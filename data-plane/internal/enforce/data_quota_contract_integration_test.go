@@ -596,19 +596,11 @@ func TestIntegration_Quota_EnforcedWithTheAggregateTimeFeatureOff(t *testing.T) 
 		t.Fatalf("data quota was not enforced with the aggregate-time feature off: %+v — the two semantics "+
 			"are independent and must not be coupled", due)
 	}
-	// And with the feature ON the answer is identical: the flag changes nothing about data.
-	f2 := quotaSeed(t, p, int64(100_000_000), "PER_DEVICE", "VALIDITY_WINDOW")
-	ent2, sess2 := grant(t, p, f2, nil, at)
-	m2 := onBridge(t, p, sess2, "br-g-test")
-	submit(t, p, f2, m2, 1, 0, 0, at)
-	submit(t, p, f2, m2, 1, 30_000_000, 80_000_000, at.Add(time.Minute))
-	due2, err := New(p).WithAggregateOnlineTime(60).EnforceExpiries(ctx, f2.tenant, f2.site)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(due2) != 1 || due2[0].Reason != "DATA" || due2[0].EntitlementID != ent2 {
-		t.Fatalf("the same crossing produced a different answer with the flag on: %+v", due2)
-	}
+	// The flag-ON direction is NOT asserted here: turning the tick on requires p6_tick_online_time, which
+	// exists only on a Phase-6 schema, and this suite runs on the Phase-3/5 chain. It is already covered by
+	// the Phase-6 suite, which runs DATA terminations with the tick enabled. What this case owns is the
+	// direction that had never been proven anywhere: with the Phase-6 feature completely absent, the data
+	// quota is still enforced.
 }
 
 // ---------------------------------------------------------------------------------------------------------
