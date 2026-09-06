@@ -13,7 +13,9 @@
 
 ## 1. GitHub is the only authoritative working source
 
-Before every task, in order:
+**Scope (Product-Owner decision).** The full preflight below is a **CONTROLLED-work** procedure — a migration, a deployment, an approved milestone or phase, an authoritative export, or an explicit release closure, per `CLAUDE.md` §0. Routine FAST DEVELOPMENT does not run it: for ordinary code, UI and bug work, use the current checkout, run only the relevant targeted tests, and commit locally. The repository is still the authoritative source and Git is still mandatory; what changes is that a routine edit no longer triggers a release preflight.
+
+Before every CONTROLLED task, in order:
 
 1. Fetch the remote repository (`git fetch origin`).
 2. Verify the expected remote is `aibrahiiim1/StayConnectEnterprise`.
@@ -133,7 +135,7 @@ This rule is enforced by:
 - `.gitattributes` — cross-platform **LF consistency** (`GH-LF-CONSISTENCY`): all checksum-controlled text is pinned to `eol=lf` and ZIP/binary artifacts are marked binary, so a Windows checkout, a Linux checkout and CI produce byte-identical, checksum-stable pack files. Without it, `core.autocrlf` materializes tracked text as CRLF on Windows and the keyword validator reports false pack-checksum failures. Enforced by `tools/project-state.py validate` and adversarially by `run_mutations.py` (weakened/removed policy).
 - The decision register entries `GH-SOURCE-OF-TRUTH`, `GH-BRANCH-PR`, `GH-COMPLETE-MANIFEST`, `GH-FINAL-REPORT`, `GH-MANDATORY-CI` (`governance/decision-register.json`).
 
-Run `make governance-validate` before any implement/migrate/deploy/export, and `python tools/generate-change-manifest.py <base>..HEAD` before writing every final report. A delivered PR must additionally show the GitHub **Project Governance** check green before it is called merge-ready.
+Run `make governance-validate` before any CONTROLLED implement/migrate/deploy/export, and `python tools/generate-change-manifest.py <base>..HEAD` before writing the final report **of a CONTROLLED delivery or milestone closure** — not after routine FAST-mode work, which produces neither a manifest nor a governance run (`CLAUDE.md` §0). A delivered PR must additionally show the GitHub **Project Governance** check green before it is called merge-ready.
 
 ## 12. Agent-owned Git and GitHub operations (`GIT_OPERATIONS_OWNER: AGENT`)
 

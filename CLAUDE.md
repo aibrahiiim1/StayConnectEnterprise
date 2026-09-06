@@ -6,6 +6,58 @@ These instructions are permanent project operating rules and override all projec
 
 The user is the final authority for this repository.
 
+---
+
+## 0. TWO MODES — read this before anything else
+
+**Product-Owner decision (permanent, supersedes any older wording anywhere in this repository that demands heavy governance after routine work).** The governance process was too heavy for day-to-day development. Safety controls stay; ceremony goes.
+
+Every task runs in one of two modes. **Decide the mode first, from what the work TOUCHES — never from how large, complex or file-heavy it is.**
+
+### FAST DEVELOPMENT — the DEFAULT
+
+Anything that does not hit a CONTROLLED trigger below. UI colours, wording, CSS, layout, spacing, button behaviour, small validation fixes, ordinary UI bugs, bounded refactors, routine implementation defects — and ordinary feature, API and business-logic work too.
+
+Do: implement the requested outcome, fix routine defects directly related to it, run only the **relevant targeted** build/tests, make a local Git commit when useful, report concisely.
+
+**Do NOT automatically run or update any of these:** `governance/project-state.json` · governance transitions · evidence packs · ChatGPT/project packs · change manifests · project-wide CI · PR creation or merge · project-wide stale-state audits · unrelated documentation.
+
+**Do not turn a small change into a release process.**
+
+Related changes may accumulate locally across several requests. Perform documentation sync, full required CI, PR and merge **once for the finished batch** — and only when the Product Owner says something like *"close this milestone"*, *"release this"*, *"merge this"*, *"deploy this"*, or equivalent. Governance closure does not follow every intermediate edit.
+
+### CONTROLLED — only for what actually touches these
+
+* database schema or migration
+* production/appliance deployment
+* destructive or historical-data modification
+* PMS protocol, configuration or traffic
+* financial posting, payment, settlement, reversal or FX
+* guest authentication, Entitlement or enforcement core
+* enrollment / assignment / licensing identity foundations
+* security, certificates, PKI or trust roots
+* networking architecture or appliance topology
+* an architecture, contract or product-semantics decision
+* Go-Live / cutover
+
+CONTROLLED work keeps the existing safety, verification, evidence, CI and Product-Owner authorization appropriate to that action — the governance rules in `docs/` apply in full, and only here.
+
+**A change is NOT controlled merely because many files changed, tests were added, or the implementation is technically complex.**
+
+### Governance synchronization is MILESTONE-BASED, not edit-based
+
+Synchronize authoritative current-state documentation when there is a meaningful approved milestone, a verified live acceptance, a controlled deployment, a product/architecture decision, or an explicit release closure. Routine local development creates no governance transition. Cosmetic, UI, text, layout, refactor and routine bug fixes create no governance transition unless they materially change authoritative production state.
+
+### Scope discipline
+
+Do not open side projects while implementing a request. On discovering another issue: fix it in the same run **only** if it directly blocks the correctness or safety of the requested task; **stop and state the exact decision** if it needs a new Product-Owner decision; otherwise record it as backlog and carry on. Do not start project-wide audits, refactors, observability work, documentation cleanups or unrelated consistency work unless asked.
+
+### What this does NOT relax
+
+Authorization is still never inferred for production changes, PMS traffic, financial actions, destructive data operations, Root-CA changes or Go-Live (§12 stands). No fake data, fake topology, invented managed state or invented protocol behaviour. Approved product and architecture contracts remain binding until the Product Owner changes them. Git remains mandatory and the GitHub repository remains authoritative.
+
+---
+
 ### 1. Execute, do not review
 
 When the user requests a code change, configuration change, database change, deployment action, production action, file edit, deletion, migration, commit, push, or other repository operation:
@@ -25,19 +77,16 @@ When the user requests a code change, configuration change, database change, dep
 
 The requested change is the scope.
 
-### 2. No automatic checks
+This removes the agent's own *self-imposed* review, not the safeguards a CONTROLLED action carries. Where §0 classifies the work as CONTROLLED — a migration, a deployment, PMS or financial traffic, and the rest of that list — execute it with the verification and authorization that action requires. Everywhere else, execute directly.
 
-NEVER automatically run any of the following unless the user explicitly requests that specific check:
+### 2. No automatic PROJECT-WIDE checks
 
-* unit tests
-* integration tests
-* E2E / Playwright tests
-* TypeScript typecheck
-* lint
-* build
-* formatting checks
-* static analysis
-* security scans
+**Targeted verification of the change you just made is expected** — §0 asks for the *relevant* build/tests, and a functional change carries the regression coverage it needs. What is forbidden is turning that into a project-wide validation run.
+
+NEVER automatically run any of the following unless the user explicitly requests that specific check, or the work is CONTROLLED (§0) and the check belongs to that action:
+
+* the full unit/integration/E2E suite for the whole project (as opposed to the affected package or area)
+* project-wide TypeScript typecheck, lint, formatting checks, static analysis or security scans
 * governance validators
 * project-state validators
 * generated-block checks
@@ -49,16 +98,13 @@ NEVER automatically run any of the following unless the user explicitly requests
 * inventory regeneration
 * CI status checks
 * GitHub Actions polling
-* post-deployment verification
-* smoke tests
-* regression tests
 * git diff review
 * code review
 * repository-wide searches for related issues
 
-A completed edit is considered complete when the requested edit itself has been performed.
+A routine edit is complete when the requested edit has been made and the **relevant targeted** check passes. Do not extend that into a project-wide verification phase, and do not invent one where nothing was asked.
 
-Do not invent a verification phase after implementation.
+Post-deployment verification, smoke tests and full regression runs belong to CONTROLLED work (§0), where they remain required.
 
 ### 3. Show the result immediately
 
@@ -103,17 +149,18 @@ Do not automatically modify, regenerate, inspect, reconcile, or validate:
 * project phase status
 * historical evidence
 
-Only touch these when the user's current request explicitly asks for them.
+Only touch these when the user's current request explicitly asks for them, or when §0 makes this a governance-synchronization moment: an approved milestone, a verified live acceptance, a controlled deployment, a product/architecture decision, or an explicit release closure.
 
 A normal product/code change does NOT require governance synchronization.
 
 Do not reopen old governance contradictions merely because you notice them.
 
-### 6. No unsolicited Git operations
+### 6. No unsolicited REMOTE Git operations
 
-Do not automatically:
+A **local commit** is allowed whenever it is useful to checkpoint work (§0), and Git remains mandatory.
 
-* commit
+Everything that leaves this machine or rewrites history is not automatic. Do not, unless asked:
+
 * amend
 * rebase
 * merge
@@ -123,7 +170,7 @@ Do not automatically:
 * wait for CI
 * poll GitHub Actions
 
-Only perform the Git operation explicitly requested by the user.
+Only perform those when the user requests them, or when they are part of a CONTROLLED delivery the user has authorized (§0, §12).
 
 If the user says `commit`, commit.
 
@@ -186,7 +233,7 @@ The second workflow is explicitly prohibited unless the user asks for those indi
 
 ### 11. Persistence
 
-These rules are intentional and persistent.
+These rules are intentional and persistent. §0 is the current operating model: FAST DEVELOPMENT by default, CONTROLLED only for what it lists, governance synchronized at milestones rather than after every edit. Do not silently drift back to running governance, packs, manifests or full CI after routine work.
 
 Do not ask the user in future sessions whether they still want Direct Execution Mode.
 
