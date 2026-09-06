@@ -50,6 +50,22 @@ want = "/" + os.environ["SC_ROUTE"]
 raise SystemExit(0 if want in set(v for v in m.values() if isinstance(v, str)) else 1)' 2>/dev/null
 }
 
+# ha_wire_build_id <build-id> — the BUILD_ID as it appears IN THE SERVED DOCUMENT.
+#
+# Next stamps the id into an HTML comment, and an HTML comment may not contain "--". A BUILD_ID is generated
+# from an alphabet that includes BOTH "-" and "_", so any id containing a hyphen is serialized with that
+# hyphen written as an underscore. Comparing the file's id against the served id therefore fails for every
+# build whose id happens to contain "-" — roughly half of them — while passing for the rest.
+#
+# That is exactly how this gate behaved: it passed for build after build and then failed a correct deployment
+# with "serving CiLetqcFQ_UcO0nBzrxeZ but installed CiLetqcFQ-UcO0nBzrxeZ", two spellings of one id.
+#
+# So both sides are compared in the WIRE form. This is still an exact identity check: two different builds
+# still differ. The only distinction it gives up is between ids that differ solely by "-" versus "_" in the
+# same positions, which is a distinction the served document cannot express in the first place.
+ha_wire_build_id() { printf '%s
+' "${1//-/_}"; }
+
 # ha_served_build_id <url> — the BUILD_ID a running endpoint is serving, or NOTHING.
 #
 # Next stamps it into every rendered document as an HTML comment. Extraction uses sed and not

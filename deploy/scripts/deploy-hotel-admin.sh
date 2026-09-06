@@ -42,7 +42,8 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 # A carriage return, spelled so this file never CONTAINS one. The first version of these strips was
 # written as $'<literal CR>' and the byte did not survive editing, so the strip silently did nothing
 # and every route comparison failed on a bundle that contained every route.
-CR=$''
+CR=$'
+'
 
 # jqless JSON reader: this runs on an appliance where jq is not guaranteed, and python3 is.
 jget() { # jget <file> <python-expression-on-d>
@@ -250,7 +251,8 @@ assert_manifest() {
   local rel="$1" mf="$1/$MANIFEST_NAME"
   [ -f "$mf" ] || die "release $rel carries no $MANIFEST_NAME — it cannot prove its provenance and will not be served"
   local commit bid
-  commit="$(jget "$mf" 'd["source_commit"]' | tr -d '')"
+  commit="$(jget "$mf" 'd["source_commit"]' | tr -d '
+')"
   bid="$(jget "$mf" 'd["build_id"]')"
   [ -n "$commit" ] || die "$mf records no source_commit"
   [ -n "$bid" ]    || die "$mf records no build_id"
@@ -279,7 +281,9 @@ smoke_live() {
     echo "SMOKE FAIL: could not extract a BUILD_ID from $base/login — the served identity is unverifiable, which is a failure and not a pass" >&2
     return 1
   fi
-  if [ "$served" != "$want_bid" ]; then
+  # Compared in the served document's own spelling: an HTML comment cannot carry "--", so a BUILD_ID
+  # containing "-" arrives with it written as "_". See ha_wire_build_id.
+  if [ "$served" != "$(ha_wire_build_id "$want_bid")" ]; then
     echo "SMOKE FAIL: the live endpoint is serving BUILD_ID '$served' but the release we installed is '$want_bid'" >&2
     return 1
   fi
@@ -330,7 +334,7 @@ smoke_live() {
       echo "SMOKE FAIL: the configured operator endpoint ${HOTEL_ADMIN_PUBLIC_URL} served no extractable BUILD_ID" >&2
       return 1
     fi
-    [ "$public_id" = "$want_bid" ]       || { echo "SMOKE FAIL: the operator endpoint ${HOTEL_ADMIN_PUBLIC_URL} serves BUILD_ID '$public_id', not '$want_bid'" >&2; return 1; }
+    [ "$public_id" = "$(ha_wire_build_id "$want_bid")" ] || { echo "SMOKE FAIL: the operator endpoint ${HOTEL_ADMIN_PUBLIC_URL} serves BUILD_ID '$public_id', not '$want_bid'" >&2; return 1; }
     echo ">> smoke: the operator endpoint ${HOTEL_ADMIN_PUBLIC_URL} serves the same BUILD_ID"
   fi
   return 0

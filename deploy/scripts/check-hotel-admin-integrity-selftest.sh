@@ -128,6 +128,25 @@ grep -qF "PLAIN DIRECTORY" <<<"$out" && { echo "  *** FAIL: a healthy release wa
 grep -qF "built WITHOUT" <<<"$out" && { echo "  *** FAIL: a healthy release was called flagless"; fail=1; }
 [ "$fail" = "0" ] && echo "  ok: a correct release passes every structural check"
 
+echo "== a BUILD_ID containing a hyphen must still compare equal to what is SERVED =="
+# THE GATE THAT PASSED UNTIL IT MATTERED. An HTML comment cannot contain "--", so Next writes a BUILD_ID's
+# hyphens as underscores in the served document. Comparing the file's spelling against the served spelling
+# therefore failed for every id containing "-" -- roughly half of all builds -- and a correct deployment was
+# rolled back with "serving CiLetqcFQ_UcO0nBzrxeZ but installed CiLetqcFQ-UcO0nBzrxeZ".
+# shellcheck source=/dev/null
+. "$HERE/lib-hotel-admin-contract.sh"
+if [ "$(ha_wire_build_id 'CiLetqcFQ-UcO0nBzrxeZ')" != "CiLetqcFQ_UcO0nBzrxeZ" ]; then
+  echo "  *** FAIL: a hyphenated BUILD_ID is not converted to its served spelling"; fail=1
+elif [ "$(ha_wire_build_id 'aap1R2iCuFf2dubGXuDC5')" != "aap1R2iCuFf2dubGXuDC5" ]; then
+  echo "  *** FAIL: an id with no hyphen was altered"; fail=1
+elif [ "$(ha_wire_build_id 'a-b-c')" != "a_b_c" ]; then
+  echo "  *** FAIL: only the first hyphen was converted"; fail=1
+elif [ "$(ha_wire_build_id 'CiLetqcFQ-UcO0nBzrxeZ')" = "$(ha_wire_build_id 'ZZZZZZZZZ-UcO0nBzrxeZ')" ]; then
+  echo "  *** FAIL: two different builds compare equal — the identity check has been weakened, not fixed"; fail=1
+else
+  echo "  ok: a hyphenated BUILD_ID matches its served spelling, and different builds still differ"
+fi
+
 if [ "$fail" = "0" ]; then
   echo "HOTEL_ADMIN_INTEGRITY_SELFTEST = PASS"
   exit 0
