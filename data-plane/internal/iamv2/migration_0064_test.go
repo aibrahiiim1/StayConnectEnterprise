@@ -47,17 +47,42 @@ INSERT INTO iam_v2.accounting_records (session_id, sampled_at, bytes_up, bytes_d
   ('55555555-5555-5555-5555-555555555555','2026-03-01T03:00:00Z',2,2);
 `
 
+// liveDatabaseNames are databases this test must NEVER open. Its fixture begins with DROP SCHEMA iam_v2
+// CASCADE, so a mistyped DSN would not fail -- it would succeed, and destroy a real site. The guard is here
+// rather than in a runbook because the destructive statement is here.
+var liveDatabaseNames = map[string]bool{
+	"stayconnect_site": true, "stayconnect": true, "stayconnect_central": true,
+}
+
 func mig0064Conn(t *testing.T) *pgx.Conn {
 	t.Helper()
 	dsn := os.Getenv("MIGRATION_TEST_DSN")
 	if dsn == "" {
 		t.Skip("MIGRATION_TEST_DSN not set; skipping the 0064 migration test")
 	}
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("MIGRATION_TEST_DSN is not a valid DSN: %v", err)
+	}
+	if liveDatabaseNames[cfg.Database] {
+		t.Fatalf("refusing to run against %q: this test DROPs schema iam_v2 and would destroy a real site. "+
+			"Point MIGRATION_TEST_DSN at a disposable database.", cfg.Database)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	c, err := pgx.Connect(ctx, dsn)
+	c, err := pgx.ConnectConfig(ctx, cfg)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
+	}
+	// A second guard, asked of the SERVER rather than the string: a DSN can reach a database under a name the
+	// parse did not reveal (a service file, a URI alias, a search-path trick).
+	var dbName string
+	if err := c.QueryRow(ctx, `SELECT current_database()`).Scan(&dbName); err != nil {
+		t.Fatalf("current_database: %v", err)
+	}
+	if liveDatabaseNames[dbName] {
+		_ = c.Close(context.Background())
+		t.Fatalf("refusing to run: the DSN actually reached the live database %q", dbName)
 	}
 	t.Cleanup(func() { _ = c.Close(context.Background()) })
 	return c
@@ -187,14 +212,30 @@ func TestMigration0064(t *testing.T) {
 
 	// 7. THE DOWN MIGRATION RESTORES THE PREVIOUS SHAPE.
 	applySQLFile(t, c, mig0064Down)
+	// Scoped to the two tables 0064 touched. service_plan_revisions has carried its OWN data_quota_bytes
+	// since long before this migration, so counting by column name alone across the schema reports the
+	// pre-existing column as a leak -- which is exactly what the first run of this test did.
 	var stillThere int
 	if err := c.QueryRow(ctx,
 		`SELECT count(*) FROM information_schema.columns
-		  WHERE table_schema='iam_v2' AND column_name IN ('data_allocation_policy','data_quota_bytes')`).
+		  WHERE table_schema='iam_v2'
+		    AND ((table_name='internet_package_revisions' AND column_name='data_allocation_policy')
+		      OR (table_name='entitlements'               AND column_name='data_quota_bytes'))`).
 		Scan(&stillThere); err != nil {
 		t.Fatal(err)
 	}
 	if stillThere != 0 {
 		t.Errorf("%d of the new columns survived the down migration", stillThere)
+	}
+	// The plan revision's own quota column is untouched by the rollback.
+	var planCol int
+	if err := c.QueryRow(ctx,
+		`SELECT count(*) FROM information_schema.columns
+		  WHERE table_schema='iam_v2' AND table_name='service_plan_revisions'
+		    AND column_name='data_quota_bytes'`).Scan(&planCol); err != nil {
+		t.Fatal(err)
+	}
+	if planCol != 1 {
+		t.Error("the down migration removed the service plan's own data quota column")
 	}
 }

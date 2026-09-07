@@ -52,10 +52,19 @@ COMMENT ON COLUMN iam_v2.internet_package_revisions.data_allocation_policy IS
 -- rather than at publication in front of the operator who wrote it.
 ALTER TABLE iam_v2.internet_package_revisions
   DROP CONSTRAINT IF EXISTS internet_package_revisions_data_allocation_policy_shape;
+-- THE WHOLE PREDICATE IS WRAPPED IN COALESCE(..., false), and that is not defensive noise -- without it this
+-- constraint does not work at all.
+--
+-- A CHECK rejects a row only when its expression evaluates to FALSE. UNKNOWN passes. Every operator here
+-- yields UNKNOWN on a missing key: `policy->'gb_per_night'` is SQL NULL when the key is absent,
+-- jsonb_typeof(NULL) is NULL, and `NULL = 'number'` is UNKNOWN, which propagates through the ANDs and lets
+-- the row in. The first real-PostgreSQL run of this migration accepted {"mode":"PER_STAY_NIGHT"} -- a
+-- per-night package with no per-night rate -- which would have published an immutable revision that refuses
+-- every grant it is offered for. COALESCE turns "cannot tell" into "no".
 ALTER TABLE iam_v2.internet_package_revisions
   ADD CONSTRAINT internet_package_revisions_data_allocation_policy_shape CHECK (
     data_allocation_policy IS NULL
-    OR (
+    OR COALESCE(
       jsonb_typeof(data_allocation_policy) = 'object'
       AND (
         data_allocation_policy->>'mode' = 'FIXED'
@@ -64,16 +73,15 @@ ALTER TABLE iam_v2.internet_package_revisions
           AND jsonb_typeof(data_allocation_policy->'gb_per_night') = 'number'
           AND (data_allocation_policy->>'gb_per_night')::numeric > 0
           AND (data_allocation_policy->'min_gb' IS NULL
-               OR (jsonb_typeof(data_allocation_policy->'min_gb') = 'number'
-                   AND (data_allocation_policy->>'min_gb')::numeric >= 0))
+               OR COALESCE(jsonb_typeof(data_allocation_policy->'min_gb') = 'number'
+                           AND (data_allocation_policy->>'min_gb')::numeric >= 0, false))
           AND (data_allocation_policy->'max_gb' IS NULL
-               OR (jsonb_typeof(data_allocation_policy->'max_gb') = 'number'
-                   AND (data_allocation_policy->>'max_gb')::numeric > 0
-                   AND (data_allocation_policy->>'max_gb')::numeric
-                       >= COALESCE((data_allocation_policy->>'min_gb')::numeric, 0)))
+               OR COALESCE(jsonb_typeof(data_allocation_policy->'max_gb') = 'number'
+                           AND (data_allocation_policy->>'max_gb')::numeric > 0
+                           AND (data_allocation_policy->>'max_gb')::numeric
+                               >= COALESCE((data_allocation_policy->>'min_gb')::numeric, 0), false))
         )
-      )
-    )
+      ), false)
   );
 
 -- ---------------------------------------------------------------------------
@@ -179,21 +187,58 @@ BEGIN
     RAISE EXCEPTION 'iam_v2.p6_data_crossing is no longer SECURITY DEFINER';
   END IF;
 
-  -- The shape constraint actually refuses a malformed policy rather than merely existing.
-  BEGIN
-    INSERT INTO iam_v2.internet_package_revisions (id, data_allocation_policy)
-    VALUES ('00000000-0000-0000-0000-000000000000', '{"mode":"PER_STAY_NIGHT"}'::jsonb);
-    RAISE EXCEPTION 'a PER_STAY_NIGHT policy with no gb_per_night was accepted';
-  EXCEPTION
-    WHEN check_violation THEN NULL;   -- the constraint refused it, which is the point
-    WHEN others THEN NULL;            -- NOT NULL / FK refused it first; the shape check is asserted below
-  END;
+  -- THE SHAPE CONSTRAINT MUST REFUSE, NOT MERELY EXIST.
+  --
+  -- The first version of this block "tested" the constraint by inserting into the real table and swallowing
+  -- every error, so a NOT NULL violation on an unrelated column looked exactly like the constraint doing its
+  -- job. It passed while the constraint accepted {"mode":"PER_STAY_NIGHT"} -- a per-night package with no
+  -- per-night rate. That is what a check written to pass looks like.
+  --
+  -- So the predicate is lifted OUT of the catalog with pg_get_constraintdef and applied to a temp table. It
+  -- cannot drift from the real constraint, because it IS the real constraint, and a temp table has no other
+  -- columns whose failures could be mistaken for a refusal.
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint
      WHERE conname = 'internet_package_revisions_data_allocation_policy_shape'
   ) THEN
     RAISE EXCEPTION 'the data_allocation_policy shape constraint is missing';
   END IF;
+  DECLARE
+    probe   text;
+    bad     text;
+    refused boolean;
+  BEGIN
+    SELECT pg_get_constraintdef(oid) INTO probe FROM pg_constraint
+     WHERE conname = 'internet_package_revisions_data_allocation_policy_shape';
+    EXECUTE format('CREATE TEMP TABLE _alloc_shape_probe (data_allocation_policy jsonb, %s) ON COMMIT DROP',
+                   probe);
+    FOREACH bad IN ARRAY ARRAY[
+      '{"mode":"PER_STAY_NIGHT"}',                                        -- no rate at all
+      '{"mode":"PER_STAY_NIGHT","gb_per_night":0}',                       -- a rate of nothing
+      '{"mode":"PER_STAY_NIGHT","gb_per_night":"lots"}',                  -- not a number
+      '{"mode":"PER_STAY_NIGHT","gb_per_night":1,"max_gb":0}',            -- a ceiling of nothing
+      '{"mode":"PER_STAY_NIGHT","gb_per_night":1,"min_gb":10,"max_gb":5}',-- ceiling under floor
+      '{"mode":"PER_GUEST_MOOD"}',                                        -- unknown mode
+      '{}',                                                               -- an object stating nothing
+      '"not an object"'
+    ] LOOP
+      refused := false;
+      BEGIN
+        EXECUTE 'INSERT INTO _alloc_shape_probe VALUES ($1::jsonb)' USING bad;
+      EXCEPTION WHEN check_violation THEN
+        refused := true;
+      END;
+      IF NOT refused THEN
+        RAISE EXCEPTION 'the shape constraint accepted a malformed policy: %', bad;
+      END IF;
+    END LOOP;
+    -- ...and it accepts the approved one, so the constraint is not merely refusing everything.
+    EXECUTE 'INSERT INTO _alloc_shape_probe VALUES ($1::jsonb)'
+      USING '{"mode":"PER_STAY_NIGHT","gb_per_night":1,"min_gb":5,"max_gb":20}';
+    EXECUTE 'INSERT INTO _alloc_shape_probe VALUES ($1::jsonb)' USING '{"mode":"FIXED"}';
+    EXECUTE 'INSERT INTO _alloc_shape_probe VALUES (NULL)';
+    DROP TABLE _alloc_shape_probe;
+  END;
 END
 $verify$;
 
