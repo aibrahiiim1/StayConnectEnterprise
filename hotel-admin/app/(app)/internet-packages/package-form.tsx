@@ -17,6 +17,10 @@ import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Trash2, Plus, ChevronDown, ChevronRight } from "lucide-react";
 import { durationToSeconds } from "@/lib/units";
+import {
+  ALLOCATION_MODE_LABELS, validateAllocation, serializeAllocation, previewAllocation,
+  type AllocationForm,
+} from "@/lib/stay-packages";
 import { planSummary } from "@/lib/package-save";
 import {
   SUPPORTED_RULE_TYPES,
@@ -25,6 +29,7 @@ import {
   RULE_TYPE_LABELS,
   buildPublishPayload,
   type EligibilityRuleForm,
+  isPMSRuleType,
   type GrantTierForm,
   type DurationForm,
   type PublishPayload,
@@ -59,6 +64,8 @@ export type PackageFormInitial = {
   duration: DurationForm;
   visibleFrom?: string;
   visibleUntil?: string;
+  /** The package's existing data-allowance policy. Absent means the plan's flat allowance. */
+  allocation?: AllocationForm;
 };
 
 function emptyRule(type: RuleType): EligibilityRuleForm {
@@ -68,6 +75,12 @@ function emptyRule(type: RuleType): EligibilityRuleForm {
     case "DATE_WINDOW": return { type, from: "", until: "" };
     case "PRIOR_PURCHASE": return { type, mode: "forbids_prior" };
     case "SITE_NETWORK": return { type, guest_network_ids: "" };
+    case "STAY_LENGTH": return { type, min_nights: "", max_nights: "" };
+    case "ROOM_TYPE": return { type, room_types: "" };
+    case "RATE_PLAN": return { type, rate_plans: "" };
+    case "VIP": return { type, is_vip: "true" };
+    case "TRAVEL_AGENT": return { type, travel_agents: "" };
+    case "PMS_INTERFACE": return { type, pms_interface_ids: "" };
   }
 }
 
@@ -95,6 +108,11 @@ export function PackageForm({
   // means "everyone who is eligible". The operator never has to know that.
   const [tiers, setTiers] = useState<GrantTierForm[]>(initial?.tiers?.length ? initial.tiers : [{ order: 10 }]);
   const [duration, setDuration] = useState<DurationForm>(initial?.duration ?? { end_mode: "MANUAL_END" });
+  // The data allowance. FIXED is the default and means "whatever the service plan says", which is what every
+  // package did before this existed. It is loaded from the package rather than reset, so saving an unrelated
+  // change cannot quietly turn a per-night package back into a flat one.
+  const [alloc, setAlloc] = useState<AllocationForm>(
+    initial?.allocation ?? { mode: "FIXED", gb_per_night: "", min_gb: "", max_gb: "" });
   const [visFrom, setVisFrom] = useState(initial?.visibleFrom ?? "");
   const [visUntil, setVisUntil] = useState(initial?.visibleUntil ?? "");
   const [durationHours, setDurationHours] = useState(
@@ -126,6 +144,10 @@ export function PackageForm({
       visible_from: visFrom || undefined, visible_until: visUntil || undefined,
     });
     if (res.error || !res.payload) { setError(res.error ?? "Please check the form"); return; }
+    const allocErr = validateAllocation(alloc);
+    if (allocErr) { setError(allocErr); return; }
+    const policy = serializeAllocation(alloc);
+    if (policy) res.payload.data_allocation_policy = policy;
     onSave({ payload: res.payload, selectedPlanID: planID });
   }
 
@@ -220,6 +242,54 @@ export function PackageForm({
         </div>
       </div>
 
+      {/* THE DATA ALLOWANCE.
+          A flat allowance treats a two-night guest and a three-week guest identically: generous to one and
+          exhausted on day four for the other. Per-night scales it with the stay, between a floor and a
+          ceiling, and the preview below is there because the clamp order is not obvious from three boxes —
+          and the revision this publishes cannot be edited afterwards. */}
+      <div>
+        <h3 className="text-sm font-medium mb-1">Data allowance</h3>
+        <select aria-label="allocation-mode" className="w-full bg-panel2 border border-border rounded-md px-2 py-2 text-sm"
+          value={alloc.mode}
+          onChange={(e) => setAlloc((a) => ({ ...a, mode: e.target.value as AllocationForm["mode"] }))}>
+          {(Object.keys(ALLOCATION_MODE_LABELS) as (keyof typeof ALLOCATION_MODE_LABELS)[]).map((m) => (
+            <option key={m} value={m}>{ALLOCATION_MODE_LABELS[m]}</option>
+          ))}
+        </select>
+        {alloc.mode === "PER_STAY_NIGHT" && (
+          <div className="mt-2 space-y-2">
+            <div className="grid gap-2 sm:grid-cols-3">
+              <div>
+                <Label>GB per night</Label>
+                <Input aria-label="gb-per-night" type="number" min={0} step="0.1" value={alloc.gb_per_night}
+                  onChange={(e) => setAlloc((a) => ({ ...a, gb_per_night: e.target.value }))} />
+              </div>
+              <div>
+                <Label>Minimum GB</Label>
+                <Input aria-label="min-gb" type="number" min={0} step="0.1" placeholder="none" value={alloc.min_gb}
+                  onChange={(e) => setAlloc((a) => ({ ...a, min_gb: e.target.value }))} />
+              </div>
+              <div>
+                <Label>Maximum GB</Label>
+                <Input aria-label="max-gb" type="number" min={0} step="0.1" placeholder="no cap" value={alloc.max_gb}
+                  onChange={(e) => setAlloc((a) => ({ ...a, max_gb: e.target.value }))} />
+              </div>
+            </div>
+            {previewAllocation(alloc, [2, 5, 8, 12, 25]).length > 0 && (
+              <div className="text-xs text-muted" data-testid="allocation-preview">
+                {previewAllocation(alloc, [2, 5, 8, 12, 25])
+                  .map((r) => `${r.nights} nights → ${r.gb} GB`).join(" · ")}
+              </div>
+            )}
+            <p className="text-xs text-muted">
+              The allowance is worked out once, when the guest is given the package, and does not change
+              afterwards if their stay is extended or shortened. Guests who did not sign in with their room
+              are not offered this package, because their stay length is not known.
+            </p>
+          </div>
+        )}
+      </div>
+
       <div>
         <div className="flex items-center justify-between mb-1">
           <h3 className="text-sm font-medium">Who this package is offered to</h3>
@@ -228,6 +298,15 @@ export function PackageForm({
           </Button>
         </div>
         {rules.length === 0 && <p className="text-xs text-muted">Everyone who signs in. Add a condition to narrow it.</p>}
+        {/* A PMS condition is only answerable for a guest who signed in through the PMS. Saying so here stops
+            the reasonable assumption that adding "VIP guests only" merely narrows the audience — for a voucher
+            guest there is no Stay to test, so the package is not offered to them at all. */}
+        {rules.some((r) => isPMSRuleType(r.type)) && (
+          <p className="text-xs text-muted mb-2" data-testid="pms-rule-note">
+            Conditions about the stay only apply to guests who signed in with their room. Guests using a
+            voucher or an account are not offered this package while any of them is set.
+          </p>
+        )}
         {rules.map((r, i) => (
           <div key={i} className="flex gap-2 items-center mb-2" data-testid={`rule-${i}`}>
             <select aria-label={`rule-type-${i}`} className="bg-panel2 border border-border rounded-md px-2 py-1.5 text-sm"
@@ -248,6 +327,25 @@ export function PackageForm({
               </select>
             )}
             {r.type === "SITE_NETWORK" && <Input aria-label={`rule-networks-${i}`} placeholder="uuid,uuid" value={r.guest_network_ids} onChange={(e) => setRule(i, { guest_network_ids: e.target.value })} />}
+            {/* STAY LENGTH. Either bound may be left empty — "8 nights or more" and "up to 7 nights" are both
+                real rules — so neither input is required and an empty one is omitted rather than sent as 0. */}
+            {r.type === "STAY_LENGTH" && <>
+              <Input aria-label={`rule-min-nights-${i}`} type="number" min={0} placeholder="from (nights)"
+                value={r.min_nights} onChange={(e) => setRule(i, { min_nights: e.target.value })} />
+              <Input aria-label={`rule-max-nights-${i}`} type="number" min={0} placeholder="to (nights)"
+                value={r.max_nights} onChange={(e) => setRule(i, { max_nights: e.target.value })} />
+            </>}
+            {r.type === "ROOM_TYPE" && <Input aria-label={`rule-room-types-${i}`} placeholder="DLX, SUITE" value={r.room_types} onChange={(e) => setRule(i, { room_types: e.target.value })} />}
+            {r.type === "RATE_PLAN" && <Input aria-label={`rule-rate-plans-${i}`} placeholder="BAR, CORP" value={r.rate_plans} onChange={(e) => setRule(i, { rate_plans: e.target.value })} />}
+            {r.type === "VIP" && (
+              <select aria-label={`rule-vip-${i}`} className="bg-panel2 border border-border rounded-md px-2 py-1.5 text-sm"
+                value={r.is_vip} onChange={(e) => setRule(i, { is_vip: e.target.value as "true" | "false" })}>
+                <option value="true">VIP guests only</option>
+                <option value="false">Non-VIP guests only</option>
+              </select>
+            )}
+            {r.type === "TRAVEL_AGENT" && <Input aria-label={`rule-travel-agents-${i}`} placeholder="EXPEDIA, BOOKING" value={r.travel_agents} onChange={(e) => setRule(i, { travel_agents: e.target.value })} />}
+            {r.type === "PMS_INTERFACE" && <Input aria-label={`rule-pms-interfaces-${i}`} placeholder="interface id" value={r.pms_interface_ids} onChange={(e) => setRule(i, { pms_interface_ids: e.target.value })} />}
             <Button type="button" variant="ghost" aria-label={`remove-rule-${i}`} onClick={() => setRules((rs) => rs.filter((_, j) => j !== i))}><Trash2 size={14} /></Button>
           </div>
         ))}

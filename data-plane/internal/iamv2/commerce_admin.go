@@ -265,6 +265,10 @@ type PackageCurrent struct {
 	GrantTiers            []GrantTier       `json:"grant_tiers"`
 	VisibleFrom           *string           `json:"visible_from,omitempty"`
 	VisibleUntil          *string           `json:"visible_until,omitempty"`
+	// DataAllocationPolicy is returned so the authoring form hands it back UNCHANGED when it saves. A field
+	// the editor cannot read is a field the editor silently drops: saving an unrelated rename would quietly
+	// turn a PER_STAY_NIGHT package back into a flat one, on a new immutable revision nobody could tell apart.
+	DataAllocationPolicy map[string]any `json:"data_allocation_policy,omitempty"`
 }
 
 // PackagePublishSpec is a request to publish a new immutable free package revision.
@@ -278,6 +282,10 @@ type PackagePublishSpec struct {
 	GrantTiers            []GrantTier
 	VisibleFrom           *time.Time
 	VisibleUntil          *time.Time
+	// DataAllocationPolicy decides how this revision turns a stay into a byte allowance. Nil (and
+	// {"mode":"FIXED"}) means the pinned service plan revision's quota is used unchanged, which is what every
+	// revision published before this field existed carries.
+	DataAllocationPolicy map[string]any
 }
 
 // AdminResult is the guest-independent result of an admin mutation.
@@ -349,6 +357,14 @@ func (a *CommerceAdmin) PublishRevision(ctx context.Context, spec PackagePublish
 	}
 	if spec.VisibleFrom != nil && spec.VisibleUntil != nil && !spec.VisibleFrom.Before(*spec.VisibleUntil) {
 		return AdminResult{Reason: "invalid_sale_window"}, nil
+	}
+	// THE ALLOCATION POLICY IS VALIDATED AT PUBLICATION, in front of the operator who wrote it, because the
+	// revision it lands on is immutable. A policy that only fails at grant time fails in front of a guest, on
+	// a record nobody can correct -- the operator's only remedy would be to publish a replacement revision.
+	// The database CHECK constraint holds the same shape; this exists so the refusal has a reason a person can
+	// read, rather than a constraint name.
+	if _, err := ParseDataAllocationPolicy(spec.DataAllocationPolicy); err != nil {
+		return AdminResult{Reason: "invalid_data_allocation_policy: " + err.Error()}, nil
 	}
 
 	var res AdminResult

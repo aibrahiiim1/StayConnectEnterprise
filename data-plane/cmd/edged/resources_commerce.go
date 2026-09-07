@@ -369,6 +369,9 @@ type publishPackageReq struct {
 	GrantTiers            []commerceTierDTO `json:"grant_tiers"`
 	VisibleFrom           *time.Time        `json:"visible_from"`
 	VisibleUntil          *time.Time        `json:"visible_until"`
+	// DataAllocationPolicy is optional and absent means FIXED, so every client that predates it -- and every
+	// package that stays on a flat allowance -- goes on publishing exactly what it published before.
+	DataAllocationPolicy map[string]any `json:"data_allocation_policy"`
 }
 
 func (s *server) publishCommercialPackage(w http.ResponseWriter, r *http.Request) {
@@ -382,6 +385,7 @@ func (s *server) publishCommercialPackage(w http.ResponseWriter, r *http.Request
 		PackageCode: in.Code, ServicePlanRevisionID: in.ServicePlanRevisionID,
 		Display: in.Display, DurationPolicy: in.DurationPolicy,
 		VisibleFrom: in.VisibleFrom, VisibleUntil: in.VisibleUntil,
+		DataAllocationPolicy: in.DataAllocationPolicy,
 	}
 	for _, ru := range in.EligibilityRules {
 		spec.EligibilityRules = append(spec.EligibilityRules, iamv2.EligibilityRule{Type: ru.Type, Value: ru.Value})

@@ -358,16 +358,28 @@ func (t *pgCommerceAdminTx) PlanRevisionBelongs(ctx context.Context, tenantID, s
 func (t *pgCommerceAdminTx) InsertPackageRevision(ctx context.Context, spec PackagePublishSpec, packageID string, revNo int) (string, error) {
 	display, _ := json.Marshal(orEmptyObj(spec.Display))
 	duration, _ := json.Marshal(orEmptyObj(spec.DurationPolicy))
+	// A FIXED (or absent) allocation policy is written as SQL NULL, not as {"mode":"FIXED"}. The two mean the
+	// same thing to every reader, and NULL means this revision is byte-identical to one published before the
+	// column existed -- which is what makes "nothing changed for existing packages" checkable rather than
+	// merely intended.
+	var alloc *string
+	if len(spec.DataAllocationPolicy) > 0 {
+		if mode, _ := spec.DataAllocationPolicy["mode"].(string); mode != "" && mode != AllocFixed {
+			b, _ := json.Marshal(spec.DataAllocationPolicy)
+			s := string(b)
+			alloc = &s
+		}
+	}
 	var id string
 	err := t.tx.QueryRow(ctx,
 		`INSERT INTO iam_v2.internet_package_revisions
 		   (tenant_id, site_id, package_id, revision_no, service_plan_revision_id, package_type,
 		    price_minor, currency, currency_exponent, settlement_methods, duration_policy,
-		    visible_from, visible_until, display)
-		 VALUES ($1,$2,$3,$4,$5,'GENERAL',0,'USD',2,'{NOT_REQUIRED}',$6::jsonb,$7,$8,$9::jsonb)
+		    visible_from, visible_until, display, data_allocation_policy)
+		 VALUES ($1,$2,$3,$4,$5,'GENERAL',0,'USD',2,'{NOT_REQUIRED}',$6::jsonb,$7,$8,$9::jsonb,$10::jsonb)
 		 RETURNING id::text`,
 		spec.TenantID, spec.SiteID, packageID, revNo, spec.ServicePlanRevisionID,
-		duration, spec.VisibleFrom, spec.VisibleUntil, display).Scan(&id)
+		duration, spec.VisibleFrom, spec.VisibleUntil, display, alloc).Scan(&id)
 	return id, err
 }
 
@@ -733,19 +745,20 @@ func (t *pgGraceProvisionTx) DefaultPlanRevisionForGrace(ctx context.Context, te
 // Read-only. It resolves nothing and decides nothing; the revision chain is untouched.
 func (r *PgCommerceAdminRepository) GetPackageCurrent(ctx context.Context, tenantID, siteID, packageID string) (PackageCurrent, error) {
 	var c PackageCurrent
-	var display, duration []byte
+	var display, duration, alloc []byte
 	err := r.db.QueryRow(ctx,
 		`SELECT p.id::text, p.code, p.active, cur.id::text, cur.revision_no,
 		        cur.service_plan_revision_id::text, cur.package_type, cur.price_minor,
 		        COALESCE(cur.currency,''), COALESCE(cur.settlement_methods, ARRAY[]::text[]),
 		        COALESCE(cur.display,'{}'::jsonb), COALESCE(cur.duration_policy,'{}'::jsonb),
-		        cur.visible_from::text, cur.visible_until::text
+		        cur.visible_from::text, cur.visible_until::text,
+		        COALESCE(cur.data_allocation_policy,'{}'::jsonb)
 		   FROM iam_v2.internet_packages p
 		   JOIN iam_v2.internet_package_revisions cur ON cur.id = p.current_revision_id
 		  WHERE p.tenant_id=$1 AND p.site_id=$2 AND p.id=$3 AND p.is_system = false`,
 		tenantID, siteID, packageID).Scan(&c.PackageID, &c.Code, &c.Active, &c.RevisionID, &c.RevisionNo,
 		&c.ServicePlanRevisionID, &c.PackageType, &c.PriceMinor, &c.Currency, &c.SettlementMethods,
-		&display, &duration, &c.VisibleFrom, &c.VisibleUntil)
+		&display, &duration, &c.VisibleFrom, &c.VisibleUntil, &alloc)
 	if err != nil {
 		return PackageCurrent{}, err
 	}
@@ -754,6 +767,9 @@ func (r *PgCommerceAdminRepository) GetPackageCurrent(ctx context.Context, tenan
 	}
 	if len(duration) > 0 {
 		_ = json.Unmarshal(duration, &c.DurationPolicy)
+	}
+	if len(alloc) > 0 {
+		_ = json.Unmarshal(alloc, &c.DataAllocationPolicy)
 	}
 
 	// THE CONDITIONS COME THROUGH THE SCOPED READER, NOT FROM THE TABLES.

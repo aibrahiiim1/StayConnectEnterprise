@@ -446,9 +446,13 @@ func eligibleOriginalAtBoundary(ctx context.Context, tx pgx.Tx, tenant, site, if
 func validAtBoundary(ctx context.Context, tx pgx.Tx, entID string, boundary time.Time) (bool, error) {
 	var windowOK bool
 	var quota *int64
-	if err := tx.QueryRow(ctx, `SELECT (e.window_ends_at IS NULL OR e.window_ends_at > $2), spr.data_quota_bytes
+	// The quota is the entitlement's OWN frozen allowance when it has one (a PER_STAY_NIGHT grant) and the
+	// pinned plan revision's otherwise. LEFT JOIN for the same reason p6_data_crossing uses one: an
+	// entitlement that carries its own quota must be judged on it whatever the plan revision says.
+	if err := tx.QueryRow(ctx, `SELECT (e.window_ends_at IS NULL OR e.window_ends_at > $2),
+		       COALESCE(e.data_quota_bytes, spr.data_quota_bytes)
 		FROM iam_v2.entitlements e
-		JOIN iam_v2.service_plan_revisions spr ON spr.tenant_id=e.tenant_id AND spr.site_id=e.site_id AND spr.id=e.service_plan_revision_id
+		LEFT JOIN iam_v2.service_plan_revisions spr ON spr.tenant_id=e.tenant_id AND spr.site_id=e.site_id AND spr.id=e.service_plan_revision_id
 		WHERE e.id=$1`, entID, boundary).Scan(&windowOK, &quota); err != nil {
 		return false, err
 	}

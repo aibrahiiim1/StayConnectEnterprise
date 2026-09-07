@@ -23,6 +23,7 @@ import { Plus, X, AlertTriangle } from "lucide-react";
 import { PackageForm, type PackageFormInitial, type PackageFormValue, type PlanOption } from "./package-form";
 import { decideSave, saveOutcomeMessage } from "@/lib/package-save";
 import { formatSpeed, formatData, formatDuration, formatDevices } from "@/lib/units";
+import { allocationFromPolicy, stayLengthWarnings, readStayLength, type PackageStayRange } from "@/lib/stay-packages";
 import type { EligibilityRuleForm, GrantTierForm, DurationForm } from "@/lib/commerce-form";
 
 type PackageSummary = {
@@ -46,6 +47,7 @@ type PackageCurrent = {
   service_plan_revision_id: string;
   display?: Record<string, unknown> | null;
   duration_policy?: Record<string, unknown> | null;
+  data_allocation_policy?: Record<string, unknown> | null;
   eligibility_rules?: { Type?: string; type?: string; Value?: Record<string, unknown>; value?: Record<string, unknown> }[] | null;
   grant_tiers?: { Order?: number; order?: number; Value?: Record<string, unknown>; value?: Record<string, unknown> }[] | null;
   visible_from?: string | null; visible_until?: string | null;
@@ -119,6 +121,7 @@ function PackagesTab({ guard, setErr }: TabProps) {
   const [editingID, setEditingID] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [stayWarnings, setStayWarnings] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -127,6 +130,33 @@ function PackagesTab({ guard, setErr }: TabProps) {
         api.get<ListResp<PlanSummary>>("/commercial-packages/plans"),
       ]);
       setRows(pk.data ?? []); setPlans(pl.data ?? []);
+
+      // THE STAY-LENGTH OVERLAP CHECK.
+      //
+      // The list does not carry eligibility rules -- edged authors them and cannot read the table back, so
+      // they come one package at a time through the scoped reader. That is a handful of extra reads on a page
+      // with a handful of packages, and it buys the one thing the operator cannot work out by eye: whether
+      // "1-7 / 8-10 / 11+" actually tiles the range or quietly double-covers part of it.
+      //
+      // It is a WARNING. Overlapping ranges are a legitimate design when the operator wants the guest to
+      // choose, so nothing here rewrites a rule -- it says what will happen.
+      const active = (pk.data ?? []).filter((p) => p.active);
+      const ranges = await Promise.all(active.map(async (p): Promise<PackageStayRange> => {
+        try {
+          const cur = await api.get<PackageCurrent>(`/commercial-packages/${p.package_id}/current`);
+          return {
+            package_id: p.package_id, name: p.name || p.code, active: true,
+            range: readStayLength((cur.eligibility_rules ?? []).map((r) => ({
+              type: r.type ?? r.Type, value: r.value ?? r.Value,
+            }))),
+          };
+        } catch {
+          // A package whose conditions cannot be read is not evidence of an overlap. Reporting one from a
+          // failed read would be a warning about nothing.
+          return { package_id: p.package_id, name: p.name || p.code, active: true, range: null };
+        }
+      }));
+      setStayWarnings(stayLengthWarnings(ranges));
     } catch (e) { if (!guard(e)) setErr((e as Error)?.message ?? "Could not load packages"); }
   }, [guard, setErr]);
   useEffect(() => { load(); }, [load]);
@@ -158,6 +188,9 @@ function PackagesTab({ guard, setErr }: TabProps) {
         duration: durationToForm(cur.duration_policy),
         visibleFrom: toLocalInput(cur.visible_from),
         visibleUntil: toLocalInput(cur.visible_until),
+        // Loaded, not defaulted: a package on a per-night allowance must not be flattened by an edit that
+        // was only meant to rename it.
+        allocation: allocationFromPolicy(cur.data_allocation_policy),
       });
       setAdding(false);
     } catch (e) { if (!guard(e)) setErr((e as Error)?.message ?? "Could not open this package"); }
@@ -213,6 +246,20 @@ function PackagesTab({ guard, setErr }: TabProps) {
     <div className="space-y-3">
       {notice && (
         <div className="text-sm rounded-md border border-border bg-panel2 px-3 py-2" role="status">{notice}</div>
+      )}
+      {stayWarnings.length > 0 && (
+        <div className="text-sm rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2"
+          data-testid="stay-length-warnings">
+          <div className="flex items-center gap-2 font-medium mb-1">
+            <AlertTriangle size={14} /> Overlapping stay lengths
+          </div>
+          <ul className="list-disc pl-5 space-y-0.5 text-muted">
+            {stayWarnings.map((w, i) => <li key={i}>{w}</li>)}
+          </ul>
+          <p className="text-xs text-muted mt-1">
+            Nothing has been changed. If you meant each length to have one package, adjust the night ranges.
+          </p>
+        </div>
       )}
       <div className="flex justify-end">
         <Button onClick={() => { setAdding((v) => !v); setEditing(null); setEditingID(null); }}>
@@ -335,6 +382,7 @@ function rulesToForm(rules: PackageCurrent["eligibility_rules"]): EligibilityRul
     const type = pick(r.type, r.Type);
     const value = (pick(r.value, r.Value) ?? {}) as Record<string, unknown>;
     const list = (k: string) => (Array.isArray(value[k]) ? (value[k] as string[]).join(", ") : "");
+    const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? String(v) : "");
     switch (type) {
       case "AUTH_METHOD": out.push({ type: "AUTH_METHOD", methods: list("methods") }); break;
       case "SUBJECT_KIND": out.push({ type: "SUBJECT_KIND", kinds: list("kinds") }); break;
@@ -347,6 +395,20 @@ function rulesToForm(rules: PackageCurrent["eligibility_rules"]): EligibilityRul
         type: "PRIOR_PURCHASE", mode: value.requires_prior ? "requires_prior" : "forbids_prior",
       }); break;
       case "SITE_NETWORK": out.push({ type: "SITE_NETWORK", guest_network_ids: list("guest_network_ids") }); break;
+      // THE STAY DIMENSIONS. A bound that is absent stays absent: reading a missing max_nights back as "0"
+      // would republish "up to zero nights", i.e. a package for nobody.
+      case "STAY_LENGTH": out.push({
+        type: "STAY_LENGTH",
+        min_nights: num(value.min_nights),
+        max_nights: num(value.max_nights),
+      }); break;
+      case "ROOM_TYPE": out.push({ type: "ROOM_TYPE", room_types: list("room_types") }); break;
+      case "RATE_PLAN": out.push({ type: "RATE_PLAN", rate_plans: list("rate_plans") }); break;
+      case "VIP": out.push({ type: "VIP", is_vip: value.is_vip === false ? "false" : "true" }); break;
+      case "TRAVEL_AGENT": out.push({ type: "TRAVEL_AGENT", travel_agents: list("travel_agents") }); break;
+      case "PMS_INTERFACE": out.push({
+        type: "PMS_INTERFACE", pms_interface_ids: list("pms_interface_ids"),
+      }); break;
       default: break; // an unknown/unsupported type is not re-emitted; the form only offers supported ones
     }
   }

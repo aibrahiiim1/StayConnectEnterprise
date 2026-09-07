@@ -56,6 +56,9 @@ export type PackageCurrentDTO = {
   grant_tiers?: { order?: number; Order?: number; value?: Record<string, unknown>; Value?: Record<string, unknown> }[] | null;
   visible_from?: string | null;
   visible_until?: string | null;
+  /** Absent means the plan's flat allowance. Carried across so a repin never silently flattens a
+   *  per-night package back to a fixed one. */
+  data_allocation_policy?: Record<string, unknown> | null;
 };
 
 /**
@@ -86,6 +89,11 @@ export function repinPayload(cur: PackageCurrentDTO, planRevisionID: string, fal
     })),
     visible_from: cur.visible_from ?? undefined,
     visible_until: cur.visible_until ?? undefined,
+    // The allowance policy is part of the package's terms, so it travels with everything else. Omitting it
+    // would turn a per-night package into a flat one on a revision that claims only to have moved plan.
+    ...(cur.data_allocation_policy && Object.keys(cur.data_allocation_policy).length > 0
+      ? { data_allocation_policy: cur.data_allocation_policy }
+      : {}),
   };
 }
 

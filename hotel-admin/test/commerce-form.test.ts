@@ -13,16 +13,26 @@ import {
 } from "@/lib/commerce-form";
 
 describe("supported / forbidden rule types", () => {
-  it("offers only the five non-PMS Phase-2 rule types", () => {
+  // THE PMS DIMENSIONS ARE NOW OFFERED, and that is a product decision rather than a relaxation. They were
+  // withheld while the engine recognised them but could not evaluate them, because a control that silently
+  // does nothing is worse than an absent one. The engine evaluates every one of them against server-pinned
+  // Stay evidence and refuses when that evidence is missing, so the reason for withholding them has gone.
+  it("offers the non-PMS types AND the six approved stay dimensions", () => {
     expect([...SUPPORTED_RULE_TYPES].sort()).toEqual(
-      ["AUTH_METHOD", "DATE_WINDOW", "PRIOR_PURCHASE", "SITE_NETWORK", "SUBJECT_KIND"].sort(),
+      [
+        "AUTH_METHOD", "DATE_WINDOW", "PRIOR_PURCHASE", "SITE_NETWORK", "SUBJECT_KIND",
+        "STAY_LENGTH", "ROOM_TYPE", "RATE_PLAN", "VIP", "TRAVEL_AGENT", "PMS_INTERFACE",
+      ].sort(),
     );
   });
-  it("never lists a PMS/Stay-dependent rule type as supported", () => {
+  it("never lists a rule type the engine cannot evaluate", () => {
+    // What stays forbidden is what has no evidence behind it: a package carrying one of these would be
+    // ineligible for every guest, permanently, on an immutable revision.
     for (const bad of FORBIDDEN_RULE_TYPES) {
       expect(isSupportedRuleType(bad)).toBe(false);
       expect((SUPPORTED_RULE_TYPES as readonly string[]).includes(bad)).toBe(false);
     }
+    expect([...FORBIDDEN_RULE_TYPES].sort()).toEqual(["LOYALTY_TIER", "STAY_NIGHTS"]);
   });
 });
 

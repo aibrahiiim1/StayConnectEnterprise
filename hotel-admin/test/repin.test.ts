@@ -107,6 +107,15 @@ describe("repinPayload", () => {
     expect(raw.match(/rev4/g)?.length).toBe(1);
   });
 
+  it("carries a per-night data allowance across a repin instead of flattening it", () => {
+    const perNight = { ...cur, data_allocation_policy: { mode: "PER_STAY_NIGHT", gb_per_night: 1, min_gb: 5 } };
+    expect(repinPayload(perNight, "rev4").data_allocation_policy)
+      .toEqual({ mode: "PER_STAY_NIGHT", gb_per_night: 1, min_gb: 5 });
+    // ...and a package with a flat allowance still sends no policy at all.
+    expect("data_allocation_policy" in repinPayload(cur, "rev4")).toBe(false);
+    expect("data_allocation_policy" in repinPayload({ ...cur, data_allocation_policy: {} }, "rev4")).toBe(false);
+  });
+
   it("falls back to a readable name only when the package has no display", () => {
     expect(repinPayload({ code: "X" }, "rev4", "Nice name").display).toEqual({ name: "Nice name" });
     expect(repinPayload({ code: "X" }, "rev4").display).toEqual({ name: "X" });
