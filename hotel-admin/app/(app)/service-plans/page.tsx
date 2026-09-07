@@ -27,7 +27,8 @@ import { ErrorBanner } from "@/components/ui/error-banner";
 import { Plus, X, Gauge } from "lucide-react";
 import {
   formatSpeed, formatData, formatDuration, formatDevices, mbpsToKbps, gbToBytes,
-  durationToSeconds, DEVICE_LIMIT_POLICIES, TIME_ACCOUNTING_MODES,
+  durationToSeconds, secondsToDurationField, bytesToGb,
+  DEVICE_LIMIT_POLICIES, TIME_ACCOUNTING_MODES,
 } from "@/lib/units";
 import {
   stalePackagesFor, repinPayload, repinOutcomeMessage, type PackageCurrentDTO,
@@ -50,6 +51,12 @@ type PackageRef = {
   service_plan_id?: string | null; service_plan_revision_id?: string | null;
 };
 type RevisionInfo = { revision_id: string; revision_no: number; is_current: boolean; label?: string };
+
+// The server's bounds, in the units this form collects. edged is the authority and refuses anything past
+// these; repeating them here is what lets the browser refuse it at the field that caused it, naming a control
+// the operator can see rather than a wire field they cannot.
+//   maxKbps 10_000_000 · maxIdleSeconds 30d · maxSessionSeconds 365d · maxTimeQuotaSecond 10y
+const LIMITS = { mbps: 10000, idleMinutes: 43200, sessionHours: 8760, timeQuotaDays: 3650 } as const;
 
 export default function ServicePlansPage() {
   // The capability being OFF is not an error the operator can act on, so it gets its own state rather than a
@@ -77,6 +84,10 @@ export default function ServicePlansPage() {
     planRevisionID: string; planLabel: string; packages: PackageRef[];
     chosen: Record<string, boolean>; standing: boolean;
   } | null>(null);
+
+  // The plan's existing time allowance, expressed in the largest unit that divides it exactly, so the value
+  // and its unit are pre-filled together and mean what the plan already means.
+  const timeQuota = secondsToDurationField(prefill?.time_quota_seconds, ["hours", "days"]);
 
   const load = useCallback(async () => {
     try {
@@ -280,7 +291,10 @@ export default function ServicePlansPage() {
                     ? "Saving records these settings as the plan's current settings. Guests already connected keep the terms they were given, and packages using this plan are only updated if you choose them below."
                     : "This creates the plan and its first settings."}
                 </p>
-                <form onSubmit={onPublish} className="grid gap-3 sm:grid-cols-2">
+                {/* Keyed on the plan being edited. These are uncontrolled inputs, so React reuses the DOM
+                    nodes and their defaultValue is applied once; switching straight from editing one plan to
+                    another would otherwise leave the first plan's numbers on screen — and publish them. */}
+                <form key={prefill?.plan_id ?? "new"} onSubmit={onPublish} className="grid gap-3 sm:grid-cols-2">
                   <div>
                     <Label>Plan code</Label>
                     <Input name="code" required defaultValue={prefill?.code ?? ""} readOnly={!!prefill}
@@ -292,15 +306,19 @@ export default function ServicePlansPage() {
                     <Input name="name" defaultValue={prefill?.name ?? ""} placeholder="Premium Wi-Fi" />
                   </div>
 
+                  {/* max= on every numeric field mirrors the server's bound, so an over-limit value is refused
+                      at the field that caused it instead of as a rejected save that names a wire field. */}
                   <div>
                     <Label>Download speed (Mbps)</Label>
-                    <Input name="down_mbps" type="number" min={0} step="0.1"
+                    <Input name="down_mbps" type="number" min={0} max={LIMITS.mbps} step="0.1"
                       defaultValue={prefill?.down_kbps ? prefill.down_kbps / 1000 : ""} placeholder="Leave empty for unlimited" />
+                    <p className="text-xs text-muted mt-1">Up to {LIMITS.mbps} Mbps.</p>
                   </div>
                   <div>
                     <Label>Upload speed (Mbps)</Label>
-                    <Input name="up_mbps" type="number" min={0} step="0.1"
+                    <Input name="up_mbps" type="number" min={0} max={LIMITS.mbps} step="0.1"
                       defaultValue={prefill?.up_kbps ? prefill.up_kbps / 1000 : ""} placeholder="Leave empty for unlimited" />
+                    <p className="text-xs text-muted mt-1">Up to {LIMITS.mbps} Mbps.</p>
                   </div>
 
                   <div>
@@ -318,28 +336,40 @@ export default function ServicePlansPage() {
                     </select>
                   </div>
 
+                  {/* THESE FOUR ARE PRE-FILLED, and that is a bug fix rather than a nicety. The form does not
+                      patch a plan: it publishes a complete new revision from whatever the fields hold, so a
+                      field left blank because it was never loaded PUBLISHED a blank. Editing the OneDay plan
+                      to change its speed silently dropped its one-day time allowance, and re-typing the value
+                      against a unit dropdown that had reset to its default is how that became a different
+                      allowance again. */}
                   <div>
                     <Label>Total time allowance</Label>
                     <div className="flex gap-2">
-                      <Input name="time_quota" type="number" min={0} placeholder="Unlimited" className="flex-1" />
-                      <select name="time_quota_unit" className="bg-panel2 border border-border rounded-md px-2 text-sm">
+                      <Input name="time_quota" type="number" min={0} step="0.01" placeholder="Unlimited"
+                        className="flex-1" defaultValue={timeQuota.value} />
+                      <select name="time_quota_unit" defaultValue={timeQuota.unit}
+                        className="bg-panel2 border border-border rounded-md px-2 text-sm">
                         <option value="hours">hours</option>
                         <option value="days">days</option>
                       </select>
                     </div>
+                    <p className="text-xs text-muted mt-1">Up to {LIMITS.timeQuotaDays} days.</p>
                   </div>
                   <div>
                     <Label>Data allowance (GB)</Label>
-                    <Input name="data_quota_gb" type="number" min={0} step="0.1" placeholder="Unlimited" />
+                    <Input name="data_quota_gb" type="number" min={0} step="0.1" placeholder="Unlimited"
+                      defaultValue={bytesToGb(prefill?.data_quota_bytes)} />
                   </div>
 
                   <div>
                     <Label>Disconnect after inactivity (minutes)</Label>
-                    <Input name="idle_timeout" type="number" min={0} placeholder="Never" />
+                    <Input name="idle_timeout" type="number" min={0} max={LIMITS.idleMinutes} placeholder="Never"
+                      defaultValue={secondsToDurationField(prefill?.idle_timeout_seconds, ["minutes"]).value} />
                   </div>
                   <div>
                     <Label>Maximum single session (hours)</Label>
-                    <Input name="max_session" type="number" min={0} placeholder="No limit" />
+                    <Input name="max_session" type="number" min={0} max={LIMITS.sessionHours} placeholder="No limit"
+                      defaultValue={secondsToDurationField(prefill?.max_continuous_session_seconds, ["hours"]).value} />
                   </div>
 
                   <div className="sm:col-span-2">

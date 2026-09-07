@@ -35,6 +35,17 @@ const PLANS = [{
   current_revision_id: "rev4", revision_count: 4,
   down_kbps: 10000, up_kbps: 5000, max_concurrent_devices: 1, used_by_active_packages: 2,
 }];
+
+// The live OneDay plan, values and all: 10 Gbps each way (exactly the server's ceiling), 5 devices, and a
+// one-day time allowance that editing the plan used to throw away.
+const ONEDAY = {
+  plan_id: "plan-oneday", code: "OneDay", name: "OneDay", enabled: true,
+  current_revision_id: "rev-od-1", revision_count: 1,
+  down_kbps: 10000000, up_kbps: 10000000, max_concurrent_devices: 5,
+  time_quota_seconds: 86400, data_quota_bytes: null,
+  idle_timeout_seconds: null, max_continuous_session_seconds: null,
+  used_by_active_packages: 1,
+};
 const PACKAGES = [
   {
     package_id: "pkg-freee", code: "FREEE", name: "Freee", active: true,
@@ -56,9 +67,9 @@ const FREEE_CURRENT = {
   visible_until: null,
 };
 
-function mockLoad(packages = PACKAGES) {
+function mockLoad(packages = PACKAGES, plans: unknown[] = PLANS) {
   g.mockImplementation((path: string) => {
-    if (path === "/commercial-packages/plans") return Promise.resolve(list(PLANS));
+    if (path === "/commercial-packages/plans") return Promise.resolve(list(plans));
     if (path === "/commercial-packages") return Promise.resolve(list(packages));
     if (path === "/commercial-packages/pkg-freee/current") return Promise.resolve(FREEE_CURRENT);
     return Promise.resolve(list([]));
@@ -158,6 +169,19 @@ describe("ServicePlansPage — stale package pin", () => {
     expect(msg.toLowerCase()).not.toContain("revision");
   });
 
+  it("republishes a stale package even when other packages of the same plan are current", async () => {
+    // Only the one that is behind is touched; the current one is not republished as a side effect.
+    mockLoad();
+    p.mockResolvedValue({});
+    render(<ServicePlansPage />);
+    fireEvent.click(await screen.findByTestId("apply-current-FREE"));
+    fireEvent.click(screen.getByLabelText("repin-FREEE"));
+    fireEvent.click(screen.getByRole("button", { name: /apply to selected packages/i }));
+
+    await waitFor(() => expect(p).toHaveBeenCalledTimes(1));
+    expect(g).not.toHaveBeenCalledWith("/commercial-packages/pkg-current/current");
+  });
+
   it("never asks the operator for a revision id", async () => {
     mockLoad();
     const { container } = render(<ServicePlansPage />);
@@ -166,5 +190,75 @@ describe("ServicePlansPage — stale package pin", () => {
     expect(container.innerHTML).not.toContain("rev3");
     expect(container.innerHTML).not.toContain("rev4");
     expect(screen.queryByLabelText(/revision id/i)).toBeNull();
+  });
+});
+
+// EDITING A PLAN MUST NOT DROP WHAT IT ALREADY HAS.
+//
+// This form publishes a complete new revision from whatever its fields hold — it does not patch. Four fields
+// were never pre-filled, so editing the OneDay plan to change one number published a revision with no time
+// allowance at all. Re-typing the value by hand is where the second failure came from: the unit dropdown had
+// reset to "hours", and 86400 entered against the wrong unit is what produced the refused save.
+
+describe("ServicePlansPage — editing an existing plan", () => {
+  function fieldsOf(container: HTMLElement) {
+    const v = (name: string) =>
+      (container.querySelector(`[name="${name}"]`) as HTMLInputElement | HTMLSelectElement | null)?.value;
+    return v;
+  }
+
+  it("pre-fills every value the plan already has, including the time allowance and its unit", async () => {
+    mockLoad([], [ONEDAY]);
+    const { container } = render(<ServicePlansPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /^edit$/i }));
+
+    const v = fieldsOf(container);
+    expect(v("code")).toBe("OneDay");
+    expect(v("down_mbps")).toBe("10000");
+    expect(v("up_mbps")).toBe("10000");
+    expect(v("max_concurrent_devices")).toBe("5");
+    // The one that was silently dropped: 86400 seconds reads as 1 DAY, not 24 hours and not blank.
+    expect(v("time_quota")).toBe("1");
+    expect(v("time_quota_unit")).toBe("days");
+  });
+
+  it("leaves genuinely unset fields empty rather than inventing a zero", async () => {
+    mockLoad([], [ONEDAY]);
+    const { container } = render(<ServicePlansPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /^edit$/i }));
+
+    const v = fieldsOf(container);
+    for (const unset of ["data_quota_gb", "idle_timeout", "max_session"]) expect(v(unset)).toBe("");
+  });
+
+  it("republishes the plan unchanged when the operator edits one field and saves", async () => {
+    // The regression in one assertion: changing the device count must not also remove the time allowance.
+    mockLoad([], [ONEDAY]);
+    p.mockResolvedValue({ current_revision_id: "rev-od-2" });
+    const { container } = render(<ServicePlansPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /^edit$/i }));
+    fireEvent.change(container.querySelector('[name="max_concurrent_devices"]')!, { target: { value: "6" } });
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+    await waitFor(() => expect(p).toHaveBeenCalledTimes(1));
+    const body = p.mock.calls[0][1];
+    expect(body.max_concurrent_devices).toBe(6);
+    expect(body.time_quota_seconds).toBe(86400);
+    expect(body.down_kbps).toBe(10000000);
+    expect(body.up_kbps).toBe(10000000);
+  });
+
+  it("stops an over-limit speed at the field, with the ceiling stated on screen", async () => {
+    // 10 Gbps is the server's ceiling and OneDay already sits on it, so the next keystroke up is refused.
+    // Refusing it here names a control the operator can see instead of a wire field they cannot.
+    mockLoad([], [ONEDAY]);
+    const { container } = render(<ServicePlansPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /^edit$/i }));
+
+    const down = container.querySelector('[name="down_mbps"]') as HTMLInputElement;
+    expect(down.max).toBe("10000");
+    fireEvent.change(down, { target: { value: "10001" } });
+    expect(down.checkValidity()).toBe(false);
+    expect(screen.getAllByText(/up to 10000 mbps/i).length).toBeGreaterThan(0);
   });
 });

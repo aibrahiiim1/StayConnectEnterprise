@@ -3,6 +3,7 @@ package iamv2
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -493,22 +494,34 @@ func validatePlanSpec(spec *PlanPublishSpec, allowAggregate bool) error {
 	default:
 		return &Error{Code: ErrInvalidInput, Msg: "unsupported time_accounting_mode"}
 	}
-	nn := func(p *int, max int) error {
+	// EVERY BOUND NAMES ITS FIELD, ITS LIMIT AND WHAT WAS SENT.
+	//
+	// All six of these once shared one message -- "plan integer out of range" -- and an operator who hit it
+	// while editing a plan was told only that one of six numbers was wrong. It cost a live debugging cycle on
+	// the OneDay plan, whose speed sits exactly ON the 10 Gbps ceiling, so any nudge upward fails while the
+	// screen names no field. That is the same mistake the caller below already refused to make when it stopped
+	// collapsing distinct validation reasons into "invalid_plan_spec"; collapsing six fields into one reason
+	// only moved the guessing game down a level.
+	nn := func(field string, p *int, max int) error {
 		if p != nil && (*p < 0 || *p > max) {
-			return &Error{Code: ErrInvalidInput, Msg: "plan integer out of range"}
+			return &Error{Code: ErrInvalidInput,
+				Msg: fmt.Sprintf("%s must be between 0 and %d, but %d was sent", field, max, *p)}
 		}
 		return nil
 	}
-	nn64 := func(p *int64, max int64) error {
+	nn64 := func(field string, p *int64, max int64) error {
 		if p != nil && (*p < 0 || *p > max) {
-			return &Error{Code: ErrInvalidInput, Msg: "plan integer out of range"}
+			return &Error{Code: ErrInvalidInput,
+				Msg: fmt.Sprintf("%s must be between 0 and %d, but %d was sent", field, max, *p)}
 		}
 		return nil
 	}
 	for _, e := range []error{
-		nn(spec.DownKbps, maxKbps), nn(spec.UpKbps, maxKbps),
-		nn(spec.IdleTimeoutSeconds, maxIdleSeconds), nn(spec.MaxContinuousSessionSeconds, maxSessionSeconds),
-		nn64(spec.TimeQuotaSeconds, maxTimeQuotaSecond), nn64(spec.DataQuotaBytes, maxDataQuotaBytes),
+		nn("down_kbps", spec.DownKbps, maxKbps), nn("up_kbps", spec.UpKbps, maxKbps),
+		nn("idle_timeout_seconds", spec.IdleTimeoutSeconds, maxIdleSeconds),
+		nn("max_continuous_session_seconds", spec.MaxContinuousSessionSeconds, maxSessionSeconds),
+		nn64("time_quota_seconds", spec.TimeQuotaSeconds, maxTimeQuotaSecond),
+		nn64("data_quota_bytes", spec.DataQuotaBytes, maxDataQuotaBytes),
 	} {
 		if e != nil {
 			return e
