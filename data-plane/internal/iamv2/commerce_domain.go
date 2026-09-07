@@ -1,6 +1,7 @@
 package iamv2
 
 import (
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -400,27 +401,41 @@ func matchStringField(set map[string]bool, value, label string) (bool, string) {
 
 // parseIntField reads an optional integer bound: (value, present, wellFormed). A present-but-malformed bound
 // is never treated as omitted — that would turn a typo into a wider offer.
+// parseIntField reads a non-negative whole number out of a rule value.
+//
+// IT MUST ACCEPT EVERY NUMERIC SHAPE A DECODER IN THIS SYSTEM PRODUCES, because they are not the same shape
+// and never have been. edged decodes request bodies with UseNumber, so a number arrives as json.Number; the
+// Phase-2 repository decodes rule_value with UseNumber too; but the Phase-3 offers path in scd calls plain
+// json.Unmarshal, which produces float64. Postgres round-trips add int64.
+//
+// This handled float64, int and int64 -- and not json.Number. STAY_LENGTH is the first rule type to carry a
+// number at all, so nothing had ever exercised the gap, and the first operator to set "1 to 5 nights" was
+// told "invalid_eligibility_rule" with no way to publish it. Worse than the refusal was what would have
+// happened had it published: the rule would have evaluated correctly in the Room Login path (float64) and
+// failed closed in the Phase-2 engine (json.Number), so the same stored rule would mean two different things
+// depending on who asked.
+//
+// The strictness is unchanged and deliberate: a fractional or exponent-bearing value is REFUSED rather than
+// rounded, because "1.5 nights" is not a number of nights and silently turning it into 1 or 2 publishes a
+// rule the operator did not write onto a revision they cannot edit.
 func parseIntField(v map[string]any, key string) (int, bool, bool) {
 	raw, present := v[key]
 	if !present || raw == nil {
 		return 0, false, true
 	}
-	switch n := raw.(type) {
-	case float64:
-		if n != float64(int(n)) || n < 0 {
+	// json.Number, int and int64 all go through the one strict integer reader the grant snapshot uses, so
+	// there is a single definition of "a whole number" rather than two that can drift apart.
+	if n, ok := asInt64(raw); ok {
+		if n < 0 || n > math.MaxInt32 {
 			return 0, true, false
 		}
 		return int(n), true, true
-	case int:
-		if n < 0 {
+	}
+	if f, ok := raw.(float64); ok {
+		if f != math.Trunc(f) || f < 0 || f > math.MaxInt32 {
 			return 0, true, false
 		}
-		return n, true, true
-	case int64:
-		if n < 0 {
-			return 0, true, false
-		}
-		return int(n), true, true
+		return int(f), true, true
 	}
 	return 0, true, false
 }

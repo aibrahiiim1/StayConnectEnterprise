@@ -337,10 +337,17 @@ func (a *CommerceAdmin) PublishRevision(ctx context.Context, spec PackagePublish
 	if spec.TenantID == "" || spec.SiteID == "" || spec.PackageCode == "" || spec.ServicePlanRevisionID == "" {
 		return AdminResult{}, &Error{Code: ErrInvalidInput, Msg: "publish: missing tenant/site/code/plan_revision"}
 	}
-	// publication-strict validation of every rule and tier (no writes yet)
+	// PUBLICATION-STRICT VALIDATION of every rule and tier (no writes yet).
+	//
+	// The REASON travels, not just the label. "invalid_eligibility_rule" told an operator who had set a stay
+	// length of 1 to 5 nights that something about their conditions was wrong, and nothing else -- no rule
+	// type, no field, no reason -- for a form that can carry a dozen conditions. The validators already
+	// produce a precise sentence; this used to throw it away, which is the same mistake PublishPlanRevision
+	// below already refuses to make and for the same reason: this is the trusted operator surface, and a
+	// refusal it cannot act on is barely better than no refusal at all.
 	for _, rule := range spec.EligibilityRules {
 		if err := ValidateEligibilityRule(rule); err != nil {
-			return AdminResult{Reason: "invalid_eligibility_rule"}, nil
+			return AdminResult{Reason: reasonWithDetail("invalid_eligibility_rule", rule.Type, err)}, nil
 		}
 	}
 	if len(spec.GrantTiers) == 0 {
@@ -348,7 +355,7 @@ func (a *CommerceAdmin) PublishRevision(ctx context.Context, spec PackagePublish
 	}
 	for _, tier := range spec.GrantTiers {
 		if err := ValidateGrantTier(tier); err != nil {
-			return AdminResult{Reason: "invalid_grant_tier"}, nil
+			return AdminResult{Reason: reasonWithDetail("invalid_grant_tier", "", err)}, nil
 		}
 	}
 	// the immutable duration policy must resolve (PMS/checkout/local-time modes are capability-disabled)
@@ -544,6 +551,22 @@ func validatePlanSpec(spec *PlanPublishSpec, allowAggregate bool) error {
 		}
 	}
 	return nil
+}
+
+// reasonWithDetail appends the validator's own sentence (and the rule type, when there is one) to the machine
+// label, so a refusal names what to fix. The label stays first and unchanged, because callers match on it.
+func reasonWithDetail(label, ruleType string, err error) string {
+	var e *Error
+	if !errors.As(err, &e) || e.Msg == "" {
+		if ruleType != "" {
+			return label + ": " + ruleType
+		}
+		return label
+	}
+	if ruleType != "" {
+		return label + ": " + ruleType + ": " + e.Msg
+	}
+	return label + ": " + e.Msg
 }
 
 // PublishPlanRevision publishes a new immutable service-plan revision and moves the plan's current
