@@ -298,12 +298,19 @@ test("the choice step discloses no price and no money of any kind", async ({ pag
   expect(shown).not.toContain("p1");
 });
 
-test("choosing a package while the server refuses leaves the choices usable", async ({ page }) => {
-  // The buttons are disabled during the grant and must come back. A guest whose grant is refused once should
-  // be able to pick the other package rather than reload and start over.
+test("a refused choice takes the offers down and returns the guest to sign-in", async ({ page }) => {
+  // THIS REPLACED THE OPPOSITE BEHAVIOUR, and the change is the product decision -- not an implementation
+  // detail. The buttons used to be re-enabled and left on screen after a refusal, so they read as still
+  // valid; a real guest pressed three times in fourteen seconds, each attempt refused identically, because
+  // nothing indicated the offer set was spent.
+  //
+  // The portal cannot tell WHY a grant was refused -- the guest-facing envelope is uniform by design -- so it
+  // cannot know whether pressing another button is a safe retry or an attempt to spend a consumed Auth
+  // Context. Going back to sign-in is correct under every reading, and costs the guest nothing: the request
+  // id is retained, so signing in again returns the SAME Auth Context rather than minting a second one.
   const calls: Call[] = [];
   await serve(page, calls, (n) =>
-    n === 0
+    n === 0 || n === 2
       ? {
           ok: true, needs_choice: true, auth_context_id: "ctx",
           choices: [
@@ -321,12 +328,47 @@ test("choosing a package while the server refuses leaves the choices usable", as
   await expect(choices).toHaveCount(2);
 
   await choices.first().click();
-  await expect(page.locator("#pms-err")).toHaveText(UNIFORM_MESSAGE);
-  await expect(choices.nth(1)).toBeEnabled();
 
-  await choices.nth(1).click();
+  // The offer set is GONE, not merely disabled: a disabled button still says "this is your package".
+  await expect(choices).toHaveCount(0);
+  await expect(page.locator("#pms-choices")).toBeHidden();
+  // ...the sign-in form is back and usable...
+  await expect(page.locator("#form-pms")).toBeVisible();
+  await expect(page.locator("#pms-room")).toBeEditable();
+  // ...and the guest is told the same one thing as every other failure.
+  await expect(page.locator("#pms-err")).toHaveText(UNIFORM_MESSAGE);
+
+  // Signing in again is safe and reaches a package the guest can actually take.
+  await submitStay(page, "412", "Okonkwo");
+  await expect(page.locator("#pms-choices button.choice")).toHaveCount(2);
+  await page.locator("#pms-choices button.choice").nth(1).click();
   await expect(page.getByRole("heading", { name: "You are online" })).toBeVisible();
-  expect(calls[2].body.package_revision_id).toBe("p2");
+  expect(calls[3].body.package_revision_id).toBe("p2");
+});
+
+test("the retry after a refused choice reuses the request id, so it cannot double-grant", async ({ page }) => {
+  // Returning to sign-in must not become a route to two grants. The request id is cleared only by a
+  // SUCCESSFUL grant, so the second resolution returns the same Auth Context rather than a second one.
+  const calls: Call[] = [];
+  await serve(page, calls, (n) =>
+    n === 0 || n === 2
+      ? {
+          ok: true, needs_choice: true, auth_context_id: "ctx",
+          choices: [{ package_revision_id: "p1", code: "STANDARD", down_kbps: 9000 }],
+        }
+      : n === 1
+        ? FAIL
+        : { ok: true, session_id: "s", redirect_to: "/success" });
+
+  await page.goto("http://localhost/portal");
+  await submitStay(page, "412", "Okonkwo");
+  await page.locator("#pms-choices button.choice").first().click();
+  await expect(page.locator("#form-pms")).toBeVisible();
+  await submitStay(page, "412", "Okonkwo");
+
+  const first = calls[0].body.request_id;
+  expect(first).toBeTruthy();
+  expect(calls[2].body.request_id).toBe(first);
 });
 
 test("an empty choice list is the uniform message, not an empty screen", async ({ page }) => {

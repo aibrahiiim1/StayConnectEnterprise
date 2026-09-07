@@ -1,8 +1,8 @@
 {
   "transition_id": "T0120",
   "seq": 120,
-  "timestamp": "2026-09-08T00:20:00Z",
-  "timestamp_derivation": "After the Product Owner's manual PRE-LIVE acceptance of Stay-length package eligibility and the PER_STAY_NIGHT configuration on the deployed test HEAD 4112186e, and after migration 0064 was applied through the authoritative runner and the Gate-P reconcile repair was verified idempotent; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "timestamp": "2026-09-07T21:30:00Z",
+  "timestamp_derivation": "After migration 0064 was applied to stayconnect_site through the authoritative runner (20:12Z) and the Gate-P reconcile repair was verified idempotent, and after the Product Owner's manual PRE-LIVE acceptance grants at 20:41Z and 20:44Z; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
   "record_type": "PRE_LIVE_PACKAGE_ELIGIBILITY_AND_PER_STAY_NIGHT_MILESTONE_ACCEPTED_AND_CLOSED",
   "previous_state": {
     "phase": "7",
