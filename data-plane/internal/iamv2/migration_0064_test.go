@@ -188,11 +188,11 @@ func TestMigration0064(t *testing.T) {
 
 	// 6. THE POLICY SHAPE IS ENFORCED by the database, not only by the writer.
 	bad := []string{
-		`{"mode":"PER_STAY_NIGHT"}`,                                  // no rate
-		`{"mode":"PER_STAY_NIGHT","gb_per_night":0}`,                 // zero rate
-		`{"mode":"PER_STAY_NIGHT","gb_per_night":1,"max_gb":0}`,      // zero ceiling
+		`{"mode":"PER_STAY_NIGHT"}`,                                         // no rate
+		`{"mode":"PER_STAY_NIGHT","gb_per_night":0}`,                        // zero rate
+		`{"mode":"PER_STAY_NIGHT","gb_per_night":1,"max_gb":0}`,             // zero ceiling
 		`{"mode":"PER_STAY_NIGHT","gb_per_night":1,"min_gb":10,"max_gb":5}`, // ceiling under floor
-		`{"mode":"PER_GUEST_MOOD"}`,                                  // unknown mode
+		`{"mode":"PER_GUEST_MOOD"}`,                                         // unknown mode
 		`"not an object"`,
 	}
 	for _, b := range bad {
