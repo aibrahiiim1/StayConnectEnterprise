@@ -65,7 +65,7 @@ describe("the data-allowance precedence notice", () => {
     perNight("1", "3", "20");
     // 8 nights x 1 GB = 8 GB, above the 3 GB floor and below the 20 GB ceiling.
     expect(screen.getByTestId("allowance-example").textContent)
-      .toMatch(new RegExp(`For a ${NOTICE_EXAMPLE_NIGHTS}-night stay the guest receives\\s*8 GB`));
+      .toMatch(new RegExp(`For an ${NOTICE_EXAMPLE_NIGHTS}-night stay the guest receives\\s*8 GB`));
   });
 
   it("FIXED says plainly that the plan's allowance is what applies", () => {
