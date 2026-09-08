@@ -1,0 +1,4 @@
+commit b61b2b12c1e0684367bd883c8f5bf5f3125a3758
+Date:   Wed Sep 9 00:14:22 2026 +0300
+
+    Governance sync: record the PRE-LIVE quota closure at its merged commits
