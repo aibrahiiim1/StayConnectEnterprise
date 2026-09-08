@@ -1,0 +1,4 @@
+commit 485862914f22961ffbad0a47f431749bca51d9d2
+Date:   Tue Sep 8 14:57:07 2026 +0300
+
+    Delivery: manifest and delivery head resynchronized
