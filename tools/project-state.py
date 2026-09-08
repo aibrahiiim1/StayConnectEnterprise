@@ -1299,15 +1299,32 @@ def check_appliance_facts_agree(st):
                      str(f.get("room_auth_blocked_reason_note", ""))),
                     ("current_activity_execution_state_note",
                      str(st.get("current_activity_execution_state_note", "")))]
+        named_current = False
         for name, value in pms_srcs:
             for m in _re2.finditer(r"generation\s+(\d+)", value, _re2.I):
-                if int(m.group(1)) == gen:
-                    continue
                 # a window around the mention must mark it as no longer current
                 lo, hi = max(0, m.start() - 160), min(len(value), m.end() + 160)
-                if not _re2.search(r"historical|supersed|earlier|recovery publication|was the", value[lo:hi], _re2.I):
+                excused = bool(_re2.search(r"historical|supersed|earlier|recovery publication|was the",
+                                           value[lo:hi], _re2.I))
+                if int(m.group(1)) == gen:
+                    # The canonical number, stated as current, is what makes the rule falsifiable.
+                    named_current = named_current or not excused
+                    continue
+                if not excused:
                     bad.append(f"{name} names PMS generation {m.group(1)} as current but "
                                f"current_state_facts.pms_published_generation is {gen}")
+        # THE CANONICAL NUMBER MUST APPEAR AS THE CURRENT ONE SOMEWHERE, not merely fail to be contradicted.
+        #
+        # This half was missing and it silently disarmed the rule. Once every superseded generation carried a
+        # "superseded"/"earlier" label -- which is correct, and what keeps the history readable -- there was no
+        # unexcused wrong number left, so flipping pms_published_generation to any value at all contradicted
+        # nothing and the mutation case that guards this went from PASS to MISS. A rule that can only catch a
+        # wrong number, and not a canonical number nobody states, stops being a check the moment the prose
+        # gets tidy.
+        if not named_current:
+            bad.append(f"current_state_facts.pms_published_generation is {gen} but no current-state surface "
+                       f"states generation {gen} as the current one (every mention is labelled historical or "
+                       f"superseded), so the recorded number is unfalsifiable")
 
     # 3c. THE RUNTIME HEAD IS WHAT IS INSTALLED, NOT WHAT WAS INSTALLED LAST TIME.
     #
