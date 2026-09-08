@@ -1,0 +1,4 @@
+commit c5438ef707c8d96e593c46dac0801930d79d46ca
+Date:   Tue Sep 8 09:58:29 2026 +0300
+
+    Merge PR #84: Stay-based package eligibility and a per-stay-night data allowance (D40/T0120)
