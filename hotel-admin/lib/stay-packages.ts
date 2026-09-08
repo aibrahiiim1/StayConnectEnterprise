@@ -159,3 +159,83 @@ export function previewAllocation(a: AllocationForm, nights: number[]): { nights
     return { nights: n, gb: Math.round(gb * 100) / 100 };
   });
 }
+
+// ---------------------------------------------------------------------------
+// WHICH ALLOWANCE ACTUALLY APPLIES.
+//
+// A package can carry a per-night allowance while the Service Plan it uses carries a flat one, and both
+// numbers are visible on the same screen. Nothing on that screen said which of them a guest would actually
+// receive, so the honest reading was a coin toss: the plan is the technical service, the package is the offer,
+// and either could plausibly win.
+//
+// The rule is not a preference, it is a consequence of where the number is written. A PER_STAY_NIGHT package
+// computes its allowance at grant time and FREEZES it onto the entitlement, and every quota reader takes the
+// entitlement's own value when it has one. So for guests on that package the package allowance wins -- and the
+// Service Plan is not modified in any way, so packages using FIXED go on receiving the plan's quota exactly as
+// before. Both halves matter: an operator who reads only the first will think editing the package changed the
+// plan.
+
+export type AllowanceNoticeKind =
+  | "PER_STAY_NIGHT_OVERRIDES_PLAN"
+  | "PER_STAY_NIGHT_PLAN_HAS_NO_QUOTA"
+  | "FIXED_USES_PLAN"
+  | "FIXED_PLAN_HAS_NO_QUOTA";
+
+export type AllowanceNotice = {
+  kind: AllowanceNoticeKind;
+  /** Emphasised when the two allowances disagree and the package's wins. */
+  emphasis: boolean;
+  planQuotaGB?: number;
+  gbPerNight?: number;
+  minGB?: number;
+  maxGB?: number;
+  /** A worked example, so the clamp order is visible rather than inferred. */
+  exampleNights?: number;
+  exampleGB?: number;
+};
+
+/** The stay length the worked example uses. Eight nights sits above a typical floor and below a ceiling, so
+ *  the example shows the CALCULATION rather than a clamp — the clamps are visible in the preview row. */
+export const NOTICE_EXAMPLE_NIGHTS = 8;
+
+/**
+ * allowanceNotice decides which notice the Data allowance section should show, or null when there is nothing
+ * truthful to say yet (no plan chosen, or a per-night allowance not yet filled in).
+ *
+ * It never claims an override when the plan sets no quota of its own: there is nothing to override, and
+ * saying otherwise would teach the operator a rule that does not exist.
+ */
+export function allowanceNotice(
+  alloc: AllocationForm,
+  planDataQuotaBytes: number | null | undefined,
+  planSelected: boolean,
+): AllowanceNotice | null {
+  if (!planSelected) return null;
+  const planGB = planDataQuotaBytes && planDataQuotaBytes > 0
+    ? Math.round((planDataQuotaBytes / 1_000_000_000) * 100) / 100
+    : undefined;
+
+  if (alloc.mode !== "PER_STAY_NIGHT") {
+    return planGB === undefined
+      ? { kind: "FIXED_PLAN_HAS_NO_QUOTA", emphasis: false }
+      : { kind: "FIXED_USES_PLAN", emphasis: false, planQuotaGB: planGB };
+  }
+  // Per-night, but the numbers are not usable yet: say nothing rather than something wrong.
+  if (validateAllocation(alloc) !== null) return null;
+
+  const per = Number(alloc.gb_per_night);
+  const min = alloc.min_gb === "" ? undefined : Number(alloc.min_gb);
+  const max = alloc.max_gb === "" ? undefined : Number(alloc.max_gb);
+  const example = previewAllocation(alloc, [NOTICE_EXAMPLE_NIGHTS])[0];
+
+  return {
+    kind: planGB === undefined ? "PER_STAY_NIGHT_PLAN_HAS_NO_QUOTA" : "PER_STAY_NIGHT_OVERRIDES_PLAN",
+    emphasis: planGB !== undefined,
+    planQuotaGB: planGB,
+    gbPerNight: per,
+    minGB: min,
+    maxGB: max,
+    exampleNights: example?.nights,
+    exampleGB: example?.gb,
+  };
+}
