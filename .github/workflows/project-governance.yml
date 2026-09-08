@@ -121,6 +121,13 @@ jobs:
         # guarded could never match. Only the bytes give that away, so the bytes are checked.
         run: python tools/tests/tooling/run_control_chars.py
 
+      - name: The documented preflight suite SIZE is pass + fail, not pass
+        # The stale-document check read the preflight JSON's "pass" count and used it as the suite TOTAL, so
+        # a single red preflight check redefined the suite from 108 checks to 107 and reported the Final
+        # Report's correct "PASS 108/108" as stale. It also crossed a line: whether the preflight PASSES is
+        # Phase 3 Software CI's job. This drives the real validator against a stub preflight, offline.
+        run: bash tools/tests/tooling/preflight-total-selftest.sh
+
       - name: Working tree must remain clean
         run: |
           status="$(git status --porcelain --untracked-files=all)"

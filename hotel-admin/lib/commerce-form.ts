@@ -3,26 +3,46 @@
 // currently-supported contract on the client (the edged API re-validates authoritatively): free-only,
 // non-PMS eligibility, and only the duration modes this build actually implements.
 
-// The ONLY eligibility rule types an operator may select. PMS/Stay-dependent rule types (ROOM_TYPE,
-// RATE_PLAN, STAY_*, etc.) are deliberately absent — they are not implemented end to end, and a control that
-// silently does nothing is worse than an absent one.
+// The eligibility rule types an operator may select.
+//
+// THE PMS ONES WERE ABSENT ON PURPOSE, AND THAT PURPOSE HAS EXPIRED. They were withheld while the engine
+// recognised them but could not evaluate them — a control that silently does nothing is worse than an absent
+// one. The engine now evaluates every one of them against server-pinned Stay evidence, and refuses when that
+// evidence is missing rather than guessing, so withholding them only hides working behaviour.
+//
+// What is still absent is anything the engine cannot answer: LOYALTY_TIER has no evidence behind it, and
+// STAY_NIGHTS was never a rule type — stay length is STAY_LENGTH, with min/max night bounds.
 export const SUPPORTED_RULE_TYPES = [
   "AUTH_METHOD",
   "SUBJECT_KIND",
   "DATE_WINDOW",
   "PRIOR_PURCHASE",
   "SITE_NETWORK",
+  "STAY_LENGTH",
+  "ROOM_TYPE",
+  "RATE_PLAN",
+  "VIP",
+  "TRAVEL_AGENT",
+  "PMS_INTERFACE",
 ] as const;
 export type RuleType = (typeof SUPPORTED_RULE_TYPES)[number];
 
-// Rule types that must never be selectable (PMS/Stay dependent, not implemented). Exported for tests.
+// Rule types that must never be selectable: recognised nowhere in the engine, so a package carrying one would
+// be permanently ineligible for everybody. Exported for tests.
 export const FORBIDDEN_RULE_TYPES = [
-  "ROOM_TYPE",
-  "RATE_PLAN",
-  "STAY_STATUS",
   "STAY_NIGHTS",
   "LOYALTY_TIER",
 ] as const;
+
+// The rule types that need authoritative Stay evidence. A guest who did not sign in through the PMS has none,
+// so a package carrying any of these is not offered to them at all — which is a product decision worth
+// stating on screen rather than leaving the operator to discover.
+export const PMS_RULE_TYPES = [
+  "STAY_LENGTH", "ROOM_TYPE", "RATE_PLAN", "VIP", "TRAVEL_AGENT", "PMS_INTERFACE",
+] as const;
+export function isPMSRuleType(t: string): boolean {
+  return (PMS_RULE_TYPES as readonly string[]).includes(t);
+}
 
 export function isSupportedRuleType(t: string): t is RuleType {
   return (SUPPORTED_RULE_TYPES as readonly string[]).includes(t);
@@ -38,7 +58,15 @@ export type EligibilityRuleForm =
   | { type: "SUBJECT_KIND"; kinds: string }
   | { type: "DATE_WINDOW"; from: string; until: string }
   | { type: "PRIOR_PURCHASE"; mode: "requires_prior" | "forbids_prior" }
-  | { type: "SITE_NETWORK"; guest_network_ids: string };
+  | { type: "SITE_NETWORK"; guest_network_ids: string }
+  // Either bound may be left empty: "8 nights or more" and "up to 7 nights" are both real rules, and the
+  // backend contract permits an open end. What it does not permit is BOTH empty, which constrains nothing.
+  | { type: "STAY_LENGTH"; min_nights: string; max_nights: string }
+  | { type: "ROOM_TYPE"; room_types: string }
+  | { type: "RATE_PLAN"; rate_plans: string }
+  | { type: "VIP"; is_vip: "true" | "false" }
+  | { type: "TRAVEL_AGENT"; travel_agents: string }
+  | { type: "PMS_INTERFACE"; pms_interface_ids: string };
 
 export type GrantTierForm = { order: number | string; down_kbps?: number | string; up_kbps?: number | string };
 
@@ -76,6 +104,24 @@ export function serializeRule(r: EligibilityRuleForm): { type: string; value: Re
       return { type: "PRIOR_PURCHASE", value: { [r.mode]: true } };
     case "SITE_NETWORK":
       return { type: "SITE_NETWORK", value: { guest_network_ids: asList(r.guest_network_ids) } };
+    case "STAY_LENGTH": {
+      // An empty bound is OMITTED, never sent as 0. {min_nights: 0} reads as "at least zero nights", which
+      // is a rule that constrains nothing while looking like one that does.
+      const value: Record<string, unknown> = {};
+      if (r.min_nights !== "" && r.min_nights !== undefined) value.min_nights = Number(r.min_nights);
+      if (r.max_nights !== "" && r.max_nights !== undefined) value.max_nights = Number(r.max_nights);
+      return { type: "STAY_LENGTH", value };
+    }
+    case "ROOM_TYPE":
+      return { type: "ROOM_TYPE", value: { room_types: asList(r.room_types) } };
+    case "RATE_PLAN":
+      return { type: "RATE_PLAN", value: { rate_plans: asList(r.rate_plans) } };
+    case "VIP":
+      return { type: "VIP", value: { is_vip: r.is_vip === "true" } };
+    case "TRAVEL_AGENT":
+      return { type: "TRAVEL_AGENT", value: { travel_agents: asList(r.travel_agents) } };
+    case "PMS_INTERFACE":
+      return { type: "PMS_INTERFACE", value: { pms_interface_ids: asList(r.pms_interface_ids) } };
     default:
       throw new Error(`unsupported rule type: ${(r as { type: string }).type}`);
   }
@@ -133,6 +179,8 @@ export type PublishPayload = {
   grant_tiers: { order: number; grant: Record<string, number> }[];
   visible_from?: string;
   visible_until?: string;
+  /** Absent means FIXED: the pinned service plan's allowance, used unchanged. */
+  data_allocation_policy?: Record<string, unknown>;
 };
 
 // buildPublishPayload validates the whole form and returns { payload } or { error }. It NEVER emits any
@@ -182,4 +230,10 @@ export const RULE_TYPE_LABELS: Record<RuleType, string> = {
   DATE_WINDOW: "Only between two dates",
   PRIOR_PURCHASE: "Whether they already had a package",
   SITE_NETWORK: "Only on certain guest networks",
+  STAY_LENGTH: "How many nights they are staying",
+  ROOM_TYPE: "Room type",
+  RATE_PLAN: "Rate plan",
+  VIP: "VIP guest",
+  TRAVEL_AGENT: "Travel agent",
+  PMS_INTERFACE: "Which PMS the stay came from",
 };

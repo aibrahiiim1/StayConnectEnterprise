@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0061, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0064, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -1237,6 +1237,48 @@ CREATE FUNCTION iam_v2.ns_payment_parent(p text) RETURNS bigint
 
 
 --
+-- Name: p2_package_current_conditions(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p2_package_current_conditions(p_tenant uuid, p_site uuid, p_package uuid) RETURNS TABLE(kind text, rule_type text, tier_order integer, value jsonb)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  WITH cur AS (
+    -- THE WHOLE AUTHORISATION DECISION, and it is not the caller's to make. The revision is resolved from the
+    -- package's own current pointer, and only for a package that is in this tenant and site and is not a
+    -- system package. A caller naming another site's package, a system package, or a package with nothing
+    -- published gets no rows — the same answer as a package that genuinely has no conditions, which is the
+    -- correct amount of information to give something that asked out of scope.
+    SELECT p.current_revision_id AS rev
+      FROM iam_v2.internet_packages p
+     WHERE p.id = p_package
+       AND p.tenant_id = p_tenant
+       AND p.site_id = p_site
+       AND p.is_system = false
+       AND p.current_revision_id IS NOT NULL
+  )
+  SELECT 'RULE'::text, r.rule_type, NULL::int, COALESCE(r.rule_value, '{}'::jsonb)
+    FROM iam_v2.package_eligibility_rules r
+    JOIN cur ON r.package_revision_id = cur.rev
+   WHERE r.tenant_id = p_tenant AND r.site_id = p_site
+  UNION ALL
+  SELECT 'TIER'::text, NULL::text, t.tier_order, COALESCE(t.grant_value, '{}'::jsonb)
+    FROM iam_v2.package_grant_tiers t
+    JOIN cur ON t.package_revision_id = cur.rev
+   WHERE t.tenant_id = p_tenant AND t.site_id = p_site
+   ORDER BY 1, 3, 2
+$$;
+
+
+--
+-- Name: FUNCTION p2_package_current_conditions(p_tenant uuid, p_site uuid, p_package uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.p2_package_current_conditions(p_tenant uuid, p_site uuid, p_package uuid) IS 'The eligibility rules and grant tiers of the CURRENT revision of one non-system Internet package, scoped to the caller-supplied tenant and site and resolved from the package''s own current-revision pointer. Exists so the Hotel-Admin service can load a package''s specification before republishing it without holding SELECT on iam_v2.package_eligibility_rules or iam_v2.package_grant_tiers. Returns package policy only: no row ids, no tenant/site, and no guest, Stay, reservation, folio, payment or PMS data.';
+
+
+--
 -- Name: p3_accounting_needs_binding(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -1640,9 +1682,25 @@ CREATE FUNCTION iam_v2.p3_entitlement_data_usage(p_entitlement uuid) RETURNS big
     AS $$
   SELECT COALESCE(sum(ar.bytes_up + ar.bytes_down), 0)::bigint
     FROM iam_v2.accounting_records ar
-    JOIN iam_v2.session_entitlement_bindings b ON b.session_id = ar.session_id
-     AND b.entitlement_id = p_entitlement AND b.bound_from <= ar.sampled_at
-     AND (b.bound_until IS NULL OR b.bound_until > ar.sampled_at)
+    JOIN iam_v2.session_entitlement_bindings b
+      ON b.session_id = ar.session_id
+     AND b.entitlement_id = p_entitlement
+     AND b.bound_from <= ar.sampled_at
+     AND (
+           -- the ordinary half-open interval, unchanged
+           b.bound_until IS NULL
+        OR b.bound_until > ar.sampled_at
+           -- ...and the closing instant, ONLY when nothing else owns the sample. At most one binding per
+           -- session can close at a given instant, and this arm is unreachable whenever a successor binding
+           -- covers it, so a sample is still attributed EXACTLY ONCE.
+        OR ( b.bound_until = ar.sampled_at
+             AND NOT EXISTS (
+                   SELECT 1
+                     FROM iam_v2.session_entitlement_bindings b2
+                    WHERE b2.session_id = ar.session_id
+                      AND b2.bound_from <= ar.sampled_at
+                      AND (b2.bound_until IS NULL OR b2.bound_until > ar.sampled_at)) )
+         )
 $$;
 
 
@@ -1650,7 +1708,7 @@ $$;
 -- Name: FUNCTION p3_entitlement_data_usage(p_entitlement uuid); Type: COMMENT; Schema: iam_v2; Owner: -
 --
 
-COMMENT ON FUNCTION iam_v2.p3_entitlement_data_usage(p_entitlement uuid) IS 'Authoritative bytes attributed to an Entitlement across every Session and Device bound to it, by the same binding intervals p6_data_crossing uses. The maintained counter entitlements.consumed_data_bytes must equal this.';
+COMMENT ON FUNCTION iam_v2.p3_entitlement_data_usage(p_entitlement uuid) IS 'Authoritative bytes attributed to an Entitlement across every Session and Device bound to it. Attribution follows the half-open binding interval, plus the closing instant itself when no other binding for that session covers it - which is the terminal case, where the sample that exhausted the quota would otherwise be attributed to nothing. A Phase-5 rebinding always has a successor covering the boundary, so that arm cannot fire there and no sample is counted twice. entitlements.consumed_data_bytes must equal this.';
 
 
 --
@@ -4350,7 +4408,7 @@ CREATE FUNCTION iam_v2.p6_data_crossing(p_entitlement uuid) RETURNS timestamp wi
     AS $$
   SELECT min(x.sampled_at)
     FROM iam_v2.entitlements e
-    JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
+    LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
     CROSS JOIN LATERAL (
       SELECT ar.sampled_at,
              sum(ar.bytes_up + ar.bytes_down) OVER (ORDER BY ar.sampled_at, ar.id) AS running
@@ -4360,8 +4418,8 @@ CREATE FUNCTION iam_v2.p6_data_crossing(p_entitlement uuid) RETURNS timestamp wi
          AND (b.bound_until IS NULL OR b.bound_until > ar.sampled_at)
     ) x
    WHERE e.id = p_entitlement
-     AND spr.data_quota_bytes IS NOT NULL
-     AND x.running >= spr.data_quota_bytes;
+     AND COALESCE(e.data_quota_bytes, spr.data_quota_bytes) IS NOT NULL
+     AND x.running >= COALESCE(e.data_quota_bytes, spr.data_quota_bytes);
 $$;
 
 
@@ -4369,7 +4427,7 @@ $$;
 -- Name: FUNCTION p6_data_crossing(p_entitlement uuid); Type: COMMENT; Schema: iam_v2; Owner: -
 --
 
-COMMENT ON FUNCTION iam_v2.p6_data_crossing(p_entitlement uuid) IS 'The instant attributed usage first reached the plan quota, or NULL. The single implementation: both the expiry sweep''s candidate query and the sanctioned expiry writer call it, so they cannot disagree about when -- or whether -- a guest ran out of data.';
+COMMENT ON FUNCTION iam_v2.p6_data_crossing(p_entitlement uuid) IS 'The instant attributed usage first reached this entitlement''s quota, or NULL. The quota is the entitlement''s own frozen data_quota_bytes when it has one (a PER_STAY_NIGHT grant) and the pinned plan revision''s otherwise. The single implementation: both the expiry sweep''s candidate query and the sanctioned expiry writer call it, so they cannot disagree about when -- or whether -- a guest ran out.';
 
 
 --
@@ -6725,10 +6783,12 @@ CREATE TABLE iam_v2.entitlements (
     activated_at timestamp with time zone,
     terminated_at timestamp with time zone,
     online_time_exhausted_at timestamp with time zone,
+    data_quota_bytes bigint,
     CONSTRAINT ent_one_subject CHECK ((num_nonnulls(stay_id, guest_account_id, voucher_id, guest_principal_id) = 1)),
     CONSTRAINT ent_terminal CHECK (((status = 'TERMINATED'::text) = (terminal_reason IS NOT NULL))),
     CONSTRAINT entitlements_consumed_data_bytes_check CHECK ((consumed_data_bytes >= 0)),
     CONSTRAINT entitlements_consumed_online_seconds_check CHECK ((consumed_online_seconds >= 0)),
+    CONSTRAINT entitlements_data_quota_bytes_positive CHECK (((data_quota_bytes IS NULL) OR (data_quota_bytes > 0))),
     CONSTRAINT entitlements_end_mode_check CHECK ((end_mode = ANY (ARRAY['FIXED_AT'::text, 'VALIDITY_WINDOW'::text, 'AT_CHECKOUT'::text, 'EARLIEST_OF_FIXED_AND_CHECKOUT'::text, 'GRACE_AFTER_CHECKOUT'::text, 'MANUAL_END'::text]))),
     CONSTRAINT entitlements_status_check CHECK ((status = ANY (ARRAY['PENDING'::text, 'ACTIVE'::text, 'SUSPENDED'::text, 'TERMINATED'::text]))),
     CONSTRAINT entitlements_terminal_reason_check CHECK ((terminal_reason = ANY (ARRAY['TIME'::text, 'DATA'::text, 'HARD_EXPIRY'::text, 'CHECKOUT'::text, 'ADMIN'::text, 'REVOKED'::text, 'SUPERSEDED'::text, 'CONVERTED'::text, 'TRANSFERRED'::text, 'CANCELLED'::text, 'OTHER'::text])))
@@ -6740,6 +6800,13 @@ CREATE TABLE iam_v2.entitlements (
 --
 
 COMMENT ON COLUMN iam_v2.entitlements.online_time_exhausted_at IS 'For AGGREGATE_ONLINE_TIME: the instant the online-time budget was exhausted, computed inside the tick that crossed it. Stable across retries -- a re-reported exhaustion carries the original instant, never the clock of the tick that re-reported it.';
+
+
+--
+-- Name: COLUMN entitlements.data_quota_bytes; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.entitlements.data_quota_bytes IS 'The byte allowance THIS entitlement was granted, frozen at grant time. NULL means the allowance is the pinned service plan revision''s data_quota_bytes -- which is what every entitlement granted before PER_STAY_NIGHT existed means, and why nothing was backfilled. A PMS update that lengthens or shortens the stay does not change a value that is already here.';
 
 
 --
@@ -6970,9 +7037,18 @@ CREATE TABLE iam_v2.internet_package_revisions (
     display jsonb,
     visible_from timestamp with time zone,
     visible_until timestamp with time zone,
+    data_allocation_policy jsonb,
+    CONSTRAINT internet_package_revisions_data_allocation_policy_shape CHECK (((data_allocation_policy IS NULL) OR COALESCE(((jsonb_typeof(data_allocation_policy) = 'object'::text) AND (((data_allocation_policy ->> 'mode'::text) = 'FIXED'::text) OR (((data_allocation_policy ->> 'mode'::text) = 'PER_STAY_NIGHT'::text) AND (jsonb_typeof((data_allocation_policy -> 'gb_per_night'::text)) = 'number'::text) AND (((data_allocation_policy ->> 'gb_per_night'::text))::numeric > (0)::numeric) AND (((data_allocation_policy -> 'min_gb'::text) IS NULL) OR COALESCE(((jsonb_typeof((data_allocation_policy -> 'min_gb'::text)) = 'number'::text) AND (((data_allocation_policy ->> 'min_gb'::text))::numeric >= (0)::numeric)), false)) AND (((data_allocation_policy -> 'max_gb'::text) IS NULL) OR COALESCE(((jsonb_typeof((data_allocation_policy -> 'max_gb'::text)) = 'number'::text) AND (((data_allocation_policy ->> 'max_gb'::text))::numeric > (0)::numeric) AND (((data_allocation_policy ->> 'max_gb'::text))::numeric >= COALESCE(((data_allocation_policy ->> 'min_gb'::text))::numeric, (0)::numeric))), false))))), false))),
     CONSTRAINT internet_package_revisions_package_type_check CHECK ((package_type = ANY (ARRAY['FREE_STAY'::text, 'ONE_DAY'::text, 'REST_OF_STAY'::text, 'POST_STAY'::text, 'GENERAL'::text, 'CHECKOUT_GRACE'::text]))),
     CONSTRAINT internet_package_revisions_price_minor_check CHECK ((price_minor >= 0))
 );
+
+
+--
+-- Name: COLUMN internet_package_revisions.data_allocation_policy; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.internet_package_revisions.data_allocation_policy IS 'How this revision turns a stay into a byte allowance. NULL or {"mode":"FIXED"} uses the pinned service plan revision''s data_quota_bytes unchanged. {"mode":"PER_STAY_NIGHT","gb_per_night":N,"min_gb":N,"max_gb":N} computes nights x gb_per_night, raises it to min_gb and caps it at max_gb when set. The computed value is frozen onto the entitlement at grant time and never recomputed.';
 
 
 --
@@ -13241,6 +13317,14 @@ GRANT ALL ON FUNCTION iam_v2.lock_pms_interface_runtime(p_tenant uuid, p_site uu
 
 REVOKE ALL ON FUNCTION iam_v2.lock_stay(p_tenant uuid, p_site uuid, p_stay uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.lock_stay(p_tenant uuid, p_site uuid, p_stay uuid) TO svc_scd;
+
+
+--
+-- Name: FUNCTION p2_package_current_conditions(p_tenant uuid, p_site uuid, p_package uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p2_package_current_conditions(p_tenant uuid, p_site uuid, p_package uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p2_package_current_conditions(p_tenant uuid, p_site uuid, p_package uuid) TO svc_edged;
 
 
 --

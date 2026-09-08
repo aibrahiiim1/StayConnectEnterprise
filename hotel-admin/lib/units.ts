@@ -89,6 +89,32 @@ export function durationToSeconds(
   return Math.round(n * mult);
 }
 
+/**
+ * seconds → the {value, unit} pair a duration FIELD should be pre-filled with, in the largest unit that
+ * divides exactly.
+ *
+ * This is durationToSeconds' inverse, and it exists because a form that collects a value and a unit cannot be
+ * pre-filled from seconds alone. Leaving those fields blank on an edit was not neutral: the plan's existing
+ * allowance was simply dropped when the operator saved, and re-typing it against a unit dropdown that had
+ * reset to its default is how a one-day allowance becomes something else entirely.
+ */
+export function secondsToDurationField(
+  seconds: number | null | undefined,
+  units: readonly ("minutes" | "hours" | "days")[],
+): { value: string; unit: "minutes" | "hours" | "days" } {
+  const fallback = units[units.length - 1];
+  if (seconds === null || seconds === undefined || seconds <= 0) return { value: "", unit: fallback };
+  const size = { days: 86400, hours: 3600, minutes: 60 } as const;
+  // Largest first, so 86400 reads as "1 day" rather than "24 hours".
+  for (const u of ["days", "hours", "minutes"] as const) {
+    if (units.includes(u) && seconds % size[u] === 0) return { value: String(seconds / size[u]), unit: u };
+  }
+  // Not a whole number of any offered unit. The smallest offered one keeps the most precision; rounding is
+  // what the form would do on submit anyway, and showing the value beats showing nothing.
+  const smallest = units.reduce((a, b) => (size[a] <= size[b] ? a : b));
+  return { value: String(+(seconds / size[smallest]).toFixed(4)), unit: smallest };
+}
+
 /** Minor currency units → a display string. Price 0 is FREE and says so — it is a product fact, not a zero. */
 export function formatPrice(minor?: number | null, currency?: string | null): string {
   if (minor === null || minor === undefined) return "—";

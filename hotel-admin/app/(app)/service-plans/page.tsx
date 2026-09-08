@@ -27,8 +27,12 @@ import { ErrorBanner } from "@/components/ui/error-banner";
 import { Plus, X, Gauge } from "lucide-react";
 import {
   formatSpeed, formatData, formatDuration, formatDevices, mbpsToKbps, gbToBytes,
-  durationToSeconds, DEVICE_LIMIT_POLICIES, TIME_ACCOUNTING_MODES,
+  durationToSeconds, secondsToDurationField, bytesToGb,
+  DEVICE_LIMIT_POLICIES, TIME_ACCOUNTING_MODES,
 } from "@/lib/units";
+import {
+  stalePackagesFor, repinPayload, repinOutcomeMessage, type PackageCurrentDTO,
+} from "@/lib/repin";
 
 type PlanSummary = {
   plan_id: string; code: string; enabled: boolean;
@@ -40,13 +44,25 @@ type PlanSummary = {
   time_quota_seconds?: number | null; data_quota_bytes?: number | null;
   time_accounting_mode?: string | null;
   speed_allocation?: string | null;
+  used_by_active_packages?: number;
+};
+type PackageRef = {
+  package_id: string; code: string; name?: string | null; active: boolean;
+  service_plan_id?: string | null; service_plan_revision_id?: string | null;
 };
 type RevisionInfo = { revision_id: string; revision_no: number; is_current: boolean; label?: string };
+
+// The server's bounds, in the units this form collects. edged is the authority and refuses anything past
+// these; repeating them here is what lets the browser refuse it at the field that caused it, naming a control
+// the operator can see rather than a wire field they cannot.
+//   maxKbps 10_000_000 · maxIdleSeconds 30d · maxSessionSeconds 365d · maxTimeQuotaSecond 10y
+const LIMITS = { mbps: 10000, idleMinutes: 43200, sessionHours: 8760, timeQuotaDays: 3650 } as const;
 
 export default function ServicePlansPage() {
   // The capability being OFF is not an error the operator can act on, so it gets its own state rather than a
   // red banner. edged answers 503 while the surface is dark; that is the authority, not this flag.
   const [rows, setRows] = useState<PlanSummary[] | null>(null);
+  const [packages, setPackages] = useState<PackageRef[]>([]);
   const [revs, setRevs] = useState<Record<string, RevisionInfo[]>>({});
   const [err, setErr] = useState<string | null>(null);
   const [unavailable, setUnavailable] = useState(false);
@@ -54,11 +70,32 @@ export default function ServicePlansPage() {
   const [showNew, setShowNew] = useState(false);
   const [prefill, setPrefill] = useState<PlanSummary | null>(null);
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  // THE REPIN STEP. Publishing new plan settings does NOT move any package onto them — packages pin a
+  // specific revision, and that is what keeps a guest's terms stable. So after saving, the operator is asked
+  // which packages should use the new settings for FUTURE guests. Nothing is repinned unless they say so,
+  // and no existing Entitlement changes either way.
+  //
+  // The same step is reachable on its own from the plan row, because declining it once must not be a life
+  // sentence. A package left behind stays behind until somebody moves it, and the only other way to be
+  // offered this prompt was to publish ANOTHER plan revision — an immutable record created purely to see a
+  // button. `standing` only changes the wording; both routes publish exactly the same thing.
+  const [repin, setRepin] = useState<{
+    planRevisionID: string; planLabel: string; packages: PackageRef[];
+    chosen: Record<string, boolean>; standing: boolean;
+  } | null>(null);
+
+  // The plan's existing time allowance, expressed in the largest unit that divides it exactly, so the value
+  // and its unit are pre-filled together and mean what the plan already means.
+  const timeQuota = secondsToDurationField(prefill?.time_quota_seconds, ["hours", "days"]);
 
   const load = useCallback(async () => {
     try {
-      const r = await api.get<ListResp<PlanSummary>>("/commercial-packages/plans");
-      setRows(r.data ?? []); setUnavailable(false);
+      const [r, pk] = await Promise.all([
+        api.get<ListResp<PlanSummary>>("/commercial-packages/plans"),
+        api.get<ListResp<PackageRef>>("/commercial-packages"),
+      ]);
+      setRows(r.data ?? []); setPackages(pk.data ?? []); setUnavailable(false);
     } catch (e) {
       if (e instanceof ApiError && e.status === 503) { setUnavailable(true); setRows([]); return; }
       setRows([]);
@@ -86,7 +123,7 @@ export default function ServicePlansPage() {
     const str = (k: string) => ((f.get(k) as string) || "").trim();
     const int = (k: string) => { const v = str(k); return v === "" ? undefined : Number(v); };
     try {
-      await api.post("/commercial-packages/plans", {
+      const res = await api.post<{ current_revision_id: string }>("/commercial-packages/plans", {
         code: str("code"),
         name: str("name"),
         // Operator units in, wire units out.
@@ -101,8 +138,66 @@ export default function ServicePlansPage() {
         time_accounting_mode: str("time_accounting_mode") || "VALIDITY_WINDOW",
         speed_allocation: str("speed_allocation") || "PER_DEVICE",
       });
-      el.reset(); setShowNew(false); setPrefill(null); await load();
+      el.reset(); setShowNew(false);
+      // Which packages are now behind is the same question as on the plan row, so it is the same answer:
+      // active packages of this plan not already pinned to what was just published.
+      const affected = prefill && res?.current_revision_id
+        ? stalePackagesFor(
+            { plan_id: prefill.plan_id, code: prefill.code, current_revision_id: res.current_revision_id },
+            packages,
+          )
+        : [];
+      if (affected.length > 0 && res?.current_revision_id) {
+        setRepin({
+          planRevisionID: res.current_revision_id,
+          planLabel: prefill?.name || prefill?.code || "this plan",
+          packages: affected,
+          chosen: Object.fromEntries(affected.map((k) => [k.package_id, false])),
+          standing: false,
+        });
+      } else {
+        setNotice("Changes saved. Existing guest access is unchanged; the new settings apply to future grants.");
+      }
+      setPrefill(null); await load();
     } catch (e) { setErr((e as Error)?.message ?? "Could not publish this plan revision"); }
+    finally { setBusy(false); }
+  }
+
+  // startRepin opens the same prompt from a plan row, for packages that are ALREADY behind. It offers the
+  // plan's existing current revision — it does not publish a plan revision, so the plan's history is untouched
+  // and nothing at all happens until the operator ticks a package and applies.
+  function startRepin(p: PlanSummary) {
+    const stale = stalePackagesFor(p, packages);
+    if (stale.length === 0) return;
+    setNotice(null); setErr(null);
+    setRepin({
+      planRevisionID: p.current_revision_id,
+      planLabel: p.name || p.code,
+      packages: stale,
+      chosen: Object.fromEntries(stale.map((k) => [k.package_id, false])),
+      standing: true,
+    });
+  }
+
+  // applyRepin republishes ONLY the chosen packages, each pinned to the plan revision the prompt was opened
+  // with. Every package is republished from its own CURRENT configuration, so nothing but the plan pin
+  // changes — the eligibility rules and grant tiers it already had are carried across rather than dropped.
+  //
+  // It posts only to /commercial-packages. No service-plan revision is created on this path, whichever route
+  // opened the prompt.
+  async function applyRepin() {
+    if (!repin) return;
+    const chosen = repin.packages.filter((k) => repin.chosen[k.package_id]);
+    setBusy(true); setErr(null);
+    try {
+      for (const k of chosen) {
+        const cur = await api.get<PackageCurrentDTO>(`/commercial-packages/${k.package_id}/current`);
+        await api.post("/commercial-packages", repinPayload(cur, repin.planRevisionID, k.name || k.code));
+      }
+      setRepin(null);
+      setNotice(repinOutcomeMessage(chosen.length));
+      await load();
+    } catch (e) { setErr((e as Error)?.message ?? "Could not update those packages"); }
     finally { setBusy(false); }
   }
 
@@ -118,12 +213,61 @@ export default function ServicePlansPage() {
         </div>
         {writable && !unavailable && (
           <Button onClick={() => (showNew ? setShowNew(false) : startNew())}>
-            {showNew ? <X size={16} /> : <Plus size={16} />}{showNew ? "Cancel" : "New plan"}
+            {showNew ? <X size={16} /> : <Plus size={16} />}{showNew ? "Cancel" : "Add plan"}
           </Button>
         )}
       </div>
 
       {err && <ErrorBanner err={err} />}
+      {notice && (
+        <div className="text-sm rounded-md border border-border bg-panel2 px-3 py-2" role="status">{notice}</div>
+      )}
+
+      {repin && (
+        <Card>
+          <CardHeader><CardTitle data-testid="repin-title">
+            {repin.standing ? "Apply current settings to packages" : "Apply these settings to packages?"}
+          </CardTitle></CardHeader>
+          <CardBody>
+            <p className="text-sm text-muted mb-3" data-testid="repin-intro">
+              {repin.standing ? (
+                <>
+                  These packages still give guests older settings than <strong>{repin.planLabel}</strong> has
+                  now. Choose which of them should use the current settings for <strong>future</strong> guests.
+                </>
+              ) : (
+                <>
+                  The new settings for <strong>{repin.planLabel}</strong> are saved. Choose which packages
+                  should give them to <strong>future</strong> guests.
+                </>
+              )}{" "}
+              Guests already connected are not affected either way, and any package you leave unticked keeps
+              the settings it has now.
+            </p>
+            <div className="space-y-2 mb-4">
+              {repin.packages.map((k) => (
+                <label key={k.package_id} className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" aria-label={`repin-${k.code}`}
+                    checked={!!repin.chosen[k.package_id]}
+                    onChange={(e) => setRepin((s2) => s2 && ({ ...s2, chosen: { ...s2.chosen, [k.package_id]: e.target.checked } }))} />
+                  <span>{k.name || k.code}</span>
+                  <span className="text-xs text-muted">{k.code}</span>
+                </label>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Button onClick={applyRepin} disabled={busy}>{busy ? "Applying…" : "Apply to selected packages"}</Button>
+              <Button variant="ghost" disabled={busy} onClick={() => {
+                const wasStanding = repin.standing;
+                setRepin(null);
+                setNotice(wasStanding
+                  ? "Nothing was changed. Those packages keep the settings they have now."
+                  : "Changes saved. No packages were updated, so guests continue to receive the settings they do now.");
+              }}>Not now</Button>
+            </div>
+          </CardBody>
+        </Card>
+      )}
 
       {unavailable ? (
         <Card><CardBody>
@@ -136,7 +280,7 @@ export default function ServicePlansPage() {
           {showNew && (
             <Card>
               <CardHeader>
-                <CardTitle>{prefill ? `New revision of ${prefill.code}` : "New service plan"}</CardTitle>
+                <CardTitle>{prefill ? `Edit ${prefill.name || prefill.code}` : "Add service plan"}</CardTitle>
               </CardHeader>
               <CardBody>
                 {/* Editing means publishing a NEW revision — the previous one stays intact so that anything
@@ -144,10 +288,13 @@ export default function ServicePlansPage() {
                     reasonable assumption that this form edits the plan in place. */}
                 <p className="text-sm text-muted mb-3">
                   {prefill
-                    ? "Plans are never edited in place. This publishes a new revision and makes it current; guests already connected keep the terms they were given."
-                    : "Publishing creates the plan and its first revision."}
+                    ? "Saving records these settings as the plan's current settings. Guests already connected keep the terms they were given, and packages using this plan are only updated if you choose them below."
+                    : "This creates the plan and its first settings."}
                 </p>
-                <form onSubmit={onPublish} className="grid gap-3 sm:grid-cols-2">
+                {/* Keyed on the plan being edited. These are uncontrolled inputs, so React reuses the DOM
+                    nodes and their defaultValue is applied once; switching straight from editing one plan to
+                    another would otherwise leave the first plan's numbers on screen — and publish them. */}
+                <form key={prefill?.plan_id ?? "new"} onSubmit={onPublish} className="grid gap-3 sm:grid-cols-2">
                   <div>
                     <Label>Plan code</Label>
                     <Input name="code" required defaultValue={prefill?.code ?? ""} readOnly={!!prefill}
@@ -159,15 +306,19 @@ export default function ServicePlansPage() {
                     <Input name="name" defaultValue={prefill?.name ?? ""} placeholder="Premium Wi-Fi" />
                   </div>
 
+                  {/* max= on every numeric field mirrors the server's bound, so an over-limit value is refused
+                      at the field that caused it instead of as a rejected save that names a wire field. */}
                   <div>
                     <Label>Download speed (Mbps)</Label>
-                    <Input name="down_mbps" type="number" min={0} step="0.1"
+                    <Input name="down_mbps" type="number" min={0} max={LIMITS.mbps} step="0.1"
                       defaultValue={prefill?.down_kbps ? prefill.down_kbps / 1000 : ""} placeholder="Leave empty for unlimited" />
+                    <p className="text-xs text-muted mt-1">Up to {LIMITS.mbps} Mbps.</p>
                   </div>
                   <div>
                     <Label>Upload speed (Mbps)</Label>
-                    <Input name="up_mbps" type="number" min={0} step="0.1"
+                    <Input name="up_mbps" type="number" min={0} max={LIMITS.mbps} step="0.1"
                       defaultValue={prefill?.up_kbps ? prefill.up_kbps / 1000 : ""} placeholder="Leave empty for unlimited" />
+                    <p className="text-xs text-muted mt-1">Up to {LIMITS.mbps} Mbps.</p>
                   </div>
 
                   <div>
@@ -185,28 +336,40 @@ export default function ServicePlansPage() {
                     </select>
                   </div>
 
+                  {/* THESE FOUR ARE PRE-FILLED, and that is a bug fix rather than a nicety. The form does not
+                      patch a plan: it publishes a complete new revision from whatever the fields hold, so a
+                      field left blank because it was never loaded PUBLISHED a blank. Editing the OneDay plan
+                      to change its speed silently dropped its one-day time allowance, and re-typing the value
+                      against a unit dropdown that had reset to its default is how that became a different
+                      allowance again. */}
                   <div>
                     <Label>Total time allowance</Label>
                     <div className="flex gap-2">
-                      <Input name="time_quota" type="number" min={0} placeholder="Unlimited" className="flex-1" />
-                      <select name="time_quota_unit" className="bg-panel2 border border-border rounded-md px-2 text-sm">
+                      <Input name="time_quota" type="number" min={0} step="0.01" placeholder="Unlimited"
+                        className="flex-1" defaultValue={timeQuota.value} />
+                      <select name="time_quota_unit" defaultValue={timeQuota.unit}
+                        className="bg-panel2 border border-border rounded-md px-2 text-sm">
                         <option value="hours">hours</option>
                         <option value="days">days</option>
                       </select>
                     </div>
+                    <p className="text-xs text-muted mt-1">Up to {LIMITS.timeQuotaDays} days.</p>
                   </div>
                   <div>
                     <Label>Data allowance (GB)</Label>
-                    <Input name="data_quota_gb" type="number" min={0} step="0.1" placeholder="Unlimited" />
+                    <Input name="data_quota_gb" type="number" min={0} step="0.1" placeholder="Unlimited"
+                      defaultValue={bytesToGb(prefill?.data_quota_bytes)} />
                   </div>
 
                   <div>
                     <Label>Disconnect after inactivity (minutes)</Label>
-                    <Input name="idle_timeout" type="number" min={0} placeholder="Never" />
+                    <Input name="idle_timeout" type="number" min={0} max={LIMITS.idleMinutes} placeholder="Never"
+                      defaultValue={secondsToDurationField(prefill?.idle_timeout_seconds, ["minutes"]).value} />
                   </div>
                   <div>
                     <Label>Maximum single session (hours)</Label>
-                    <Input name="max_session" type="number" min={0} placeholder="No limit" />
+                    <Input name="max_session" type="number" min={0} max={LIMITS.sessionHours} placeholder="No limit"
+                      defaultValue={secondsToDurationField(prefill?.max_continuous_session_seconds, ["hours"]).value} />
                   </div>
 
                   <div className="sm:col-span-2">
@@ -234,7 +397,7 @@ export default function ServicePlansPage() {
                   </div>
 
                   <div className="sm:col-span-2 flex gap-2">
-                    <Button type="submit" disabled={busy}>{busy ? "Publishing…" : "Publish plan"}</Button>
+                    <Button type="submit" disabled={busy}>{busy ? "Saving…" : prefill ? "Save changes" : "Add plan"}</Button>
                     <Button type="button" variant="ghost" onClick={() => { setShowNew(false); setPrefill(null); }}>Cancel</Button>
                   </div>
                 </form>
@@ -252,10 +415,15 @@ export default function ServicePlansPage() {
             ) : (
               <Table>
                 <THead><TR>
-                  <TH>Plan</TH><TH>Speed</TH><TH>Devices</TH><TH>Time</TH><TH>Data</TH><TH>Status</TH><TH></TH>
+                  <TH>Plan</TH><TH>Speed</TH><TH>Devices</TH><TH>Time</TH><TH>Data</TH><TH>Used by</TH><TH>Status</TH><TH></TH>
                 </TR></THead>
                 <tbody>
-                  {rows.map((p) => (
+                  {rows.map((p) => {
+                    // Packages of this plan that still give guests older settings. Shown per row rather than
+                    // as one global banner, because the action is per plan and the operator needs to see WHICH
+                    // plan has drifted without opening anything.
+                    const stale = stalePackagesFor(p, packages);
+                    return (
                     <Fragment key={p.plan_id}>
                       <TR>
                         <TD>
@@ -274,18 +442,34 @@ export default function ServicePlansPage() {
                         </TD>
                         <TD>{formatDuration(p.time_quota_seconds)}</TD>
                         <TD>{formatData(p.data_quota_bytes)}</TD>
-                        <TD>{p.enabled ? <Badge tone="ok">In use</Badge> : <Badge tone="default">Disabled</Badge>}</TD>
+                        <TD className="text-xs text-muted">
+                          {(p.used_by_active_packages ?? 0) === 0
+                            ? "No active packages"
+                            : `${p.used_by_active_packages} active package${p.used_by_active_packages === 1 ? "" : "s"}`}
+                          {stale.length > 0 && (
+                            <div className="text-amber-500 mt-0.5" data-testid={`stale-count-${p.code}`}>
+                              {stale.length} still on older settings
+                            </div>
+                          )}
+                        </TD>
+                        <TD>{p.enabled ? <Badge tone="ok">Active</Badge> : <Badge tone="default">Disabled</Badge>}</TD>
                         <TD className="whitespace-nowrap">
-                          <button className="underline text-muted text-xs mr-3" onClick={() => toggleRevs(p.plan_id)}>
-                            {p.revision_count} revision{p.revision_count === 1 ? "" : "s"}
+                          {writable && stale.length > 0 && (
+                            <Button variant="ghost" data-testid={`apply-current-${p.code}`}
+                              onClick={() => startRepin(p)}>
+                              Apply current settings to packages
+                            </Button>
+                          )}
+                          {writable && <Button variant="ghost" onClick={() => startNew(p)}>Edit</Button>}
+                          <button className="underline text-muted text-xs ml-2" onClick={() => toggleRevs(p.plan_id)}>
+                            History
                           </button>
-                          {writable && <Button variant="ghost" onClick={() => startNew(p)}>New revision</Button>}
                         </TD>
                       </TR>
                       {revs[p.plan_id] && (
                         <TR>
-                          <TD colSpan={7} className="text-xs bg-panel2/40">
-                            <div className="font-medium mb-1">Revision history</div>
+                          <TD colSpan={8} className="text-xs bg-panel2/40">
+                            <div className="font-medium mb-1">History</div>
                             {revs[p.plan_id].map((r) => (
                               <div key={r.revision_id} className="py-0.5">
                                 #{r.revision_no}{" "}
@@ -296,13 +480,14 @@ export default function ServicePlansPage() {
                               </div>
                             ))}
                             <p className="text-muted mt-1">
-                              Revisions are permanent. A guest keeps the terms of the revision in force when they connected.
+                              Every saved change is kept permanently. A guest keeps the terms that applied when they connected.
                             </p>
                           </TD>
                         </TR>
                       )}
                     </Fragment>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </Table>
             )}

@@ -42,7 +42,8 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 # A carriage return, spelled so this file never CONTAINS one. The first version of these strips was
 # written as $'<literal CR>' and the byte did not survive editing, so the strip silently did nothing
 # and every route comparison failed on a bundle that contained every route.
-CR=$''
+CR=$'
+'
 
 # jqless JSON reader: this runs on an appliance where jq is not guaranteed, and python3 is.
 jget() { # jget <file> <python-expression-on-d>
@@ -250,7 +251,8 @@ assert_manifest() {
   local rel="$1" mf="$1/$MANIFEST_NAME"
   [ -f "$mf" ] || die "release $rel carries no $MANIFEST_NAME — it cannot prove its provenance and will not be served"
   local commit bid
-  commit="$(jget "$mf" 'd["source_commit"]' | tr -d '')"
+  commit="$(jget "$mf" 'd["source_commit"]' | tr -d '
+')"
   bid="$(jget "$mf" 'd["build_id"]')"
   [ -n "$commit" ] || die "$mf records no source_commit"
   [ -n "$bid" ]    || die "$mf records no build_id"
@@ -274,16 +276,36 @@ smoke_live() {
   # extracted -- so a page that rendered without the stamp, an endpoint answering with something that is not
   # this application, or an extraction that quietly broke, all reported the identity as verified. An identity
   # check that cannot obtain an identity has FAILED.
-  local served
-  if ! served="$(ha_served_build_id "$base/login")"; then
-    echo "SMOKE FAIL: could not extract a BUILD_ID from $base/login — the served identity is unverifiable, which is a failure and not a pass" >&2
+  # THE IDENTITY IS PROVEN TWICE, AND NEITHER PROOF IS REDUNDANT.
+  #
+  # FIRST the endpoint must ASSERT an identity. Next stamps the BUILD_ID into every rendered document, and an
+  # endpoint that serves none is not this application -- or is an extraction that quietly broke. Either way an
+  # identity check that cannot obtain an identity has FAILED, and must say so rather than fall through.
+  #
+  # SECOND that identity must be EXACTLY this build. The stamp alone cannot prove it: an HTML comment cannot
+  # contain "--", so Next writes a hyphen there as an underscore, and comparing through that encoding makes
+  # "ABC-DEF" and "ABC_DEF" indistinguishable -- both ids Next can generate, so a deployment could be reported
+  # verified against a DIFFERENT build. So the exact characters are proven by asking the endpoint for THIS
+  # build's own asset path, which carries the id as generated and is resolved by the running server against
+  # its own build alone. 200 means this build; 404 means another, whatever the punctuation.
+  #
+  # The asset probe cannot replace the stamp either: on its own it would accept any server that answers 200
+  # to everything. Together they refuse a silent endpoint, a different build, and a permissive one.
+  local served_bid
+  served_bid="$(ha_served_build_id "$base")"
+  if [ -z "$served_bid" ]; then
+    echo "SMOKE FAIL: could not extract a BUILD_ID from $base — the endpoint asserts no identity" >&2
     return 1
   fi
-  if [ "$served" != "$want_bid" ]; then
-    echo "SMOKE FAIL: the live endpoint is serving BUILD_ID '$served' but the release we installed is '$want_bid'" >&2
+  if [ "$(printf %s "$served_bid" | tr -- - _)" != "$(printf %s "$want_bid" | tr -- - _)" ]; then
+    echo "SMOKE FAIL: $base is serving BUILD_ID '$served_bid', not '$want_bid'" >&2
     return 1
   fi
-  echo ">> smoke: live endpoint serves BUILD_ID $served"
+  if ! ha_serves_build_id "$base" "$want_bid"; then
+    echo "SMOKE FAIL: $base is serving BUILD_ID that differs from '$want_bid' by punctuation the page stamp cannot represent — it did not answer for that build's own assets" >&2
+    return 1
+  fi
+  echo ">> smoke: live endpoint serves BUILD_ID $want_bid"
 
   # ---- EVERY REQUIRED SURFACE, COUNTED -------------------------------------------------------------------
   # The route list is MATERIALISED and asserted non-empty before anything iterates: a `while read` over a
@@ -330,7 +352,7 @@ smoke_live() {
       echo "SMOKE FAIL: the configured operator endpoint ${HOTEL_ADMIN_PUBLIC_URL} served no extractable BUILD_ID" >&2
       return 1
     fi
-    [ "$public_id" = "$want_bid" ]       || { echo "SMOKE FAIL: the operator endpoint ${HOTEL_ADMIN_PUBLIC_URL} serves BUILD_ID '$public_id', not '$want_bid'" >&2; return 1; }
+    ha_serves_build_id "${HOTEL_ADMIN_PUBLIC_URL}" "$want_bid" || { echo "SMOKE FAIL: the operator endpoint ${HOTEL_ADMIN_PUBLIC_URL} is not serving BUILD_ID '$want_bid'" >&2; return 1; }
     echo ">> smoke: the operator endpoint ${HOTEL_ADMIN_PUBLIC_URL} serves the same BUILD_ID"
   fi
   return 0

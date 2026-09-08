@@ -128,18 +128,32 @@ echo "== 1c. Phase-3 enforcement/evidence phrases must not drift =="
 p3drift=0
 REPORT="$DOCS/reports/StayConnect-IAM-Phase3-Final-Report.md"
 if [ -f "$REPORT" ]; then
-  # the preflight total in the report must match what the preflight actually reports
-  actual_pf="$(bash "$REPO_ROOT/scripts/phase3-preflight.sh" --json 2>/dev/null | sed -n 's/.*"pass":\([0-9]*\).*/\1/p')"
-  # NOTE: this used to read "$ROOT/..." — a variable this script never defines. Under `set -u` the unbound
-  # expansion killed only the COMMAND SUBSTITUTION's subshell, so actual_pf came back empty and the guard
-  # below skipped the entire check in silence. A Zero-Stale check that never runs is exactly the failure
-  # this file exists to catch, so an unreadable total is now a HIT rather than a quiet pass.
-  if [ -z "$actual_pf" ]; then
-    echo "    HIT [preflight total unreadable]: the preflight could not be run, so the report's total cannot be checked"
+  # THE REPORT RECORDS HOW MANY CHECKS THE PREFLIGHT HAS, NOT HOW MANY PASSED.
+  #
+  # This read "pass" and used it as the total, so a single red preflight check silently redefined the suite
+  # size: {"pass":107,"fail":1} was treated as a 107-check suite and the Final Report's correct "PASS 108/108"
+  # was reported as stale documentation. The suite still has 108 checks whether or not they all pass.
+  #
+  # That is also a separation-of-duties error. Whether the preflight PASSES is Phase 3 Software CI's job, and
+  # it fails loudly there. This check owns exactly one question -- is the documented suite SIZE current -- so
+  # it must read a size, and the size is pass + fail.
+  pf_json="$(bash "$REPO_ROOT/scripts/phase3-preflight.sh" --json 2>/dev/null || true)"
+  pf_pass="$(printf %s "$pf_json" | sed -n 's/.*"pass":[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -1)"
+  pf_fail="$(printf %s "$pf_json" | sed -n 's/.*"fail":[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -1)"
+  actual_pf=""
+  # FAIL-CLOSED on anything unreadable. A missing, malformed or partially-parsed result is not a pass: an
+  # earlier version of this check silently skipped itself when its own path variable was undefined, and a
+  # Zero-Stale check that never runs is exactly the failure this file exists to catch.
+  if [ -n "$pf_pass" ] && [ -n "$pf_fail" ]; then
+    actual_pf=$(( pf_pass + pf_fail ))
+  fi
+  if [ -z "$actual_pf" ] || [ "$actual_pf" -le 0 ] 2>/dev/null; then
+    echo "    HIT [preflight total unreadable]: the preflight could not be run or did not report both pass and fail, so the report's total cannot be checked"
     p3drift=$((p3drift+1))
+    actual_pf=""
   fi
   if [ -n "$actual_pf" ]; then
-    grep -qE "PASS $actual_pf/$actual_pf" "$REPORT" || { echo "    HIT [stale preflight total]: report does not state PASS $actual_pf/$actual_pf"; p3drift=$((p3drift+1)); }
+    grep -qE "PASS $actual_pf/$actual_pf" "$REPORT" || { echo "    HIT [stale preflight total]: report does not state PASS $actual_pf/$actual_pf (preflight has $actual_pf checks: ${pf_pass} passing, ${pf_fail} failing)"; p3drift=$((p3drift+1)); }
     for bad in 17 18 19 20 21; do
       [ "$bad" = "$actual_pf" ] && continue
       grep -qE "Offline preflight[^|]*\| \*\*PASS $bad/$bad\*\*" "$REPORT" && { echo "    HIT [stale preflight total]: PASS $bad/$bad still claimed"; p3drift=$((p3drift+1)); }

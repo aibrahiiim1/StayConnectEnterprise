@@ -87,7 +87,25 @@ export default function PMSInterfacesPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [authoring, setAuthoring] = useState<string | null>(null);
+  // The current configuration of the interface being edited, loaded before the form opens so it can start
+  // from what is actually in use. null while it loads or when there is nothing published yet.
+  const [authoringInitial, setAuthoringInitial] = useState<Record<string, unknown> | null>(null);
   const [note, setNote] = useState<string | null>(null);
+
+  // openEditor loads the CURRENT published configuration and then opens the form on it. If nothing is
+  // published there is nothing to start from, and the form opens on its defaults — which is the only case
+  // where that is the right behaviour.
+  async function openEditor(id: string) {
+    setNote(null); setErr(null);
+    try {
+      const r = await api.get<{ revisions: PmsRevision[] }>(`/pms-interfaces/${id}/revisions`);
+      const live = (r.revisions ?? []).find((x) => x.published);
+      setAuthoringInitial(live ? { ...(live.config ?? {}), source_timezone: live.source_timezone } : null);
+    } catch {
+      setAuthoringInitial(null);
+    }
+    setAuthoring(id);
+  }
   // The pending lifecycle change, held while the operator confirms. Both directions are consequential —
   // one opens a live connection to the property's PMS, the other stops every guest on every mapped network
   // being resolved — so neither happens on a single click.
@@ -143,8 +161,10 @@ export default function PMSInterfacesPage() {
         <Card>
           <CardBody>
             <AuthorRevisionForm
+              key={authoring}
               interfaceID={authoring}
-              onDone={(msg) => { setAuthoring(null); setNote(msg); void load(); }}
+              initial={authoringInitial}
+              onDone={(msg) => { setAuthoring(null); setAuthoringInitial(null); setNote(msg); void load(); }}
               onError={setErr}
             />
           </CardBody>
@@ -171,9 +191,11 @@ export default function PMSInterfacesPage() {
               <THead>
                 <TR>
                   <TH>Interface</TH>
-                  <TH>Connector</TH>
+                  <TH>PMS</TH>
+                  <TH>Address</TH>
+                  <TH>Currency</TH>
                   <TH>State</TH>
-                  <TH>Published revision</TH>
+                  <TH>Configuration</TH>
                   <TH>&nbsp;</TH>
                 </TR>
               </THead>
@@ -182,20 +204,18 @@ export default function PMSInterfacesPage() {
                   <TR key={i.id}>
                     <TD>{i.display_label || "(unlabelled)"}</TD>
                     <TD>{CONNECTOR_LABELS[i.connector_kind] ?? i.connector_kind}</TD>
+                    <TD className="text-xs">{i.endpoint || <span className="text-gray-500">—</span>}</TD>
+                    <TD className="text-xs">{i.financial_base_currency || <span className="text-gray-500">—</span>}</TD>
                     <TD>
                       <Badge tone={toneFor(i.lifecycle_state) as any}>{words(LIFECYCLE_WORDS, i.lifecycle_state)}</Badge>
                     </TD>
                     <TD>
-                      {i.published ? (
-                        <>
-                          #{i.current_revision_no ?? "?"}{" "}
-                          <span className="text-xs text-gray-500">of {i.revision_count}</span>
-                        </>
-                      ) : (
-                        // An interface with nothing published resolves nothing at all. Saying so plainly
-                        // beats an empty cell that reads as "not loaded yet".
-                        <Badge tone="warn">nothing published</Badge>
-                      )}
+                      {/* The revision NUMBER is gone from this column. What an operator needs here is whether
+                          the interface has a configuration in use at all; which numbered revision it happens
+                          to be is audit detail and lives under History in the detail panel. */}
+                      {i.published
+                        ? <span className="text-xs text-gray-500">In use</span>
+                        : <Badge tone="warn">not configured</Badge>}
                     </TD>
                     <TD className="whitespace-nowrap">
                       <Button
@@ -210,8 +230,8 @@ export default function PMSInterfacesPage() {
                         backend would be correct but pointless -- the honest surface is not to offer it.
                       */}
                       {i.lifecycle_state !== "DECOMMISSIONED" && (
-                        <Button variant="secondary" onClick={() => { setAuthoring(i.id); setNote(null); }}>
-                          Configure
+                        <Button variant="secondary" onClick={() => void openEditor(i.id)}>
+                          Edit
                         </Button>
                       )}{" "}
                       {/*
@@ -401,9 +421,9 @@ function RevisionsCard({
   return (
     <Card>
       <CardBody>
-        <h2 className="text-lg font-medium">Revisions</h2>
+        <h2 className="text-lg font-medium">History</h2>
         <p className="mt-1 text-sm text-gray-600">
-          A revision is never edited. Changing configuration means publishing a different revision, so every
+          Every saved configuration is kept permanently and is read-only here. Changing settings records a new one, so every
           stay records exactly what the interface was configured as when it was resolved.
         </p>
 
@@ -713,8 +733,16 @@ function CreateInterfaceForm({ onDone, onError }: {
   );
 }
 
-function AuthorRevisionForm({ interfaceID, onDone, onError }: {
-  interfaceID: string; onDone: (msg: string) => void; onError: (e: string | null) => void;
+function AuthorRevisionForm({ interfaceID, initial, onDone, onError }: {
+  interfaceID: string;
+  // The CURRENT configuration, so Edit means "change what is there" rather than "retype it".
+  //
+  // IT USED TO START BLANK. Every field was a hardcoded default, so an operator changing a single timeout
+  // silently reset the endpoint, the time zone and every other value to whatever this file happened to
+  // default to — and the form looked exactly the same either way. That is not an edit; it is a new
+  // configuration wearing an edit's clothes.
+  initial?: Record<string, unknown> | null;
+  onDone: (msg: string) => void; onError: (e: string | null) => void;
 }) {
   // WHAT THIS FORM NO LONGER ASKS, and why each one was a way to be wrong rather than a setting:
   //
@@ -731,12 +759,27 @@ function AuthorRevisionForm({ interfaceID, onDone, onError }: {
   //
   // The server stamps all five and ignores anything sent for them, so removing the inputs closes the gap
   // rather than merely hiding it.
+  const pick = (k: string, dflt: number) => {
+    const v = initial?.[k];
+    return typeof v === "number" && Number.isFinite(v) ? v : dflt;
+  };
+  const pickStr = (k: string, dflt: string) => {
+    const v = initial?.[k];
+    return typeof v === "string" && v !== "" ? v : dflt;
+  };
   const [f, setF] = useState({
-    endpoint: "", source_timezone: "Africa/Cairo",
-    dial_timeout_ms: 5000, read_timeout_ms: 15000, write_timeout_ms: 15000,
-    heartbeat_interval_ms: 30000, heartbeat_timeout_ms: 90000,
-    feed_freshness_ms: 120000, complete_sync_ms: 600000,
-    financial_base_currency: "", financial_base_currency_exponent: "",
+    endpoint: pickStr("endpoint", ""), source_timezone: pickStr("source_timezone", "Africa/Cairo"),
+    dial_timeout_ms: pick("dial_timeout_ms", 5000),
+    read_timeout_ms: pick("read_timeout_ms", 15000),
+    write_timeout_ms: pick("write_timeout_ms", 15000),
+    heartbeat_interval_ms: pick("heartbeat_interval_ms", 30000),
+    heartbeat_timeout_ms: pick("heartbeat_timeout_ms", 90000),
+    feed_freshness_ms: pick("feed_freshness_ms", 120000),
+    complete_sync_ms: pick("complete_sync_ms", 600000),
+    financial_base_currency: pickStr("financial_base_currency", ""),
+    financial_base_currency_exponent:
+      typeof initial?.financial_base_currency_exponent === "number"
+        ? String(initial.financial_base_currency_exponent) : "",
   });
   const [busy, setBusy] = useState(false);
   const num = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -769,9 +812,12 @@ function AuthorRevisionForm({ interfaceID, onDone, onError }: {
         finally { setBusy(false); }
       }}
     >
-      <h2 className="font-medium">Configure a revision</h2>
+      <h2 className="font-medium">{initial ? "Edit configuration" : "Configure this interface"}</h2>
       <p className="text-xs text-gray-500">
-        Saved as a draft. Publishing it is a separate, confirmed action, and this connection is read-only.
+        {initial
+          ? "These are the settings in use now. Saving records the change; it does not take effect until you put it live, which is a separate confirmed action."
+          : "Saved as a draft. Putting it live is a separate, confirmed action."}{" "}
+        This connection is read-only.
       </p>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block text-sm">

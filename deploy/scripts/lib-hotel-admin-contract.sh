@@ -50,6 +50,46 @@ want = "/" + os.environ["SC_ROUTE"]
 raise SystemExit(0 if want in set(v for v in m.values() if isinstance(v, str)) else 1)' 2>/dev/null
 }
 
+# ha_build_asset_url <base> <build-id> — where a running Next server publishes THAT EXACT build's manifest.
+#
+# The BUILD_ID appears verbatim in the path, so nothing normalises it and nothing has to.
+ha_build_asset_url() { printf '%s/_next/static/%s/_buildManifest.js
+' "${1%/}" "$2"; }
+
+# ha_serves_build_id <base> <build-id> — TRUE only if the endpoint is running exactly this build.
+#
+# THE IDENTITY CHECK USED TO BE LOSSY AND IT MATTERED. It compared the BUILD_ID on disk against the one Next
+# stamps into an HTML comment -- and an HTML comment cannot contain "--", so a hyphen is written there as an
+# underscore. Normalising the disk id the same way made the comparison pass again, at the cost of making
+# "ABC-DEF" and "ABC_DEF" indistinguishable. Both are ids Next can generate, so that traded a false negative
+# for a false positive: a deployment could be reported verified against a DIFFERENT build.
+#
+# So the identity is taken from a source that never lost the character in the first place. Next serves each
+# build's manifest under a path containing the id exactly as generated; the running server resolves that path
+# against its own build and nothing else. 200 means this endpoint is serving this build. 404 means it is not,
+# whether the id differs by one character, by its punctuation, or entirely.
+#
+# It is an EXACT match by construction, not by comparison: there is no substring, prefix or normalisation step
+# anywhere in it. A prefix of the real id is simply a different path, and a different path is a 404.
+#
+# HA_FETCH_STATUS exists so the selftest can drive this without a server. It is never set in production.
+ha_serves_build_id() {
+  local base="$1" want="$2" url status
+  [ -n "$want" ] || return 1
+  url="$(ha_build_asset_url "$base" "$want")"
+  if [ -n "${HA_FETCH_STATUS:-}" ]; then
+    status="$("$HA_FETCH_STATUS" "$url")"
+  else
+    local -a xopts=()
+    [ -n "${HOTEL_ADMIN_PUBLIC_CACERT:-}" ] && xopts+=(--cacert "$HOTEL_ADMIN_PUBLIC_CACERT")
+    [ "${HOTEL_ADMIN_PUBLIC_INSECURE:-0}" = "1" ] && xopts+=(-k)
+    [ -n "${HOTEL_ADMIN_PUBLIC_HOST:-}" ] && xopts+=(-H "Host: ${HOTEL_ADMIN_PUBLIC_HOST}")
+    [ -n "${HOTEL_ADMIN_PUBLIC_RESOLVE:-}" ] && xopts+=(--resolve "${HOTEL_ADMIN_PUBLIC_RESOLVE}")
+    status="$(curl -sS -o /dev/null -w '%{http_code}' "${xopts[@]}"                 --max-time "${HOTEL_ADMIN_HTTP_TIMEOUT:-5}" "$url" 2>/dev/null || true)"
+  fi
+  [ "$status" = "200" ]
+}
+
 # ha_served_build_id <url> — the BUILD_ID a running endpoint is serving, or NOTHING.
 #
 # Next stamps it into every rendered document as an HTML comment. Extraction uses sed and not

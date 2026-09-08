@@ -3,6 +3,9 @@ package iamv2
 import (
 	"context"
 	"encoding/json"
+	"errors"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -31,16 +34,7 @@ func (r *PgCommerceAdminRepository) WithTx(ctx context.Context, fn func(Commerce
 
 func (r *PgCommerceAdminRepository) ListPackages(ctx context.Context, tenantID, siteID string) ([]PackageSummary, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT p.id::text, p.code, p.active, COALESCE(p.current_revision_id::text,''),
-		        (SELECT count(*) FROM iam_v2.internet_package_revisions r WHERE r.package_id = p.id)
-		   FROM iam_v2.internet_packages p
-		  WHERE p.tenant_id=$1 AND p.site_id=$2
-		    -- D32: the system grace package is HIDDEN from the operator catalogue. Excluded here rather than
-		    -- filtered in the handler so every caller of the catalogue gets the same answer -- a listing that
-		    -- showed it would invite an operator to edit or deactivate a package whose existence, type and
-		    -- provenance are not theirs to change, and deactivating it would silently disable checkout grace.
-		    AND p.is_system = false
-		  ORDER BY p.code`, tenantID, siteID)
+		packagesListSQL(), tenantID, siteID)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +42,12 @@ func (r *PgCommerceAdminRepository) ListPackages(ctx context.Context, tenantID, 
 	var out []PackageSummary
 	for rows.Next() {
 		var s PackageSummary
-		if err := rows.Scan(&s.PackageID, &s.Code, &s.Active, &s.CurrentRevisionID, &s.RevisionCount); err != nil {
+		if err := rows.Scan(&s.PackageID, &s.Code, &s.Active, &s.CurrentRevisionID, &s.RevisionCount,
+			&s.Name, &s.PriceMinor, &s.Currency, &s.PackageType, &s.VisibleFrom, &s.VisibleUntil,
+			&s.ServicePlanID, &s.ServicePlanRevisionID, &s.ServicePlanCode, &s.ServicePlanRevisionNo,
+			&s.DownKbps, &s.UpKbps, &s.MaxConcurrentDevices, &s.DeviceLimitPolicy,
+			&s.TimeQuotaSeconds, &s.DataQuotaBytes, &s.SpeedAllocation,
+			&s.PlanHasNewerRevision); err != nil {
 			return nil, err
 		}
 		out = append(out, s)
@@ -90,7 +89,16 @@ func (r *PgCommerceAdminRepository) ListPlans(ctx context.Context, tenantID, sit
 		        cur.name, cur.down_kbps, cur.up_kbps, cur.max_concurrent_devices, cur.device_limit_policy,
 		        cur.idle_timeout_seconds, cur.max_continuous_session_seconds,
 		        cur.time_quota_seconds, cur.data_quota_bytes, cur.time_accounting_mode,
-		        cur.speed_allocation
+		        cur.speed_allocation,
+		        -- HOW MANY GUEST-FACING OFFERS THIS PLAN CURRENTLY DECIDES. Counted over ACTIVE packages whose
+		        -- CURRENT revision pins any revision of this plan, because those are the ones whose meaning
+		        -- would change if the operator repinned them to a new revision.
+		        (SELECT count(*) FROM iam_v2.internet_packages ip
+		           JOIN iam_v2.internet_package_revisions ipr ON ipr.id = ip.current_revision_id
+		           JOIN iam_v2.service_plan_revisions psr ON psr.id = ipr.service_plan_revision_id
+		          WHERE ip.tenant_id = p.tenant_id AND ip.site_id = p.site_id
+		            AND ip.is_system = false AND ip.active IS TRUE
+		            AND psr.service_plan_id = p.id)
 		   FROM iam_v2.service_plans p
 		   -- LEFT JOIN: a plan with no published revision yet is a real state, and it must still list.
 		   LEFT JOIN iam_v2.service_plan_revisions cur ON cur.id = p.current_revision_id
@@ -114,7 +122,7 @@ func (r *PgCommerceAdminRepository) ListPlans(ctx context.Context, tenantID, sit
 		if err := rows.Scan(&s.PlanID, &s.Code, &s.Enabled, &s.CurrentRevisionID, &s.RevisionCount,
 			&s.Name, &s.DownKbps, &s.UpKbps, &s.MaxConcurrentDevices, &s.DeviceLimitPolicy,
 			&s.IdleTimeoutSeconds, &s.MaxSessionSeconds, &s.TimeQuotaSeconds, &s.DataQuotaBytes,
-			&s.TimeAccountingMode, &s.SpeedAllocation); err != nil {
+			&s.TimeAccountingMode, &s.SpeedAllocation, &s.UsedByActivePackages); err != nil {
 			return nil, err
 		}
 		out = append(out, s)
@@ -350,16 +358,28 @@ func (t *pgCommerceAdminTx) PlanRevisionBelongs(ctx context.Context, tenantID, s
 func (t *pgCommerceAdminTx) InsertPackageRevision(ctx context.Context, spec PackagePublishSpec, packageID string, revNo int) (string, error) {
 	display, _ := json.Marshal(orEmptyObj(spec.Display))
 	duration, _ := json.Marshal(orEmptyObj(spec.DurationPolicy))
+	// A FIXED (or absent) allocation policy is written as SQL NULL, not as {"mode":"FIXED"}. The two mean the
+	// same thing to every reader, and NULL means this revision is byte-identical to one published before the
+	// column existed -- which is what makes "nothing changed for existing packages" checkable rather than
+	// merely intended.
+	var alloc *string
+	if len(spec.DataAllocationPolicy) > 0 {
+		if mode, _ := spec.DataAllocationPolicy["mode"].(string); mode != "" && mode != AllocFixed {
+			b, _ := json.Marshal(spec.DataAllocationPolicy)
+			s := string(b)
+			alloc = &s
+		}
+	}
 	var id string
 	err := t.tx.QueryRow(ctx,
 		`INSERT INTO iam_v2.internet_package_revisions
 		   (tenant_id, site_id, package_id, revision_no, service_plan_revision_id, package_type,
 		    price_minor, currency, currency_exponent, settlement_methods, duration_policy,
-		    visible_from, visible_until, display)
-		 VALUES ($1,$2,$3,$4,$5,'GENERAL',0,'USD',2,'{NOT_REQUIRED}',$6::jsonb,$7,$8,$9::jsonb)
+		    visible_from, visible_until, display, data_allocation_policy)
+		 VALUES ($1,$2,$3,$4,$5,'GENERAL',0,'USD',2,'{NOT_REQUIRED}',$6::jsonb,$7,$8,$9::jsonb,$10::jsonb)
 		 RETURNING id::text`,
 		spec.TenantID, spec.SiteID, packageID, revNo, spec.ServicePlanRevisionID,
-		duration, spec.VisibleFrom, spec.VisibleUntil, display).Scan(&id)
+		duration, spec.VisibleFrom, spec.VisibleUntil, display, alloc).Scan(&id)
 	return id, err
 }
 
@@ -717,4 +737,144 @@ func (t *pgGraceProvisionTx) DefaultPlanRevisionForGrace(ctx context.Context, te
 		return "", err
 	}
 	return *rev, nil
+}
+
+// GetPackageCurrent reads one package's CURRENT revision in full — including the eligibility rules and grant
+// tiers, which the authoring form must hand back unchanged when it saves.
+//
+// Read-only. It resolves nothing and decides nothing; the revision chain is untouched.
+func (r *PgCommerceAdminRepository) GetPackageCurrent(ctx context.Context, tenantID, siteID, packageID string) (PackageCurrent, error) {
+	var c PackageCurrent
+	var display, duration, alloc []byte
+	err := r.db.QueryRow(ctx,
+		`SELECT p.id::text, p.code, p.active, cur.id::text, cur.revision_no,
+		        cur.service_plan_revision_id::text, cur.package_type, cur.price_minor,
+		        COALESCE(cur.currency,''), COALESCE(cur.settlement_methods, ARRAY[]::text[]),
+		        COALESCE(cur.display,'{}'::jsonb), COALESCE(cur.duration_policy,'{}'::jsonb),
+		        cur.visible_from::text, cur.visible_until::text,
+		        COALESCE(cur.data_allocation_policy,'{}'::jsonb)
+		   FROM iam_v2.internet_packages p
+		   JOIN iam_v2.internet_package_revisions cur ON cur.id = p.current_revision_id
+		  WHERE p.tenant_id=$1 AND p.site_id=$2 AND p.id=$3 AND p.is_system = false`,
+		tenantID, siteID, packageID).Scan(&c.PackageID, &c.Code, &c.Active, &c.RevisionID, &c.RevisionNo,
+		&c.ServicePlanRevisionID, &c.PackageType, &c.PriceMinor, &c.Currency, &c.SettlementMethods,
+		&display, &duration, &c.VisibleFrom, &c.VisibleUntil, &alloc)
+	if err != nil {
+		return PackageCurrent{}, err
+	}
+	if len(display) > 0 {
+		_ = json.Unmarshal(display, &c.Display)
+	}
+	if len(duration) > 0 {
+		_ = json.Unmarshal(duration, &c.DurationPolicy)
+	}
+	if len(alloc) > 0 {
+		_ = json.Unmarshal(alloc, &c.DataAllocationPolicy)
+	}
+
+	// THE CONDITIONS COME THROUGH THE SCOPED READER, NOT FROM THE TABLES.
+	//
+	// svc_edged holds INSERT on iam_v2.package_eligibility_rules and iam_v2.package_grant_tiers and no SELECT
+	// on either -- the admin service composes a package, the guest-auth service evaluates it. Reading them
+	// directly here is what returned 500 on the operator's package screen. iam_v2.p2_package_current_conditions
+	// answers the one question Edit needs, for the CURRENT revision of this non-system package in this tenant
+	// and site, and the scoping is inside the function rather than in this argument list.
+	//
+	// packageConditionsSQL is named so a test can assert this path references neither table.
+	rows, err := r.db.Query(ctx, packageConditionsSQL(), tenantID, siteID, packageID)
+	if err != nil {
+		return PackageCurrent{}, wrapIfDenied(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var kind string
+		var ruleType *string
+		var tierOrder *int
+		var raw []byte
+		if err := rows.Scan(&kind, &ruleType, &tierOrder, &raw); err != nil {
+			return PackageCurrent{}, wrapIfDenied(err)
+		}
+		var val map[string]any
+		if len(raw) > 0 {
+			_ = json.Unmarshal(raw, &val)
+		}
+		switch kind {
+		case "RULE":
+			if ruleType != nil {
+				c.EligibilityRules = append(c.EligibilityRules, EligibilityRule{Type: *ruleType, Value: val})
+			}
+		case "TIER":
+			if tierOrder != nil {
+				c.GrantTiers = append(c.GrantTiers, GrantTier{Order: *tierOrder, Value: val})
+			}
+		}
+	}
+	// pgx reports a denied read when the rows are DRAINED rather than when the statement is sent, so this
+	// return is classified too. Wrapping only the Query error is what made a permission problem surface to
+	// the operator as "no current configuration for this package".
+	return c, wrapIfDenied(rows.Err())
+}
+
+// packageConditionsSQL calls the scoped reader. It is a function so commerce_admin_privilege_test.go can
+// assert that loading a package's conditions references neither protected table by name.
+func packageConditionsSQL() string {
+	return `SELECT kind, rule_type, tier_order, value
+	          FROM iam_v2.p2_package_current_conditions($1::uuid, $2::uuid, $3::uuid)`
+}
+
+// ErrPackageConditionsUnreadable means this runtime role cannot read a package's eligibility rules or grant
+// tiers. Editing must refuse rather than load a partial configuration it would then republish.
+var ErrPackageConditionsUnreadable = errors.New("iamv2: package conditions are not readable by this role")
+
+// wrapIfDenied turns PostgreSQL's insufficient_privilege (42501) into that condition and leaves every other
+// failure exactly as it was.
+func wrapIfDenied(err error) error {
+	var pe *pgconn.PgError
+	if errors.As(err, &pe) && pe.Code == "42501" {
+		return ErrPackageConditionsUnreadable
+	}
+	return err
+}
+
+// packagesListSQL is the operator package-catalogue query, named so a test can assert what it reads.
+//
+// IT IS A FUNCTION RATHER THAN A LITERAL BECAUSE OF WHAT IT MUST NOT CONTAIN. edged holds no SELECT on
+// iam_v2.package_eligibility_rules or iam_v2.package_grant_tiers; referencing either makes the whole
+// statement fail under the real runtime role, which is how the operator's package screen returned 500 in
+// PRE-LIVE while every superuser test passed. commerce_admin_privilege_test.go enforces that.
+func packagesListSQL() string {
+	return `SELECT p.id::text, p.code, p.active, COALESCE(p.current_revision_id::text,''),
+		        (SELECT count(*) FROM iam_v2.internet_package_revisions r WHERE r.package_id = p.id),
+		        cur.display->>'name', cur.price_minor, cur.currency, cur.package_type,
+		        cur.visible_from::text, cur.visible_until::text,
+		        -- THE ELIGIBILITY AND TIER COUNTS ARE NOT READ HERE, AND THAT IS A PRIVILEGE FACT.
+		        --
+		        -- svc_edged AUTHORS iam_v2.package_eligibility_rules and iam_v2.package_grant_tiers through the
+		        -- controlled SECURITY DEFINER writers, but holds no SELECT on either table. Counting them from
+		        -- this list made the whole query fail with "permission denied for table
+		        -- package_eligibility_rules" under the real runtime role -- a 500 on the operator's package
+		        -- screen -- while every test passed as a superuser.
+		        --
+		        -- A privilege-guarded CASE does not help: PostgreSQL checks table permissions for every
+		        -- relation the statement references, whichever branch would run. The only correct fix without
+		        -- a grant is not to reference them, so the summary they fed is absent until svc_edged is
+		        -- given SELECT on both.
+		        spr.service_plan_id::text, spr.id::text, sp.code, spr.revision_no,
+		        spr.down_kbps, spr.up_kbps, spr.max_concurrent_devices, spr.device_limit_policy,
+		        spr.time_quota_seconds, spr.data_quota_bytes, spr.speed_allocation,
+		        -- THE FACT THAT COST A GUEST 2 Mbps: the plan has moved on and this package has not.
+		        COALESCE(sp.current_revision_id <> spr.id, false)
+		   FROM iam_v2.internet_packages p
+		   -- LEFT JOINs throughout: a package with no published revision, or one whose plan revision has been
+		   -- removed, is a real state and must still list rather than vanish from the operator's catalogue.
+		   LEFT JOIN iam_v2.internet_package_revisions cur ON cur.id = p.current_revision_id
+		   LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = cur.service_plan_revision_id
+		   LEFT JOIN iam_v2.service_plans sp ON sp.id = spr.service_plan_id
+		  WHERE p.tenant_id=$1 AND p.site_id=$2
+		    -- D32: the system grace package is HIDDEN from the operator catalogue. Excluded here rather than
+		    -- filtered in the handler so every caller of the catalogue gets the same answer -- a listing that
+		    -- showed it would invite an operator to edit or deactivate a package whose existence, type and
+		    -- provenance are not theirs to change, and deactivating it would silently disable checkout grace.
+		    AND p.is_system = false
+		  ORDER BY p.code`
 }

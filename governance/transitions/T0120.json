@@ -1,0 +1,77 @@
+{
+  "transition_id": "T0120",
+  "seq": 120,
+  "timestamp": "2026-09-07T21:30:00Z",
+  "timestamp_derivation": "After migration 0064 was applied to stayconnect_site through the authoritative runner (20:12Z) and the Gate-P reconcile repair was verified idempotent, and after the Product Owner's manual PRE-LIVE acceptance grants at 20:41Z and 20:44Z; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "PRE_LIVE_PACKAGE_ELIGIBILITY_AND_PER_STAY_NIGHT_MILESTONE_ACCEPTED_AND_CLOSED",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_LIVE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_ACCEPTED_PRE_LIVE",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_LIVE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_ACCEPTED_PRE_LIVE",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": false,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap. No numbered phase advances. This closes ONE milestone inside the existing PRE-LIVE activity; the phase status, activity and execution state are unchanged, PRE-LIVE remains PRE-LIVE and Go-Live remains NOT AUTHORIZED.",
+  "decision": "D40",
+  "new_decision_created": true,
+  "new_decision_rationale": "The Product Owner completed manual PRE-LIVE acceptance of Stay-based package eligibility and the per-stay-night data allowance and authorized closing the milestone: final CI, one PR, merge, and a single documentation synchronization.",
+  "po_authorization_ref": "Product-Owner instruction CLOSE THE APPROVED PRE-LIVE PACKAGE ELIGIBILITY / PER-STAY-NIGHT MILESTONE (2026-09-08).",
+  "t0118_unchanged": "T0118 (the accepted single real-device data-quota acceptance) is untouched and was not repeated. No Room Login was performed in this milestone closure.",
+  "defect": [
+    "Package selection failed for every guest at offer_lock_unavailable: svc_scd had lost EXECUTE on iam_v2.lock_auth_context_offer and the three other Gate-P lock functions.",
+    "Hotel Admin could not publish a Stay Length condition: STAY_LENGTH is the first eligibility rule type carrying a number and parseIntField did not accept json.Number, which is what the edged UseNumber decoder produces.",
+    "Editing a Service Plan silently dropped the time allowance, data allowance, idle timeout and maximum session, because the form publishes a complete revision from fields it never pre-filled.",
+    "A package left pinned to an older plan revision could only be moved by publishing another plan revision nobody wanted.",
+    "After a refused grant the portal re-enabled the same package buttons and left them on screen, so a real guest pressed three times in fourteen seconds.",
+    "The allocation-policy CHECK in migration 0064 accepted a malformed policy, because a CHECK rejects only on FALSE and every absent key evaluated to UNKNOWN."
+  ],
+  "fix": [
+    "Gate-P: ROOT CAUSE was stale appliance artifacts, not source. The installed svc-scd-iamv2-guest-auth-grants.sql was 4,976 bytes with zero lock_ references against the repository 12,293; seven of eighteen Gate-P files differed and one was absent. The lock grants arrived in a704d520 and were never shipped, so a reconcile on the appliance revoked all function privileges and re-granted only the old file set. Repaired by syncing the Gate-P tree from the delivery HEAD and re-running the authoritative reconcile (gatep-grants.sql) with no ad-hoc GRANT.",
+    "parseIntField now reads every numeric shape any decoder in the system produces, through the one strict integer reader the grant snapshot already uses. Strictness is unchanged: fractional and exponent-bearing values are still refused rather than rounded.",
+    "Plan edit pre-fills all four fields, the time allowance together with the unit that makes it read 1 day, and the form is keyed on the plan so switching plans cannot publish the first plan numbers.",
+    "The repin prompt is a standing action on the plan row, listing only packages actually behind and publishing package revisions only.",
+    "A refused grant takes the offer set down and returns the guest to sign-in with the same uniform message; the retained request id means signing in again returns the SAME Auth Context, so no duplicate grant.",
+    "The CHECK predicate is wrapped in COALESCE(..., false), and the migration verify block now lifts the predicate out of the catalog with pg_get_constraintdef so it cannot drift from the real constraint."
+  ],
+  "not_changed": [
+    "Quota aggregation, attribution and half-open binding-interval semantics.",
+    "Exact DATA termination: the PRE-migration crossing predicate and the POST-migration p6_data_crossing return identical instants on all six pre-existing entitlements.",
+    "Existing entitlements, purchases, sessions, accounting records and entitlement history: none backfilled, none altered.",
+    "Device/session semantics: nothing about a new device, session or IP resets a quota.",
+    "PMS configuration, PMS traffic, financial posting/settlement state (all counters remain zero), networking, enrollment/licensing."
+  ],
+  "live_verification": [
+    "Migration 0064 applied to stayconnect_site through scripts/edge-migrate.sh with full positive identity and --expect-sha256 d5b2e99f; EDGE_MIGRATE_OK applied=1 skipped=0; schema head 0064.",
+    "Zero entitlements carry a snapshot and zero package revisions carry a policy after the migration.",
+    "T0119 derived-usage invariant re-verified: consumed_data_bytes equals the derived attribution on all six entitlements.",
+    "Gate-P: the four lock functions are executable by svc_scd; svc_edged retains p2_package_current_conditions; svc_scd holds EXECUTE on 53 of 146 iam_v2 functions and no UPDATE on auth_context_offers or stays; a second reconcile leaves 1,207 privilege rows byte-identical; full delta versus the pre-repair baseline is 7 additions and 0 removals.",
+    "Product-Owner manual acceptance, read from existing runtime evidence only: a 3-night stay and a 4-night stay were offered the 1-5-night package plus the unconditional OneDay package and NOT the 6-10-night package; a 7-night stay was offered the 6-10-night package plus OneDay and NOT the 1-5-night package. Two grants completed with sessions.",
+    "PER_STAY_NIGHT operator configuration was Product-Owner accepted; runtime calculation is integration-tested but no additional live grant was generated for closure. No package revision carries a PER_STAY_NIGHT policy and no entitlement carries a snapshot."
+  ],
+  "regression": [
+    "TestMigration0064 against a real disposable PostgreSQL: no backfill, unchanged crossing instant, snapshot overrides plan, snapshot still terminates when the plan quota is NULL, zero snapshot refused, eight malformed policies refused by the CHECK, clean down migration.",
+    "Stay-length rules publish and evaluate identically from json.Number, float64, int and int64.",
+    "The approved per-stay-night example: 2 to 5, 5 to 5, 8 to 8, 10 to 10, 12 to 12, 25 to 20 GB; fail-closed without authoritative dates.",
+    "Portal: a refused selection cannot leave stale choices, uses the uniform message, and cannot produce a second grant.",
+    "Full Go suite, 207 Hotel Admin tests, typecheck, production Next build, migration-runner selftest, ZERO_STALE_LEFTOVERS = PASS."
+  ],
+  "current_state_corrections": [
+    "schema_head recorded as 0064 with the no-backfill property stated.",
+    "PMS generation terminology reconciled: runtime_generation (monotonic, bumped on every failed dial, 61314), resync_generation_seq/published_resync_generation (the RESYNC generation, the counter earlier quoted as approximately 195/196, now 206) and pms_interface_revisions.revision_no (the pinned Interface revision, 3) are three different counters and are no longer all called gen.",
+    "PMS recorded as intentionally stopped by the Product Owner; DISCONNECTED / RESYNC_REQUIRED / DIAL_FAILED is expected and is not a defect.",
+    "next_authorized_action records the reserved, NOT-yet-authorized pmsd restart before PMS returns to operational use."
+  ],
+  "validator_coverage": "tools/validate-project-state.sh (ZERO_STALE_LEFTOVERS) and tools/project-state.py validate both pass on the delivery HEAD.",
+  "financial": "ZERO. pms_postings 0, posting_attempts 0, posting_outbox 0, settlements 0. No posting, payment, reversal or FX traffic was generated.",
+  "go_live": "NOT AUTHORIZED. PRE-LIVE remains PRE-LIVE.",
+  "transition_accepted": true
+}

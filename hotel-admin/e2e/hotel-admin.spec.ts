@@ -91,9 +91,11 @@ test("service plans: a new plan publishes with the supported time-accounting mod
     mutations,
   });
   await page.goto("/service-plans");
-  await page.getByRole("button", { name: /new plan/i }).click();
+  // "Add plan" opens the form, and the form's own submit carries the same words -- so the submit is taken
+  // from the form rather than by name, which would match both.
+  await page.getByRole("button", { name: /add plan/i }).click();
   await page.locator('input[name="code"]').fill("PLATINUM");
-  await page.getByRole("button", { name: /publish plan/i }).click();
+  await page.locator('form button[type="submit"]').click();
   await expect.poll(() => mutations.find((m) => m.path.endsWith("/plans") && m.method === "POST")).toBeTruthy();
   const planReq = mutations.find((m) => m.path.endsWith("/plans") && m.method === "POST")!;
   expect((planReq.body as { time_accounting_mode: string }).time_accounting_mode).toBe("VALIDITY_WINDOW");
@@ -110,12 +112,14 @@ test("internet packages: publish via the plan selector, then step-up deactivate"
   await page.goto("/internet-packages");
   await expect(page.getByText("FREEWIFI")).toBeVisible();
 
-  // Published through the plan SELECTOR — the operator never types a revision UUID.
-  await page.getByRole("button", { name: /publish package/i }).click();
+  // Published through the plan SELECTOR, which is keyed by PLAN -- the operator never sees, types or
+  // selects a revision id. The revision the save pins is resolved from the chosen plan.
+  await page.getByRole("button", { name: /add package/i }).click();
   await page.getByLabel("code").fill("FREEWIFI2");
-  await page.getByLabel("service-plan").selectOption("rev-gold");
-  await page.getByLabel("tier-down-0").fill("5000");
-  await page.getByRole("button", { name: /^publish$/i }).click();
+  await page.getByLabel("service-plan").selectOption("p1");
+  // The per-tier speed step lives under Advanced now and is not what this test is about: the package's
+  // speed comes from the chosen plan, and the form starts with the one grant tier a package needs.
+  await page.locator('form button[type="submit"]').click();
   await expect.poll(() => mutations.find((m) => m.path.endsWith("/commercial-packages") && m.method === "POST")).toBeTruthy();
   const pkgReq = mutations.find((m) => m.path.endsWith("/commercial-packages") && m.method === "POST")!;
   const pkgJson = JSON.stringify(pkgReq.body).toLowerCase();
@@ -125,7 +129,7 @@ test("internet packages: publish via the plan selector, then step-up deactivate"
   // Withdrawing a package still takes two prompts: a reason, then the operator's password.
   let dialogs = 0;
   page.on("dialog", (d) => { dialogs += 1; d.accept(dialogs === 1 ? "retire it" : "operatorpw"); });
-  await page.getByRole("button", { name: /stop offering/i }).click();
+  await page.getByRole("button", { name: /^disable$/i }).click();
   await expect.poll(() => mutations.find((m) => m.path.includes("/active"))).toBeTruthy();
   const actReq = mutations.find((m) => m.path.includes("/active"))!;
   expect(actReq.body).toMatchObject({ active: false, reason: "retire it", password: "operatorpw" });

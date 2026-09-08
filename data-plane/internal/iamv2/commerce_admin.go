@@ -3,6 +3,7 @@ package iamv2
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -52,6 +53,7 @@ type CommerceAdminRepository interface {
 	WithTx(ctx context.Context, fn func(CommerceAdminTx) error) error
 	ListPackages(ctx context.Context, tenantID, siteID string) ([]PackageSummary, error)
 	ListPackageRevisions(ctx context.Context, tenantID, siteID, packageID string) ([]RevisionInfo, error)
+	GetPackageCurrent(ctx context.Context, tenantID, siteID, packageID string) (PackageCurrent, error)
 	ListPlans(ctx context.Context, tenantID, siteID string) ([]PlanSummary, error)
 	ListPlanRevisions(ctx context.Context, tenantID, siteID, planID string) ([]RevisionInfo, error)
 	GetGraceConfig(ctx context.Context, tenantID, siteID string) (GraceConfig, error)
@@ -118,6 +120,15 @@ type PlanSummary struct {
 	DataQuotaBytes       *int64  `json:"data_quota_bytes,omitempty"`
 	TimeAccountingMode   *string `json:"time_accounting_mode,omitempty"`
 	SpeedAllocation      *string `json:"speed_allocation,omitempty"`
+
+	// UsedByActivePackages is how many ACTIVE packages currently offer this plan — i.e. how many guest-facing
+	// offers change meaning if a new revision is published and those packages are repinned to it.
+	//
+	// It exists because "edit this plan" is a question the operator cannot answer safely without it. A plan is
+	// a reusable object; publishing a revision is harmless on its own, but repinning packages to it changes
+	// what future guests are given. Showing the count next to the plan is what turns that from a surprise
+	// into a decision.
+	UsedByActivePackages int `json:"used_by_active_packages"`
 }
 
 // GraceConfig is the read/write shape for site_checkout_grace_config.
@@ -189,6 +200,75 @@ type PackageSummary struct {
 	Active            bool   `json:"active"`
 	CurrentRevisionID string `json:"current_revision_id"`
 	RevisionCount     int    `json:"revision_count"`
+
+	// WHAT THE PACKAGE ACTUALLY OFFERS, from its current revision and the plan revision that revision pins.
+	//
+	// The summary used to be a code, a flag, a UUID and a revision count — so the package list, the screen an
+	// operator manages the guest offer from, could not say what any package GAVE. Answering "what speed is
+	// Gold?" meant opening the revision history, reading a plan revision id out of it, and going to find that
+	// plan. These fields come from the CURRENT revision, so they are what a guest granted right now would
+	// receive, not the newest values drafted anywhere.
+	//
+	// They are read-only projections. The revision chain underneath is untouched and still immutable; this
+	// only stops the operator having to reconstruct it by hand.
+	Name         *string `json:"name,omitempty"`
+	PriceMinor   *int64  `json:"price_minor,omitempty"`
+	Currency     *string `json:"currency,omitempty"`
+	PackageType  *string `json:"package_type,omitempty"`
+	VisibleFrom  *string `json:"visible_from,omitempty"`
+	VisibleUntil *string `json:"visible_until,omitempty"`
+	// The eligibility-rule and grant-tier counts are deliberately ABSENT. svc_edged authors both tables and
+	// holds no SELECT on either, so reading them here is what turned this list into a 500 under the real
+	// runtime role. See the note in ListPackages.
+
+	// The pinned service plan, named rather than referenced. ServicePlanRevisionID is still carried because
+	// republishing a package unchanged has to re-pin exactly the revision it already had.
+	ServicePlanID         *string `json:"service_plan_id,omitempty"`
+	ServicePlanRevisionID *string `json:"service_plan_revision_id,omitempty"`
+	ServicePlanCode       *string `json:"service_plan_code,omitempty"`
+	ServicePlanRevisionNo *int    `json:"service_plan_revision_no,omitempty"`
+	DownKbps              *int    `json:"down_kbps,omitempty"`
+	UpKbps                *int    `json:"up_kbps,omitempty"`
+	MaxConcurrentDevices  *int    `json:"max_concurrent_devices,omitempty"`
+	DeviceLimitPolicy     *string `json:"device_limit_policy,omitempty"`
+	TimeQuotaSeconds      *int64  `json:"time_quota_seconds,omitempty"`
+	DataQuotaBytes        *int64  `json:"data_quota_bytes,omitempty"`
+	SpeedAllocation       *string `json:"speed_allocation,omitempty"`
+
+	// PlanHasNewerRevision says the pinned plan revision is no longer the plan's current one. This is exactly
+	// the condition that made a new 10/5 Mbps plan revision produce a 2 Mbps guest: publishing a plan revision
+	// does not move any package onto it, and nothing on the package screen said so.
+	PlanHasNewerRevision bool `json:"plan_has_newer_revision"`
+}
+
+// PackageCurrent is the CURRENT configuration of one package, in the shape the authoring form needs to load
+// it and hand it straight back on save.
+//
+// IT EXISTS SO THAT SAVING CANNOT SILENTLY DROP THINGS. Publishing a revision replaces the whole spec, so a
+// form that only knew the fields it displayed would republish without the eligibility rules and grant tiers
+// it never loaded — quietly changing who the package is offered to. That is not a theoretical risk: a package
+// whose only grant tier disappeared would stop being offered to anyone.
+type PackageCurrent struct {
+	PackageID             string            `json:"package_id"`
+	Code                  string            `json:"code"`
+	Active                bool              `json:"active"`
+	RevisionID            string            `json:"revision_id"`
+	RevisionNo            int               `json:"revision_no"`
+	ServicePlanRevisionID string            `json:"service_plan_revision_id"`
+	PackageType           string            `json:"package_type"`
+	PriceMinor            int64             `json:"price_minor"`
+	Currency              string            `json:"currency"`
+	SettlementMethods     []string          `json:"settlement_methods"`
+	Display               map[string]any    `json:"display"`
+	DurationPolicy        map[string]any    `json:"duration_policy"`
+	EligibilityRules      []EligibilityRule `json:"eligibility_rules"`
+	GrantTiers            []GrantTier       `json:"grant_tiers"`
+	VisibleFrom           *string           `json:"visible_from,omitempty"`
+	VisibleUntil          *string           `json:"visible_until,omitempty"`
+	// DataAllocationPolicy is returned so the authoring form hands it back UNCHANGED when it saves. A field
+	// the editor cannot read is a field the editor silently drops: saving an unrelated rename would quietly
+	// turn a PER_STAY_NIGHT package back into a flat one, on a new immutable revision nobody could tell apart.
+	DataAllocationPolicy map[string]any `json:"data_allocation_policy,omitempty"`
 }
 
 // PackagePublishSpec is a request to publish a new immutable free package revision.
@@ -202,6 +282,10 @@ type PackagePublishSpec struct {
 	GrantTiers            []GrantTier
 	VisibleFrom           *time.Time
 	VisibleUntil          *time.Time
+	// DataAllocationPolicy decides how this revision turns a stay into a byte allowance. Nil (and
+	// {"mode":"FIXED"}) means the pinned service plan revision's quota is used unchanged, which is what every
+	// revision published before this field existed carries.
+	DataAllocationPolicy map[string]any
 }
 
 // AdminResult is the guest-independent result of an admin mutation.
@@ -224,6 +308,23 @@ func (a *CommerceAdmin) ListPackages(ctx context.Context, tenantID, siteID strin
 	return out, false, nil
 }
 
+// GetPackageCurrent returns one package's current configuration for the authoring form to load.
+func (a *CommerceAdmin) GetPackageCurrent(ctx context.Context, tenantID, siteID, packageID string) (PackageCurrent, bool, error) {
+	if !a.cfg.AdminOn() {
+		return PackageCurrent{}, true, nil // disabled
+	}
+	out, err := a.repo.GetPackageCurrent(ctx, tenantID, siteID, packageID)
+	if err != nil {
+		// The unreadable-conditions case is passed through unchanged: it is the one failure the caller must
+		// tell apart, because it means "do not offer to edit this", not "something broke".
+		if errors.Is(err, ErrPackageConditionsUnreadable) {
+			return PackageCurrent{}, false, err
+		}
+		return PackageCurrent{}, false, &Error{Code: ErrRepo, Msg: "read package"}
+	}
+	return out, false, nil
+}
+
 // PublishRevision validates and publishes a new immutable revision, then moves the current-revision
 // pointer — atomically. Publication is fail-closed: a malformed rule/tier, an unknown/PMS rule type, a
 // bad duration policy, or a plan revision from another tenant/site is rejected before any write. Phase 2
@@ -236,10 +337,17 @@ func (a *CommerceAdmin) PublishRevision(ctx context.Context, spec PackagePublish
 	if spec.TenantID == "" || spec.SiteID == "" || spec.PackageCode == "" || spec.ServicePlanRevisionID == "" {
 		return AdminResult{}, &Error{Code: ErrInvalidInput, Msg: "publish: missing tenant/site/code/plan_revision"}
 	}
-	// publication-strict validation of every rule and tier (no writes yet)
+	// PUBLICATION-STRICT VALIDATION of every rule and tier (no writes yet).
+	//
+	// The REASON travels, not just the label. "invalid_eligibility_rule" told an operator who had set a stay
+	// length of 1 to 5 nights that something about their conditions was wrong, and nothing else -- no rule
+	// type, no field, no reason -- for a form that can carry a dozen conditions. The validators already
+	// produce a precise sentence; this used to throw it away, which is the same mistake PublishPlanRevision
+	// below already refuses to make and for the same reason: this is the trusted operator surface, and a
+	// refusal it cannot act on is barely better than no refusal at all.
 	for _, rule := range spec.EligibilityRules {
 		if err := ValidateEligibilityRule(rule); err != nil {
-			return AdminResult{Reason: "invalid_eligibility_rule"}, nil
+			return AdminResult{Reason: reasonWithDetail("invalid_eligibility_rule", rule.Type, err)}, nil
 		}
 	}
 	if len(spec.GrantTiers) == 0 {
@@ -247,7 +355,7 @@ func (a *CommerceAdmin) PublishRevision(ctx context.Context, spec PackagePublish
 	}
 	for _, tier := range spec.GrantTiers {
 		if err := ValidateGrantTier(tier); err != nil {
-			return AdminResult{Reason: "invalid_grant_tier"}, nil
+			return AdminResult{Reason: reasonWithDetail("invalid_grant_tier", "", err)}, nil
 		}
 	}
 	// the immutable duration policy must resolve (PMS/checkout/local-time modes are capability-disabled)
@@ -256,6 +364,14 @@ func (a *CommerceAdmin) PublishRevision(ctx context.Context, spec PackagePublish
 	}
 	if spec.VisibleFrom != nil && spec.VisibleUntil != nil && !spec.VisibleFrom.Before(*spec.VisibleUntil) {
 		return AdminResult{Reason: "invalid_sale_window"}, nil
+	}
+	// THE ALLOCATION POLICY IS VALIDATED AT PUBLICATION, in front of the operator who wrote it, because the
+	// revision it lands on is immutable. A policy that only fails at grant time fails in front of a guest, on
+	// a record nobody can correct -- the operator's only remedy would be to publish a replacement revision.
+	// The database CHECK constraint holds the same shape; this exists so the refusal has a reason a person can
+	// read, rather than a constraint name.
+	if _, err := ParseDataAllocationPolicy(spec.DataAllocationPolicy); err != nil {
+		return AdminResult{Reason: "invalid_data_allocation_policy: " + err.Error()}, nil
 	}
 
 	var res AdminResult
@@ -401,28 +517,56 @@ func validatePlanSpec(spec *PlanPublishSpec, allowAggregate bool) error {
 	default:
 		return &Error{Code: ErrInvalidInput, Msg: "unsupported time_accounting_mode"}
 	}
-	nn := func(p *int, max int) error {
+	// EVERY BOUND NAMES ITS FIELD, ITS LIMIT AND WHAT WAS SENT.
+	//
+	// All six of these once shared one message -- "plan integer out of range" -- and an operator who hit it
+	// while editing a plan was told only that one of six numbers was wrong. It cost a live debugging cycle on
+	// the OneDay plan, whose speed sits exactly ON the 10 Gbps ceiling, so any nudge upward fails while the
+	// screen names no field. That is the same mistake the caller below already refused to make when it stopped
+	// collapsing distinct validation reasons into "invalid_plan_spec"; collapsing six fields into one reason
+	// only moved the guessing game down a level.
+	nn := func(field string, p *int, max int) error {
 		if p != nil && (*p < 0 || *p > max) {
-			return &Error{Code: ErrInvalidInput, Msg: "plan integer out of range"}
+			return &Error{Code: ErrInvalidInput,
+				Msg: fmt.Sprintf("%s must be between 0 and %d, but %d was sent", field, max, *p)}
 		}
 		return nil
 	}
-	nn64 := func(p *int64, max int64) error {
+	nn64 := func(field string, p *int64, max int64) error {
 		if p != nil && (*p < 0 || *p > max) {
-			return &Error{Code: ErrInvalidInput, Msg: "plan integer out of range"}
+			return &Error{Code: ErrInvalidInput,
+				Msg: fmt.Sprintf("%s must be between 0 and %d, but %d was sent", field, max, *p)}
 		}
 		return nil
 	}
 	for _, e := range []error{
-		nn(spec.DownKbps, maxKbps), nn(spec.UpKbps, maxKbps),
-		nn(spec.IdleTimeoutSeconds, maxIdleSeconds), nn(spec.MaxContinuousSessionSeconds, maxSessionSeconds),
-		nn64(spec.TimeQuotaSeconds, maxTimeQuotaSecond), nn64(spec.DataQuotaBytes, maxDataQuotaBytes),
+		nn("down_kbps", spec.DownKbps, maxKbps), nn("up_kbps", spec.UpKbps, maxKbps),
+		nn("idle_timeout_seconds", spec.IdleTimeoutSeconds, maxIdleSeconds),
+		nn("max_continuous_session_seconds", spec.MaxContinuousSessionSeconds, maxSessionSeconds),
+		nn64("time_quota_seconds", spec.TimeQuotaSeconds, maxTimeQuotaSecond),
+		nn64("data_quota_bytes", spec.DataQuotaBytes, maxDataQuotaBytes),
 	} {
 		if e != nil {
 			return e
 		}
 	}
 	return nil
+}
+
+// reasonWithDetail appends the validator's own sentence (and the rule type, when there is one) to the machine
+// label, so a refusal names what to fix. The label stays first and unchanged, because callers match on it.
+func reasonWithDetail(label, ruleType string, err error) string {
+	var e *Error
+	if !errors.As(err, &e) || e.Msg == "" {
+		if ruleType != "" {
+			return label + ": " + ruleType
+		}
+		return label
+	}
+	if ruleType != "" {
+		return label + ": " + ruleType + ": " + e.Msg
+	}
+	return label + ": " + e.Msg
 }
 
 // PublishPlanRevision publishes a new immutable service-plan revision and moves the plan's current

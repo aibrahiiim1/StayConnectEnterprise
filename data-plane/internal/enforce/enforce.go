@@ -91,8 +91,13 @@ const dataCrossingLegacy = `LEFT JOIN LATERAL (
 					  AND b.entitlement_id = e.id AND b.bound_from <= ar.sampled_at
 					  AND (b.bound_until IS NULL OR b.bound_until > ar.sampled_at)
 				) x
-				JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
-				WHERE spr.data_quota_bytes IS NOT NULL AND x.running >= spr.data_quota_bytes) dat ON true`
+				LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
+				-- The entitlement's OWN frozen allowance wins when it has one (a PER_STAY_NIGHT grant); the
+				-- pinned plan revision answers for everything else, which is every entitlement granted before
+				-- that mode existed. Kept identical to p6_data_crossing above: these two must never disagree
+				-- about how many bytes a guest was given.
+				WHERE COALESCE(e.data_quota_bytes, spr.data_quota_bytes) IS NOT NULL
+				  AND x.running >= COALESCE(e.data_quota_bytes, spr.data_quota_bytes)) dat ON true`
 
 // resolveDataCrossing asks the catalog once per sweep. It is a single cheap lookup rather than a cached flag
 // because a migration can be applied or rolled back under a running process, and a flag decided at startup

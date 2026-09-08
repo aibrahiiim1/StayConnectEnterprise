@@ -55,6 +55,10 @@ const landingHTML = `<!doctype html>
   <h1>Welcome</h1>
   <p>Choose how you'd like to connect.</p>
 
+  <!-- WHY THE INTERNET STOPPED. Shown only when this device's most recent access ended because it ran out
+       of data or time; the sign-in below is unchanged and the guest carries straight on into it. -->
+  <div class="notice" id="access-ended" role="status" aria-live="polite"></div>
+
   <div class="notice" id="site-notice" role="status" aria-live="polite"></div>
 
   <div class="tabs" id="tabs"></div>
@@ -238,6 +242,19 @@ const landingHTML = `<!doctype html>
       // That is what keeps it outside the uniform-envelope contract. The contract governs what an
       // AUTHENTICATION ATTEMPT may reveal; this is a statement about the site made before anyone attempts
       // anything, and it carries no information about any room, name or stay.
+      // THE EXPIRY NOTICE. Asked once, on load, and only ever renders a message the SERVER chose from its
+      // two-sentence vocabulary — the browser never composes this text and never learns anything else about
+      // the access that ended. Any failure is silent: the ordinary sign-in page is the correct fallback.
+      fetch('/access/status', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(res){
+          if (!res || !res.message) return;
+          const n = document.getElementById('access-ended');
+          n.textContent = res.message;
+          n.classList.add('show');
+        })
+        .catch(function(){ /* no notice; the sign-in form below is unaffected */ });
+
       if (cfg.internet_packages_available === false) {
         const n = document.getElementById('site-notice');
         n.textContent = 'Internet access is not available here at the moment. You can still sign in, but there is nothing to connect you to yet — please let reception know.';
@@ -441,12 +458,12 @@ const landingHTML = `<!doctype html>
         // A new attempt after this one must be a NEW resolution, not a replay of a spent request id.
         PMS_REQUEST_ID = ''; PMS_ATTEMPT_KEY = '';
         window.location = (j.redirect_to || '/success') + '?s=' + encodeURIComponent(j.session_id);
-        return;
+        return true;
       }
       if (j.ok && j.needs_choice) {
         PMS_AUTH_CONTEXT = j.auth_context_id || '';
         renderPhase3Choices(j.choices || [], errEl);
-        return;
+        return true;
       }
       // EVERY other answer — including a transport failure — is the same message. No branch here reads the
       // server's outcome, the site configuration, or anything else: one assignment, one string.
@@ -456,7 +473,38 @@ const landingHTML = `<!doctype html>
       // the resolution already recorded. Discarding the id would turn the second of those into a duplicate
       // resolution; keeping it lets the retry return the same Auth Context. A guest who corrects their details
       // gets a new id automatically, because the details are what the id is keyed to.
+      //
+      // The boolean is for the CALLER, not the guest: the package-choice handler needs to know whether the
+      // offer set it is displaying is still worth showing. It carries no more information than "this did not
+      // succeed", which the guest can already see.
       errEl.textContent = PHASE3_FAIL;
+      return false;
+    }
+
+    // RETURNING TO SIGN-IN AFTER A FAILED SELECTION.
+    //
+    // A failed grant used to re-enable the same buttons and leave them on screen, so the guest was looking at
+    // three package choices that had just been refused. They read as still valid, so the natural response is
+    // to press one again -- which is exactly what happened on 2026-09-07, three times in fourteen seconds,
+    // each one failing identically.
+    //
+    // WHY SIGN-IN RATHER THAN A RETRY BUTTON. The guest-facing answer is uniform by design: the portal is not
+    // told whether the grant failed because the Auth Context was already spent, because the offer expired, or
+    // for an internal reason. So it cannot know whether pressing the same button again is a safe retry or an
+    // attempt to spend a consumed context. Going back to sign-in is safe under every one of those readings,
+    // and it costs the guest nothing, because the request id is deliberately retained: signing in again with
+    // the same details returns the SAME Auth Context rather than creating a second one, so no duplicate grant
+    // can arise from the retry.
+    function resetPhase3ToSignIn(errEl) {
+      const box = document.getElementById('pms-choices');
+      const form = document.getElementById('form-pms');
+      box.innerHTML = '';
+      box.style.display = 'none';
+      form.style.display = '';
+      // The same uniform message as every other failure. Nothing here says which stage failed.
+      errEl.textContent = PHASE3_FAIL;
+      const btn = form.querySelector('button[type=submit]');
+      if (btn) btn.disabled = false;
     }
 
     function renderPhase3Choices(choices, errEl) {
@@ -477,8 +525,10 @@ const landingHTML = `<!doctype html>
         b.addEventListener('click', async function() {
           box.querySelectorAll('button').forEach(function(x){ x.disabled = true; });
           errEl.textContent = '';
-          await submitPhase3({ auth_context_id: PMS_AUTH_CONTEXT, package_revision_id: c.package_revision_id }, errEl);
-          box.querySelectorAll('button').forEach(function(x){ x.disabled = false; });
+          const ok = await submitPhase3({ auth_context_id: PMS_AUTH_CONTEXT, package_revision_id: c.package_revision_id }, errEl);
+          // On success submitPhase3 has already navigated away. On failure the offer set can no longer be
+          // trusted, so it is taken down rather than re-enabled.
+          if (!ok) resetPhase3ToSignIn(errEl);
         });
         box.appendChild(b);
       });

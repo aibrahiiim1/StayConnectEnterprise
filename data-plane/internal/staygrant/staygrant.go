@@ -38,6 +38,11 @@ var (
 	ErrAlreadyEntitled = errors.New("staygrant: stay already holds a live entitlement")
 	// ErrDeviceLimit — the entitlement's plan does not allow another concurrent device.
 	ErrDeviceLimit = errors.New("staygrant: device limit reached")
+	// ErrStayLengthUnknown — a PER_STAY_NIGHT package cannot be granted because this Stay's arrival or
+	// departure is not authoritatively known, so the allowance it earns cannot be computed. Refusing is the
+	// only safe answer: every guess is either mean to a long stay or generous to a short one, and both are
+	// permanent once frozen onto an entitlement.
+	ErrStayLengthUnknown = errors.New("staygrant: stay length is not authoritatively known")
 )
 
 // Store performs atomic stay grants.
@@ -136,8 +141,9 @@ func (s *Store) GrantTx(ctx context.Context, tx pgx.Tx, tenant, site string, r R
 	var settlement []string
 	var pkgType string
 	var duration []byte
+	var allocPolicy []byte
 	err = tx.QueryRow(ctx, `SELECT ipr.service_plan_revision_id::text, ipr.price_minor, ipr.settlement_methods,
-			ipr.package_type, ipr.duration_policy
+			ipr.package_type, ipr.duration_policy, ipr.data_allocation_policy
 		FROM iam_v2.internet_package_revisions ipr
 		JOIN iam_v2.internet_packages ip ON ip.tenant_id=ipr.tenant_id AND ip.site_id=ipr.site_id AND ip.id=ipr.package_id
 		WHERE ipr.tenant_id=$1 AND ipr.site_id=$2 AND ipr.id=$3
@@ -145,7 +151,7 @@ func (s *Store) GrantTx(ctx context.Context, tx pgx.Tx, tenant, site string, r R
 		  AND ip.is_system IS NOT TRUE                 -- system/grace catalogs are never guest-purchasable
 		  AND (ipr.visible_from IS NULL OR ipr.visible_from <= now())
 		  AND (ipr.visible_until IS NULL OR ipr.visible_until > now())`,
-		tenant, site, r.PackageRevID).Scan(&svcRev, &priceMinor, &settlement, &pkgType, &duration)
+		tenant, site, r.PackageRevID).Scan(&svcRev, &priceMinor, &settlement, &pkgType, &duration, &allocPolicy)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return res, ErrPackageNotGrantable
@@ -224,17 +230,28 @@ func (s *Store) GrantTx(ctx context.Context, tx pgx.Tx, tenant, site string, r R
 			return res, fmt.Errorf("refusing to grant plan revision %s: %s", svcRev, why)
 		}
 	}
+	// THE DERIVED ALLOWANCE IS RESOLVED ONCE, HERE, AND FROZEN.
+	//
+	// A PER_STAY_NIGHT package computes its byte allowance from the length of THIS stay. It is computed inside
+	// the same transaction that already holds the L1 Stay lock, from the same Stay row the context was pinned
+	// to, and written onto the entitlement -- so a later PMS update that extends or shortens the stay cannot
+	// reach back and change what this guest was granted. A FIXED package resolves to nothing and the
+	// entitlement goes on reading its pinned plan revision, exactly as every entitlement did before this.
+	dataQuota, qErr := s.effectiveDataQuota(ctx, tx, tenant, site, res.Stay, allocPolicy)
+	if qErr != nil {
+		return res, qErr
+	}
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.entitlements
 		(tenant_id, site_id, stay_id, pms_interface_id, purchase_id, policy_snapshot, service_plan_revision_id,
-		 package_revision_id, time_accounting_mode, end_mode, status, window_ends_at)
+		 package_revision_id, time_accounting_mode, end_mode, status, window_ends_at, data_quota_bytes)
 		SELECT $1,$2,$3,$4,$5,
 		       jsonb_build_object('package_revision_id',$8::text,'service_plan_revision_id',$9::text,
 		                          'granted_from','PMS_AUTH_CONTEXT'),
-		       $7,$6, spr.time_accounting_mode, $10, 'ACTIVE', $11
+		       $7,$6, spr.time_accounting_mode, $10, 'ACTIVE', $11, $12
 		FROM iam_v2.service_plan_revisions spr WHERE spr.id=$7
 		RETURNING id::text`,
 		tenant, site, res.Stay, res.Interface, res.PurchaseID, r.PackageRevID, svcRev,
-		r.PackageRevID, svcRev, endMode, window).Scan(&res.EntitlementID); err != nil {
+		r.PackageRevID, svcRev, endMode, window, dataQuota).Scan(&res.EntitlementID); err != nil {
 		return res, err
 	}
 	if _, err := tx.Exec(ctx, `SELECT iam_v2.apply_entitlement_transition($1,'ACTIVE',$2,'GRANT')`,
@@ -275,4 +292,54 @@ func grantShape(durationPolicy []byte) (string, int64) {
 		return "VALIDITY_WINDOW", secs
 	}
 	return "MANUAL_END", 0
+}
+
+// effectiveDataQuota resolves the byte allowance to FREEZE onto this entitlement, or nil to leave the
+// entitlement reading its pinned service plan revision.
+//
+// nil is the answer for every package published before PER_STAY_NIGHT existed and for every package that
+// stays FIXED, which is why applying this feature changes nothing for them: the column stays NULL and every
+// quota reader falls through to the plan revision exactly as it always did.
+//
+// WHEN IT REFUSES. A PER_STAY_NIGHT package whose stay has no authoritative arrival or departure is NOT
+// granted. There is no defensible guess: assume one night and a three-week guest is cut off on day two;
+// assume the maximum and the allowance stops being derived from anything. The Stay row is read inside this
+// transaction, which already holds the L1 Stay lock taken when the Auth Context was consumed, so the dates
+// cannot move between being read here and the entitlement being written below.
+func (s *Store) effectiveDataQuota(ctx context.Context, tx pgx.Tx, tenant, site, stayID string,
+	rawPolicy []byte) (*int64, error) {
+	if len(rawPolicy) == 0 {
+		return nil, nil // no policy column value at all: FIXED
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(rawPolicy, &raw); err != nil {
+		return nil, fmt.Errorf("%w: unreadable data allocation policy", ErrPackageNotGrantable)
+	}
+	policy, err := iamv2.ParseDataAllocationPolicy(raw)
+	if err != nil {
+		// A malformed policy on an IMMUTABLE revision cannot be corrected in place, so this refuses the grant
+		// rather than falling back to the plan quota -- silently granting different terms than the operator
+		// published is worse than refusing one package.
+		return nil, fmt.Errorf("%w: %v", ErrPackageNotGrantable, err)
+	}
+	if policy.Mode != iamv2.AllocPerStayNight {
+		return nil, nil
+	}
+
+	var arrival, departure *time.Time
+	if err := tx.QueryRow(ctx,
+		`SELECT s.arrival, s.departure FROM iam_v2.stays s
+		  WHERE s.tenant_id=$1 AND s.site_id=$2 AND s.id=$3`,
+		tenant, site, stayID).Scan(&arrival, &departure); err != nil {
+		return nil, err
+	}
+	bytes, snapshot, err := iamv2.EffectiveDataQuotaBytes(policy,
+		iamv2.EligibilitySubject{Stay: &iamv2.StayEvidence{Arrival: arrival, Departure: departure}})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrStayLengthUnknown, err)
+	}
+	if !snapshot {
+		return nil, nil
+	}
+	return &bytes, nil
 }

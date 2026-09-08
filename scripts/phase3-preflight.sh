@@ -9,6 +9,22 @@
 #
 # Usage: bash scripts/phase3-preflight.sh [--json]
 set -uo pipefail
+
+# awk_has <start-regex> <end-regex> <file> <fixed-pattern> — does that range of the file contain the pattern?
+#
+# THIS EXISTS BECAUSE `awk ... | grep -q ...` IS A RACE UNDER `set -o pipefail`, WHICH THIS FILE SETS.
+# grep -q exits the moment it matches, closing the pipe; awk then dies of SIGPIPE; and pipefail reports the
+# PIPELINE as failed even though the pattern was found. Whether awk had finished writing first is timing, so
+# the same unchanged file passes on one run and fails on the next -- which is exactly what happened: the
+# smoke_live route-count assertion reported PASS (108/0) and then FAIL (107/1) on byte-identical sources.
+#
+# Capturing the range first removes the pipe, and with it the race. The match itself is unchanged.
+awk_has() {
+  local start="$1" end="$2" file="$3" pat="$4" body
+  [ -f "$file" ] || return 1
+  body="$(awk "/$start/,/$end/" "$file")" || return 1
+  case "$body" in *"$pat"*) return 0 ;; *) return 1 ;; esac
+}
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 JSON=0
 [ "${1:-}" = "--json" ] && JSON=1
@@ -484,7 +500,7 @@ if [ -f "$RECON" ]; then
     no "the converge does not verify its result against the kernel"
   fi
   # the remaining lease, never the original
-  if awk '/^func CarryOverCommands/,/^}/' "$RECON" | grep -q 'e.Expires > 0'; then
+  if awk_has '^func CarryOverCommands' '^}' "$RECON" 'e.Expires > 0'; then
     ok "carried authorizations use the REMAINING lease, not the original"
   else
     no "carried authorizations do not use the remaining lease"
@@ -578,12 +594,12 @@ if [ -f "$RECON" ]; then
   else
     no "an unreadable live nft state is not distinguished from an empty one"
   fi
-  if awk '/^func \(e \*Engine\) ReadLive/,/^}/' "$RECON" | grep -q 'list tables'; then
+  if awk_has '^func \(e \*Engine\) ReadLive' '^}' "$RECON" 'list tables'; then
     ok "set absence is decided by enumerating the table, not by a failed read"
   else
     no "set absence is still inferred from a failed read"
   fi
-  if awk '/^func \(e \*Engine\) readSet/,/^}/' "$RECON" | grep -q 'return nil, nil'; then
+  if awk_has '^func \(e \*Engine\) readSet' '^}' "$RECON" 'return nil, nil'; then
     no "a failed set read still degrades to an empty set"
   else
     ok "a failed set read never degrades to an empty set"
@@ -690,7 +706,7 @@ if [ -f "$ROLLBACK" ]; then
   else
     ok "no force/override path exists on the ordinary rollback command"
   fi
-  awk '/^check_compat_boundary/,/^}/' "$ROLLBACK" | grep -q 'legacy_auth_count'     && ok "the boundary decides from the LIVE authorization set, not from assumptions"     || no "the boundary does not read the live authorization set"
+  awk_has '^check_compat_boundary' '^}' "$ROLLBACK" 'legacy_auth_count'     && ok "the boundary decides from the LIVE authorization set, not from assumptions"     || no "the boundary does not read the live authorization set"
 else
   no "scripts/binary-rollback.sh is missing"
 fi
@@ -717,7 +733,7 @@ else
   no "netd has no DHCP ownership-evidence probe"
 fi
 grep -q 'statusWithEvidence' "$ROOT/data-plane/cmd/netd/main.go"   && ok "netd health reports the plane against a FRESH evidence probe, not a cached one"   || no "netd health does not consult the ownership authority"
-awk '/func \(p \*phase3Shaping\) statusWithEvidence/,/^}/' "$ROOT/data-plane/cmd/netd/phase3_shaping.go"   | grep -q 'shapingDegradedState'   && ok "an evidence outage degrades the reported enforcement plane"   || no "the plane can report itself healthy while its ownership authority is unavailable"
+awk_has 'func \(p \*phase3Shaping\) statusWithEvidence' '^}' "$ROOT/data-plane/cmd/netd/phase3_shaping.go" 'shapingDegradedState'   && ok "an evidence outage degrades the reported enforcement plane"   || no "the plane can report itself healthy while its ownership authority is unavailable"
 CHK="$ROOT/deploy/scripts/check-dhcp-ownership-evidence.sh"
 if [ -f "$CHK" ]; then
   ok "an operational DHCP ownership-evidence check ships with the appliance"
@@ -761,7 +777,7 @@ grep -q 'rollback_eligible' "$DHA"   && ok "a rollback target must satisfy the c
 # THE GUARDS MUST BE FAIL-CLOSED, and one shared implementation must decide what satisfies the contract.
 [ -f "$ROOT/deploy/scripts/lib-hotel-admin-contract.sh" ]   && ok "one shared implementation decides whether a release satisfies the contract"   || no "the deployment path and the standing checker define contract satisfaction separately"
 grep -q 'ha_served_build_id' "$ROOT/deploy/scripts/check-hotel-admin-integrity.sh"   && grep -q 'ha_served_build_id' "$DHA"   && ok "both guards read the served BUILD_ID through the same fail-closed extractor"   || no "a guard still compares a served BUILD_ID it may not have been able to extract"
-awk '/^smoke_live\(\)/,/^}/' "$DHA" | grep -q 'checked" -ne "$want_n'   && ok "the live smoke test proves it exercised every required route, by count"   || no "the live smoke test cannot tell a full route sweep from an empty one"
+awk_has '^smoke_live\(\)' '^}' "$DHA" 'checked" -ne "$want_n'   && ok "the live smoke test proves it exercised every required route, by count"   || no "the live smoke test cannot tell a full route sweep from an empty one"
 grep -q 'HOTEL_ADMIN_PUBLIC_URL' "$ROOT/deploy/scripts/check-hotel-admin-integrity.sh"   && ok "a configured operator endpoint is verified to serve the managed release"   || no "localhost health alone is allowed to prove the operator endpoint is current"
 [ -f "$ROOT/deploy/scripts/check-hotel-admin-integrity-adversarial.sh" ]   && ok "the integrity guards carry an adversarial suite that drives them against controlled endpoints"   || no "nothing proves the integrity guards can fail"
 # THE CERTIFICATE CHAIN, not just the leaf. A leaf with two years of life above an intermediate that expired

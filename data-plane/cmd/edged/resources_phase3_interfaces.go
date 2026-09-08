@@ -60,6 +60,16 @@ type pmsInterfaceRow struct {
 	// SecretGeneration is the CURRENT credential generation number — never the credential.
 	SecretGeneration *int       `json:"secret_generation,omitempty"`
 	SecretRotatedAt  *time.Time `json:"secret_rotated_at,omitempty"`
+
+	// WHAT THIS INTERFACE IS ACTUALLY POINTED AT, from its published Revision.
+	//
+	// The list could say an interface was published as revision #4 of 7 and nothing about WHERE it dials, so
+	// answering "which PMS is this and on what port" meant opening the revision history and reading a config
+	// blob. These are projections of the published Revision — read-only, and the Revision itself is
+	// unchanged and still immutable.
+	Endpoint       *string `json:"endpoint,omitempty"`
+	SourceTimezone *string `json:"source_timezone,omitempty"`
+	BaseCurrency   *string `json:"financial_base_currency,omitempty"`
 }
 
 func (s *server) pmsInterfacesRoutes() http.Handler {
@@ -196,12 +206,16 @@ const pmsInterfaceCols = `i.id::text, i.connector_kind, i.display_label, i.lifec
          WHERE g.pms_interface_id = i.id AND g.superseded_at IS NULL
          ORDER BY g.generation_no DESC LIMIT 1),
        (SELECT max(g.superseded_at) FROM iam_v2.pms_interface_secret_generations g
-         WHERE g.pms_interface_id = i.id)`
+         WHERE g.pms_interface_id = i.id),
+       (SELECT r.config->>'endpoint' FROM iam_v2.pms_interface_revisions r WHERE r.id = i.current_revision_id),
+       (SELECT r.source_timezone FROM iam_v2.pms_interface_revisions r WHERE r.id = i.current_revision_id),
+       (SELECT r.config->>'financial_base_currency' FROM iam_v2.pms_interface_revisions r WHERE r.id = i.current_revision_id)`
 
 func scanPMSInterface(row interface{ Scan(...any) error }, e *pmsInterfaceRow) error {
 	if err := row.Scan(&e.ID, &e.ConnectorKind, &e.DisplayLabel, &e.LifecycleState,
 		&e.CurrentRevisionID, &e.CurrentRevisionNo, &e.RevisionCount,
-		&e.SecretGeneration, &e.SecretRotatedAt); err != nil {
+		&e.SecretGeneration, &e.SecretRotatedAt,
+		&e.Endpoint, &e.SourceTimezone, &e.BaseCurrency); err != nil {
 		return err
 	}
 	e.Published = e.CurrentRevisionID != ""

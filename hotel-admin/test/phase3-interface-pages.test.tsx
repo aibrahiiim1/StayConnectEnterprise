@@ -92,7 +92,7 @@ describe("PMS interfaces page", () => {
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
     render(<Page />);
     // an empty cell would read as "not loaded yet"; an interface with nothing published resolves nothing
-    expect(await screen.findByText("nothing published")).toBeTruthy();
+    expect(await screen.findByText("not configured")).toBeTruthy();
   });
 
   it("shows the four health dimensions separately and the age of the backlog", async () => {
@@ -120,7 +120,7 @@ describe("PMS interfaces page", () => {
     await screen.findByText("Main PMS");
     await userEvent.click(screen.getByRole("button", { name: "Open" }));
 
-    await screen.findByText("Revisions");
+    await screen.findByText("History");
     await userEvent.click(screen.getByRole("button", { name: "Publish" }));
     await userEvent.type(screen.getByLabelText(/Reason/), "CONFIG_UPDATE");
     await userEvent.type(screen.getByLabelText(/Confirm your password/), "pw");
@@ -144,7 +144,7 @@ describe("PMS interfaces page", () => {
     render(<Page />);
     await screen.findByText("Main PMS");
     await userEvent.click(screen.getByRole("button", { name: "Open" }));
-    await screen.findByText("Revisions");
+    await screen.findByText("History");
     await userEvent.click(screen.getByRole("button", { name: "Publish" }));
     await userEvent.type(screen.getByLabelText(/Reason/), "CONFIG_UPDATE");
     await userEvent.type(screen.getByLabelText(/Confirm your password/), "pw");
@@ -202,7 +202,7 @@ describe("PMS interfaces page", () => {
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
     render(<Page />);
     await screen.findByText("Main PMS");
-    await userEvent.click(screen.getByRole("button", { name: "Configure" }));
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
 
     expect(await screen.findByLabelText(/PMS time zone/)).toBeTruthy(); // still the operator's to set
     for (const gone of [/folio identity/i, /credential mode/i, /normalization version/i, /resync supported/i]) {

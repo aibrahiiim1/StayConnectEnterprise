@@ -37,6 +37,9 @@ func (s *server) commercialPackagesRoutes() http.Handler {
 	r.Get("/purchases", s.listCommercePurchases)
 	// package-scoped
 	r.Get("/{id}/revisions", s.listCommercialPackageRevisions)
+	// The CURRENT configuration, for the Edit form to load. Read-only: saving still goes through the ordinary
+	// publish route, which creates a new immutable revision.
+	r.Get("/{id}/current", s.getCommercialPackageCurrent)
 	r.Post("/{id}/active", s.setCommercialPackageActive)
 	return r
 }
@@ -366,6 +369,9 @@ type publishPackageReq struct {
 	GrantTiers            []commerceTierDTO `json:"grant_tiers"`
 	VisibleFrom           *time.Time        `json:"visible_from"`
 	VisibleUntil          *time.Time        `json:"visible_until"`
+	// DataAllocationPolicy is optional and absent means FIXED, so every client that predates it -- and every
+	// package that stays on a flat allowance -- goes on publishing exactly what it published before.
+	DataAllocationPolicy map[string]any `json:"data_allocation_policy"`
 }
 
 func (s *server) publishCommercialPackage(w http.ResponseWriter, r *http.Request) {
@@ -379,6 +385,7 @@ func (s *server) publishCommercialPackage(w http.ResponseWriter, r *http.Request
 		PackageCode: in.Code, ServicePlanRevisionID: in.ServicePlanRevisionID,
 		Display: in.Display, DurationPolicy: in.DurationPolicy,
 		VisibleFrom: in.VisibleFrom, VisibleUntil: in.VisibleUntil,
+		DataAllocationPolicy: in.DataAllocationPolicy,
 	}
 	for _, ru := range in.EligibilityRules {
 		spec.EligibilityRules = append(spec.EligibilityRules, iamv2.EligibilityRule{Type: ru.Type, Value: ru.Value})
@@ -456,4 +463,31 @@ func (s *server) setCommercialPackageActive(w http.ResponseWriter, r *http.Reque
 	}
 	s.audit(r, action, "commercial_package", id, nil)
 	writeJSON(w, http.StatusOK, map[string]any{"package_id": id, "active": in.Active})
+}
+
+func (s *server) getCommercialPackageCurrent(w http.ResponseWriter, r *http.Request) {
+	cur, disabled, err := s.commerce.GetPackageCurrent(r.Context(), s.tenantID, s.siteID, chi.URLParam(r, "id"))
+	if err != nil {
+		// SAYING WHICH FAILURE IT IS, because the two need different actions from the operator.
+		//
+		// If this service cannot read the package's conditions, editing must not be offered at all: saving
+		// republishes the whole package, so a form loaded without the eligibility rules and speed steps would
+		// quietly drop them - and a package left with no grant tier is offered to nobody. Answering
+		// "not found" here would invite exactly that, by looking like a missing package rather than a
+		// refusal to risk one.
+		if errors.Is(err, iamv2.ErrPackageConditionsUnreadable) {
+			jsonErr(w, http.StatusConflict, "conditions_unreadable",
+				"This package cannot be edited here yet: its eligibility conditions and speed steps are not "+
+					"readable by this service, and saving without them would change who the package is "+
+					"offered to. Ask your StayConnect administrator to grant read access.")
+			return
+		}
+		jsonErr(w, http.StatusNotFound, "not_found", "no current configuration for this package")
+		return
+	}
+	if disabled {
+		jsonErr(w, http.StatusServiceUnavailable, "phase2_disabled", "commercial packages are not enabled")
+		return
+	}
+	writeJSON(w, http.StatusOK, cur)
 }
