@@ -276,11 +276,33 @@ smoke_live() {
   # extracted -- so a page that rendered without the stamp, an endpoint answering with something that is not
   # this application, or an extraction that quietly broke, all reported the identity as verified. An identity
   # check that cannot obtain an identity has FAILED.
-  # THE IDENTITY IS PROVEN LOSSLESSLY. The endpoint is asked for THIS build's own asset path, which carries
-  # the BUILD_ID exactly as generated; the running server answers 200 only if that is the build it is running.
-  # Nothing is normalised, compared as substrings, or read out of an HTML comment that cannot represent "--".
+  # THE IDENTITY IS PROVEN TWICE, AND NEITHER PROOF IS REDUNDANT.
+  #
+  # FIRST the endpoint must ASSERT an identity. Next stamps the BUILD_ID into every rendered document, and an
+  # endpoint that serves none is not this application -- or is an extraction that quietly broke. Either way an
+  # identity check that cannot obtain an identity has FAILED, and must say so rather than fall through.
+  #
+  # SECOND that identity must be EXACTLY this build. The stamp alone cannot prove it: an HTML comment cannot
+  # contain "--", so Next writes a hyphen there as an underscore, and comparing through that encoding makes
+  # "ABC-DEF" and "ABC_DEF" indistinguishable -- both ids Next can generate, so a deployment could be reported
+  # verified against a DIFFERENT build. So the exact characters are proven by asking the endpoint for THIS
+  # build's own asset path, which carries the id as generated and is resolved by the running server against
+  # its own build alone. 200 means this build; 404 means another, whatever the punctuation.
+  #
+  # The asset probe cannot replace the stamp either: on its own it would accept any server that answers 200
+  # to everything. Together they refuse a silent endpoint, a different build, and a permissive one.
+  local served_bid
+  served_bid="$(ha_served_build_id "$base")"
+  if [ -z "$served_bid" ]; then
+    echo "SMOKE FAIL: could not extract a BUILD_ID from $base — the endpoint asserts no identity" >&2
+    return 1
+  fi
+  if [ "$(printf %s "$served_bid" | tr -- - _)" != "$(printf %s "$want_bid" | tr -- - _)" ]; then
+    echo "SMOKE FAIL: $base is serving BUILD_ID '$served_bid', not '$want_bid'" >&2
+    return 1
+  fi
   if ! ha_serves_build_id "$base" "$want_bid"; then
-    echo "SMOKE FAIL: $base is not serving BUILD_ID '$want_bid' — it did not answer for that build's own assets" >&2
+    echo "SMOKE FAIL: $base is serving BUILD_ID that differs from '$want_bid' by punctuation the page stamp cannot represent — it did not answer for that build's own assets" >&2
     return 1
   fi
   echo ">> smoke: live endpoint serves BUILD_ID $want_bid"
