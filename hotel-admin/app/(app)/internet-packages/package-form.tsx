@@ -19,7 +19,7 @@ import { Trash2, Plus, ChevronDown, ChevronRight } from "lucide-react";
 import { durationToSeconds } from "@/lib/units";
 import {
   ALLOCATION_MODE_LABELS, validateAllocation, serializeAllocation, previewAllocation,
-  type AllocationForm,
+  allowanceNotice, type AllocationForm,
 } from "@/lib/stay-packages";
 import { planSummary } from "@/lib/package-save";
 import {
@@ -126,6 +126,8 @@ export function PackageForm({
   const [error, setError] = useState<string | null>(null);
 
   const selected = plans.find((p) => p.plan_id === planID);
+  // Recomputed on every render, so it follows the plan, the mode and the three numbers immediately.
+  const notice = allowanceNotice(alloc, selected?.data_quota_bytes, !!selected);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -286,6 +288,56 @@ export function PackageForm({
               afterwards if their stay is extended or shortened. Guests who did not sign in with their room
               are not offered this package, because their stay length is not known.
             </p>
+          </div>
+        )}
+
+        {/* WHICH ALLOWANCE ACTUALLY APPLIES.
+            Two numbers are visible at once -- the plan's flat quota and the package's per-night one -- and
+            nothing said which a guest receives. Informational only: it never blocks Save, because both
+            configurations are legitimate. */}
+        {notice && (
+          <div
+            data-testid="allowance-notice"
+            role="note"
+            className={
+              notice.emphasis
+                ? "mt-2 text-sm rounded-md border border-border bg-panel2 px-3 py-2 space-y-1"
+                : "mt-2 text-xs text-muted"
+            }
+          >
+            {notice.kind === "FIXED_USES_PLAN" && (
+              <p>This package uses the service plan&rsquo;s {notice.planQuotaGB} GB data allowance.</p>
+            )}
+            {notice.kind === "FIXED_PLAN_HAS_NO_QUOTA" && (
+              <p>The selected service plan sets no data allowance, so this package does not limit data.</p>
+            )}
+            {notice.kind === "PER_STAY_NIGHT_PLAN_HAS_NO_QUOTA" && (
+              <p>
+                The selected service plan sets no data allowance of its own, so this package&rsquo;s{" "}
+                {notice.gbPerNight} GB per stay night is the only allowance a guest receives.
+              </p>
+            )}
+            {notice.kind === "PER_STAY_NIGHT_OVERRIDES_PLAN" && (
+              <>
+                <p>Service plan allowance: <strong>{notice.planQuotaGB} GB</strong></p>
+                <p>
+                  This package gives <strong>{notice.gbPerNight} GB per stay night</strong> instead.
+                  {notice.minGB !== undefined && <> Minimum {notice.minGB} GB.</>}
+                  {notice.maxGB !== undefined && <> Maximum {notice.maxGB} GB.</>}
+                </p>
+                {notice.exampleGB !== undefined && (
+                  <p data-testid="allowance-example">
+                    For a {notice.exampleNights}-night stay the guest receives{" "}
+                    <strong>{notice.exampleGB} GB</strong>.
+                  </p>
+                )}
+                <p className="text-muted">
+                  For guests receiving this package, the stay-based allowance takes precedence over the
+                  service plan allowance. The service plan itself is unchanged, and its {notice.planQuotaGB} GB
+                  still applies to other packages that use the plan&rsquo;s own allowance.
+                </p>
+              </>
+            )}
           </div>
         )}
       </div>
