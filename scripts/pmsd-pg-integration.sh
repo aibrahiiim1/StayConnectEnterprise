@@ -184,6 +184,21 @@ fi
 docker exec "$C" psql -U postgres -d "$DB" -tAqc \
   "INSERT INTO public.schema_migrations(version) VALUES ('0063_scoped_reader_for_current_package_conditions') ON CONFLICT DO NOTHING;" >/dev/null
 
+# 0064 adds entitlements.data_quota_bytes and internet_package_revisions.data_allocation_policy, and makes
+# p6_data_crossing compare usage against COALESCE(entitlement snapshot, pinned plan quota). internal/enforce
+# reads that column directly, so without this the enforcement suites fail with "column e.data_quota_bytes
+# does not exist" rather than on anything they are testing.
+if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+     < "$ROOT/data-plane/migrations/0064_the_allowance_a_stay_earned_is_frozen_when_it_is_granted.up.sql" >/dev/null 2>&1; then
+  echo "0064 FAILED TO APPLY -- deterministic, not a flake"
+  docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+    < "$ROOT/data-plane/migrations/0064_the_allowance_a_stay_earned_is_frozen_when_it_is_granted.up.sql" 2>&1 | tail -10
+  exit 1
+fi
+docker exec "$C" psql -U postgres -d "$DB" -tAqc \
+  "INSERT INTO public.schema_migrations(version) VALUES ('0064_the_allowance_a_stay_earned_is_frozen_when_it_is_granted') ON CONFLICT DO NOTHING;" >/dev/null
+
+
 built="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"
 if [ "${built:-0}" -lt 40 ]; then echo "INFRA: SCHEMA BUILD FAILED (iam_v2 tables=$built)"; exit 2; fi
 runtime_cols="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.columns WHERE table_schema='iam_v2' AND table_name='pms_interface_runtime' AND column_name='pinned_secret_generation_id';")"

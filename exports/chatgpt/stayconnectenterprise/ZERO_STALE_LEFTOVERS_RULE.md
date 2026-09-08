@@ -1,6 +1,14 @@
 # PERMANENT RULE — Zero Stale Leftovers (project-wide, mandatory)
 
-**Authoritative, permanent Product-Owner rule for the entire StayConnect Enterprise project.** It applies to every future milestone, phase, implementation, acceptance run, documentation update, migration, deployment, export and handoff. Referenced from `StayConnect-IAM-Handoff.md`, `00-START-HERE.md`, and `PROJECT-INSTRUCTIONS.md`.
+**Authoritative, permanent Product-Owner rule for the entire StayConnect Enterprise project.** Referenced from `StayConnect-IAM-Handoff.md`, `00-START-HERE.md`, and `PROJECT-INSTRUCTIONS.md`.
+
+## WHEN THIS RULE APPLIES (Product-Owner decision — read first)
+
+This rule applies to **CONTROLLED work and milestone closure**: an approved milestone or phase, a verified live acceptance, a migration, a deployment, an authoritative export or handoff, a product/architecture decision, or an explicit release closure — as defined in `CLAUDE.md` §0.
+
+It does **not** apply to routine FAST DEVELOPMENT: cosmetic, UI, text, layout, bounded refactor and ordinary implementation/bug work creates no governance transition, no pack rebuild and no manifest, and must not be turned into a release process. The rule below is written for the moment work is *closed*, not for every edit on the way there.
+
+Everything after this section assumes CONTROLLED scope.
 
 ## Absolute requirement
 No completed task may leave behind any stale, superseded, contradictory, misleading or partially-updated artifact — in docs, handoffs, plans, roadmaps, acceptance records, runbooks, diagrams, README/inline comments, TODOs, feature flags, config templates, env examples, migration notes, fixtures, compatibility/dead code, unused functions, legacy schema/API references, old paths, exported packs, manifests/checksums, scripts, UI labels, stale defaults, old service/role/network names, or old next-action statements.
@@ -10,7 +18,7 @@ No completed task may leave behind any stale, superseded, contradictory, mislead
 - A banner/note/disclaimer does **not** excuse contradictory current-state content.
 
 ## Source-of-truth enforcement
-Read sources in the required precedence order before changing anything. After every authorized change, synchronize all directly-related sources to state one consistent truth: current Phase; exact maturity; what is implemented / verified / not implemented / prohibited; authoritative commits; known limitations; remaining blockers; the **single** next authorized action. The latest PO-approved contract + verified execution evidence override all older plans/reports/chats/comments/assumptions.
+Read sources in the required precedence order before changing anything. After every authorized CONTROLLED change or at milestone closure, synchronize all directly-related sources to state one consistent truth: current Phase; exact maturity; what is implemented / verified / not implemented / prohibited; authoritative commits; known limitations; remaining blockers; the **single** next authorized action. The latest PO-approved contract + verified execution evidence override all older plans/reports/chats/comments/assumptions.
 
 Old content may remain **only if all** hold: (1) required as audit/history; (2) explicitly labeled `HISTORICAL`/`SUPERSEDED`/`CLOSED`/`DEPRECATED`; (3) cannot be mistaken for current plan/behavior/authorization; (4) names the current replacement directly; (5) the stale-content validator excludes it only via an explicit reviewed historical marker. Otherwise remove/rewrite it.
 
@@ -30,7 +38,7 @@ Every Project Pack / Evidence Pack must be rebuilt from the committed authoritat
 The committed changed-file manifest must enumerate the **complete** `base..delivery_head` path/status set — including the export packs, checksums, manifest and provenance files that the final PR diff actually contains — verified equal to `git diff --name-status base..delivery_head`. A substantive-only manifest that lists fewer paths than the final PR diff is a stale/contradictory artifact and fails. Follow the deterministic `inventory_head` / `delivery_head` protocol in `docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md` §4.1: the manifest records `inventory_head` (the commit before the delivery-only commit) as its generation HEAD, while its path/status table covers the whole `base..delivery_head` diff so no path in the final PR diff is unlisted; the Final Report and PR body record both HEADs and the actual final changed-file count.
 
 ## Required automation
-`tools/validate-project-state.sh` must exit non-zero on: contradictory current Phase statuses; >1 current next action; stale baseline commits; stale plan-status wording; superseded architecture terms outside marked historical sections; project-pack source mismatch; manifest/hash mismatch; missing required acceptance record; current files claiming a completed phase is not started; current files claiming an unimplemented capability is implemented; current files claiming a separately-gated action is authorized; obsolete files still authoritative; broken core links; secrets/guest PII in exports. Run it before every documentation commit, implementation/acceptance commit, and each pack export; record its PASS in the acceptance evidence.
+`tools/validate-project-state.sh` must exit non-zero on: contradictory current Phase statuses; >1 current next action; stale baseline commits; stale plan-status wording; superseded architecture terms outside marked historical sections; project-pack source mismatch; manifest/hash mismatch; missing required acceptance record; current files claiming a completed phase is not started; current files claiming an unimplemented capability is implemented; current files claiming a separately-gated action is authorized; obsolete files still authoritative; broken core links; secrets/guest PII in exports. Run it before each CONTROLLED documentation/acceptance commit and each pack export, and record its PASS in the acceptance evidence. It is **not** run after routine FAST-mode edits.
 
 ## Commit completion gate
 A milestone is complete only when **all** hold: (1) authorized implementation complete; (2) required acceptance passes; (3) related docs synchronized; (4) zero current-state contradictions; (5) stale-leftover scan clean; (6) retained legacy items explicitly classified + gated; (7) Project Pack regenerated + verified; (8) Evidence Pack regenerated + verified; (9) authoritative commits + checksums recorded; (10) the single next authorized action identical everywhere. Otherwise report `INCOMPLETE — STALE OR UNSYNCHRONIZED ARTIFACTS REMAIN` (never complete/verified/closed/accepted).
