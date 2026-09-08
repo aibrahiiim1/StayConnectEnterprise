@@ -1,0 +1,41 @@
+name: TEMPORARY - regenerate the factory-clean baseline
+
+# TEMPORARY, BRANCH-ONLY. Deleted in the same PR that uses its output.
+#
+# Migration 0065 changes the upgrade path's end state (entitlement_usage_bytes becomes SECURITY DEFINER), so
+# the baseline that builds NEW installations must be regenerated from that path. The generator needs a working
+# Docker engine AND a Go toolchain together; this workstation's Docker is unresponsive and the appliance has
+# no Go and is not a development generator, so this borrows the runner the Phase-3 gate already uses.
+#
+# It runs the REPOSITORY'S OWN generator against the PR HEAD and uploads what the generator wrote.
+on:
+  pull_request:
+    branches: [ master ]
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    name: generate-production-baseline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: data-plane/go.sum
+      - name: Run the repository generator
+        run: bash "$GITHUB_WORKSPACE/scripts/generate-production-baseline.sh"
+      - name: Verify the generated baseline against the upgrade path
+        run: bash "$GITHUB_WORKSPACE/scripts/factory-clean-baseline-verify.sh"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: generated-baseline
+          if-no-files-found: error
+          path: |
+            data-plane/migrations/baseline/
+            .cleanroom/catalog.txt
