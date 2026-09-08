@@ -1,6 +1,6 @@
 name: TEMPORARY - generate the factory-clean baseline
 
-# TEMPORARY, BRANCH-ONLY, MANUAL. Delete before merge.
+# TEMPORARY, BRANCH-ONLY. Delete before merge.
 #
 # scripts/generate-production-baseline.sh needs a working Docker engine AND a Go toolchain in the same
 # environment. The workstation's Docker engine is unresponsive and the appliance has no Go toolchain and is
@@ -11,8 +11,12 @@ name: TEMPORARY - generate the factory-clean baseline
 # wrote so it can be committed from a checkout that can read it. No live database, no appliance, no manual
 # SQL, no hand-edited baseline.
 
+# pull_request rather than workflow_dispatch: GitHub only registers a dispatchable workflow once it exists
+# on the DEFAULT branch, and this one must never reach master. A pull_request trigger runs the workflow file
+# from the PR branch itself, which is exactly what is needed to generate from this HEAD.
 on:
-  workflow_dispatch:
+  pull_request:
+    branches: [ master ]
 
 permissions:
   contents: read
