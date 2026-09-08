@@ -1,0 +1,4 @@
+commit 86c4324ea499ae38321d3e96d8908f60c0cf3f47
+Date:   Wed Sep 9 00:13:32 2026 +0300
+
+    Record what migration 0065 fixed, how PRE-LIVE recovered, and what the Product Owner accepted
