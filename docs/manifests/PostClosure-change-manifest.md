@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `1e9652a4c259e21e7d711420b344222e7a5efa91`
-- **Provenance (generation HEAD = inventory_head):** `1e9652a4c259e21e7d711420b344222e7a5efa91`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `552fc64e9e7ba3f7b18f387b6ad04eceee69b759`
+- **Provenance (generation HEAD = inventory_head):** `552fc64e9e7ba3f7b18f387b6ad04eceee69b759`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `test/prelive-admin-ux-and-quota-message`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 378
@@ -285,7 +285,7 @@
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Apply 0064 in the integration harnesses, and state the next action canonically |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase3-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DHCP is a safety authority, and the state file must say what the appliance is |
 | `exports/chatgpt/stayconnectenterprise/ZERO_STALE_LEFTOVERS_RULE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Apply 0064 in the integration harnesses, and state the next action canonically |
-| `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | A dead socket is not a dead mirror |
+| `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Remove the SIGPIPE race that made six preflight checks non-deterministic |
 | `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: manifest and delivery head resynchronized |
 | `governance/transitions/T0083.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Stamp T0083 from the commit that introduced it |
 | `governance/transitions/T0084.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Use the established phase_affected convention in the post-closure receipts |
@@ -379,7 +379,7 @@
 | `scripts/gatep-reconcile-acceptance.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Prove the reconcile is safe to run, and exercise the path that actually protects it |
 | `scripts/gatep-reconcile.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Address in-container paths so the copy verification looks where the files are |
 | `scripts/generate-production-baseline.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Regenerate the factory-clean baseline for migration 0050 |
-| `scripts/phase3-preflight.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Retire the tc primer: netd has owned this since before the unit last worked |
+| `scripts/phase3-preflight.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Remove the SIGPIPE race that made six preflight checks non-deterministic |
 | `scripts/phase5-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Bring the E2E suite and the Phase-5 gate onto the accepted behaviour |
 | `scripts/pmsd-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Apply 0064 in the integration harnesses, and state the next action canonically |
 | `scripts/prod-privilege-integration.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Apply 0064 in the integration harnesses, and state the next action canonically |
@@ -522,7 +522,7 @@
  data-plane/internal/pmsd/progress_log_test.go      |   99 ++
  data-plane/internal/pmsd/resync_command.go         |   67 ++
  .../internal/pmsd/resync_command_adapter_test.go   |  251 +++++
- .../pmsd/resync_command_integration_test.go        |  246 +++++
+ .../pmsd/resync_command_integration_test.go        |  246 ++++
  .../internal/pmsd/resync_wedge_integration_test.go |  118 ++
  data-plane/internal/pmsd/strict_parse.go           |   53 +-
  data-plane/internal/pmsd/worker.go                 |  104 ++
@@ -635,7 +635,7 @@
  docs/design/Room-Auth-Materialization-Readiness.md |  197 ++++
  .../PC-0002-complete-delivery-manifest.md          |  159 +++
  docs/manifests/Phase7-change-manifest.md           |  108 +-
- docs/manifests/PostClosure-change-manifest.md      | 1166 ++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 1170 ++++++++++++++++++++
  .../reports/StayConnect-IAM-Phase3-Final-Report.md |    8 +-
  .../runbooks/Guest-Access-End-To-End-Acceptance.md |  378 +++++++
  docs/runbooks/PMS-Interface-Commissioning.md       |  357 ++++++
@@ -666,7 +666,7 @@
  .../StayConnect-IAM-Phase1B-Plan.md                |   13 +-
  .../StayConnect-IAM-Phase3-Plan.md                 |    5 +-
  .../ZERO_STALE_LEFTOVERS_RULE.md                   |   14 +-
- governance/decision-register.json                  |   33 +
+ governance/decision-register.json                  |   46 +
  governance/project-state.json                      |  475 +++++++-
  governance/transitions/T0083.json                  |   58 +
  governance/transitions/T0084.json                  |   48 +
@@ -760,7 +760,7 @@
  scripts/gatep-reconcile-acceptance.sh              |  236 ++++
  scripts/gatep-reconcile.sh                         |  161 +++
  scripts/generate-production-baseline.sh            |   38 +-
- scripts/phase3-preflight.sh                        |  141 ++-
+ scripts/phase3-preflight.sh                        |  165 ++-
  scripts/phase5-pg-integration.sh                   |   20 +-
  scripts/pmsd-pg-integration.sh                     |  163 ++-
  scripts/prod-privilege-integration.sh              |  139 +++
@@ -771,7 +771,7 @@
  tools/tests/tooling/preflight-total-selftest.sh    |  102 ++
  tools/validate-current-state-parity.py             |  107 ++
  tools/validate-project-state.sh                    |   44 +-
- 378 files changed, 38703 insertions(+), 2876 deletions(-)
+ 378 files changed, 38740 insertions(+), 2880 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -781,6 +781,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 552fc64e Remove the SIGPIPE race that made six preflight checks non-deterministic
+HISTORICAL: d967ba95 Delivery: manifest and delivery head resynchronized
 HISTORICAL: 1e9652a4 The documented preflight suite SIZE is pass + fail, not pass
 HISTORICAL: 9abf6a31 Delivery: manifest and delivery head resynchronized
 HISTORICAL: 65c09f8e Prove the served build identity twice, because neither proof stands alone
