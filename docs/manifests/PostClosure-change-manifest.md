@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `67cb48bf2061ce0e52718c832c6d04e01713138e`
-- **Provenance (generation HEAD = inventory_head):** `67cb48bf2061ce0e52718c832c6d04e01713138e`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `65c09f8efcb8e6d29700feef8071800d35db186b`
+- **Provenance (generation HEAD = inventory_head):** `65c09f8efcb8e6d29700feef8071800d35db186b`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `test/prelive-admin-ux-and-quota-message`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 377
@@ -216,7 +216,7 @@
 | `deploy/scripts/check-hotel-admin-integrity.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | The guards had the same fail-open shape they exist to prevent |
 | `deploy/scripts/check-phase3-enforcement-plane-selftest.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | The fake Kea must survive being quoted, and must not hold the pipe open |
 | `deploy/scripts/check-phase3-enforcement-plane.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | The probe guarded on a bit no checker in this directory carries |
-| `deploy/scripts/deploy-hotel-admin.sh` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | Hide the revision, not the Service Plan; and prove build identity losslessly |
+| `deploy/scripts/deploy-hotel-admin.sh` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | Prove the served build identity twice, because neither proof stands alone |
 | `deploy/scripts/enable-phase3-enforcement-plane.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | A handover is not a teardown |
 | `deploy/scripts/hotel-admin-cert-manager.sh` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | The leaf was never the problem: the intermediate under it was |
 | `deploy/scripts/hotel-admin-mint-cert.sh` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | Synchronize current state to the deployed Fresh Production appliance |
@@ -254,7 +254,7 @@
 | `docs/design/Room-Auth-Materialization-Readiness.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Record the live sync, and that publication is not materialization |
 | `docs/manifests/PC-0002-complete-delivery-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Correct two reporting defects in the PC-0002 delivery record |
 | `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at ac68164: state-scope synchronization, packs and manifest |
-| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery at d48cbfb9: manifest and delivery head resynchronized |
+| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery at 67cb48bf: manifest and delivery head resynchronized |
 | `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Retire the tc primer: netd has owned this since before the unit last worked |
 | `docs/runbooks/Guest-Access-End-To-End-Acceptance.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | A dead socket is not a dead mirror |
 | `docs/runbooks/PMS-Interface-Commissioning.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Point the runbooks at the verifying reconcile runner |
@@ -286,7 +286,7 @@
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase3-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DHCP is a safety authority, and the state file must say what the appliance is |
 | `exports/chatgpt/stayconnectenterprise/ZERO_STALE_LEFTOVERS_RULE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Apply 0064 in the integration harnesses, and state the next action canonically |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | A dead socket is not a dead mirror |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Apply 0064 in the integration harnesses, and state the next action canonically |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery at 67cb48bf: manifest and delivery head resynchronized |
 | `governance/transitions/T0083.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Stamp T0083 from the commit that introduced it |
 | `governance/transitions/T0084.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Use the established phase_affected convention in the post-closure receipts |
 | `governance/transitions/T0085.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | D36 ACCEPTED by the Product Owner |
@@ -399,7 +399,7 @@
  Makefile                                           |    8 +-
  cloud-admin/app/(app)/appliances/page.tsx          |    5 +-
  cloud-admin/app/(app)/licenses/page.tsx            |   37 +
- cloud-admin/app/(app)/onboarding/page.tsx          |   61 ++
+ cloud-admin/app/(app)/onboarding/page.tsx          |   61 +
  cloud-admin/app/login/page.tsx                     |   90 +-
  cloud-admin/components/nav.tsx                     |    2 +-
  control-plane/internal/activation/activation.go    |  237 ++++
@@ -468,13 +468,13 @@
  data-plane/cmd/scd/phase3_access_status.go         |  113 ++
  data-plane/cmd/scd/phase3_auth.go                  |   79 +-
  data-plane/cmd/scd/phase3_auth_integration_test.go |   12 +
- .../scd/phase3_grant_privilege_integration_test.go |  245 +++++
+ .../scd/phase3_grant_privilege_integration_test.go |  245 ++++
  .../scd/phase3_local_mirror_integration_test.go    |  259 +++++
  .../scd/phase3_offer_active_integration_test.go    |  132 +++
  data-plane/cmd/scd/phase3_offers.go                |   15 +-
  data-plane/cmd/scd/phase3_prod_fixture_test.go     |  185 ++++
  data-plane/internal/activation/activation.go       |  237 ++++
- data-plane/internal/activation/activation_test.go  |  122 +++
+ data-plane/internal/activation/activation_test.go  |  122 ++
  .../appliancecert/bootstrap_recovery_test.go       |  261 +++++
  .../appliancecert/bootstrap_states_test.go         |  270 +++++
  data-plane/internal/appliancecert/cert.go          |  425 ++++++-
@@ -565,11 +565,11 @@
  ..._reader_for_current_package_conditions.down.sql |   15 +
  ...ed_reader_for_current_package_conditions.up.sql |  121 ++
  ...ay_earned_is_frozen_when_it_is_granted.down.sql |   40 +
- ...stay_earned_is_frozen_when_it_is_granted.up.sql |  245 +++++
+ ...stay_earned_is_frozen_when_it_is_granted.up.sql |  245 ++++
  .../baseline/0000_production_baseline.sql          |  695 +++++++++++-
  deploy/caddy/Caddyfile.central                     |    6 +-
  deploy/config/central-endpoint.env                 |   50 +
- deploy/env/ctrlapi.env.example                     |   61 ++
+ deploy/env/ctrlapi.env.example                     |   61 +
  deploy/gatep/gatep-grants.sql                      |   30 +-
  deploy/gatep/gatep-roles.sql                       |    9 +
  deploy/gatep/gatep-set-passwords.sh                |    4 +-
@@ -582,7 +582,7 @@
  deploy/pki/README.md                               |   26 +
  deploy/scripts/appliance-central-cutover.sh        |  218 ++++
  deploy/scripts/appliance-dns-align.sh              |  138 +++
- deploy/scripts/central-firewall.sh                 |   61 ++
+ deploy/scripts/central-firewall.sh                 |   61 +
  deploy/scripts/central-migrate.sh                  |  268 +++++
  deploy/scripts/central-mint-tls.sh                 |  148 +++
  deploy/scripts/central-preflight.sh                |  174 +++
@@ -596,7 +596,7 @@
  deploy/scripts/check-hotel-admin-integrity.sh      |  216 ++++
  .../check-phase3-enforcement-plane-selftest.sh     |  132 +++
  deploy/scripts/check-phase3-enforcement-plane.sh   |   76 ++
- deploy/scripts/deploy-hotel-admin.sh               |  392 ++++++-
+ deploy/scripts/deploy-hotel-admin.sh               |  414 ++++++-
  deploy/scripts/enable-phase3-enforcement-plane.sh  |  101 ++
  deploy/scripts/hotel-admin-cert-manager.sh         |   76 +-
  deploy/scripts/hotel-admin-mint-cert.sh            |   26 +-
@@ -634,7 +634,7 @@
  docs/design/Room-Auth-Materialization-Readiness.md |  197 ++++
  .../PC-0002-complete-delivery-manifest.md          |  159 +++
  docs/manifests/Phase7-change-manifest.md           |  108 +-
- docs/manifests/PostClosure-change-manifest.md      | 1158 ++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 1164 ++++++++++++++++++++
  .../reports/StayConnect-IAM-Phase3-Final-Report.md |    8 +-
  .../runbooks/Guest-Access-End-To-End-Acceptance.md |  378 +++++++
  docs/runbooks/PMS-Interface-Commissioning.md       |  357 ++++++
@@ -711,11 +711,11 @@
  .../app/(app)/internet-packages/package-form.tsx   |  400 +++++++
  hotel-admin/app/(app)/internet-packages/page.tsx   |  495 +++++++++
  hotel-admin/app/(app)/network/system/page.tsx      |    2 +-
- hotel-admin/app/(app)/pms-interfaces/page.tsx      |  427 ++++++--
+ hotel-admin/app/(app)/pms-interfaces/page.tsx      |  427 +++++--
  .../(app)/pms-interfaces/synchronization-card.tsx  |  248 +++++
  hotel-admin/app/(app)/pms-providers/page.tsx       |  329 ------
  hotel-admin/app/(app)/service-plans/page.tsx       |  499 +++++++++
- hotel-admin/app/(app)/setup/enrollment/page.tsx    |  244 ++++-
+ hotel-admin/app/(app)/setup/enrollment/page.tsx    |  244 +++-
  hotel-admin/app/(app)/sign-in-methods/page.tsx     |  413 +++++++
  hotel-admin/app/(app)/stays/page.tsx               |  277 +++--
  hotel-admin/capability-contract.json               |   63 ++
@@ -769,7 +769,7 @@
  .../tests/project_state_validator/run_mutations.py |   89 +-
  tools/validate-current-state-parity.py             |  107 ++
  tools/validate-project-state.sh                    |   12 +-
- 377 files changed, 38541 insertions(+), 2867 deletions(-)
+ 377 files changed, 38569 insertions(+), 2867 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -779,6 +779,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 65c09f8e Prove the served build identity twice, because neither proof stands alone
+HISTORICAL: 50f3c8d3 Delivery at 67cb48bf: manifest and delivery head resynchronized
 HISTORICAL: 67cb48bf Apply 0064 in the integration harnesses, and state the next action canonically
 HISTORICAL: e3c230e2 Delivery at d48cbfb9: manifest and delivery head resynchronized
 HISTORICAL: d48cbfb9 Regenerate the factory-clean production baseline
