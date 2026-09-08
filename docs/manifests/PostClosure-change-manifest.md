@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `ced638ef550907d67952209aa4eec7edeffd9fab`
-- **Provenance (generation HEAD = inventory_head):** `ced638ef550907d67952209aa4eec7edeffd9fab`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `efad9f15572eeb575cd40ed413cfd061509abeb5`
+- **Provenance (generation HEAD = inventory_head):** `efad9f15572eeb575cd40ed413cfd061509abeb5`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `fix/usage-helper-security-definer`
 - **Remote branch:** `origin/fix/usage-helper-security-definer`
 - **Changed files:** 382
@@ -189,7 +189,7 @@
 | `data-plane/migrations/0064_the_allowance_a_stay_earned_is_frozen_when_it_is_granted.up.sql` | CREATED | `A` | database | MIGRATIONS | rollback REMOVES it | Make the allocation-policy CHECK actually refuse a malformed policy |
 | `data-plane/migrations/0065_the_usage_helper_reads_on_its_own_authority.down.sql` | CREATED | `A` | database | MIGRATIONS | rollback REMOVES it | Let the usage helper read on its own authority |
 | `data-plane/migrations/0065_the_usage_helper_reads_on_its_own_authority.up.sql` | CREATED | `A` | database | MIGRATIONS | rollback REMOVES it | Let the usage helper read on its own authority |
-| `data-plane/migrations/baseline/0000_production_baseline.sql` | MODIFIED | `M` | database | MIGRATIONS | rollback RESTORES prior content | Regenerate the factory-clean production baseline |
+| `data-plane/migrations/baseline/0000_production_baseline.sql` | MODIFIED | `M` | database | MIGRATIONS | rollback RESTORES prior content | Regenerate the factory-clean baseline for migration 0065 |
 | `deploy/caddy/Caddyfile.central` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | Activation, licensing, Central FQDN and Kea health: production readiness |
 | `deploy/config/central-endpoint.env` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | Central mTLS is on 9443, not 8443 |
 | `deploy/env/ctrlapi.env.example` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | Activation, licensing, Central FQDN and Kea health: production readiness |
@@ -257,7 +257,7 @@
 | `docs/design/Room-Auth-Materialization-Readiness.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Record the live sync, and that publication is not materialization |
 | `docs/manifests/PC-0002-complete-delivery-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Correct two reporting defects in the PC-0002 delivery record |
 | `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at ac68164: state-scope synchronization, packs and manifest |
-| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery: manifest and delivery head resynchronized |
+| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery: manifest and delivery head resynchronized for migration 0065 |
 | `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Retire the tc primer: netd has owned this since before the unit last worked |
 | `docs/runbooks/Guest-Access-End-To-End-Acceptance.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | A dead socket is not a dead mirror |
 | `docs/runbooks/PMS-Interface-Commissioning.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Point the runbooks at the verifying reconcile runner |
@@ -289,7 +289,7 @@
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase3-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DHCP is a safety authority, and the state file must say what the appliance is |
 | `exports/chatgpt/stayconnectenterprise/ZERO_STALE_LEFTOVERS_RULE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Apply 0064 in the integration harnesses, and state the next action canonically |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Remove the SIGPIPE race that made six preflight checks non-deterministic |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: manifest and delivery head resynchronized |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: manifest and delivery head resynchronized for migration 0065 |
 | `governance/transitions/T0083.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Stamp T0083 from the commit that introduced it |
 | `governance/transitions/T0084.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Use the established phase_affected convention in the post-closure receipts |
 | `governance/transitions/T0085.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | D36 ACCEPTED by the Product Owner |
@@ -496,7 +496,7 @@
  .../internal/enforce/address_ownership_test.go     |  116 ++
  .../enforce/aggregate_quota_integration_test.go    |  197 ++++
  .../data_quota_contract_integration_test.go        |  797 +++++++++++++
- .../internal/enforce/device_movement_test.go       |  125 +++
+ .../internal/enforce/device_movement_test.go       |  125 ++
  data-plane/internal/enforce/enforce.go             |  150 ++-
  data-plane/internal/iamv2/commerce_admin.go        |  204 +++-
  .../iamv2/commerce_admin_planbounds_test.go        |   93 ++
@@ -526,7 +526,7 @@
  data-plane/internal/pmsd/pmsd_test.go              |   71 ++
  data-plane/internal/pmsd/progress_log_test.go      |   99 ++
  data-plane/internal/pmsd/resync_command.go         |   67 ++
- .../internal/pmsd/resync_command_adapter_test.go   |  251 +++++
+ .../internal/pmsd/resync_command_adapter_test.go   |  251 ++++
  .../pmsd/resync_command_integration_test.go        |  246 ++++
  .../internal/pmsd/resync_wedge_integration_test.go |  118 ++
  data-plane/internal/pmsd/strict_parse.go           |   53 +-
@@ -574,7 +574,7 @@
  ...stay_earned_is_frozen_when_it_is_granted.up.sql |  245 ++++
  ...sage_helper_reads_on_its_own_authority.down.sql |   44 +
  ..._usage_helper_reads_on_its_own_authority.up.sql |  134 +++
- .../baseline/0000_production_baseline.sql          |  695 +++++++++++-
+ .../baseline/0000_production_baseline.sql          |  704 +++++++++++-
  deploy/caddy/Caddyfile.central                     |    6 +-
  deploy/config/central-endpoint.env                 |   50 +
  deploy/env/ctrlapi.env.example                     |   61 +
@@ -642,7 +642,7 @@
  docs/design/Room-Auth-Materialization-Readiness.md |  197 ++++
  .../PC-0002-complete-delivery-manifest.md          |  159 +++
  docs/manifests/Phase7-change-manifest.md           |  108 +-
- docs/manifests/PostClosure-change-manifest.md      | 1186 ++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 1195 ++++++++++++++++++++
  .../reports/StayConnect-IAM-Phase3-Final-Report.md |    8 +-
  .../runbooks/Guest-Access-End-To-End-Acceptance.md |  378 +++++++
  docs/runbooks/PMS-Interface-Commissioning.md       |  357 ++++++
@@ -779,7 +779,7 @@
  tools/tests/tooling/preflight-total-selftest.sh    |  102 ++
  tools/validate-current-state-parity.py             |  107 ++
  tools/validate-project-state.sh                    |   44 +-
- 382 files changed, 39447 insertions(+), 2890 deletions(-)
+ 382 files changed, 39464 insertions(+), 2891 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -789,6 +789,9 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: efad9f15 Regenerate the factory-clean baseline for migration 0065
+HISTORICAL: 397286b4 TEMPORARY: regenerate the baseline on a CI runner (removed before merge)
+HISTORICAL: b9ccf7ef Delivery: manifest and delivery head resynchronized for migration 0065
 HISTORICAL: ced638ef Let the usage helper read on its own authority
 HISTORICAL: 86b3413e Merge PR #86: record the authorized pmsd restart and the reconnected PMS feed
 HISTORICAL: 15e5d47f Delivery: manifest and delivery head resynchronized
