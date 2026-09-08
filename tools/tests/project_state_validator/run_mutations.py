@@ -543,7 +543,12 @@ MUTATIONS = [
    # unchanged in substance - have a renderer source state an active-session count the recorded counters deny.
    # THIS IS THE MUTATION THAT MATTERED: when the counters were corrected to sessions_active 0, three prose
    # surfaces were still claiming a live Session, and this is the rule that caught them.
-   ("replace", [("sessions=5 - ALL FIVE ENDED", "sessions=5 - four ENDED and ONE ACTIVE")])),
+   ("replace", [("sessions=5 all ended", "sessions=5 with four ended and ONE ACTIVE")])),
+   # RE-ANCHORED AGAIN. The counters block became a dated HISTORICAL snapshot when the PMS/counter
+   # staleness defect was corrected, and the sentence lost its dashes: "sessions=5 - ALL FIVE ENDED"
+   # is now "sessions=5 all ended". A replace whose anchor no longer exists ABORTS the harness, which
+   # is what took the suite down after M54 rather than reporting a MISS. The case is unchanged in
+   # substance: have a renderer source state an active-session count the recorded counters deny.
  ("M56 kernel records an authorization and a shaping class while no Session is active",
   "governance/project-state.json",
    # RE-AIMED AGAIN, SAME DEFECT CLASS, NOW THE OTHER DIRECTION. No Session is live and the kernel is empty,
