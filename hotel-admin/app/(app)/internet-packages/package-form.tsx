@@ -330,7 +330,7 @@ export function PackageForm({
                 </p>
                 {notice.exampleGB !== undefined && (
                   <p data-testid="allowance-example">
-                    For an {notice.exampleNights}-night stay the guest receives{" "}
+                    For a stay of {notice.exampleNights} nights, the guest receives{" "}
                     <strong>{notice.exampleGB} GB</strong>.
                   </p>
                 )}
