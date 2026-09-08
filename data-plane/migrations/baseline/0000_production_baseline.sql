@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0064, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0065, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -673,7 +673,7 @@ END $_$;
 --
 
 CREATE FUNCTION iam_v2.entitlement_usage_bytes(p_ent uuid, p_at timestamp with time zone) RETURNS TABLE(bytes_up bigint, bytes_down bigint, records bigint, latest_sampled_at timestamp with time zone)
-    LANGUAGE sql STABLE
+    LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
   SELECT COALESCE(sum(ar.bytes_up),0)::bigint, COALESCE(sum(ar.bytes_down),0)::bigint,
@@ -689,6 +689,13 @@ CREATE FUNCTION iam_v2.entitlement_usage_bytes(p_ent uuid, p_at timestamp with t
           AND NOT EXISTS (SELECT 1 FROM iam_v2.session_entitlement_bindings b2 WHERE b2.session_id = ar.session_id))
     );
 $$;
+
+
+--
+-- Name: FUNCTION entitlement_usage_bytes(p_ent uuid, p_at timestamp with time zone); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.entitlement_usage_bytes(p_ent uuid, p_at timestamp with time zone) IS 'Bytes attributed to ONE Entitlement up to ONE instant, by binding interval, with the no-binding fallback for sessions that predate the binding table. SECURITY DEFINER so a caller can obtain the aggregate without holding SELECT on iam_v2.accounting_records -- svc_pmsd needs the number at a checkout boundary and Gate-P forbids it the table. It returns four aggregate numbers about an entitlement the caller must already be able to name; it exposes no guest, Stay, reservation, folio, payment or PMS data, and it writes nothing.';
 
 
 --
