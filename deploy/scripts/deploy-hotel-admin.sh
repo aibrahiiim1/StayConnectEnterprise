@@ -291,10 +291,24 @@ smoke_live() {
   #
   # The asset probe cannot replace the stamp either: on its own it would accept any server that answers 200
   # to everything. Together they refuse a silent endpoint, a different build, and a permissive one.
+  # THE STAMP IS READ FROM THE LOGIN SURFACE, because that is the surface an unauthenticated request actually
+  # renders. hotel-admin/middleware.ts redirects every gated path to /login, so a bare GET of the base returns
+  # a 307 whose body is a 36-byte URL and carries no stamp at all -- and this check, which is fail-closed by
+  # design, then reports "the endpoint asserts no identity" for a bundle that is serving perfectly. It is not a
+  # hypothetical: it rejected and rolled back a verified release whose BUILD_ID the very next request returned.
+  #
+  # The other two callers already knew this. check-hotel-admin-integrity.sh probes
+  # "http://127.0.0.1:$PORT/login", and the operator-endpoint branch twenty lines below probes
+  # "${HOTEL_ADMIN_PUBLIC_URL%/}/login". Only this one asked the redirecting path, which is exactly the drift
+  # lib-hotel-admin-contract.sh exists to prevent -- so it now asks what they ask.
+  #
+  # Nothing is weakened. An absent or malformed stamp still fails, the id is still compared under the
+  # hyphen/underscore encoding an HTML comment forces, and ha_serves_build_id below still proves the exact
+  # characters by resolving THIS build's own asset path against the running server.
   local served_bid
-  served_bid="$(ha_served_build_id "$base")"
+  served_bid="$(ha_served_build_id "$base/login")"
   if [ -z "$served_bid" ]; then
-    echo "SMOKE FAIL: could not extract a BUILD_ID from $base — the endpoint asserts no identity" >&2
+    echo "SMOKE FAIL: could not extract a BUILD_ID from $base/login — the endpoint asserts no identity" >&2
     return 1
   fi
   if [ "$(printf %s "$served_bid" | tr -- - _)" != "$(printf %s "$want_bid" | tr -- - _)" ]; then
