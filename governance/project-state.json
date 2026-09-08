@@ -949,7 +949,7 @@
   },
   "acceptance_candidate_head": "ac6816456be0e5bbaf2aa1c67c36b33032328ccb",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD of the Phase-6 change manifest. delivery_head is that commit plus one delivery-only commit; the manifest is generated from the STAGED tree so its path set already covers the complete base..delivery_head diff.",
-  "inventory_head": "e75948b20ec58d718550b5a630e247fb766de6c3",
+  "inventory_head": "b61b2b12c1e0684367bd883c8f5bf5f3125a3758",
   "delivery_head_note": "delivery_head (the Phase-6 PR HEAD) = inventory_head + one delivery-only commit. Its exact 40-character SHA is recorded in the PR body and verified to resolve on the authoritative remote before the delivery is reported.",
   "roadmap_exhaustion": {
     "recorded_by": "D28 / T0065 (2026-08-17)",
@@ -1346,8 +1346,8 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "ac6816456be0e5bbaf2aa1c67c36b33032328ccb",
     "base_note": "The Phase-7 delivery head (== inventory_head == acceptance_candidate_head). Post-closure work begins exactly where the last numbered phase's delivery ended, so the two lineages abut without overlapping.",
-    "head": "e75948b20ec58d718550b5a630e247fb766de6c3",
-    "head_note": "The post-closure delivery head: the committed HEAD immediately before the delivery-only commit that adds the manifest itself. Same self-reference protocol the phase manifests use - the manifest is generated from the STAGED tree so its own path is inside the range it describes. Advanced to the migration-0065 corrective closure: 0065 (PR #87), the Hotel Admin quota-precedence notice (PR #88) and this governance synchronization.",
+    "head": "b61b2b12c1e0684367bd883c8f5bf5f3125a3758",
+    "head_note": "The post-closure delivery head: the committed HEAD immediately before the delivery-only commit that adds the manifest itself. Same self-reference protocol the phase manifests use - the manifest is generated from the STAGED tree so its own path is inside the range it describes. Advanced to the migration-0065 corrective closure: 0065 (PR #87), the Hotel Admin quota-precedence notice (PR #88) and this governance synchronization. Advanced from e75948b2 to b61b2b12 for the quota-closure governance synchronization, which records the merges of PR #87 (migration 0065) and PR #88 (Hotel Admin quota-precedence notice).",
     "note": "D36: post-closure corrective work is its own delivery lineage with its own manifest. The numbered phases are closed and their manifests are HISTORICAL — each remains a faithful record of what that phase delivered and is never range-checked against a later HEAD. While this key is present it names THE current delivery manifest, and that manifest is what the path/status equality check applies to.",
     "decision_status": "ACCEPTED by the Product Owner on 2026-08-24 (T0086)."
   },
