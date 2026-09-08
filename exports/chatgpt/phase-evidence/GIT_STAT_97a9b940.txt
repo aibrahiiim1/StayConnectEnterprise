@@ -1,0 +1,4 @@
+commit 97a9b9402e9d0bdbce4d1c29e96a02ad8584e443
+Date:   Tue Sep 8 12:34:00 2026 +0300
+
+    Merge PR #85: governance fix-forward for the PR #84 closure (D40/T0120)

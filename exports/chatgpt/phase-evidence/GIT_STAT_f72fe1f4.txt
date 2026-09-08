@@ -1,4 +1,0 @@
-commit f72fe1f4ec5709183d962eee2c85087cd5bba724
-Date:   Tue Sep 8 09:59:13 2026 +0300
-
-    Delivery: manifest and delivery head resynchronized after the merge record

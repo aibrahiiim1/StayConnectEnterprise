@@ -39,6 +39,15 @@ LIVE_CLAIMS = [
     r"pms(?:[^.]{0,40})is (?:live|connected)\b",
 ]
 STOPPED_MARKERS = [r"intentionally stopped", r"\bdisconnected\b", r"resync[_ ]required", r"dial[_ ]failed"]
+# Phrases that assert the feed is CURRENTLY down. The mirror image of LIVE_CLAIMS, and just as stale-able:
+# when Protel was restored and pmsd restarted, "intentionally stopped" became the wrong tense everywhere it
+# still appeared unlabelled.
+STOPPED_CLAIMS = [
+    r"intentionally stopped",
+    r"pms(?:[^.]{0,40})is (?:stopped|down|disconnected)\b",
+    r"feed is (?:currently )?(?:stopped|down|disconnected)",
+    r"\bdisconnected\s*/\s*resync[_ ]required\b",
+]
 HISTORICAL_MARKERS = [r"historical", r"do not read as current", r"superseded", r"snapshot"]
 
 fails = []
@@ -51,20 +60,39 @@ def sentences(text):
 
 
 def canonical_pms_is_stopped(state):
+    """Read the CANONICAL FIELDS, not the prose.
+
+    The first version of this grepped the notes for words like "disconnected" and "intentionally stopped".
+    That worked while the feed was down and inverted the moment it came back: the notes still CONTAIN those
+    words, correctly, inside the HISTORICAL clause that records the stopped period. So the check declared the
+    canonical state STOPPED and then failed the very sentence that truthfully says the feed is connected.
+
+    A staleness check that reads prose to decide what the prose should say is circular. project-state.json
+    already carries the machine answer -- pms_feed_connected -- so that is what decides, and the prose is only
+    ever the thing being checked.
+    """
+    csf = state.get("current_state_facts", {})
+    if "pms_feed_connected" in csf:
+        return not bool(csf["pms_feed_connected"])
+    # No canonical field: fall back to prose, but only the part BEFORE any historical label, so a retained
+    # history cannot be mistaken for the present.
     blob = " ".join(str(v) for v in [
-        state["current_state_facts"].get("pms_feed_connected_note", ""),
+        csf.get("pms_feed_connected_note", ""),
         state.get("production_appliance", {}).get("pms_traffic", ""),
-        state.get("pms_financial_state", ""),
     ]).lower()
+    blob = re.split(r"historical \(do not read as current\)|historical:", blob)[0]
     return any(re.search(m, blob) for m in STOPPED_MARKERS)
 
 
 def check_pms(state):
     stopped = canonical_pms_is_stopped(state)
     notes.append(f"canonical PMS state reads as {'STOPPED/DISCONNECTED' if stopped else 'not stopped'}")
-    if not stopped:
-        # Nothing to enforce: the canonical state does not claim the feed is down.
-        return
+    # SYMMETRIC. Staleness has two directions and only one of them was ever checked. When the feed was
+    # stopped, the blocks still said "live and healthy"; when Protel was restored and pmsd restarted, the same
+    # blocks would have gone on saying "intentionally stopped" just as wrongly. Whichever way the canonical
+    # state points, an unlabelled sentence pointing the other way is stale.
+    claims = STOPPED_CLAIMS if not stopped else LIVE_CLAIMS
+    wrong = "STOPPED" if not stopped else "CONNECTED"
     for doc in BLOCK_DOCS:
         if not os.path.isfile(doc):
             fails.append(f"{os.path.relpath(doc, ROOT)}: missing, so the rendered claim cannot be checked")
@@ -72,15 +100,16 @@ def check_pms(state):
         text = open(doc, encoding="utf-8").read()
         for s in sentences(text):
             low = s.lower()
-            hit = next((c for c in LIVE_CLAIMS if re.search(c, low)), None)
+            hit = next((c for c in claims if re.search(c, low)), None)
             if not hit:
                 continue
             # A labelled historical statement is legitimate and must stay legitimate.
             if any(re.search(h, low) for h in HISTORICAL_MARKERS):
                 continue
             fails.append(
-                f"{os.path.relpath(doc, ROOT)}: canonical PMS state is STOPPED but a current sentence claims "
-                f"a live feed ({hit!r}): {s[:150]!r}")
+                f"{os.path.relpath(doc, ROOT)}: canonical PMS state is "
+                f"{'STOPPED' if stopped else 'CONNECTED'} but a current sentence claims the feed is {wrong} "
+                f"({hit!r}): {s[:150]!r}")
 
 
 def check_counters(state):
