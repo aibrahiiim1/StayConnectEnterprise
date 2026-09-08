@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `d79719a985b5823232b2f8842a8232da86350866`
-- **Provenance (generation HEAD = inventory_head):** `d79719a985b5823232b2f8842a8232da86350866`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `d48cbfb9218312a39a0cac4972845e65aff7f846`
+- **Provenance (generation HEAD = inventory_head):** `d48cbfb9218312a39a0cac4972845e65aff7f846`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `test/prelive-admin-ux-and-quota-message`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 375
@@ -186,7 +186,7 @@
 | `data-plane/migrations/0063_scoped_reader_for_current_package_conditions.up.sql` | CREATED | `A` | database | MIGRATIONS | rollback REMOVES it | Read a package's conditions through a scoped reader, not by widening the role |
 | `data-plane/migrations/0064_the_allowance_a_stay_earned_is_frozen_when_it_is_granted.down.sql` | CREATED | `A` | database | MIGRATIONS | rollback REMOVES it | Stay-based package eligibility, and an allowance that scales with the stay |
 | `data-plane/migrations/0064_the_allowance_a_stay_earned_is_frozen_when_it_is_granted.up.sql` | CREATED | `A` | database | MIGRATIONS | rollback REMOVES it | Make the allocation-policy CHECK actually refuse a malformed policy |
-| `data-plane/migrations/baseline/0000_production_baseline.sql` | MODIFIED | `M` | database | MIGRATIONS | rollback RESTORES prior content | Regenerate the factory-clean baseline so a NEW appliance does not ship the defect |
+| `data-plane/migrations/baseline/0000_production_baseline.sql` | MODIFIED | `M` | database | MIGRATIONS | rollback RESTORES prior content | Regenerate the factory-clean production baseline |
 | `deploy/caddy/Caddyfile.central` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | Activation, licensing, Central FQDN and Kea health: production readiness |
 | `deploy/config/central-endpoint.env` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | Central mTLS is on 9443, not 8443 |
 | `deploy/env/ctrlapi.env.example` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | Activation, licensing, Central FQDN and Kea health: production readiness |
@@ -254,7 +254,7 @@
 | `docs/design/Room-Auth-Materialization-Readiness.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Record the live sync, and that publication is not materialization |
 | `docs/manifests/PC-0002-complete-delivery-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Correct two reporting defects in the PC-0002 delivery record |
 | `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at ac68164: state-scope synchronization, packs and manifest |
-| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery at 4112186e: milestone closure, governance sync and manifest |
+| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery at d79719a9: manifest and delivery head resynchronized |
 | `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Retire the tc primer: netd has owned this since before the unit last worked |
 | `docs/runbooks/Guest-Access-End-To-End-Acceptance.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | A dead socket is not a dead mirror |
 | `docs/runbooks/PMS-Interface-Commissioning.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Point the runbooks at the verifying reconcile runner |
@@ -284,7 +284,7 @@
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase3-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DHCP is a safety authority, and the state file must say what the appliance is |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | A dead socket is not a dead mirror |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery at 4112186e: milestone closure, governance sync and manifest |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery at d79719a9: manifest and delivery head resynchronized |
 | `governance/transitions/T0083.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Stamp T0083 from the commit that introduced it |
 | `governance/transitions/T0084.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Use the established phase_affected convention in the post-closure receipts |
 | `governance/transitions/T0085.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | D36 ACCEPTED by the Product Owner |
@@ -434,7 +434,7 @@
  data-plane/cmd/netd/kea.go                         |   40 +
  data-plane/cmd/netd/main.go                        |   56 +-
  data-plane/cmd/netd/phase3_address_owner.go        |  140 +++
- .../cmd/netd/phase3_address_ownership_test.go      |  304 +++++
+ .../cmd/netd/phase3_address_ownership_test.go      |  304 ++++++
  data-plane/cmd/netd/phase3_enforcement.go          |   25 +-
  .../phase3_enforcement_cycle_integration_test.go   |  408 +++++++
  data-plane/cmd/netd/phase3_mode.go                 |    7 +-
@@ -564,7 +564,7 @@
  ...ed_reader_for_current_package_conditions.up.sql |  121 ++
  ...ay_earned_is_frozen_when_it_is_granted.down.sql |   40 +
  ...stay_earned_is_frozen_when_it_is_granted.up.sql |  245 +++++
- .../baseline/0000_production_baseline.sql          |  603 +++++++++-
+ .../baseline/0000_production_baseline.sql          |  695 +++++++++++-
  deploy/caddy/Caddyfile.central                     |    6 +-
  deploy/config/central-endpoint.env                 |   50 +
  deploy/env/ctrlapi.env.example                     |   61 ++
@@ -632,7 +632,7 @@
  docs/design/Room-Auth-Materialization-Readiness.md |  197 ++++
  .../PC-0002-complete-delivery-manifest.md          |  159 +++
  docs/manifests/Phase7-change-manifest.md           |  108 +-
- docs/manifests/PostClosure-change-manifest.md      | 1159 ++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 1154 ++++++++++++++++++++
  .../reports/StayConnect-IAM-Phase3-Final-Report.md |    8 +-
  .../runbooks/Guest-Access-End-To-End-Acceptance.md |  378 +++++++
  docs/runbooks/PMS-Interface-Commissioning.md       |  357 ++++++
@@ -765,7 +765,7 @@
  .../tests/project_state_validator/run_mutations.py |   89 +-
  tools/validate-current-state-parity.py             |  107 ++
  tools/validate-project-state.sh                    |   12 +-
- 375 files changed, 38420 insertions(+), 2856 deletions(-)
+ 375 files changed, 38503 insertions(+), 2860 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -775,6 +775,10 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: d48cbfb9 Regenerate the factory-clean production baseline
+HISTORICAL: 942ecb5d TEMPORARY: trigger the generator from the PR, not a dispatch
+HISTORICAL: 6e72a484 TEMPORARY: run the baseline generator on a CI runner (delete before merge)
+HISTORICAL: 07b94f05 Delivery at d79719a9: manifest and delivery head resynchronized
 HISTORICAL: d79719a9 Bring the E2E suite and the Phase-5 gate onto the accepted behaviour
 HISTORICAL: 4a18afa5 Delivery at 4112186e: milestone closure, governance sync and manifest
 HISTORICAL: 4112186e Let a stay-length rule carry a number from whichever decoder produced it
