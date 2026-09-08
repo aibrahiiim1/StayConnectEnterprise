@@ -85,8 +85,12 @@ describe("the data-allowance precedence notice", () => {
     setPlan("plan-none");
     perNight("2");
     const n = notice()!;
-    expect(n.textContent).toMatch(/sets no data allowance/i);
+    expect(n.textContent).toMatch(/sets no data allowance of its own/i);
     expect(n.textContent).toContain("2 GB per stay night");
+    // SCOPED TO DATA, DELIBERATELY. "the only allowance a guest receives" read as though it also covered the
+    // time, session and device limits the plan still imposes -- it does not; it is the DATA allowance only.
+    expect(n.textContent).toMatch(/data allowance for this package/i);
+    expect(n.textContent).not.toMatch(/only allowance a guest receives/i);
     expect(n.textContent).not.toMatch(/precedence|takes precedence|instead of/i);
     // ...and it must not invent a plan quota figure.
     expect(n.textContent).not.toMatch(/Service plan allowance:/i);
@@ -96,7 +100,11 @@ describe("the data-allowance precedence notice", () => {
     openForm();
     setPlan("plan-none");
     setMode("FIXED");
-    expect(notice()!.textContent).toMatch(/sets no data allowance, so this package does not limit data/i);
+    // "does not limit data" read as though the whole package were unrestricted. The limit that is absent is
+    // the DATA-VOLUME one; the plan's speed, time, session and device limits are untouched by this notice.
+    expect(notice()!.textContent)
+      .toMatch(/has no data-usage quota, so this package does not impose a\s+data-volume limit/i);
+    expect(notice()!.textContent).not.toMatch(/does not limit data/i);
   });
 
   it("follows the selected service plan immediately", () => {

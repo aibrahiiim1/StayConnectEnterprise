@@ -309,12 +309,15 @@ export function PackageForm({
               <p>This package uses the service plan&rsquo;s {notice.planQuotaGB} GB data allowance.</p>
             )}
             {notice.kind === "FIXED_PLAN_HAS_NO_QUOTA" && (
-              <p>The selected service plan sets no data allowance, so this package does not limit data.</p>
+              <p>
+                The selected service plan has no data-usage quota, so this package does not impose a
+                data-volume limit.
+              </p>
             )}
             {notice.kind === "PER_STAY_NIGHT_PLAN_HAS_NO_QUOTA" && (
               <p>
                 The selected service plan sets no data allowance of its own, so this package&rsquo;s{" "}
-                {notice.gbPerNight} GB per stay night is the only allowance a guest receives.
+                {notice.gbPerNight} GB per stay night is the guest&rsquo;s data allowance for this package.
               </p>
             )}
             {notice.kind === "PER_STAY_NIGHT_OVERRIDES_PLAN" && (
