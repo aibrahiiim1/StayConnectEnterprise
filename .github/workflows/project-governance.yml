@@ -106,6 +106,13 @@ jobs:
         # PASS unconditionally. Each case reintroduces a contradiction that actually shipped green.
         run: python tools/tests/current_state_parity/run_negative.py
 
+      - name: Rendered current state must not contradict the canonical PMS state or re-date a snapshot
+        # The first thing a reader opens said the PMS feed was "live and healthy" while project-state.json
+        # correctly recorded it as intentionally stopped, and the same block presented a dated counter
+        # snapshot as current totals. Every existing gate passed: they compared documents with each other,
+        # not the rendered prose with the canonical transport state.
+        run: python tools/tests/current_state_parity/run_pms_and_counter_staleness.py
+
       - name: Evidence-artifact staleness (a post-closure artifact must not describe finished work as pending)
         # The software artifact is the most authoritative file a reviewer opens, and it kept emitting the
         # 2026-08-10 Increment-9 snapshot — corrected_software_deployed=false and a five-item remaining-work
