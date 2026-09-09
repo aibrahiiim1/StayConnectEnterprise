@@ -1,0 +1,4 @@
+commit a2b3e482e72bfba04dd616b89ea18f7fa94db197
+Date:   Wed Sep 9 11:03:26 2026 +0300
+
+    Record what actually stood between a new appliance and its first guest network

@@ -1,4 +1,0 @@
-commit 821264a4164603983f2f13476415052da54f49a2
-Date:   Wed Sep 9 09:49:20 2026 +0300
-
-    Rebuild the export packs on the factory-clean fix source
