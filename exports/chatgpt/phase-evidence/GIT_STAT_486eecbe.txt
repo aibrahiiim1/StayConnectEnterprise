@@ -1,0 +1,4 @@
+commit 486eecbe741ad86d3ad7cb7ab505ef5c99f964dc
+Date:   Wed Sep 9 22:18:18 2026 +0300
+
+    Observe presence when the decision is made, not when the inventory was last written
