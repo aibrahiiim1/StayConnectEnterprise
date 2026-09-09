@@ -1,4 +1,0 @@
-commit 401a3c06754b08bc5cf3ff71eeccba3cbb60aef7
-Date:   Wed Sep 9 17:35:58 2026 +0300
-
-    Ask whether an interface is here now, not whether it was ever here
