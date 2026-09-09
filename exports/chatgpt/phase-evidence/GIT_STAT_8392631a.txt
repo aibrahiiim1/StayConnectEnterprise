@@ -1,0 +1,4 @@
+commit 8392631a4e8110164d1b6aa9a5835e9c11319372
+Date:   Wed Sep 9 07:32:24 2026 +0300
+
+    Record the Product Owner's ONE MISSION execution policy, permanently
