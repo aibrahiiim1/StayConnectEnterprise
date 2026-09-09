@@ -1,0 +1,4 @@
+commit d7af3581e39bbcd37e8b74e1720a1ad998a097c0
+Date:   Wed Sep 9 11:03:41 2026 +0300
+
+    Rebuild the export packs on the closure-synchronized source
