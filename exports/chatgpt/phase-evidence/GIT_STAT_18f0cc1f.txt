@@ -1,0 +1,4 @@
+commit 18f0cc1fa3b58848fcbc9339c10d56ddd2c659f6
+Date:   Wed Sep 9 06:56:24 2026 +0300
+
+    Measure the Hotel Admin TLS state, and record what is actually true
