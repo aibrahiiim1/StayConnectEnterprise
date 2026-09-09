@@ -1,4 +1,0 @@
-commit c671b0f7ca0d2ff96504c60a6a4ee4cf10f0143b
-Date:   Wed Sep 9 01:34:36 2026 +0300
-
-    Rebuild the export packs on the security-corrected source
