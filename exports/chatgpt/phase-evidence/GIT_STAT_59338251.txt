@@ -1,0 +1,4 @@
+commit 593382510f586bbe3433e5945cdc06ecd4ba6827
+Date:   Wed Sep 9 18:32:52 2026 +0300
+
+    Record that presence is now derived, and that nothing was deleted to get there
