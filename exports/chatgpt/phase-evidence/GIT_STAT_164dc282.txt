@@ -1,4 +1,0 @@
-commit 164dc282e441410ee68345660136729e78a565a6
-Date:   Wed Sep 9 22:18:36 2026 +0300
-
-    Rebuild the export packs on the live-discovery presence source
