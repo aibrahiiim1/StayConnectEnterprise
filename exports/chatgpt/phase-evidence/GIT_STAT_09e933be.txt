@@ -1,0 +1,4 @@
+commit 09e933be25e8a35e95743975e9b60259f41467a6
+Date:   Wed Sep 9 07:32:32 2026 +0300
+
+    Rebuild the export packs so the pack checksums carry the policy
