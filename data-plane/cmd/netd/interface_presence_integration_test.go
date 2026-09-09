@@ -10,21 +10,21 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// PRESENCE IS DERIVED FROM THE LATEST SWEEP, PROVEN AGAINST A REAL POSTGRES.
+// WHAT THE INVENTORY IS FOR, NOW THAT IT IS NOT THE PRESENCE ORACLE.
 //
-// The SQL is the whole fix. `SELECT name FROM network_interfaces` answered "has this appliance ever seen an
-// interface by this name", which let a bridge destroyed weeks earlier satisfy guest-network validation. The
-// defect lives in the query, so the query is what these cases run — a fake store would simply agree with
-// whatever it was handed.
+// Presence is observed live at the moment of the decision (see applier.presenceSets and
+// interface_presence_test.go). This table answers a different question — what has this appliance EVER
+// recorded — and holds the operator's own columns. These cases pin the properties that question depends on,
+// against a real PostgreSQL, because they are properties of the SQL.
 //
-// They run against the disposable PostgreSQL the Phase-3 gate already provisions and executes
-// `-tags integration -run Integration ./cmd/netd/` against, so they run in CI rather than skipping there.
+// They run against the disposable PostgreSQL the Phase-3 gate provisions and executes
+// `-tags integration -run Integration ./cmd/netd/` against.
 
 func presenceTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("PHASE3_TEST_DSN")
 	if dsn == "" {
-		t.Skip("PHASE3_TEST_DSN not set; skipping the interface-presence integration")
+		t.Skip("PHASE3_TEST_DSN not set; skipping the interface-inventory integration")
 	}
 	p, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {
@@ -34,11 +34,8 @@ func presenceTestPool(t *testing.T) *pgxpool.Pool {
 	return p
 }
 
-// freshInventory gives each case an empty inventory.
-//
-// A REAL TABLE, NOT A TEMP ONE: the store holds a pgxpool, so consecutive statements can land on different
-// connections, and a TEMP table is visible only to the session that made it. A temp table here would have
-// produced a test that passes or fails on which connection the pool happened to hand out.
+// A REAL TABLE, NOT A TEMP ONE: the store holds a pool, so consecutive statements can land on different
+// connections and a TEMP table is visible only to the session that made it.
 func freshInventory(t *testing.T, p *pgxpool.Pool) *store {
 	t.Helper()
 	ctx := context.Background()
@@ -62,54 +59,55 @@ func freshInventory(t *testing.T, p *pgxpool.Pool) *store {
 	return &store{db: p}
 }
 
-// THE DEFECT ITSELF: a row no sweep has touched for weeks is not present — and is not deleted either.
-func TestIntegrationPresenceExcludesStaleRowWithoutDeletingIt(t *testing.T) {
+// NOTHING IS EVER DELETED, and the operator's own column survives an interface going away. This is why the
+// fix does not prune: role, is_protected and mode are chosen by a person, and an interface that came back
+// after a prune would return silently declassified.
+func TestIntegrationInventoryRetainsVanishedInterfaceAndItsRole(t *testing.T) {
 	p := presenceTestPool(t)
 	st := freshInventory(t, p)
 	ctx := context.Background()
 
-	// A destroyed bridge, recorded long ago, carrying a classification an operator chose.
-	if _, err := p.Exec(ctx, `
-        INSERT INTO public.network_interfaces (name, role, is_protected, last_seen_at)
-        VALUES ('vguest-h','guest_access',false, now() - interval '18 days')`); err != nil {
-		t.Fatalf("seed: %v", err)
+	if err := st.SyncInterfaces(ctx, []Interface{{Name: "ens160"}, {Name: "ens224"}}, "ens160", "ens160"); err != nil {
+		t.Fatalf("sync 1: %v", err)
 	}
-	if err := st.SyncInterfaces(ctx, []Interface{
-		{Name: "ens160", LinkState: "up", MTU: 1500},
-		{Name: "ens192", LinkState: "down", MTU: 1500}, // present, cable out — still an interface
-	}, "ens160", "ens160"); err != nil {
-		t.Fatalf("sync: %v", err)
+	if _, err := p.Exec(ctx, `UPDATE public.network_interfaces SET role='guest_access' WHERE name='ens224'`); err != nil {
+		t.Fatalf("classify: %v", err)
 	}
 
-	present, err := st.PresentIfaceSet(ctx)
-	if err != nil {
-		t.Fatalf("present: %v", err)
-	}
-	if present["vguest-h"] {
-		t.Fatal("a bridge destroyed 18 days ago must NOT be present — this is the defect being fixed")
-	}
-	if !present["ens160"] || !present["ens192"] {
-		t.Fatalf("every interface the latest sweep saw must be present, got %v", present)
+	// ens224 is gone: a later sweep does not see it.
+	if err := st.SyncInterfaces(ctx, []Interface{{Name: "ens160"}}, "ens160", "ens160"); err != nil {
+		t.Fatalf("sync 2: %v", err)
 	}
 
-	// NOTHING WAS DELETED. The row survives, and so does the operator's own column.
 	known, err := st.KnownIfaceSet(ctx)
 	if err != nil {
 		t.Fatalf("known: %v", err)
 	}
-	if !known["vguest-h"] {
-		t.Fatal("the row must be RETAINED: deleting it would destroy operator configuration and history")
+	if !known["ens224"] {
+		t.Fatal("the row must be RETAINED: the inventory records what this appliance has ever had")
 	}
 	var role string
-	if err := p.QueryRow(ctx, `SELECT role FROM public.network_interfaces WHERE name='vguest-h'`).Scan(&role); err != nil {
+	if err := p.QueryRow(ctx, `SELECT role FROM public.network_interfaces WHERE name='ens224'`).Scan(&role); err != nil {
 		t.Fatalf("read role: %v", err)
 	}
 	if role != "guest_access" {
 		t.Fatalf("the operator-assigned role must survive absence, got %q", role)
 	}
+
+	// And it comes back with that classification intact.
+	if err := st.SyncInterfaces(ctx, []Interface{{Name: "ens160"}, {Name: "ens224"}}, "ens160", "ens160"); err != nil {
+		t.Fatalf("sync 3: %v", err)
+	}
+	if err := p.QueryRow(ctx, `SELECT role FROM public.network_interfaces WHERE name='ens224'`).Scan(&role); err != nil {
+		t.Fatalf("read role: %v", err)
+	}
+	if role != "guest_access" {
+		t.Fatalf("reappearance must not reset the operator's classification, got %q", role)
+	}
 }
 
-// ONE SWEEP IS ONE INSTANT, so "seen by the latest sweep" is not a question about clock skew between rows.
+// ONE SWEEP IS ONE INSTANT, so anything that legitimately reads this table reads a coherent snapshot rather
+// than a spread of per-row timestamps.
 func TestIntegrationSweepStampsOneInstant(t *testing.T) {
 	p := presenceTestPool(t)
 	st := freshInventory(t, p)
@@ -129,72 +127,9 @@ func TestIntegrationSweepStampsOneInstant(t *testing.T) {
 	}
 }
 
-// DISAPPEAR AND COME BACK. Absence is not sticky state: it is simply the absence of a fresh observation, so
-// the next sweep that sees the interface makes it present again — with everything the operator set intact.
-//
-// The disappearance is aged deterministically rather than by sleeping: a test that waits for a tolerance
-// window to elapse is a test that fails on a slow machine.
-func TestIntegrationInterfaceReappearsWithRoleIntact(t *testing.T) {
-	p := presenceTestPool(t)
-	st := freshInventory(t, p)
-	ctx := context.Background()
-
-	if err := st.SyncInterfaces(ctx, []Interface{{Name: "ens160"}, {Name: "ens224"}}, "ens160", "ens160"); err != nil {
-		t.Fatalf("sync 1: %v", err)
-	}
-	if _, err := p.Exec(ctx, `UPDATE public.network_interfaces SET role='guest_access' WHERE name='ens224'`); err != nil {
-		t.Fatalf("classify: %v", err)
-	}
-
-	// GONE: age ens224 well beyond the tolerance, then let a sweep refresh only the interface that remains.
-	if _, err := p.Exec(ctx, `UPDATE public.network_interfaces SET last_seen_at = now() - interval '3 days' WHERE name='ens224'`); err != nil {
-		t.Fatalf("age: %v", err)
-	}
-	if err := st.SyncInterfaces(ctx, []Interface{{Name: "ens160"}}, "ens160", "ens160"); err != nil {
-		t.Fatalf("sync 2: %v", err)
-	}
-	present, err := st.PresentIfaceSet(ctx)
-	if err != nil {
-		t.Fatalf("present: %v", err)
-	}
-	if present["ens224"] {
-		t.Fatal("an interface the latest sweep did not see must not be present")
-	}
-
-	// BACK AGAIN.
-	if err := st.SyncInterfaces(ctx, []Interface{{Name: "ens160"}, {Name: "ens224"}}, "ens160", "ens160"); err != nil {
-		t.Fatalf("sync 3: %v", err)
-	}
-	present, _ = st.PresentIfaceSet(ctx)
-	if !present["ens224"] {
-		t.Fatal("an interface that came back must be present again, immediately")
-	}
-	var role string
-	if err := p.QueryRow(ctx, `SELECT role FROM public.network_interfaces WHERE name='ens224'`).Scan(&role); err != nil {
-		t.Fatalf("read role: %v", err)
-	}
-	if role != "guest_access" {
-		t.Fatalf("the operator's classification must survive a disappearance, got %q — this is exactly why rows are not deleted", role)
-	}
-}
-
-// AN EMPTY INVENTORY HAS NOTHING PRESENT. max(last_seen_at) over no rows is NULL; the query must yield
-// nothing rather than fail open and call everything present.
-func TestIntegrationEmptyInventoryHasNothingPresent(t *testing.T) {
-	p := presenceTestPool(t)
-	st := freshInventory(t, p)
-	present, err := st.PresentIfaceSet(context.Background())
-	if err != nil {
-		t.Fatalf("present: %v", err)
-	}
-	if len(present) != 0 {
-		t.Fatalf("an empty inventory has nothing present, got %v", present)
-	}
-}
-
-// A ROW WITH NO OBSERVATION AT ALL (last_seen_at NULL) is not present. Rows can be created by other paths —
-// edged assigns roles — and a NULL must never be read as "seen".
-func TestIntegrationNullLastSeenIsNotPresent(t *testing.T) {
+// THE KNOWN SET IS EVERY ROW, whatever its observation state — including one never observed at all, which
+// other paths (edged assigning a role) can create.
+func TestIntegrationKnownSetIncludesNeverObservedRows(t *testing.T) {
 	p := presenceTestPool(t)
 	st := freshInventory(t, p)
 	ctx := context.Background()
@@ -205,15 +140,11 @@ func TestIntegrationNullLastSeenIsNotPresent(t *testing.T) {
 	if err := st.SyncInterfaces(ctx, []Interface{{Name: "ens160"}}, "ens160", "ens160"); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
-	present, err := st.PresentIfaceSet(ctx)
+	known, err := st.KnownIfaceSet(ctx)
 	if err != nil {
-		t.Fatalf("present: %v", err)
+		t.Fatalf("known: %v", err)
 	}
-	if present["ens999"] {
-		t.Fatal("a row that has never been observed must not be present")
-	}
-	known, _ := st.KnownIfaceSet(ctx)
-	if !known["ens999"] {
-		t.Fatal("it is still KNOWN, so validation can tell the operator it exists but is not present")
+	if !known["ens999"] || !known["ens160"] {
+		t.Fatalf("the known set is every recorded row, got %v", known)
 	}
 }

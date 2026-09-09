@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -40,6 +41,15 @@ type applier struct {
 	// "rewrote it to the same thing", and those differ by whether a live guest keeps their authorization.
 	runFn func(ctx context.Context, name string, args ...string) error
 	outFn func(ctx context.Context, name string, args ...string) ([]byte, error)
+
+	// discoverFn is the interface-discovery seam. Presence is observed live at decision time, so a test has
+	// to be able to say "this interface is gone now" without unplugging anything.
+	discoverFn func(ctx context.Context) ([]Interface, error)
+	// knownFn / syncFn are the inventory seams beside it: what this appliance has EVER recorded, and the
+	// opportunistic refresh. Both are advisory to the decision -- presence does not depend on either -- so a
+	// test can state them, or leave them out entirely.
+	knownFn func(ctx context.Context) (map[string]bool, error)
+	syncFn  func(ctx context.Context, ifaces []Interface) error
 
 	// activeIntentFn / prevIntentFn / eventFn are the database seams the lifecycle paths use. They exist so a
 	// test can state, without a database, exactly what the CONFIRMED active revision holds and what the
@@ -301,13 +311,84 @@ func (a *applier) output(ctx context.Context, name string, args ...string) ([]by
 // driver or a destroyed bridge. Validation refuses both — a guest network cannot come up on either — but the
 // message says which.
 func (a *applier) presenceSets(ctx context.Context) (present, known map[string]bool, err error) {
-	present, err = a.st.PresentIfaceSet(ctx)
+	// PRESENCE IS OBSERVED AT THE MOMENT OF THE DECISION, FROM THE KERNEL.
+	//
+	// It used to be derived from the inventory: each row's last_seen_at compared against the newest one in
+	// the table. That is a RELATIVE reference, and it fails open in exactly the case that matters. If netd
+	// stops sweeping -- discovery broken, the database refusing writes, the process wedged -- the whole table
+	// freezes TOGETHER, every surviving row stays within the tolerance of the newest one, and an interface
+	// that vanished afterwards reads as present indefinitely. The stored observations stay internally
+	// consistent while being collectively wrong, which is the hardest kind of stale to notice.
+	//
+	// An absolute age bound on the stored observation cannot fix that either, because a sweep only happens at
+	// boot and on GET /v1/interfaces -- there is no periodic refresh. On a healthy appliance nobody has
+	// touched for a day, every stored observation is legitimately a day old, and any bound tight enough to
+	// catch a wedged netd would refuse applies on an appliance with nothing wrong with it.
+	//
+	// So the question is not asked of the database at all. netd is the process that can SEE the interfaces;
+	// it does not need to be told which ones exist. Discovering here removes the freshness problem rather
+	// than parameterising it: the observation is taken when the decision is made, so it cannot be stale.
+	//
+	// FAIL CLOSED. If discovery fails, presence cannot be established, and the error is returned rather than
+	// falling back to whatever the inventory last recorded. A fallback to stored data is precisely the
+	// fail-open this replaces.
+	ifaces, err := a.discover(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("cannot determine which interfaces are present: %w — refusing to "+
+			"validate against a stale inventory", err)
 	}
-	known, err = a.st.KnownIfaceSet(ctx)
+	present = make(map[string]bool, len(ifaces))
+	for _, f := range ifaces {
+		present[f.Name] = true
+	}
+
+	// The inventory still answers a different question: what has this appliance EVER recorded. That is what
+	// lets the message separate a name the appliance has never had from one it had and lost. It is advisory
+	// -- if it cannot be read, the check still refuses an absent parent, it just cannot say which kind.
+	known, err = a.knownIfaces(ctx)
 	if err != nil {
-		return nil, nil, err
+		slog.Warn("interface inventory unreadable; an absent parent will still be refused, but the message "+
+			"cannot distinguish 'never had one' from 'had one and lost it'", "err", err)
+		known = nil
+	}
+
+	// Refresh the inventory opportunistically, since discovery just ran. A failure here does NOT affect the
+	// decision above -- presence no longer depends on this table -- so it is logged and carried on from.
+	if err := a.syncInventory(ctx, ifaces); err != nil {
+		slog.Error("interface inventory refresh failed during validation; the decision is unaffected because "+
+			"presence is observed live, but the inventory is now stale for the UI and for audit", "err", err)
 	}
 	return present, known, nil
+}
+
+// knownIfaces reports what the appliance has EVER recorded. Advisory: it only sharpens the message.
+func (a *applier) knownIfaces(ctx context.Context) (map[string]bool, error) {
+	if a.knownFn != nil {
+		return a.knownFn(ctx)
+	}
+	if a.st == nil {
+		return nil, nil
+	}
+	return a.st.KnownIfaceSet(ctx)
+}
+
+// syncInventory refreshes the inventory from a sweep that has already happened. Advisory: the decision does
+// not depend on it.
+func (a *applier) syncInventory(ctx context.Context, ifaces []Interface) error {
+	if a.syncFn != nil {
+		return a.syncFn(ctx, ifaces)
+	}
+	if a.st == nil {
+		return nil
+	}
+	return a.st.SyncInterfaces(ctx, ifaces, a.topo.MgmtInterface, a.topo.WANInterface)
+}
+
+// discover is the discovery seam. Production uses Discover(); a test substitutes it to state exactly which
+// interfaces exist at the moment of the decision, including none at all and an outright failure.
+func (a *applier) discover(ctx context.Context) ([]Interface, error) {
+	if a.discoverFn != nil {
+		return a.discoverFn(ctx)
+	}
+	return Discover(ctx)
 }
