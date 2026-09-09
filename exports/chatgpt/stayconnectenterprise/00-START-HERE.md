@@ -25,6 +25,31 @@
 
 ---
 
+## 0A. PERMANENT PRODUCT-OWNER EXECUTION POLICY — ONE MISSION, END TO END
+
+**Read this before advising on any execution workflow. It is a permanent Product-Owner policy, not a per-task preference, and it supersedes any older wording — in this pack, in a historical chat, or in a prior report — that splits already-authorized routine work into repeated approval prompts.**
+
+When the Product Owner authorizes a defined mission, that single authorization covers **every routine step named in it or necessarily included in it**. The executing agent carries the mission through to DONE and returns **one** final completion report.
+
+Within an authorized mission the agent owns, where directly related: investigation and diagnosis, implementation, directly-related bug fixes, targeted and regression tests, build and package, CI and required gates, lockfile/dependency corrections the mission requires, manifest and generated-artifact corrections governance requires, commits, pushes, PR creation, directly-related PR/CI fixes, protected merge, deployment **if that exact environment was named in the mission**, deployment verification, rollback and retry, directly-related documentation and governance synchronization, and final post-merge/post-deployment verification.
+
+A progress report is **informational, never an approval checkpoint**. Running CI, a failed test, a failed build, a stale manifest, a pack needing refresh, another directly-related commit, or a routine defect found during deployment verification are all things to diagnose, fix and continue through — not reasons to stop and ask.
+
+The agent returns to the Product Owner **only for a genuinely new decision** outside the original mission: changed product semantics, architecture change, a security or trust-boundary change not already authorized, destructive or historical data mutation, a new DB schema/migration, PMS configuration or PMS/financial traffic not already authorized, networking/topology change, deployment to an environment not named, a Root-CA or trust-root change, or Go-Live/cutover.
+
+Four boundaries keep this safe rather than open-ended:
+
+- **ONE MISSION is not ONE PR.** As many directly-required commits, PRs and fix cycles as safe completion needs.
+- **CONTROLLED work stays CONTROLLED.** No blanket authorization is created for future controlled actions; the mission must name the controlled boundary it authorizes, and that authorization does not carry into an unrelated later mission.
+- **FAST DEVELOPMENT stays lightweight.** A simple UI or code request does not become a release/deploy mission unless the Product Owner put release, merge or deployment in the goal.
+- **Quality is not traded for speed.** Required tests, security checks, evidence, rollback safety and production-grade verification remain mandatory where they apply.
+
+**One active delivery owner per branch:** two agent sessions must never commit or push to the same active delivery branch. If a concurrent writer appears, one owner is established and the other stands down.
+
+The pattern is: **Product Owner gives the goal once → agent completes the entire authorized mission → agent returns one final completion report.** The repository copy of this rule is `CLAUDE.md` §0A, which is authoritative.
+
+---
+
 ## 1. What StayConnect Enterprise is
 
 A Linux-based inline **captive-portal Wi-Fi gateway appliance for hotels**, plus a cloud **Central Control Plane** — an enterprise alternative to IACBOX. Guests get internet access via the hotel network; the appliance authenticates them (PMS room lookup, vouchers, username/password guest accounts, OTP/social), enforces plans (speed/time/data/devices), meters usage, and can post Wi-Fi charges to the guest folio in the hotel's PMS over the **Protel/Opera FIAS** protocol.

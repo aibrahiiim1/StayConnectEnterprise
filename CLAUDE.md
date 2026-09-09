@@ -58,6 +58,51 @@ Authorization is still never inferred for production changes, PMS traffic, finan
 
 ---
 
+## 0A. PERMANENT PRODUCT-OWNER EXECUTION RULE — ONE MISSION, END TO END
+
+**Permanent Product-Owner policy. It sits beside §0 and governs how far a single authorization reaches. Where older wording in this file reads as "stop and ask again" for a step the current mission already authorized, this section wins.**
+
+**1. One authorization covers its whole mission.** When the Product Owner authorizes a defined mission, that initial authorization *is* the explicit authorization for every routine step named in it or necessarily included in it. It is not a licence to begin and then ask permission to continue.
+
+**2. Carry it to DONE.** The agent completes the authorized mission without returning for routine intermediate approvals.
+
+**3. Inside an authorized mission the agent owns**, where directly related: investigation and diagnosis · implementation · directly-related bug fixes · targeted and regression tests · build and package · CI and required gates · lockfile/dependency corrections the mission requires · manifest and generated-artifact corrections governance requires · commits · pushes · PR creation · directly-related PR/CI fixes · protected merge · deployment **if that exact environment was included in the mission** · deployment verification · rollback and retry when directly required · directly-related documentation and governance synchronization · final post-merge and post-deployment verification.
+
+**4. A progress report is INFORMATIONAL, never an approval checkpoint.** Do not stop merely because CI is running, a test failed, a build failed, a directly-related dependency needs correcting, a manifest is stale, a generated pack needs refreshing, a PR needs another directly-related commit, or deployment verification found a routine directly-related defect. Diagnose, fix, verify, continue.
+
+**5. Return to the Product Owner ONLY for a genuinely NEW decision** outside the original mission: changed product semantics · architecture change · a security or trust-boundary change not already authorized · destructive or historical data mutation not already authorized · a new DB schema/migration not already authorized · PMS configuration, PMS traffic or financial traffic not already authorized · networking/topology change · deployment to an environment not already authorized · Root-CA or trust-root change · Go-Live or cutover.
+
+**6. ONE MISSION does not mean ONE COMMIT or ONE PR.** Use as many directly-required commits, PRs and fix cycles as reaching DONE safely takes.
+
+**7. CONTROLLED work stays CONTROLLED.** This rule creates **no** blanket authorization for future controlled actions. The mission must name the controlled boundary it authorizes. Once named, the agent does not re-request that *same* authorization at each intermediate step — and the authorization does not carry into an unrelated later mission.
+
+**8. FAST DEVELOPMENT stays lightweight.** A simple local UI or code request does not become a release/deploy mission unless the Product Owner put release, merge or deployment in the goal.
+
+**9. Speed never buys out quality.** Required tests, security checks, evidence, rollback safety and production-grade verification remain mandatory wherever they apply.
+
+**10. ONE ACTIVE DELIVERY OWNER PER BRANCH.** Two agent sessions must not commit or push to the same active delivery branch. On detecting a concurrent writer, establish a single owner and have the other stand down before continuing.
+
+**11. The normal interaction pattern:**
+
+**PRODUCT OWNER GIVES THE GOAL ONCE → AGENT COMPLETES THE ENTIRE AUTHORIZED MISSION → AGENT RETURNS ONE FINAL COMPLETION REPORT**
+
+not: implement → ask again to test → ask again for a PR → ask again to merge → ask again to deploy → ask again to verify.
+
+### How this reconciles with the rest of this file
+
+Two lifecycles now coexist, chosen by what the Product Owner actually authorized:
+
+| The request | Lifecycle |
+|---|---|
+| A task with no release/deploy authorization | **REQUEST → EXECUTE → TARGETED CHECK → RESULT → STOP** (§3, §10 unchanged) |
+| An explicitly authorized end-to-end mission | **MISSION AUTHORIZATION → EXECUTE → FIX DIRECT BLOCKERS → TEST → CI → PR → MERGE → AUTHORIZED DEPLOYMENT → VERIFY → GOVERNANCE SYNC → FINAL REPORT**, with no intermediate re-authorization for steps the mission already covered |
+
+§3 and §10's STOP still describe the *default*: a routine edit ends at its targeted check. They do not truncate a mission whose goal explicitly included merge, deployment or verification — in that case the mission's own end is the stopping point.
+
+§6 still forbids *unsolicited* remote Git operations. A mission that names push, PR, merge or deployment **is** the solicitation, for that mission, and the agent should not ask again per step. §6's list continues to apply to everything the mission did not name.
+
+§5's governance restraint is unchanged for routine work. Where a mission's own governance checks require a manifest refresh, a generated-block re-render or a pack rebuild in order to merge, performing those is part of the authorized mission rather than unsolicited ceremony.
+
 ### 1. Execute, do not review
 
 When the user requests a code change, configuration change, database change, deployment action, production action, file edit, deletion, migration, commit, push, or other repository operation:
@@ -256,6 +301,10 @@ These still require explicit Product-Owner authorization before execution:
 * PMS, payment-provider or financial traffic
 
 Everything else: implement directly, fix routine blockers without asking, and continue.
+
+**"Explicit Product-Owner authorization" may be supplied ONCE, by the mission prompt itself.** Where a mission explicitly authorizes a commit, push, PR, merge or a deployment to a named environment, that authorization is already given for that mission: the agent must **not** request duplicate authorization for the same action at each intermediate step, and must not treat its own progress report as a point where the authorization lapses.
+
+This does **not** extend the authorization beyond that mission. An action authorized for one mission is unauthorized for the next one unless that next mission names it again. Anything the mission did not name — a different environment, a migration it never mentioned, PMS or financial traffic, Go-Live — still requires its own decision (§0A.5, §0A.7).
 
 ### 13. Review happens after delivery
 
