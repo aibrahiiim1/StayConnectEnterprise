@@ -92,14 +92,25 @@ func main() {
 		unboundFrag:   envOr("NETD_UNBOUND_FRAG", "/etc/unbound/unbound.conf.d/stayconnect-guest.conf"),
 		keaLeaseCSV:   envOr("NETD_KEA_LEASE_CSV", "/var/lib/kea/kea-leases4.csv"),
 		keaSocket:     envOr("NETD_KEA_SOCKET", "/run/kea/kea4-ctrl-socket"),
+		keaConfFile:   envOr("NETD_KEA_CONF", "/etc/kea/kea-dhcp4.conf"),
 		confirmWindow: confirmWindow,
 		legacyBridge:  envOr("NETD_LEGACY_BRIDGE", "br-lan"),
 		dryRun:        dryRun,
 	}
 
 	// Refresh interface inventory at boot.
+	//
+	// THE SYNC ERROR IS LOGGED, because discarding it is what hid a dead inventory for weeks. netd upserts
+	// this table with ON CONFLICT DO UPDATE; when the role was missing UPDATE, every refresh failed with
+	// "permission denied for table network_interfaces" and both call sites threw the error away. The table
+	// simply stopped advancing, and the symptom surfaced somewhere else entirely -- guest-network
+	// validation reading an inventory that no longer described the appliance and rejecting parents that
+	// were plainly present. A refresh that cannot write is worth a line in the journal.
 	if ifaces, err := Discover(rootCtx); err == nil {
-		_ = st.SyncInterfaces(rootCtx, ifaces, topo.MgmtInterface, topo.WANInterface)
+		if err := st.SyncInterfaces(rootCtx, ifaces, topo.MgmtInterface, topo.WANInterface); err != nil {
+			slog.Error("interface inventory refresh failed; the inventory is now STALE and guest-network "+
+				"validation reads it to decide which parents exist", "err", err)
+		}
 	} else {
 		slog.Warn("interface discovery failed", "err", err)
 	}
@@ -354,7 +365,11 @@ func (s *server) interfaces(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	_ = s.st.SyncInterfaces(r.Context(), ifaces, s.topo.MgmtInterface, s.topo.WANInterface)
+	// Logged, not discarded — see the boot-refresh call site. This is the request that populates the
+	// wizard's dropdown, so a silent failure here is what makes a present interface look absent.
+	if err := s.st.SyncInterfaces(r.Context(), ifaces, s.topo.MgmtInterface, s.topo.WANInterface); err != nil {
+		slog.Error("interface inventory refresh failed; serving discovery without a fresh inventory", "err", err)
+	}
 	// Overlay the operator-assigned role/protected flag from the inventory so the
 	// UI can tell which interfaces may parent a guest network. Discover() alone
 	// leaves Role empty, which made every interface non-selectable in the wizard.

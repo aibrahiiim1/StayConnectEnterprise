@@ -126,7 +126,13 @@ done
 echo "=== positive write PRIVILEGES (authoritative has_table_privilege) MUST be granted ==="
 for t in "svc_scd|audit_log|INSERT" "svc_scd|sessions|UPDATE" "svc_scd|guests|INSERT" \
          "svc_acctd|accounting_records|INSERT" "svc_acctd|sessions|UPDATE" \
-         "svc_netd|network_apply_events|INSERT" "svc_edged|ticket_templates|INSERT"; do
+         "svc_netd|network_apply_events|INSERT" "svc_edged|ticket_templates|INSERT" \
+         "svc_netd|network_interfaces|UPDATE"; do
+  # netd refreshes network_interfaces with INSERT ... ON CONFLICT DO UPDATE, and PostgreSQL demands UPDATE
+  # for the DO UPDATE clause whether or not a row conflicts. A SELECT probe cannot see that: the table read
+  # fine while every refresh failed and netd discarded the error, so the inventory silently froze and guest
+  # validation reported interface_not_found for interfaces that were plainly present. Asserted as a
+  # PRIVILEGE, because that is the thing that was missing.
   IFS='|' read -r role tbl verb <<<"$t"
   v=$(q "select has_table_privilege('$role','public.$tbl','$verb')")
   [ "$v" = "t" ] && ok "$role $verb $tbl granted" || bad "$role $verb $tbl NOT granted (got '$v')"

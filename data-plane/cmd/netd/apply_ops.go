@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -82,9 +83,50 @@ func (a *applier) applyBundle(ctx context.Context, revID string, intent []netcfg
 	// atomically (no partial apply) if the config is bad, which is the gate we
 	// want. Structural validation already ran via netcfg.ValidateSet.
 	dhcp4 := netcfg.RenderKeaDhcp4(intent, a.topo, a.keaLeaseCSV, a.keaSocket)
+
+	// A BRIDGE THAT IS NOT RUNNING YET CANNOT BE BOUND. `ip link add` returned moments ago, but a bridge is
+	// not IFF_RUNNING until a member settles, and the Kea configuration used to land in exactly that gap:
+	// Kea kept running, answered status-get, reported the right subnet, and held no DHCP socket at all.
+	var wantBridges []string
+	for _, n := range managed {
+		if n.Enabled && n.BridgeName != "" {
+			wantBridges = append(wantBridges, n.BridgeName)
+		}
+	}
+	a.waitBridgesRunning(ctx, wantBridges)
+
 	if !a.dryRun {
+		// FIRST GUEST NETWORK ON A FACTORY-CLEAN APPLIANCE: Kea is installed stopped and disabled because it
+		// binds a bridge that did not exist until a moment ago, and it can only be configured through a
+		// socket that exists only while it runs. No-op once Kea is answering.
+		// The control socket takes the inner Dhcp4 object; the config FILE needs the whole document, which is
+		// the same render wrapped exactly as extractDhcp4 expects to read it back.
+		full, ferr := json.MarshalIndent(map[string]any{"Dhcp4": dhcp4}, "", "  ")
+		if ferr != nil {
+			return fmt.Errorf("render kea config file: %w", ferr)
+		}
+		if err := a.bootstrapKeaIfStopped(ctx, revID, full); err != nil {
+			return err
+		}
 		if err := a.kea.ConfigSet(dhcp4); err != nil {
 			return err
+		}
+		// AND NOW ASSERT THE THING THAT MATTERS. config-set does not reliably rebind Kea's sockets when the
+		// interface set changes underneath it — rollback destroys a bridge and re-apply creates a new one
+		// with a new ifindex, and Kea accepts a configuration for an interface it never binds. A restart
+		// rebinds instantly from the very same config. Only locally-served, enabled networks are expected to
+		// hold a socket; a relayed network legitimately has none.
+		if missing := a.gatewaysNotListening(managed); len(missing) > 0 {
+			slog.Warn("kea accepted the configuration but is not listening on every guest gateway; restarting to rebind",
+				"gateways", strings.Join(missing, ","))
+			if err := a.run(ctx, "systemctl", "restart", "kea-dhcp4-server"); err != nil {
+				return fmt.Errorf("kea is not listening on %s and the rebind restart failed: %w",
+					strings.Join(missing, ","), err)
+			}
+			if still := a.gatewaysNotListening(managed); len(still) > 0 {
+				return fmt.Errorf("kea is still not listening on %s after a restart; guests on that network "+
+					"would get no address", strings.Join(still, ","))
+			}
 		}
 	}
 	a.st.Event(ctx, revID, "kea", true, nil)
@@ -243,11 +285,18 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) {
 
 	if prevBundle == "" {
 		// No prior good revision: tear down everything managed and clear.
+		//
+		// A FACTORY-CLEAN APPLIANCE HAS TO COME BACK FACTORY-CLEAN. This is the path the very first guest
+		// network takes when it fails or its confirmation expires, and that first apply is the one that
+		// STARTED Kea — because there is no other way to configure it. Tearing down the bridge, the netplan
+		// and the unbound fragment while leaving Kea running, enabled, and serving DHCP for a network that
+		// no longer exists is not a rollback.
 		for br := range a.liveGuestBridges() {
 			_ = a.destroyBridge(ctx, br)
 		}
 		_ = os.Remove(a.netplanFile)
 		_ = os.Remove(a.unboundFrag)
+		a.restoreKeaBootstrap(ctx)
 		_ = a.markRolledBack(ctx, failedID, reason)
 		return
 	}
@@ -355,9 +404,24 @@ func (a *applier) healthChecks(ctx context.Context, revID string, intent []netcf
 		add("gateway_up", true, "")
 	}
 
-	// kea_running.
-	keaOK := a.dryRun || a.kea.Healthy()
-	add("kea_running", keaOK, "")
+	// kea_running — IS IT LISTENING, not is it feeling well.
+	//
+	// This used to be a.kea.Healthy(), a status-get. status-get answers "healthy" from a Kea that holds no
+	// DHCP socket at all, which is the exact state a rollback-then-re-apply leaves behind: the bridge is
+	// recreated with a new ifindex and config-set does not rebind. The check therefore could not fail while
+	// guests were unable to get an address, and the failure it hid looks like a cabling fault from the guest
+	// side — the most expensive place to debug it.
+	keaOK, keaDetail := true, ""
+	if !a.dryRun {
+		if !a.kea.Healthy() {
+			keaOK, keaDetail = false, "Kea is not answering its control socket"
+		} else if missing := a.gatewaysNotListening(intent); len(missing) > 0 {
+			keaOK = false
+			keaDetail = "Kea is answering but holds NO DHCP socket for " + strings.Join(missing, ",") +
+				" — guests on that network would get no address"
+		}
+	}
+	add("kea_running", keaOK, keaDetail)
 
 	// portal_listen: portald must still be listening on the HTTP portal port.
 	portalOK := a.dryRun || tcpListening(a.topo.PortalHTTPPort)
