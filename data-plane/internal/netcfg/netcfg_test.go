@@ -36,7 +36,7 @@ func hasCode(iss []Issue, code string) bool {
 }
 
 func TestValidValid(t *testing.T) {
-	iss := ValidateOne(vlan20(), topoT(), availAll(), "")
+	iss := ValidateOne(vlan20(), topoT(), availAll(), nil, "")
 	if len(iss) != 0 {
 		t.Fatalf("expected no issues, got %+v", iss)
 	}
@@ -45,11 +45,11 @@ func TestValidValid(t *testing.T) {
 func TestVLANRange(t *testing.T) {
 	n := vlan20()
 	n.VLANID = 5000
-	if !hasCode(ValidateOne(n, topoT(), availAll(), ""), "vlan_out_of_range") {
+	if !hasCode(ValidateOne(n, topoT(), availAll(), nil, ""), "vlan_out_of_range") {
 		t.Fatal("expected vlan_out_of_range")
 	}
 	n.VLANID = 0
-	if !hasCode(ValidateOne(n, topoT(), availAll(), ""), "vlan_out_of_range") {
+	if !hasCode(ValidateOne(n, topoT(), availAll(), nil, ""), "vlan_out_of_range") {
 		t.Fatal("expected vlan_out_of_range for 0 on a vlan network")
 	}
 }
@@ -57,7 +57,7 @@ func TestVLANRange(t *testing.T) {
 func TestPoolOutsideSubnet(t *testing.T) {
 	n := vlan20()
 	n.Pools = []Pool{{StartIP: "10.99.0.100", EndIP: "10.99.0.200"}}
-	if !hasCode(ValidateOne(n, topoT(), availAll(), ""), "pool_outside_subnet") {
+	if !hasCode(ValidateOne(n, topoT(), availAll(), nil, ""), "pool_outside_subnet") {
 		t.Fatal("expected pool_outside_subnet")
 	}
 }
@@ -65,7 +65,7 @@ func TestPoolOutsideSubnet(t *testing.T) {
 func TestGatewayInPool(t *testing.T) {
 	n := vlan20()
 	n.Pools = []Pool{{StartIP: "10.20.0.1", EndIP: "10.20.0.200"}}
-	if !hasCode(ValidateOne(n, topoT(), availAll(), ""), "pool_contains_gateway") {
+	if !hasCode(ValidateOne(n, topoT(), availAll(), nil, ""), "pool_contains_gateway") {
 		t.Fatal("expected pool_contains_gateway")
 	}
 }
@@ -73,7 +73,7 @@ func TestGatewayInPool(t *testing.T) {
 func TestPoolReversed(t *testing.T) {
 	n := vlan20()
 	n.Pools = []Pool{{StartIP: "10.20.0.200", EndIP: "10.20.0.100"}}
-	if !hasCode(ValidateOne(n, topoT(), availAll(), ""), "pool_reversed") {
+	if !hasCode(ValidateOne(n, topoT(), availAll(), nil, ""), "pool_reversed") {
 		t.Fatal("expected pool_reversed")
 	}
 }
@@ -84,7 +84,7 @@ func TestPoolOverlap(t *testing.T) {
 		{StartIP: "10.20.0.100", EndIP: "10.20.1.100"},
 		{StartIP: "10.20.1.50", EndIP: "10.20.2.0"},
 	}
-	if !hasCode(ValidateOne(n, topoT(), availAll(), ""), "pool_overlap") {
+	if !hasCode(ValidateOne(n, topoT(), availAll(), nil, ""), "pool_overlap") {
 		t.Fatal("expected pool_overlap")
 	}
 }
@@ -92,7 +92,7 @@ func TestPoolOverlap(t *testing.T) {
 func TestGatewayOutsideSubnet(t *testing.T) {
 	n := vlan20()
 	n.GatewayIP = "10.99.0.1"
-	if !hasCode(ValidateOne(n, topoT(), availAll(), ""), "gateway_outside_subnet") {
+	if !hasCode(ValidateOne(n, topoT(), availAll(), nil, ""), "gateway_outside_subnet") {
 		t.Fatal("expected gateway_outside_subnet")
 	}
 }
@@ -100,7 +100,7 @@ func TestGatewayOutsideSubnet(t *testing.T) {
 func TestProtectedInterface(t *testing.T) {
 	n := vlan20()
 	n.ParentInterface = "ens160" // WAN/mgmt
-	if !hasCode(ValidateOne(n, topoT(), availAll(), ""), "protected_interface") {
+	if !hasCode(ValidateOne(n, topoT(), availAll(), nil, ""), "protected_interface") {
 		t.Fatal("expected protected_interface")
 	}
 }
@@ -108,7 +108,7 @@ func TestProtectedInterface(t *testing.T) {
 func TestMissingParent(t *testing.T) {
 	n := vlan20()
 	n.ParentInterface = "eth-nope"
-	if !hasCode(ValidateOne(n, topoT(), availAll(), ""), "interface_not_found") {
+	if !hasCode(ValidateOne(n, topoT(), availAll(), nil, ""), "interface_not_found") {
 		t.Fatal("expected interface_not_found")
 	}
 }
@@ -116,7 +116,7 @@ func TestMissingParent(t *testing.T) {
 func TestReservationInPool(t *testing.T) {
 	n := vlan20()
 	n.Reservations = []Reservation{{MAC: "aa:bb:cc:dd:ee:ff", ReservedIP: "10.20.0.150", Enabled: true}}
-	if !hasCode(ValidateOne(n, topoT(), availAll(), ""), "reservation_in_pool") {
+	if !hasCode(ValidateOne(n, topoT(), availAll(), nil, ""), "reservation_in_pool") {
 		t.Fatal("expected reservation_in_pool")
 	}
 }
@@ -124,7 +124,7 @@ func TestReservationInPool(t *testing.T) {
 func TestReservationOK(t *testing.T) {
 	n := vlan20()
 	n.Reservations = []Reservation{{MAC: "aa:bb:cc:dd:ee:ff", ReservedIP: "10.20.0.10", Enabled: true}}
-	if len(ValidateOne(n, topoT(), availAll(), "")) != 0 {
+	if len(ValidateOne(n, topoT(), availAll(), nil, "")) != 0 {
 		t.Fatal("reservation outside pool should be valid")
 	}
 }
@@ -136,7 +136,7 @@ func TestDuplicateVLAN(t *testing.T) {
 	bnet.BridgeName = "br-g20b"
 	bnet.SubnetCIDR = "10.21.0.0/22"
 	bnet.GatewayIP = "10.21.0.1"
-	res := ValidateSet([]GuestNetwork{a, bnet}, topoT(), availAll())
+	res := ValidateSet([]GuestNetwork{a, bnet}, topoT(), availAll(), nil)
 	if !hasCode(res.Issues, "duplicate_vlan") {
 		t.Fatalf("expected duplicate_vlan, got %+v", res.Issues)
 	}
@@ -149,7 +149,7 @@ func TestSubnetOverlap(t *testing.T) {
 	bnet.VLANID = 30
 	bnet.BridgeName = "br-g30"
 	// overlapping subnet
-	res := ValidateSet([]GuestNetwork{a, bnet}, topoT(), availAll())
+	res := ValidateSet([]GuestNetwork{a, bnet}, topoT(), availAll(), nil)
 	if !hasCode(res.Issues, "subnet_overlap") {
 		t.Fatalf("expected subnet_overlap, got %+v", res.Issues)
 	}
@@ -165,7 +165,7 @@ func TestMultiVLANValid(t *testing.T) {
 	bnet.SubnetCIDR = "10.40.0.0/24"
 	bnet.PrefixLen = 24
 	bnet.Pools = []Pool{{StartIP: "10.40.0.50", EndIP: "10.40.0.220"}}
-	res := ValidateSet([]GuestNetwork{a, bnet}, topoT(), availAll())
+	res := ValidateSet([]GuestNetwork{a, bnet}, topoT(), availAll(), nil)
 	if !res.OK {
 		t.Fatalf("two disjoint VLANs should validate, got %+v", res.Issues)
 	}
