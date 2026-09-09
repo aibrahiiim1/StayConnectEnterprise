@@ -1,0 +1,4 @@
+commit 0f095fc1d2c5dba17d3739882dbff9db661b25a2
+Date:   Wed Sep 9 09:49:02 2026 +0300
+
+    Let a factory-clean appliance apply its first guest network
