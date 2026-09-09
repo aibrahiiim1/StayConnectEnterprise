@@ -1,0 +1,4 @@
+commit 3df9b6e03d2216ff77d2fab92a271ad68dec2517
+Date:   Wed Sep 9 23:30:36 2026 +0300
+
+    Rebuild the export packs on the live-presence closure source

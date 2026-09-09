@@ -1,4 +1,0 @@
-commit 7aac79a956deac6fe1181ef6e5e166eb578f5de2
-Date:   Wed Sep 9 23:30:21 2026 +0300
-
-    Record the fail-open the review found, and the design that removes it
