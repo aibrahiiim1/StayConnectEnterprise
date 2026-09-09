@@ -1,0 +1,4 @@
+commit c02abe6f31bdffdec656e87617973b500de6d38f
+Date:   Wed Sep 9 18:33:07 2026 +0300
+
+    Rebuild the export packs on the presence-closure source

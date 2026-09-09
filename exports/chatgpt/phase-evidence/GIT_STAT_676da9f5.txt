@@ -1,4 +1,0 @@
-commit 676da9f5ccd8ba8f83aece31d89c3bbe9b52ccdc
-Date:   Wed Sep 9 17:36:18 2026 +0300
-
-    Rebuild the export packs on the presence-fix source
