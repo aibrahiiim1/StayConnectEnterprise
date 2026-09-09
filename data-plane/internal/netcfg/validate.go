@@ -26,7 +26,7 @@ func (r *ValidationResult) add(field, code, msg string) {
 
 // ValidateOne checks a single network in isolation (shape, CIDR, pools,
 // reservations, timers, VLAN, portal). prefix is the field path prefix.
-func ValidateOne(n GuestNetwork, topo Topology, availIfaces map[string]bool, prefix string) []Issue {
+func ValidateOne(n GuestNetwork, topo Topology, availIfaces, knownIfaces map[string]bool, prefix string) []Issue {
 	var r ValidationResult
 	r.OK = true
 	f := func(s string) string { return prefix + s }
@@ -37,8 +37,22 @@ func ValidateOne(n GuestNetwork, topo Topology, availIfaces map[string]bool, pre
 	if n.ParentInterface == "" {
 		r.add(f("parent_interface"), "required", "a parent interface is required")
 	} else if availIfaces != nil && !availIfaces[n.ParentInterface] {
-		r.add(f("parent_interface"), "interface_not_found",
-			fmt.Sprintf("interface %q was not found on the appliance", n.ParentInterface))
+		// availIfaces is the set of interfaces the appliance HAS RIGHT NOW, not the set it has ever recorded.
+		// A guest network attached to an interface that no longer exists cannot come up, so it is refused
+		// here rather than at netplan/Kea time where the message would name something else entirely.
+		//
+		// KnownIfaces, when supplied, lets the message distinguish an interface this appliance has never had
+		// from one it had and lost — a typo and a pulled card are the same error code otherwise, and they are
+		// resolved very differently.
+		if knownIfaces != nil && knownIfaces[n.ParentInterface] {
+			r.add(f("parent_interface"), "interface_not_present",
+				fmt.Sprintf("interface %q is recorded on this appliance but is NOT PRESENT now — it was not "+
+					"seen by the latest interface scan. Reconnect or restore it, or choose an interface that "+
+					"is present.", n.ParentInterface))
+		} else {
+			r.add(f("parent_interface"), "interface_not_found",
+				fmt.Sprintf("interface %q was not found on the appliance", n.ParentInterface))
+		}
 	}
 	// Never attach a guest network to the management/WAN interface without an
 	// explicit override (which this validator does not grant).
@@ -247,10 +261,10 @@ func validateReservations(r *ValidationResult, n GuestNetwork, ipnet *net.IPNet,
 // one appliance: duplicate VLAN on the same parent, duplicate bridge names,
 // and overlapping enabled subnets (no VRF yet). Issues is always non-nil so
 // it serializes as [] rather than null.
-func ValidateSet(nets []GuestNetwork, topo Topology, availIfaces map[string]bool) ValidationResult {
+func ValidateSet(nets []GuestNetwork, topo Topology, availIfaces, knownIfaces map[string]bool) ValidationResult {
 	res := ValidationResult{OK: true, Issues: []Issue{}}
 	for i := range nets {
-		for _, iss := range ValidateOne(nets[i], topo, availIfaces, fmt.Sprintf("networks[%d].", i)) {
+		for _, iss := range ValidateOne(nets[i], topo, availIfaces, knownIfaces, fmt.Sprintf("networks[%d].", i)) {
 			res.Issues = append(res.Issues, iss)
 			res.OK = false
 		}

@@ -111,11 +111,11 @@ func (a *applier) Validate(ctx context.Context, summary, actor string) (*applyRe
 	if err != nil {
 		return nil, err
 	}
-	avail, err := a.st.AvailableIfaceSet(ctx)
+	avail, known, err := a.presenceSets(ctx)
 	if err != nil {
 		return nil, err
 	}
-	res := netcfg.ValidateSet(intent, a.topo, avail)
+	res := netcfg.ValidateSet(intent, a.topo, avail, known)
 	id, seq, err := a.st.CreateRevision(ctx, summary, intent, actor)
 	if err != nil {
 		return nil, err
@@ -138,11 +138,11 @@ func (a *applier) Apply(ctx context.Context, summary, actor string) (*applyResul
 	if err != nil {
 		return nil, err
 	}
-	avail, err := a.st.AvailableIfaceSet(ctx)
+	avail, known, err := a.presenceSets(ctx)
 	if err != nil {
 		return nil, err
 	}
-	res := netcfg.ValidateSet(intent, a.topo, avail)
+	res := netcfg.ValidateSet(intent, a.topo, avail, known)
 	id, seq, err := a.st.CreateRevision(ctx, summary, intent, actor)
 	if err != nil {
 		return nil, err
@@ -292,4 +292,22 @@ func (a *applier) output(ctx context.Context, name string, args ...string) ([]by
 	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	return exec.CommandContext(cctx, name, args...).Output()
+}
+
+// presenceSets reads what the appliance HAS NOW and what it has EVER recorded.
+//
+// Two sets rather than one, because "this interface does not exist" and "this interface existed and is gone"
+// are different operator problems: the first is usually a typo, the second is a pulled card, an unloaded
+// driver or a destroyed bridge. Validation refuses both — a guest network cannot come up on either — but the
+// message says which.
+func (a *applier) presenceSets(ctx context.Context) (present, known map[string]bool, err error) {
+	present, err = a.st.PresentIfaceSet(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	known, err = a.st.KnownIfaceSet(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return present, known, nil
 }

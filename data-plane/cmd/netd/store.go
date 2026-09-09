@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -110,7 +111,14 @@ func (s *store) loadReservations(ctx context.Context, n *netcfg.GuestNetwork) er
 // AvailableInterfaces refreshes the network_interfaces inventory from discovery
 // and returns the set of assignable parent names (excludes protected mgmt/wan
 // only from *new guest attachment*, not from the inventory listing).
+// A SWEEP IS ONE INSTANT, not one instant per row.
+//
+// Presence is derived by comparing each row's last_seen_at against the newest one in the table (see
+// PresentIfaceSet), so every interface observed by the SAME sweep has to carry the SAME timestamp. Stamping
+// now() per statement would spread one sweep across a range of microseconds and make "was this seen in the
+// latest sweep" a question about clock skew rather than about the appliance.
 func (s *store) SyncInterfaces(ctx context.Context, ifaces []Interface, mgmt, wan string) error {
+	sweptAt := time.Now().UTC()
 	for _, f := range ifaces {
 		role := "unused"
 		protected := false
@@ -122,14 +130,14 @@ func (s *store) SyncInterfaces(ctx context.Context, ifaces []Interface, mgmt, wa
 		ipsRaw, _ := json.Marshal(f.IPs)
 		_, err := s.db.Exec(ctx, `
             INSERT INTO network_interfaces (name, mac, role, mode, parent, link_state, mtu, ip_addresses, is_protected, last_seen_at)
-            VALUES ($1, NULLIF($2,'')::macaddr, $3, 'auto', NULLIF($4,''), $5, $6, $7::jsonb, $8, now())
+            VALUES ($1, NULLIF($2,'')::macaddr, $3, 'auto', NULLIF($4,''), $5, $6, $7::jsonb, $8, $9)
             ON CONFLICT (name) DO UPDATE SET
               mac = EXCLUDED.mac, link_state = EXCLUDED.link_state, mtu = EXCLUDED.mtu,
-              ip_addresses = EXCLUDED.ip_addresses, last_seen_at = now(),
+              ip_addresses = EXCLUDED.ip_addresses, last_seen_at = EXCLUDED.last_seen_at,
               -- keep an operator-assigned role; only seed protected flag/role
               role = CASE WHEN network_interfaces.role = 'unused' THEN EXCLUDED.role ELSE network_interfaces.role END,
               is_protected = network_interfaces.is_protected OR EXCLUDED.is_protected
-        `, f.Name, f.MAC, role, f.Parent, f.LinkState, f.MTU, string(ipsRaw), protected)
+        `, f.Name, f.MAC, role, f.Parent, f.LinkState, f.MTU, string(ipsRaw), protected, sweptAt)
 		if err != nil {
 			return err
 		}
@@ -137,7 +145,60 @@ func (s *store) SyncInterfaces(ctx context.Context, ifaces []Interface, mgmt, wa
 	return nil
 }
 
-func (s *store) AvailableIfaceSet(ctx context.Context) (map[string]bool, error) {
+// PresentIfaceSet returns the interfaces the appliance ACTUALLY HAS RIGHT NOW.
+//
+// THE DEFECT THIS REPLACES. This was `SELECT name FROM network_interfaces`, which answers "has this
+// appliance ever seen an interface by this name", not "does it have one now". network_interfaces is an
+// accumulating inventory that is never pruned, so a bridge or veth that existed once and has since been
+// destroyed leaves a row behind — and guest-network validation, which asks this set whether a parent exists,
+// would accept it. Observed on PRE-LIVE: a row for `vguest-h`, a bridge deleted weeks earlier, would still
+// have satisfied `interface_not_found`.
+//
+// PRESENCE IS DERIVED, NOT STORED, AND NOTHING IS DELETED. Each sweep stamps every interface it observed
+// with one identical last_seen_at (see SyncInterfaces), so the newest timestamp in the table IS the last
+// sweep, and a row older than it was not observed by that sweep. That keeps the operator's own columns —
+// role, is_protected, mode — and the row's history intact for an interface that is merely gone for now,
+// which deleting the row would destroy: an interface that came back would return as role='unused' and
+// silently lose its classification.
+//
+// WHY A TOLERANCE. The sweep timestamp is uniform by construction, but rows written by an OLDER build (or by
+// a sweep that was interrupted part-way) are not. The window admits those without admitting a row that is
+// genuinely stale — the case this exists for was 18 days old, not 30 seconds.
+//
+// AN UNPLUGGED CABLE IS NOT AN ABSENT INTERFACE. Discovery reads link objects from `ip -j addr`; a NIC with
+// nothing plugged into it still appears, carrying link_state "down". Absence here means the link object is
+// gone — the NIC was removed, its driver unloaded, or a bridge/veth destroyed. Unplugging and replugging a
+// guest NIC therefore does not change presence at all, which is the behaviour an operator expects.
+func (s *store) PresentIfaceSet(ctx context.Context) (map[string]bool, error) {
+	rows, err := s.db.Query(ctx, `
+        SELECT name FROM network_interfaces
+         WHERE last_seen_at IS NOT NULL
+           AND last_seen_at >= (SELECT max(last_seen_at) FROM network_interfaces) - $1::interval
+    `, ifacePresenceTolerance)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		out[n] = true
+	}
+	return out, rows.Err()
+}
+
+// ifacePresenceTolerance is how much older than the newest observation a row may be and still count as seen
+// by the same sweep. Generous enough to absorb a partial sweep or a row written by an older build; far
+// smaller than any interval over which an interface genuinely disappears unnoticed.
+const ifacePresenceTolerance = "2 minutes"
+
+// KnownIfaceSet returns every interface the inventory has EVER recorded, present or not. It exists so a
+// caller can tell "this appliance has no such interface" apart from "it had one and it is gone now" — two
+// situations an operator resolves very differently.
+func (s *store) KnownIfaceSet(ctx context.Context) (map[string]bool, error) {
 	rows, err := s.db.Query(ctx, `SELECT name FROM network_interfaces`)
 	if err != nil {
 		return nil, err
