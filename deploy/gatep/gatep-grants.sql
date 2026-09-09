@@ -154,7 +154,21 @@ GRANT USAGE ON SCHEMA public TO svc_netd;
 GRANT SELECT,INSERT,UPDATE ON public.network_config_revisions TO svc_netd;
 GRANT SELECT,INSERT        ON public.network_apply_events     TO svc_netd;
 GRANT SELECT,INSERT        ON public.network_health_checks    TO svc_netd;
-GRANT SELECT,INSERT        ON public.network_interfaces       TO svc_netd;
+-- network_interfaces is an INVENTORY netd REFRESHES, not an append-only log, so it needs UPDATE.
+--
+-- netd syncs it with INSERT ... ON CONFLICT (name) DO UPDATE, and PostgreSQL requires UPDATE privilege for
+-- the DO UPDATE clause whether or not a row actually conflicts. With SELECT,INSERT alone every refresh
+-- failed with "permission denied for table network_interfaces" -- and both call sites in netd discard that
+-- error, so nothing was written and nothing was logged.
+--
+-- The consequence landed nowhere near the cause. Guest-network validation reads this table to decide which
+-- interfaces exist, so a table that never refreshes made parents fail with interface_not_found -- naming an
+-- interface that is present, that netd discovers, and that the wizard offers from its own dropdown. It
+-- reads as broken hardware.
+--
+-- Measured on the PRE-LIVE appliance before this grant existed: last_seen_at frozen at 2026-08-22 across
+-- every later netd restart, holding a bridge that no longer exists and missing every bridge that does.
+GRANT SELECT,INSERT,UPDATE ON public.network_interfaces       TO svc_netd;
 GRANT INSERT               ON public.system_network_audit     TO svc_netd; -- append-only
 GRANT SELECT               ON public.guest_networks           TO svc_netd; -- read for apply
 GRANT SELECT               ON public.dhcp_pools               TO svc_netd;

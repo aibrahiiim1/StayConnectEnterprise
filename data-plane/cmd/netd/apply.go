@@ -28,6 +28,7 @@ type applier struct {
 	unboundFrag   string // /etc/unbound/unbound.conf.d/stayconnect-guest.conf
 	keaLeaseCSV   string
 	keaSocket     string
+	keaConfFile   string // /etc/kea/kea-dhcp4.conf — written only by the factory-clean bootstrap
 	confirmWindow time.Duration
 	// legacyBridge is never surgically managed (it is adopted as-is).
 	legacyBridge string
@@ -210,7 +211,13 @@ func (a *applier) Apply(ctx context.Context, summary, actor string) (*applyResul
 
 // Confirm commits a pending revision (cancels the watchdog rollback).
 func (a *applier) Confirm(ctx context.Context, id, actor string) error {
-	return a.st.MarkActive(ctx, id, actor)
+	if err := a.st.MarkActive(ctx, id, actor); err != nil {
+		return err
+	}
+	// Confirming is the operator saying to keep it, so the pre-bootstrap Kea snapshot is discarded: a later
+	// rollback to a DIFFERENT revision must not put a confirmed appliance back to stopped-and-disabled.
+	a.clearKeaSnapshot()
+	return nil
 }
 
 // Rollback restores the previous active revision on operator request.
