@@ -1,4 +1,0 @@
-commit 614de5c672c6bb39dff5ac549e05b8ef6dfb70c7
-Date:   Thu Sep 10 22:26:45 2026 +0300
-
-    [CI] The fixture needs dhcp_pools, and an empty section must not be silent
