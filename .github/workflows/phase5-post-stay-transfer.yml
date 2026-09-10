@@ -65,10 +65,27 @@ jobs:
       # The publisher is fail-closed, and a fail-closed component that has only ever been watched succeeding
       # has not been shown to fail-close. This runs FIRST, before any gate can make the staging directory
       # look complete, and drives the real assembler against deliberately incomplete inputs.
+
+      # HAS THIS EXACT CONTENT ALREADY BEEN PROVEN GREEN BY THIS GATE?
+      #
+      # Keyed by GIT TREE HASH and answered from GitHub's own run history. An identical tree is identical
+      # content in every tracked path -- including this workflow file, the scripts it calls and the sources
+      # under test -- so the verdict cannot differ. A changed check is a changed tree, and a changed tree
+      # never matches. Every failure path reports no hit, so the full gate runs.
+      #
+      # This exists because the merge commit's tree was byte-identical to the pull-request head's tree in
+      # thirteen of the last thirteen merges: the second run was re-deriving a verdict it already held.
+      - name: Tree-equality evidence reuse
+        id: reuse
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/ci/evidence-reuse.sh phase5-post-stay-transfer.yml
       - name: Evidence-publication self-test (does the publisher refuse an incomplete run?)
+        if: steps.reuse.outputs.hit != 'true'
         run: bash "$GITHUB_WORKSPACE/scripts/ci/phase5-evidence-selftest.sh"
 
       - name: Initialise evidence staging
+        if: steps.reuse.outputs.hit != 'true'
         run: |
           set -euo pipefail
           mkdir -p "$EVID/counts" "$EVID/logs"
@@ -83,23 +100,28 @@ jobs:
 
       # ---------------------------------------------------------------- build / static
       - name: gofmt
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: data-plane
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh gofmt -- bash $GITHUB_WORKSPACE/scripts/ci/gofmt-check.sh"
 
       - name: go build (./...)
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: data-plane
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-build -- go build ./..."
 
       - name: go vet (./...)
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: data-plane
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-vet -- go vet ./..."
 
       - name: go vet (integration && phase5)
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: data-plane
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-vet-phase5 -- go vet -tags 'integration phase5' ./..."
 
       # ---------------------------------------------------------------- unit matrix (counted)
       - name: Phase-5 unit matrix
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: data-plane
         # The flag loader's dark default and its refusal of a child flag without its master, and the strict
         # guest decoder. internal/codegen carries no tests of its own -- it is listed because the PIN
@@ -113,14 +135,17 @@ jobs:
 
       # ---------------------------------------------------------------- dark posture
       - name: Phase-5 DARK guard
+        if: steps.reuse.outputs.hit != 'true'
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase5-dark-guard -- bash $GITHUB_WORKSPACE/scripts/phase5-dark-guard.sh"
 
       # ---------------------------------------------------------------- database gates + integration
       - name: Phase-5 database gates and integration matrix
+        if: steps.reuse.outputs.hit != 'true'
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase5-integration -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh scripts/phase5-pg-integration.sh"
 
       # ---------------------------------------------------------------- prior-phase regression
       - name: Phase-4 financial-core regression
+        if: steps.reuse.outputs.hit != 'true'
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-regression -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh scripts/phase4-pg-integration.sh"
 
       # ---------------------------------------------------------------- evidence publication (fail-closed)
@@ -130,16 +155,16 @@ jobs:
       # before uploading it. A green run with no artifact is indistinguishable from a green run whose
       # evidence was never produced, so every one of those three is closed below.
       - name: Assemble the Phase-5 evidence artifact
-        if: always()
+        if: always() && steps.reuse.outputs.hit != 'true'
         run: python3 scripts/ci/phase5_evidence.py
 
       - name: Record the HEAD for the artifact name
-        if: always()
+        if: always() && steps.reuse.outputs.hit != 'true'
         id: head
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Publish the Phase-5 evidence artifact
-        if: always()
+        if: always() && steps.reuse.outputs.hit != 'true'
         id: publish
         uses: actions/upload-artifact@v4
         with:
@@ -157,7 +182,7 @@ jobs:
       # this digest" -- so the ID and the digest are read back from the action that created them and the job
       # fails if either is absent.
       - name: Prove the artifact really exists
-        if: always()
+        if: always() && steps.reuse.outputs.hit != 'true'
         env:
           ART_ID: ${{ steps.publish.outputs.artifact-id }}
           ART_DIGEST: ${{ steps.publish.outputs.artifact-digest }}
