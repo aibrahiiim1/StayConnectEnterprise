@@ -11,6 +11,30 @@ package main
 // operator surface keeps its contract: started_at is iam_v2.sessions.started, ended_at is ended. There is
 // no last_activity_at in the current model -- liveness is derived from accounting, not stamped on the
 // session row -- so it reports the session start until the first accounting tick would have moved it.
+//
+// ---------------------------------------------------------------------------------------------------------
+// WHO IS THIS SESSION? The list used to answer with an IP and a MAC address.
+//
+// That is the one question the screen exists to answer and the only question it could not answer. A duty
+// manager looking at "a4:83:e7:2f:11:c0 · 10.80.4.62" cannot tell whether that is room 412, a staff laptop on
+// a username, or a conference voucher — so the Active sessions screen could show that twelve devices were
+// online and nothing about who they belonged to, and "disconnect the guest in 318" was not a thing the product
+// could do.
+//
+// Every session already hangs off an Entitlement, and an Entitlement has EXACTLY ONE subject by database
+// constraint (ent_one_subject): a Stay, a guest account, a voucher or a guest principal. So the subject is
+// knowable without any schema change — it just was not being read. The same join reaches the Internet package
+// and Service plan the session was granted from, which is the other thing an operator was asked to find out by
+// cross-referencing three screens.
+//
+// WHAT IS DELIBERATELY ABSENT, and why it is absent rather than missing:
+//
+//   * a voucher CODE. svc_edged holds no privilege on iam_v2.vouchers — by design, since the admin service is
+//     not the voucher authority — so a voucher-backed session reports its kind and nothing more. Widening that
+//     grant is a trust-boundary change, not a UI improvement, so the surface says "Voucher" honestly instead.
+//   * a guest principal's email or phone, for the same reason: iam_v2.guest_principals is not readable here.
+//   * anything from iam_v2.devices, which is also not granted. The MAC and IP on the session row are the
+//     device facts this service may have, and they are the ones it reports.
 
 import (
 	"net/http"
@@ -31,14 +55,119 @@ type edgeSessionRow struct {
 	EndReason      *string    `json:"end_reason,omitempty"`
 	BytesUp        int64      `json:"bytes_up"`
 	BytesDown      int64      `json:"bytes_down"`
+
+	// HOW THE GUEST PROVED WHO THEY WERE, as the session recorded it at the time.
+	CredentialMethod *string `json:"credential_method,omitempty"`
+
+	// WHICH GUEST NETWORK THE DEVICE IS ON. sessions.ingress_interface is the bridge the traffic arrived on,
+	// which is an implementation name ("br-guest-30"); the guest_networks row that owns that bridge carries the
+	// name the operator gave it. Reported as both, because a network engineer diagnosing a VLAN wants the
+	// bridge and a duty manager wants "Guest Wi-Fi".
+	IngressInterface *string `json:"ingress_interface,omitempty"`
+	NetworkName      *string `json:"guest_network_name,omitempty"`
+
+	// THE SUBJECT — the single answer to "who is this".
+	//
+	// SubjectKind is a closed set: room | account | voucher | guest. SubjectLabel is what to show (a room
+	// number, a username); SubjectName is the human name when one is known. Both may be absent, and a client
+	// that falls back to the MAC address when they are is behaving correctly.
+	EntitlementID     string  `json:"entitlement_id,omitempty"`
+	EntitlementStatus *string `json:"entitlement_status,omitempty"`
+	SubjectKind       string  `json:"subject_kind,omitempty"`
+	SubjectLabel      *string `json:"subject_label,omitempty"`
+	SubjectName       *string `json:"subject_name,omitempty"`
+
+	// Stay context, present only for a room-authenticated session.
+	StayID      *string `json:"stay_id,omitempty"`
+	Room        *string `json:"room,omitempty"`
+	Reservation *string `json:"external_reservation_id,omitempty"`
+
+	// WHAT THEY WERE GIVEN. The package is the guest-facing offer; the plan is the service behind it. An
+	// operator answering "why is this guest slow" needs the plan's numbers, not the package's name.
+	PackageCode *string `json:"package_code,omitempty"`
+	PackageName *string `json:"package_name,omitempty"`
+	PlanCode    *string `json:"service_plan_code,omitempty"`
+	DownKbps    *int32  `json:"down_kbps,omitempty"`
+	UpKbps      *int32  `json:"up_kbps,omitempty"`
+	MaxDevices  *int32  `json:"max_devices,omitempty"`
+
+	// THE ALLOWANCE AND WHAT IS LEFT OF IT, from the Entitlement's own counters and the plan's quotas. Null
+	// quota means unmetered on that axis; the client must not render a meter for an allowance that does not
+	// exist.
+	DataQuotaBytes   *int64 `json:"data_quota_bytes,omitempty"`
+	DataUsedBytes    *int64 `json:"data_used_bytes,omitempty"`
+	TimeQuotaSeconds *int64 `json:"time_quota_seconds,omitempty"`
+	TimeUsedSeconds  *int64 `json:"time_used_seconds,omitempty"`
+
+	// How many devices this same Entitlement currently has online. "3 of 4 devices" is the fact behind a guest
+	// complaining that their fourth device is refused.
+	ActiveDevices int `json:"active_devices"`
 }
 
-const sessionCols = `id, ip::text, mac::text, state, started AS started_at, started AS last_activity_at,
-       ended AS ended_at, expires_at, end_reason, bytes_up, bytes_down`
+// sessionCols keeps the historical alias pairs (started AS started_at, ended AS ended_at) so the wire contract
+// does not move, and adds the subject/offer projection described above.
+//
+// Every added join is LEFT. A session whose Entitlement, Stay or package row cannot be read must still appear
+// in the list: an operator hunting a device they cannot account for is exactly who needs the row that will not
+// resolve, and dropping it would make the screen quietly incomplete.
+const sessionCols = `s.id, s.ip::text, s.mac::text, s.state,
+       s.started AS started_at, s.started AS last_activity_at,
+       s.ended AS ended_at, s.expires_at, s.end_reason, s.bytes_up, s.bytes_down,
+       NULLIF(s.credential_method,''), NULLIF(s.ingress_interface,''), gn.name,
+       COALESCE(e.id::text,''), e.status,
+       CASE
+         WHEN e.stay_id             IS NOT NULL THEN 'room'
+         WHEN e.guest_account_id    IS NOT NULL THEN 'account'
+         WHEN e.voucher_id          IS NOT NULL THEN 'voucher'
+         WHEN e.guest_principal_id  IS NOT NULL THEN 'guest'
+         ELSE ''
+       END AS subject_kind,
+       COALESCE(NULLIF(st.normalized_room_number,''), ga.username) AS subject_label,
+       COALESCE(
+         (SELECT COALESCE(NULLIF(g.display_name,''), NULLIF(g.last_name_norm,''))
+            FROM iam_v2.stay_guests g WHERE g.stay_id = st.id
+           ORDER BY g.is_primary DESC LIMIT 1),
+         NULLIF(ga.display_name,'')
+       ) AS subject_name,
+       st.id::text, st.normalized_room_number, st.external_reservation_id,
+       ip.code, NULLIF(ipr.display->>'name',''),
+       sp.code, spr.down_kbps, spr.up_kbps, spr.max_concurrent_devices,
+       spr.data_quota_bytes, e.consumed_data_bytes,
+       spr.time_quota_seconds, e.consumed_online_seconds,
+       (SELECT count(DISTINCT d.mac)::int FROM iam_v2.sessions d
+         WHERE d.entitlement_id = s.entitlement_id AND d.state = 'active')`
+
+// sessionFrom is shared by the list and the single-row read so the two cannot drift into describing the same
+// session differently.
+const sessionFrom = `FROM iam_v2.sessions s
+       LEFT JOIN iam_v2.entitlements e
+              ON e.tenant_id = s.tenant_id AND e.site_id = s.site_id AND e.id = s.entitlement_id
+       LEFT JOIN iam_v2.stays st
+              ON st.tenant_id = e.tenant_id AND st.site_id = e.site_id AND st.id = e.stay_id
+       LEFT JOIN iam_v2.guest_access_accounts ga
+              ON ga.tenant_id = e.tenant_id AND ga.site_id = e.site_id AND ga.id = e.guest_account_id
+       LEFT JOIN iam_v2.internet_package_revisions ipr
+              ON ipr.tenant_id = e.tenant_id AND ipr.site_id = e.site_id AND ipr.id = e.package_revision_id
+       LEFT JOIN iam_v2.internet_packages ip
+              ON ip.tenant_id = ipr.tenant_id AND ip.site_id = ipr.site_id AND ip.id = ipr.package_id
+       LEFT JOIN iam_v2.service_plan_revisions spr
+              ON spr.tenant_id = e.tenant_id AND spr.site_id = e.site_id AND spr.id = e.service_plan_revision_id
+       LEFT JOIN iam_v2.service_plans sp
+              ON sp.tenant_id = spr.tenant_id AND sp.site_id = spr.site_id AND sp.id = spr.service_plan_id
+       LEFT JOIN public.guest_networks gn
+              ON gn.tenant_id = s.tenant_id AND gn.site_id = s.site_id
+             AND gn.bridge_name = NULLIF(s.ingress_interface,'')`
 
 func scanEdgeSession(row interface{ Scan(...any) error }, e *edgeSessionRow) error {
 	return row.Scan(&e.ID, &e.IP, &e.MAC, &e.State, &e.StartedAt, &e.LastActivityAt,
-		&e.EndedAt, &e.ExpiresAt, &e.EndReason, &e.BytesUp, &e.BytesDown)
+		&e.EndedAt, &e.ExpiresAt, &e.EndReason, &e.BytesUp, &e.BytesDown,
+		&e.CredentialMethod, &e.IngressInterface, &e.NetworkName,
+		&e.EntitlementID, &e.EntitlementStatus, &e.SubjectKind, &e.SubjectLabel, &e.SubjectName,
+		&e.StayID, &e.Room, &e.Reservation,
+		&e.PackageCode, &e.PackageName,
+		&e.PlanCode, &e.DownKbps, &e.UpKbps, &e.MaxDevices,
+		&e.DataQuotaBytes, &e.DataUsedBytes, &e.TimeQuotaSeconds, &e.TimeUsedSeconds,
+		&e.ActiveDevices)
 }
 
 func (s *server) sessionsRoutes() http.Handler {
@@ -77,10 +206,10 @@ func (s *server) listGuestSessions(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	rows, err := s.db.Query(ctx, `
         SELECT `+sessionCols+`
-          FROM iam_v2.sessions
-         WHERE tenant_id = $1
-           AND ($2::text IS NULL OR state = $2)
-         ORDER BY started DESC
+          `+sessionFrom+`
+         WHERE s.tenant_id = $1
+           AND ($2::text IS NULL OR s.state = $2)
+         ORDER BY s.started DESC
          LIMIT 200
     `, s.tenantID, stateArg)
 	if err != nil {
@@ -106,7 +235,7 @@ func (s *server) getGuestSession(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	var e edgeSessionRow
 	err := scanEdgeSession(s.db.QueryRow(ctx,
-		`SELECT `+sessionCols+` FROM iam_v2.sessions WHERE id = $1 AND tenant_id = $2`,
+		`SELECT `+sessionCols+` `+sessionFrom+` WHERE s.id = $1 AND s.tenant_id = $2`,
 		id, s.tenantID), &e)
 	if isNoRows(err) {
 		jsonErr(w, http.StatusNotFound, "not_found", "session not found")

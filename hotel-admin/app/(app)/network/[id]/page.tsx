@@ -146,22 +146,28 @@ export default function EditGuestNetworkPage() {
     finally { setBusy(false); }
   }
 
+  // Reserving an address is how a printer, a TV or a door lock keeps the same IP. Saying which address is about
+  // to stop being reserved is the difference between a confirmation and a speed bump.
   async function onDeleteReservation(rid: string) {
-    if (!confirm("Delete this reservation?")) return;
+    const r = (reservations ?? []).find((x) => x.id === rid);
+    if (!confirm(
+      `Remove the reserved address${r ? ` ${r.reserved_ip}` : ""}${r?.hostname ? ` (${r.hostname})` : ""}? ` +
+      "That device will be given any free address next time it connects.",
+    )) return;
     try { await api.del(`/network/dhcp/reservations/${rid}`); loadReservations(); }
     catch (e) { setErr(errMsg(e)); }
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="mx-auto w-full max-w-5xl space-y-5">
       <Link href="/network" className="text-sm text-muted hover:text-text inline-flex items-center gap-1 mb-4">
         <ArrowLeft size={14} /> Back to guest networks
       </Link>
 
       <div className="flex items-baseline justify-between mb-4">
         <div>
-          <div className="text-xs text-muted uppercase tracking-wider">Networking</div>
-          <h1 className="text-2xl font-semibold">{net?.name || "Guest network"}</h1>
+          <div className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground">Networking</div>
+          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{net?.name || "Guest network"}</h1>
           {net && <div className="text-xs text-muted font-mono">{net.id}</div>}
         </div>
       </div>
@@ -207,7 +213,7 @@ export default function EditGuestNetworkPage() {
                     <div key={i} className="flex items-center gap-2">
                       <Input placeholder="start" value={p.start_ip} disabled={!writable}
                         onChange={(e) => setPools((ps) => ps.map((x, k) => k === i ? { ...x, start_ip: e.target.value } : x))} />
-                      <span className="text-muted">–</span>
+                      <span className="text-muted-foreground">–</span>
                       <Input placeholder="end" value={p.end_ip} disabled={!writable}
                         onChange={(e) => setPools((ps) => ps.map((x, k) => k === i ? { ...x, end_ip: e.target.value } : x))} />
                       {writable && (
@@ -274,7 +280,7 @@ export default function EditGuestNetworkPage() {
                       <TR key={r.id}>
                         <TD className="font-mono text-xs">{r.mac}</TD>
                         <TD className="font-mono text-xs">{r.reserved_ip}</TD>
-                        <TD className="text-muted">{r.hostname || "—"}</TD>
+                        <TD className="text-muted-foreground">{r.hostname || "—"}</TD>
                         <TD>{r.enabled ? <Badge tone="ok">on</Badge> : <Badge tone="default">off</Badge>}</TD>
                         <TD className="text-right space-x-2">
                           {writable && <Button size="sm" variant="ghost" onClick={() => setEditRes(r)}>Edit</Button>}
@@ -300,10 +306,10 @@ export default function EditGuestNetworkPage() {
       )}
 
       {editRes && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-6 z-50" onClick={() => setEditRes(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/45 p-6 backdrop-blur-[2px]" onClick={() => setEditRes(null)}>
           <div className="bg-panel border border-border rounded-lg shadow-panel max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-              <h2 className="text-base font-semibold">Edit reservation</h2>
+              <h2 className="text-sm font-semibold tracking-tight">Edit reservation</h2>
               <Button size="sm" variant="ghost" onClick={() => setEditRes(null)}><X size={14} /></Button>
             </div>
             <div className="px-5 py-4 space-y-3">
@@ -323,7 +329,7 @@ export default function EditGuestNetworkPage() {
 function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div>
-      <div className="text-xs text-muted">{label}</div>
+      <div className="text-xs text-muted-foreground">{label}</div>
       <div className={mono ? "font-mono text-xs mt-0.5" : "text-sm mt-0.5"}>{value}</div>
     </div>
   );

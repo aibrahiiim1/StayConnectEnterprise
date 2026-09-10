@@ -110,7 +110,7 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
   // The error is rendered BEFORE the loading guard. When the load fails the state variable is never set,
   // so a guard placed first returns "Loading…" forever and the alert further down is unreachable -- the
   // screen tells the operator it is still working when it has already given up.
-  if (err) return <p role="alert" className="text-sm text-red-700">{err}</p>;
+  if (err) return <p role="alert" className="text-sm text-destructive">{err}</p>;
   if (!rows) return <p role="status">Loading the review queue…</p>;
 
   const spec = actions.find((a) => a.action === action);
@@ -118,12 +118,12 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
 
   return (
     <div className="space-y-4">
-      {err ? <p role="alert" className="text-sm text-red-700">{err}</p> : null}
-      {note ? <p role="status" className="text-sm text-emerald-700">{note}</p> : null}
+      {err ? <p role="alert" className="text-sm text-destructive">{err}</p> : null}
+      {note ? <p role="status" className="text-sm text-success-subtle-foreground">{note}</p> : null}
 
       <Card>
         <CardBody>
-          <h2 className="mb-3 text-sm font-medium text-slate-500">
+          <h2 className="mb-3 text-sm font-medium text-muted-foreground">
             Awaiting a decision ({rows.length})
           </h2>
           {rows.length === 0 ? (
@@ -166,32 +166,32 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
         <>
           <Card>
             <CardBody>
-              <h3 className="mb-2 text-sm font-medium text-slate-500">What this charge was attached to</h3>
+              <h3 className="mb-2 text-sm font-medium text-muted-foreground">What this charge was attached to</h3>
               <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
                 <div>
-                  <dt className="text-slate-500">Amount</dt>
+                  <dt className="text-muted-foreground">Amount</dt>
                   <dd>{money(detail.posting.amount_minor, detail.posting.currency, detail.posting.currency_exponent)}</dd>
                 </div>
                 <div>
-                  <dt className="text-slate-500">Settlement</dt>
+                  <dt className="text-muted-foreground">Settlement</dt>
                   <dd>{detail.pinned_evidence.settlement_status}</dd>
                 </div>
                 <div>
-                  <dt className="text-slate-500">Purchase</dt>
+                  <dt className="text-muted-foreground">Purchase</dt>
                   <dd>{detail.pinned_evidence.purchase_state}</dd>
                 </div>
                 <div>
-                  <dt className="text-slate-500">Interface</dt>
+                  <dt className="text-muted-foreground">Interface</dt>
                   <dd>
                     {detail.pinned_evidence.connector_kind} ({detail.pinned_evidence.interface_lifecycle_state})
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-slate-500">Folio identity</dt>
+                  <dt className="text-muted-foreground">Folio identity</dt>
                   <dd>{detail.pinned_evidence.folio_identity_strategy}</dd>
                 </div>
                 <div>
-                  <dt className="text-slate-500">Interface freshness</dt>
+                  <dt className="text-muted-foreground">Interface freshness</dt>
                   <dd>{detail.diagnostics.interface_freshness_block ?? "OK"}</dd>
                 </div>
               </dl>
@@ -200,12 +200,12 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
 
           <Card>
             <CardBody>
-              <h3 className="mb-3 text-sm font-medium text-slate-500">
+              <h3 className="mb-3 text-sm font-medium text-muted-foreground">
                 Attempts ({detail.diagnostics.attempt_count}, of which UNKNOWN:{" "}
                 {detail.diagnostics.unknown_attempt_count})
               </h3>
               {detail.attempts.length === 0 ? (
-                <p className="text-sm text-slate-600">This posting has never been transmitted.</p>
+                <p className="text-sm text-muted-foreground">This posting has never been transmitted.</p>
               ) : (
                 <Table>
                   <THead>
@@ -238,7 +238,7 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
                 </Table>
               )}
               {detail.diagnostics.has_unknown_history ? (
-                <p className="mt-3 text-sm text-amber-800">
+                <p className="mt-3 text-sm text-warning-subtle-foreground">
                   An attempt ended UNKNOWN. Nobody knows whether the folio was charged, and nothing has been
                   retried automatically — that is what this decision is for.
                 </p>
@@ -249,12 +249,12 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
           {detail.review.history.length > 0 ? (
             <Card>
               <CardBody>
-                <h3 className="mb-3 text-sm font-medium text-slate-500">Decisions already recorded</h3>
+                <h3 className="mb-3 text-sm font-medium text-muted-foreground">Decisions already recorded</h3>
                 <ul className="space-y-2 text-sm">
                   {detail.review.history.map((h, i) => (
-                    <li key={i} className="rounded-md border border-slate-200 p-2">
+                    <li key={i} className="rounded-md border border-border p-2">
                       <span className="font-medium">{h.action}</span> · {h.created_at}
-                      <p className="mt-1 text-slate-700">{h.reason}</p>
+                      <p className="mt-1 text-foreground">{h.reason}</p>
                     </li>
                   ))}
                 </ul>
@@ -264,9 +264,9 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
 
           <Card>
             <CardBody>
-              <h3 className="mb-3 text-sm font-medium text-slate-500">Record a decision</h3>
+              <h3 className="mb-3 text-sm font-medium text-muted-foreground">Record a decision</h3>
               {allowed.length === 0 ? (
-                <p className="text-sm text-slate-600">
+                <p className="text-sm text-muted-foreground">
                   This posting has a terminal decision already. Nothing further can be recorded against it.
                 </p>
               ) : (
@@ -277,7 +277,7 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
                     </label>
                     <select
                       id="review-action"
-                      className="mt-1 w-full max-w-xl rounded-md border border-slate-300 px-2 py-1"
+                      className="mt-1 w-full max-w-xl rounded-md border border-border px-2 py-1"
                       value={action}
                       onChange={(e) => setAction(e.target.value)}
                     >
@@ -291,7 +291,7 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
                         ))}
                     </select>
                     {spec?.terminal ? (
-                      <p className="mt-1 text-xs text-amber-800">
+                      <p className="mt-1 text-xs text-warning-subtle-foreground">
                         This is a terminal decision. It can be recorded once and never revised.
                       </p>
                     ) : null}
@@ -304,7 +304,7 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
                     <textarea
                       id="review-reason"
                       rows={2}
-                      className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                      className="mt-1 w-full rounded-md border border-border px-3 py-2"
                       value={reason}
                       onChange={(e) => setReason(e.target.value)}
                     />
@@ -318,7 +318,7 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
                         </label>
                         <select
                           id="review-ev-source"
-                          className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1"
+                          className="mt-1 w-full rounded-md border border-border px-2 py-1"
                           value={evSource}
                           onChange={(e) => setEvSource(e.target.value)}
                         >
@@ -336,12 +336,12 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
                         </label>
                         <input
                           id="review-ev-ref"
-                          className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                          className="mt-1 w-full rounded-md border border-border px-3 py-2"
                           placeholder="e.g. PMS folio screen, 14:22"
                           value={evRef}
                           onChange={(e) => setEvRef(e.target.value)}
                         />
-                        <p className="mt-1 text-xs text-slate-500">
+                        <p className="mt-1 text-xs text-muted-foreground">
                           Record a REFERENCE to the artefact, never its contents. This goes into an immutable
                           audit record.
                         </p>
@@ -357,7 +357,7 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
                       id="review-password"
                       type="password"
                       autoComplete="current-password"
-                      className="mt-1 w-full max-w-sm rounded-md border border-slate-300 px-3 py-2"
+                      className="mt-1 w-full max-w-sm rounded-md border border-border px-3 py-2"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                     />
@@ -367,7 +367,7 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
                     {busy ? "Recording…" : "Record decision"}
                   </Button>
 
-                  <ul className="mt-2 space-y-1 text-xs text-slate-500">
+                  <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
                     {(detail.limitations ?? []).map((l, i) => (
                       <li key={i}>{l}</li>
                     ))}

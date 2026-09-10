@@ -14,12 +14,19 @@
 
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { api, ApiError, ListResp } from "@/lib/api";
+import { PageShell, PageHeader } from "@/components/ui/page";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Plus, X, AlertTriangle } from "lucide-react";
+import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody, ConfirmDialog,
+} from "@/components/ui/dialog";
+import { MonoId, SkeletonRows } from "@/components/ui/misc";
+import { Package, Plus, AlertTriangle } from "lucide-react";
 import { PackageForm, type PackageFormInitial, type PackageFormValue, type PlanOption } from "./package-form";
 import { decideSave, saveOutcomeMessage } from "@/lib/package-save";
 import { formatSpeed, formatData, formatDuration, formatDevices } from "@/lib/units";
@@ -72,41 +79,37 @@ export default function InternetPackagesPage() {
   const [err, setErr] = useState<string | null>(null);
   const { disabled, guard } = useDisabled();
 
-  const tabs: { id: Tab; label: string }[] = [
-    { id: "packages", label: "Packages" },
-    { id: "inspection", label: "Guest activity" },
-  ];
-
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-lg font-semibold">Internet packages</h1>
-        <p className="text-sm text-muted mt-1 max-w-2xl">
-          An internet package is what a guest sees and takes on the portal: how fast it is, how much data and
-          time it includes, and who is offered it.
-        </p>
-      </div>
+    <PageShell width="wide">
+      <PageHeader
+        eyebrow="Internet offering"
+        title="Internet packages"
+        description="An internet package is what a guest sees and takes on the portal: how fast it is, how much data and time it includes, and who is offered it."
+      />
       {disabled ? (
         <Card><CardBody>
-          <EmptyState title="The internet offering is not switched on for this appliance"
-            hint="Internet packages become available once this capability is enabled for the site. Contact your StayConnect administrator." />
+          <EmptyState
+            icon={<Package />}
+            title="The internet offering is not switched on for this appliance"
+            hint="Internet packages become available once this capability is enabled for the site. Contact your StayConnect administrator."
+          />
         </CardBody></Card>
       ) : (
-        <>
-          <div className="flex gap-2 border-b border-border">
-            {tabs.map((t) => (
-              <button key={t.id} onClick={() => setTab(t.id)}
-                className={`px-3 py-2 text-sm border-b-2 ${tab === t.id ? "border-brand text-text" : "border-transparent text-muted hover:text-text"}`}>
-                {t.label}
-              </button>
-            ))}
-          </div>
-          {err && <div className="text-sm text-red-500">{err}</div>}
-          {tab === "packages" && <PackagesTab guard={guard} setErr={setErr} />}
-          {tab === "inspection" && <InspectionTab guard={guard} setErr={setErr} />}
-        </>
+        <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
+          <TabsList>
+            <TabsTrigger value="packages">Packages</TabsTrigger>
+            <TabsTrigger value="inspection">Guest activity</TabsTrigger>
+          </TabsList>
+          <ErrorBanner err={err} className="mt-4" />
+          <TabsContent value="packages" className="mt-4">
+            <PackagesTab guard={guard} setErr={setErr} />
+          </TabsContent>
+          <TabsContent value="inspection" className="mt-4">
+            <InspectionTab guard={guard} setErr={setErr} />
+          </TabsContent>
+        </Tabs>
       )}
-    </div>
+    </PageShell>
   );
 }
 
@@ -122,6 +125,14 @@ function PackagesTab({ guard, setErr }: TabProps) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [stayWarnings, setStayWarnings] = useState<string[]>([]);
+  // THE DISABLE CONFIRMATION, which used to be two window.prompt() calls in a row.
+  //
+  // The first asked for a reason, the second for a password -- in a browser dialog that shows what you type, with
+  // no way to say what the action does, and cancelling the second left the operator with no idea whether the
+  // first had already taken effect. None of that is a property of the code; all of it is a property of
+  // window.prompt, which is why it is gone.
+  const [disabling, setDisabling] = useState<PackageSummary | null>(null);
+  const [actionErr, setActionErr] = useState<unknown>(null);
 
   const load = useCallback(async () => {
     try {
@@ -225,71 +236,109 @@ function PackagesTab({ guard, setErr }: TabProps) {
     finally { setBusy(false); }
   }
 
-  async function toggleActive(p: PackageSummary) {
+  async function enable(p: PackageSummary) {
     setBusy(true); setErr(null); setNotice(null);
     try {
-      if (p.active) {
-        const reason = window.prompt("Why are you disabling this package? Guests will stop being offered it immediately.");
-        if (!reason) { setBusy(false); return; }
-        const password = window.prompt("Confirm your password to disable");
-        if (!password) { setBusy(false); return; }
-        await api.post(`/commercial-packages/${p.package_id}/active`, { active: false, reason, password });
-      } else {
-        await api.post(`/commercial-packages/${p.package_id}/active`, { active: true });
-      }
+      await api.post(`/commercial-packages/${p.package_id}/active`, { active: true });
+      setNotice(`${p.name || p.code} is being offered to guests again.`);
       await load();
     } catch (e) { if (!guard(e)) setErr((e as Error)?.message ?? "Could not update this package"); }
     finally { setBusy(false); }
   }
 
+  async function disable({ reason, password }: { reason: string; password: string }) {
+    if (!disabling) return;
+    setBusy(true); setActionErr(null); setNotice(null);
+    try {
+      await api.post(`/commercial-packages/${disabling.package_id}/active`, { active: false, reason, password });
+      setNotice(`${disabling.name || disabling.code} is no longer offered to guests. Anyone already online keeps what they have.`);
+      setDisabling(null);
+      await load();
+    } catch (e) { setActionErr(e); }
+    finally { setBusy(false); }
+  }
+
   return (
-    <div className="space-y-3">
-      {notice && (
-        <div className="text-sm rounded-md border border-border bg-panel2 px-3 py-2" role="status">{notice}</div>
-      )}
+    <div className="space-y-4">
+      {notice && <Callout tone="success">{notice}</Callout>}
       {stayWarnings.length > 0 && (
-        <div className="text-sm rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2"
-          data-testid="stay-length-warnings">
-          <div className="flex items-center gap-2 font-medium mb-1">
-            <AlertTriangle size={14} /> Overlapping stay lengths
-          </div>
-          <ul className="list-disc pl-5 space-y-0.5 text-muted">
-            {stayWarnings.map((w, i) => <li key={i}>{w}</li>)}
-          </ul>
-          <p className="text-xs text-muted mt-1">
-            Nothing has been changed. If you meant each length to have one package, adjust the night ranges.
-          </p>
+        <div data-testid="stay-length-warnings">
+          <Callout tone="warning" title="Overlapping stay lengths">
+            <ul className="list-disc space-y-0.5 pl-4">
+              {stayWarnings.map((w, i) => <li key={i}>{w}</li>)}
+            </ul>
+            <p className="mt-1 text-xs">
+              Nothing has been changed. If you meant each length to have one package, adjust the night ranges.
+            </p>
+          </Callout>
         </div>
       )}
       <div className="flex justify-end">
-        <Button onClick={() => { setAdding((v) => !v); setEditing(null); setEditingID(null); }}>
-          {adding ? <X size={16} /> : <Plus size={16} />}{adding ? "Cancel" : "Add package"}
+        <Button onClick={() => { setAdding(true); setEditing(null); setEditingID(null); }}>
+          <Plus /> Add package
         </Button>
       </div>
 
-      {adding && (
-        <Card>
-          <CardHeader><CardTitle>Add package</CardTitle></CardHeader>
-          <CardBody><PackageForm mode="add" plans={plans} busy={busy} onSave={save} onCancel={() => setAdding(false)} /></CardBody>
-        </Card>
-      )}
+      {/*
+        THE FORM IS A MODAL NOW. It used to be a card pushed above the table, with Edit pushing a second one
+        below it -- so on a list of a dozen packages an operator clicked Edit and nothing visibly happened,
+        because the form had opened off-screen. With both open at once nothing said which package Save applied to.
+      */}
+      <Dialog open={adding} onOpenChange={(v) => !v && setAdding(false)}>
+        <DialogContent size="xl">
+          <DialogHeader>
+            <DialogTitle>Add an internet package</DialogTitle>
+            <DialogDescription>
+              What the guest is offered on the portal, and the service plan it hands out.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            <PackageForm mode="add" plans={plans} busy={busy} onSave={save} onCancel={() => setAdding(false)} />
+          </DialogBody>
+        </DialogContent>
+      </Dialog>
 
-      {editing && (
-        <Card>
-          <CardHeader><CardTitle>Edit {editing.name || editing.code}</CardTitle></CardHeader>
-          <CardBody>
-            <PackageForm mode="edit" initial={editing} plans={plans} busy={busy} onSave={save}
-              onCancel={() => { setEditing(null); setEditingID(null); }} />
-          </CardBody>
-        </Card>
-      )}
+      <Dialog open={editing !== null} onOpenChange={(v) => { if (!v) { setEditing(null); setEditingID(null); } }}>
+        <DialogContent size="xl">
+          <DialogHeader>
+            <DialogTitle>{editing ? `Edit ${editing.name || editing.code}` : "Edit package"}</DialogTitle>
+            <DialogDescription>
+              Saving records a new permanent version of this package. Guests already online keep the terms they
+              connected under.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            {editing && (
+              <PackageForm mode="edit" initial={editing} plans={plans} busy={busy} onSave={save}
+                onCancel={() => { setEditing(null); setEditingID(null); }} />
+            )}
+          </DialogBody>
+        </DialogContent>
+      </Dialog>
 
-      <Card><CardBody>
+      <ConfirmDialog
+        open={disabling !== null}
+        onOpenChange={(v) => !v && setDisabling(null)}
+        title={`Stop offering ${disabling?.name || disabling?.code || "this package"}?`}
+        description="Guests will stop being offered it immediately. Anyone already online keeps the access they were given, and it can be switched back on at any time."
+        confirmLabel="Stop offering it"
+        confirmVariant="danger"
+        busy={busy}
+        error={actionErr}
+        requireReason
+        reasonLabel="Why are you disabling it?"
+        reasonPlaceholder="Replaced by the new summer package"
+        requirePassword
+        onConfirm={disable}
+      />
+
+      <Card><CardBody className="p-0">
         {rows === null ? (
-          <div className="text-sm text-muted py-6 text-center">Loading packages…</div>
+          <SkeletonRows rows={4} cols={7} />
         ) : rows.length === 0 ? (
-          <EmptyState title="No internet packages yet"
-            hint="Until a package exists, a verified guest has nothing to be given and cannot get online." />
+          <EmptyState icon={<Package />} title="No internet packages yet"
+            hint="Until a package exists, a verified guest has nothing to be given and cannot get online."
+            action={<Button onClick={() => setAdding(true)}><Plus /> Add the first package</Button>} />
         ) : (
           <Table>
             <THead><TR>
@@ -304,33 +353,39 @@ function PackagesTab({ guard, setErr }: TabProps) {
                       <div className="font-medium">{p.name || p.code}</div>
                       {/* Only when it adds something. A package with no separate display name printed its
                           code twice, one line under the other. */}
-                      {p.name && p.name !== p.code && <div className="text-xs text-muted">{p.code}</div>}
+                      {p.name && p.name !== p.code && <div className="text-xs text-muted-foreground">{p.code}</div>}
                     </TD>
                     <TD>{p.active ? <Badge tone="ok">Active</Badge> : <Badge tone="default">Disabled</Badge>}</TD>
                     <TD>{p.price_minor ? `${p.price_minor} ${p.currency ?? ""}` : "Free"}</TD>
                     <TD>
                       <div>{formatSpeed(p.down_kbps)} down{p.speed_allocation === "SHARED" ? " (shared)" : ""}</div>
-                      <div className="text-xs text-muted">{formatSpeed(p.up_kbps)} up</div>
+                      <div className="text-xs text-muted-foreground">{formatSpeed(p.up_kbps)} up</div>
                     </TD>
                     <TD>{formatData(p.data_quota_bytes)}</TD>
                     <TD>{formatDuration(p.time_quota_seconds)}</TD>
                     <TD>{formatDevices(p.max_concurrent_devices)}</TD>
-                    <TD className="whitespace-nowrap">
-                      <Button variant="ghost" disabled={busy} onClick={() => startEdit(p)}>Edit</Button>
-                      <Button variant="ghost" disabled={busy} onClick={() => toggleActive(p)}>
+                    <TD className="whitespace-nowrap text-right">
+                      <Button size="sm" variant="ghost" disabled={busy} onClick={() => startEdit(p)}>Edit</Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => {
+                          setActionErr(null);
+                          if (p.active) setDisabling(p); else void enable(p);
+                        }}
+                      >
                         {p.active ? "Disable" : "Enable"}
                       </Button>
-                      <button className="underline text-muted text-xs ml-2" onClick={() => toggleHistory(p.package_id)}>
-                        History
-                      </button>
+                      <Button size="sm" variant="ghost" onClick={() => toggleHistory(p.package_id)}>History</Button>
                     </TD>
                   </TR>
                   {/* The one internal fact worth surfacing: the plan this package uses has moved on and this
                       package has not. That is precisely the state that silently produced a 2 Mbps guest. */}
                   {p.plan_has_newer_revision && (
                     <TR>
-                      <TD colSpan={8} className="text-xs">
-                        <span className="inline-flex items-center gap-1 text-amber-500">
+                      <TD colSpan={8} className="bg-warning-subtle/40 text-xs">
+                        <span className="inline-flex items-center gap-1.5 text-warning-subtle-foreground">
                           <AlertTriangle size={13} />
                           The <strong>{p.service_plan_code}</strong> service plan has newer settings that this
                           package does not use. Open Edit and save to bring it up to date.
@@ -340,16 +395,16 @@ function PackagesTab({ guard, setErr }: TabProps) {
                   )}
                   {history[p.package_id] && (
                     <TR>
-                      <TD colSpan={8} className="text-xs bg-panel2/40">
-                        <div className="font-medium mb-1">History</div>
+                      <TD colSpan={8} className="bg-surface/50 text-xs">
+                        <div className="mb-1 font-medium">History</div>
                         {history[p.package_id].map((r) => (
                           <div key={r.revision_id} className="py-0.5">
                             #{r.revision_no}{" "}
-                            {r.is_current ? <Badge tone="info">in force</Badge> : <span className="text-muted">superseded</span>}{" "}
+                            {r.is_current ? <Badge tone="info">in force</Badge> : <span className="text-muted-foreground">superseded</span>}{" "}
                             {r.price_minor === 0 ? "free" : `${r.price_minor} ${r.currency ?? ""}`}
                           </div>
                         ))}
-                        <p className="text-muted mt-1">
+                        <p className="mt-1 text-muted-foreground">
                           Each saved change is kept permanently. A guest keeps the terms that applied
                           when they connected.
                         </p>
@@ -362,7 +417,6 @@ function PackagesTab({ guard, setErr }: TabProps) {
           </Table>
         )}
       </CardBody></Card>
-      {editingID && null}
     </div>
   );
 }
@@ -469,7 +523,7 @@ function InspectionTab({ guard, setErr }: TabProps) {
             <Table>
               <THead><TR><TH>ID</TH><TH>Revision</TH><TH>Price</TH><TH>Expires</TH><TH>Consumed</TH></TR></THead>
               <tbody>{quotes.map((q) => (
-                <TR key={q.id}><TD className="font-mono text-xs">{q.id}</TD><TD className="font-mono text-xs">{q.package_revision_id}</TD>
+                <TR key={q.id}><TD><MonoId value={q.id} title="Quote" /></TD><TD><MonoId value={q.package_revision_id} title="Package version" /></TD>
                   <TD>{q.price_minor === 0 ? "free" : `${q.price_minor} ${q.currency}`}</TD><TD className="text-xs">{q.expires_at}</TD><TD className="text-xs">{q.consumed_at || "—"}</TD></TR>
               ))}</tbody>
             </Table>
@@ -483,7 +537,7 @@ function InspectionTab({ guard, setErr }: TabProps) {
             <Table>
               <THead><TR><TH>ID</TH><TH>Revision</TH><TH>State</TH><TH>Amount</TH></TR></THead>
               <tbody>{purchases.map((p) => (
-                <TR key={p.id}><TD className="font-mono text-xs">{p.id}</TD><TD className="font-mono text-xs">{p.package_revision_id}</TD>
+                <TR key={p.id}><TD><MonoId value={p.id} title="Purchase" /></TD><TD><MonoId value={p.package_revision_id} title="Package version" /></TD>
                   <TD><Badge tone={p.state === "GRANTED" ? "ok" : "default"}>{p.state}</Badge></TD><TD>{p.amount_minor === 0 ? "free" : `${p.amount_minor} ${p.currency}`}</TD></TR>
               ))}</tbody>
             </Table>

@@ -67,7 +67,7 @@ function CopyField({ label, value, big }: { label: string; value?: string; big?:
 function Row({ k, v }: { k: string; v: React.ReactNode }) {
   return (
     <div className="flex justify-between gap-4 border-b border-border py-1.5 text-sm last:border-0">
-      <span className="text-muted">{k}</span>
+      <span className="text-muted-foreground">{k}</span>
       <span className="text-right text-text">{v ?? "—"}</span>
     </div>
   );
@@ -149,16 +149,16 @@ export default function LicensePage() {
   const activated = activation === "activated" || activation === "licensed";
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 p-6">
+    <div className="mx-auto w-full max-w-3xl space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="flex items-center gap-2 text-xl font-semibold"><BadgeCheck className="h-5 w-5" /> License &amp; Activation</h1>
+        <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight sm:text-2xl"><BadgeCheck className="h-5 w-5" /> License &amp; Activation</h1>
         <Badge tone={activationTone(activation)}>{activationLabel(activation)}</Badge>
       </div>
 
-      {err && <div className="rounded border border-[#6b2128] bg-[#3a1418] p-3 text-sm text-err">Couldn&apos;t read status (retrying): {err}</div>}
+      {err && <div className="rounded-md border border-destructive/25 bg-destructive-subtle p-3 text-sm text-destructive-subtle-foreground">Couldn&apos;t read status (retrying): {err}</div>}
 
       {st?.permissive_blocked && (
-        <div className="rounded border border-[#6b2128] bg-[#3a1418] p-3 text-sm text-err">
+        <div className="rounded-md border border-destructive/25 bg-destructive-subtle p-3 text-sm text-destructive-subtle-foreground">
           <b>Critical: blocked attempt to disable license enforcement.</b> This production appliance
           rejected an attempt to run in permissive/unlicensed mode ({st.permissive_blocked}). Guest
           Internet authorization remains gated on a real signed license. Remove the misconfiguration
@@ -167,7 +167,7 @@ export default function LicensePage() {
       )}
 
       {activation === "mismatch" && (
-        <div className="rounded border border-[#6b4e1c] bg-[#3a2a0e] p-3 text-sm text-warn">
+        <div className="rounded-md border border-warning/30 bg-warning-subtle p-3 text-sm text-warning-subtle-foreground">
           <b>Hardware Binding Mismatch.</b> This license is bound to a different WAN network adapter than the one now present
           {st?.hardware_mismatch ? <> ({st.hardware_mismatch})</> : null}. The hotel keeps running on a time-limited grace.
           If the WAN NIC was genuinely replaced, ask StayConnect to authorize a <b>Rebind</b> — a new license will be issued.
@@ -179,7 +179,7 @@ export default function LicensePage() {
         <CardHeader><CardTitle className="flex items-center gap-2"><Cpu className="h-4 w-4" /> Appliance identity</CardTitle></CardHeader>
         <CardBody className="space-y-4">
           {!activated && (
-            <p className="text-sm text-muted">
+            <p className="text-sm text-muted-foreground">
               To activate this appliance, send these two values to StayConnect:
               your <b>Serial Number</b> and <b>WAN MAC Address</b>.
             </p>
@@ -194,7 +194,7 @@ export default function LicensePage() {
               <div className="text-xs uppercase tracking-wide text-muted">Appliance</div>
               <div className="text-sm">
                 <div>{hw?.model || "—"}</div>
-                <div className="text-muted">host: {hw?.hostname || "—"} · WAN {hw?.wan_interface || "—"} · LAN {hw?.lan_interface || "—"}</div>
+                <div className="text-muted-foreground">host: {hw?.hostname || "—"} · WAN {hw?.wan_interface || "—"} · LAN {hw?.lan_interface || "—"}</div>
               </div>
             </div>
           </div>
@@ -203,13 +203,13 @@ export default function LicensePage() {
 
       {/* ---- Grace / expiry / capacity warnings ---- */}
       {(lic?.state === "GracePeriod") && (
-        <div className="rounded border border-[#6b4e1c] bg-[#3a2a0e] p-3 text-sm text-warn">
+        <div className="rounded-md border border-warning/30 bg-warning-subtle p-3 text-sm text-warning-subtle-foreground">
           <b>License in grace period.</b> It expired {lic?.valid_until ? formatDate(lic.valid_until) : ""} and guests keep
           working until <b>{lic?.grace_ends_at ? formatDate(lic.grace_ends_at) : "the grace end"}</b>. Renew now to avoid interruption.
         </div>
       )}
       {(lic?.state === "Expired" || lic?.state === "Revoked" || lic?.state === "Suspended") && (
-        <div className="rounded border border-[#6b2128] bg-[#3a1418] p-3 text-sm text-err">
+        <div className="rounded-md border border-destructive/25 bg-destructive-subtle p-3 text-sm text-destructive-subtle-foreground">
           <b>License {lic?.state}.</b> New guest logins are refused; existing guest sessions are not dropped.
           DHCP, DNS, the captive portal and this admin stay available.
           {lic?.valid_until ? <> Expired {formatDate(lic.valid_until)}{lic?.grace_ends_at ? <>; grace ended {formatDate(lic.grace_ends_at)}</> : null}.</> : null}
@@ -217,7 +217,7 @@ export default function LicensePage() {
       )}
       {lic?.max_concurrent_online_guests != null && lic.max_concurrent_online_guests > 0 &&
         lic.current_online_guests != null && lic.current_online_guests >= lic.max_concurrent_online_guests && (
-        <div className="rounded border border-[#6b4e1c] bg-[#3a2a0e] p-3 text-sm text-warn">
+        <div className="rounded-md border border-warning/30 bg-warning-subtle p-3 text-sm text-warning-subtle-foreground">
           <b>Licensed capacity reached.</b> {lic.current_online_guests} of {lic.max_concurrent_online_guests} concurrent
           online guests in use — new logins receive LICENSE_CAPACITY_REACHED until a slot frees up.
         </div>
@@ -230,11 +230,11 @@ export default function LicensePage() {
           {/* Concurrent online guests — the licensed cap and live usage. */}
           <div>
             <div className="mb-1 flex items-baseline justify-between text-sm">
-              <span className="text-muted">Online guests (all guest networks)</span>
+              <span className="text-muted-foreground">Online guests (all guest networks)</span>
               <span className="font-mono">
                 {lic?.current_online_guests ?? "—"} / {lic?.max_concurrent_online_guests && lic.max_concurrent_online_guests > 0 ? lic.max_concurrent_online_guests : "∞"}
-                {lic?.remaining_capacity != null && <span className="text-muted"> · {lic.remaining_capacity} free</span>}
-                {lic?.usage_percent != null && <span className="text-muted"> · {Math.round(lic.usage_percent)}%</span>}
+                {lic?.remaining_capacity != null && <span className="text-muted-foreground"> · {lic.remaining_capacity} free</span>}
+                {lic?.usage_percent != null && <span className="text-muted-foreground"> · {Math.round(lic.usage_percent)}%</span>}
               </span>
             </div>
             {lic?.max_concurrent_online_guests != null && lic.max_concurrent_online_guests > 0 && (
@@ -266,7 +266,7 @@ export default function LicensePage() {
       <Card>
         <CardHeader><CardTitle className="flex items-center gap-2"><Upload className="h-4 w-4" /> Offline activation</CardTitle></CardHeader>
         <CardBody className="space-y-3">
-          <p className="text-sm text-muted">
+          <p className="text-sm text-muted-foreground">
             No connection to Central? Get a signed license file from StayConnect (generated for this Serial + WAN MAC) and upload it here.
             The appliance verifies it is bound to this exact hardware before accepting.
           </p>
@@ -274,9 +274,9 @@ export default function LicensePage() {
           <Button variant="secondary" disabled={!writable || uploading} onClick={() => fileRef.current?.click()}>
             {uploading ? "Installing…" : "Upload license file"}
           </Button>
-          {uploadMsg && <div className="rounded border border-[#2d5a3d] bg-[#12261a] p-2 text-sm text-ok">{uploadMsg}</div>}
-          {uploadErr && <div className="rounded border border-[#6b2128] bg-[#3a1418] p-2 text-sm text-err">{uploadErr}</div>}
-          {!writable && <p className="text-xs text-muted">Your role cannot install a license.</p>}
+          {uploadMsg && <div className="rounded border border-success/25 bg-success-subtle p-2 text-sm text-success-subtle-foreground">{uploadMsg}</div>}
+          {uploadErr && <div className="rounded border border-destructive/25 bg-destructive-subtle p-2 text-sm text-destructive-subtle-foreground">{uploadErr}</div>}
+          {!writable && <p className="text-xs text-muted-foreground">Your role cannot install a license.</p>}
         </CardBody>
       </Card>
 
@@ -328,7 +328,7 @@ export default function LicensePage() {
                         {(Object.keys(FEATURE_LABELS) as (keyof LicenseFeatures)[]).map((k) => (
                           <TR key={k}>
                             <TD>{FEATURE_LABELS[k]}</TD>
-                            <TD>{ls.features?.[k] ? <Badge tone="ok">yes</Badge> : <span className="text-muted">—</span>}</TD>
+                            <TD>{ls.features?.[k] ? <Badge tone="ok">yes</Badge> : <span className="text-muted-foreground">—</span>}</TD>
                           </TR>
                         ))}
                       </tbody>

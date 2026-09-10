@@ -15,18 +15,24 @@ import userEvent from "@testing-library/user-event";
 const get = vi.fn();
 const post = vi.fn();
 const put = vi.fn();
+const del = vi.fn();
 vi.mock("@/lib/api", () => ({
   api: {
     get: (...a: any[]) => get(...a),
     post: (...a: any[]) => post(...a),
     put: (...a: any[]) => put(...a),
+    del: (...a: any[]) => del(...a),
   },
+  // The ApiError class is re-exported by the real module and is used by the pages' error handling. A bare object
+  // mock with no ApiError makes `e instanceof ApiError` throw rather than return false.
+  ApiError: class ApiError extends Error {},
 }));
 
 beforeEach(() => {
   get.mockReset();
   post.mockReset();
   put.mockReset();
+  del.mockReset();
 });
 afterEach(() => vi.resetModules());
 
@@ -45,9 +51,11 @@ const iface = {
 
 const health = {
   pms_interface_id: "i1",
+  room_auth_ready: true,
   transport_status: "CONNECTED",
   continuity_status: "CONTINUOUS",
   sync_status: "IN_SYNC",
+  materialization_ready: true,
   in_house_stays: 12,
   pending_events: 4,
   review_events: 1,
@@ -64,6 +72,7 @@ const revisions = [
 
 function mockInterfacePage(overrides: Record<string, any> = {}) {
   get.mockImplementation((path: string) => {
+    if (path === "/auth/whoami") return Promise.resolve({ roles: overrides.roles ?? ["site_admin"] });
     if (path === "/pms-interfaces") return Promise.resolve({ interfaces: [overrides.iface ?? iface] });
     if (path.endsWith("/health")) return Promise.resolve({ health: overrides.health ?? health });
     if (path.endsWith("/revisions")) return Promise.resolve({ revisions: overrides.revisions ?? revisions });
@@ -77,10 +86,10 @@ describe("PMS interfaces page", () => {
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
     render(<Page />);
     await screen.findByText("Main PMS");
-    await userEvent.click(screen.getByRole("button", { name: "Open" }));
+    await userEvent.click(screen.getByRole("button", { name: "Manage" }));
 
-    // revision 1 is published even though revision 2 exists and is newer
-    const published = await screen.findByText("published");
+    // revision 1 is live even though revision 2 exists and is newer
+    const published = await screen.findByText("Live");
     const row = published.closest("tr")!;
     expect(within(row).getByText(/#1/)).toBeTruthy();
   });
@@ -88,11 +97,17 @@ describe("PMS interfaces page", () => {
   it("states plainly when an interface has nothing published", async () => {
     mockInterfacePage({
       iface: { ...iface, published: false, current_revision_id: undefined, current_revision_no: null },
+      // The server would never report an interface with nothing published as ready; saying so in the fixture is
+      // what makes this a test of the screen rather than of an impossible state.
+      health: { ...health, room_auth_ready: false, room_auth_reason: "NO_PUBLISHED_REVISION" },
     });
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
     render(<Page />);
-    // an empty cell would read as "not loaded yet"; an interface with nothing published resolves nothing
-    expect(await screen.findByText("not configured")).toBeTruthy();
+    // An interface with nothing published resolves nothing. It is stated as the CONSEQUENCE now -- "No" under
+    // "Can guests sign in?" with the reason beneath -- rather than as a "not configured" badge, because the
+    // operator's question is whether guests can get online, not whether a record exists.
+    expect(await screen.findByText("No")).toBeTruthy();
+    expect(screen.getByText(/No configuration has been put live/i)).toBeTruthy();
   });
 
   it("shows the four health dimensions separately and the age of the backlog", async () => {
@@ -100,16 +115,16 @@ describe("PMS interfaces page", () => {
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
     render(<Page />);
     await screen.findByText("Main PMS");
-    await userEvent.click(screen.getByRole("button", { name: "Open" }));
+    await userEvent.click(screen.getByRole("button", { name: "Manage" }));
 
     await screen.findByText("Connection status");
     // separate, because they fail separately and each has a different response
-    expect(screen.getByText("Connection")).toBeTruthy();
+    expect(screen.getAllByText("Connection").length).toBeGreaterThan(0);
     expect(screen.getByText("Live updates")).toBeTruthy();
-    expect(screen.getByText("Guest list")).toBeTruthy();
-    expect(screen.getByText(/12 stays in house/)).toBeTruthy();
+    expect(screen.getAllByText("Guest list").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/12/).length).toBeGreaterThan(0);
     // the age of the oldest waiting event is what separates a busy morning from a stuck processor
-    expect(screen.getByText(/oldest waiting since/)).toBeTruthy();
+    expect(screen.getByText(/^Oldest /)).toBeTruthy();
   });
 
   it("publishes with the revision the operator believed was live, a reason and a password", async () => {
@@ -118,13 +133,16 @@ describe("PMS interfaces page", () => {
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
     render(<Page />);
     await screen.findByText("Main PMS");
-    await userEvent.click(screen.getByRole("button", { name: "Open" }));
+    await userEvent.click(screen.getByRole("button", { name: "Manage" }));
 
-    await screen.findByText("History");
-    await userEvent.click(screen.getByRole("button", { name: "Publish" }));
-    await userEvent.type(screen.getByLabelText(/Reason/), "CONFIG_UPDATE");
+    await screen.findByText("Configuration history");
+    await userEvent.click(screen.getByRole("button", { name: "Put live" }));
+    await userEvent.type(await screen.findByLabelText(/Reason/), "CONFIG_UPDATE");
     await userEvent.type(screen.getByLabelText(/Confirm your password/), "pw");
-    await userEvent.click(screen.getByRole("button", { name: "Publish revision" }));
+    // Scoped to the dialog rather than picked by index: the row button that OPENED it has the same name, it is
+    // inert while the dialog is open, and which of the two comes first in the document is an implementation
+    // detail of where Radix portals its content.
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^Put live$/ }));
 
     await waitFor(() => expect(post).toHaveBeenCalled());
     const [path, body] = post.mock.calls[0];
@@ -143,12 +161,12 @@ describe("PMS interfaces page", () => {
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
     render(<Page />);
     await screen.findByText("Main PMS");
-    await userEvent.click(screen.getByRole("button", { name: "Open" }));
-    await screen.findByText("History");
-    await userEvent.click(screen.getByRole("button", { name: "Publish" }));
-    await userEvent.type(screen.getByLabelText(/Reason/), "CONFIG_UPDATE");
+    await userEvent.click(screen.getByRole("button", { name: "Manage" }));
+    await screen.findByText("Configuration history");
+    await userEvent.click(screen.getByRole("button", { name: "Put live" }));
+    await userEvent.type(await screen.findByLabelText(/Reason/), "CONFIG_UPDATE");
     await userEvent.type(screen.getByLabelText(/Confirm your password/), "pw");
-    await userEvent.click(screen.getByRole("button", { name: "Publish revision" }));
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^Put live$/ }));
 
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toMatch(/another operator published/);
@@ -168,7 +186,7 @@ describe("PMS interfaces page", () => {
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
     const { container } = render(<Page />);
     await screen.findByText("Main PMS");
-    await userEvent.click(screen.getByRole("button", { name: "Open" }));
+    await userEvent.click(screen.getByRole("button", { name: "Manage" }));
 
     expect(screen.queryByRole("heading", { name: "Credential" })).toBeNull();
     expect(screen.queryByRole("button", { name: /replace credential/i })).toBeNull();
@@ -185,7 +203,7 @@ describe("PMS interfaces page", () => {
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
     const { container } = render(<Page />);
     await screen.findByText("Main PMS");
-    await userEvent.click(screen.getByRole("button", { name: /add interface/i }));
+    await userEvent.click(screen.getByRole("button", { name: /add connection/i }));
 
     for (const unsupported of ["opera-fias", "fidelio-fias", "mews", "apaleo", "stub"]) {
       expect(container.textContent).not.toContain(unsupported);
@@ -202,7 +220,7 @@ describe("PMS interfaces page", () => {
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
     render(<Page />);
     await screen.findByText("Main PMS");
-    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await userEvent.click(screen.getByRole("button", { name: "Settings" }));
 
     expect(await screen.findByLabelText(/PMS time zone/)).toBeTruthy(); // still the operator's to set
     for (const gone of [/folio identity/i, /credential mode/i, /normalization version/i, /resync supported/i]) {
@@ -215,18 +233,30 @@ describe("PMS interfaces page", () => {
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
     render(<Page />);
     await screen.findByText("Main PMS");
-    await userEvent.click(screen.getByRole("button", { name: "Open" }));
+    await userEvent.click(screen.getByRole("button", { name: "Manage" }));
     // configured but unreachable looks identical to healthy everywhere else on the page
-    expect(await screen.findByText(/No guest network routes to this interface/)).toBeTruthy();
+    expect(await screen.findByText(/No Wi-Fi network points at this connection/)).toBeTruthy();
   });
 });
 
 describe("Guest network routing page", () => {
+  const routingMock = (over: Record<string, any> = {}) =>
+    get.mockImplementation((path: string) => {
+      if (path === "/auth/whoami") return Promise.resolve({ roles: over.roles ?? ["site_admin"] });
+      if (path === "/pms-interfaces") {
+        return Promise.resolve({ interfaces: over.interfaces ?? [{ ...iface }] });
+      }
+      return Promise.resolve({
+        routes: over.routes ?? [],
+        unmapped_guest_networks: over.unmapped ?? [],
+      });
+    });
+
   it("names the networks that are mapped to nothing", async () => {
-    get.mockResolvedValue({
+    routingMock({
       routes: [{ guest_network_id: "gn1", guest_network_name: "Guest VLAN 10", pms_interface_id: "i1",
         pms_interface_label: "Main PMS", is_default: true, routing_mode: "MAPPED" }],
-      unmapped_guest_networks: [{ guest_network_id: "gn2", guest_network_name: "Conference VLAN 20" }],
+      unmapped: [{ guest_network_id: "gn2", guest_network_name: "Conference VLAN 20" }],
     });
     const Page = (await import("@/app/(app)/pms-routing/page")).default;
     render(<Page />);
@@ -235,18 +265,51 @@ describe("Guest network routing page", () => {
     expect(screen.getByText("Main PMS")).toBeTruthy();
     // the point of the page: an absence is invisible in a list of what exists
     expect(await screen.findByText("Conference VLAN 20")).toBeTruthy();
-    expect(screen.getByText(/resolved against no\s+PMS interface/)).toBeTruthy();
+    expect(screen.getByText(/will not be recognised/i)).toBeTruthy();
   });
 
-  it("does not offer any way to change the mapping", async () => {
-    get.mockResolvedValue({ routes: [], unmapped_guest_networks: [] });
+  // THE PAGE CAN NOW SET THE MAPPING, AND THE PREVIOUS DECISION IS REVERSED ON PURPOSE.
+  //
+  // It used to be read-only, on the reasoning that which PMS a VLAN resolves against follows the network
+  // topology and should therefore be changed "where the networks are configured". The reasoning is sound; the
+  // problem is that it was not true. The guest-network API has no PMS field, so the conclusion in practice was
+  // that the mapping could be set NOWHERE in the product -- it existed only as a row written by integration-test
+  // fixtures, which is how a deployment reached "PMS connected, stays ingested, nothing authenticates" with no
+  // product action available to fix it. edged has carried PUT/DELETE on this resource since; this is the screen
+  // finally using them.
+  //
+  // WRITE is site_admin only, matching edged's rolePerms, and the test below pins that the controls are HIDDEN
+  // for a reader rather than offered and refused.
+  it("lets a site admin point a network at a PMS", async () => {
+    routingMock({ unmapped: [{ guest_network_id: "gn2", guest_network_name: "Conference VLAN 20" }] });
+    put.mockResolvedValue({});
     const Page = (await import("@/app/(app)/pms-routing/page")).default;
     render(<Page />);
-    await screen.findByText(/Every guest network is mapped/);
-    // routing follows the network topology; editing it here would be editing it without that context
-    expect(screen.queryAllByRole("button")).toHaveLength(0);
-    expect(post).not.toHaveBeenCalled();
+
+    await userEvent.click(await screen.findByRole("button", { name: /point at a pms/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /save mapping/i }));
+
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    expect(put.mock.calls[0][0]).toBe("/pms-routing/gn2");
+    expect(put.mock.calls[0][1]).toEqual({ pms_interface_id: "i1", routing_mode: "MAPPED" });
+  });
+
+  it("offers no way to change the mapping to a role that may only read it", async () => {
+    routingMock({
+      roles: ["front_office_operator"],
+      routes: [{ guest_network_id: "gn1", guest_network_name: "Guest VLAN 10", pms_interface_id: "i1",
+        pms_interface_label: "Main PMS", is_default: false, routing_mode: "MAPPED" }],
+      unmapped: [{ guest_network_id: "gn2", guest_network_name: "Conference VLAN 20" }],
+    });
+    const Page = (await import("@/app/(app)/pms-routing/page")).default;
+    render(<Page />);
+    await screen.findByText("Guest VLAN 10");
+
+    expect(screen.queryByRole("button", { name: /change/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /remove/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /point at a pms/i })).toBeNull();
     expect(put).not.toHaveBeenCalled();
+    expect(del).not.toHaveBeenCalled();
   });
 });
 
@@ -290,10 +353,13 @@ describe("Resolution evidence page", () => {
     const Page = (await import("@/app/(app)/pms-resolutions/page")).default;
     const { container } = render(<Page />);
 
-    expect(await screen.findByText("1 of 3 verified")).toBeTruthy();
+    // The split is stated as a figure plus a proportion now, rather than as one "1 of 3 verified" string.
+    expect(await screen.findByText("Checks recorded")).toBeTruthy();
+    expect(screen.getAllByText("Let online").length).toBeGreaterThan(0);
     // a hundred NO_MATCH rows is a different problem from a hundred INDETERMINATE ones, and the difference
-    // is invisible while scrolling
-    expect(screen.getByText(/ambiguous discriminator required · 2/)).toBeTruthy();
+    // is invisible while scrolling, so the outcome breakdown carries its own counts
+    expect(screen.getAllByText("2").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/ambiguous discriminator required/i).length).toBeGreaterThan(0);
     // And the DATA carries no guest identity — a resolution list that named rooms or reservations would be a
     // way to enumerate who is staying at the property. The check is scoped to the table because the page's
     // own explanatory copy legitimately uses the word "room" to say that no room is named.

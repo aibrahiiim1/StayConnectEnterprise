@@ -133,7 +133,7 @@ export function StayTransferView({ canAct }: { canAct: boolean }) {
   return (
     <div className="space-y-6">
       <header className="space-y-1">
-        <h1 className="text-2xl font-semibold">Cross-PMS transfer</h1>
+        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Cross-PMS transfer</h1>
         <p className="text-sm text-muted-foreground">
           Moves a guest&apos;s live access from a stay on one PMS interface to a stay on another. This is not a
           room move: a guest changing rooms on the same interface keeps their access automatically and needs
@@ -142,12 +142,12 @@ export function StayTransferView({ canAct }: { canAct: boolean }) {
       </header>
 
       {error && (
-        <div role="alert" className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800">
+        <div role="alert" className="rounded-md border border-destructive/25 bg-destructive-subtle p-3 text-sm text-destructive-subtle-foreground">
           {error}
         </div>
       )}
       {done && (
-        <div role="status" className="rounded border border-green-300 bg-green-50 p-3 text-sm text-green-900">
+        <div role="status" className="rounded-md border border-success/25 bg-success-subtle p-3 text-sm text-success-subtle-foreground">
           {done}
         </div>
       )}
@@ -217,13 +217,13 @@ export function StayTransferView({ canAct }: { canAct: boolean }) {
         </button>
 
         {preview && preview.blocker && (
-          <div role="alert" className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          <div role="alert" className="rounded-md border border-warning/30 bg-warning-subtle p-3 text-sm text-warning-subtle-foreground">
             <strong>This transfer cannot be performed.</strong> {preview.blocker}
           </div>
         )}
 
         {preview && !preview.blocker && (
-          <div className="space-y-3 rounded border border-slate-300 p-3 text-sm">
+          <div className="space-y-3 rounded border border-border p-3 text-sm">
             <div data-testid="preview-summary">
               Moving reservation <strong>{preview.from_external_reservation_id}</strong> (room{" "}
               {preview.from_room || "—"}) to <strong>{preview.to_external_reservation_id}</strong> (room{" "}
@@ -257,7 +257,7 @@ export function StayTransferView({ canAct }: { canAct: boolean }) {
             </label>
             <button
               type="button"
-              className="rounded bg-slate-800 px-3 py-1 text-white disabled:opacity-40"
+              className="rounded-md bg-primary px-3 py-1 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-50"
               disabled={!canAct || busy || reason.trim().length < 4 || !password}
               onClick={execute}
             >

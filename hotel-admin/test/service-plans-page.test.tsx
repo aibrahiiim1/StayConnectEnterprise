@@ -201,9 +201,12 @@ describe("ServicePlansPage — stale package pin", () => {
 // reset to "hours", and 86400 entered against the wrong unit is what produced the refused save.
 
 describe("ServicePlansPage — editing an existing plan", () => {
-  function fieldsOf(container: HTMLElement) {
+  // SCOPED TO THE DOCUMENT, NOT THE CONTAINER. The form moved into a dialog, and Radix portals dialog content to
+  // document.body — so a container-scoped query looks in the one place the fields are guaranteed not to be. The
+  // assertions themselves are unchanged: same field names, same expected values.
+  function fieldsOf(_container: HTMLElement) {
     const v = (name: string) =>
-      (container.querySelector(`[name="${name}"]`) as HTMLInputElement | HTMLSelectElement | null)?.value;
+      (document.querySelector(`[name="${name}"]`) as HTMLInputElement | HTMLSelectElement | null)?.value;
     return v;
   }
 
@@ -237,7 +240,7 @@ describe("ServicePlansPage — editing an existing plan", () => {
     p.mockResolvedValue({ current_revision_id: "rev-od-2" });
     const { container } = render(<ServicePlansPage />);
     fireEvent.click(await screen.findByRole("button", { name: /^edit$/i }));
-    fireEvent.change(container.querySelector('[name="max_concurrent_devices"]')!, { target: { value: "6" } });
+    fireEvent.change(document.querySelector('[name="max_concurrent_devices"]')!, { target: { value: "6" } });
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
 
     await waitFor(() => expect(p).toHaveBeenCalledTimes(1));
@@ -255,7 +258,7 @@ describe("ServicePlansPage — editing an existing plan", () => {
     const { container } = render(<ServicePlansPage />);
     fireEvent.click(await screen.findByRole("button", { name: /^edit$/i }));
 
-    const down = container.querySelector('[name="down_mbps"]') as HTMLInputElement;
+    const down = document.querySelector('[name="down_mbps"]') as HTMLInputElement;
     expect(down.max).toBe("10000");
     fireEvent.change(down, { target: { value: "10001" } });
     expect(down.checkValidity()).toBe(false);

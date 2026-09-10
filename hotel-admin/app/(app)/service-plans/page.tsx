@@ -23,6 +23,9 @@ import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PageShell, PageHeader } from "@/components/ui/page";
+import { Callout } from "@/components/ui/error-banner";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody } from "@/components/ui/dialog";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { Plus, X, Gauge } from "lucide-react";
 import {
@@ -202,26 +205,16 @@ export default function ServicePlansPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-lg font-semibold">Service plans</h1>
-          <p className="text-sm text-muted mt-1 max-w-2xl">
-            A service plan is the technical service a guest receives: speed, how many devices, and how long
-            access lasts. Internet packages are what a guest sees and chooses; each one uses a service plan.
-          </p>
-        </div>
-        {writable && !unavailable && (
-          <Button onClick={() => (showNew ? setShowNew(false) : startNew())}>
-            {showNew ? <X size={16} /> : <Plus size={16} />}{showNew ? "Cancel" : "Add plan"}
-          </Button>
-        )}
-      </div>
+    <PageShell width="wide">
+      <PageHeader
+        eyebrow="Internet offering"
+        title="Service plans"
+        description="A service plan is the technical service a guest receives: how fast it is, how many devices it covers, and how long access lasts. Internet packages are what a guest sees and chooses; each package hands out one service plan."
+        actions={writable && !unavailable && <Button onClick={() => startNew()}><Plus /> Add plan</Button>}
+      />
 
-      {err && <ErrorBanner err={err} />}
-      {notice && (
-        <div className="text-sm rounded-md border border-border bg-panel2 px-3 py-2" role="status">{notice}</div>
-      )}
+      <ErrorBanner err={err} />
+      {notice && <Callout tone="success">{notice}</Callout>}
 
       {repin && (
         <Card>
@@ -251,7 +244,7 @@ export default function ServicePlansPage() {
                     checked={!!repin.chosen[k.package_id]}
                     onChange={(e) => setRepin((s2) => s2 && ({ ...s2, chosen: { ...s2.chosen, [k.package_id]: e.target.checked } }))} />
                   <span>{k.name || k.code}</span>
-                  <span className="text-xs text-muted">{k.code}</span>
+                  <span className="text-xs text-muted-foreground">{k.code}</span>
                 </label>
               ))}
             </div>
@@ -277,20 +270,25 @@ export default function ServicePlansPage() {
         </CardBody></Card>
       ) : (
         <>
-          {showNew && (
-            <Card>
-              <CardHeader>
-                <CardTitle>{prefill ? `Edit ${prefill.name || prefill.code}` : "Add service plan"}</CardTitle>
-              </CardHeader>
-              <CardBody>
+          {/*
+            THE FORM IS A DIALOG. It was a card pushed above the plan list, which put it off-screen on a site with
+            more than a handful of plans — and this particular form matters, because saving it publishes settings
+            that decide how fast every guest on that plan gets.
+          */}
+          <Dialog open={showNew} onOpenChange={(v) => { if (!v) { setShowNew(false); setPrefill(null); } }}>
+            <DialogContent size="lg">
+              <DialogHeader>
+                <DialogTitle>{prefill ? `Edit ${prefill.name || prefill.code}` : "Add a service plan"}</DialogTitle>
                 {/* Editing means publishing a NEW revision — the previous one stays intact so that anything
                     already sold under it keeps the terms it was sold under. Saying so here prevents the
                     reasonable assumption that this form edits the plan in place. */}
-                <p className="text-sm text-muted mb-3">
+                <DialogDescription>
                   {prefill
-                    ? "Saving records these settings as the plan's current settings. Guests already connected keep the terms they were given, and packages using this plan are only updated if you choose them below."
+                    ? "Saving records these as the plan's current settings. Guests already connected keep the terms they were given, and packages using this plan are only updated if you choose them afterwards."
                     : "This creates the plan and its first settings."}
-                </p>
+                </DialogDescription>
+              </DialogHeader>
+              <DialogBody>
                 {/* Keyed on the plan being edited. These are uncontrolled inputs, so React reuses the DOM
                     nodes and their defaultValue is applied once; switching straight from editing one plan to
                     another would otherwise leave the first plan's numbers on screen — and publish them. */}
@@ -401,9 +399,9 @@ export default function ServicePlansPage() {
                     <Button type="button" variant="ghost" onClick={() => { setShowNew(false); setPrefill(null); }}>Cancel</Button>
                   </div>
                 </form>
-              </CardBody>
-            </Card>
-          )}
+              </DialogBody>
+            </DialogContent>
+          </Dialog>
 
           <Card><CardBody>
             {rows === null ? (
@@ -427,27 +425,27 @@ export default function ServicePlansPage() {
                     <Fragment key={p.plan_id}>
                       <TR>
                         <TD>
-                          <div className="font-medium flex items-center gap-2"><Gauge size={14} className="text-muted" />{p.name || p.code}</div>
-                          <div className="text-xs text-muted">{p.code}</div>
+                          <div className="font-medium flex items-center gap-2"><Gauge size={14} className="text-muted-foreground" />{p.name || p.code}</div>
+                          <div className="text-xs text-muted-foreground">{p.code}</div>
                         </TD>
                         <TD>
                           <div>{formatSpeed(p.down_kbps)} down{p.speed_allocation === "SHARED" ? " (shared)" : ""}</div>
-                          <div className="text-xs text-muted">{formatSpeed(p.up_kbps)} up</div>
+                          <div className="text-xs text-muted-foreground">{formatSpeed(p.up_kbps)} up</div>
                         </TD>
                         <TD>
                           <div>{formatDevices(p.max_concurrent_devices)}</div>
-                          <div className="text-xs text-muted">
+                          <div className="text-xs text-muted-foreground">
                             {DEVICE_LIMIT_POLICIES[p.device_limit_policy ?? ""] ?? "—"}
                           </div>
                         </TD>
                         <TD>{formatDuration(p.time_quota_seconds)}</TD>
                         <TD>{formatData(p.data_quota_bytes)}</TD>
-                        <TD className="text-xs text-muted">
+                        <TD className="text-xs text-muted-foreground">
                           {(p.used_by_active_packages ?? 0) === 0
                             ? "No active packages"
                             : `${p.used_by_active_packages} active package${p.used_by_active_packages === 1 ? "" : "s"}`}
                           {stale.length > 0 && (
-                            <div className="text-amber-500 mt-0.5" data-testid={`stale-count-${p.code}`}>
+                            <div className="text-warning mt-0.5" data-testid={`stale-count-${p.code}`}>
                               {stale.length} still on older settings
                             </div>
                           )}
@@ -475,7 +473,7 @@ export default function ServicePlansPage() {
                                 #{r.revision_no}{" "}
                                 {r.is_current
                                   ? <Badge tone="info">in force</Badge>
-                                  : <span className="text-muted">superseded</span>}{" "}
+                                  : <span className="text-muted-foreground">superseded</span>}{" "}
                                 {r.label}
                               </div>
                             ))}
@@ -494,6 +492,6 @@ export default function ServicePlansPage() {
           </CardBody></Card>
         </>
       )}
-    </div>
+    </PageShell>
   );
 }

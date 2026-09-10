@@ -172,7 +172,7 @@ export default function NewGuestNetworkPage() {
 
   if (!writable) {
     return (
-      <div className="p-6 max-w-3xl mx-auto">
+      <div className="mx-auto w-full max-w-3xl space-y-5">
         <Link href="/network" className="text-sm text-muted hover:text-text inline-flex items-center gap-1 mb-4">
           <ArrowLeft size={14} /> Back to guest networks
         </Link>
@@ -182,14 +182,14 @@ export default function NewGuestNetworkPage() {
   }
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
+    <div className="mx-auto w-full max-w-3xl space-y-5">
       <Link href="/network" className="text-sm text-muted hover:text-text inline-flex items-center gap-1 mb-4">
         <ArrowLeft size={14} /> Back to guest networks
       </Link>
 
       <div className="mb-4">
-        <div className="text-xs text-muted uppercase tracking-wider">Networking</div>
-        <h1 className="text-2xl font-semibold">New guest network</h1>
+        <div className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground">Networking</div>
+        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">New guest network</h1>
       </div>
 
       {/* stepper */}
@@ -233,7 +233,7 @@ export default function NewGuestNetworkPage() {
               <div>
                 <Label>Parent interface</Label>
                 {interfaces === null ? (
-                  <div className="text-sm text-muted">Loading interfaces…</div>
+                  <div className="text-sm text-muted-foreground">Loading interfaces…</div>
                 ) : (
                   <div className="space-y-2">
                     {interfaces.map((n) => {
@@ -253,13 +253,13 @@ export default function NewGuestNetworkPage() {
                               onChange={() => setParentInterface(n.name)}
                             />
                             <span className="font-mono text-sm">{n.name}</span>
-                            <span className="text-xs text-muted">{n.mac} · {n.link_state} · mtu {n.mtu}</span>
+                            <span className="text-xs text-muted-foreground">{n.mac} · {n.link_state} · mtu {n.mtu}</span>
                           </div>
                           <Badge tone={selectable ? "info" : "default"}>{n.role ?? "unknown"}</Badge>
                         </label>
                       );
                     })}
-                    {interfaces.length === 0 && <div className="text-sm text-muted">No interfaces discovered.</div>}
+                    {interfaces.length === 0 && <div className="text-sm text-muted-foreground">No interfaces discovered.</div>}
                   </div>
                 )}
               </div>
@@ -300,7 +300,7 @@ export default function NewGuestNetworkPage() {
                     <div key={i} className="flex items-center gap-2">
                       <Input placeholder="start (10.20.0.100)" value={p.start_ip}
                         onChange={(e) => setPools((ps) => ps.map((x, k) => k === i ? { ...x, start_ip: e.target.value } : x))} />
-                      <span className="text-muted">–</span>
+                      <span className="text-muted-foreground">–</span>
                       <Input placeholder="end (10.20.3.250)" value={p.end_ip}
                         onChange={(e) => setPools((ps) => ps.map((x, k) => k === i ? { ...x, end_ip: e.target.value } : x))} />
                       <Button size="sm" variant="ghost" disabled={pools.length === 1}
@@ -347,7 +347,7 @@ export default function NewGuestNetworkPage() {
               <label className="flex items-center gap-2 text-sm text-muted">
                 <input type="checkbox" checked={clientIsolation} onChange={(e) => setClientIsolation(e.target.checked)} /> Client isolation
               </label>
-              <div className="text-xs text-muted">
+              <div className="text-xs text-muted-foreground">
                 The captive portal will be served automatically at <span className="font-mono">{portalNote}</span> once applied.
               </div>
             </>
@@ -365,7 +365,7 @@ export default function NewGuestNetworkPage() {
               <Summary label="DNS" value={dnsMode === "custom" ? dnsServers : "appliance"} />
               <Summary label="Captive portal" value={captivePortal ? "on" : "off"} />
               <Summary label="Internet / NAT / isolation" value={`${internetAccess ? "internet" : "no-internet"} · ${nat ? "nat" : "no-nat"} · ${clientIsolation ? "isolated" : "open"}`} />
-              <div className="mt-4 rounded-md border border-[#6b4e1c] bg-[#3a2a0e] text-warn text-sm px-4 py-3">
+              <div className="mt-4 rounded-md border border-warning/30 bg-warning-subtle px-4 py-3 text-sm text-warning-subtle-foreground">
                 <div className="font-medium">Wireless controller action required</div>
                 <div className="text-xs mt-1">
                   Map the &lsquo;{ssidLabel || name}&rsquo; SSID to VLAN {vlanTagged ? vlanId : "(untagged)"} on your wireless controller.
@@ -378,7 +378,7 @@ export default function NewGuestNetworkPage() {
           {step === 6 && (
             <div className="space-y-4 text-sm">
               {!created && !applied && (
-                <div className="text-muted">
+                <div className="text-muted-foreground">
                   Ready to create the guest network, validate the full configuration, then apply it.
                 </div>
               )}
@@ -390,12 +390,12 @@ export default function NewGuestNetworkPage() {
                 </div>
               )}
               {issues && issues.length > 0 && (
-                <div className="rounded-md border border-[#6b2128] bg-[#3a1418] px-4 py-3">
+                <div className="rounded-md border border-destructive/25 bg-destructive-subtle px-4 py-3">
                   <div className="text-err font-medium mb-1">Validation failed</div>
                   <ul className="space-y-1">
                     {issues.map((i, k) => (
                       <li key={k} className="text-err text-xs">
-                        <span className="font-mono">{i.field}</span> — {i.message} <span className="text-muted">({i.code})</span>
+                        <span className="font-mono">{i.field}</span> — {i.message} <span className="text-muted-foreground">({i.code})</span>
                       </li>
                     ))}
                   </ul>
@@ -406,10 +406,10 @@ export default function NewGuestNetworkPage() {
                 <div className={
                   "rounded-md border px-4 py-3 " +
                   (applied.state === "pending_confirmation"
-                    ? "border-[#6b4e1c] bg-[#3a2a0e] text-warn"
+                    ? "border-warning/30 bg-warning-subtle text-warning-subtle-foreground"
                     : applied.state === "rolled_back" || applied.state === "failed"
-                    ? "border-[#6b2128] bg-[#3a1418] text-err"
-                    : "border-[#1e5c3c] bg-[#123422] text-ok")
+                    ? "border-destructive/25 bg-destructive-subtle text-destructive-subtle-foreground"
+                    : "border-success/25 bg-success-subtle text-success-subtle-foreground")
                 }>
                   <div className="font-medium">
                     {applied.state === "pending_confirmation" ? "Applied — pending confirmation" : `Apply state: ${applied.state}`}
@@ -424,7 +424,7 @@ export default function NewGuestNetworkPage() {
                         <li key={k} className="flex items-center gap-2 text-xs">
                           <Badge tone={h.ok ? "ok" : "err"}>{h.ok ? "ok" : "fail"}</Badge>
                           <span className="font-mono">{h.name}</span>
-                          {h.detail && <span className="text-muted">{h.detail}</span>}
+                          {h.detail && <span className="text-muted-foreground">{h.detail}</span>}
                         </li>
                       ))}
                     </ul>
@@ -444,7 +444,7 @@ export default function NewGuestNetworkPage() {
                   </>
                 )}
                 {applied && applied.state !== "pending_confirmation" && (
-                  <Link href="/network" className="inline-flex items-center gap-2 h-9 px-4 text-sm rounded-md bg-panel2 border border-border hover:bg-[#222735]">
+                  <Link href="/network" className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-card px-4 text-sm font-medium shadow-xs hover:bg-surface">
                     Back to guest networks
                   </Link>
                 )}
@@ -472,7 +472,7 @@ export default function NewGuestNetworkPage() {
 function Summary({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between border-b border-border py-1">
-      <span className="text-muted">{label}</span>
+      <span className="text-muted-foreground">{label}</span>
       <span className="font-mono text-xs text-right">{value}</span>
     </div>
   );

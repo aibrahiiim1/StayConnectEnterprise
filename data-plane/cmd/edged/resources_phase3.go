@@ -63,6 +63,25 @@ type stayRow struct {
 	RoomType    *string `json:"room_type,omitempty"`
 	RatePlan    *string `json:"rate_plan,omitempty"`
 	TravelAgent *string `json:"travel_agent,omitempty"`
+
+	// WHAT INTERNET THIS ROOM HAS BEEN GIVEN.
+	//
+	// An operator asked "which package is room 412 on?" and the product had no screen that could answer it. The
+	// Stays list knew the room, the Internet packages list knew the packages, and nothing joined the two — so the
+	// answer existed only as a database query.
+	//
+	// It is the LIVE entitlement: PENDING, ACTIVE or SUSPENDED. A stay whose access has ended reports none, which
+	// is the correct answer rather than a stale one — iam_v2 enforces at most one live entitlement per stay
+	// (ent_live_stay), so there is never an ambiguous choice to make here.
+	AccessStatus      *string `json:"access_status,omitempty"`
+	AccessPackageCode *string `json:"access_package_code,omitempty"`
+	AccessPackageName *string `json:"access_package_name,omitempty"`
+	AccessPlanCode    *string `json:"access_plan_code,omitempty"`
+	AccessDownKbps    *int32  `json:"access_down_kbps,omitempty"`
+	AccessUpKbps      *int32  `json:"access_up_kbps,omitempty"`
+	AccessMaxDevices  *int32  `json:"access_max_devices,omitempty"`
+	// Devices currently online under that entitlement, so "the family says the Wi-Fi is full" is answerable.
+	AccessActiveDevices int `json:"access_active_devices"`
 }
 
 const stayCols = `s.id::text, s.pms_interface_id::text, COALESCE(i.display_label,''),
@@ -74,18 +93,44 @@ const stayCols = `s.id::text, s.pms_interface_id::text, COALESCE(i.display_label
           FROM iam_v2.stay_guests g WHERE g.stay_id = s.id
          ORDER BY g.is_primary DESC LIMIT 1),
        s.posting_block_reason, s.posting_permission_source, s.occupancy_evidence_at,
-       s.vip, s.room_type, s.rate_plan, s.travel_agent`
+       s.vip, s.room_type, s.rate_plan, s.travel_agent,
+       ent.status, pkg.code, NULLIF(pkgr.display->>'name',''),
+       plan.code, planr.down_kbps, planr.up_kbps, planr.max_concurrent_devices,
+       COALESCE((SELECT count(DISTINCT d.mac) FROM iam_v2.sessions d
+                  WHERE d.entitlement_id = ent.id AND d.state = 'active'), 0)::int`
 
-// stayFrom is the FROM clause every stay query shares. The interface join is LEFT so a Stay whose interface
-// row is somehow missing still lists rather than vanishing from the operator's view.
+// stayFrom is the FROM clause every stay query shares. Every join is LEFT so a Stay whose interface row is
+// somehow missing — or which has no internet entitlement at all — still lists rather than vanishing from the
+// operator's view.
+//
+// The entitlement join is filtered to the LIVE statuses in the ON clause rather than the WHERE clause. In a
+// WHERE it would stop being a left join: a stay with no live entitlement would be excluded from the listing
+// entirely, which is the opposite of what this projection is for.
 const stayFrom = `FROM iam_v2.stays s
-       LEFT JOIN iam_v2.pms_interfaces i ON i.id = s.pms_interface_id`
+       LEFT JOIN iam_v2.pms_interfaces i ON i.id = s.pms_interface_id
+       LEFT JOIN iam_v2.entitlements ent
+              ON ent.tenant_id = s.tenant_id AND ent.site_id = s.site_id AND ent.stay_id = s.id
+             AND ent.status IN ('PENDING','ACTIVE','SUSPENDED')
+       LEFT JOIN iam_v2.internet_package_revisions pkgr
+              ON pkgr.tenant_id = ent.tenant_id AND pkgr.site_id = ent.site_id
+             AND pkgr.id = ent.package_revision_id
+       LEFT JOIN iam_v2.internet_packages pkg
+              ON pkg.tenant_id = pkgr.tenant_id AND pkg.site_id = pkgr.site_id AND pkg.id = pkgr.package_id
+       LEFT JOIN iam_v2.service_plan_revisions planr
+              ON planr.tenant_id = ent.tenant_id AND planr.site_id = ent.site_id
+             AND planr.id = ent.service_plan_revision_id
+       LEFT JOIN iam_v2.service_plans plan
+              ON plan.tenant_id = planr.tenant_id AND plan.site_id = planr.site_id
+             AND plan.id = planr.service_plan_id`
 
 func scanStay(row interface{ Scan(...any) error }, e *stayRow) error {
 	return row.Scan(&e.ID, &e.Interface, &e.InterfaceLabel, &e.Reservation, &e.Room, &e.Status,
 		&e.LifecycleVersion, &e.Arrival, &e.Departure, &e.EffectiveCheckoutAt, &e.PostingAllowed,
 		&e.Occupants, &e.PrimaryGuest, &e.PostingBlockReason, &e.PostingSource, &e.OccupancyEvidenceAt,
-		&e.VIP, &e.RoomType, &e.RatePlan, &e.TravelAgent)
+		&e.VIP, &e.RoomType, &e.RatePlan, &e.TravelAgent,
+		&e.AccessStatus, &e.AccessPackageCode, &e.AccessPackageName,
+		&e.AccessPlanCode, &e.AccessDownKbps, &e.AccessUpKbps, &e.AccessMaxDevices,
+		&e.AccessActiveDevices)
 }
 
 func (s *server) pmsStaysRoutes() http.Handler {
@@ -202,8 +247,11 @@ func (s *server) getStay(w http.ResponseWriter, r *http.Request) {
 // ---------- Stay events (including the MANUAL_REVIEW queue) ----------
 
 type stayEventRow struct {
-	ID         string     `json:"id"`
-	Interface  string     `json:"pms_interface_id"`
+	ID        string `json:"id"`
+	Interface string `json:"pms_interface_id"`
+	// The PMS's OWN identifier for this message. It is retained because it is the only handle support and the
+	// PMS vendor share, but it is not an answer to "what is this event about" -- which is what the operator
+	// screen was using it as, having nothing else to show.
 	Identity   string     `json:"external_event_identity"`
 	Type       string     `json:"event_type"`
 	Status     string     `json:"processing_status"`
@@ -211,6 +259,23 @@ type stayEventRow struct {
 	StayID     *string    `json:"stay_id,omitempty"`
 	PMSAt      *time.Time `json:"pms_timestamp_utc,omitempty"`
 	ReceivedAt time.Time  `json:"received_at"`
+
+	// WHAT THE EVENT IS ABOUT, when it has been matched to a stay.
+	//
+	// The PMS activity list showed a column headed "Identity" containing a connector-generated token such as
+	// `PROTEL:GI:8831:2026-09-09T18:22:04Z`. An operator cannot tell from that whether the event concerns room
+	// 412 or room 1207, which makes the screen unusable for the job it exists for: checking that the feed is
+	// carrying the arrivals and departures the front desk just processed.
+	//
+	// The stay is already linked by stay_id on applied events, so the room, reservation and primary guest are a
+	// LEFT JOIN away. They are absent -- not blank -- on an event that has not been matched to a stay, which is
+	// itself the meaningful state for a PENDING or MANUAL_REVIEW row: "we could not tell which stay this is
+	// about" is exactly why it is waiting.
+	InterfaceLabel string  `json:"pms_interface_label,omitempty"`
+	Room           *string `json:"room,omitempty"`
+	Reservation    *string `json:"external_reservation_id,omitempty"`
+	PrimaryGuest   *string `json:"primary_guest,omitempty"`
+	StayStatus     *string `json:"stay_status,omitempty"`
 }
 
 func (s *server) pmsEventsRoutes() http.Handler {
@@ -232,11 +297,24 @@ func (s *server) listStayEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	rows, err := s.db.Query(ctx, `SELECT id::text, pms_interface_id::text, external_event_identity, event_type,
-			processing_status, review_code, stay_id::text, pms_timestamp_utc, received_at
-		FROM iam_v2.stay_events
-		WHERE tenant_id=$1 AND ($2::text IS NULL OR processing_status=$2)
-		ORDER BY received_at DESC LIMIT 200`, s.tenantID, statusArg)
+	// Both joins are LEFT, and that is the point rather than defensive habit: an event NOT matched to a stay is
+	// the one an operator most needs to see, so it must list with its stay columns empty instead of being
+	// filtered out by an inner join.
+	rows, err := s.db.Query(ctx, `SELECT ev.id::text, ev.pms_interface_id::text, ev.external_event_identity,
+			ev.event_type, ev.processing_status, ev.review_code, ev.stay_id::text,
+			ev.pms_timestamp_utc, ev.received_at,
+			COALESCE(i.display_label,''),
+			st.normalized_room_number, st.external_reservation_id,
+			(SELECT COALESCE(NULLIF(g.display_name,''), NULLIF(g.last_name_norm,''))
+			   FROM iam_v2.stay_guests g WHERE g.stay_id = st.id
+			  ORDER BY g.is_primary DESC LIMIT 1),
+			st.status
+		FROM iam_v2.stay_events ev
+		LEFT JOIN iam_v2.pms_interfaces i ON i.id = ev.pms_interface_id
+		LEFT JOIN iam_v2.stays st
+		       ON st.tenant_id = ev.tenant_id AND st.site_id = ev.site_id AND st.id = ev.stay_id
+		WHERE ev.tenant_id=$1 AND ($2::text IS NULL OR ev.processing_status=$2)
+		ORDER BY ev.received_at DESC LIMIT 200`, s.tenantID, statusArg)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
@@ -246,7 +324,8 @@ func (s *server) listStayEvents(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var e stayEventRow
 		if err := rows.Scan(&e.ID, &e.Interface, &e.Identity, &e.Type, &e.Status, &e.ReviewCode,
-			&e.StayID, &e.PMSAt, &e.ReceivedAt); err != nil {
+			&e.StayID, &e.PMSAt, &e.ReceivedAt,
+			&e.InterfaceLabel, &e.Room, &e.Reservation, &e.PrimaryGuest, &e.StayStatus); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
 			return
 		}
@@ -258,11 +337,21 @@ func (s *server) listStayEvents(w http.ResponseWriter, r *http.Request) {
 // ---------- PMS resolutions (evidence only, never guest PII) ----------
 
 type resolutionRow struct {
-	ID           string    `json:"id"`
-	GuestNetwork string    `json:"guest_network_id"`
-	Outcome      string    `json:"outcome_code"`
-	Resolved     bool      `json:"resolved"`
-	ResolvedAt   time.Time `json:"resolved_at"`
+	ID           string `json:"id"`
+	GuestNetwork string `json:"guest_network_id"`
+	// THE NETWORK'S NAME, which is the only thing the operator can act on in this list.
+	//
+	// The screen printed a bare uuid in a column headed "Guest network". Nothing in the product maps a uuid to a
+	// network by eye, so "all the failures are on one network" -- the single most useful pattern this page can
+	// show -- was invisible: every row looked equally opaque. The name is on public.guest_networks, which this
+	// service already reads to manage those networks, so this adds no new access.
+	//
+	// The uuid is still sent, because it is the handle for a support ticket and for cross-referencing the
+	// networking screens. It just stops being the only thing shown.
+	GuestNetworkName *string   `json:"guest_network_name,omitempty"`
+	Outcome          string    `json:"outcome_code"`
+	Resolved         bool      `json:"resolved"`
+	ResolvedAt       time.Time `json:"resolved_at"`
 }
 
 func (s *server) pmsResolutionsRoutes() http.Handler {
@@ -276,10 +365,17 @@ func (s *server) listResolutions(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	// deliberately NO stay identity, guest name, room or reservation: a resolution list is operational
 	// evidence, and a failed resolution must not become a way to enumerate who is staying at the property.
-	rows, err := s.db.Query(ctx, `SELECT id::text, guest_network_id::text, outcome_code,
-			(resolved_stay_id IS NOT NULL), resolved_at
-		FROM iam_v2.auth_resolutions WHERE tenant_id=$1
-		ORDER BY resolved_at DESC LIMIT 200`, s.tenantID)
+	//
+	// The guest NETWORK's name is not guest data and is added: it names a piece of this property's own
+	// infrastructure, which is the thing an operator is being asked to draw a conclusion about. The constraint
+	// this page is built around is that no row identifies a PERSON, and that is unchanged.
+	rows, err := s.db.Query(ctx, `SELECT ar.id::text, ar.guest_network_id::text, gn.name, ar.outcome_code,
+			(ar.resolved_stay_id IS NOT NULL), ar.resolved_at
+		FROM iam_v2.auth_resolutions ar
+		LEFT JOIN public.guest_networks gn
+		       ON gn.tenant_id = ar.tenant_id AND gn.site_id = ar.site_id AND gn.id = ar.guest_network_id
+		WHERE ar.tenant_id=$1
+		ORDER BY ar.resolved_at DESC LIMIT 200`, s.tenantID)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
@@ -288,7 +384,7 @@ func (s *server) listResolutions(w http.ResponseWriter, r *http.Request) {
 	out := []resolutionRow{}
 	for rows.Next() {
 		var e resolutionRow
-		if err := rows.Scan(&e.ID, &e.GuestNetwork, &e.Outcome, &e.Resolved, &e.ResolvedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.GuestNetwork, &e.GuestNetworkName, &e.Outcome, &e.Resolved, &e.ResolvedAt); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
 			return
 		}

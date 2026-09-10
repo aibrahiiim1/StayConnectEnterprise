@@ -370,6 +370,10 @@ func (s *server) auditRoutes() http.Handler {
 
 func (s *server) reportsRoutes() http.Handler {
 	r := chi.NewRouter()
+	// The richer operational snapshot the dashboard reads. /summary stays exactly as it is: it is a stable
+	// contract that scd's cloud telemetry shape mirrors, and widening it would change what gets reported
+	// upward as a side effect of changing a screen.
+	r.Get("/dashboard", s.reportsDashboard)
 	r.Get("/summary", func(w http.ResponseWriter, req *http.Request) {
 		ctx, cancel := dbCtx(req)
 		defer cancel()
@@ -408,6 +412,15 @@ func (s *server) reportsRoutes() http.Handler {
 		// TOP PACKAGES, not top legacy plans. The name kept its wire key so the dashboard card does not
 		// break, but the thing being counted is the internet package an entitlement was granted from --
 		// the current commercial object -- rather than a ticket_template.
+		//
+		// THIS QUERY USED TO BE DEAD, and silently so. It joined `iam_v2.internet_packages p ON p.id =
+		// e.package_id` and selected `p.name`: iam_v2.entitlements has no package_id column (it pins a
+		// package_revision_id) and iam_v2.internet_packages has no name column (the display name lives in the
+		// revision's `display` JSON). Every execution therefore errored, `if err == nil` below swallowed it,
+		// and the card has been permanently empty since it was written — the kind of fault that never gets
+		// reported because an empty "top packages" list looks exactly like a quiet week.
+		//
+		// The link runs through the revision, which is where the schema actually puts it.
 		type topPlan struct {
 			TemplateID string `json:"template_id"`
 			Name       string `json:"name"`
@@ -415,12 +428,19 @@ func (s *server) reportsRoutes() http.Handler {
 		}
 		var top []topPlan
 		rows, err := s.db.Query(ctx, `
-            SELECT p.id::text, p.name, count(se.id) AS n
+            SELECT p.id::text,
+                   COALESCE(NULLIF(cur.display->>'name',''), p.code) AS name,
+                   count(se.id) AS n
               FROM iam_v2.sessions se
-              JOIN iam_v2.entitlements e ON e.id = se.entitlement_id
-              JOIN iam_v2.internet_packages p ON p.id = e.package_id
+              JOIN iam_v2.entitlements e
+                ON e.tenant_id = se.tenant_id AND e.site_id = se.site_id AND e.id = se.entitlement_id
+              JOIN iam_v2.internet_package_revisions r
+                ON r.tenant_id = e.tenant_id AND r.site_id = e.site_id AND r.id = e.package_revision_id
+              JOIN iam_v2.internet_packages p
+                ON p.tenant_id = r.tenant_id AND p.site_id = r.site_id AND p.id = r.package_id
+              LEFT JOIN iam_v2.internet_package_revisions cur ON cur.id = p.current_revision_id
              WHERE se.tenant_id = $1 AND se.started >= now() - interval '7 days'
-             GROUP BY p.id, p.name ORDER BY n DESC LIMIT 5
+             GROUP BY p.id, p.code, cur.display->>'name' ORDER BY n DESC LIMIT 5
         `, s.tenantID)
 		if err == nil {
 			defer rows.Close()

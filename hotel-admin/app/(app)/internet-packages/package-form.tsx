@@ -161,7 +161,7 @@ export function PackageForm({
 
   return (
     <form onSubmit={submit} className="space-y-5" aria-label="package-form">
-      {error && <div role="alert" className="text-sm text-red-500">{error}</div>}
+      {error && <div role="alert" className="text-sm text-destructive">{error}</div>}
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
@@ -250,7 +250,7 @@ export function PackageForm({
           ceiling, and the preview below is there because the clamp order is not obvious from three boxes —
           and the revision this publishes cannot be edited afterwards. */}
       <div>
-        <h3 className="text-sm font-medium mb-1">Data allowance</h3>
+        <h3 className="mb-1.5 text-sm font-semibold">Data allowance</h3>
         <select aria-label="allocation-mode" className="w-full bg-panel2 border border-border rounded-md px-2 py-2 text-sm"
           value={alloc.mode}
           onChange={(e) => setAlloc((a) => ({ ...a, mode: e.target.value as AllocationForm["mode"] }))}>
@@ -278,12 +278,12 @@ export function PackageForm({
               </div>
             </div>
             {previewAllocation(alloc, [2, 5, 8, 12, 25]).length > 0 && (
-              <div className="text-xs text-muted" data-testid="allocation-preview">
+              <div className="text-xs text-muted-foreground" data-testid="allocation-preview">
                 {previewAllocation(alloc, [2, 5, 8, 12, 25])
                   .map((r) => `${r.nights} nights → ${r.gb} GB`).join(" · ")}
               </div>
             )}
-            <p className="text-xs text-muted">
+            <p className="text-xs text-muted-foreground">
               The allowance is worked out once, when the guest is given the package, and does not change
               afterwards if their stay is extended or shortened. Guests who did not sign in with their room
               are not offered this package, because their stay length is not known.
@@ -334,7 +334,7 @@ export function PackageForm({
                     <strong>{notice.exampleGB} GB</strong>.
                   </p>
                 )}
-                <p className="text-muted">
+                <p className="text-muted-foreground">
                   For guests receiving this package, the stay-based allowance takes precedence over the
                   service plan allowance. The service plan itself is unchanged, and its {notice.planQuotaGB} GB
                   still applies to other packages that use the plan&rsquo;s own allowance.
@@ -352,7 +352,7 @@ export function PackageForm({
             <Plus size={14} /> Add condition
           </Button>
         </div>
-        {rules.length === 0 && <p className="text-xs text-muted">Everyone who signs in. Add a condition to narrow it.</p>}
+        {rules.length === 0 && <p className="text-xs text-muted-foreground">Everyone who signs in. Add a condition to narrow it.</p>}
         {/* A PMS condition is only answerable for a guest who signed in through the PMS. Saying so here stops
             the reasonable assumption that adding "VIP guests only" merely narrows the audience — for a voucher
             guest there is no Stay to test, so the package is not offered to them at all. */}
@@ -433,7 +433,7 @@ export function PackageForm({
                   <Button type="button" variant="ghost" aria-label={`remove-tier-${i}`} onClick={() => setTiers((ts) => ts.filter((_, j) => j !== i))}><Trash2 size={14} /></Button>
                 </div>
               ))}
-              <p className="text-xs text-muted">
+              <p className="text-xs text-muted-foreground">
                 Leave a single step with no speeds unless you need different speeds for different guests.
               </p>
             </div>
@@ -441,7 +441,7 @@ export function PackageForm({
         )}
       </div>
 
-      <div className="text-xs text-muted">
+      <div className="text-xs text-muted-foreground">
         This package is <strong>free to the guest</strong>. Selling packages to guests is not enabled on this
         appliance, so there is no price to set here; the package is granted rather than sold.
       </div>

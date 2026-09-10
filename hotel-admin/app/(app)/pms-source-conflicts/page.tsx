@@ -42,14 +42,14 @@ export default function PMSSourceConflictsPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-semibold">Source conflicts</h1>
-      <p className="text-sm text-muted">
+      <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Source conflicts</h1>
+      <p className="text-sm text-muted-foreground">
         Where two PMS interfaces claim the same source. Until one is given authority, guests matching the
         contested rooms cannot be verified.
       </p>
 
       {err && (
-        <p role="alert" className="text-sm text-red-600">
+        <p role="alert" className="text-sm text-destructive">
           {err}
         </p>
       )}

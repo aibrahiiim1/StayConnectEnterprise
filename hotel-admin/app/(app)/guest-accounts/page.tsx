@@ -5,47 +5,82 @@ import {
   api, ApiError, GuestAccount, GuestAccountCreateResp,
   GuestAccountPasswordResp, ListResp,
 } from "@/lib/api";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
+import { Card, CardBody } from "@/components/ui/card";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Input, Label, Field } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Plus, X, KeyRound, Copy, Check, Eye, EyeOff, Pencil, Power } from "lucide-react";
+import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody, DialogFooter,
+  ConfirmDialog,
+} from "@/components/ui/dialog";
+import { Switch, SkeletonRows } from "@/components/ui/misc";
+import { Plus, KeyRound, Copy, Check, Eye, EyeOff, Pencil, Power, Users } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
 
 function weakPassword(pw: string): boolean {
   return pw.length > 0 && pw.length < 8;
 }
 
-// A one-time password reveal shown once after create/reset. The password is
-// NEVER retrievable afterwards.
+/**
+ * The one-time password reveal, shown once after create or reset. The password is NEVER retrievable afterwards.
+ *
+ * IT IS A MODAL NOW, and for this screen that is a correctness change rather than a presentation one. It used to
+ * be a card inserted above the table: on a list of accounts the operator scrolled to find, creating an account
+ * put the only copy of its password off-screen, and the next click anywhere could scroll it out of reach for good.
+ * A password shown exactly once must be impossible to miss.
+ */
 function PasswordReveal({ username, password, onClose }: { username: string; password: string; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
   const [show, setShow] = useState(true);
   return (
-    <Card className="mb-6 border-brand">
-      <CardHeader><CardTitle>Password for {username} — shown once</CardTitle></CardHeader>
-      <CardBody>
-        <div className="flex items-center gap-2 mb-2">
-          <code className="font-mono text-lg bg-panel2 border border-border rounded px-3 py-1.5 select-all">
-            {show ? password : "•".repeat(password.length)}
-          </code>
-          <Button size="sm" variant="ghost" onClick={() => setShow((s) => !s)}>
-            {show ? <EyeOff size={14} /> : <Eye size={14} />}
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent size="sm">
+        <DialogHeader>
+          <DialogTitle>Password for {username}</DialogTitle>
+          <DialogDescription>
+            Write it down or hand it over now. It is shown this once and cannot be looked up again.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody className="space-y-3">
+          <div className="flex items-center gap-2">
+            <code className="flex-1 select-all rounded-md border border-border bg-surface px-3 py-2 font-mono text-lg">
+              {show ? password : "•".repeat(password.length)}
+            </code>
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label={show ? "Hide the password" : "Show the password"}
+              onClick={() => setShow((s) => !s)}
+            >
+              {show ? <EyeOff /> : <Eye />}
+            </Button>
+          </div>
+          <Button
+            variant="secondary"
+            className="w-full"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(password);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              } catch { /* clipboard denied — the value is on screen */ }
+            }}
+          >
+            {copied ? <><Check /> Copied</> : <><Copy /> Copy password</>}
           </Button>
-          <Button size="sm" variant="secondary" onClick={async () => {
-            try { await navigator.clipboard.writeText(password); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
-          }}>
-            {copied ? <><Check size={14} /> Copied</> : <><Copy size={14} /> Copy password</>}
-          </Button>
-          <Button size="sm" variant="ghost" onClick={onClose}>Done</Button>
-        </div>
-        <p className="text-xs text-warn">
-          This password is shown once. It cannot be retrieved later — if it is lost, set a new password.
-        </p>
-      </CardBody>
-    </Card>
+          <Callout tone="warning">
+            If this is lost, there is no way to recover it — you would set a new password instead.
+          </Callout>
+        </DialogBody>
+        <DialogFooter>
+          <Button onClick={onClose}>I have it</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -60,6 +95,11 @@ export default function GuestAccountsPage() {
   const [editing, setEditing] = useState<GuestAccount | null>(null);
   const [pwFor, setPwFor] = useState<GuestAccount | null>(null);
   const [reveal, setReveal] = useState<{ username: string; password: string } | null>(null);
+  // The two destructive actions, held while the operator confirms. They used to be `window.confirm` calls, which
+  // could not say how many devices were about to be cut off or that a disabled account is the reversible option.
+  const [disconnecting, setDisconnecting] = useState<GuestAccount | null>(null);
+  const [deleting, setDeleting] = useState<GuestAccount | null>(null);
+  const [actionErr, setActionErr] = useState<unknown>(null);
   // THE LIST HAS THREE OUTCOMES, NOT TWO. `rows === null` was doing double duty as "still loading" and "the
   // load failed", so a failed load rendered the error banner AND "Loading…" underneath it forever -- the
   // screen contradicting itself.
@@ -191,119 +231,188 @@ export default function GuestAccountsPage() {
     try { await api.patch(`/guest-accounts/${a.id}`, { enabled: !a.enabled }); load(); }
     catch (e: any) { setErr(e?.message ?? "Update failed"); }
   }
-  async function onDisconnect(a: GuestAccount) {
-    if (!confirm(`Disconnect all active devices for "${a.username}"?`)) return;
-    try { const r = await api.post<{ disconnected_sessions: number }>(`/guest-accounts/${a.id}/disconnect`); setMsg(`${r.disconnected_sessions} session(s) disconnected.`); load(); }
-    catch (e: any) { setErr(e?.message ?? "Disconnect failed"); }
+
+  async function onDisconnect() {
+    if (!disconnecting) return;
+    setBusy(true); setActionErr(null);
+    try {
+      const r = await api.post<{ disconnected_sessions: number }>(`/guest-accounts/${disconnecting.id}/disconnect`);
+      setMsg(`${r.disconnected_sessions} device${r.disconnected_sessions === 1 ? "" : "s"} disconnected.`);
+      setDisconnecting(null);
+      load();
+    } catch (e) { setActionErr(e); }
+    finally { setBusy(false); }
   }
-  async function onDelete(a: GuestAccount) {
-    if (!confirm(`Delete guest account "${a.username}"? This cannot be undone.`)) return;
-    try { await api.del(`/guest-accounts/${a.id}`); load(); }
-    catch (e: any) { setErr(e?.message ?? "Delete failed"); }
+
+  async function onDelete() {
+    if (!deleting) return;
+    setBusy(true); setActionErr(null);
+    try {
+      await api.del(`/guest-accounts/${deleting.id}`);
+      setMsg(`The account "${deleting.username}" has been deleted.`);
+      setDeleting(null);
+      load();
+    } catch (e) { setActionErr(e); }
+    finally { setBusy(false); }
   }
 
   const locked = (a: GuestAccount) => a.locked_until && new Date(a.locked_until) > new Date();
 
+  const totals = useMemo(() => {
+    const list = rows ?? [];
+    return {
+      all: list.length,
+      enabled: list.filter((a) => a.enabled).length,
+      online: list.reduce((n, a) => n + (a.active_devices ?? 0), 0),
+      locked: list.filter((a) => locked(a)).length,
+    };
+  }, [rows]);
+
   return (
-    <div className="p-6 max-w-[92rem] mx-auto">
-      <div className="flex items-baseline justify-between mb-4">
-        <div>
-          <div className="text-xs text-muted uppercase tracking-wider">Access</div>
-          <h1 className="text-2xl font-semibold">Guest accounts</h1>
-        </div>
-        {/*
-          This button used to be disabled whenever there were no active guest access plans, which under
-          IAM-v2 meant permanently: a credential carries no plan there, so on a site with none an operator
-          could never create a guest account at all, and the only symptom was a dead button. It is no longer
-          gated on anything, and there is no longer a plan for it to be gated on.
-        */}
-        <Button onClick={() => { setShowNew((s) => !s); setEditing(null); setPwFor(null); }}>
-          {showNew ? <><X size={14} /> Cancel</> : <><Plus size={14} /> New account</>}
-        </Button>
+    <PageShell width="wide">
+      <PageHeader
+        eyebrow="Guests"
+        title="Guest accounts"
+        description="A username and password a guest can sign in with, instead of a room number or a code. What each guest may then take is decided by package eligibility rules on the Internet packages screen, not by anything stored on the account."
+        actions={
+          // This button used to be disabled whenever there were no active guest access plans, which under
+          // IAM-v2 meant permanently: a credential carries no plan there, so on a site with none an operator
+          // could never create a guest account at all, and the only symptom was a dead button. It is no longer
+          // gated on anything, and there is no longer a plan for it to be gated on.
+          <Button onClick={() => { setShowNew(true); setEditing(null); setPwFor(null); }}>
+            <Plus /> Add account
+          </Button>
+        }
+      />
+
+      <ErrorBanner err={err} />
+      {msg && <Callout tone="success">{msg}</Callout>}
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Accounts" value={rows ? totals.all.toLocaleString() : "—"} icon={<Users />} tone="primary" />
+        <StatCard label="Able to sign in" value={rows ? totals.enabled.toLocaleString() : "—"} />
+        <StatCard
+          label="Devices online"
+          value={rows ? totals.online.toLocaleString() : "—"}
+          href="/sessions"
+        />
+        <StatCard
+          label="Locked out"
+          value={rows ? totals.locked.toLocaleString() : "—"}
+          tone={totals.locked > 0 ? "warn" : "default"}
+          hint={totals.locked > 0 ? "Too many failed sign-in attempts" : "No account is locked"}
+        />
       </div>
 
-      <p className="text-sm text-muted mb-4">
-        Username &amp; Password sign-in for guests — the guest signs in with a username and password instead of a code.
-        What each guest may then take is decided by <strong>package eligibility rules</strong> on the Commercial
-        packages screen, not by anything stored on the account. License capacity is appliance-wide.
-      </p>
-
-      <div className="mb-4 flex items-center gap-3 text-sm">
-        <span>Show <strong>Username &amp; Password</strong> tab on the captive portal:</span>
-        <Button size="sm" variant={portalOn ? "secondary" : "ghost"} onClick={onTogglePortal}>{portalOn ? "On" : "Off"}</Button>
-        <span className="text-muted text-xs">{portalOn ? "Guests can sign in with an account." : "The tab is hidden until enabled."}</span>
-      </div>
-
-      {err && <div className="text-err text-sm mb-4">{err}</div>}
-      {msg && <div className="text-ok text-sm mb-4">{msg}</div>}
+      {/* THE PORTAL SWITCH, as a switch. It was a button whose label was its state ("On"), which reads as the
+          action rather than the setting — so an operator could not tell whether pressing it would turn the tab on
+          or report that it already was. */}
+      <Card>
+        <CardBody className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <div className="text-sm font-medium">Offer username-and-password sign-in on the guest portal</div>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {portalOn
+                ? "Guests see a Username & Password tab and can sign in with these accounts."
+                : "The tab is hidden, so these accounts cannot be used even though they exist."}
+            </p>
+          </div>
+          <Switch checked={portalOn} onCheckedChange={onTogglePortal} label="Offer username-and-password sign-in" />
+        </CardBody>
+      </Card>
 
       {reveal && <PasswordReveal username={reveal.username} password={reveal.password} onClose={() => setReveal(null)} />}
 
-      {showNew && (
-        <Card className="mb-6">
-          <CardHeader><CardTitle>New guest account</CardTitle></CardHeader>
-          <CardBody><AccountForm onSubmit={onCreate} busy={busy} withPassword /></CardBody>
-        </Card>
-      )}
-
-      {editing && (
-        <Card className="mb-6 border-brand">
-          <CardHeader><CardTitle>Edit {editing.username}</CardTitle></CardHeader>
-          <CardBody><AccountForm account={editing} onSubmit={onSaveEdit} busy={busy} onCancel={() => setEditing(null)} /></CardBody>
-        </Card>
-      )}
-
-      {pwFor && (
-        <Card className="mb-6 border-brand">
-          <CardHeader><CardTitle>Set password — {pwFor.username}</CardTitle></CardHeader>
-          <CardBody><PasswordForm onSubmit={onSavePassword} busy={busy} onCancel={() => setPwFor(null)} /></CardBody>
-        </Card>
-      )}
-
-      <div className="flex gap-2 mb-3">
-        <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search username or name…" className="max-w-xs" />
-      </div>
-
       <Card>
+        <CardBody className="border-b border-border py-3">
+          <Input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search username or name…"
+            aria-label="Search guest accounts"
+            className="max-w-xs"
+          />
+        </CardBody>
         <CardBody className="p-0">
           {loadFailed ? (
             // A failed load is not an empty list and not a slow one. Saying so, and offering the one action
             // that can help, beats a spinner that will never finish.
-            <div className="py-14 text-center text-muted">
-              <div className="text-sm">Could not load guest accounts</div>
-              <div className="text-xs mt-1">The appliance did not answer. Nothing has been changed.</div>
-              <Button className="mt-3" onClick={() => void load()}>Try again</Button>
-            </div>
-          ) : rows === null ? <EmptyState title="Loading…" /> : filtered.length === 0 ? (
-            <EmptyState title="No guest accounts" hint="Create one to let guests sign in with a username and password." />
+            <EmptyState
+              title="Could not load guest accounts"
+              hint="The appliance did not answer. Nothing has been changed."
+              action={<Button onClick={() => void load()}>Try again</Button>}
+            />
+          ) : rows === null ? (
+            <SkeletonRows rows={5} cols={6} />
+          ) : filtered.length === 0 ? (
+            <EmptyState
+              icon={<KeyRound />}
+              title={q ? "No account matches that search" : "No guest accounts"}
+              hint={q ? undefined : "Create one to let a guest sign in with a username and password."}
+              action={q ? undefined : <Button onClick={() => setShowNew(true)}><Plus /> Add the first account</Button>}
+            />
           ) : (
             <Table>
               <THead>
-                <TR><TH>Username</TH><TH>Name</TH><TH>Devices</TH><TH>Status</TH><TH>Validity</TH><TH>Last login</TH><TH>Logins</TH><TH></TH></TR>
+                <TR>
+                  <TH>Account</TH><TH>Devices</TH><TH>Status</TH><TH>Valid until</TH>
+                  <TH>Last sign-in</TH><TH className="text-right">Sign-ins</TH><TH />
+                </TR>
               </THead>
               <tbody>
                 {filtered.map((a) => {
                   const cap = a.max_devices;
+                  const atCap = cap ? (a.active_devices ?? 0) >= cap : false;
                   return (
-                  <TR key={a.id}>
-                    <TD className="font-mono">{a.username}</TD>
-                    <TD className="text-muted">{a.display_name || "—"}</TD>
-                    <TD className="text-muted">{a.active_devices ?? 0}{cap ? ` of ${cap}` : ""}</TD>
-                    <TD>
-                      <Badge tone={a.enabled ? "ok" : "err"}>{a.enabled ? "enabled" : "disabled"}</Badge>
-                      {locked(a) && <Badge tone="warn" className="ml-1">locked</Badge>}
-                    </TD>
-                    <TD className="text-muted text-xs">{a.valid_until ? `until ${formatRelative(a.valid_until)}` : "—"}</TD>
-                    <TD className="text-muted">{a.last_login_at ? formatRelative(a.last_login_at) : "never"}</TD>
-                    <TD className="text-muted">{a.login_count}</TD>
-                    <TD className="text-right space-x-1 whitespace-nowrap">
-                      <Button size="sm" variant="ghost" onClick={() => { setEditing(a); setPwFor(null); setShowNew(false); }}><Pencil size={13} /> Edit</Button>
-                      <Button size="sm" variant="ghost" onClick={() => { setPwFor(a); setEditing(null); setShowNew(false); }}><KeyRound size={13} /> Password</Button>
-                      <Button size="sm" variant="secondary" onClick={() => onToggle(a)}>{a.enabled ? "Disable" : "Enable"}</Button>
-                      {(a.active_devices ?? 0) > 0 && <Button size="sm" variant="ghost" onClick={() => onDisconnect(a)}><Power size={13} /> Disconnect</Button>}
-                      <Button size="sm" variant="danger" onClick={() => onDelete(a)}>Delete</Button>
-                    </TD>
-                  </TR>
+                    <TR key={a.id}>
+                      <TD>
+                        <div className="font-mono text-sm font-medium">{a.username}</div>
+                        {a.display_name && (
+                          <div className="text-xs text-muted-foreground">{a.display_name}</div>
+                        )}
+                      </TD>
+                      <TD className={atCap ? "text-warning-subtle-foreground" : "text-muted-foreground"}>
+                        <span className="tabular">{a.active_devices ?? 0}</span>
+                        {cap ? <span className="tabular"> / {cap}</span> : ""}
+                        {atCap && <div className="text-2xs">At the limit</div>}
+                      </TD>
+                      <TD>
+                        <Badge tone={a.enabled ? "ok" : "err"} dot>
+                          {a.enabled ? "Can sign in" : "Disabled"}
+                        </Badge>
+                        {locked(a) && (
+                          <div className="mt-0.5">
+                            <Badge tone="warn">Locked until {formatRelative(a.locked_until)}</Badge>
+                          </div>
+                        )}
+                      </TD>
+                      <TD className="text-sm text-muted-foreground">
+                        {a.valid_until ? formatRelative(a.valid_until) : "No end date"}
+                      </TD>
+                      <TD className="text-sm text-muted-foreground">
+                        {a.last_login_at ? formatRelative(a.last_login_at) : "Never"}
+                      </TD>
+                      <TD className="text-right tabular text-muted-foreground">{a.login_count}</TD>
+                      <TD className="whitespace-nowrap text-right">
+                        <Button size="sm" variant="ghost" onClick={() => { setEditing(a); setPwFor(null); setShowNew(false); }}>
+                          <Pencil /> Edit
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => { setPwFor(a); setEditing(null); setShowNew(false); }}>
+                          <KeyRound /> Password
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => onToggle(a)}>
+                          {a.enabled ? "Disable" : "Enable"}
+                        </Button>
+                        {(a.active_devices ?? 0) > 0 && (
+                          <Button size="sm" variant="ghost" onClick={() => { setActionErr(null); setDisconnecting(a); }}>
+                            <Power /> Disconnect
+                          </Button>
+                        )}
+                        <Button size="sm" variant="ghost" onClick={() => { setActionErr(null); setDeleting(a); }}>
+                          Delete
+                        </Button>
+                      </TD>
+                    </TR>
                   );
                 })}
               </tbody>
@@ -311,7 +420,85 @@ export default function GuestAccountsPage() {
           )}
         </CardBody>
       </Card>
-    </div>
+
+      {/* ------------------------------------------------------------------ create / edit / password */}
+      <Dialog open={showNew} onOpenChange={(v) => !v && setShowNew(false)}>
+        <DialogContent size="lg">
+          <DialogHeader>
+            <DialogTitle>Add a guest account</DialogTitle>
+            <DialogDescription>
+              The guest signs in with this username and password. The password is shown once, after you save.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            <AccountForm onSubmit={onCreate} busy={busy} withPassword onCancel={() => setShowNew(false)} />
+          </DialogBody>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={editing !== null} onOpenChange={(v) => !v && setEditing(null)}>
+        <DialogContent size="lg">
+          <DialogHeader>
+            <DialogTitle>Edit {editing?.username}</DialogTitle>
+            <DialogDescription>
+              Changing the username does not disconnect anyone who is already online.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            {editing && (
+              <AccountForm account={editing} onSubmit={onSaveEdit} busy={busy} onCancel={() => setEditing(null)} />
+            )}
+          </DialogBody>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={pwFor !== null} onOpenChange={(v) => !v && setPwFor(null)}>
+        <DialogContent size="md">
+          <DialogHeader>
+            <DialogTitle>Set a new password for {pwFor?.username}</DialogTitle>
+            <DialogDescription>
+              The new password is shown once, after you save. The old one stops working immediately.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            <PasswordForm onSubmit={onSavePassword} busy={busy} onCancel={() => setPwFor(null)} />
+          </DialogBody>
+        </DialogContent>
+      </Dialog>
+
+      {/* ------------------------------------------------------------------ destructive confirmations */}
+      <ConfirmDialog
+        open={disconnecting !== null}
+        onOpenChange={(v) => !v && setDisconnecting(null)}
+        title="Disconnect this account's devices?"
+        description={
+          disconnecting
+            ? `All ${disconnecting.active_devices ?? 0} device${(disconnecting.active_devices ?? 0) === 1 ? "" : "s"} signed in as "${disconnecting.username}" will lose internet access immediately. The account still works, so they can sign in again.`
+            : undefined
+        }
+        confirmLabel="Disconnect devices"
+        confirmVariant="danger"
+        busy={busy}
+        error={actionErr}
+        onConfirm={onDisconnect}
+      />
+
+      <ConfirmDialog
+        open={deleting !== null}
+        onOpenChange={(v) => !v && setDeleting(null)}
+        title="Delete this guest account?"
+        description={
+          deleting
+            ? `"${deleting.username}" will be removed permanently and anyone using it will be disconnected. This cannot be undone — if you only want to stop it being used for now, Disable it instead.`
+            : undefined
+        }
+        confirmLabel="Delete permanently"
+        confirmVariant="danger"
+        busy={busy}
+        error={actionErr}
+        onConfirm={onDelete}
+      />
+    </PageShell>
   );
 }
 
@@ -327,24 +514,73 @@ function AccountForm({ account, onSubmit, busy, withPassword, onCancel }: {
   const dt = (s?: string | null) => (s ? new Date(s).toISOString().slice(0, 16) : "");
 
   return (
-    <form onSubmit={onSubmit} className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-      <div><Label>Username</Label><Input name="username" required minLength={1} maxLength={64} defaultValue={account?.username} placeholder="room101 · A · 1" /></div>
-      {withPassword ? (
-        <>
-          <div>
-            <Label>Password</Label>
-            <div className="flex gap-1">
-              <Input name="password" type={showPw ? "text" : "password"} value={pw} onChange={(e) => setPw(e.target.value)}
-                disabled={generate} required={!generate} minLength={1} maxLength={128} placeholder={generate ? "auto-generated" : "any length ≥ 1"} />
-              <Button type="button" size="sm" variant="ghost" onClick={() => setShowPw((s) => !s)}>{showPw ? <EyeOff size={14} /> : <Eye size={14} />}</Button>
+    <form onSubmit={onSubmit} className="space-y-4">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Username" required hint="What the guest types. Short is fine — even a single character.">
+          <Input name="username" required minLength={1} maxLength={64} defaultValue={account?.username} placeholder="room101" />
+        </Field>
+        <Field label="Name" hint="For your own reference; the guest never sees it.">
+          <Input name="display_name" defaultValue={account?.display_name ?? ""} placeholder="Room 101 guest" />
+        </Field>
+      </div>
+
+      {withPassword && (
+        <div className="rounded-md border border-border bg-surface/50 p-3.5">
+          <Field
+            label="Password"
+            required={!generate}
+            error={!generate && weakPassword(pw) ? "Short passwords are easy to guess. You can still save it." : undefined}
+          >
+            <div className="flex gap-1.5">
+              <Input
+                name="password"
+                type={showPw ? "text" : "password"}
+                autoComplete="new-password"
+                value={pw}
+                onChange={(e) => setPw(e.target.value)}
+                disabled={generate}
+                required={!generate}
+                minLength={1}
+                maxLength={128}
+                placeholder={generate ? "Generated when you save" : ""}
+              />
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                aria-label={showPw ? "Hide the password" : "Show the password"}
+                onClick={() => setShowPw((s) => !s)}
+              >
+                {showPw ? <EyeOff /> : <Eye />}
+              </Button>
             </div>
-            <label className="flex items-center gap-1.5 text-xs text-muted mt-1">
-              <input type="checkbox" name="generate" checked={generate} onChange={(e) => setGenerate(e.target.checked)} /> Generate a strong password
-            </label>
-            {!generate && weakPassword(pw) && <div className="text-xs text-warn mt-1">Weak guest password — short passwords are easier to guess. You may still save it.</div>}
-          </div>
-        </>
-      ) : <div />}
+          </Field>
+          <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              name="generate"
+              checked={generate}
+              onChange={(e) => setGenerate(e.target.checked)}
+              className="size-3.5 accent-[hsl(var(--primary))]"
+            />
+            Generate a strong password instead
+          </label>
+        </div>
+      )}
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Valid from" hint="Leave empty to work immediately.">
+          <Input name="valid_from" type="datetime-local" defaultValue={dt(account?.valid_from)} />
+        </Field>
+        <Field label="Valid until" hint="Leave empty for no end date.">
+          <Input name="valid_until" type="datetime-local" defaultValue={dt(account?.valid_until)} />
+        </Field>
+      </div>
+
+      <Field label="Notes">
+        <Input name="notes" defaultValue={account?.notes ?? ""} placeholder="Optional" />
+      </Field>
+
       {/*
         WHERE THE PLAN CONTROL USED TO BE.
 
@@ -353,18 +589,12 @@ function AccountForm({ account, onSubmit, busy, withPassword, onCancel }: {
         present -- every arm of which existed to describe a superseded prerequisite. It says the one thing
         that is now true instead.
       */}
-      <div>
-        <Label>Access</Label>
-        <p className="text-xs text-muted mt-1.5 leading-relaxed">
-          Decided by <strong>package eligibility rules</strong> on the Commercial packages screen, not by
-          anything stored on this account.
-        </p>
-      </div>
-      <div><Label>Display name (optional)</Label><Input name="display_name" defaultValue={account?.display_name ?? ""} placeholder="Room 101 guest" /></div>
-      <div><Label>Valid from (optional)</Label><Input name="valid_from" type="datetime-local" defaultValue={dt(account?.valid_from)} /></div>
-      <div><Label>Valid until (optional)</Label><Input name="valid_until" type="datetime-local" defaultValue={dt(account?.valid_until)} /></div>
-      <div className="sm:col-span-3"><Label>Notes (optional)</Label><Input name="notes" defaultValue={account?.notes ?? ""} /></div>
-      <div className="sm:col-span-3 flex justify-end gap-2">
+      <Callout tone="neutral" title="What this guest can take">
+        Decided by the eligibility rules on each internet package, not by anything stored on the account. The
+        licence capacity is appliance-wide.
+      </Callout>
+
+      <div className="flex justify-end gap-2 border-t border-border pt-4">
         {onCancel && <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>}
         <Button type="submit" disabled={busy}>
           {busy ? "Saving…" : account ? "Save changes" : "Create account"}
@@ -379,27 +609,60 @@ function PasswordForm({ onSubmit, busy, onCancel }: { onSubmit: (e: React.FormEv
   const [pw, setPw] = useState("");
   const [showPw, setShowPw] = useState(false);
   return (
-    <form onSubmit={onSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-      <div>
-        <Label>New password</Label>
-        <div className="flex gap-1">
-          <Input name="password" type={showPw ? "text" : "password"} value={pw} onChange={(e) => setPw(e.target.value)}
-            disabled={generate} required={!generate} minLength={1} maxLength={128} placeholder={generate ? "auto-generated" : "any length ≥ 1"} />
-          <Button type="button" size="sm" variant="ghost" onClick={() => setShowPw((s) => !s)}>{showPw ? <EyeOff size={14} /> : <Eye size={14} />}</Button>
+    <form onSubmit={onSubmit} className="space-y-4">
+      <Field
+        label="New password"
+        required={!generate}
+        error={!generate && weakPassword(pw) ? "Short passwords are easy to guess. You can still save it." : undefined}
+      >
+        <div className="flex gap-1.5">
+          <Input
+            name="password"
+            type={showPw ? "text" : "password"}
+            autoComplete="new-password"
+            value={pw}
+            onChange={(e) => setPw(e.target.value)}
+            disabled={generate}
+            required={!generate}
+            minLength={1}
+            maxLength={128}
+            placeholder={generate ? "Generated when you save" : ""}
+          />
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            aria-label={showPw ? "Hide the password" : "Show the password"}
+            onClick={() => setShowPw((s) => !s)}
+          >
+            {showPw ? <EyeOff /> : <Eye />}
+          </Button>
         </div>
-        <label className="flex items-center gap-1.5 text-xs text-muted mt-1">
-          <input type="checkbox" name="generate" checked={generate} onChange={(e) => setGenerate(e.target.checked)} /> Generate a strong password
-        </label>
-        {!generate && weakPassword(pw) && <div className="text-xs text-warn mt-1">Weak guest password — short passwords are easier to guess. You may still save it.</div>}
-      </div>
-      <div className="flex flex-col justify-end">
-        <label className="flex items-center gap-2 text-sm text-muted mb-2">
-          <input type="checkbox" name="disconnect_sessions" /> Disconnect existing sessions after reset
-        </label>
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
-          <Button type="submit" disabled={busy}>{busy ? "Saving…" : "Set password"}</Button>
-        </div>
+      </Field>
+      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+        <input
+          type="checkbox"
+          name="generate"
+          checked={generate}
+          onChange={(e) => setGenerate(e.target.checked)}
+          className="size-3.5 accent-[hsl(var(--primary))]"
+        />
+        Generate a strong password instead
+      </label>
+
+      <label className="flex items-start gap-2 rounded-md border border-border bg-surface/50 px-3.5 py-2.5 text-sm">
+        <input type="checkbox" name="disconnect_sessions" className="mt-0.5 size-3.5 accent-[hsl(var(--primary))]" />
+        <span>
+          Disconnect this account&rsquo;s devices now
+          <span className="block text-xs text-muted-foreground">
+            Without this, devices already online stay connected on the old password until their access ends.
+          </span>
+        </span>
+      </label>
+
+      <div className="flex justify-end gap-2 border-t border-border pt-4">
+        <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
+        <Button type="submit" disabled={busy}>{busy ? "Saving…" : "Set password"}</Button>
       </div>
     </form>
   );

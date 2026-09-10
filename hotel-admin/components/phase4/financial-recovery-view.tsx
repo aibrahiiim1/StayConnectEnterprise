@@ -158,7 +158,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
   // The error is rendered BEFORE the loading guard. When the load fails the state variable is never set,
   // so a guard placed first returns "Loading…" forever and the alert further down is unreachable -- the
   // screen tells the operator it is still working when it has already given up.
-  if (err) return <p role="alert" className="text-sm text-red-700">{err}</p>;
+  if (err) return <p role="alert" className="text-sm text-destructive">{err}</p>;
   if (!status) return <p role="status">Loading recovery state…</p>;
 
   if (!status.Active) {
@@ -167,7 +167,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
         <CardBody>
           <div className="flex items-center gap-3">
             <Badge tone="ok">NOT IN RECOVERY</Badge>
-            <p className="text-sm text-slate-600">
+            <p className="text-sm text-muted-foreground">
               Financial execution is running normally. Epoch {status.Epoch}.
             </p>
           </div>
@@ -180,14 +180,14 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
 
   return (
     <div className="space-y-4">
-      {err ? <p role="alert" className="text-sm text-red-700">{err}</p> : null}
-      {note ? <p role="status" className="text-sm text-emerald-700">{note}</p> : null}
+      {err ? <p role="alert" className="text-sm text-destructive">{err}</p> : null}
+      {note ? <p role="status" className="text-sm text-success-subtle-foreground">{note}</p> : null}
 
       <Card>
         <CardBody>
           <div className="flex items-start gap-3">
             <Badge tone="err">FINANCIAL RECOVERY</Badge>
-            <div className="text-sm text-slate-700">
+            <div className="text-sm text-foreground">
               <p>
                 Money movement is held for this site. Nothing has been replayed and nothing will be: after a
                 restore, a correct retry is how a guest gets charged twice.
@@ -196,7 +196,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
                 Epoch {status.Epoch} · {status.Reason.replace(/_/g, " ").toLowerCase()} ·{" "}
                 <strong>{status.HeldOpen}</strong> of {status.HeldTotal} items still to reconcile.
               </p>
-              <p className="mt-2 text-slate-600">Guest internet access is unaffected and continues to work.</p>
+              <p className="mt-2 text-muted-foreground">Guest internet access is unaffected and continues to work.</p>
             </div>
           </div>
         </CardBody>
@@ -211,12 +211,12 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
             id="recovery-password"
             type="password"
             autoComplete="current-password"
-            className="mt-1 w-full max-w-sm rounded-md border border-slate-300 px-3 py-2"
+            className="mt-1 w-full max-w-sm rounded-md border border-border px-3 py-2"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             aria-describedby="recovery-password-help"
           />
-          <p id="recovery-password-help" className="mt-1 text-xs text-slate-500">
+          <p id="recovery-password-help" className="mt-1 text-xs text-muted-foreground">
             Every reconciliation decision is an audited statement about real money, so each one is confirmed
             with your password.
           </p>
@@ -226,10 +226,10 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
       {(zero?.queue.length ?? 0) > 0 ? (
         <Card>
           <CardBody>
-            <h3 className="mb-1 text-sm font-medium text-slate-500">
+            <h3 className="mb-1 text-sm font-medium text-muted-foreground">
               Never transmitted ({zero!.queue.length})
             </h3>
-            <p className="mb-3 max-w-3xl text-sm text-slate-700">
+            <p className="mb-3 max-w-3xl text-sm text-foreground">
               These charges were held before anything was sent to the PMS, so there is no attempt to review
               and they do not appear on the Manual Review screen. {zero!.note}
             </p>
@@ -271,7 +271,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
                             <textarea
                               id={`za-reason-${z.posting_id}`}
                               rows={2}
-                              className="w-72 rounded-md border border-slate-300 px-2 py-1"
+                              className="w-72 rounded-md border border-border px-2 py-1"
                               placeholder="Why this charge must still go out"
                               value={zaReason[z.posting_id] ?? ""}
                               onChange={(e) =>
@@ -286,7 +286,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
                               </label>
                               <select
                                 id={`za-source-${z.posting_id}`}
-                                className="rounded-md border border-slate-300 px-2 py-1"
+                                className="rounded-md border border-border px-2 py-1"
                                 value={zaSource[z.posting_id] ?? ""}
                                 onChange={(e) =>
                                   setZaSource({ ...zaSource, [z.posting_id]: e.target.value })
@@ -306,7 +306,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
                               </label>
                               <input
                                 id={`za-ref-${z.posting_id}`}
-                                className="w-40 rounded-md border border-slate-300 px-2 py-1"
+                                className="w-40 rounded-md border border-border px-2 py-1"
                                 placeholder="e.g. folio 4471"
                                 value={zaRef[z.posting_id] ?? ""}
                                 onChange={(e) => setZaRef({ ...zaRef, [z.posting_id]: e.target.value })}
@@ -315,7 +315,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
                           </div>
                         </div>
                       ) : (
-                        <p className="max-w-xs text-xs text-slate-500">
+                        <p className="max-w-xs text-xs text-muted-foreground">
                           {z.retry_authorized_attempt_no !== null
                             ? "An attempt has already been authorized for this posting. Exactly one is allowed."
                             : "Reconcile this item above as “It never completed” first — the authorization rests on that finding."}
@@ -336,7 +336,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
                 ))}
               </tbody>
             </Table>
-            <p className="mt-3 text-xs text-slate-500">
+            <p className="mt-3 text-xs text-muted-foreground">
               {zero!.eligibility} Authorizing sends nothing now, and it can be done once per posting.
             </p>
           </CardBody>
@@ -356,7 +356,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
               </label>
               <textarea
                 id="release-note"
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                className="mt-1 w-full rounded-md border border-border px-3 py-2"
                 rows={3}
                 value={evidence["__release"] ?? ""}
                 onChange={(e) => setEvidence({ ...evidence, __release: e.target.value })}
@@ -374,7 +374,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
       ) : (
         <Card>
           <CardBody>
-            <h3 className="mb-3 text-sm font-medium text-slate-500">Held work ({open.length})</h3>
+            <h3 className="mb-3 text-sm font-medium text-muted-foreground">Held work ({open.length})</h3>
             <Table>
               <THead>
                 <TR>
@@ -400,7 +400,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
                       </label>
                       <select
                         id={`res-${h.hold_id}`}
-                        className="rounded-md border border-slate-300 px-2 py-1"
+                        className="rounded-md border border-border px-2 py-1"
                         value={choice[h.hold_id] ?? ""}
                         onChange={(e) =>
                           setChoice({ ...choice, [h.hold_id]: e.target.value as RecoveryResolution })
@@ -420,7 +420,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
                       </label>
                       <input
                         id={`note-${h.hold_id}`}
-                        className="w-64 rounded-md border border-slate-300 px-2 py-1"
+                        className="w-64 rounded-md border border-border px-2 py-1"
                         placeholder="e.g. provider dashboard shows no charge"
                         value={evidence[h.hold_id] ?? ""}
                         onChange={(e) => setEvidence({ ...evidence, [h.hold_id]: e.target.value })}
@@ -435,7 +435,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
                 ))}
               </tbody>
             </Table>
-            <p className="mt-3 text-xs text-slate-500">
+            <p className="mt-3 text-xs text-muted-foreground">
               Recording a decision never re-sends anything. Recovery can only be released once every item
               above has been reconciled.
             </p>

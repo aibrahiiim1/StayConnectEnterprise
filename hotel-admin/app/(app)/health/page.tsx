@@ -6,6 +6,8 @@ import { canWrite } from "@/lib/roles";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/dialog";
+import { Callout } from "@/components/ui/error-banner";
 import { Activity, RefreshCw, RotateCw, FileText, X } from "lucide-react";
 
 type ServiceHealth = {
@@ -83,6 +85,9 @@ export default function HealthPage() {
   useEffect(() => { api.get<Whoami>("/auth/whoami").then(setMe).catch(() => {}); }, []);
   useEffect(() => { load(); const t = setInterval(load, 10000); return () => clearInterval(t); }, [load]);
 
+  // The service awaiting a restart confirmation.
+  const [restarting, setRestarting] = useState<string | null>(null);
+
   async function openDetail(name: string) {
     setSel(name); setLogs(null);
     try { setDetail(await api.get(`/diagnostics/services/${name}`)); } catch { setDetail(null); }
@@ -99,14 +104,21 @@ export default function HealthPage() {
     catch (e) { setErr(e instanceof ApiError ? e.message : "logs failed"); }
     finally { setBusy(null); }
   }
-  async function restart(name: string) {
-    const reason = window.prompt(`Restart ${name}? This is audited. Reason:`);
-    if (!reason) return;
-    const password = window.prompt("Confirm your password to authorize the restart:");
-    if (!password) return;
+  // RESTARTING A SERVICE TOOK A PASSWORD THROUGH window.prompt().
+  //
+  // That is the one change on this page that is not presentation. `prompt()` renders a plain text input, so every
+  // character of an operator's own admin password was displayed on a front-desk screen — and the first prompt
+  // asked for a reason with no indication of what restarting that particular service would interrupt. Restarting
+  // scd drops every guest; restarting kea stops new devices getting an address. A confirmation that cannot say
+  // which of those is about to happen is not a confirmation.
+  async function restart({ reason, password }: { reason: string; password: string }) {
+    if (!restarting) return;
+    const name = restarting;
     setBusy("restart:" + name);
+    setErr(null);
     try {
       await api.post(`/diagnostics/services/${name}/restart`, { reason, password });
+      setRestarting(null);
       await load();
     } catch (e) {
       setErr(e instanceof ApiError ? (e.body?.error === "reauth_required" ? "Password confirmation failed." : e.message) : "restart failed");
@@ -115,19 +127,19 @@ export default function HealthPage() {
 
   const c = sum?.counts || {};
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-6">
+    <div className="mx-auto w-full max-w-6xl space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="flex items-center gap-2 text-xl font-semibold"><Activity className="h-5 w-5" /> Diagnostics &amp; Service Health</h1>
+        <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight sm:text-2xl"><Activity className="h-5 w-5" /> Diagnostics &amp; Service Health</h1>
         <div className="flex items-center gap-3">
           {sum && <Badge tone={overallTone(sum.overall) as any}>Appliance: {sum.overall}</Badge>}
           <Button variant="ghost" onClick={load}><RefreshCw className="h-4 w-4" /> Refresh</Button>
         </div>
       </div>
 
-      {err && <div className="rounded border border-[#6b2128] bg-[#3a1418] p-3 text-sm text-err">{err}</div>}
+      {err && <div className="rounded-md border border-destructive/25 bg-destructive-subtle p-3 text-sm text-destructive-subtle-foreground">{err}</div>}
 
       {sum?.boot && !sum.boot.converged && (
-        <div className="rounded border border-[#6b4e1c] bg-[#3a2a0e] p-3 text-sm text-warn">
+        <div className="rounded-md border border-warning/30 bg-warning-subtle p-3 text-sm text-warning-subtle-foreground">
           <b>Appliance still converging after boot.</b> Waiting on: {sum.boot.pending?.join(", ") || "—"}.
           {sum.boot.alert_open && <> This has exceeded the expected convergence time — check the pending services below.</>}
         </div>
@@ -170,9 +182,9 @@ export default function HealthPage() {
                     {s.degraded_dependency ? <span className="text-warn">dep: {s.degraded_dependency} — </span> : ""}
                     {s.health_detail}
                   </td>
-                  <td className="px-2 text-xs">{s.restart_count}<span className="text-muted"> ({s.restarts_in_window}/{s.restart_window_secs}s)</span>
+                  <td className="px-2 text-xs">{s.restart_count}<span className="text-muted-foreground"> ({s.restarts_in_window}/{s.restart_window_secs}s)</span>
                     {s.consecutive_failures > 0 && <div className="text-err text-[10px]">{s.consecutive_failures} consec.</div>}</td>
-                  <td className="px-2 text-xs">{s.backoff_level > 0 ? <span className="text-warn">L{s.backoff_level} · {until(s.next_retry_at)}</span> : <span className="text-muted">—</span>}</td>
+                  <td className="px-2 text-xs">{s.backoff_level > 0 ? <span className="text-warn">L{s.backoff_level} · {until(s.next_retry_at)}</span> : <span className="text-muted-foreground">—</span>}</td>
                   <td className="px-2 text-xs text-muted max-w-[14rem] truncate" title={s.last_failure_reason}>
                     {s.last_failure_reason ? <>{s.last_failure_reason}<div className="text-[10px]">{ago(s.last_failure_at)}</div></> : "—"}</td>
                   <td className="px-2 text-xs text-muted">{s.state === "healthy" ? ago(s.last_healthy_at).replace(" ago", "") : (s.last_recovery_at ? "rec " + ago(s.last_recovery_at) : "—")}</td>
@@ -180,7 +192,18 @@ export default function HealthPage() {
                     <div className="flex justify-end gap-1">
                       <Button size="sm" variant="ghost" disabled={busy === "recheck:" + s.service} onClick={() => recheck(s.service)}><RefreshCw className="h-3 w-3" /></Button>
                       <Button size="sm" variant="ghost" disabled={busy === "logs:" + s.service} onClick={() => { openDetail(s.service); viewLogs(s.service); }}><FileText className="h-3 w-3" /></Button>
-                      {writable && <Button size="sm" variant="danger" disabled={busy === "restart:" + s.service} onClick={() => restart(s.service)}><RotateCw className="h-3 w-3" /></Button>}
+                      {writable && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          aria-label={`Restart ${s.service}`}
+                          title={`Restart ${s.service}`}
+                          disabled={busy === "restart:" + s.service}
+                          onClick={() => { setErr(null); setRestarting(s.service); }}
+                        >
+                          <RotateCw className="h-3 w-3" />
+                        </Button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -213,7 +236,7 @@ export default function HealthPage() {
               <KV k="Exit" v={detail.service.last_exit_signal || (detail.service.last_exit_code != null ? `code ${detail.service.last_exit_code}` : "—")} />
               <KV k="Dependency" v={detail.service.degraded_dependency || "—"} />
             </div>
-            {detail.service.last_failure_reason && <div className="text-sm text-warn">Reason: {detail.service.last_failure_reason}</div>}
+            {detail.service.last_failure_reason && <div className="text-sm text-warning-subtle-foreground">Reason: {detail.service.last_failure_reason}</div>}
 
             {logs && (
               <div>
@@ -225,7 +248,7 @@ export default function HealthPage() {
             <div>
               <div className="mb-1 text-xs uppercase tracking-wider text-muted">Recovery history</div>
               <div className="space-y-1">
-                {(detail.recovery_events || []).length === 0 && <div className="text-sm text-muted">No events recorded.</div>}
+                {(detail.recovery_events || []).length === 0 && <div className="text-sm text-muted-foreground">No events recorded.</div>}
                 {(detail.recovery_events || []).map((e) => (
                   <div key={e.id} className="flex items-center gap-3 border-b border-border/40 py-1 text-xs">
                     <span className="w-32 shrink-0 text-muted">{ago(e.created_at)}</span>
@@ -238,10 +261,52 @@ export default function HealthPage() {
           </CardBody>
         </Card>
       )}
+
+      {/*
+        The restart confirmation. It names the service and says what restarting it INTERRUPTS, because that is the
+        only thing the operator is actually deciding — and the password is typed into a masked field rather than
+        into a browser prompt that shows it.
+      */}
+      <ConfirmDialog
+        open={restarting !== null}
+        onOpenChange={(v) => !v && setRestarting(null)}
+        title={restarting ? `Restart ${restarting}?` : "Restart service"}
+        description={restarting ? RESTART_IMPACT[restarting] ?? GENERIC_RESTART_IMPACT : undefined}
+        confirmLabel="Restart now"
+        confirmVariant="danger"
+        busy={busy === "restart:" + restarting}
+        requireReason
+        reasonLabel="Why are you restarting it?"
+        reasonPlaceholder="Health check failing since 02:10"
+        requirePassword
+        onConfirm={restart}
+      >
+        <Callout tone="warning">
+          This is recorded in the audit log against your account.
+        </Callout>
+      </ConfirmDialog>
     </div>
   );
 }
 
+// WHAT A RESTART COSTS, per service. The operator is not choosing whether to restart "a process" — they are
+// choosing whether to drop every guest, or to stop new devices getting an address for a few seconds. An
+// unrecognised service falls back to the generic warning rather than claiming something specific.
+const RESTART_IMPACT: Record<string, string> = {
+  scd: "Every guest currently online is disconnected and has to reconnect. Enforcement of speed and data limits stops until it comes back.",
+  edged: "This admin interface goes away for a few seconds and you may have to sign in again. Guests are not affected.",
+  netd: "Network configuration changes cannot be applied while it is down. Guests already online stay online.",
+  portald: "The guest sign-in page stops loading, so nobody new can sign in. Guests already online stay online.",
+  acctd: "Usage measurement pauses, so data and time allowances stop being counted for a few seconds.",
+  "hotel-admin": "This admin interface reloads. Guests are not affected.",
+  caddy: "Both the admin interface and the guest portal are briefly unreachable. Guests already online stay online.",
+  kea: "New devices cannot get an IP address until it returns, so new guests cannot connect. Existing devices keep their lease.",
+  unbound: "Name lookups stop for guests, which looks to them like the internet is down, until it returns.",
+  postgres: "Everything stops: guest sign-in, this admin and the PMS connection all depend on the database.",
+};
+const GENERIC_RESTART_IMPACT =
+  "The service will be stopped and started again. Anything depending on it is interrupted until it returns.";
+
 function KV({ k, v }: { k: string; v: React.ReactNode }) {
-  return <div><span className="text-muted">{k}: </span>{v}</div>;
+  return <div><span className="text-muted-foreground">{k}: </span>{v}</div>;
 }

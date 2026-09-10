@@ -68,10 +68,10 @@ export default function RevisionsPage() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="mx-auto w-full max-w-7xl space-y-5">
       <div className="mb-4">
-        <div className="text-xs text-muted uppercase tracking-wider">Networking</div>
-        <h1 className="text-2xl font-semibold">Config history</h1>
+        <div className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground">Networking</div>
+        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Config history</h1>
       </div>
 
       {err && <div className="text-err text-sm mb-4">{err}</div>}
@@ -92,8 +92,8 @@ export default function RevisionsPage() {
                       <TD className="font-mono">#{r.seq}</TD>
                       <TD><Badge tone={stateTone(r.state)}>{r.state}</Badge></TD>
                       <TD>{r.summary || "—"}</TD>
-                      <TD className="text-muted">{r.applied_at ? formatDate(r.applied_at) : "—"}</TD>
-                      <TD className="text-muted">{r.confirmed_at ? formatDate(r.confirmed_at) : "—"}</TD>
+                      <TD className="text-muted-foreground">{r.applied_at ? formatDate(r.applied_at) : "—"}</TD>
+                      <TD className="text-muted-foreground">{r.confirmed_at ? formatDate(r.confirmed_at) : "—"}</TD>
                       <TD className="text-err text-xs max-w-xs truncate" title={r.failure_reason ?? ""}>{r.failure_reason || "—"}</TD>
                       <TD className="text-right space-x-2 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                         {writable && r.state === "pending_confirmation" && (
@@ -136,13 +136,13 @@ function RevisionDetailView({ d }: { d?: NetRevisionDetail }) {
               <ul className="mt-1 space-y-1">
                 {d.validation.issues.map((i, k) => (
                   <li key={k} className="text-err text-xs">
-                    <span className="font-mono">{i.field}</span> — {i.message} <span className="text-muted">({i.code})</span>
+                    <span className="font-mono">{i.field}</span> — {i.message} <span className="text-muted-foreground">({i.code})</span>
                   </li>
                 ))}
               </ul>
             )}
           </>
-        ) : <span className="text-muted text-xs">—</span>}
+        ) : <span className="text-xs text-muted-foreground">—</span>}
       </div>
 
       <div>
@@ -153,12 +153,12 @@ function RevisionDetailView({ d }: { d?: NetRevisionDetail }) {
               <li key={k} className="flex items-center gap-2 text-xs">
                 <Badge tone={e.ok ? "ok" : "err"}>{e.ok ? "ok" : "fail"}</Badge>
                 <span className="font-mono">{e.phase}</span>
-                {e.at && <span className="text-muted">{formatDate(e.at)}</span>}
-                {e.detail != null && <span className="text-muted">{typeof e.detail === "string" ? e.detail : JSON.stringify(e.detail)}</span>}
+                {e.at && <span className="text-muted-foreground">{formatDate(e.at)}</span>}
+                {e.detail != null && <span className="text-muted-foreground">{typeof e.detail === "string" ? e.detail : JSON.stringify(e.detail)}</span>}
               </li>
             ))}
           </ul>
-        ) : <span className="text-muted text-xs">—</span>}
+        ) : <span className="text-xs text-muted-foreground">—</span>}
       </div>
 
       <div>
@@ -169,12 +169,12 @@ function RevisionDetailView({ d }: { d?: NetRevisionDetail }) {
               <li key={k} className="flex items-center gap-2 text-xs">
                 <Badge tone={h.ok ? "ok" : "err"}>{h.ok ? "ok" : "fail"}</Badge>
                 <span className="font-mono">{h.check_name}</span>
-                {h.detail && <span className="text-muted">{h.detail}</span>}
-                {h.at && <span className="text-muted">{formatDate(h.at)}</span>}
+                {h.detail && <span className="text-muted-foreground">{h.detail}</span>}
+                {h.at && <span className="text-muted-foreground">{formatDate(h.at)}</span>}
               </li>
             ))}
           </ul>
-        ) : <span className="text-muted text-xs">—</span>}
+        ) : <span className="text-xs text-muted-foreground">—</span>}
       </div>
     </div>
   );

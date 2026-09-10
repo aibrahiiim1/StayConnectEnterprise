@@ -62,7 +62,7 @@ describe("Stays page", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "View" }));
     expect(await screen.findByText("Byron, Ada")).toBeTruthy();
-    expect(screen.getByText("main guest")).toBeTruthy();
+    expect(screen.getByText("Main guest")).toBeTruthy();
     expect(screen.getByText(/F900/)).toBeTruthy();
   });
 
@@ -75,7 +75,13 @@ describe("Stays page", () => {
 });
 
 describe("Stay events page", () => {
-  it("defaults to the review queue and shows the bounded reason an event was refused", async () => {
+  // IT NO LONGER DEFAULTS TO THE REVIEW QUEUE, and that is the fix rather than a regression.
+  //
+  // The default filter was MANUAL_REVIEW, so the normal and healthy state of this screen was an empty table
+  // reading "Nothing to review" -- which an operator checking whether the PMS feed is alive reads as "the feed
+  // is dead". It now opens on everything the feed has sent, and the review queue is called out above the table
+  // whenever it is non-empty. What this test pins is that the bounded review code is still surfaced.
+  it("opens on the whole feed and still surfaces the bounded reason an event was refused", async () => {
     get.mockResolvedValue({
       data: [{
         id: "e1", pms_interface_id: "i1", external_event_identity: "FC-2", event_type: "GI",
@@ -87,9 +93,12 @@ describe("Stay events page", () => {
     const { default: StayEventsPage } = await import("@/app/(app)/stay-events/page");
     render(<StayEventsPage />);
     await waitFor(() => expect(get).toHaveBeenCalled());
-    // the default view is what needs attention
-    expect(get.mock.calls[0][0]).toContain("processing_status=MANUAL_REVIEW");
-    expect(await screen.findByText("FOLIO_CLAIMED_BY_OTHER_STAY")).toBeTruthy();
+    // No status filter on the first load: the screen shows what the PMS has actually sent.
+    expect(get.mock.calls[0][0]).not.toContain("processing_status=");
+    // The review code is rendered de-underscored and lower-cased, as every other bounded code in the UI now is.
+    expect(await screen.findByText(/folio claimed by other stay/i)).toBeTruthy();
+    // And the queue is announced rather than being the only thing visible.
+    expect(screen.getByText(/need a decision/i)).toBeTruthy();
   });
 });
 
