@@ -1,4 +1,0 @@
-commit 0d82371b35fbb5e9a0fa137be543b4573d5ba3a1
-Date:   Thu Sep 10 21:34:26 2026 +0300
-
-    [GOVERNANCE] Record PC-0006 and synchronize the Hotel Admin page reference
