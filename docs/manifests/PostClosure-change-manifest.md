@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `d9df1c005960f149a547d78e2200ab2968d9b5c9`
-- **Provenance (generation HEAD = inventory_head):** `d9df1c005960f149a547d78e2200ab2968d9b5c9`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `614de5c672c6bb39dff5ac549e05b8ef6dfb70c7`
+- **Provenance (generation HEAD = inventory_head):** `614de5c672c6bb39dff5ac549e05b8ef6dfb70c7`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `post-closure/hotel-admin-ui-redesign`
 - **Remote branch:** `origin/post-closure/hotel-admin-ui-redesign`
 - **Changed files:** 477
@@ -49,7 +49,7 @@
 | `data-plane/cmd/edged/phase3_room_auth_readiness_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Teach the integration harnesses about migration 0053 |
 | `data-plane/cmd/edged/pms_interface_capability_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Make the operator surface tell the truth about what this build does |
 | `data-plane/cmd/edged/resources_commerce.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Stay-based package eligibility, and an allowance that scales with the stay |
-| `data-plane/cmd/edged/resources_dashboard.go` | CREATED | `A` | runtime | UI | rollback REMOVES it | [UI] A guest network with a NULL column must render, not disappear |
+| `data-plane/cmd/edged/resources_dashboard.go` | CREATED | `A` | runtime | CI | rollback REMOVES it | [CI] The fixture needs dhcp_pools, and an empty section must not be silent |
 | `data-plane/cmd/edged/resources_phase3.go` | MODIFIED | `M` | runtime | UI | rollback RESTORES prior content | [UI] Rebuild the Hotel Admin design system, shell and operator-facing screens |
 | `data-plane/cmd/edged/resources_phase3_full_resync.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Ask for a resync through a function, not a table grant |
 | `data-plane/cmd/edged/resources_phase3_interface_authoring.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Let an operator actually set max_auth_cache_age_seconds |
@@ -276,29 +276,29 @@
 | `docs/design/Room-Auth-Materialization-Readiness.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Record the live sync, and that publication is not materialization |
 | `docs/manifests/PC-0002-complete-delivery-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Correct two reporting defects in the PC-0002 delivery record |
 | `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at ac68164: state-scope synchronization, packs and manifest |
-| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery at 0d82371b: manifest, export packs and delivery head resynchronized |
+| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery at d9df1c00: manifest, export packs and delivery head resynchronized |
 | `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Retire the tc primer: netd has owned this since before the unit last worked |
 | `docs/runbooks/Guest-Access-End-To-End-Acceptance.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | A dead socket is not a dead mirror |
 | `docs/runbooks/PMS-Interface-Commissioning.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Point the runbooks at the verifying reconcile runner |
 | `docs/user-guide/hotel-admin-reference.md` | MODIFIED | `M` | documentation | GOVERNANCE | rollback RESTORES prior content | [GOVERNANCE] Record PC-0006 and synchronize the Hotel Admin page reference |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 0d82371b: manifest, export packs and delivery head resynchronized |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 0d82371b: manifest, export packs and delivery head resynchronized |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 0d82371b: manifest, export packs and delivery head resynchronized |
-| `exports/chatgpt/phase-evidence/GIT_STAT_d9df1c00.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at d9df1c00: manifest, export packs and delivery head resynchronized |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at d9df1c00: manifest, export packs and delivery head resynchronized |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at d9df1c00: manifest, export packs and delivery head resynchronized |
+| `exports/chatgpt/phase-evidence/GIT_STAT_614de5c6.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 0d82371b: manifest, export packs and delivery head resynchronized |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 0d82371b: manifest, export packs and delivery head resynchronized |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at d9df1c00: manifest, export packs and delivery head resynchronized |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at d9df1c00: manifest, export packs and delivery head resynchronized |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Record the PR #84 merge, and what the appliance actually runs |
 | `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Require the canonical PMS generation to be stated, not merely uncontradicted |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Record the PR #84 merge, and what the appliance actually runs |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 0d82371b: manifest, export packs and delivery head resynchronized |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 0d82371b: manifest, export packs and delivery head resynchronized |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 0d82371b: manifest, export packs and delivery head resynchronized |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at d9df1c00: manifest, export packs and delivery head resynchronized |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at d9df1c00: manifest, export packs and delivery head resynchronized |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at d9df1c00: manifest, export packs and delivery head resynchronized |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest, export packs and delivery head resynchronized |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Make GitHub enforce the delivery guarantees the rule already required |
 | `exports/chatgpt/stayconnectenterprise/DEPLOYMENT_APPLIANCE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/stayconnectenterprise/GITHUB_EXECUTION_AND_DELIVERY_RULE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest, export packs and delivery head resynchronized |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 0d82371b: manifest, export packs and delivery head resynchronized |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at d9df1c00: manifest, export packs and delivery head resynchronized |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Make GitHub enforce the delivery guarantees the rule already required |
 | `exports/chatgpt/stayconnectenterprise/Phase3-Privilege-Matrix.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
 | `exports/chatgpt/stayconnectenterprise/SYSTEM_OVERVIEW.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
@@ -311,7 +311,7 @@
 | `governance/branch-protection.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Make GitHub enforce the delivery guarantees the rule already required |
 | `governance/ci-reuse-policy.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Make GitHub enforce the delivery guarantees the rule already required |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Remove the SIGPIPE race that made six preflight checks non-deterministic |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery at 0d82371b: manifest, export packs and delivery head resynchronized |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery at d9df1c00: manifest, export packs and delivery head resynchronized |
 | `governance/transitions/T0083.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Stamp T0083 from the commit that introduced it |
 | `governance/transitions/T0084.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Use the established phase_affected convention in the post-closure receipts |
 | `governance/transitions/T0085.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | D36 ACCEPTED by the Product Owner |
@@ -459,7 +459,7 @@
 | `hotel-admin/test/session-identity.test.ts` | CREATED | `A` | runtime | UI | rollback REMOVES it | [UI] Rebuild the Hotel Admin design system, shell and operator-facing screens |
 | `hotel-admin/test/stay-packages.test.ts` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Stay-based package eligibility, and an allowance that scales with the stay |
 | `hotel-admin/test/synchronization-card.test.tsx` | CREATED | `A` | runtime | UI | rollback REMOVES it | [UI] Rebuild the Hotel Admin design system, shell and operator-facing screens |
-| `iam_v2_scratch/00_platform_fixture.sql` | MODIFIED | `M` | other | UI | rollback RESTORES prior content | [UI] A partial dashboard payload must degrade, not blank the page; re-pin the E2E specs |
+| `iam_v2_scratch/00_platform_fixture.sql` | MODIFIED | `M` | other | CI | rollback RESTORES prior content | [CI] The fixture needs dhcp_pools, and an empty section must not be silent |
 | `iam_v2_scratch/phase3_0010_lifecycle.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | The 0010 lifecycle gate asserted the rule that broke factory-clean installs |
 | `scripts/ci/env-fingerprint.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Prove the machine, not just the code |
 | `scripts/ci/evidence-pointer.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Reuse evidence only where the evidence key covers every input |
@@ -529,7 +529,7 @@
  .../phase3_room_auth_readiness_integration_test.go |  296 ++++
  .../cmd/edged/pms_interface_capability_test.go     |  141 ++
  data-plane/cmd/edged/resources_commerce.go         |   36 +
- data-plane/cmd/edged/resources_dashboard.go        |  516 +++++++
+ data-plane/cmd/edged/resources_dashboard.go        |  525 +++++++
  data-plane/cmd/edged/resources_phase3.go           |  185 ++-
  .../cmd/edged/resources_phase3_full_resync.go      |  135 ++
  .../edged/resources_phase3_interface_authoring.go  |  208 ++-
@@ -756,15 +756,15 @@
  docs/design/Room-Auth-Materialization-Readiness.md |  197 +++
  .../PC-0002-complete-delivery-manifest.md          |  159 ++
  docs/manifests/Phase7-change-manifest.md           |  108 +-
- docs/manifests/PostClosure-change-manifest.md      | 1479 +++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 1486 +++++++++++++++++++
  .../reports/StayConnect-IAM-Phase3-Final-Report.md |    8 +-
  .../runbooks/Guest-Access-End-To-End-Acceptance.md |  378 +++++
  docs/runbooks/PMS-Interface-Commissioning.md       |  357 +++++
  docs/user-guide/hotel-admin-reference.md           |  206 ++-
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 315199 -> 332528 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 125464 -> 139907 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 42319 -> 43731 bytes
- .../chatgpt/phase-evidence/GIT_STAT_d9df1c00.txt   |    4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 315199 -> 332526 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 125464 -> 139898 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 42319 -> 43734 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_614de5c6.txt   |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt    |    4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |    8 +-
@@ -939,7 +939,7 @@
  hotel-admin/test/session-identity.test.ts          |  115 ++
  hotel-admin/test/stay-packages.test.ts             |  160 ++
  hotel-admin/test/synchronization-card.test.tsx     |  283 ++++
- iam_v2_scratch/00_platform_fixture.sql             |   19 +-
+ iam_v2_scratch/00_platform_fixture.sql             |   36 +-
  iam_v2_scratch/phase3_0010_lifecycle.sh            |   19 +-
  scripts/ci/env-fingerprint.sh                      |  172 +++
  scripts/ci/evidence-pointer.sh                     |   51 +
@@ -969,7 +969,7 @@
  tools/validate-ci-reuse-policy.py                  |  252 ++++
  tools/validate-current-state-parity.py             |  107 ++
  tools/validate-project-state.sh                    |   44 +-
- 477 files changed, 56513 insertions(+), 5381 deletions(-)
+ 477 files changed, 56546 insertions(+), 5381 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -977,8 +977,8 @@
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_0d82371b.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_d9df1c00.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_614de5c6.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_d9df1c00.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -990,6 +990,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 614de5c6 [CI] The fixture needs dhcp_pools, and an empty section must not be silent
+HISTORICAL: 46949361 Delivery at d9df1c00: manifest, export packs and delivery head resynchronized
 HISTORICAL: d9df1c00 [UI] A partial dashboard payload must degrade, not blank the page; re-pin the E2E specs
 HISTORICAL: a8e1826e Delivery at 0d82371b: manifest, export packs and delivery head resynchronized
 HISTORICAL: 0d82371b [GOVERNANCE] Record PC-0006 and synchronize the Hotel Admin page reference

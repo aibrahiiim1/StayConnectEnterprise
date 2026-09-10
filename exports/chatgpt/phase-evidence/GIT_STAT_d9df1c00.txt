@@ -1,4 +1,0 @@
-commit d9df1c005960f149a547d78e2200ab2968d9b5c9
-Date:   Thu Sep 10 22:11:01 2026 +0300
-
-    [UI] A partial dashboard payload must degrade, not blank the page; re-pin the E2E specs

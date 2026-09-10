@@ -1521,7 +1521,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "ac6816456be0e5bbaf2aa1c67c36b33032328ccb",
     "base_note": "The Phase-7 delivery head (== inventory_head == acceptance_candidate_head). Post-closure work begins exactly where the last numbered phase's delivery ended, so the two lineages abut without overlapping.",
-    "head": "d9df1c005960f149a547d78e2200ab2968d9b5c9",
+    "head": "614de5c672c6bb39dff5ac549e05b8ef6dfb70c7",
     "head_note": "The post-closure delivery head for the Hotel Admin UI/UX rebuild (PR #108): the committed HEAD immediately before the delivery-only commit that rebuilds the manifest, the export packs and this pointer. Same self-reference protocol every manifest here uses -- the manifest is generated from the STAGED tree, so its own path is inside the range it describes.",
     "note": "D36: post-closure corrective work is its own delivery lineage with its own manifest. The numbered phases are closed and their manifests are HISTORICAL — each remains a faithful record of what that phase delivered and is never range-checked against a later HEAD. While this key is present it names THE current delivery manifest, and that manifest is what the path/status equality check applies to.",
     "decision_status": "ACCEPTED by the Product Owner as an explicit mission authorization: rebuild the Hotel Admin design system and operator screens, keep Network routing editable for site_admin, and carry the work to verified closure through the protected PR path with a PRE-LIVE deployment to 172.21.60.25 and live acceptance. The authorization names the commit, push, PR, merge and that one deployment target, and nothing beyond them."
