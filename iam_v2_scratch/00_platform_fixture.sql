@@ -55,6 +55,23 @@ INSERT INTO public.guest_networks(id, tenant_id, site_id, name, parent_interface
 -- settings row cannot name an appliance that does not exist and an audit row cannot name an operator the
 -- server never authenticated. Those FKs need the platform tables to exist here too. Same shape as migration
 -- 0001/0005 create on a real appliance, reduced to the columns the FKs and the gate actually use.
+-- THE ADDRESS RANGES A GUEST NETWORK HANDS OUT.
+--
+-- Migration 0002 creates this alongside guest_networks and every real appliance has it; the fixture did not, so
+-- any query joining it failed with "relation does not exist" and returned an EMPTY RESULT SET rather than an
+-- error the caller could see. That is the same trap the missing guest_networks columns set: a reader concludes
+-- "this site has no guest networks" when the truth is that the fixture could not answer the question.
+--
+-- Same shape and same constraint as 0002, minus the index, which nothing here measures.
+CREATE TABLE IF NOT EXISTS public.dhcp_pools (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  guest_network_id uuid NOT NULL REFERENCES public.guest_networks(id) ON DELETE CASCADE,
+  start_ip         inet NOT NULL,
+  end_ip           inet NOT NULL,
+  sort_order       int NOT NULL DEFAULT 0,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT dhcp_pool_order CHECK (start_ip <= end_ip));
+
 CREATE TABLE IF NOT EXISTS public.appliances (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL,

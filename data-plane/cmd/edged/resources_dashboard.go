@@ -31,6 +31,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -450,15 +451,23 @@ func (s *server) dashNetworks(ctx context.Context) []dashNetwork {
 		 ORDER BY gn.enabled DESC, gn.name
 	`, s.tenantID, s.siteID)
 	if err != nil {
+		// A QUERY ERROR IS NOT AN EMPTY PROPERTY, and conflating the two cost this delivery two debugging
+		// cycles: a missing column and then a missing table each made this return `[]`, which renders as "this
+		// site has no guest networks" -- a confident, wrong answer that nothing in the response contradicts.
+		// The failure is now logged with its cause, so the next time the shape of the schema and the shape of
+		// this query disagree, the server says so instead of quietly reporting an empty estate.
+		slog.Warn("dashboard: guest-network section unavailable", "err", err)
 		return out
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var n dashNetwork
-		if rows.Scan(&n.Name, &n.Bridge, &n.Enabled, &n.VlanID, &n.SubnetCIDR, &n.DhcpMode,
-			&n.CaptivePortal, &n.Internet, &n.PoolAddresses, &n.DevicesOnline) == nil {
-			out = append(out, n)
+		if err := rows.Scan(&n.Name, &n.Bridge, &n.Enabled, &n.VlanID, &n.SubnetCIDR, &n.DhcpMode,
+			&n.CaptivePortal, &n.Internet, &n.PoolAddresses, &n.DevicesOnline); err != nil {
+			slog.Warn("dashboard: skipped a guest-network row", "err", err)
+			continue
 		}
+		out = append(out, n)
 	}
 	return out
 }
