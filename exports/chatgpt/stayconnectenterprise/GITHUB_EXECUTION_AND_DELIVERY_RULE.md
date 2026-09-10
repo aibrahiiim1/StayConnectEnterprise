@@ -245,6 +245,8 @@ A completed Phase must not leave stale or contradictory plans, status text, code
 
 ## 10. Phase delivery speed
 
+**HOW a delivery is executed quickly and safely is specified in the Fast Delivery and Parallel-Agent Protocol, which is authoritative for delivery execution, CI hygiene, dependency-aware deployment order, guest data in delivery evidence, and how more than one agent may work at once.** That rule is built on the measured delivery of PRs #108/#109 (3 h 12 m wall clock, 11 461 s of gate execution, 16 of 34 attempts failed, 0 s of GitHub queue time), and it is machine-enforced by `tools/validate-delivery-protocol.py`. Run `bash tools/preflight.sh` before pushing: it refuses locally what the gates would refuse remotely.
+
 The objective is fast, complete delivery without sacrificing production safety. For each approved Phase: use the approved Phase plan as the complete work breakdown; execute all included workstreams in one controlled run; fix test failures within the same branch; synchronize all directly-affected documents once at the end and whenever a milestone materially changes the authoritative state; generate one consolidated final report; produce one Phase PR. Do not send the Product Owner through repeated documentation-only loops when structural governance can detect and resolve the issue automatically.
 
 ## 11. Enforcement
@@ -255,6 +257,9 @@ This rule is enforced by:
 - `tools/validate-project-state.sh` — keyword safety layer (bundled with the export packs).
 - `tools/generate-change-manifest.py` — the deterministic changed-file manifest every final report must embed (columns: Path · Classification · Git status · Domain · Workstream · Rollback · Purpose).
 - `.github/workflows/project-governance.yml` — the mandatory **Project Governance** CI check (GH-MANDATORY-CI), enforced structurally by `tools/project-state.py validate` and adversarially by `run_mutations.py` (missing workflow, removed command, missing PR trigger, ignored failures).
+- `tools/validate-delivery-protocol.py` — the **Fast Delivery and Parallel-Agent protocol**, asserted from the tree: every required gate reports on `pull_request`, declares **no `workflow_dispatch`** (a dispatched run reports the same required context, so it can block a merge and can be inherited as evidence), and carries a `concurrency:` block that cancels superseded pull-request runs while never cancelling a master run; and the preflight, its protocol document and the PR template all exist and still implement what they claim. Adversarially proven by `run_mutations.py` cases M61-M65.
+- `tools/check-fixture-parity.py` — the disposable-Postgres fixture carries every column its queries actually select and every table joined into a fixture-backed statement. This was the largest single failure category in the PRs #108/#109 delivery (8 of 16 failed attempts).
+- `tools/preflight.sh` — the local aggregate, ordered cheapest-and-most-likely-to-fail first.
 - `.gitattributes` — cross-platform **LF consistency** (`GH-LF-CONSISTENCY`): all checksum-controlled text is pinned to `eol=lf` and ZIP/binary artifacts are marked binary, so a Windows checkout, a Linux checkout and CI produce byte-identical, checksum-stable pack files. Without it, `core.autocrlf` materializes tracked text as CRLF on Windows and the keyword validator reports false pack-checksum failures. Enforced by `tools/project-state.py validate` and adversarially by `run_mutations.py` (weakened/removed policy).
 - The decision register entries `GH-SOURCE-OF-TRUTH`, `GH-BRANCH-PR`, `GH-COMPLETE-MANIFEST`, `GH-FINAL-REPORT`, `GH-MANDATORY-CI` (`governance/decision-register.json`).
 
