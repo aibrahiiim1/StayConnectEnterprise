@@ -9,6 +9,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { ApplianceStatus } from "@/components/appliance-status";
 import { Skeleton } from "@/components/ui/misc";
 import { api, Whoami } from "@/lib/api";
+import { useSidebarCollapsed } from "@/lib/sidebar-state";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -17,6 +18,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [me, setMe] = useState<Whoami | null>(null);
   const [loading, setLoading] = useState(true);
   const [drawer, setDrawer] = useState(false);
+  // Desktop only. The drawer below `lg` is a full-width overlay and never consults this.
+  const { collapsed, toggle: toggleCollapsed } = useSidebarCollapsed();
 
   useEffect(() => {
     let cancelled = false;
@@ -73,7 +76,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (loading) {
     return (
       <div className="flex h-screen overflow-hidden">
-        <div className="hidden w-64 shrink-0 border-r border-sidebar-border bg-sidebar lg:block" />
+        {/* The width token, not a literal: the pre-paint script has already decided this, so the
+            placeholder and the real column agree and nothing moves when loading finishes. */}
+        <div className="hidden w-[var(--sidebar-width)] shrink-0 border-r border-sidebar-border bg-sidebar lg:block" />
         <div className="flex-1 space-y-4 p-6">
           <Skeleton className="h-7 w-48" />
           <Skeleton className="h-4 w-72" />
@@ -104,7 +109,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           option and is worse here: these labels ("Duplicate sources", "Checkout grace") are not guessable
           from an icon. */}
       <div className="hidden lg:block">
-        <Nav email={me.email} roles={roles} onLogout={onLogout} />
+        <Nav
+          email={me.email}
+          roles={roles}
+          onLogout={onLogout}
+          collapsed={collapsed}
+          onToggleCollapsed={toggleCollapsed}
+        />
       </div>
 
       <DialogPrimitive.Root open={drawer} onOpenChange={setDrawer}>

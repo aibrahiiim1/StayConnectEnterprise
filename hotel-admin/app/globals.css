@@ -89,6 +89,14 @@
     --sidebar-accent-foreground: 0 0% 100%;
     --sidebar-border: 222 20% 22%;
 
+    /* THE NAVIGATION COLUMN'S WIDTH IS A TOKEN, and it is deliberately not a React value.
+       The server cannot read a device-local preference, so a state-driven width would render expanded on the
+       server and snap to the rail on every hydration. A pre-paint script stamps data-sidebar on <html> and
+       this property answers for the width, so the correct column is painted once and never moves.
+       See lib/sidebar-state.ts. */
+    --sidebar-width: 16rem;      /* expanded: the full labelled navigation */
+    --sidebar-width-rail: 3.5rem; /* collapsed: an icon rail, sized to a 40px target plus the column padding */
+
     /* CHART SERIES. Ordered for categorical use and assigned in that fixed order — never cycled, never
        generated. None of the six is a status colour, so "series 3" can never be mistaken for "warning".
 
@@ -215,6 +223,29 @@
   :focus-visible {
     outline: 2px solid hsl(var(--ring));
     outline-offset: 2px;
+  }
+}
+
+@layer base {
+  /* COLLAPSED IS AN ATTRIBUTE ON <html>, NOT A CLASS ON THE COLUMN.
+     The pre-paint script can only reach the document element, and the width has to be right on the very first
+     frame; anything scoped lower would need React to have run. Only the DESKTOP column reads it — the mobile
+     drawer is a fixed-width overlay and is deliberately unaffected, because a 3.5rem rail of unlabelled icons
+     is the wrong answer on a phone. */
+  html[data-sidebar="collapsed"] {
+    --sidebar-width: var(--sidebar-width-rail);
+  }
+
+  /* RESTRAINED MOTION, AND NONE AT ALL WHEN THE OPERATOR HAS ASKED FOR NONE.
+     A width transition is the one animation here; it is short enough to read as a state change rather than an
+     effect. `prefers-reduced-motion` is honoured by removing the transition entirely rather than shortening
+     it: the setting means "do not animate", not "animate faster". */
+  @media (prefers-reduced-motion: reduce) {
+    .sidebar-motion,
+    .sidebar-motion * {
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+    }
   }
 }
 

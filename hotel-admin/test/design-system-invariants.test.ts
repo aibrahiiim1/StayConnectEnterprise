@@ -84,10 +84,23 @@ describe("colour only ever comes from a theme token", () => {
     const lightBlock = css.slice(css.indexOf(":root {"), css.indexOf(".dark {"));
     const darkBlock = css.slice(css.indexOf(".dark {"));
     const names = (block: string) => new Set([...block.matchAll(/--([a-z0-9-]+):/g)].map((m) => m[1]));
-    const light = names(lightBlock);
     const dark = names(darkBlock);
-    // `radius` is a geometry token, not a colour, and is deliberately theme-invariant.
-    const missing = [...light].filter((n) => n !== "radius" && !dark.has(n));
+
+    // CLASSIFY BY VALUE, NOT BY NAME.
+    //
+    // This rule is about COLOUR: a colour defined only for light renders with the light value on a dark
+    // surface. Geometry tokens -- `radius`, and the sidebar's expanded/rail widths -- are deliberately
+    // theme-invariant, and a dark override for them would be a bug rather than a fix.
+    //
+    // The exception used to be the single hard-coded name `radius`, which meant every new dimension token
+    // failed this test until someone added it to the list. Matching the VALUE shape instead makes the rule
+    // self-maintaining and strictly stronger: every token whose value is an HSL triple is still required to
+    // have a dark counterpart, including ones that do not exist yet.
+    const HSL_TRIPLE = /^\s*[\d.]+\s+[\d.]+%\s+[\d.]+%/;
+    const lightColours = [...lightBlock.matchAll(/--([a-z0-9-]+):\s*([^;]+);/g)]
+      .filter((m) => HSL_TRIPLE.test(m[2]))
+      .map((m) => m[1]);
+    const missing = lightColours.filter((n) => !dark.has(n));
     expect(missing, `defined for light but never redefined for dark — these would render with the light value on a dark surface: ${missing.join(", ")}`).toEqual([]);
   });
 

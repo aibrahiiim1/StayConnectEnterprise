@@ -9,7 +9,9 @@ import {
   LayoutDashboard, Users, LogOut, Monitor, Shield, ScrollText, Hotel, Send, KeyRound,
   Wallet, BadgeCheck, Paintbrush, Archive, Network, Wifi, History, Router, Cloud,
   ServerCog, Lock, Activity, Package, Gauge, Smartphone, LogIn, Search, X,
+  PanelLeftClose, PanelLeftOpen,
 } from "lucide-react";
+import { Tooltip } from "@/components/ui/tooltip";
 
 // DEPLOYMENT GATES, NOT PRODUCT VOCABULARY.
 //
@@ -170,17 +172,28 @@ export function activeNavHref(path: string): string | null {
 }
 
 export function Nav({
-  onLogout, email, roles, onNavigate,
+  onLogout, email, roles, onNavigate, collapsed = false, onToggleCollapsed,
 }: {
   onLogout: () => void;
   email?: string;
   roles: string[];
   /** Called after a link is followed, so the mobile drawer can close itself. */
   onNavigate?: () => void;
+  /**
+   * Render as an icon rail. THE DRAWER NEVER PASSES THIS. Below `lg` the navigation is a full-width overlay
+   * with room for labels, and these labels ("Duplicate sources", "Checkout grace") are not guessable from an
+   * icon — so the phone gets the labelled list, exactly as it did before.
+   */
+  collapsed?: boolean;
+  /** Absent in the drawer, which has no width to reclaim and therefore no control to offer. */
+  onToggleCollapsed?: () => void;
 }) {
   const path = usePathname();
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement | null>(null);
+  // Set when the operator opens the filter FROM the rail, so focus lands in the input only once the expanded
+  // input actually exists. Focusing during the same render would target an element that is not mounted yet.
+  const focusFilterAfterExpand = useRef(false);
 
   const activeHref = useMemo(() => activeNavHref(path), [path]);
 
@@ -203,6 +216,24 @@ export function Nav({
     })).filter((sec) => sec.items.length > 0);
   }, [query, roles]);
 
+  // Opening the filter is also a request to SEE it. From the rail there is no input to focus, so the column
+  // expands first and the focus is deferred to the render in which the input exists.
+  const openFilter = () => {
+    if (collapsed && onToggleCollapsed) {
+      focusFilterAfterExpand.current = true;
+      onToggleCollapsed();
+      return;
+    }
+    searchRef.current?.focus();
+  };
+
+  useEffect(() => {
+    if (!collapsed && focusFilterAfterExpand.current) {
+      focusFilterAfterExpand.current = false;
+      searchRef.current?.focus();
+    }
+  }, [collapsed]);
+
   // "/" focuses the filter, the one shortcut worth having on a screen whose primary cost is finding a page.
   // Guarded so it does not steal the key while the operator is typing into a form.
   useEffect(() => {
@@ -211,11 +242,11 @@ export function Nav({
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
       e.preventDefault();
-      searchRef.current?.focus();
+      openFilter();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  });
 
   const roleLabel = roles
     .map((r) => ROLE_LABELS[r as SiteRole])
@@ -223,49 +254,106 @@ export function Nav({
     .join(", ");
 
   return (
-    <aside className="flex h-full w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
-      <div className="flex items-center gap-2.5 border-b border-sidebar-border px-4 py-3.5">
+    <aside
+      data-collapsed={collapsed ? "true" : undefined}
+      className={cn(
+        "sidebar-motion flex h-full shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground",
+        // The DRAWER is always a full 16rem overlay; only the desktop column follows the width token.
+        onToggleCollapsed ? "w-[var(--sidebar-width)] transition-[width] duration-200 ease-out" : "w-64",
+      )}
+    >
+      <div
+        className={cn(
+          "flex items-center gap-2.5 border-b border-sidebar-border py-3.5",
+          collapsed ? "flex-col gap-2 px-2" : "px-4",
+        )}
+      >
         {/* The mark is drawn rather than loaded: one fewer asset to ship to an appliance, and it inherits the
             brand token so it is never out of step with the rest of the product. */}
         <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
           <Wifi className="size-4" />
         </span>
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold leading-tight text-white">StayConnect</div>
-          <div className="truncate text-2xs uppercase tracking-widest text-sidebar-muted">Hotel Admin</div>
-        </div>
-      </div>
-
-      <div className="border-b border-sidebar-border px-3 py-2.5">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-sidebar-muted" />
-          <input
-            ref={searchRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === "Escape" && setQuery("")}
-            placeholder="Find a screen…"
-            aria-label="Filter navigation"
-            className={cn(
-              "h-8 w-full rounded-md border border-sidebar-border bg-sidebar-accent/60 pl-8 pr-7 text-sm",
-              "text-sidebar-foreground placeholder:text-sidebar-muted",
-              "focus:border-primary/60 focus:outline-none focus:ring-2 focus:ring-primary/25",
-            )}
-          />
-          {query && (
+        {!collapsed && (
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-semibold leading-tight text-white">StayConnect</div>
+            <div className="truncate text-2xs uppercase tracking-widest text-sidebar-muted">Hotel Admin</div>
+          </div>
+        )}
+        {onToggleCollapsed && (
+          // ONE control, and its accessible name states what activating it will DO, which is what a screen
+          // reader user needs — not what the current state is. aria-expanded carries the state.
+          <Tooltip content={collapsed ? "Expand sidebar" : "Collapse sidebar"} side="right">
             <button
               type="button"
-              onClick={() => setQuery("")}
-              aria-label="Clear filter"
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-sidebar-muted hover:text-white"
+              onClick={onToggleCollapsed}
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-expanded={!collapsed}
+              aria-controls="sidebar-nav"
+              className={cn(
+                "flex size-8 shrink-0 items-center justify-center rounded-md text-sidebar-muted",
+                "transition-colors hover:bg-sidebar-accent/60 hover:text-white",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+              )}
             >
-              <X className="size-3.5" />
+              {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
             </button>
-          )}
-        </div>
+          </Tooltip>
+        )}
       </div>
 
-      <nav className="nav-scroll flex-1 overflow-y-auto px-2 py-2.5" aria-label="Main">
+      <div className={cn("border-b border-sidebar-border py-2.5", collapsed ? "px-2" : "px-3")}>
+        {collapsed ? (
+          // The rail keeps the filter REACHABLE rather than hiding it: finding a screen is the sidebar's main
+          // job, and losing it would be the strongest argument against ever collapsing.
+          <Tooltip content="Find a screen" side="right">
+            <button
+              type="button"
+              onClick={openFilter}
+              aria-label="Find a screen"
+              className={cn(
+                "flex size-10 w-full items-center justify-center rounded-md text-sidebar-muted",
+                "transition-colors hover:bg-sidebar-accent/60 hover:text-white",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+              )}
+            >
+              <Search className="size-4" />
+            </button>
+          </Tooltip>
+        ) : (
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-sidebar-muted" />
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Escape" && setQuery("")}
+              placeholder="Find a screen…"
+              aria-label="Filter navigation"
+              className={cn(
+                "h-8 w-full rounded-md border border-sidebar-border bg-sidebar-accent/60 pl-8 pr-7 text-sm",
+                "text-sidebar-foreground placeholder:text-sidebar-muted",
+                "focus:border-primary/60 focus:outline-none focus:ring-2 focus:ring-primary/25",
+              )}
+            />
+            {query && (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                aria-label="Clear filter"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-sidebar-muted hover:text-white"
+              >
+                <X className="size-3.5" />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      <nav
+        id="sidebar-nav"
+        className={cn("nav-scroll flex-1 overflow-y-auto py-2.5", collapsed ? "px-2" : "px-2")}
+        aria-label="Main"
+      >
         {visibleSections.length === 0 ? (
           <p className="px-3 py-6 text-center text-xs text-sidebar-muted">
             Nothing matches “{query}”.
@@ -273,44 +361,70 @@ export function Nav({
         ) : (
           visibleSections.map((sec) => (
             <div key={sec.title} className="mb-3 last:mb-0">
-              <div className="px-2.5 pb-1 pt-1.5 text-2xs font-semibold uppercase tracking-widest text-sidebar-muted">
-                {sec.title}
-              </div>
+              {collapsed ? (
+                // The heading text goes, but the GROUPING stays: a hairline keeps the eight groups legible as
+                // groups, which is most of what the headings were doing for someone who already knows the
+                // product. It is decorative, so it is hidden from assistive tech — the accessible grouping
+                // still comes from each item's own label.
+                <div className="mx-2 mb-1.5 mt-1 border-t border-sidebar-border/70 first:mt-0 first:border-t-0" aria-hidden />
+              ) : (
+                <div className="px-2.5 pb-1 pt-1.5 text-2xs font-semibold uppercase tracking-widest text-sidebar-muted">
+                  {sec.title}
+                </div>
+              )}
               <ul className="space-y-0.5">
                 {sec.items.map((it) => {
                   const active = it.href === activeHref;
                   const Icon = it.icon;
+                  const link = (
+                    <Link
+                      href={it.href}
+                      onClick={onNavigate}
+                      aria-current={active ? "page" : undefined}
+                      // WITHOUT A VISIBLE LABEL, THE ACCESSIBLE NAME MUST COME FROM SOMEWHERE. In the rail the
+                      // only text in the anchor is the sr-only span below, kept as REAL TEXT rather than
+                      // replaced by aria-label. That keeps the accessible name identical in both modes, so
+                      // getByRole("link", { name }) and aria-current continue to work unchanged — the
+                      // collapse is a visual change, not a semantic one.
+                      className={cn(
+                        "group relative flex items-center rounded-md text-sm transition-colors",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+                        collapsed ? "h-10 justify-center px-0" : "gap-2.5 px-2.5 py-1.5",
+                        active
+                          ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                          : "text-sidebar-foreground/85 hover:bg-sidebar-accent/60 hover:text-white",
+                      )}
+                    >
+                      {/* The active rail. A background tint alone was the only active signal and it is two
+                          steps off the surrounding colour — easy to miss on a dim front-desk monitor. In the
+                          collapsed rail it matters MORE, because the tint is the only other cue and there is
+                          no label to read. */}
+                      <span
+                        className={cn(
+                          "absolute left-0 top-1/2 -translate-y-1/2 rounded-r-full bg-primary transition-opacity",
+                          collapsed ? "h-6 w-[3px]" : "h-4 w-0.5",
+                          active ? "opacity-100" : "opacity-0",
+                        )}
+                        aria-hidden
+                      />
+                      <Icon
+                        className={cn(
+                          "size-4 shrink-0 transition-colors",
+                          active ? "text-primary" : "text-sidebar-muted group-hover:text-sidebar-foreground",
+                        )}
+                      />
+                      <span className={cn(collapsed ? "sr-only" : "truncate")}>{it.label}</span>
+                    </Link>
+                  );
                   return (
                     <li key={it.href}>
-                      <Link
-                        href={it.href}
-                        onClick={onNavigate}
-                        aria-current={active ? "page" : undefined}
-                        className={cn(
-                          "group relative flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition-colors",
-                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
-                          active
-                            ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                            : "text-sidebar-foreground/85 hover:bg-sidebar-accent/60 hover:text-white",
-                        )}
-                      >
-                        {/* The active rail. A background tint alone was the only active signal and it is two
-                            steps off the surrounding colour — easy to miss on a dim front-desk monitor. */}
-                        <span
-                          className={cn(
-                            "absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-r-full bg-primary transition-opacity",
-                            active ? "opacity-100" : "opacity-0",
-                          )}
-                          aria-hidden
-                        />
-                        <Icon
-                          className={cn(
-                            "size-4 shrink-0 transition-colors",
-                            active ? "text-primary" : "text-sidebar-muted group-hover:text-sidebar-foreground",
-                          )}
-                        />
-                        <span className="truncate">{it.label}</span>
-                      </Link>
+                      {collapsed ? (
+                        // Radix opens this on hover AND on keyboard focus, which is the requirement: a rail
+                        // whose labels are mouse-only would be unusable from the keyboard.
+                        <Tooltip content={it.label} side="right">{link}</Tooltip>
+                      ) : (
+                        link
+                      )}
                     </li>
                   );
                 })}
@@ -320,36 +434,74 @@ export function Nav({
         )}
       </nav>
 
-      <div className="border-t border-sidebar-border p-2.5">
-        <div className="flex items-center gap-2.5 rounded-md px-2 py-1.5">
-          <span
-            className="flex size-7 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-2xs font-semibold uppercase text-white"
-            aria-hidden
+      {/* PROFILE AND SIGN OUT SURVIVE THE COLLAPSE. Who you are signed in as, and the way out, are the two
+          things an operator must never have to expand a menu to find. */}
+      <div className={cn("border-t border-sidebar-border", collapsed ? "p-2" : "p-2.5")}>
+        {collapsed ? (
+          <Tooltip
+            side="right"
+            content={
+              <span className="block">
+                <span className="block font-medium">{email ?? "—"}</span>
+                <span className="block text-muted-foreground">{roleLabel || "No site role"}</span>
+              </span>
+            }
           >
-            {(email ?? "?").slice(0, 2)}
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-xs font-medium text-sidebar-foreground" title={email}>
-              {email ?? "—"}
+            {/* Not a button: it does nothing when activated. tabIndex makes it focusable so the tooltip is
+                reachable from the keyboard, and the role/label make it announce as the status it is. */}
+            <div
+              tabIndex={0}
+              role="img"
+              aria-label={`Signed in as ${email ?? "unknown"}${roleLabel ? `, ${roleLabel}` : ""}`}
+              className={cn(
+                "mx-auto flex size-8 items-center justify-center rounded-full bg-sidebar-accent",
+                "text-2xs font-semibold uppercase text-white",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+              )}
+            >
+              {(email ?? "?").slice(0, 2)}
             </div>
-            {/* The ROLE, named. An operator refused a button needs to know which hat they are wearing; the
-                product knew and did not say. */}
-            <div className="truncate text-2xs text-sidebar-muted" title={roleLabel}>
-              {roleLabel || "No site role"}
+          </Tooltip>
+        ) : (
+          <div className="flex items-center gap-2.5 rounded-md px-2 py-1.5">
+            <span
+              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-2xs font-semibold uppercase text-white"
+              aria-hidden
+            >
+              {(email ?? "?").slice(0, 2)}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-xs font-medium text-sidebar-foreground" title={email}>
+                {email ?? "—"}
+              </div>
+              {/* The ROLE, named. An operator refused a button needs to know which hat they are wearing; the
+                  product knew and did not say. */}
+              <div className="truncate text-2xs text-sidebar-muted" title={roleLabel}>
+                {roleLabel || "No site role"}
+              </div>
             </div>
           </div>
-        </div>
-        <button
-          type="button"
-          onClick={onLogout}
-          className={cn(
-            "mt-1 flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-sidebar-foreground/85",
-            "transition-colors hover:bg-sidebar-accent/60 hover:text-white",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
-          )}
-        >
-          <LogOut className="size-4 shrink-0 text-sidebar-muted" /> Sign out
-        </button>
+        )}
+
+        {(() => {
+          const signOut = (
+            <button
+              type="button"
+              onClick={onLogout}
+              aria-label={collapsed ? "Sign out" : undefined}
+              className={cn(
+                "mt-1 flex w-full items-center rounded-md text-sm text-sidebar-foreground/85",
+                "transition-colors hover:bg-sidebar-accent/60 hover:text-white",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+                collapsed ? "h-10 justify-center px-0" : "gap-2.5 px-2.5 py-1.5",
+              )}
+            >
+              <LogOut className="size-4 shrink-0 text-sidebar-muted" />
+              <span className={cn(collapsed ? "sr-only" : undefined)}>Sign out</span>
+            </button>
+          );
+          return collapsed ? <Tooltip content="Sign out" side="right">{signOut}</Tooltip> : signOut;
+        })()}
       </div>
     </aside>
   );
