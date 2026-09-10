@@ -78,12 +78,12 @@ export function GuestDeviceSelfServiceView({ canAct }: { canAct: boolean }) {
 
   if (error && !state) {
     return (
-      <div role="alert" className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800">
+      <div role="alert" className="rounded-md border border-destructive/25 bg-destructive-subtle p-3 text-sm text-destructive-subtle-foreground">
         {error}
       </div>
     );
   }
-  if (!state) return <div className="text-sm text-muted">Loading…</div>;
+  if (!state) return <div className="text-sm text-muted-foreground">Loading…</div>;
 
   const on = state.enabled;
   const deployed = state.phase_gate_enabled;
@@ -91,8 +91,8 @@ export function GuestDeviceSelfServiceView({ canAct }: { canAct: boolean }) {
   return (
     <div className="space-y-6">
       <header className="space-y-1">
-        <h1 className="text-2xl font-semibold">Guest device self-service</h1>
-        <p className="text-sm text-muted">
+        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Guest device self-service</h1>
+        <p className="text-sm text-muted-foreground">
           When this is on, a guest who is signed in can see the devices using their own allowance and remove
           one that is not currently connected, freeing its place. A device that is online is never removable,
           and a guest can only ever see their own devices.
@@ -100,12 +100,12 @@ export function GuestDeviceSelfServiceView({ canAct }: { canAct: boolean }) {
       </header>
 
       {error && (
-        <div role="alert" className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800">
+        <div role="alert" className="rounded-md border border-destructive/25 bg-destructive-subtle p-3 text-sm text-destructive-subtle-foreground">
           {error}
         </div>
       )}
       {saved && (
-        <div role="status" className="rounded border border-green-300 bg-green-50 p-3 text-sm text-green-800">
+        <div role="status" className="rounded-md border border-success/25 bg-success-subtle p-3 text-sm text-success-subtle-foreground">
           {saved}
         </div>
       )}
@@ -150,7 +150,7 @@ export function GuestDeviceSelfServiceView({ canAct }: { canAct: boolean }) {
       </div>
 
       {!canAct && (
-        <p className="text-sm text-muted" data-testid="readonly-note">
+        <p className="text-sm text-muted-foreground" data-testid="readonly-note">
           Your role can see this setting but not change it. Ask a site administrator or the hotel IT manager.
         </p>
       )}
@@ -174,13 +174,13 @@ export function GuestDeviceSelfServiceView({ canAct }: { canAct: boolean }) {
               ? "Offer guest device self-service at this property?"
               : "Stop offering guest device self-service at this property?"}
           </div>
-          <p className="text-xs text-muted">
+          <p className="text-xs text-muted-foreground">
             {pending
               ? "Guests will be able to remove their own devices that are not connected. Devices that are online stay put."
               : "Guests will no longer see or be able to remove their devices. Nothing already connected is disconnected by this change."}
           </p>
           <label className="block text-sm">
-            <span className="text-muted">Reason (recorded in the change history)</span>
+            <span className="text-muted-foreground">Reason (recorded in the change history)</span>
             <input
               type="text"
               value={reason}
@@ -194,7 +194,7 @@ export function GuestDeviceSelfServiceView({ canAct }: { canAct: boolean }) {
               type="button"
               disabled={busy}
               onClick={() => save(pending)}
-              className="rounded bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-50"
+              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-50"
             >
               {busy ? "Saving…" : pending ? "Switch on" : "Switch off"}
             </button>

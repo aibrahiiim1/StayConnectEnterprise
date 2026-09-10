@@ -109,7 +109,7 @@ export function CheckoutGraceForm({ canWrite = true }: { canWrite?: boolean }) {
   if (packages === null) {
     return (
       <div className="space-y-4">
-        <h1 className="text-xl font-semibold">Checkout grace</h1>
+        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Checkout grace</h1>
         <p className="text-sm">Loading…</p>
       </div>
     );
@@ -117,7 +117,7 @@ export function CheckoutGraceForm({ canWrite = true }: { canWrite?: boolean }) {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-semibold">Checkout grace</h1>
+      <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Checkout grace</h1>
       <p className="text-sm">
         Guests who had valid access at checkout keep a bounded grace period, delivered by the package you choose
         here. Currently version {version}
@@ -125,12 +125,12 @@ export function CheckoutGraceForm({ canWrite = true }: { canWrite?: boolean }) {
       </p>
 
       {err && (
-        <p role="alert" className="text-sm text-red-600">
+        <p role="alert" className="text-sm text-destructive">
           {err}
         </p>
       )}
       {msg && (
-        <p role="status" className="text-sm text-green-700">
+        <p role="status" className="text-sm text-success-subtle-foreground">
           {msg}
         </p>
       )}

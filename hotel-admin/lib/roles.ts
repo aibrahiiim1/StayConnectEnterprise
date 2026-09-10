@@ -30,6 +30,17 @@ export const ROLE_LABELS: Record<SiteRole, string> = {
 // Resource keys match edged's mountResource names.
 type Matrix = Record<string, Record<string, Perm>>;
 
+// THIS TABLE HAD DRIFTED FROM THE SERVER'S, AND THE DRIFT HID SCREENS.
+//
+// edged's rolePerms grants hotel_it_manager WRITE on "pms-interfaces" and READ on "pms-routing" and
+// "pms-source-conflicts". None of those three keys appeared here, so `canRead` returned false for them and the
+// sidebar hid PMS connection, Network routing and Duplicate sources from the role that owns the PMS integration.
+// The screens worked; they were unreachable. The same omission hid "financial-ops" from everyone but site_admin
+// and "commercial-packages" from site_viewer.
+//
+// The keys below now mirror data-plane/cmd/edged/auth.go. When that file changes, this one has to change with it:
+// a permission this table is missing is a screen nobody can find, and a permission it invents is a button that
+// 403s on click.
 const MATRIX: Matrix = {
   hotel_it_manager: {
     // Phase 3 (DARK): the IT manager owns the PMS integration — publishing the
@@ -37,6 +48,8 @@ const MATRIX: Matrix = {
     // events and resolutions are read-only evidence.
     "pms-stays": "read", "pms-events": "read", "pms-resolutions": "read",
     "checkout-grace": "write", "operational-alerts": "write",
+    // The interface itself is this role's job; routing and conflicts are read-only for everyone but site_admin.
+    "pms-interfaces": "write", "pms-routing": "read", "pms-source-conflicts": "read",
     // Phase 5 (DARK): rotating or ending a post-stay credential. This mirrors the edged matrix exactly --
     // it decides whether the BUTTON is offered, never whether the action is allowed.
     "post-stay-profiles": "write",
@@ -50,6 +63,7 @@ const MATRIX: Matrix = {
     "portal-branding": "write", "notification-providers": "write",
     "social-providers": "write", "stripe-accounts": "write",
     network: "write",
+    "financial-review": "read", "financial-ops": "read",
     operators: "read", audit: "read",
     reports: "read", backups: "read", license: "read", diagnostics: "write",
   },
@@ -57,13 +71,16 @@ const MATRIX: Matrix = {
     // Phase 6 (DARK): the desk answers "why can't I remove my old phone" and changes no capability.
     "guest-device-self-service": "read",
     "pms-stays": "read", "pms-events": "read", "operational-alerts": "write", "checkout-grace": "read",
+    "pms-interfaces": "read", "pms-routing": "read", "pms-source-conflicts": "read",
     "post-stay-profiles": "write", "stay-transfers": "write",
+    "financial-review": "read", "financial-ops": "read",
     "guest-accounts": "write", sessions: "write",
     "auth-methods": "read", "walled-garden": "read", reports: "read", audit: "read", license: "read", backups: "read", diagnostics: "read",
   },
   guest_relations_operator: {
     "guest-device-self-service": "read",
     "pms-stays": "read", "pms-events": "read", "operational-alerts": "write", "checkout-grace": "read",
+    "pms-interfaces": "read", "pms-routing": "read", "pms-source-conflicts": "read",
     "post-stay-profiles": "write", "stay-transfers": "write",
     "guest-accounts": "write", sessions: "write",
     "auth-methods": "read", reports: "read",
@@ -76,12 +93,18 @@ const MATRIX: Matrix = {
   payments_operator: {
     "guest-device-self-service": "read",
     "stripe-accounts": "read",
+    // Contract section 15 gives the charge decision to this role; edged additionally requires password
+    // re-authentication at the route.
+    "financial-review": "write", "financial-ops": "write",
     sessions: "read", reports: "read", audit: "read", license: "read", diagnostics: "read",
   },
   site_viewer: {
     "guest-device-self-service": "read",
     "pms-stays": "read", "pms-events": "read", "pms-resolutions": "read", "checkout-grace": "read", "operational-alerts": "read",
+    "pms-interfaces": "read", "pms-routing": "read", "pms-source-conflicts": "read",
+    "commercial-packages": "read",
     "post-stay-profiles": "read", "stay-transfers": "read",
+    "financial-review": "read", "financial-ops": "read",
     "guest-accounts": "read", sessions: "read", "auth-methods": "read",
     "walled-garden": "read", "portal-branding": "read", "notification-providers": "read", "social-providers": "read",
     "stripe-accounts": "read", audit: "read", reports: "read",

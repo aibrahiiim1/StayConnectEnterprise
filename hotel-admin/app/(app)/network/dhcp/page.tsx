@@ -90,18 +90,25 @@ export default function DhcpPage() {
     finally { setBusy(false); }
   }
 
+  // Reserving an address is how a printer, a TV or a door lock keeps the same IP. Removing the reservation means
+  // that device takes whatever address is free next time, which is why the confirmation says so rather than
+  // asking "Delete this reservation?" and leaving the consequence to be discovered.
   async function onDelete(id: string) {
-    if (!confirm("Delete this reservation?")) return;
+    const r = reservations?.find((x) => x.id === id);
+    if (!confirm(
+      `Remove the reserved address${r ? ` ${r.reserved_ip}` : ""}?` +
+      `${r?.hostname ? ` (${r.hostname})` : ""} That device will be given any free address next time it connects.`,
+    )) return;
     try { await api.del(`/network/dhcp/reservations/${id}`); loadReservations(); }
     catch (e) { setErr(errMsg(e)); }
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="mx-auto w-full max-w-7xl space-y-5">
       <div className="flex items-baseline justify-between mb-4">
         <div>
-          <div className="text-xs text-muted uppercase tracking-wider">Networking</div>
-          <h1 className="text-2xl font-semibold">DHCP &amp; leases</h1>
+          <div className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground">Networking</div>
+          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">DHCP &amp; leases</h1>
         </div>
         {tab === "reservations" && writable && (
           <Button onClick={() => setShowNew((v) => !v)}>
@@ -161,10 +168,10 @@ export default function DhcpPage() {
                     <TR key={i}>
                       <TD className="font-mono text-xs">{l["ip-address"]}</TD>
                       <TD className="font-mono text-xs">{l["hw-address"]}</TD>
-                      <TD className="text-muted">{l.hostname || "—"}</TD>
-                      <TD className="text-muted">{l["subnet-id"] ?? "—"}</TD>
+                      <TD className="text-muted-foreground">{l.hostname || "—"}</TD>
+                      <TD className="text-muted-foreground">{l["subnet-id"] ?? "—"}</TD>
                       <TD><Badge tone={leaseState(l.state) === "active" ? "ok" : "warn"}>{leaseState(l.state)}</Badge></TD>
-                      <TD className="text-muted">{leaseExpiry(l)}</TD>
+                      <TD className="text-muted-foreground">{leaseExpiry(l)}</TD>
                     </TR>
                   ))}
                 </tbody>
@@ -182,7 +189,7 @@ export default function DhcpPage() {
                       <TD>{netName(r.guest_network_id)}</TD>
                       <TD className="font-mono text-xs">{r.mac}</TD>
                       <TD className="font-mono text-xs">{r.reserved_ip}</TD>
-                      <TD className="text-muted">{r.hostname || "—"}</TD>
+                      <TD className="text-muted-foreground">{r.hostname || "—"}</TD>
                       <TD>{r.enabled ? <Badge tone="ok">on</Badge> : <Badge tone="default">off</Badge>}</TD>
                       <TD className="text-right space-x-2">
                         {writable && <Button size="sm" variant="ghost" onClick={() => setEditRes(r)}>Edit</Button>}
@@ -198,10 +205,10 @@ export default function DhcpPage() {
       </Card>
 
       {editRes && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-6 z-50" onClick={() => setEditRes(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/45 p-6 backdrop-blur-[2px]" onClick={() => setEditRes(null)}>
           <div className="bg-panel border border-border rounded-lg shadow-panel max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-              <h2 className="text-base font-semibold">Edit reservation</h2>
+              <h2 className="text-sm font-semibold tracking-tight">Edit reservation</h2>
               <Button size="sm" variant="ghost" onClick={() => setEditRes(null)}><X size={14} /></Button>
             </div>
             <div className="px-5 py-4 space-y-3">

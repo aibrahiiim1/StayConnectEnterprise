@@ -31,7 +31,7 @@ test.describe("the authentication gate", () => {
       expect(url.pathname).toBe("/login");
       expect(url.searchParams.get("next")).toBe(route);
       // ...and the login page actually renders, rather than the redirect landing on a 500
-      await expect(page.getByText("Hotel Admin sign-in")).toBeVisible();
+      await expect(page.getByRole("heading", { name: "StayConnect Hotel Admin" })).toBeVisible();
       await expect(page.getByLabel("Email or username")).toBeVisible();
       await expect(page.getByLabel("Password")).toBeVisible();
     }
@@ -43,7 +43,7 @@ test.describe("the authentication gate", () => {
     await page.context().clearCookies();
     const resp = await page.goto("/financial-review");
     expect(resp?.status()).toBe(200); // the LOGIN page, having been redirected there
-    await expect(page.getByText("Hotel Admin sign-in")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "StayConnect Hotel Admin" })).toBeVisible();
     // nothing from the financial surface leaked into the response the browser actually got
     await expect(page.getByRole("heading", { name: /manual review/i })).toHaveCount(0);
   });

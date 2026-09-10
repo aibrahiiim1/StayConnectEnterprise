@@ -149,8 +149,8 @@ export default function SignInMethodsPage() {
     [pmsIfaces, pmsHealth, pmsRoutes]);
 
   if (cfg === null) {
-    return <div className="space-y-4"><h1 className="text-lg font-semibold">Sign-in methods</h1>
-      <p className="text-sm text-muted">Loading…</p></div>;
+    return <div className="space-y-4"><h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Sign-in methods</h1>
+      <p className="text-sm text-muted-foreground">Loading…</p></div>;
   }
 
   const pms = cfg.pms ?? {};
@@ -160,7 +160,7 @@ export default function SignInMethodsPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-lg font-semibold">Sign-in methods</h1>
+        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Sign-in methods</h1>
         <p className="text-sm text-muted mt-1 max-w-2xl">
           How guests prove who they are on the portal. Changes apply immediately — the next guest to open the
           sign-in page sees them. Turning a method off does not disconnect guests already online.
@@ -168,7 +168,7 @@ export default function SignInMethodsPage() {
       </div>
 
       {err ? <ErrorBanner err={err} /> : null}
-      {note && <p className="text-sm text-emerald-700" role="status">{note}</p>}
+      {note && <p className="text-sm text-success-subtle-foreground" role="status">{note}</p>}
 
       <MethodCard
         icon={<Ticket size={16} />}
@@ -194,14 +194,14 @@ export default function SignInMethodsPage() {
             // PARTIAL IS ITS OWN CASE. When one guest network is affected and another is fine, "Room sign-in
             // is not working" would be false for half the property, and staying silent would be false for the
             // other half. The networks are named so the operator knows which guests are affected.
-            <div role="status" className="rounded-md border border-amber-300 bg-amber-50 p-3">
-              <div className="text-sm font-medium text-amber-900">
+            <div role="status" className="rounded-md border border-warning/30 bg-warning-subtle p-3">
+              <div className="text-sm font-medium text-warning-subtle-foreground">
                 {pmsReadiness.state === "down"
                   ? "Room sign-in is not working at the moment"
                   : "Room sign-in is not working on some guest networks"}
               </div>
               {pmsReadiness.state === "down" ? (
-                <p className="text-xs text-amber-800 mt-1">
+                <p className="text-xs text-warning-subtle-foreground mt-1">
                   {capitalise(pmsReadiness.reason)}. Guests cannot sign in with their room number until the
                   property management system is connected to StayConnect again; they can still use any other
                   method switched on below. Nothing here needs changing — this setting is kept as it is and
@@ -209,12 +209,12 @@ export default function SignInMethodsPage() {
                 </p>
               ) : (
                 <>
-                  <p className="text-xs text-amber-800 mt-1">
+                  <p className="text-xs text-warning-subtle-foreground mt-1">
                     Guests on the networks below cannot sign in with their room number. Everywhere else is
                     working normally. Nothing here needs changing — each one starts working again on its own
                     once its property management system is connected.
                   </p>
-                  <ul className="text-xs text-amber-800 mt-1 list-disc pl-4 space-y-0.5">
+                  <ul className="text-xs text-warning-subtle-foreground mt-1 list-disc pl-4 space-y-0.5">
                     {pmsReadiness.affected.map((a) => (
                       <li key={`${a.guestNetwork}-${a.pmsInterface}`}>
                         <span className="font-medium">{a.guestNetwork}</span> (via {a.pmsInterface}) —{" "}
@@ -227,12 +227,12 @@ export default function SignInMethodsPage() {
               {pmsReadiness.unchecked.length > 0 && (
                 // Neutral, and never counted as an outage. A health read that failed is absence of evidence,
                 // and one of those networks may be perfectly fine.
-                <p className="text-xs text-amber-800 mt-1">
+                <p className="text-xs text-warning-subtle-foreground mt-1">
                   Readiness could not be checked for {pmsReadiness.unchecked.join(", ")}.
                 </p>
               )}
               <p className="text-xs mt-1">
-                <Link href="/pms-interfaces" className="underline text-amber-900">
+                <Link href="/pms-interfaces" className="underline text-warning-subtle-foreground">
                   Check the PMS interface <ExternalLink size={11} className="inline" />
                 </Link>
               </p>
@@ -258,7 +258,7 @@ export default function SignInMethodsPage() {
               {modeIsLegacy && (
                 // Shown rather than silently migrated: changing what a stored configuration does is the
                 // operator's decision, not this screen's.
-                <p className="text-xs text-amber-600 mb-2">
+                <p className="text-xs text-warning mb-2">
                   This site currently uses an older setting that accepts a last name or a reservation number
                   and guesses which one was typed, so some surnames are rejected. Choosing one of the
                   options below replaces it.
@@ -331,7 +331,7 @@ export default function SignInMethodsPage() {
       <Card>
         <CardHeader><CardTitle className="flex items-center gap-2"><Users size={16} /> Social login</CardTitle></CardHeader>
         <CardBody className="space-y-2">
-          <p className="text-sm text-muted">
+          <p className="text-sm text-muted-foreground">
             The guest signs in with an existing account such as Google. Each provider is switched on
             individually, because each needs its own credentials.
           </p>
@@ -381,8 +381,8 @@ function MethodCard({
           <div className="font-medium flex items-center gap-2">{icon}{title}
             {!ready && <Badge tone="default">Not available</Badge>}
           </div>
-          <p className="text-sm text-muted mt-1">{description}</p>
-          {!ready && notReadyReason && <p className="text-xs text-amber-600 mt-1">{notReadyReason}</p>}
+          <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+          {!ready && notReadyReason && <p className="text-xs text-warning mt-1">{notReadyReason}</p>}
           {manageHref && (
             <p className="text-xs mt-1">
               <Link href={manageHref} className="underline text-muted">

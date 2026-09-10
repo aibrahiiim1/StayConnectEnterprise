@@ -158,13 +158,49 @@ export type Voucher = {
   effective_state?: string; exhaustion_reason?: string;
 };
 
+// SubjectKind — the four things an Entitlement can belong to, which is therefore the four things a session can
+// belong to. The database guarantees exactly one (iam_v2 ent_one_subject), so this is a closed set rather than a
+// convention. An empty string means the session's entitlement could not be read, not that it has no subject.
+export type SubjectKind = "room" | "account" | "voucher" | "guest" | "";
+
 export type Session = {
   id: string; tenant_id: string; site_id: string; appliance_id: string;
   guest_id: string; voucher_id?: string | null;
   ip: string; mac: string;
   state: string; end_reason?: string | null;
   started_at: string; last_activity_at: string; ended_at?: string | null;
+  expires_at?: string | null;
   bytes_up: number; bytes_down: number;
+
+  // WHO, WHERE AND ON WHAT — see edged's resources_sessions.go for why each of these is safe to send and why a
+  // voucher code and a guest principal's contact details are deliberately NOT among them.
+  credential_method?: string | null;
+  ingress_interface?: string | null;
+  guest_network_name?: string | null;
+
+  entitlement_id?: string;
+  entitlement_status?: string | null;
+  subject_kind?: SubjectKind;
+  subject_label?: string | null;
+  subject_name?: string | null;
+
+  stay_id?: string | null;
+  room?: string | null;
+  external_reservation_id?: string | null;
+
+  package_code?: string | null;
+  package_name?: string | null;
+  service_plan_code?: string | null;
+  down_kbps?: number | null;
+  up_kbps?: number | null;
+  max_devices?: number | null;
+
+  data_quota_bytes?: number | null;
+  data_used_bytes?: number | null;
+  time_quota_seconds?: number | null;
+  time_used_seconds?: number | null;
+
+  active_devices?: number;
 };
 
 // ---- Phase 3 (DARK) PMS stay resolution + checkout grace -------------------
@@ -185,6 +221,17 @@ export type Stay = {
   // Hotel attributes the schema carries. Present only when the connector sends them; the Protel FIAS feed
   // does not, so these are absent on that interface rather than blank.
   vip?: boolean | null; room_type?: string | null; rate_plan?: string | null; travel_agent?: string | null;
+
+  // WHICH INTERNET THIS ROOM HAS. The live entitlement's package and the service plan behind it — absent when
+  // the stay has no live access, which is a real and common state rather than a missing value.
+  access_status?: string | null;
+  access_package_code?: string | null;
+  access_package_name?: string | null;
+  access_plan_code?: string | null;
+  access_down_kbps?: number | null;
+  access_up_kbps?: number | null;
+  access_max_devices?: number | null;
+  access_active_devices?: number;
 };
 
 export type StayDetail = Stay & {
@@ -196,10 +243,19 @@ export type StayEvent = {
   id: string; pms_interface_id: string; external_event_identity: string; event_type: string;
   processing_status: string; review_code?: string | null; stay_id?: string | null;
   pms_timestamp_utc?: string | null; received_at: string;
+  // What the event is ABOUT. Absent on an event the appliance could not match to a stay — which is usually
+  // precisely why it is still waiting.
+  pms_interface_label?: string;
+  room?: string | null;
+  external_reservation_id?: string | null;
+  primary_guest?: string | null;
+  stay_status?: string | null;
 };
 
 export type PmsResolution = {
   id: string; guest_network_id: string; outcome_code: string; resolved: boolean; resolved_at: string;
+  // The network's own name. No guest, room or reservation appears on this surface by design.
+  guest_network_name?: string | null;
 };
 
 export type CheckoutGraceConfig = {
@@ -478,6 +534,122 @@ export type ReportsSummary = {
   revenue_cents_today?: number;
   currency?: string;
   tz?: string;
+};
+
+// ------- Dashboard snapshot (GET /reports/dashboard) -------
+//
+// One read, many independently-fallible sections. `available: false` on a section means this appliance does not
+// have that surface (no PMS, charges not deployed) — the UI says so instead of rendering zeros, because a zero
+// and an absence are different facts and only one of them means "nothing happened tonight".
+
+export type DashSection = { available: boolean; reason?: string };
+
+export type DashHourBucket = { hour: number; sign_ins: number; sessions_started: number };
+
+export type DashGuests = {
+  devices_online: number;
+  guests_online: number;
+  sign_ins_today: number;
+  devices_today: number;
+  sign_ins_7d: number;
+  busiest_hour_today?: number | null;
+  busiest_hour_count?: number;
+};
+
+export type DashData = {
+  bytes_down_today: number;
+  bytes_up_today: number;
+  total_bytes_today: number;
+  bytes_down_7d: number;
+  bytes_up_7d: number;
+};
+
+export type DashOccupancy = DashSection & {
+  in_house: number;
+  with_internet: number;
+  arrivals_today: number;
+  departures_today: number;
+  posting_allowed: number;
+};
+
+export type DashSignInChecks = DashSection & {
+  window: string;
+  total: number;
+  verified: number;
+  outcomes: { outcome_code: string; count: number }[];
+};
+
+export type DashPmsInterface = {
+  pms_interface_id: string;
+  display_label: string;
+  lifecycle_state: string;
+  published: boolean;
+  transport_status: string;
+  continuity_status: string;
+  sync_status: string;
+  sync_stage?: string;
+  room_auth_ready: boolean;
+  room_auth_reason?: string;
+  in_house_stays: number;
+  pending_events: number;
+  review_events: number;
+  last_stay_event_at?: string | null;
+  last_heartbeat_at?: string | null;
+  last_complete_sync_at?: string | null;
+  sync_records_received?: number;
+  materialization_ready: boolean;
+};
+
+export type DashPms = DashSection & {
+  interfaces: DashPmsInterface[];
+  events_today: number;
+  events_applied_today: number;
+  events_needing_review: number;
+};
+
+export type DashPostings = DashSection & {
+  posted_today: number;
+  failed_today: number;
+  pending: number;
+  review_open: number;
+  unknown_open: number;
+};
+
+export type DashNetwork = {
+  name: string;
+  bridge_name: string;
+  enabled: boolean;
+  vlan_id?: number | null;
+  subnet_cidr: string;
+  dhcp_mode: string;
+  pool_addresses: number;
+  devices_online: number;
+  captive_portal_enabled: boolean;
+  internet_access_enabled: boolean;
+};
+
+export type DashPackage = {
+  package_id: string;
+  code: string;
+  name?: string;
+  active: boolean;
+  online_now: number;
+  grants_7d: number;
+};
+
+export type DashboardSnapshot = {
+  generated_at: string;
+  /** The appliance's local midnight that every "today" figure is measured from. */
+  day_start: string;
+  guests: DashGuests;
+  data: DashData;
+  hourly: DashHourBucket[];
+  occupancy: DashOccupancy;
+  sign_in_checks: DashSignInChecks;
+  pms: DashPms;
+  postings: DashPostings;
+  networks: DashNetwork[];
+  packages: DashPackage[];
 };
 
 export type BackupRecord = {

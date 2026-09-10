@@ -42,7 +42,7 @@ const THRESH: Record<string, { tone: "ok" | "info" | "warn" | "err"; label: stri
 function Row({ k, v }: { k: string; v: React.ReactNode }) {
   return (
     <div className="flex justify-between gap-4 border-b border-border py-1.5 text-sm last:border-0">
-      <span className="text-muted">{k}</span>
+      <span className="text-muted-foreground">{k}</span>
       <span className="text-right text-text break-all">{v ?? "—"}</span>
     </div>
   );
@@ -103,7 +103,7 @@ export default function CertificatePage() {
   }
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
+    <div className="mx-auto w-full max-w-3xl space-y-5">
       <div className="flex items-baseline justify-between mb-1">
         <h1 className="text-2xl font-semibold flex items-center gap-2"><ShieldCheck className="h-5 w-5" /> Hotel Admin TLS certificate</h1>
         <Button variant="ghost" size="sm" onClick={load}><RefreshCw size={14} /> Refresh</Button>
@@ -123,8 +123,8 @@ export default function CertificatePage() {
           <Badge tone={thr.tone as any}>{thr.label}{typeof st?.days_remaining === "number" ? ` · ${st.days_remaining}d left` : ""}</Badge>
         </CardHeader>
         <CardBody>
-          {!st ? <div className="text-sm text-muted">Loading…</div> : st.available === false ? (
-            <div className="text-sm text-warn">No certificate status available yet. Run “Check certificate”.</div>
+          {!st ? <div className="text-sm text-muted-foreground">Loading…</div> : st.available === false ? (
+            <div className="text-sm text-warning-subtle-foreground">No certificate status available yet. Run “Check certificate”.</div>
           ) : (
             <>
               <Row k="Subject" v={<code>{st.subject}</code>} />

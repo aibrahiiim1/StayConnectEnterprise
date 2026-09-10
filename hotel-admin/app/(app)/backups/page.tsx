@@ -28,10 +28,10 @@ export default function BackupsPage() {
   useEffect(() => { load(); }, []);
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="mx-auto w-full max-w-7xl space-y-5">
       <div className="mb-4">
-        <div className="text-xs text-muted uppercase tracking-wider">System</div>
-        <h1 className="text-2xl font-semibold">Backups</h1>
+        <div className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground">System</div>
+        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Backups</h1>
       </div>
 
       {err && <div className="text-err text-sm mb-4">{err}</div>}
@@ -48,8 +48,8 @@ export default function BackupsPage() {
               <tbody>
                 {rows.map((b) => (
                   <TR key={b.id}>
-                    <TD className="text-muted">{formatDate(b.started_at)}</TD>
-                    <TD className="text-muted">{b.finished_at ? formatDate(b.finished_at) : "—"}</TD>
+                    <TD className="text-muted-foreground">{formatDate(b.started_at)}</TD>
+                    <TD className="text-muted-foreground">{b.finished_at ? formatDate(b.finished_at) : "—"}</TD>
                     <TD><Badge tone={statusTone(b.status)}>{b.status}</Badge></TD>
                     <TD className="font-mono text-xs">{b.kind}</TD>
                     <TD className="font-mono text-xs max-w-xs truncate" title={b.path ?? ""}>{b.path ?? "—"}</TD>

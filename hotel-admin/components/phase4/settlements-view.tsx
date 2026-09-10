@@ -85,12 +85,12 @@ export function SettlementsView() {
   // The error is rendered BEFORE the loading guard. When the load fails the state variable is never set,
   // so a guard placed first returns "Loading…" forever and the alert further down is unreachable -- the
   // screen tells the operator it is still working when it has already given up.
-  if (err) return <p role="alert" className="text-sm text-red-700">{err}</p>;
+  if (err) return <p role="alert" className="text-sm text-destructive">{err}</p>;
   if (!rows) return <p role="status">Loading settlements…</p>;
 
   return (
     <div className="space-y-4">
-      {err ? <p role="alert" className="text-sm text-red-700">{err}</p> : null}
+      {err ? <p role="alert" className="text-sm text-destructive">{err}</p> : null}
 
       <Card>
         <CardBody>
@@ -101,7 +101,7 @@ export function SettlementsView() {
               </label>
               <select
                 id="settlement-status"
-                className="mt-1 rounded-md border border-slate-300 px-2 py-1"
+                className="mt-1 rounded-md border border-border px-2 py-1"
                 value={status}
                 onChange={(e) => setStatus(e.target.value)}
               >
@@ -113,7 +113,7 @@ export function SettlementsView() {
                 ))}
               </select>
             </div>
-            <p className="pb-1 text-sm text-slate-500">{rows.length} shown (newest 200)</p>
+            <p className="pb-1 text-sm text-muted-foreground">{rows.length} shown (newest 200)</p>
           </div>
 
           {rows.length === 0 ? (
@@ -152,9 +152,9 @@ export function SettlementsView() {
       {selected && detail ? (
         <Card>
           <CardBody>
-            <h3 className="mb-3 text-sm font-medium text-slate-500">Payment history</h3>
+            <h3 className="mb-3 text-sm font-medium text-muted-foreground">Payment history</h3>
             {detail.payments.length === 0 ? (
-              <p className="text-sm text-slate-600">
+              <p className="text-sm text-muted-foreground">
                 No payment has been attempted against this settlement.
               </p>
             ) : (
@@ -185,9 +185,9 @@ export function SettlementsView() {
             )}
 
             {detail.available_actions.length === 0 ? (
-              <p className="mt-3 text-sm text-slate-600">{detail.note}</p>
+              <p className="mt-3 text-sm text-muted-foreground">{detail.note}</p>
             ) : (
-              <p className="mt-3 text-sm text-slate-600">
+              <p className="mt-3 text-sm text-muted-foreground">
                 Available actions: {detail.available_actions.join(", ")}
               </p>
             )}

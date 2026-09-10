@@ -143,6 +143,10 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 			mountResource(r, s, "pms-interfaces", s.pmsInterfacesRoutes)
 			mountResource(r, s, "pms-routing", s.pmsRoutingRoutes)
 			mountResource(r, s, "pms-source-conflicts", s.pmsSourceConflictsRoutes)
+			// The operational snapshot the dashboard reads. Mounted here so its authorization and its
+			// site confinement are exercised through the REAL middleware chain and the real role matrix --
+			// see dashboard_api_integration_test.go for why a mocked assertion would not be worth having.
+			mountResource(r, s, "reports", s.reportsRoutes)
 			// Phase 4 (DARK): the Manual Review surface. Mounted here so the API contract tests exercise the
 			// real router and the real RBAC/step-up middleware, exactly as the appliance would when enabled.
 			mountResource(r, s, "financial-review", s.financialReviewRoutes)

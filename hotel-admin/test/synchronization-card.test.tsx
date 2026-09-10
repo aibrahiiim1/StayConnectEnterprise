@@ -46,7 +46,9 @@ describe("synchronization", () => {
     );
     // The count appears twice on purpose: once in the field list, once inside the honest sentence.
     expect(screen.getAllByText(/1,847/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/does not provide a total/i)).toBeInTheDocument();
+    // The wording moved into a Callout during the UI rework; the RULE it enforces is unchanged and is what the
+    // rest of this test pins.
+    expect(screen.getByText(/does not say how many records it will send/i)).toBeInTheDocument();
 
     // No percentage, no "of N", no progress bar. FIAS cannot support any of them before the end of a sync.
     const body = document.body.textContent ?? "";
@@ -59,7 +61,7 @@ describe("synchronization", () => {
   it("explains that the first connection syncs automatically and this asks for another", () => {
     render(<SynchronizationCard id="i1" health={health()} onRefreshed={() => {}} />);
     expect(screen.getByText(/first successful connection/i)).toBeInTheDocument();
-    expect(screen.getByText(/another complete, fresh copy/i)).toBeInTheDocument();
+    expect(screen.getByText(/looks out of date/i)).toBeInTheDocument();
   });
 
   it("refuses to offer the action while the PMS is disconnected", () => {
@@ -70,8 +72,8 @@ describe("synchronization", () => {
         onRefreshed={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: /full resync now/i })).toBeDisabled();
-    expect(screen.getByText(/available when the PMS is connected/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /refresh the guest list now/i })).toBeDisabled();
+    expect(screen.getByText(/available once the PMS is connected/i)).toBeInTheDocument();
   });
 
   it("refuses while a sync is already running, so a second click cannot start one", () => {
@@ -82,15 +84,21 @@ describe("synchronization", () => {
         onRefreshed={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: /full resync now/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /refresh the guest list now/i })).toBeDisabled();
   });
 
+  // THE STEP-UP MOVED INTO A CONFIRMATION DIALOG.
+  //
+  // The reason and the password used to be two inline fields beside the button, so a read-only status page asked
+  // for a password with nothing saying what it was for. The CONTRACT is unchanged and is what this test pins:
+  // exactly reason_code + password, and nothing resembling an actor or a secret.
   it("sends the reason and the password, and never an actor or an interface secret", async () => {
     const user = userEvent.setup();
     render(<SynchronizationCard id="i1" health={health()} onRefreshed={() => {}} />);
 
-    await user.type(screen.getByLabelText(/password to confirm this resync/i), "hunter2");
-    await user.click(screen.getByRole("button", { name: /full resync now/i }));
+    await user.click(screen.getByRole("button", { name: /refresh the guest list now/i }));
+    await user.type(await screen.findByLabelText(/confirm your password/i), "hunter2");
+    await user.click(screen.getByRole("button", { name: /^request refresh$/i }));
 
     await waitFor(() => expect(post).toHaveBeenCalledOnce());
     const [path, body] = post.mock.calls[0];
@@ -182,7 +190,7 @@ describe("observing an external reconnect", () => {
       seen.push(document.body.textContent ?? "");
     }
 
-    expect(seen[1]).toMatch(/Requesting a full sync/i);
+    expect(seen[1]).toMatch(/Requesting the full list/i);
     expect(seen[1]).toMatch(/happens automatically the first time/i);
     expect(seen[2]).toMatch(/Waiting for the PMS/i);
     expect(seen[3]).toMatch(/120/);
@@ -228,7 +236,7 @@ describe("materialization readiness", () => {
         onRefreshed={() => {}}
       />,
     );
-    expect(screen.getByText(/Applying guest list/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Applying the guest list/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Room sign-in resumes automatically/i)).toBeInTheDocument();
     expect(screen.queryByText(/^Complete$/)).toBeNull();
   });
@@ -243,7 +251,7 @@ describe("materialization readiness", () => {
     );
     // "Complete" appears both as the stage value and in the Last-completed-full-sync label.
     expect(screen.getAllByText(/Complete/i).length).toBeGreaterThan(0);
-    expect(screen.queryByText(/Applying guest list/i)).toBeNull();
+    expect(screen.queryByText(/Applying the guest list/i)).toBeNull();
   });
 
   it("keeps polling while applying, because the guest list is still changing", async () => {

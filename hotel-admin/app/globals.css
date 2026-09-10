@@ -2,15 +2,230 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { color-scheme: dark; }
+/*
+  THE DESIGN TOKENS. One palette, two themes, named by ROLE rather than by colour.
 
-html, body {
-  background: theme(colors.bg);
-  color: theme(colors.text);
+  The appliance admin used to be a single hard-coded near-black palette, applied with literal hex values in a
+  Tailwind config. That made dark the only possibility: there was nothing to swap, because "panel" meant
+  #14171f rather than "the surface a card sits on". Light mode was not a missing feature so much as an
+  unexpressible one.
+
+  Every colour below is an HSL triple behind a role name, so a theme is a set of token values and nothing
+  else. `.dark` redefines the triples; no component, page or utility class mentions a colour.
+
+  THE LEGACY NAMES STILL WORK. tailwind.config.ts maps the old `bg / panel / panel2 / border / muted / text /
+  brand / ok / warn / err` onto these roles, so forty existing screens keep rendering while they are refitted
+  one at a time — and they render in BOTH themes, because the names now resolve to tokens instead of hexes.
+*/
+
+@layer base {
+  :root {
+    /* Page and content surfaces. `background` is the app canvas; `card` is what sits on it. `surface` is the
+       recessed tone used for table headers, inset panels and hover states — the old `panel2`. */
+    --background: 210 22% 97%;
+    --foreground: 222 24% 13%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 24% 13%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 24% 13%;
+
+    --surface: 212 22% 95%;
+    --surface-foreground: 222 24% 13%;
+
+    /* `muted` is a BACKGROUND; `muted-foreground` is secondary text. Keeping them distinct is what lets a
+       quiet label and a quiet panel be styled independently. */
+    --muted: 212 22% 95%;
+    --muted-foreground: 218 13% 44%;
+
+    --accent: 214 32% 93%;
+    --accent-foreground: 222 36% 20%;
+
+    /* Brand. The dark theme keeps the product's historical #5b8cff; light mode needs more depth to hold
+       contrast against white, so the same hue is darkened rather than a second brand being invented. */
+    --primary: 224 72% 51%;
+    --primary-foreground: 0 0% 100%;
+    --primary-hover: 224 72% 44%;
+    --primary-subtle: 224 78% 96%;
+    --primary-subtle-foreground: 224 72% 38%;
+
+    --secondary: 212 22% 95%;
+    --secondary-foreground: 222 24% 18%;
+
+    /* STATUS. Four roles, each with a readable foreground and a subtle fill for badges and banners, so a
+       warning never has to be assembled out of arbitrary amber utilities at the call site. */
+    --success: 146 64% 34%;
+    --success-foreground: 0 0% 100%;
+    --success-subtle: 146 56% 94%;
+    --success-subtle-foreground: 147 70% 25%;
+
+    --warning: 33 90% 42%;
+    --warning-foreground: 0 0% 100%;
+    --warning-subtle: 40 92% 93%;
+    --warning-subtle-foreground: 28 82% 29%;
+
+    --destructive: 0 72% 48%;
+    --destructive-foreground: 0 0% 100%;
+    --destructive-subtle: 0 86% 96%;
+    --destructive-subtle-foreground: 0 70% 38%;
+
+    --info: 211 88% 44%;
+    --info-foreground: 0 0% 100%;
+    --info-subtle: 211 92% 95%;
+    --info-subtle-foreground: 212 84% 33%;
+
+    --border: 214 20% 88%;
+    --border-strong: 214 18% 80%;
+    --input: 214 20% 85%;
+    --ring: 224 72% 51%;
+
+    /* The navigation column is its own surface so it can be darker than the page in light mode without the
+       rest of the UI inheriting it. */
+    --sidebar: 222 26% 13%;
+    --sidebar-foreground: 213 24% 84%;
+    --sidebar-muted: 218 14% 58%;
+    --sidebar-accent: 222 22% 20%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 222 20% 22%;
+
+    /* CHART SERIES. Ordered for categorical use and assigned in that fixed order — never cycled, never
+       generated. None of the six is a status colour, so "series 3" can never be mistaken for "warning".
+
+       Both themes were checked rather than eyeballed: each set sits inside its mode's OKLCH lightness band,
+       clears the chroma floor, holds ≥3:1 against its own surface, and keeps every adjacent pair separable
+       under deuteranopia, protanopia and tritanopia. Changing a value here means re-running that check. */
+    --chart-1: 224 72% 51%;
+    --chart-2: 173 62% 38%;
+    --chart-3: 271 62% 56%;
+    --chart-4: 28 88% 38%;
+    --chart-5: 199 82% 42%;
+    --chart-6: 330 66% 52%;
+
+    --radius: 0.625rem;
+  }
+
+  .dark {
+    --background: 222 26% 7%;
+    --foreground: 220 26% 92%;
+
+    --card: 223 21% 11%;
+    --card-foreground: 220 26% 92%;
+
+    --popover: 223 22% 13%;
+    --popover-foreground: 220 26% 92%;
+
+    --surface: 222 19% 15%;
+    --surface-foreground: 220 26% 92%;
+
+    --muted: 222 19% 15%;
+    --muted-foreground: 220 14% 64%;
+
+    --accent: 222 19% 19%;
+    --accent-foreground: 220 26% 94%;
+
+    --primary: 222 100% 68%;
+    --primary-foreground: 224 60% 10%;
+    --primary-hover: 222 84% 60%;
+    --primary-subtle: 223 46% 19%;
+    --primary-subtle-foreground: 222 100% 80%;
+
+    --secondary: 222 19% 17%;
+    --secondary-foreground: 220 26% 92%;
+
+    --success: 148 58% 46%;
+    --success-foreground: 150 80% 8%;
+    --success-subtle: 152 40% 15%;
+    --success-subtle-foreground: 148 62% 66%;
+
+    --warning: 38 92% 58%;
+    --warning-foreground: 30 90% 10%;
+    --warning-subtle: 34 44% 17%;
+    --warning-subtle-foreground: 40 92% 70%;
+
+    --destructive: 357 88% 64%;
+    --destructive-foreground: 0 60% 10%;
+    --destructive-subtle: 355 44% 19%;
+    --destructive-subtle-foreground: 357 94% 78%;
+
+    --info: 212 92% 64%;
+    --info-foreground: 215 70% 10%;
+    --info-subtle: 213 44% 20%;
+    --info-subtle-foreground: 212 94% 78%;
+
+    --border: 220 17% 20%;
+    --border-strong: 220 15% 28%;
+    --input: 220 16% 24%;
+    --ring: 222 100% 68%;
+
+    --sidebar: 224 24% 9%;
+    --sidebar-foreground: 215 20% 80%;
+    --sidebar-muted: 220 13% 56%;
+    --sidebar-accent: 222 20% 17%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 221 18% 17%;
+
+    /* Not a lightened copy of the light set — the dark band is NARROWER (L 0.48–0.67), so these are stepped
+       independently against the dark card surface. A flipped palette fails the band on every slot. */
+    --chart-1: 222 75% 63%;
+    --chart-2: 172 78% 35%;
+    --chart-3: 270 56% 63%;
+    --chart-4: 38 100% 37%;
+    --chart-5: 198 96% 42%;
+    --chart-6: 330 52% 58%;
+  }
 }
 
-* { border-color: theme(colors.border); }
+@layer base {
+  /* color-scheme is set per theme rather than globally, so native controls — scrollbars, date pickers, the
+     form autofill tint — follow the operator's choice instead of always rendering dark. */
+  :root { color-scheme: light; }
+  .dark { color-scheme: dark; }
 
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: #2a2f3c; border-radius: 6px; }
-::-webkit-scrollbar-thumb:hover { background: #343a4a; }
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  html, body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
+
+  body {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Tabular figures everywhere a number is compared against another number. A dashboard whose digits change
+     width makes a stable figure look like it is flickering. */
+  .tabular { font-variant-numeric: tabular-nums; }
+
+  ::-webkit-scrollbar { width: 11px; height: 11px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border-strong));
+    border-radius: 9999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.6); background-clip: content-box; }
+
+  /* One focus treatment for the whole product. Keyboard focus was previously visible on some controls and
+     invisible on others, which is the same as not having it. */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  /* The sidebar column keeps its own scrollbar tuned to its darker surface. */
+  .nav-scroll::-webkit-scrollbar-thumb {
+    background: hsl(var(--sidebar-border));
+    background-clip: content-box;
+  }
+  .nav-scroll::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--sidebar-muted) / 0.6);
+    background-clip: content-box;
+  }
+}

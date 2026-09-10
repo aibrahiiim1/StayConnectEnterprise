@@ -103,7 +103,7 @@ export function PostStayView({ canAct }: { canAct: boolean }) {
   return (
     <div className="space-y-6">
       <header className="space-y-1">
-        <h1 className="text-2xl font-semibold">Post-stay access</h1>
+        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Post-stay access</h1>
         <p className="text-sm text-muted-foreground">
           A post-stay PIN belongs to one stay episode, never to a room. When a guest is reinstated or the room
           is re-let, the previous PIN stops working on its own — nothing has to be revoked for that to happen.
@@ -111,7 +111,7 @@ export function PostStayView({ canAct }: { canAct: boolean }) {
       </header>
 
       {error && (
-        <div role="alert" className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800">
+        <div role="alert" className="rounded-md border border-destructive/25 bg-destructive-subtle p-3 text-sm text-destructive-subtle-foreground">
           {error}
         </div>
       )}
@@ -121,7 +121,7 @@ export function PostStayView({ canAct }: { canAct: boolean }) {
         // this value and cannot produce it again.
         <div
           role="status"
-          className="rounded border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 space-y-2"
+          className="rounded-md border border-warning/30 bg-warning-subtle p-4 text-sm text-warning-subtle-foreground space-y-2"
         >
           <div className="font-semibold">New PIN — shown once</div>
           <div className="font-mono text-2xl tracking-widest">{revealed.pin}</div>
@@ -132,7 +132,7 @@ export function PostStayView({ canAct }: { canAct: boolean }) {
           {revealed.validUntil && <p>Valid until {revealed.validUntil}</p>}
           <button
             type="button"
-            className="rounded border border-amber-400 px-3 py-1"
+            className="rounded border border-warning/40 px-3 py-1"
             onClick={() => setRevealed(null)}
           >
             I have given it to the guest
@@ -199,7 +199,7 @@ export function PostStayView({ canAct }: { canAct: boolean }) {
                 <button
                   type="button"
                   disabled={!canAct || row.status !== "ACTIVE"}
-                  className="rounded border border-red-400 px-2 py-1 text-red-700 disabled:opacity-40"
+                  className="rounded-md border border-destructive/40 px-2 py-1 text-destructive hover:bg-destructive-subtle disabled:opacity-50"
                   onClick={() => setDialog({ kind: "revoke", row })}
                 >
                   End access
@@ -263,8 +263,8 @@ export function PostStayView({ canAct }: { canAct: boolean }) {
               disabled={!canSubmit || busy}
               className={
                 dialog.kind === "revoke"
-                  ? "rounded bg-red-600 px-3 py-1 text-white disabled:opacity-40"
-                  : "rounded bg-slate-800 px-3 py-1 text-white disabled:opacity-40"
+                  ? "rounded-md bg-destructive px-3 py-1 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
+                  : "rounded-md bg-primary px-3 py-1 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-50"
               }
               onClick={submit}
             >

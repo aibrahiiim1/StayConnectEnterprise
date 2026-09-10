@@ -49,11 +49,11 @@ export default function PortalBrandingPage() {
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="mx-auto w-full max-w-4xl space-y-5">
       <div className="flex items-baseline justify-between mb-4">
         <div>
-          <div className="text-xs text-muted uppercase tracking-wider">Site</div>
-          <h1 className="text-2xl font-semibold">Portal branding</h1>
+          <div className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground">Site</div>
+          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Portal branding</h1>
         </div>
         {writable && <Button disabled={busy || !loaded} onClick={onSave}>{busy ? "Saving…" : "Save"}</Button>}
       </div>

@@ -35,10 +35,10 @@ export default function AuditPage() {
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="mx-auto w-full max-w-7xl space-y-5">
       <div className="mb-4">
-        <div className="text-xs text-muted uppercase tracking-wider">System</div>
-        <h1 className="text-2xl font-semibold">Audit log</h1>
+        <div className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground">System</div>
+        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Audit log</h1>
       </div>
 
       {err && <div className="text-err text-sm mb-4">{err}</div>}

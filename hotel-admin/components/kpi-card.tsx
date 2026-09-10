@@ -1,5 +1,11 @@
-import { Card, CardBody } from "@/components/ui/card";
+import { StatCard } from "@/components/ui/page";
 
+/**
+ * @deprecated Use `StatCard` from `@/components/ui/page`, which also carries an icon, a tone, a trend and a
+ * link to the screen the figure comes from.
+ *
+ * Kept as a thin alias so nothing that still imports KpiCard breaks; it now renders the new tile.
+ */
 export function KpiCard({
   label, value, hint,
 }: {
@@ -7,13 +13,5 @@ export function KpiCard({
   value: React.ReactNode;
   hint?: React.ReactNode;
 }) {
-  return (
-    <Card>
-      <CardBody>
-        <div className="text-xs text-muted uppercase tracking-wider">{label}</div>
-        <div className="text-2xl font-semibold mt-1">{value}</div>
-        {hint && <div className="text-xs text-muted mt-1">{hint}</div>}
-      </CardBody>
-    </Card>
-  );
+  return <StatCard label={label} value={value} hint={hint} />;
 }

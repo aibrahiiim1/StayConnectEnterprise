@@ -65,14 +65,14 @@ export function OperationalAlertsView({ canAct = true }: { canAct?: boolean }) {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-semibold">Operational alerts</h1>
+      <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Operational alerts</h1>
       <p className="text-sm">
         Alerts raised when a checkout could not be handled with the configured policy — for example an
         emergency grace fallback. Resolved alerts leave the queue.
       </p>
 
       {err && (
-        <p role="alert" className="text-sm text-red-600">
+        <p role="alert" className="text-sm text-destructive">
           {err}
         </p>
       )}

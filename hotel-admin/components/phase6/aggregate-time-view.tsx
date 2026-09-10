@@ -61,18 +61,18 @@ export function AggregateTimeView() {
 
   if (error) {
     return (
-      <div role="alert" className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800">
+      <div role="alert" className="rounded-md border border-destructive/25 bg-destructive-subtle p-3 text-sm text-destructive-subtle-foreground">
         {error}
       </div>
     );
   }
-  if (!rows) return <div className="text-sm text-muted">Loading…</div>;
+  if (!rows) return <div className="text-sm text-muted-foreground">Loading…</div>;
 
   return (
     <div className="space-y-6">
       <header className="space-y-1">
-        <h1 className="text-2xl font-semibold">Online-time budgets</h1>
-        <p className="text-sm text-muted">
+        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Online-time budgets</h1>
+        <p className="text-sm text-muted-foreground">
           These packages are sold as an amount of connected time rather than a period. The time left counts
           down only while a device is actually connected — but the end date arrives either way, and any time
           left at that point is lost.
@@ -80,7 +80,7 @@ export function AggregateTimeView() {
       </header>
 
       {rows.length === 0 ? (
-        <p className="text-sm text-muted" data-testid="empty">
+        <p className="text-sm text-muted-foreground" data-testid="empty">
           No package on this property uses an online-time budget.
         </p>
       ) : (

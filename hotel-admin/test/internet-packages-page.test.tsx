@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 // Mock the edged API client. ApiError is a real class so the page's `e instanceof ApiError` guard works.
 vi.mock("@/lib/api", () => {
@@ -82,18 +83,30 @@ describe("InternetPackagesPage", () => {
     expect(screen.getByText(/#1/)).toBeInTheDocument();
   });
 
+  // THE STEP-UP IS A DIALOG, NOT TWO window.prompt() CALLS IN A ROW.
+  //
+  // It used to prompt for a reason and then, separately, for a password. Both appeared in a browser dialog that
+  // echoes what you type, neither could say what the action would do, and cancelling the second left the operator
+  // with no idea whether the first had taken effect. The CONTRACT the backend enforces is unchanged and is what
+  // these two tests pin: the API is called with active:false plus a reason and a password, and it is not called
+  // at all until both are supplied.
   it("deactivation requires reason + password step-up before calling the API", async () => {
     g.mockImplementation((path: string) => {
       if (path === "/commercial-packages") return Promise.resolve(list([{ package_id: "pk1", code: "FREEWIFI", active: true, current_revision_id: "r1", revision_count: 1 }]));
       return Promise.resolve(list([]));
     });
     p.mockResolvedValue({});
-    const promptSpy = vi.spyOn(window, "prompt").mockReturnValueOnce("bad package").mockReturnValueOnce("secretpw");
     render(<InternetPackagesPage />);
     await screen.findByText("FREEWIFI");
     fireEvent.click(screen.getByRole("button", { name: /^disable$/i }));
+
+    // Nothing has been sent yet: the dialog is a confirmation, not a fire-and-confirm.
+    expect(p).not.toHaveBeenCalled();
+    fireEvent.change(await screen.findByLabelText(/why are you disabling it/i), { target: { value: "bad package" } });
+    fireEvent.change(screen.getByLabelText(/confirm your password/i), { target: { value: "secretpw" } });
+    fireEvent.click(screen.getByRole("button", { name: /stop offering it/i }));
+
     await waitFor(() => expect(p).toHaveBeenCalled());
-    expect(promptSpy).toHaveBeenCalledTimes(2); // reason then password
     expect(p).toHaveBeenCalledWith("/commercial-packages/pk1/active", { active: false, reason: "bad package", password: "secretpw" });
   });
 
@@ -102,12 +115,28 @@ describe("InternetPackagesPage", () => {
       ? Promise.resolve(list([{ package_id: "pk1", code: "FREEWIFI", active: true, current_revision_id: "r1", revision_count: 1 }]))
       : Promise.resolve(list([])));
     p.mockResolvedValue({});
-    vi.spyOn(window, "prompt").mockReturnValue(null); // cancel
     render(<InternetPackagesPage />);
     await screen.findByText("FREEWIFI");
     fireEvent.click(screen.getByRole("button", { name: /^disable$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^cancel$/i }));
     await new Promise((r) => setTimeout(r, 10));
     expect(p).not.toHaveBeenCalled();
+  });
+
+  it("cannot confirm the disable until both the reason and the password are given", async () => {
+    g.mockImplementation((path: string) => path === "/commercial-packages"
+      ? Promise.resolve(list([{ package_id: "pk1", code: "FREEWIFI", active: true, current_revision_id: "r1", revision_count: 1 }]))
+      : Promise.resolve(list([])));
+    render(<InternetPackagesPage />);
+    await screen.findByText("FREEWIFI");
+    fireEvent.click(screen.getByRole("button", { name: /^disable$/i }));
+
+    const confirm = await screen.findByRole("button", { name: /stop offering it/i });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/why are you disabling it/i), { target: { value: "superseded" } });
+    expect(confirm).toBeDisabled(); // a reason alone is not the step-up
+    fireEvent.change(screen.getByLabelText(/confirm your password/i), { target: { value: "pw" } });
+    expect(confirm).toBeEnabled();
   });
 
   it("inspection tab renders sanitized quotes/purchases with NO guest PII", async () => {
@@ -117,8 +146,13 @@ describe("InternetPackagesPage", () => {
       return Promise.resolve(list([]));
     });
     render(<InternetPackagesPage />);
-    fireEvent.click(await screen.findByRole("button", { name: /guest activity/i }));
-    expect(await screen.findByText("q1")).toBeInTheDocument();
+    // userEvent, not fireEvent: the tab strip is a real Radix Tabs widget now and activates on the pointer
+    // sequence a person produces. A bare click event is not that sequence, so fireEvent would leave the first
+    // tab selected and the assertion below would fail for a reason that has nothing to do with the product.
+    await userEvent.click(await screen.findByRole("tab", { name: /guest activity/i }));
+    // Long ids are rendered as copyable, truncated chips now, so the assertion matches the shortened form the
+    // operator actually sees rather than the full string.
+    expect(await screen.findByText(/^q1/)).toBeInTheDocument();
     expect(screen.getByText("GRANTED")).toBeInTheDocument();
     const html = document.body.innerHTML.toLowerCase();
     for (const pii of ["auth_context", "auth-context", "device_id", "guest_network", "mac", "subject", "voucher_id", "guest_account", "password"]) {

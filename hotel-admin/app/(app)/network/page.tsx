@@ -12,6 +12,7 @@ import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ConfirmDialog } from "@/components/ui/dialog";
 import { Plus } from "lucide-react";
 import { canWrite } from "@/lib/roles";
 import { errMsg } from "@/lib/utils";
@@ -78,18 +79,24 @@ export default function NetworkPage() {
     api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => {});
   }, []);
 
-  async function onDisable(id: string) {
-    if (!confirm("Disable this guest network? Apply the change to take it offline.")) return;
-    setActing(id); setErr(null);
-    try { await api.post(`/network/guest-networks/${id}/disable`); reload(); }
-    catch (e) { setErr(errMsg(e)); }
-    finally { setActing(null); }
-  }
+  // THESE TWO TOOK A window.confirm, for actions that take a property's Wi-Fi offline.
+  //
+  // "Delete this guest network permanently?" was the entire explanation offered before removing the network every
+  // guest on a VLAN is connected through. A browser confirm also cannot say the thing that matters most here: in
+  // this product a network change is STAGED, and nothing happens to a guest until it is applied — which is the
+  // difference between a scary button and a safe one, and it was nowhere on screen.
+  const [confirming, setConfirming] = useState<{ kind: "disable" | "delete"; net: GuestNetwork } | null>(null);
 
-  async function onDelete(id: string) {
-    if (!confirm("Delete this guest network permanently?")) return;
-    setActing(id); setErr(null);
-    try { await api.del(`/network/guest-networks/${id}`); reload(); }
+  async function applyStagedRemoval() {
+    if (!confirming) return;
+    const { kind, net } = confirming;
+    setActing(net.id); setErr(null);
+    try {
+      if (kind === "disable") await api.post(`/network/guest-networks/${net.id}/disable`);
+      else await api.del(`/network/guest-networks/${net.id}`);
+      setConfirming(null);
+      reload();
+    }
     catch (e) { setErr(errMsg(e)); }
     finally { setActing(null); }
   }
@@ -139,11 +146,11 @@ export default function NetworkPage() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="mx-auto w-full max-w-7xl space-y-5">
       <div className="flex items-baseline justify-between mb-4">
         <div>
-          <div className="text-xs text-muted uppercase tracking-wider">Networking</div>
-          <h1 className="text-2xl font-semibold">Guest networks</h1>
+          <div className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground">Networking</div>
+          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Guest networks</h1>
         </div>
         {writable && (
           <div className="flex gap-2">
@@ -151,7 +158,7 @@ export default function NetworkPage() {
             <Button variant="secondary" disabled={busy} onClick={onApply}>Apply changes</Button>
             <Link
               href="/network/new"
-              className="inline-flex items-center gap-2 h-9 px-4 text-sm rounded-md bg-brand text-white hover:bg-brandDim"
+              className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
             >
               <Plus size={14} /> New guest network
             </Link>
@@ -163,7 +170,7 @@ export default function NetworkPage() {
       {msg && <div className="text-ok text-sm mb-4">{msg}</div>}
 
       {pending && (
-        <div className="mb-6 rounded-md border border-[#6b4e1c] bg-[#3a2a0e] text-warn text-sm px-4 py-3 flex items-center justify-between gap-4">
+        <div className="mb-6 rounded-md border border-warning/30 bg-warning-subtle px-4 py-3 text-sm text-warning-subtle-foreground flex items-center justify-between gap-4">
           <div>
             <div className="font-medium">Configuration pending confirmation</div>
             <div className="text-xs mt-0.5">
@@ -187,14 +194,14 @@ export default function NetworkPage() {
             {validation && (
               <div>
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="text-muted">Validation</span>
+                  <span className="text-muted-foreground">Validation</span>
                   <Badge tone={validation.ok ? "ok" : "err"}>{validation.ok ? "ok" : "issues"}</Badge>
                 </div>
                 {validation.issues && validation.issues.length > 0 && (
                   <ul className="space-y-1">
                     {validation.issues.map((i, k) => (
                       <li key={k} className="text-err text-xs">
-                        <span className="font-mono">{i.field}</span> — {i.message} <span className="text-muted">({i.code})</span>
+                        <span className="font-mono">{i.field}</span> — {i.message} <span className="text-muted-foreground">({i.code})</span>
                       </li>
                     ))}
                   </ul>
@@ -209,7 +216,7 @@ export default function NetworkPage() {
                     <li key={k} className="flex items-center gap-2 text-xs">
                       <Badge tone={h.ok ? "ok" : "err"}>{h.ok ? "ok" : "fail"}</Badge>
                       <span className="font-mono">{h.name}</span>
-                      {h.detail && <span className="text-muted">{h.detail}</span>}
+                      {h.detail && <span className="text-muted-foreground">{h.detail}</span>}
                     </li>
                   ))}
                 </ul>
@@ -237,9 +244,9 @@ export default function NetworkPage() {
                   <TR key={n.id}>
                     <TD>
                       <Link href={`/network/${n.id}`} className="hover:text-brand">{n.name}</Link>
-                      {n.description && <div className="text-xs text-muted">{n.description}</div>}
+                      {n.description && <div className="text-xs text-muted-foreground">{n.description}</div>}
                     </TD>
-                    <TD className="text-muted">{n.ssid_label || "—"}</TD>
+                    <TD className="text-muted-foreground">{n.ssid_label || "—"}</TD>
                     <TD>
                       {n.network_type === "vlan"
                         ? <Badge tone="info">VLAN {n.vlan_id ?? "?"}</Badge>
@@ -252,14 +259,14 @@ export default function NetworkPage() {
                     <TD className="font-mono text-xs text-muted">{poolSummary(n)}</TD>
                     <TD>{n.captive_portal_enabled ? <Badge tone="info">portal</Badge> : <Badge tone="default">open</Badge>}</TD>
                     <TD>{n.enabled ? <Badge tone="ok">on</Badge> : <Badge tone="default">off</Badge>}</TD>
-                    <TD className="text-muted">{status[n.id]?.active_clients ?? "—"}</TD>
+                    <TD className="text-muted-foreground">{status[n.id]?.active_clients ?? "—"}</TD>
                     <TD className="text-right space-x-2 whitespace-nowrap">
                       <Link href={`/network/${n.id}`} className="text-sm text-muted hover:text-text">Edit</Link>
                       {writable && n.enabled && (
-                        <Button size="sm" variant="ghost" disabled={acting === n.id} onClick={() => onDisable(n.id)}>Disable</Button>
+                        <Button size="sm" variant="ghost" disabled={acting === n.id} onClick={() => setConfirming({ kind: "disable", net: n })}>Disable</Button>
                       )}
                       {writable && !n.enabled && (
-                        <Button size="sm" variant="ghost" disabled={acting === n.id} onClick={() => onDelete(n.id)}>Delete</Button>
+                        <Button size="sm" variant="ghost" disabled={acting === n.id} onClick={() => setConfirming({ kind: "delete", net: n })}>Delete</Button>
                       )}
                     </TD>
                   </TR>
@@ -269,6 +276,25 @@ export default function NetworkPage() {
           )}
         </CardBody>
       </Card>
+
+      <ConfirmDialog
+        open={confirming !== null}
+        onOpenChange={(v) => !v && setConfirming(null)}
+        title={
+          confirming?.kind === "delete"
+            ? `Delete the network "${confirming.net.name}"?`
+            : `Take "${confirming?.net.name}" offline?`
+        }
+        description={
+          confirming?.kind === "delete"
+            ? "The network and its address ranges are removed from the staged configuration. Nothing happens to guests until you apply the change — and once applied, any device on this network loses its connection and cannot reconnect."
+            : "The network is marked disabled in the staged configuration. Guests on it stay connected until you apply the change; after that, nobody can join it."
+        }
+        confirmLabel={confirming?.kind === "delete" ? "Delete network" : "Disable network"}
+        confirmVariant="danger"
+        busy={acting === confirming?.net.id}
+        onConfirm={applyStagedRemoval}
+      />
     </div>
   );
 }

@@ -47,10 +47,10 @@ function ageText(seconds: number): string {
 
 function Metric({ label, value, hint }: { label: string; value: number | string; hint?: string }) {
   return (
-    <div className="rounded-md border border-slate-200 p-3">
-      <dt className="text-xs uppercase tracking-wide text-slate-500">{label}</dt>
+    <div className="rounded-md border border-border p-3">
+      <dt className="text-xs uppercase tracking-wide text-muted-foreground">{label}</dt>
       <dd className="mt-1 text-2xl font-semibold tabular-nums">{value}</dd>
-      {hint ? <p className="mt-1 text-xs text-slate-500">{hint}</p> : null}
+      {hint ? <p className="mt-1 text-xs text-muted-foreground">{hint}</p> : null}
     </div>
   );
 }
@@ -87,11 +87,11 @@ export function FinancialHealthView() {
         <CardBody>
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 className="text-sm font-medium text-slate-500">Financial subsystem</h2>
+              <h2 className="text-sm font-medium text-muted-foreground">Financial subsystem</h2>
               <p className="mt-1 flex items-center gap-2 text-3xl font-semibold">
                 <Badge tone={STATUS_TONE[health.status]}>{health.status.replace(/_/g, " ")}</Badge>
               </p>
-              <ul className="mt-3 space-y-1 text-sm text-slate-700">
+              <ul className="mt-3 space-y-1 text-sm text-foreground">
                 {health.reasons.length === 0 ? (
                   <li>Nothing needs attention.</li>
                 ) : (
@@ -110,7 +110,7 @@ export function FinancialHealthView() {
 
       <Card>
         <CardBody>
-          <h3 className="mb-3 text-sm font-medium text-slate-500">PMS posting rail</h3>
+          <h3 className="mb-3 text-sm font-medium text-muted-foreground">PMS posting rail</h3>
           <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Metric label="Queued" value={health.outbox_queued} />
             <Metric label="In flight" value={health.outbox_in_flight} />
@@ -125,7 +125,7 @@ export function FinancialHealthView() {
 
       <Card>
         <CardBody>
-          <h3 className="mb-3 text-sm font-medium text-slate-500">Online payment rail</h3>
+          <h3 className="mb-3 text-sm font-medium text-muted-foreground">Online payment rail</h3>
           <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Metric label="Created" value={health.payments_created} />
             <Metric label="Pending" value={health.payments_pending} />
@@ -141,7 +141,7 @@ export function FinancialHealthView() {
 
       <Card>
         <CardBody>
-          <h3 className="mb-3 text-sm font-medium text-slate-500">Configuration</h3>
+          <h3 className="mb-3 text-sm font-medium text-muted-foreground">Configuration</h3>
           <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Metric
               label="Payment account"

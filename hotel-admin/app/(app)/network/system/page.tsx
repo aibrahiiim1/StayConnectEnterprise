@@ -10,15 +10,16 @@ import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
+import { ConfirmDialog } from "@/components/ui/dialog";
 import { canWrite } from "@/lib/roles";
 import { errMsg } from "@/lib/utils";
 import { Router, AlertTriangle, CheckCircle2, XCircle, Download, RefreshCw, Archive, Network, ExternalLink } from "lucide-react";
 
 function Dot({ ok }: { ok: boolean }) {
-  return <span className={ok ? "text-emerald-600" : "text-red-600"}>{ok ? "●" : "●"}</span>;
+  return <span className={ok ? "text-success" : "text-destructive"} aria-hidden>●</span>;
 }
 function StateBadge({ ok, label }: { ok: boolean; label: string }) {
-  return <Badge className={ok ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"}>{label}</Badge>;
+  return <Badge className={ok ? "bg-success-subtle text-success-subtle-foreground" : "bg-destructive-subtle text-destructive-subtle-foreground"}>{label}</Badge>;
 }
 
 export default function NetworkSettingsPage() {
@@ -129,12 +130,16 @@ export default function NetworkSettingsPage() {
     } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
   }
 
-  async function doRollback() {
-    const pw = prompt("Confirm your password to roll back:");
-    if (!pw) return;
+  // THE PASSWORD WAS GOING INTO A window.prompt(), which shows what you type. On this page in particular that is
+  // the worst place for it: rolling back the appliance's own WAN configuration is what an operator reaches for
+  // when they have just locked themselves out, often with somebody standing next to them.
+  const [rollingBack, setRollingBack] = useState(false);
+
+  async function doRollback({ password }: { reason: string; password: string }) {
     setBusy(true); setErr(null);
     try {
-      await api.post("/network/system/rollback", { password: pw });
+      await api.post("/network/system/rollback", { password });
+      setRollingBack(false);
       if (timer.current) clearInterval(timer.current);
       setApplyResp(null); setCountdown(0);
       await load(); loadHistory();
@@ -155,28 +160,28 @@ export default function NetworkSettingsPage() {
     a.click();
   }
 
-  if (!state) return <div className="p-6 text-sm text-neutral-500">{err ?? "Loading network settings…"}</div>;
+  if (!state) return <div className="p-6 text-sm text-muted-foreground">{err ?? "Loading network settings…"}</div>;
 
   const wanChanged = wanIp !== state.wan.ip || Number(wanPrefix) !== state.wan.prefix_len || wanGw !== state.wan.gateway || wanDns !== (state.wan.dns || []).join(", ");
   const mgmtWillChange = wanIp !== state.wan.ip;
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold">Network settings</h1>
-          <p className="text-sm text-neutral-500">Configure the appliance WAN / management and guest LAN. Changes preview, apply with automatic rollback, and are audited.</p>
+          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Network settings</h1>
+          <p className="text-sm text-muted-foreground">Configure the appliance WAN / management and guest LAN. Changes preview, apply with automatic rollback, and are audited.</p>
         </div>
         <Button variant="secondary" onClick={() => { load(); loadHistory(); }}><RefreshCw className="mr-1 h-4 w-4" />Refresh</Button>
       </div>
 
-      {err && <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{err}</div>}
+      {err && <div className="rounded-md border border-destructive/25 bg-destructive-subtle p-3 text-sm text-destructive-subtle-foreground">{err}</div>}
 
       {/* pending banner */}
       {state.pending || applyResp?.state === "pending_confirmation" ? (
-        <div className="rounded border border-amber-300 bg-amber-50 p-4">
-          <div className="flex items-center gap-2 font-medium text-amber-900"><AlertTriangle className="h-5 w-5" />Change applied — confirmation required</div>
-          <p className="mt-1 text-sm text-amber-800">
+        <div className="rounded border border-warning/30 bg-warning-subtle p-4">
+          <div className="flex items-center gap-2 font-medium text-warning-subtle-foreground"><AlertTriangle className="h-5 w-5" />Change applied — confirmation required</div>
+          <p className="mt-1 text-sm text-warning-subtle-foreground">
             The new configuration is live but will <b>automatically roll back in {countdown}s</b> unless you confirm.
             {(applyResp?.management_url || state.pending?.management_url) && (
               <> If you changed the WAN IP, reconnect at <b>{applyResp?.management_url || state.pending?.management_url}</b> and confirm there.</>
@@ -184,7 +189,9 @@ export default function NetworkSettingsPage() {
           </p>
           <div className="mt-3 flex gap-2">
             <Button onClick={doConfirm} disabled={busy}>Keep this configuration</Button>
-            <Button variant="secondary" onClick={doRollback} disabled={busy}>Roll back now</Button>
+            <Button variant="secondary" onClick={() => { setErr(null); setRollingBack(true); }} disabled={busy}>
+              Roll back now
+            </Button>
           </div>
         </div>
       ) : null}
@@ -193,7 +200,7 @@ export default function NetworkSettingsPage() {
       <div className="grid gap-4 md:grid-cols-2">
         {/* WAN card */}
         <Card>
-          <CardHeader><CardTitle className="flex items-center gap-2"><Router className="h-4 w-4" />WAN / Management <span className="text-xs font-normal text-neutral-400">({state.wan.interface})</span></CardTitle></CardHeader>
+          <CardHeader><CardTitle className="flex items-center gap-2"><Router className="h-4 w-4" />WAN / Management <span className="text-xs font-normal text-muted-foreground">({state.wan.interface})</span></CardTitle></CardHeader>
           <CardBody className="space-y-1 text-sm">
             <Row k="Physical interface" v={<code>{state.wan.interface}</code>} />
             <Row k="MAC address" v={<code>{state.wan.mac}</code>} />
@@ -203,14 +210,14 @@ export default function NetworkSettingsPage() {
             <Row k="Subnet mask" v={<code>{state.wan.netmask}</code>} />
             <Row k="Default gateway" v={<code>{state.wan.gateway}</code>} />
             <Row k="DNS" v={<code>{state.wan.dns.join(", ")}</code>} />
-            <Row k="Management URL" v={<a className="text-blue-600 underline" href={state.wan.management_url}>{state.wan.management_url}</a>} />
+            <Row k="Management URL" v={<a className="text-primary underline" href={state.wan.management_url}>{state.wan.management_url}</a>} />
             <Row k="Outbound interface" v={<code>{state.wan.outbound_interface}</code>} />
             <Row k="Connectivity" v={<span className="flex gap-3">
               <span><Dot ok={state.wan.connectivity.gateway_reachable} /> gateway</span>
               <span><Dot ok={state.wan.connectivity.internet_ok} /> internet</span>
               <span><Dot ok={state.wan.connectivity.dns_ok} /> DNS</span>
             </span>} />
-            {state.wan.drift && <div className="text-amber-700">⚠ runtime IP differs from saved config ({state.wan.persistent_ip})</div>}
+            {state.wan.drift && <div className="text-warning-subtle-foreground">⚠ runtime IP differs from saved config ({state.wan.persistent_ip})</div>}
           </CardBody>
         </Card>
 
@@ -219,7 +226,7 @@ export default function NetworkSettingsPage() {
         <Card>
           <CardHeader><CardTitle className="flex items-center gap-2"><Network className="h-4 w-4" />Guest Networks</CardTitle></CardHeader>
           <CardBody className="space-y-3 text-sm">
-            <p className="text-muted">
+            <p className="text-muted-foreground">
               Guest WiFi is served by the <strong>Guest Networks</strong> you create — each has its own VLAN, bridge,
               gateway, DHCP pool and captive-portal settings. Configure and check them here (this page only covers the
               WAN uplink and the legacy base bridge):
@@ -232,7 +239,7 @@ export default function NetworkSettingsPage() {
                 <ExternalLink size={14} /> DHCP &amp; leases — per-network DHCP pools, reservations, leases
               </a>
             </div>
-            <p className="text-xs text-muted">
+            <p className="text-xs text-muted-foreground">
               Example: a guest network <code>CHR</code> → VLAN 90 → <code>ens192.90</code> → bridge <code>br-g90</code>
               {" "}→ gateway <code>10.20.0.1/22</code> → DHCP pool <code>10.20.0.100–10.20.3.250</code>. Each guest
               network shows its own DHCP status on those pages.
@@ -281,31 +288,31 @@ export default function NetworkSettingsPage() {
           <CardHeader><CardTitle>Change configuration</CardTitle></CardHeader>
           <CardBody className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2">
-              <fieldset className="space-y-2 rounded border border-neutral-200 p-3">
-                <legend className="px-1 text-xs font-semibold uppercase text-neutral-500">WAN / Management ({state.wan.interface})</legend>
+              <fieldset className="space-y-2 rounded border border-border p-3">
+                <legend className="px-1 text-xs font-semibold uppercase text-muted-foreground">WAN / Management ({state.wan.interface})</legend>
                 <Field label="IP address"><Input value={wanIp} onChange={(e) => setWanIp(e.target.value)} /></Field>
                 <Field label="Prefix length"><Input type="number" value={wanPrefix} onChange={(e) => setWanPrefix(Number(e.target.value))} /></Field>
                 <Field label="Default gateway"><Input value={wanGw} onChange={(e) => setWanGw(e.target.value)} /></Field>
                 <Field label="DNS (comma separated)"><Input value={wanDns} onChange={(e) => setWanDns(e.target.value)} /></Field>
               </fieldset>
-              <fieldset className="space-y-2 rounded border border-neutral-200 p-3">
-                <legend className="px-1 text-xs font-semibold uppercase text-neutral-500">Base LAN / Legacy bridge ({state.lan.bridge})</legend>
+              <fieldset className="space-y-2 rounded border border-border p-3">
+                <legend className="px-1 text-xs font-semibold uppercase text-muted-foreground">Base LAN / Legacy bridge ({state.lan.bridge})</legend>
                 <Field label="Base gateway IP"><Input value={lanIp} onChange={(e) => setLanIp(e.target.value)} /></Field>
                 <Field label="Prefix length"><Input type="number" value={lanPrefix} onChange={(e) => setLanPrefix(Number(e.target.value))} /></Field>
                 {/* Carryover A — DHCP has ONE source of truth: the Guest Networks
                     pages (Site DB → Kea). Shown read-only here to avoid a second,
                     conflicting editor for the same Kea scope. */}
-                <div className="rounded border border-neutral-200 bg-neutral-50 p-2 text-xs text-neutral-600">
-                  <div className="mb-1 font-semibold uppercase text-neutral-500">DHCP (read-only)</div>
+                <div className="rounded-md border border-border bg-surface p-2 text-xs text-muted-foreground">
+                  <div className="mb-1 font-semibold uppercase text-muted-foreground">DHCP (read-only)</div>
                   <div>This is the legacy base bridge. Guest VLAN DHCP scopes, lease times, reservations and Option 114
                     are managed per guest network in{" "}
-                    <a href="/network/dhcp" className="text-blue-600 underline">Guest Networks → DHCP &amp; leases</a> (single source of truth).</div>
+                    <a href="/network/dhcp" className="text-primary underline">Guest Networks → DHCP &amp; leases</a> (single source of truth).</div>
                 </div>
               </fieldset>
             </div>
 
             {mgmtWillChange && (
-              <div className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+              <div className="rounded-md border border-warning/30 bg-warning-subtle p-3 text-sm text-warning-subtle-foreground">
                 <b>⚠ Changing the WAN IP changes the management URL.</b> After applying you must reconnect at{" "}
                 <b>https://{wanIp}</b> and confirm there, or the change auto-rolls-back.
               </div>
@@ -319,11 +326,11 @@ export default function NetworkSettingsPage() {
             {validation && (
               <div className="space-y-3">
                 {validation.validation.ok ? (
-                  <div className="flex items-center gap-2 text-emerald-700"><CheckCircle2 className="h-4 w-4" />Configuration is valid.</div>
+                  <div className="flex items-center gap-2 text-success-subtle-foreground"><CheckCircle2 className="h-4 w-4" />Configuration is valid.</div>
                 ) : (
                   <div className="space-y-1">
-                    <div className="flex items-center gap-2 text-red-700"><XCircle className="h-4 w-4" />Validation failed:</div>
-                    <ul className="ml-6 list-disc text-sm text-red-700">
+                    <div className="flex items-center gap-2 text-destructive"><XCircle className="h-4 w-4" />Validation failed:</div>
+                    <ul className="ml-6 list-disc text-sm text-destructive">
                       {validation.validation.issues?.map((i, n) => <li key={n}><code>{i.field}</code> — {i.message}</li>)}
                     </ul>
                   </div>
@@ -335,7 +342,7 @@ export default function NetworkSettingsPage() {
                 <div className="text-sm">New management URL: <b>{validation.management_url}</b></div>
 
                 {validation.validation.ok && (
-                  <div className="flex items-end gap-2 rounded border border-neutral-200 bg-neutral-50 p-3">
+                  <div className="flex items-end gap-2 rounded border border-border bg-surface p-3">
                     <Field label="Confirm password to apply">
                       <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="your password" />
                     </Field>
@@ -360,8 +367,8 @@ export default function NetworkSettingsPage() {
           <CardBody className="space-y-3">
             {Object.entries(diag).map(([k, v]) => (
               <div key={k}>
-                <div className="text-xs font-semibold uppercase text-neutral-500">{k}</div>
-                <pre className="overflow-x-auto rounded bg-neutral-900 p-2 text-xs text-neutral-100">{v}</pre>
+                <div className="text-xs font-semibold uppercase text-muted-foreground">{k}</div>
+                <pre className="overflow-x-auto rounded-md border border-border bg-surface p-2 font-mono text-xs text-foreground">{v}</pre>
               </div>
             ))}
           </CardBody>
@@ -381,27 +388,39 @@ export default function NetworkSettingsPage() {
                   <TD>{h.apply_result || h.confirm_result || h.rollback_result || h.failure_reason || "—"}</TD>
                 </TR>
               ))}
-              {history.length === 0 && <TR><TD colSpan={6} className="text-neutral-400">No changes recorded yet.</TD></TR>}
+              {history.length === 0 && <TR><TD colSpan={6} className="text-muted-foreground">No changes recorded yet.</TD></TR>}
             </tbody>
           </Table>
         </CardBody>
       </Card>
+
+      <ConfirmDialog
+        open={rollingBack}
+        onOpenChange={(v) => !v && setRollingBack(false)}
+        title="Roll back the network configuration?"
+        description="The appliance returns to the WAN and LAN settings that were in force before this change. If you are connected through the address this change created, you will lose this page and have to reach the appliance on its previous address."
+        confirmLabel="Roll back now"
+        confirmVariant="danger"
+        busy={busy}
+        requirePassword
+        onConfirm={doRollback}
+      />
     </div>
   );
 }
 
 function Row({ k, v }: { k: string; v: React.ReactNode }) {
-  return <div className="flex justify-between gap-4 border-b border-neutral-100 py-1"><span className="text-neutral-500">{k}</span><span className="text-right">{v}</span></div>;
+  return <div className="flex justify-between gap-4 border-b border-border py-1"><span className="text-muted-foreground">{k}</span><span className="text-right">{v}</span></div>;
 }
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div className="space-y-1"><Label>{label}</Label>{children}</div>;
 }
 function BeforeAfter({ title, before, after }: { title: string; before: string; after: string }) {
   return (
-    <div className="rounded border border-neutral-200 p-2 text-xs">
+    <div className="rounded border border-border p-2 text-xs">
       <div className="font-semibold">{title}</div>
-      <div className="text-neutral-500">before: <code>{before}</code></div>
-      <div className="text-neutral-900">after: <code>{after}</code></div>
+      <div className="text-muted-foreground">before: <code>{before}</code></div>
+      <div className="text-foreground">after: <code>{after}</code></div>
     </div>
   );
 }

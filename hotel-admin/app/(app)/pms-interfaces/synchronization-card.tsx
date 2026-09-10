@@ -1,6 +1,6 @@
 "use client";
 
-// THE SYNCHRONIZATION SECTION — what is happening with the guest list, in words a duty manager can act on.
+// THE GUEST-LIST REFRESH — what is happening with the guest list, in words a duty manager can act on.
 //
 // The hard rule here is about what is NOT displayed. Protel's FIAS gives no record total before the end of a
 // sync: there is no field carrying it and no way to derive it. So there is no progress bar, no percentage and
@@ -11,19 +11,33 @@
 //
 // The polling exists for the same reason the section does. A sync takes as long as the hotel's roster takes,
 // and an operator who has to keep pressing refresh cannot tell a slow sync from a stalled one.
+//
+// WHAT CHANGED: the reason and the password used to be two inline fields sitting beside the button, so a
+// read-only status page asked for a password with nothing saying what it was for, and the reason dropdown
+// looked like a filter on the table above it. Both now live in a confirmation dialog that states what the
+// action does — and critically, that the current guest list stays in use until the new one is complete, which
+// is the thing an operator hesitates over before pressing it.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError, type PmsInterfaceHealth } from "@/lib/api";
+import { api, type PmsInterfaceHealth } from "@/lib/api";
+import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Select, Field } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { Separator } from "@/components/ui/misc";
+import { ConfirmDialog } from "@/components/ui/dialog";
+import { RefreshCw } from "lucide-react";
 
 // Stages, in the order they occur. The server sends the token; the wording lives here so it can be phrased for
 // hotel staff rather than for engineers, and an unrecognised token falls back rather than rendering raw.
 const STAGE_WORDS: Record<string, string> = {
-  REQUESTING_FULL_SYNC: "Requesting a full sync",
+  REQUESTING_FULL_SYNC: "Requesting the full list",
   WAITING_FOR_PMS: "Waiting for the PMS to start sending",
   RECEIVING: "Receiving the guest list",
   PUBLISHING: "Publishing the new guest list",
   COMPLETE: "Complete",
-  APPLYING: "Applying guest list",
+  APPLYING: "Applying the guest list",
   FAILED: "Failed",
   INTERRUPTED: "Interrupted",
 };
@@ -62,10 +76,10 @@ export function SynchronizationCard({
   onRefreshed: () => void | Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const [err, setErr] = useState<unknown>(null);
   const [note, setNote] = useState<string | null>(null);
   const [reason, setReason] = useState(REASONS[0].value);
-  const [password, setPassword] = useState("");
+  const [confirming, setConfirming] = useState(false);
 
   const stage = effectiveStage(health?.sync_stage ?? "", health?.materialization_ready);
   const active = ACTIVE_STAGES.has(stage);
@@ -95,154 +109,160 @@ export function SynchronizationCard({
   const canRequest =
     health?.transport_status === "CONNECTED" && !active && health?.sync_status !== "RESYNC_IN_PROGRESS";
 
-  const request = useCallback(async () => {
-    setBusy(true);
-    setErr(null);
-    setNote(null);
-    try {
-      const r = await api.post<{ note?: string }>(`/pms-interfaces/${id}/full-resync`, {
-        reason_code: reason,
-        password,
-      });
-      setPassword("");
-      setNote(r?.note ?? "The request is recorded.");
-      await refreshRef.current();
-    } catch (e) {
-      // The server names the precondition that stopped it — "the PMS is not connected" rather than a bare
-      // refusal — because a button that looks like it should work and silently does nothing is how an
-      // operator concludes the product is broken.
-      setErr(e instanceof ApiError ? e.message : (e as Error)?.message ?? "The request could not be recorded");
-    } finally {
-      setBusy(false);
-    }
-  }, [id, reason, password]);
+  const request = useCallback(
+    async (password: string) => {
+      setBusy(true);
+      setErr(null);
+      setNote(null);
+      try {
+        const r = await api.post<{ note?: string }>(`/pms-interfaces/${id}/full-resync`, {
+          reason_code: reason,
+          password,
+        });
+        setConfirming(false);
+        setNote(r?.note ?? "The refresh has been requested. Its progress appears above as the PMS responds.");
+        await refreshRef.current();
+      } catch (e) {
+        // The server names the precondition that stopped it — "the PMS is not connected" rather than a bare
+        // refusal — because a button that looks like it should work and silently does nothing is how an
+        // operator concludes the product is broken.
+        setErr(e);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [id, reason],
+  );
 
   return (
-    <section className="rounded-lg border p-4 space-y-4">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+    <Card>
+      <CardHeader>
         <div>
-          <h2 className="font-semibold">Synchronization</h2>
-          <p className="text-sm text-muted mt-1 max-w-2xl">
-            The first successful connection to the property management system automatically loads the full
-            guest list. <strong>Full Resync Now</strong> asks for another complete, fresh copy afterwards —
-            use it if the list here looks out of date.
+          <CardTitle>Guest list refresh</CardTitle>
+          <p className="mt-0.5 max-w-2xl text-xs text-muted-foreground">
+            The first successful connection loads the full guest list automatically. Refresh it again if the list
+            here looks out of date — after PMS maintenance, for example.
           </p>
         </div>
-        <span className="text-xs rounded-full border px-2 py-1" aria-live="polite">
-          {active ? "Updating automatically…" : "Watching for changes"}
+        <span aria-live="polite">
+          {active ? (
+            <Badge tone="info" dot>Updating automatically</Badge>
+          ) : (
+            <span className="text-xs text-muted-foreground">Watching for changes</span>
+          )}
         </span>
-      </div>
+      </CardHeader>
 
-      <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-        {/* Connection and sync state are NOT repeated here: the Health card above already carries them, and
-            two copies of the same fact on one page eventually disagree. This section owns the sync itself. */}
-        <Row label="Sync stage" value={stage ? STAGE_WORDS[stage] ?? "In progress" : "—"} />
-        <Row label="Requested" value={when(health?.resync_command_requested_at)} />
-        <Row label="PMS started sending" value={when(health?.resync_started_at)} />
-        <Row label="Last completed full sync" value={when(health?.last_complete_sync_at)} />
-        <Row label="Records received" value={(health?.sync_records_received ?? 0).toLocaleString()} />
-        <Row
-          label="Records skipped"
-          value={
-            health?.sync_records_skipped
-              ? `${health.sync_records_skipped.toLocaleString()} (no guest identity)`
-              : "0"
-          }
-        />
-        {/* The ordinary live figure, and only that. The old last_sync_in_house_count was stamped at the
-            publish barrier and reported the roster the sync replaced — 461 beside a live 595. Once the stage
-            above means materialized, this number is correct by the time it says Complete. */}
-        <Row label="Guests in house" value={(health?.in_house_stays ?? 0).toLocaleString()} />
-        {health?.sync_failure_code && <Row label="Reason it stopped" value={health.sync_failure_code} />}
-      </dl>
-
-      {/* THE HONEST SENTENCE. Shown only while receiving, because that is the only stage where an operator
-          would otherwise expect a total and wonder why there isn't one. */}
-      {stage === "RECEIVING" && (
-        <p className="text-sm rounded-md border bg-muted/30 p-3">
-          Receiving records — the PMS does not provide a total, so there is no percentage to show. Waiting for
-          the end-of-sync signal. <strong>{(health?.sync_records_received ?? 0).toLocaleString()}</strong>{" "}
-          records received so far.
-        </p>
-      )}
-      {(stage === "REQUESTING_FULL_SYNC" || stage === "WAITING_FOR_PMS") && (
-        <p className="text-sm rounded-md border bg-muted/30 p-3">
-          A full sync has been requested. This happens automatically the first time the connection to the
-          property management system succeeds — you do not need to do anything.
-        </p>
-      )}
-      {stage === "APPLYING" && (
-        <p className="text-sm rounded-md border bg-muted/30 p-3">
-          The guest list has arrived and is being applied. Room sign-in resumes automatically the moment it
-          finishes — usually a few seconds.
-        </p>
-      )}
-      {stage === "INTERRUPTED" && (
-        <p className="text-sm rounded-md border p-3">
-          The sync did not finish, so the previous guest list is still in use — nothing was lost or partly
-          replaced. You can request another one.
-        </p>
-      )}
-
-      <div className="flex flex-wrap items-end gap-3 border-t pt-4">
-        <label className="text-sm">
-          <span className="block mb-1">Why resynchronize</span>
-          <select
-            className="border rounded-md px-2 py-1"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            disabled={!canRequest || busy}
-          >
-            {REASONS.map((r) => (
-              <option key={r.value} value={r.value}>
-                {r.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-sm">
-          <span className="block mb-1">Password to confirm this resync</span>
-          <input
-            type="password"
-            className="border rounded-md px-2 py-1"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            disabled={!canRequest || busy}
-            autoComplete="current-password"
-          />
-        </label>
-        <button
-          type="button"
-          className="rounded-md border px-3 py-1.5 text-sm font-medium disabled:opacity-50"
-          onClick={() => void request()}
-          disabled={!canRequest || busy || password === ""}
-        >
-          {busy ? "Requesting…" : "Full Resync Now"}
-        </button>
-        {!canRequest && (
-          <span className="text-sm text-muted">
-            {health?.transport_status !== "CONNECTED"
-              ? "Available when the PMS is connected."
-              : "A synchronization is already running."}
-          </span>
+      <CardBody className="space-y-4">
+        {/* THE HONEST SENTENCE. Shown only while receiving, because that is the only stage where an operator
+            would otherwise expect a total and wonder why there isn't one. */}
+        {stage === "RECEIVING" && (
+          <Callout tone="info" title="Receiving the guest list">
+            The PMS does not say how many records it will send, so there is no percentage to show — any such
+            number would be invented. <strong>{(health?.sync_records_received ?? 0).toLocaleString()}</strong>{" "}
+            records received so far, waiting for the end-of-list signal.
+          </Callout>
         )}
-      </div>
+        {(stage === "REQUESTING_FULL_SYNC" || stage === "WAITING_FOR_PMS") && (
+          <Callout tone="info" title="Waiting for the PMS to start sending">
+            A full refresh has been requested. This also happens automatically the first time the connection
+            succeeds — you do not need to do anything.
+          </Callout>
+        )}
+        {stage === "APPLYING" && (
+          <Callout tone="info" title="Applying the guest list">
+            The list has arrived and is being written in. Room sign-in resumes automatically the moment it
+            finishes — usually a few seconds.
+          </Callout>
+        )}
+        {stage === "INTERRUPTED" && (
+          <Callout tone="warning" title="The refresh did not finish">
+            The previous guest list is still in use — nothing was lost or partly replaced. You can request
+            another one.
+          </Callout>
+        )}
+        {stage === "FAILED" && (
+          <Callout tone="danger" title="The refresh failed">
+            The previous guest list is still in use.
+            {health?.sync_failure_code ? ` Reason reported: ${health.sync_failure_code}.` : ""}
+          </Callout>
+        )}
 
-      {note && <p className="text-sm">{note}</p>}
-      {err && (
-        <p role="alert" className="text-sm text-red-600">
-          {err}
-        </p>
-      )}
-    </section>
+        <dl className="grid gap-x-8 gap-y-1 text-sm sm:grid-cols-2">
+          {/* Connection and sync state are NOT repeated here: the status card above already carries them, and
+              two copies of the same fact on one page eventually disagree. This section owns the refresh itself. */}
+          <Row label="Stage" value={stage ? STAGE_WORDS[stage] ?? "In progress" : "Nothing running"} />
+          <Row label="Last completed refresh" value={when(health?.last_complete_sync_at)} />
+          <Row label="Requested" value={when(health?.resync_command_requested_at)} />
+          <Row label="PMS started sending" value={when(health?.resync_started_at)} />
+          <Row label="Records received" value={(health?.sync_records_received ?? 0).toLocaleString()} />
+          <Row
+            label="Records skipped"
+            value={
+              health?.sync_records_skipped
+                ? `${health.sync_records_skipped.toLocaleString()} (no guest identity)`
+                : "0"
+            }
+          />
+          {/* The ordinary live figure, and only that. The old last_sync_in_house_count was stamped at the
+              publish barrier and reported the roster the sync replaced — 461 beside a live 595. Once the stage
+              above means materialized, this number is correct by the time it says Complete. */}
+          <Row label="Guests in house" value={(health?.in_house_stays ?? 0).toLocaleString()} />
+          {health?.sync_failure_code && <Row label="Reason it stopped" value={health.sync_failure_code} />}
+        </dl>
+
+        <Separator />
+
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            variant="secondary"
+            disabled={!canRequest || busy}
+            onClick={() => { setErr(null); setConfirming(true); }}
+          >
+            <RefreshCw className={active ? "animate-spin" : undefined} />
+            Refresh the guest list now
+          </Button>
+          {!canRequest && (
+            <span className="text-sm text-muted-foreground">
+              {health?.transport_status !== "CONNECTED"
+                ? "Available once the PMS is connected."
+                : "A refresh is already running."}
+            </span>
+          )}
+        </div>
+
+        {note && <Callout tone="success">{note}</Callout>}
+        <ErrorBanner err={err} />
+      </CardBody>
+
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={(v) => { if (!v) setConfirming(false); }}
+        title="Reload the full guest list?"
+        description="The appliance will ask the PMS to send every in-house guest again, and replace its copy once the list is complete. The current list stays in use until then, so nobody online is interrupted."
+        confirmLabel="Request refresh"
+        busy={busy}
+        error={err}
+        requirePassword
+        onConfirm={({ password }) => request(password)}
+      >
+        <Field label="Why are you refreshing?" hint="Recorded with the request.">
+          <Select value={reason} onChange={(e) => setReason(e.target.value)}>
+            {REASONS.map((r) => (
+              <option key={r.value} value={r.value}>{r.label}</option>
+            ))}
+          </Select>
+        </Field>
+      </ConfirmDialog>
+    </Card>
   );
 }
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between gap-4 border-b py-1 last:border-0">
-      <dt className="text-muted">{label}</dt>
-      <dd className="font-medium text-right">{value}</dd>
+    <div className="flex justify-between gap-4 border-b border-border py-1.5 last:border-0">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="text-right font-medium tabular">{value}</dd>
     </div>
   );
 }

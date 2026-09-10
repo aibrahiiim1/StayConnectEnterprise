@@ -981,10 +981,16 @@ func (s *server) clearPMSRoute(w http.ResponseWriter, r *http.Request) {
 
 // listPMSRouting answers "which guest networks resolve against which PMS interface?".
 //
-// It is a read surface on purpose. The mapping decides which property's PMS a device on a given VLAN is
-// checked against, so getting it wrong resolves a guest against a neighbouring property's occupancy — and
-// changing it is a network-topology decision, made where the networks themselves are configured, not a PMS
-// integration one.
+// The mapping decides which property's PMS a device on a given VLAN is checked against, so getting it wrong
+// resolves a guest against a neighbouring property's occupancy — the guest simply cannot get online while every
+// other screen reports healthy.
+//
+// THIS COMMENT USED TO SAY THE SURFACE WAS READ-ONLY "on purpose", on the reasoning that the mapping is a
+// network-topology decision and belongs where the networks are configured. That reasoning is sound and the
+// conclusion was wrong, because no such control existed: the guest-network API carries no PMS field, so the
+// mapping could be set NOWHERE in the product and existed only as a row written by test fixtures. The write
+// path (setPMSRoute / clearPMSRoute) lives beside this read for that reason, and both are confined to
+// site_admin by the `pms-routing` permWrite entry in rolePerms — every other role reads it.
 func (s *server) listPMSRouting(w http.ResponseWriter, r *http.Request) {
 	routes, err := s.routesForInterface(r, "")
 	if err != nil {
