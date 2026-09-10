@@ -114,9 +114,28 @@ Before reporting completion: commit all authorized changes intentionally; push t
 
 **Repository-side enforcement (GH-MANDATORY-CI).** GitHub Actions is the authoritative merge gate. The workflow `.github/workflows/project-governance.yml` (workflow name **Project Governance**, job **governance**) runs on every pull request targeting `master`, every push to `master`, and manual `workflow_dispatch`; it checks out full history (`fetch-depth: 0`), runs `python tools/project-state.py validate`, `python tools/project-state.py check-generated`, `python tools/tests/project_state_validator/run_mutations.py` and `bash tools/validate-project-state.sh`, and then asserts the working tree is still clean — failing on any non-zero step. It uses read-only repository permissions and performs no deployment, database access, migrations or production tests. **A PR is not merge-ready until this check is green** — local validator output alone is insufficient for a delivered PR. The default branch should be protected to require the `governance` check.
 
-**How the required gates spend their time, and what is never recomputed twice (CI-REUSE).** The four
-required checks run in parallel, so the delivery path is the slowest of them, twice: once on the
-pull-request head and once on the merge commit. Two things were measured and changed.
+**What is actually enforced, and by what (WHO-ENFORCES-WHAT).** These are two different things and were
+previously reported as one. Stated exactly, as verified against the GitHub API:
+
+*Enforced by branch protection on `master`* — **one** status context: `governance` (the job name of
+`.github/workflows/project-governance.yml`). Alongside it: `strict: true` (a branch must be up to date with
+`master` before merging), one required approving review, and required conversation resolution. Deletions are
+blocked. `enforce_admins` is **false** and force pushes are **allowed**, so an administrator can bypass these
+controls — that is the real model, not an omission. There are no repository rulesets; branch protection is
+the only enforcement surface.
+
+*Obligated by this rule, not by GitHub* — the three phase gates (`phase3-full-software-gate`,
+`phase4-financial-core-gate`, `phase5-post-stay-transfer-gate`). They run on every pull request to `master`
+and on every push to it, and §8 requires them green before a PR is called merge-ready. GitHub would **not**
+block a merge on them. Calling all four "required checks" overstates what the platform enforces, and this
+document does not.
+
+Whether the three phase contexts should be added to branch protection is a Product-Owner decision about the
+security model, not a documentation fix, and is deliberately not taken here.
+
+**How the gates spend their time, and what is never recomputed twice (CI-REUSE).** The four gates run in
+parallel, so the delivery path is the slowest of them, twice: once on the pull-request head and once on the
+merge commit. Two things were measured and changed.
 
 *The adversarial mutation matrix is evaluated concurrently.* Each of its sixty cases costs a full double
 validation — the structural validator plus the keyword validator over the whole tree, about sixteen seconds
@@ -135,7 +154,7 @@ already held.
 
 **A tree hash is not a complete evidence key, and the first version of this mechanism wrongly assumed it
 was.** Tree equality proves two commits have identical CONTENT. It does not prove they have the same HISTORY,
-were judged at the same MOMENT, or ran against the same EXTERNAL WORLD. Four required checks depend on exactly
+were judged at the same MOMENT, or ran against the same EXTERNAL WORLD. Four checks in these gates depend on exactly
 those things: `tools/validate-transition-times.sh` and its self-test read the COMMIT GRAPH (`git log
 --diff-filter=A` for a receipt's introducing commit, `git log -1` for when a merge actually happened);
 `tools/validate-project-state.sh` resolves the manifest's `SOURCE_COMMIT` against the object graph; and
@@ -154,22 +173,45 @@ directions and **fails on any step nobody has classified**, so a step added late
 having its guard copied from the step above it. That validator runs on every run, hit or not: a gate may
 never reuse evidence without first proving the rules it is relying on are intact.
 
-**What counts as equivalent evidence is four rules, not one.** A hit requires the SAME GATE (only successful
+**What counts as equivalent evidence is five rules, not one.** A hit requires the SAME GATE (only successful
 runs of the same workflow — a green Phase-4 run can never satisfy governance); an IDENTICAL TREE (and
 `.github/workflows/**`, `tools/**`, `scripts/**` and `governance/**` are all tracked, so identical content is
 also the same gate definition, the same validators and the same policy file — a changed check is a changed
 tree, and a changed tree never matches); ANCESTRY, meaning the matched commit must be an ancestor of the one
 being validated, which is precisely the delivery relationship and is what rules out cross-context evidence
-from an unrelated branch or fork that happens to render the same tree; and RECENCY, a 24-hour bound that stops
-a verdict being RESURRECTED — a revert-of-a-revert restores old content and IS a descendant, so ancestry alone
-would let a months-old judgement stand for content being accepted today on a different runner image.
+from an unrelated branch or fork that happens to render the same tree; an IDENTICAL MEASURED EXECUTION
+ENVIRONMENT (below); and RECENCY.
 
-Every path that cannot establish all four — no token, an API error, no candidate, an object the checkout
-lacks, an unreadable timestamp — reports no hit and the full validation runs. Reuse can remove duplicated work
-and can never be why something went unchecked. Both mechanisms are adversarially proven rather than asserted:
+**The tree fixes the code, not the machine.** These gates ask for `ubuntu-latest`, Go `1.25`, Node `20`,
+Python `3.12` and version-tagged actions. Every one of those is resolved at run time and every one can move
+inside any recency window, so an identical tree does not establish that the toolchain which would run the
+tests is the toolchain that did. `scripts/ci/env-fingerprint.sh` therefore MEASURES the resolved environment
+— hosted image name and version, kernel release, resolved `go`/`node`/`npm`/`python` versions, and the
+digests of the container images that gate actually pulls — and publishes a SHA-256 of it. The lookup reads
+the candidate run's own fingerprint back out of **that run's job log** through the API and refuses to reuse
+across any difference. The comparison is therefore against GitHub's record of what the run really executed
+on, not a promise in a config file. Action versions are deliberately outside the fingerprint, and the reason
+is checkable rather than asserted: **no reuse-eligible step is a GitHub action** — every `uses:` step is
+classified `always`, and `tools/validate-ci-reuse-policy.py` fails the build if that ever stops being true —
+so every action re-executes on every run and no action's behaviour is ever inherited. What a setup action
+*leaves behind* is inherited, and that is exactly the resolved toolchain version the fingerprint captures.
+The validator also enforces the ordering the measurement depends on: the fingerprint step must exist exactly
+once, run unconditionally, precede the lookup, be handed to it, and have no toolchain set up after it.
+
+**RECENCY IS A BOUND, NOT A PROOF, and is described that way on purpose.** The four rules above establish
+equality of everything these gates can name and measure. The 24-hour limit exists to bound exposure to what
+they cannot — an unnamed mutable input, a registry serving different bytes, a transitive dependency. It also
+stops a verdict being RESURRECTED: a revert-of-a-revert restores old content and IS a descendant, so ancestry
+alone would let a months-old judgement stand for content being accepted today. It is a safety margin on the
+unknown; nothing in this mechanism treats it as evidence that two things are the same.
+
+Every path that cannot establish all five — no token, an API error, no candidate, an object the checkout
+lacks, an unreadable timestamp, an environment this run could not measure, a candidate whose log carries no
+fingerprint — reports no hit and the full validation runs. Reuse can remove duplicated work and can never be
+why something went unchecked. Both mechanisms are adversarially proven rather than asserted:
 `tools/tests/ci_reuse_policy/run_negative.py` drives the policy validator against fixtures carrying each
-specific defect, and `scripts/ci/tests/evidence-reuse-selftest.sh` drives the real lookup against a git
-repository with a known topology, making exactly one eligibility rule false at a time.
+specific defect (12 cases), and `scripts/ci/tests/evidence-reuse-selftest.sh` drives the real lookup against a
+git repository with a known topology, making exactly one eligibility rule false at a time (12 cases).
 
 No Agent may bypass the governed execution wrapper or validators.
 

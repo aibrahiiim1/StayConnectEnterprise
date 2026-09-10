@@ -1,0 +1,4 @@
+commit a66e148bd980d0fc1b2c0fece83c04e1fb21b431
+Date:   Thu Sep 10 15:43:14 2026 +0300
+
+    Prove the machine, not just the code
