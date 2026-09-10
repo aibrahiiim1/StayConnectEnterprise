@@ -59,7 +59,23 @@ jobs:
         with:
           python-version: '3.12'
 
+
+      # HAS THIS EXACT CONTENT ALREADY BEEN PROVEN GREEN BY THIS GATE?
+      #
+      # Keyed by GIT TREE HASH and answered from GitHub's own run history. An identical tree is identical
+      # content in every tracked path -- including this workflow file, the scripts it calls and the sources
+      # under test -- so the verdict cannot differ. A changed check is a changed tree, and a changed tree
+      # never matches. Every failure path reports no hit, so the full gate runs.
+      #
+      # This exists because the merge commit's tree was byte-identical to the pull-request head's tree in
+      # thirteen of the last thirteen merges: the second run was re-deriving a verdict it already held.
+      - name: Tree-equality evidence reuse
+        id: reuse
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/ci/evidence-reuse.sh phase3-software.yml
       - name: Initialise evidence staging
+        if: steps.reuse.outputs.hit != 'true'
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
@@ -115,18 +131,22 @@ jobs:
 
       # ---------------------------------------------------------------- backend / runtime
       - name: gofmt (whole Phase-3 Go surface)
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: data-plane
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh gofmt -- bash $GITHUB_WORKSPACE/scripts/ci/gofmt-check.sh"
 
       - name: go build (./...)
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: data-plane
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-build -- go build ./..."
 
       - name: go vet (./...)
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: data-plane
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-vet -- go vet ./..."
 
       - name: go test (all packages)
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: data-plane
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-unit -- bash $GITHUB_WORKSPACE/scripts/ci/go-test-counted.sh go-unit ./... -count=1"
 
@@ -135,6 +155,7 @@ jobs:
       # as the development build, because a production-only build tag that CI never compiles is a build tag
       # nobody has proven.
       - name: go build + test (production build tag)
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: data-plane
         run: >
           bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-production-build --
@@ -150,6 +171,7 @@ jobs:
       # constructed" but would silently skip the agreement check, and drift between the two is
       # the failure that matters most.
       - name: Factory-clean Production baseline (current-only, disposable PG)
+        if: steps.reuse.outputs.hit != 'true'
         run: >
           bash $GITHUB_WORKSPACE/scripts/ci/step.sh factory-clean-baseline --
           bash -c "bash $GITHUB_WORKSPACE/scripts/clean-install-reconstruction.sh &&
@@ -160,6 +182,7 @@ jobs:
       # files name. That silently disabled the expiry sweep on a live appliance. This proves the privileges
       # the services need are named where the reconcile will keep them.
       - name: Gate-P grants survive a reconcile (disposable PG)
+        if: steps.reuse.outputs.hit != 'true'
         run: >
           bash $GITHUB_WORKSPACE/scripts/ci/step.sh gatep-grant-survives-reconcile --
           bash $GITHUB_WORKSPACE/scripts/gatep-grant-survives-reconcile.sh
@@ -169,11 +192,13 @@ jobs:
       # mutation path, that PUBLIC holds no auth predicate, and that a stale or incomplete source set is
       # refused before a transaction opens.
       - name: Gate-P reconcile is safe to run (disposable PG)
+        if: steps.reuse.outputs.hit != 'true'
         run: >
           bash $GITHUB_WORKSPACE/scripts/ci/step.sh gatep-reconcile-acceptance --
           bash $GITHUB_WORKSPACE/scripts/gatep-reconcile-acceptance.sh
 
       - name: go test -race (all Phase-3 concurrency-sensitive paths)
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: data-plane
         # pmsd, resolver, auth context, stay grant, checkout, scd, acctd, netd, and the controlled-writer guard.
         run: >
@@ -185,9 +210,11 @@ jobs:
           ./cmd/scd/... ./cmd/acctd/... ./cmd/netd/... -count=1
 
       - name: Migration 0010 lifecycle + concurrency gate (disposable PG16)
+        if: steps.reuse.outputs.hit != 'true'
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh migration-lifecycle -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh iam_v2_scratch/phase3_0010_lifecycle.sh"
 
       - name: PG16 integration — all eleven Phase-3 suites (disposable PG16)
+        if: steps.reuse.outputs.hit != 'true'
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh pg16-integration -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh scripts/pmsd-pg-integration.sh"
 
       # THE PRODUCTION PRIVILEGE HARNESS, separate on purpose. The step above asserts the DARK posture, in
@@ -195,9 +222,11 @@ jobs:
       # files and runs the prodprivilege tag against it. Two privilege defects reached production because no
       # suite ever ran as a real service role -- this is the step that would have caught both.
       - name: Production privilege model (real Gate-P roles, disposable PG16)
+        if: steps.reuse.outputs.hit != 'true'
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh prod-privilege -- bash $GITHUB_WORKSPACE/scripts/prod-privilege-integration.sh"
 
       - name: Phase-3 offline preflight
+        if: steps.reuse.outputs.hit != 'true'
         run: |
           set -euo pipefail
           mkdir -p "$EVID/counts"
@@ -210,6 +239,7 @@ jobs:
           exit "$rc"
 
       - name: Network-enforcement system tests (nft authorization + accountable tc + Session + durable bounds)
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: data-plane
         # The system-boundary suite: nft and tc modelled as the separate mechanisms they are, plus the
         # command contracts for the real nft/tc strings, the hard-boundary lease precision matrix, and the
@@ -223,6 +253,7 @@ jobs:
           -run 'System|Lease|Activation|Durable|SecurityTime|BootID|Journal|Phase3Allow|LegacyAllow|Phase3Deny|Phase3List|PermanentConcat|AuthorizedIn|ListIn|ConcatProbe|AllowInCarries' -count=1
 
       - name: Ruleset-durability tests (restart/reboot convergence, carry-over, fingerprint)
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: data-plane
         # The Live Increment-9 blocker: netd replayed a stored bundle rendered by an older binary and deleted
         # phase3_auth_ipv4 on every start. Counted on its own because "a routine restart executes NO nft
@@ -235,12 +266,14 @@ jobs:
           -run 'Reconcile|Render_|Converge' -count=1
 
       - name: Verified binary rollback tool (false-PASS regression)
+        if: steps.reuse.outputs.hit != 'true'
         # Increment 9's rehearsal replaced binaries with cp, every replacement failed with "Text file busy",
         # and it then reported PASS because the services were active. These tests are the standing proof that
         # the tool can no longer report success without having changed the running process image.
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh binary-rollback -- bash $GITHUB_WORKSPACE/scripts/ci/binary-rollback-tests.sh"
 
       - name: Surgical live-dark nft foundation tests
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: data-plane
         # The install/rollback that has to be safe on an appliance carrying live legacy guests. Counted on its
         # own because it is the operation an operator will run during Increment 9, and its result is the thing
@@ -251,6 +284,7 @@ jobs:
           ./internal/nftfoundation/ -count=1
 
       - name: REAL-KERNEL contract suite (disposable Linux network namespaces)
+        if: steps.reuse.outputs.hit != 'true'
         # Real nft, real tc, real packets, in namespaces created and destroyed by the step. This is where the
         # kernel assumptions the whole design rests on are actually checked — that a lease expires with nothing
         # running, that a repeated `add` does not refresh it, that removing a tc filter denies nobody, and that
@@ -261,6 +295,7 @@ jobs:
         run: "sudo -E env PATH=$PATH EVID=$EVID bash $GITHUB_WORKSPACE/scripts/ci/step.sh kernel-netns -- bash $GITHUB_WORKSPACE/scripts/ci/kernel-netns-suite.sh"
 
       - name: Staged-provisioning failure tests (accountable before forwarding)
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: data-plane
         # The adversarial provisioning suite (netd) and the command-level staged shape suite, counted on their
         # own so the evidence artifact carries an explicit result for the accountable-before-forwarding work.
@@ -274,6 +309,7 @@ jobs:
       # state that granted two real guests entitlements and sessions nothing ever enforced, so the checker that
       # refuses that combination is itself proven here rather than trusted.
       - name: Phase-3 enforcement-plane coherence checker (selftest)
+        if: steps.reuse.outputs.hit != 'true'
         run: >
           bash $GITHUB_WORKSPACE/scripts/ci/step.sh enforcement-plane-check --
           bash $GITHUB_WORKSPACE/deploy/scripts/check-phase3-enforcement-plane-selftest.sh
@@ -286,6 +322,7 @@ jobs:
       # the checksum, target-identity, least-privilege, ledger and advisory-lock protections all still fail
       # closed. Disposable PostgreSQL; no repository migration is applied to anything that outlives it.
       - name: Edge migration runner (selftest)
+        if: steps.reuse.outputs.hit != 'true'
         run: >
           bash $GITHUB_WORKSPACE/scripts/ci/step.sh edge-migrate --
           bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh scripts/edge-migrate-selftest.sh
@@ -295,6 +332,7 @@ jobs:
       # --failed` listed both the whole time. This proves the standing audit refuses each of those states and
       # still excuses the Central-only units an edge appliance legitimately carries.
       - name: Appliance unit health (selftest)
+        if: steps.reuse.outputs.hit != 'true'
         run: >
           bash $GITHUB_WORKSPACE/scripts/ci/step.sh appliance-units --
           bash $GITHUB_WORKSPACE/deploy/scripts/check-appliance-units-selftest.sh
@@ -304,6 +342,7 @@ jobs:
       # zero-byte kea-leases4.csv.pid behind it, and every surface called it healthy. The checker that refuses
       # that state is proven here against the real replies Kea sends.
       - name: DHCP ownership-evidence checker (selftest)
+        if: steps.reuse.outputs.hit != 'true'
         run: >
           bash $GITHUB_WORKSPACE/scripts/ci/step.sh dhcp-evidence-check --
           bash $GITHUB_WORKSPACE/deploy/scripts/check-dhcp-ownership-evidence-selftest.sh
@@ -313,6 +352,7 @@ jobs:
       # the PRE-LIVE appliance served an operator surface with no Internet Packages, no Service Plans and no
       # PMS Connection. The checker that refuses such a release is proven here against staged release trees.
       - name: Hotel Admin deployment integrity (selftest)
+        if: steps.reuse.outputs.hit != 'true'
         run: >
           bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-integrity --
           bash $GITHUB_WORKSPACE/deploy/scripts/check-hotel-admin-integrity-selftest.sh
@@ -326,11 +366,13 @@ jobs:
       # fullchain had expired, and `openssl x509 -in <fullchain>` reads only the first certificate. These
       # cases mint a real leaf above a real expired intermediate and assert the manager sees it.
       - name: Hotel Admin certificate chain health (selftest)
+        if: steps.reuse.outputs.hit != 'true'
         run: >
           bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-cert --
           bash $GITHUB_WORKSPACE/deploy/scripts/check-hotel-admin-cert-selftest.sh
 
       - name: Hotel Admin integrity guards — adversarial (selftest)
+        if: steps.reuse.outputs.hit != 'true'
         run: >
           bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-adversarial --
           bash $GITHUB_WORKSPACE/deploy/scripts/check-hotel-admin-integrity-adversarial.sh
@@ -341,34 +383,41 @@ jobs:
       # helper list from the units and verifies every Exec directive before installing anything; this proves
       # it, including the missing-executable condition that caused the outage.
       - name: Service-unit installer — helper installation and verification (selftest)
+        if: steps.reuse.outputs.hit != 'true'
         run: >
           bash $GITHUB_WORKSPACE/scripts/ci/step.sh unit-installer-check --
           bash $GITHUB_WORKSPACE/deploy/scripts/install-service-units-selftest.sh
 
       # ---------------------------------------------------------------- Hotel Admin / Guest Portal
       - name: npm ci (locked dependencies)
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: hotel-admin
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh npm-ci -- npm ci"
 
       - name: TypeScript typecheck
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: hotel-admin
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh tsc -- npx tsc --noEmit"
 
       - name: Vitest
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: hotel-admin
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh vitest -- npx vitest run --reporter=default --reporter=json --outputFile=$EVID/counts/vitest.json"
 
       - name: Production build (Phase-3 flags OFF)
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: hotel-admin
         env:
           NEXT_TELEMETRY_DISABLED: '1'
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh next-build -- npx next build"
 
       - name: Install Playwright browser
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: hotel-admin
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh playwright-install -- npx playwright install --with-deps chrome"
 
       - name: Playwright (Hotel-Admin + guest-portal real template + a11y)
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: hotel-admin
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ github.workspace }}/.phase3-evidence/counts/playwright.json
@@ -376,14 +425,17 @@ jobs:
 
       # ---------------------------------------------------------------- evidence
       - name: Assemble the Phase-3 evidence artifact
+        if: steps.reuse.outputs.hit != 'true'
         id: evidence
         run: python3 scripts/ci/phase3_evidence.py
 
       - name: Record the delivery HEAD for the artifact name
+        if: steps.reuse.outputs.hit != 'true'
         id: head
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Upload the Phase-3 evidence artifact
+        if: steps.reuse.outputs.hit != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: phase3-software-evidence-${{ steps.head.outputs.sha }}

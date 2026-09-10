@@ -658,6 +658,86 @@ def main():
     return rc
 
 
+def _worker_count(n_cases):
+    """How many cases to evaluate at once.
+
+    ONE CASE COSTS A FULL DOUBLE VALIDATION -- the structural validator plus the keyword validator over the
+    whole tree -- which measured ~16s on a CI runner. Sixty of those in series is sixteen minutes, and it was
+    the single largest step in the whole delivery path. The cases are independent by construction (each
+    mutates one file, judges, and restores), so the only thing that ever made them serial was sharing ONE
+    sandbox.
+
+    Each worker therefore gets its OWN sandbox and the matrix is evaluated concurrently. Nothing about what
+    is checked changes: every case still runs, both validators still run per case, and --require-full still
+    refuses a partial matrix.
+
+    SERIAL WHEN MUTATION_MAX_CASES IS SET. That knob exists for the isolation regression's short overlapping
+    child runs, whose whole point is to observe concurrent sandbox behaviour; giving those children their own
+    internal fan-out would change what that regression measures.
+    """
+    if (os.environ.get("MUTATION_MAX_CASES") or "").isdigit():
+        return 1
+    override = os.environ.get("MUTATION_WORKERS")
+    if (override or "").isdigit() and int(override) > 0:
+        return min(int(override), n_cases)
+    return max(1, min(os.cpu_count() or 1, 8, n_cases))
+
+
+def _evaluate(case):
+    """Judge one mutation inside THIS process's sandbox. Returns (name, failed, which)."""
+    name, relpath, op = case
+    p, orig = apply(relpath, op)
+    try:
+        s, k = both_status()
+        which = []
+        if s != 0:
+            which.append("structural")
+        if k != 0:
+            which.append("keyword")
+        return (name, (s != 0 or k != 0), ",".join(which))
+    finally:
+        restore(p, orig)
+
+
+def _worker_init():
+    """Give this worker process its own sandbox.
+
+    A worker mutates files, so two workers sharing a sandbox would judge each other's mutations and the
+    matrix would report nonsense. The parent's sandbox is left alone for the baseline and restored-state
+    checks that bracket the matrix.
+    """
+    global WORK, _SANDBOX
+    _SANDBOX, WORK, _ = build_sandbox()
+
+
+def _run_cases(cases):
+    """Evaluate every case, concurrently where that is safe, and return verdicts IN THE GIVEN ORDER.
+
+    Order is restored explicitly rather than left to completion order: this output is read by a human
+    comparing runs, and a matrix that printed its cases in a different sequence each time would be unusable
+    as a diff even though the verdicts were identical.
+
+    FAIL CLOSED. A worker that dies takes the run with it -- an unevaluated case is never a passing one.
+    """
+    workers = _worker_count(len(cases))
+    if workers <= 1:
+        print("  workers: 1 (serial)")
+        return [_evaluate(c) for c in cases]
+
+    print("  workers: %d concurrent sandboxes (every case still runs; both validators still run per case)"
+          % workers)
+    import concurrent.futures as _cf
+    verdicts = [None] * len(cases)
+    with _cf.ProcessPoolExecutor(max_workers=workers, initializer=_worker_init) as ex:
+        futures = {ex.submit(_evaluate, c): i for i, c in enumerate(cases)}
+        for fut in _cf.as_completed(futures):
+            verdicts[futures[fut]] = fut.result()   # an exception here propagates and fails the run
+    missing = [cases[i][0] for i, v in enumerate(verdicts) if v is None]
+    if missing:
+        raise RuntimeError("mutation matrix did not return a verdict for: %s" % ", ".join(missing[:5]))
+    return verdicts
+
+
 def _run_matrix(require_full=False):
     print("=== baseline (good state) must PASS both validators ===")
     s0, k0 = both_status()
@@ -677,19 +757,12 @@ def _run_matrix(require_full=False):
               % (limit, len(cases), len(MUTATIONS)))
         print("        regression's short overlapping child runs. The authoritative gate passes")
         print("        --require-full, which refuses to run at all while this is set.")
-    for name, relpath, op in cases:
-        p, orig = apply(relpath, op)
-        try:
-            s, k = both_status()
-            failed = (s != 0 or k != 0)
-            which = []
-            if s != 0: which.append("structural")
-            if k != 0: which.append("keyword")
-            results.append((name, failed, ",".join(which) or "NONE"))
-            allok = allok and failed
-            print(f"  [{'PASS' if failed else 'MISS'}] {name:52s} -> fails: {','.join(which) or 'NONE (BAD)'}")
-        finally:
-            restore(p, orig)
+
+    verdicts = _run_cases(cases)
+    for name, failed, which in verdicts:
+        results.append((name, failed, which))
+        allok = allok and failed
+        print(f"  [{'PASS' if failed else 'MISS'}] {name:52s} -> fails: {which or 'NONE (BAD)'}")
     print("=== restored good state must PASS again ===")
     s1, k1 = both_status()
     restored_ok = (s1 == 0 and k1 == 0)

@@ -30,10 +30,30 @@ jobs:
         with:
           python-version: '3.12'
 
+      # HAS THIS EXACT CONTENT ALREADY BEEN PROVEN GREEN BY THIS GATE?
+      #
+      # Every delivery validated twice: once on the pull-request head, once on the merge commit. Across the
+      # last thirteen merges the merge commit's TREE was byte-identical to the PR head's tree in all
+      # thirteen -- a merge introduces a commit, not content -- so the second run re-derived a verdict it
+      # already held, on the critical path, for about half an hour.
+      #
+      # The lookup is keyed by GIT TREE HASH and answered from GitHub's own run history. An identical tree
+      # is identical content in every tracked path, and .github/workflows, tools/ and governance/ are all
+      # tracked -- so it is also the same gate definition running the same validators over the same inputs.
+      # A changed check is a changed tree, and a changed tree never matches. Every failure path reports no
+      # hit, so the full validation runs.
+      - name: Tree-equality evidence reuse
+        id: reuse
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/ci/evidence-reuse.sh project-governance.yml
+
       - name: Structural project-state validation
+        if: steps.reuse.outputs.hit != 'true'
         run: python tools/project-state.py validate
 
       - name: Generated-block consistency
+        if: steps.reuse.outputs.hit != 'true'
         run: python tools/project-state.py check-generated
 
       # The rule that compares the generated appliance summary to the live counters, watched failing. It was
@@ -41,6 +61,7 @@ jobs:
       # purchases=0, entitlements=0, sessions=0" about an appliance holding two real Room Logins and one
       # kernel-enforced session, with Governance green throughout.
       - name: Generated-block contradiction rules — negative tests
+        if: steps.reuse.outputs.hit != 'true'
         run: python tools/tests/generated_block_contradiction/run_negative.py
 
       # The merge-timing rule is grandfathered for T0054 on the real ledger, so a normal run reports it as a
@@ -48,9 +69,11 @@ jobs:
       # nothing. This drives the real validator with the grandfather list emptied and fails if the historical
       # defect gets through, so the rule is proven to bite BEFORE its verdict on the ledger is worth anything.
       - name: Merge-receipt timing self-test (does the rule catch the T0054 defect?)
+        if: steps.reuse.outputs.hit != 'true'
         run: bash tools/validate-merge-receipt-times-selftest.sh
 
       - name: Transition-receipt timestamps
+        if: steps.reuse.outputs.hit != 'true'
         # Two rules. A receipt that claims a moment AFTER the commit that introduced it is describing its
         # own future. A receipt that records a pull-request merge and is dated BEFORE that merge is asserting
         # an event that had not happened -- which is what T0054 did, by 311 seconds. Checked here as well as
@@ -72,6 +95,7 @@ jobs:
       # a partial matrix. The suite prints MUTATION_CASES_EXECUTED/TOTAL/LIMIT, and the step below asserts
       # from that output that the complete matrix ran with no limit active.
       - name: Adversarial mutation suite (COMPLETE matrix, no case limit)
+        if: steps.reuse.outputs.hit != 'true'
         run: |
           set -euo pipefail
           python tools/tests/project_state_validator/run_mutations.py --require-full | tee /tmp/mutations.out
@@ -89,12 +113,15 @@ jobs:
       # it cannot: concurrent runs, SIGTERM, a forced kill, and a failed sandbox all leave
       # governance/project-state.json byte-identical and the working tree unchanged.
       - name: Mutation-suite isolation regression (concurrency, forced kill, fail-closed)
+        if: steps.reuse.outputs.hit != 'true'
         run: python tools/tests/project_state_validator/run_isolation_regression.py
 
       - name: Zero-stale keyword validation
+        if: steps.reuse.outputs.hit != 'true'
         run: bash tools/validate-project-state.sh
 
       - name: Current-state semantic parity (every current surface vs the recorded facts)
+        if: steps.reuse.outputs.hit != 'true'
         # Keyword checks stop at vocabulary. This one compares MEANING: current_maturity said an authorization
         # was still awaited while current_activity said that authorization had been executed, and iam_v2 was
         # recorded as both 49 and 63 in the same file. Neither sentence contains a forbidden word; they are
@@ -102,11 +129,13 @@ jobs:
         run: python tools/validate-current-state-parity.py
 
       - name: Current-state parity — negative tests (the validator must catch what shipped before)
+        if: steps.reuse.outputs.hit != 'true'
         # A validator that has only ever seen a passing repository is indistinguishable from one that returns
         # PASS unconditionally. Each case reintroduces a contradiction that actually shipped green.
         run: python tools/tests/current_state_parity/run_negative.py
 
       - name: Rendered current state must not contradict the canonical PMS state or re-date a snapshot
+        if: steps.reuse.outputs.hit != 'true'
         # The first thing a reader opens said the PMS feed was "live and healthy" while project-state.json
         # correctly recorded it as intentionally stopped, and the same block presented a dated counter
         # snapshot as current totals. Every existing gate passed: they compared documents with each other,
@@ -114,6 +143,7 @@ jobs:
         run: python tools/tests/current_state_parity/run_pms_and_counter_staleness.py
 
       - name: Evidence-artifact staleness (a post-closure artifact must not describe finished work as pending)
+        if: steps.reuse.outputs.hit != 'true'
         # The software artifact is the most authoritative file a reviewer opens, and it kept emitting the
         # 2026-08-10 Increment-9 snapshot — corrected_software_deployed=false and a five-item remaining-work
         # list — into artifacts generated after that work was finished, accepted and merged. This runs the real
@@ -123,12 +153,14 @@ jobs:
         run: python tools/tests/evidence_artifact/run_artifact_staleness.py
 
       - name: Tooling must carry no control characters
+        if: steps.reuse.outputs.hit != 'true'
         # A heredoc turned an escape into a literal 0x08 inside two validator regexes. The file looked
         # correct, both regexes still compiled, the suite still reported PASS - and the alternatives they
         # guarded could never match. Only the bytes give that away, so the bytes are checked.
         run: python tools/tests/tooling/run_control_chars.py
 
       - name: The documented preflight suite SIZE is pass + fail, not pass
+        if: steps.reuse.outputs.hit != 'true'
         # The stale-document check read the preflight JSON's "pass" count and used it as the suite TOTAL, so
         # a single red preflight check redefined the suite from 108 checks to 107 and reported the Final
         # Report's correct "PASS 108/108" as stale. It also crossed a line: whether the preflight PASSES is
@@ -136,6 +168,7 @@ jobs:
         run: bash tools/tests/tooling/preflight-total-selftest.sh
 
       - name: Working tree must remain clean
+        if: steps.reuse.outputs.hit != 'true'
         run: |
           status="$(git status --porcelain --untracked-files=all)"
           if [ -n "$status" ]; then

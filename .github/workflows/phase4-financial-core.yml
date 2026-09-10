@@ -56,7 +56,23 @@ jobs:
         with:
           python-version: '3.12'
 
+
+      # HAS THIS EXACT CONTENT ALREADY BEEN PROVEN GREEN BY THIS GATE?
+      #
+      # Keyed by GIT TREE HASH and answered from GitHub's own run history. An identical tree is identical
+      # content in every tracked path -- including this workflow file, the scripts it calls and the sources
+      # under test -- so the verdict cannot differ. A changed check is a changed tree, and a changed tree
+      # never matches. Every failure path reports no hit, so the full gate runs.
+      #
+      # This exists because the merge commit's tree was byte-identical to the pull-request head's tree in
+      # thirteen of the last thirteen merges: the second run was re-deriving a verdict it already held.
+      - name: Tree-equality evidence reuse
+        id: reuse
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/ci/evidence-reuse.sh phase4-financial-core.yml
       - name: Initialise evidence staging
+        if: steps.reuse.outputs.hit != 'true'
         run: |
           set -euo pipefail
           mkdir -p "$EVID/counts" "$EVID/logs"
@@ -71,19 +87,23 @@ jobs:
 
       # ---------------------------------------------------------------- build / static
       - name: gofmt
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: data-plane
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh gofmt -- bash $GITHUB_WORKSPACE/scripts/ci/gofmt-check.sh"
 
       - name: go build (./...)
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: data-plane
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-build -- go build ./..."
 
       - name: go vet (./...)
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: data-plane
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-vet -- go vet ./..."
 
       # ---------------------------------------------------------------- financial core: unit + race
       - name: Financial-core unit matrix
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: data-plane
         # PS golden wire, contract field order, no currency on the wire, the AS catalog, ambiguous-PA
         # refusal, the DARK guard, and the fail-closed gate matrix on synthetic snapshots.
@@ -93,6 +113,7 @@ jobs:
           ./internal/posting/ -count=1
 
       - name: Financial-core race detector
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: data-plane
         # The outbox lanes, the P# allocator and the review path are all concurrent. A data race in a money
         # path is a defect regardless of whether a test happened to observe it.
@@ -103,12 +124,14 @@ jobs:
 
       # ---------------------------------------------------------------- migrations
       - name: Migrations 0011-0026 + financial DB invariant gate (disposable PG16)
+        if: steps.reuse.outputs.hit != 'true'
         # Includes the ENTIRE pre-0011 financial invariant suite, run on the pre-0011 chain and again after
         # the Phase-4 chain on a clean rebuild, so "nothing was weakened" is measured rather than asserted.
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-migration -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh iam_v2_scratch/phase4_0011_financial.sh"
 
       # ---------------------------------------------------------------- payment concurrency
       - name: Payment concurrency proof (real concurrent PG16 sessions)
+        if: steps.reuse.outputs.hit != 'true'
         # Its own gate rather than a step inside the DB gate: the proof backgrounds psql sessions, and
         # nesting it in a command substitution changes their scheduling -- exactly the timing dependence
         # this proof exists to rule out.
@@ -116,12 +139,14 @@ jobs:
 
       # ---------------------------------------------------------------- least privilege
       - name: Least-privilege boundary as real PostgreSQL roles (disposable PG16)
+        if: steps.reuse.outputs.hit != 'true'
         # Runs AS sc_payment_runtime / sc_financial_operator / sc_financial_readonly and shows the refusals.
         # A grant file is a claim; this is the measurement.
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-least-privilege -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh scripts/phase4-least-privilege.sh"
 
       # ---------------------------------------------------------------- restore
       - name: Supported restore drill (real pg_dump / pg_restore, disposable PG16)
+        if: steps.reuse.outputs.hit != 'true'
         # Performs an ACTUAL dump-and-restore rather than faking the signal. It is the step that would have
         # caught the T0038 defect: the supported restore goes into the same cluster, so system_identifier
         # never changes and an identity-only detector sees nothing.
@@ -129,12 +154,14 @@ jobs:
 
       # ---------------------------------------------------------------- financial core against real PG
       - name: Financial-core PG16 integration matrix (disposable PG16)
+        if: steps.reuse.outputs.hit != 'true'
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-integration -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh scripts/phase4-pg-integration.sh"
 
       # ---------------------------------------------------------------- DARK
       # The gate must be able to FAIL. A suite nobody has watched fail is a suite nobody has tested, and a
       # deterministic command error sitting inside a green run is worse than a red one.
       - name: Prove the integration gate reports a broken step
+        if: steps.reuse.outputs.hit != 'true'
         env:
           PHASE4_SELFTEST_BREAK: recovery
         run: |
@@ -145,12 +172,14 @@ jobs:
           echo "the integration gate correctly failed on the broken step"
 
       - name: DARK assertion — no Phase-4 flag is enabled anywhere in the tree
+        if: steps.reuse.outputs.hit != 'true'
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-dark -- bash $GITHUB_WORKSPACE/scripts/ci/phase4-dark-check.sh"
 
       # ---------------------------------------------------------------- Hotel-Admin financial operator UI
       # The operator screens are part of the Phase-4 software boundary: a recovery screen that grew a
       # "retry" button would be a way to double-charge a guest, and only a UI test catches that.
       - name: Set up Node
+        if: steps.reuse.outputs.hit != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -158,6 +187,7 @@ jobs:
           cache-dependency-path: hotel-admin/package-lock.json
 
       - name: Install the Hotel-Admin toolchain
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: hotel-admin
         # package-lock.json is generated by a real `npm install` on LINUX (node:20-bookworm), not on the
         # Windows development host. sharp and the SWC binaries are optional platform packages, and npm's
@@ -167,14 +197,17 @@ jobs:
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-npm-ci -- npm ci"
 
       - name: Hotel-Admin typecheck
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: hotel-admin
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-typecheck -- npx tsc --noEmit"
 
       - name: Hotel-Admin unit tests (financial operator surface)
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: hotel-admin
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-vitest -- npx vitest run --reporter=default"
 
       - name: Hotel-Admin production build with Phase-4 flags OFF
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: hotel-admin
         # The DELIVERED bundle. Building it with the flags off is what proves the financial screens are
         # absent from the shipped navigation rather than merely hidden by a runtime check.
@@ -183,10 +216,12 @@ jobs:
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-build -- npx next build"
 
       - name: Install Chrome for the browser tests
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: hotel-admin
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh playwright-install -- npx playwright install --with-deps chrome"
 
       - name: Hotel-Admin E2E — the FULL browser suite
+        if: steps.reuse.outputs.hit != 'true'
         working-directory: hotel-admin
         # The whole suite, not only the Phase-4 spec: a financial milestone that regressed the PMS-interface
         # or guest-portal screens would still be a regression, and this is the gate that caught exactly that
@@ -198,9 +233,11 @@ jobs:
       # corrected state file, which is also what a validator that does nothing looks like. This drives the
       # real validator against the exact stale values found at T0041 and fails if it lets any of them pass.
       - name: Current-state parity self-test
+        if: steps.reuse.outputs.hit != 'true'
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh state-parity-selftest -- bash $GITHUB_WORKSPACE/tools/validate-state-parity-selftest.sh"
 
       - name: Current-state claims match the repository
+        if: steps.reuse.outputs.hit != 'true'
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh state-parity -- python3 $GITHUB_WORKSPACE/tools/validate-state-parity.py"
 
       # ---------------------------------------------------------------- dependency risk
@@ -208,21 +245,24 @@ jobs:
       # does nothing is also in; this proves it refuses an unaccepted production advisory before its verdict
       # on the real tree is worth anything.
       - name: Dependency gate self-test
+        if: steps.reuse.outputs.hit != 'true'
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-dependency-gate-selftest -- bash $GITHUB_WORKSPACE/scripts/ci/phase4-dependency-gate-selftest.sh"
 
       - name: Production dependency advisory gate
+        if: steps.reuse.outputs.hit != 'true'
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-dependency-gate -- bash $GITHUB_WORKSPACE/scripts/ci/phase4-dependency-gate.sh"
 
       - name: Assemble the Phase-4 financial-core evidence artifact
-        if: always()
+        if: always() && steps.reuse.outputs.hit != 'true'
         run: python3 scripts/ci/phase4_evidence.py
 
       - name: Record the HEAD for the artifact name
+        if: steps.reuse.outputs.hit != 'true'
         id: head
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Upload the Phase-4 financial-core evidence artifact
-        if: always()
+        if: always() && steps.reuse.outputs.hit != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: phase4-financial-core-evidence-${{ steps.head.outputs.sha }}
