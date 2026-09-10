@@ -139,7 +139,7 @@ test("stays list shows the stay and its occupants/folios on demand", async ({ pa
   expect(mutations.filter((m) => m.method !== "GET")).toHaveLength(0);
 });
 
-test("stay events open on the review queue and show why an event was refused", async ({ page }) => {
+test("stay events open on the whole feed and still show why an event was refused", async ({ page }) => {
   const mutations: Mutations = [];
   await installBackend(page, {
     events: [
@@ -156,8 +156,10 @@ test("stay events open on the review queue and show why an event was refused", a
     mutations,
   });
   await page.goto("/stay-events");
-  await expect(page.getByText("FOLIO_CLAIMED_BY_OTHER_STAY")).toBeVisible();
-  await expect(page.getByLabel("Filter by processing status")).toHaveValue("MANUAL_REVIEW");
+  await expect(page.getByText(/folio claimed by other stay/i)).toBeVisible();
+  await expect(page.getByLabel(/Filter by what happened to the message/i)).toHaveValue("");
+  // ...and the queue is ANNOUNCED rather than being the only thing visible.
+  await expect(page.getByText(/need a decision/i).first()).toBeVisible();
 });
 
 test("an operator acknowledges an operational alert", async ({ page }) => {
@@ -240,8 +242,8 @@ test("phase-3 pages are accessible: named controls, one heading, labelled filter
   await expect(page.getByLabel("Filter by status")).toBeVisible();
 
   await page.goto("/stay-events");
-  await expect(page.getByRole("heading", { level: 1, name: "Stay events" })).toBeVisible();
-  await expect(page.getByLabel("Filter by processing status")).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "PMS activity" })).toBeVisible();
+  await expect(page.getByLabel(/Filter by what happened to the message/i)).toBeVisible();
 
   await page.goto("/checkout-grace");
   await expect(page.getByRole("heading", { level: 1, name: "Checkout grace" })).toBeVisible();

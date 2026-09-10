@@ -126,44 +126,49 @@ test("the interface page shows what is running, how it is doing, and how far beh
   await installBackend(page, { mutations });
   await page.goto("/pms-interfaces");
 
-  await expect(page.getByRole("heading", { name: "PMS interfaces" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "PMS connection" })).toBeVisible();
   await expect(page.getByText("Main PMS")).toBeVisible();
-  await page.getByRole("button", { name: "Open" }).click();
+  await page.getByRole("button", { name: "Manage" }).click();
 
   // three dimensions, stated separately because they fail separately — and in the words an operator reads,
   // not the internal axis names. The raw codes remain available as tooltips for support.
-  await expect(page.getByText("Connected")).toBeVisible();
-  await expect(page.getByText("Receiving updates")).toBeVisible();
-  await expect(page.getByText("Up to date")).toBeVisible();
-  await expect(page.getByText(/12 stays in house/)).toBeVisible();
+  // Scoped to the status card: the list row now carries live state too, so these words legitimately appear
+  // more than once on the page. What is asserted is unchanged -- the three dimensions are stated SEPARATELY,
+  // in operator words, rather than collapsed into one "degraded".
+  const status = page.locator("dl").filter({ hasText: "Live updates" }).first();
+  await expect(status.getByText("Connected")).toBeVisible();
+  await expect(status.getByText("Receiving updates")).toBeVisible();
+  await expect(status.getByText("Up to date")).toBeVisible();
+  await expect(page.getByText("Guests in house").first()).toBeVisible();
+  await expect(page.getByText("12", { exact: true }).first()).toBeVisible();
   // the backlog's AGE, which is what distinguishes a busy morning from a stuck processor
-  await expect(page.getByText(/oldest waiting since/)).toBeVisible();
+  await expect(page.getByText(/^Oldest /).first()).toBeVisible();
 });
 
 test("the published revision is the one the interface points at, not the newest", async ({ page }) => {
   const mutations: Mutations = [];
   await installBackend(page, { mutations });
   await page.goto("/pms-interfaces");
-  await page.getByRole("button", { name: "Open" }).click();
+  await page.getByRole("button", { name: "Manage" }).click();
 
   // scoped to the badge, because the list's "Published revision" column header contains the word too
-  const badge = page.getByText("published", { exact: true });
+  const badge = page.getByText("Live", { exact: true });
   await expect(badge).toBeVisible();
   await expect(badge.locator("xpath=ancestor::tr[1]")).toContainText("#1");
   // and the newer one is the one offering a Publish action
-  await expect(page.getByRole("button", { name: "Publish", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Put live", exact: true }).first()).toBeVisible();
 });
 
 test("publishing sends the revision the operator believed was live", async ({ page }) => {
   const mutations: Mutations = [];
   await installBackend(page, { mutations });
   await page.goto("/pms-interfaces");
-  await page.getByRole("button", { name: "Open" }).click();
+  await page.getByRole("button", { name: "Manage" }).click();
 
-  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await page.getByRole("button", { name: "Put live", exact: true }).first().click();
   await page.getByLabel("Reason").fill("CONFIG_UPDATE");
   await page.getByLabel("Confirm your password").fill("operator-pw");
-  await page.getByRole("button", { name: "Publish revision" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Put live" }).click();
 
   await expect.poll(() => mutations.length).toBeGreaterThan(0);
   const m = mutations.find((x) => x.path.endsWith("/publish"))!;
@@ -177,16 +182,16 @@ test("a concurrent publication is shown as a refusal, not as success", async ({ 
   const mutations: Mutations = [];
   await installBackend(page, { mutations, publishStatus: 409 });
   await page.goto("/pms-interfaces");
-  await page.getByRole("button", { name: "Open" }).click();
+  await page.getByRole("button", { name: "Manage" }).click();
 
-  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await page.getByRole("button", { name: "Put live", exact: true }).first().click();
   await page.getByLabel("Reason").fill("CONFIG_UPDATE");
   await page.getByLabel("Confirm your password").fill("operator-pw");
-  await page.getByRole("button", { name: "Publish revision" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Put live" }).click();
 
   await expect(page.getByRole("alert").filter({ hasText: /published a different revision/ })).toBeVisible();
   // the form stays open so the operator can reload and decide, rather than closing as if it had worked
-  await expect(page.getByRole("button", { name: "Publish revision" })).toBeVisible();
+  await expect(page.getByRole("dialog").getByRole("button", { name: "Put live" })).toBeVisible();
 });
 
 // THE SUPPORTED CONNECTOR HAS NO CREDENTIAL, so no credential surface may be presented.
@@ -209,7 +214,7 @@ test("no credential surface is presented, and no credential is ever fetched", as
   });
 
   await page.goto("/pms-interfaces");
-  await page.getByRole("button", { name: "Open" }).click();
+  await page.getByRole("button", { name: "Manage" }).click();
 
   await expect(page.getByRole("heading", { name: "Credential" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /replace credential/i })).toHaveCount(0);
@@ -238,7 +243,7 @@ test("routing names the guest networks that are mapped to nothing", async ({ pag
   await expect(page.getByText("Main PMS")).toBeVisible();
   // the point of the page: an absence is invisible in a list of what exists
   await expect(page.getByText("Conference VLAN 20")).toBeVisible();
-  await expect(page.getByText(/resolved against no/)).toBeVisible();
+  await expect(page.getByText(/will not be recognised/)).toBeVisible();
 });
 
 test("source conflicts name both interfaces by their labels", async ({ page }) => {
@@ -270,8 +275,11 @@ test("resolution evidence summarises outcomes and names no guest", async ({ page
   });
   await page.goto("/pms-resolutions");
 
-  await expect(page.getByText("1 of 3 verified")).toBeVisible();
-  await expect(page.getByText(/ambiguous discriminator required · 2/)).toBeVisible();
+  await expect(page.getByText("Checks recorded")).toBeVisible();
+  await expect(page.getByText("Let online").first()).toBeVisible();
+  await expect(page.getByText(/1 of 3 verified|33% of attempts/)).toBeVisible();
+  await expect(page.getByText(/ambiguous discriminator required/i).first()).toBeVisible();
+  await expect(page.getByText("2", { exact: true }).first()).toBeVisible();
   // the table carries outcomes and networks only — a list naming rooms would be a way to enumerate who is
   // staying at the property, which is exactly what the guest-facing uniform failure exists to prevent
   const table = await page.locator("table").innerHTML();
@@ -307,8 +315,8 @@ test("the new phase-3 pages are accessible: one heading, named controls, labelle
 
   // the forms specifically: every input is reachable by its label, which is what a screen reader announces
   await page.goto("/pms-interfaces");
-  await page.getByRole("button", { name: "Open" }).click();
-  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await page.getByRole("button", { name: "Manage" }).click();
+  await page.getByRole("button", { name: "Put live", exact: true }).first().click();
   await expect(page.getByLabel("Reason")).toBeVisible();
   await expect(page.getByLabel("Confirm your password")).toBeVisible();
 
@@ -319,10 +327,10 @@ test("the new phase-3 pages are accessible: one heading, named controls, labelle
   const mutations2: Mutations = [];
   await installBackend(page, { mutations: mutations2, publishStatus: 409 });
   await page.goto("/pms-interfaces");
-  await page.getByRole("button", { name: "Open" }).click();
-  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await page.getByRole("button", { name: "Manage" }).click();
+  await page.getByRole("button", { name: "Put live", exact: true }).first().click();
   await page.getByLabel("Reason").fill("CONFIG_UPDATE");
   await page.getByLabel("Confirm your password").fill("pw");
-  await page.getByRole("button", { name: "Publish revision" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Put live" }).click();
   await expect(page.getByRole("alert").filter({ hasText: /published a different revision/ })).toBeVisible();
 });

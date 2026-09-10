@@ -47,6 +47,46 @@ import {
 
 const fmtInt = (n?: number | null) => (typeof n === "number" ? n.toLocaleString() : "—");
 
+/**
+ * normalize fills in any section the payload did not carry.
+ *
+ * This is not defensive decoration. `snap?.pms.interfaces` reads safely only while `snap` is null: once a
+ * response arrives with `pms` absent, the optional chain has already been satisfied and the next access throws
+ * — which is a CLIENT-SIDE EXCEPTION that replaces the entire dashboard with "Application error", losing the
+ * sections that did arrive. That is strictly worse than a missing number, and it is reachable from things
+ * outside this page's control: an older edged that predates a section, a proxy returning an error document with
+ * a 200, or any response shaped differently from the contract.
+ *
+ * So the payload is normalized ONCE, here, and the render reads a value it knows exists. A section that did not
+ * arrive is marked unavailable, which is exactly how the UI already presents a capability this appliance does
+ * not have — so an incomplete response degrades to the same honest surface rather than to a blank page.
+ */
+function normalize(d: DashboardSnapshot): DashboardSnapshot {
+  const absent = { available: false, reason: "section_absent_from_response" };
+  return {
+    ...d,
+    guests: d.guests ?? {
+      devices_online: 0, guests_online: 0, sign_ins_today: 0, devices_today: 0, sign_ins_7d: 0,
+    },
+    data: d.data ?? {
+      bytes_down_today: 0, bytes_up_today: 0, total_bytes_today: 0, bytes_down_7d: 0, bytes_up_7d: 0,
+    },
+    hourly: Array.isArray(d.hourly) ? d.hourly : [],
+    occupancy: d.occupancy ?? {
+      ...absent, in_house: 0, with_internet: 0, arrivals_today: 0, departures_today: 0, posting_allowed: 0,
+    },
+    sign_in_checks: d.sign_in_checks ?? { ...absent, window: "24h", total: 0, verified: 0, outcomes: [] },
+    pms: d.pms
+      ? { ...d.pms, interfaces: Array.isArray(d.pms.interfaces) ? d.pms.interfaces : [] }
+      : { ...absent, interfaces: [], events_today: 0, events_applied_today: 0, events_needing_review: 0 },
+    postings: d.postings ?? {
+      ...absent, posted_today: 0, failed_today: 0, pending: 0, review_open: 0, unknown_open: 0,
+    },
+    networks: Array.isArray(d.networks) ? d.networks : [],
+    packages: Array.isArray(d.packages) ? d.packages : [],
+  };
+}
+
 export default function DashboardPage() {
   const [snap, setSnap] = useState<DashboardSnapshot | null>(null);
   const [health, setHealth] = useState<EdgeHealth | null>(null);
@@ -63,7 +103,7 @@ export default function DashboardPage() {
         api.get<DashboardSnapshot>("/reports/dashboard"),
         api.get<EdgeHealth>("/health"),
       ]);
-      if (d.status === "fulfilled") { setSnap(d.value); setErr(null); }
+      if (d.status === "fulfilled") { setSnap(normalize(d.value)); setErr(null); }
       else setErr(d.reason);
       if (h.status === "fulfilled") setHealth(h.value);
       setLoadedAt(new Date().toISOString());

@@ -52,11 +52,11 @@ test("exactly one navigation item is active, including on nested network routes"
   await installBackend(page, "iam_v2", []);
   for (const path of ["/network/dhcp", "/network/system", "/network", "/dashboard", "/guest-accounts"]) {
     await page.goto(path);
-    const active = page.locator("aside nav a.bg-panel2");
+    const active = page.locator('aside nav a[aria-current="page"]');
     await expect(active, `exactly one active item on ${path}`).toHaveCount(1);
   }
   await page.goto("/network/dhcp");
-  await expect(page.locator("aside nav a.bg-panel2")).toHaveText(/DHCP/i);
+  await expect(page.locator('aside nav a[aria-current="page"]')).toHaveText(/DHCP/i);
 });
 
 // THE "MENU JUMPS BACK TO THE TOP". The menu never moved: `min-h-screen` let the whole page grow past the
@@ -67,16 +67,16 @@ test("the sidebar scrolls independently and the window does not scroll", async (
   await page.setViewportSize({ width: 1280, height: 700 });
   await installBackend(page, "iam_v2", []);
   await page.goto("/dashboard");
-  // The layout renders "Loading…" until whoami resolves, so the sidebar does not exist yet; without this
-  // wait the measurement below runs against a page that has no <aside> and fails for the wrong reason.
-  await page.locator("aside nav").waitFor({ state: "attached" });
-  const m = await page.evaluate(() => {
-    const nav = document.querySelector("aside nav")!;
-    return {
-      navScrollable: nav.scrollHeight > nav.clientHeight + 1,
-      windowScrollable: document.documentElement.scrollHeight > window.innerHeight + 1,
-    };
-  });
+  // The layout renders a skeleton until whoami resolves, so the sidebar does not exist yet; and below `lg` the
+  // column is replaced by a drawer that is mounted only while open. Waiting for the column to be VISIBLE pins
+  // the permanent one, and the measurement is taken from that same element rather than re-querying the
+  // document, so it cannot run against a null the wait had already satisfied.
+  const navEl = page.locator("aside nav").first();
+  await navEl.waitFor({ state: "visible" });
+  const m = await navEl.evaluate((nav) => ({
+    navScrollable: nav.scrollHeight > nav.clientHeight + 1,
+    windowScrollable: document.documentElement.scrollHeight > window.innerHeight + 1,
+  }));
   expect(m.navScrollable, "the sidebar must be its own scrolling column").toBe(true);
   expect(m.windowScrollable, "the window must not scroll -- that is what moved the menu").toBe(false);
 });
@@ -104,15 +104,20 @@ test("a failed load says so, offers a retry, and does not claim to still be chec
   // The form must still be usable and must still imply no plan prerequisite. The "checking how this site
   // decides guest access" states are gone with the authority branch they described -- there is nothing left
   // to check -- so what is asserted here is that no wording came back with the failure.
-  await page.getByRole("button", { name: /new account/i }).click();
-  await expect(page.getByText(/package eligibility rules/i).first()).toBeVisible();
+  await page.getByRole("button", { name: /add account/i }).click();
+  await expect(page.getByText(/eligibility rules on each internet package/i).first()).toBeVisible();
   const body = (await page.locator("body").innerText()).replace(/\s+/g, " ");
-  for (const rx of [/bound to a Guest Access Plan/i, /create one first/i, /guest access plan/i,
+  for (const rx of [/bound to a Guest Access Plan/i, /create one first/i, /guest access plan/i,
                     /Checking how this site decides guest access/i]) {
     expect(body, `a failed load must not claim ${rx}`).not.toMatch(rx);
   }
 
   // Retrying recovers, and the stale failure banner does not survive the recovery.
+  //
+  // The form opened above is a MODAL, so the list behind it is inert until it is dismissed -- that is what a
+  // modal is for, and Radix enforces it. Closing it first is what an operator does too.
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   fail = false;
   await page.getByRole("button", { name: /try again/i }).click();
   await expect(page.getByText("devguest2")).toBeVisible();
@@ -134,9 +139,9 @@ test("a failed load says so, offers a retry, and does not claim to still be chec
 test("the plan picker is absent, and there is no authority under which it returns", async ({ page }) => {
   await installBackend(page, "iam_v2", [IAMV2_ACCOUNT]);
   await page.goto("/guest-accounts");
-  await page.getByRole("button", { name: /new account/i }).click();
+  await page.getByRole("button", { name: /add account/i }).click();
   await expect(page.locator('select[name="template_id"]')).toHaveCount(0);
-  await expect(page.getByText(/package eligibility rules/i).first()).toBeVisible();
+  await expect(page.getByText(/eligibility rules on each internet package/i).first()).toBeVisible();
 });
 
 test("the screen never requests the removed plans resource, at any point in its load", async ({ page }) => {
@@ -155,8 +160,8 @@ test("the screen never requests the removed plans resource, at any point in its 
   });
   await page.goto("/guest-accounts");
   await expect(page.getByText("devguest2")).toBeVisible();
-  await page.getByRole("button", { name: /new account/i }).click();
-  await expect(page.getByText(/package eligibility rules/i).first()).toBeVisible();
+  await page.getByRole("button", { name: /add account/i }).click();
+  await expect(page.getByText(/eligibility rules on each internet package/i).first()).toBeVisible();
   expect(calls, "the removed plans resource must never be requested")
     .not.toContain("/guest-access-plans");
 });
@@ -180,7 +185,7 @@ test("no plan-bound wording or create-a-plan guidance appears anywhere, includin
     return route.fulfill(json(200, { data: [], meta: { has_more: false } }));
   });
   await page.goto("/guest-accounts");
-  await page.getByRole("button", { name: /new account/i }).click();
+  await page.getByRole("button", { name: /add account/i }).click();
   const banned = /bound to a Guest Access Plan|create one first|guest access plan/i;
   await expect(page.getByText(banned)).toHaveCount(0);
   release();

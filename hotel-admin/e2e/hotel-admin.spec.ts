@@ -95,7 +95,7 @@ test("service plans: a new plan publishes with the supported time-accounting mod
   // from the form rather than by name, which would match both.
   await page.getByRole("button", { name: /add plan/i }).click();
   await page.locator('input[name="code"]').fill("PLATINUM");
-  await page.locator('form button[type="submit"]').click();
+  await page.getByRole("dialog").locator('button[type="submit"]').click();
   await expect.poll(() => mutations.find((m) => m.path.endsWith("/plans") && m.method === "POST")).toBeTruthy();
   const planReq = mutations.find((m) => m.path.endsWith("/plans") && m.method === "POST")!;
   expect((planReq.body as { time_accounting_mode: string }).time_accounting_mode).toBe("VALIDITY_WINDOW");
@@ -126,11 +126,19 @@ test("internet packages: publish via the plan selector, then step-up deactivate"
   expect(pkgJson).not.toMatch(/price|settlement|pms|tax|currency/); // free-only, no PMS
   expect((pkgReq.body as { service_plan_revision_id: string }).service_plan_revision_id).toBe("rev-gold");
 
-  // Withdrawing a package still takes two prompts: a reason, then the operator's password.
-  let dialogs = 0;
-  page.on("dialog", (d) => { dialogs += 1; d.accept(dialogs === 1 ? "retire it" : "operatorpw"); });
+  // Withdrawing a package still takes a reason AND the operator's password -- now in a confirmation dialog
+  // that states what stops, with the password masked. No browser prompt is used anywhere.
+  let browserDialogs = 0;
+  page.on("dialog", (d) => { browserDialogs += 1; d.dismiss(); });
   await page.getByRole("button", { name: /^disable$/i }).click();
+  const confirm = page.getByRole("dialog");
+  await expect(confirm.getByRole("button", { name: /stop offering it/i })).toBeDisabled();
+  await confirm.getByLabel(/why are you disabling it/i).fill("retire it");
+  await confirm.getByLabel(/confirm your password/i).fill("operatorpw");
+  await expect(confirm.locator('input[type="password"]')).toHaveCount(1);
+  await confirm.getByRole("button", { name: /stop offering it/i }).click();
   await expect.poll(() => mutations.find((m) => m.path.includes("/active"))).toBeTruthy();
+  expect(browserDialogs, "a browser prompt/confirm was used for the step-up").toBe(0);
   const actReq = mutations.find((m) => m.path.includes("/active"))!;
   expect(actReq.body).toMatchObject({ active: false, reason: "retire it", password: "operatorpw" });
 });
@@ -142,8 +150,8 @@ test("internet packages: guest activity rows are sanitized and carry no guest PI
     mutations,
   });
   await page.goto("/internet-packages");
-  await page.getByRole("button", { name: /guest activity/i }).click();
-  await expect(page.getByText("q1")).toBeVisible();
+  await page.getByRole("tab", { name: /guest activity/i }).click();
+  await expect(page.getByText(/^q1/)).toBeVisible();
   await expect(page.getByText("GRANTED")).toBeVisible();
   const html = (await page.content()).toLowerCase();
   for (const pii of ["auth_context", "device_id", "guest_network", "voucher_id", "guest_account", "password\"", "mac address"]) {
