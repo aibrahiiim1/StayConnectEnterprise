@@ -182,12 +182,34 @@ vet:
 	cd control-plane && go vet ./...
 	cd data-plane && go vet ./...
 
+# -count=1 MATTERS AND IS NOT NOISE. Without it Go may serve the whole run from the test cache, so a green
+# `make test` can mean "nothing was rebuilt or re-executed since last time". CI always passes -count=1, which
+# is how a locally-green tree turns red on a runner. The local command now matches the gate.
 test:
-	cd control-plane && go test ./...
-	cd data-plane && go test ./...
-	cd license && go test ./...
+	cd control-plane && go test ./... -count=1
+	cd data-plane && go test ./... -count=1
+	cd license && go test ./... -count=1
 
 # ---- project-state governance (permanent gate) ----
+.PHONY: preflight preflight-fast preflight-full fixture-parity delivery-protocol
+# Run this before pushing. It refuses locally what the four gates would refuse remotely, cheapest check
+# first. See docs/FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md for the measurements behind the ordering.
+preflight:
+	bash tools/preflight.sh
+# Stages 1-4 only: seconds, no Go build, no browser. The pre-commit sweep.
+preflight-fast:
+	bash tools/preflight.sh --fast
+# Adds the full browser suite. Run once, before opening the pull request.
+preflight-full:
+	bash tools/preflight.sh --full
+fixture-parity:
+	python tools/check-fixture-parity.py
+delivery-protocol:
+	python tools/validate-delivery-protocol.py
+
+# The mutation suite the governance gate runs asserts a COMPLETE matrix with no case limit
+# (MUTATION_CASE_LIMIT=none, EXECUTED==TOTAL). Running it locally without --require-full can pass on a
+# partial matrix and then fail in CI, so the local target now matches the gate.
 .PHONY: governance-validate governance-render governance-mutation-tests governance-build-packs
 governance-validate:
 	python tools/project-state.py validate
@@ -196,6 +218,6 @@ governance-validate:
 governance-render:
 	python tools/project-state.py render
 governance-mutation-tests:
-	python tools/tests/project_state_validator/run_mutations.py
+	python tools/tests/project_state_validator/run_mutations.py --require-full
 governance-build-packs:
 	python tools/project-state.py build-packs

@@ -103,6 +103,50 @@ Two lifecycles now coexist, chosen by what the Product Owner actually authorized
 
 §5's governance restraint is unchanged for routine work. Where a mission's own governance checks require a manifest refresh, a generated-block re-render or a pack rebuild in order to merge, performing those is part of the authorized mission rather than unsolicited ceremony.
 
+## 0B. FAST DELIVERY AND PARALLEL AGENTS
+
+**The authoritative rule is [`docs/FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md`](docs/FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md).**
+It is machine-enforced by `tools/validate-delivery-protocol.py` inside the `governance` gate. What follows is
+the short form; where the two differ, that file wins.
+
+**Before pushing, run `bash tools/preflight.sh`.** It refuses locally what the gates refuse remotely, cheapest
+check first. This is not ceremony: it is measured. Across PRs #108/#109 the gates burned 11 461 s over 34
+attempts, 16 of them failed, and GitHub queue time was **zero** — every second lost was rework. Thirteen of
+those sixteen failures were knowable on a workstation in seconds to minutes: a fixture behind its migrations
+(8), a manifest not regenerated (3), a PR body missing its governance metadata (2), a Windows-pruned lockfile
+(1).
+
+**CI hygiene.**
+
+* **Never** use `workflow_dispatch` to satisfy or repair a required check — the four gates no longer accept
+  it. A required status context *is* a job name, so a dispatched run reports the same context: it can block
+  the merge of a PR whose own checks are green, and its success can be inherited as evidence.
+* After a genuine correction, re-run **only the failed jobs** of the `pull_request` run.
+* Superseded pull-request runs now cancel automatically; master runs never do.
+* Prepare read-only delivery material while gates run. **Never merge or deploy before the required exact head
+  is ALL_GREEN.**
+
+**Deployment order follows dependencies.** Deploy a backward-compatible API before the UI that depends on it,
+or use a verified atomic staged switch. Never expose a temporary 404. (Deploying the Hotel Admin bundle
+without its `edged` half did exactly that.)
+
+**Guest data never enters delivery evidence.** PR bodies, commit messages, governance records and export packs
+are published, and an appliance under acceptance carries a real PMS guest list. Describe the observation;
+never reproduce the record. Commit messages are immutable — check before committing, not after.
+
+**Parallel agents.**
+
+* **Exactly one Delivery Owner per delivery branch**, who alone owns commits, pushes, the PR, the merge and
+  the final report.
+* No two agents write, commit, push or run `git add -A` against the same branch or working tree concurrently.
+* Read-only investigation and review **should** run in parallel — it is free elapsed time.
+* Code-producing subagents use isolated worktrees, non-overlapping scopes, and hand results back to the
+  Delivery Owner. They do not push.
+* Parallel tests use isolated databases, artifacts and ports. Never run competing E2E servers against one
+  environment. No concurrent deployment or live mutation, ever.
+
+---
+
 ### 1. Execute, do not review
 
 When the user requests a code change, configuration change, database change, deployment action, production action, file edit, deletion, migration, commit, push, or other repository operation:

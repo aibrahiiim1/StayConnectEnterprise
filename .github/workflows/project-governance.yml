@@ -10,7 +10,30 @@ on:
     branches: [ master ]
   push:
     branches: [ master ]
-  workflow_dispatch:
+  # workflow_dispatch is DELIBERATELY ABSENT from this gate.
+  #
+  # A dispatched run reports a check with the SAME NAME as the pull_request run, because a required status
+  # context IS the job name. That has two consequences, both of which cost this project real delivery time:
+  # a dispatched run in progress blocks the merge of a PR whose own checks are already green, and a
+  # dispatched SUCCESS is a candidate the evidence-reuse lookup can inherit -- so a required check could be
+  # satisfied by a run that never evaluated a pull request. The gate must be earned on the event that
+  # actually proposes the change. To re-run after a genuine correction, re-run the FAILED JOBS of the
+  # pull_request run; do not dispatch a fresh one.
+
+# ---------------------------------------------------------------------------------------------------------
+# ONE RUN PER REF, AND A SUPERSEDED RUN IS CANCELLED INSTEAD OF BEING LEFT TO FINISH.
+#
+# Without this key -- and until now there was no `concurrency:` key in ANY of the four gate workflows -- every
+# push to a PR branch started a run that nothing ever stopped. The runs for the abandoned commits kept a
+# runner busy, kept writing evidence, and kept reporting a check whose name is REQUIRED, so an obsolete run
+# could still be "in progress" for an old commit while the branch had already moved on.
+#
+# cancel-in-progress is deliberately TRUE ONLY FOR pull_request. A push to master must never be cancelled:
+# master's green record is the thing the protection rule reads, and cancelling it would leave the default
+# branch with a check that is neither passing nor failing.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -76,6 +99,19 @@ jobs:
       # enforcement, widened merge methods. Unreachable means FAIL: unverifiable is not the same as fine.
       - name: Master protection matches the recorded model
         run: python tools/validate-branch-protection.py
+
+      # The DELIVERY-SPEED half of the protection story, and it is checked from the tree, so it is tree-pure.
+      #
+      # validate-branch-protection.py asserts that the four gates are required and cannot be bypassed. It says
+      # nothing about how a gate can be SATISFIED or how long a delivery waits for one. Both of those were
+      # measurably wrong: no gate workflow carried a `concurrency:` key, so superseded runs were never
+      # cancelled, and every gate accepted `workflow_dispatch`, so a dispatched run reported the same required
+      # context as the real pull-request run -- blocking a merge while it finished, and offering its success
+      # to the evidence-reuse lookup. This asserts both are fixed, and that the local preflight, its
+      # documentation and the PR template still exist and still implement the checks they claim to.
+      - name: Delivery protocol — concurrency, trigger hygiene, preflight coverage
+        if: steps.reuse.outputs.hit != 'true'
+        run: python tools/validate-delivery-protocol.py
 
       # Does the enforcement above actually refuse the mistakes it exists to catch? A policy validator that
       # passes on a correct repository is indistinguishable from one that returns zero. This drives the real
