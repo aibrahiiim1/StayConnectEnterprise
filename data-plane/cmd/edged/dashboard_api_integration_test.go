@@ -71,11 +71,15 @@ func seedSiteActivity(t *testing.T, f *apiFixture, roomNumber string) {
 	}
 
 	// A guest network and a successful sign-in check, so the sign-in block has something too.
+	// Seeded with its ADDRESSING, not just a name: the dashboard reports the subnet and counts devices by bridge,
+	// and a name-only stub would exercise neither. It also pins the COALESCE fix -- before it, a network missing
+	// these columns was silently dropped from the response.
 	var gn string
 	if err := f.pool.QueryRow(ctx, `
-		INSERT INTO public.guest_networks(id,tenant_id,site_id,name,enabled)
-		VALUES (gen_random_uuid(),$1,$2,$3,true) RETURNING id::text`,
-		f.tenant, f.site, "Guest VLAN "+roomNumber).Scan(&gn); err != nil {
+		INSERT INTO public.guest_networks(id,tenant_id,site_id,name,enabled,bridge_name,subnet_cidr,parent_interface)
+		VALUES (gen_random_uuid(),$1,$2,$3,true,$4,$5::cidr,'ens192') RETURNING id::text`,
+		f.tenant, f.site, "Guest VLAN "+roomNumber,
+		"br-guest-"+roomNumber, "10."+roomNumber[:1]+".0.0/24").Scan(&gn); err != nil {
 		t.Fatalf("seed guest network: %v", err)
 	}
 	if _, err := f.pool.Exec(ctx, `
@@ -194,9 +198,17 @@ func TestIntegration_API_DashboardNetworksAreSiteConfined(t *testing.T) {
 	if len(nets) != 1 {
 		t.Fatalf("networks has %d entries; another site's guest networks are visible", len(nets))
 	}
-	name, _ := nets[0].(map[string]any)["name"].(string)
-	if name != "Guest VLAN 301" {
+	first := nets[0].(map[string]any)
+	if name, _ := first["name"].(string); name != "Guest VLAN 301" {
 		t.Fatalf("networks[0].name = %q; the wrong site's network is being reported", name)
+	}
+	// The addressing travels too. Asserting it here is what stops the COALESCE above from being satisfied by a
+	// response that renders every network as blanks.
+	if cidr, _ := first["subnet_cidr"].(string); cidr != "10.3.0.0/24" {
+		t.Fatalf("networks[0].subnet_cidr = %q; the network's addressing was not reported", cidr)
+	}
+	if br, _ := first["bridge_name"].(string); br != "br-guest-301" {
+		t.Fatalf("networks[0].bridge_name = %q", br)
 	}
 }
 

@@ -418,8 +418,16 @@ func (s *server) dashPostings(ctx context.Context) dashPostings {
 
 func (s *server) dashNetworks(ctx context.Context) []dashNetwork {
 	out := []dashNetwork{}
+	// EVERY TEXT COLUMN IS COALESCED, and that is a correctness fix rather than defensive noise.
+	//
+	// public.guest_networks makes bridge_name, subnet_cidr and dhcp_mode NOT NULL on a configured appliance, but
+	// the column definitions themselves are nullable (migration 0002 and the test fixture both leave them so). A
+	// NULL therefore made Scan fail, and the loop below appends only on a nil error -- so the network VANISHED
+	// from the dashboard with no error reported anywhere. A half-configured network is exactly the one an operator
+	// needs to see, so it must render with an empty field rather than not render at all.
 	rows, err := s.db.Query(ctx, `
-		SELECT gn.name, gn.bridge_name, gn.enabled, gn.vlan_id, gn.subnet_cidr::text, gn.dhcp_mode,
+		SELECT COALESCE(gn.name,''), COALESCE(gn.bridge_name,''), gn.enabled, gn.vlan_id,
+		       COALESCE(gn.subnet_cidr::text,''), COALESCE(gn.dhcp_mode,''),
 		       gn.captive_portal_enabled, gn.internet_access_enabled,
 		       -- THE POOL SIZE, summed across every range configured for the network. Counted from the stored
 		       -- start/end addresses rather than from the subnet mask: a /22 with one small pool in it has 1,022
@@ -435,7 +443,8 @@ func (s *server) dashNetworks(ctx context.Context) []dashNetwork {
 		       COALESCE((SELECT count(DISTINCT se.mac) FROM iam_v2.sessions se
 		                  WHERE se.tenant_id = gn.tenant_id AND se.site_id = gn.site_id
 		                    AND se.state = 'active'
-		                    AND se.ingress_interface = gn.bridge_name), 0)::bigint
+		                    AND se.ingress_interface = gn.bridge_name
+		                    AND NULLIF(gn.bridge_name,'') IS NOT NULL), 0)::bigint
 		  FROM public.guest_networks gn
 		 WHERE gn.tenant_id = $1 AND gn.site_id = $2
 		 ORDER BY gn.enabled DESC, gn.name
