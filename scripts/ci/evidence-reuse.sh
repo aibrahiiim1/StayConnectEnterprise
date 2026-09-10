@@ -48,22 +48,35 @@
 #      evidence: an unrelated branch, a fork, or a stray commit that happens to produce the same tree is not
 #      an ancestor, so its verdict can never be borrowed.
 #
-#   4. RECENCY. The matched run must be recent (EVIDENCE_REUSE_MAX_AGE_HOURS, default 24). The legitimate
-#      case is a merge minutes after its pull request was validated. A bound stops evidence from being
-#      RESURRECTED: a revert-of-a-revert restores an old tree and IS a descendant, so ancestry alone would
-#      let a months-old verdict stand for content being re-accepted today, on a different runner image, with
-#      a different toolchain patch level. Twenty-four hours keeps the entire delivery-path saving and gives
-#      stale proof nowhere to hide.
+#   4. IDENTICAL EXECUTION ENVIRONMENT. Tree equality fixes the code, not the machine. These gates ask for
+#      `ubuntu-latest`, Go `1.25`, Node `20` and version-tagged actions -- all resolved at run time, all
+#      capable of moving inside any recency window. So scripts/ci/env-fingerprint.sh MEASURES the resolved
+#      environment (hosted image version, kernel, resolved toolchain versions, container image digests) and
+#      this reads the candidate's own fingerprint back out of ITS OWN JOB LOG through the API. Different
+#      environment, no reuse. This is the rule that stops a run from setting up today's toolchain and then
+#      skipping the build on a verdict produced under a different one.
 #
-# FAIL CLOSED, ALWAYS. Every path that cannot establish all four -- no token, an API error, an unparsable
-# response, no candidate, an object this checkout does not have, an unreadable timestamp -- reports NO HIT,
-# and the caller runs the full validation. Reuse can only ever remove duplicated work; it can never be why
-# something went unchecked.
+#   5. RECENCY. The matched run must be recent (EVIDENCE_REUSE_MAX_AGE_HOURS, default 24).
+#
+#      THIS ONE IS A BOUND, NOT A PROOF, and is described that way deliberately. Rules 1-4 establish
+#      equality of everything this gate can name and measure; recency exists to limit exposure to what it
+#      cannot -- an unnamed mutable input, a registry that served different bytes under the same digest, a
+#      dependency of a dependency. It also stops evidence being RESURRECTED: a revert-of-a-revert restores an
+#      old tree and IS a descendant, so ancestry alone would let a months-old verdict stand for content being
+#      re-accepted today. Twenty-four hours keeps the entire delivery-path saving. It is a safety margin on
+#      the unknown, and nothing here treats it as evidence of equality.
+#
+# FAIL CLOSED, ALWAYS. Every path that cannot establish all five -- no token, an API error, an unparsable
+# response, no candidate, an object this checkout does not have, an unreadable timestamp, an environment
+# this run could not measure, a candidate log that carries no fingerprint -- reports NO HIT, and the caller
+# runs the full validation. Reuse can only ever remove duplicated work; it can never be why something went
+# unchecked.
 #
 # IT SAYS WHY IT DECLINED. Every earlier bug in this script made it SILENTLY NEVER REUSE, which is
 # indistinguishable from working. Rejections are counted by reason and printed.
 #
 # Usage:  evidence-reuse.sh <workflow-file.yml>
+# Requires: EVIDENCE_ENV_FINGERPRINT from the env-fingerprint step that runs immediately before this one.
 # Emits to $GITHUB_OUTPUT:  hit=true|false  tree=<sha>  matched_run=<id>  matched_sha=<sha>  matched_at=<iso>
 set -uo pipefail
 
@@ -74,6 +87,7 @@ SELF_RUN="${GITHUB_RUN_ID:-0}"
 OUT="${GITHUB_OUTPUT:-/dev/stdout}"
 LOOKBACK="${EVIDENCE_REUSE_LOOKBACK:-40}"
 MAX_AGE_HOURS="${EVIDENCE_REUSE_MAX_AGE_HOURS:-24}"
+ENV_FP="${EVIDENCE_ENV_FINGERPRINT:-}"
 
 emit() { printf '%s\n' "$*" >> "$OUT"; }
 no_hit() { echo "  -> NO REUSE: $*"; echo "  the full validation will run."; emit "hit=false"; exit 0; }
@@ -87,7 +101,13 @@ TREE="$(git rev-parse "$SHA^{tree}" 2>/dev/null)"
 [ -n "$TREE" ] || no_hit "this commit's tree could not be resolved"
 echo "  this commit: $SHA"
 echo "  this tree:   $TREE"
-echo "  max evidence age: ${MAX_AGE_HOURS}h"
+echo "  max evidence age: ${MAX_AGE_HOURS}h (a bound on unmeasured drift, not a proof of equality)"
+
+# An unmeasurable environment is an unmeasurable claim. Refuse before spending any API calls.
+case "$ENV_FP" in
+  *[!0-9a-f]*|"") no_hit "this run published no execution-environment fingerprint, so no earlier run can be shown to have used the same environment" ;;
+esac
+echo "  this env fingerprint: $ENV_FP"
 
 [ -n "${GITHUB_TOKEN:-}" ] || no_hit "no GITHUB_TOKEN, so the run history cannot be consulted"
 
@@ -141,6 +161,55 @@ for r in d.get("workflow_runs", []):
 
 [ -n "$CANDS" ] || no_hit "no earlier successful run of $WF to compare against"
 
+# WHAT ENVIRONMENT DID THAT RUN ACTUALLY EXECUTE ON?
+#
+# Read out of the candidate's OWN JOB LOG, which is GitHub's record of what happened rather than anyone's
+# claim about it -- the same trust model as the run's conclusion. A single job's log is plain text and small
+# (about 40 KB for governance), and this only runs for a candidate that has already passed tree, ancestry
+# and age, so it is at most one extra fetch per decision.
+#
+# The token is anchored at the start of the line after the log's timestamp prefix is stripped. That is why
+# env-fingerprint.sh prints it unindented and alone: every other mention of a fingerprint in these scripts is
+# indented or differently labelled, so a run can never match on its own commentary.
+candidate_env_fp() { # candidate_env_fp <run id>
+  local rid="$1" jobs jid log
+  # Offline override, for scripts/ci/tests/evidence-reuse-selftest.sh only: it drives this file against a
+  # purpose-built git repository with no network. tools/validate-ci-reuse-policy.py FAILS if any workflow
+  # ever sets an EVIDENCE_REUSE_* variable, so a test hook cannot become a production bypass.
+  if [ -n "${EVIDENCE_REUSE_CANDIDATE_FP_JSON:-}" ]; then
+    printf '%s' "$EVIDENCE_REUSE_CANDIDATE_FP_JSON" | "$PY" -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+print(d.get(sys.argv[1]) or "")
+' "$rid" 2>/dev/null | tr -d '\r'
+    return 0
+  fi
+  jobs="$(api "https://api.github.com/repos/$REPO/actions/runs/$rid/jobs")" || return 1
+  jid="$(printf '%s' "$jobs" | "$PY" -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+js = d.get("jobs") or []
+# These gates define exactly one job. If that ever stops being true, taking the first completed one is not
+# good enough, so refuse rather than guess.
+if len(js) != 1:
+    sys.exit(0)
+print(js[0].get("id") or "")
+' 2>/dev/null | tr -d '\r')"
+  [ -n "$jid" ] || return 1
+  log="$(curl -sSL --max-time 40 -H "Authorization: Bearer $GITHUB_TOKEN" \
+           -H "Accept: application/vnd.github+json" \
+           "https://api.github.com/repos/$REPO/actions/jobs/$jid/logs" </dev/null 2>/dev/null)"
+  [ -n "$log" ] || return 1
+  printf '%s' "$log" | tr -d '\r' | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z //' \
+    | grep -aoE '^EVIDENCE_ENV_FINGERPRINT=[0-9a-f]{64}$' | head -1 | cut -d= -f2
+}
+
 # How old is a run, in whole seconds? Fails loudly (empty) rather than returning a number nobody checked.
 age_seconds() { "$PY" -c '
 import datetime, sys
@@ -160,7 +229,7 @@ print(int((now - t).total_seconds()))
 # history this lookup depends on -- it broke this script's own testing before it was removed. A candidate
 # whose object is absent is skipped; it cannot become a match, so skipping it can only cost a re-run.
 n=0; resolved=0; tree_match=0
-rej_unresolved=0; rej_tree=0; rej_ancestry=0; rej_age=0; rej_badtime=0
+rej_unresolved=0; rej_tree=0; rej_ancestry=0; rej_age=0; rej_badtime=0; rej_env=0; rej_noenv=0
 while read -r rid rsha rstarted; do
     [ -n "$rsha" ] || continue
     n=$((n + 1))
@@ -189,14 +258,33 @@ while read -r rid rsha rstarted; do
         rej_age=$((rej_age + 1)); continue
     fi
 
+    # IDENTICAL EXECUTION ENVIRONMENT. Last, because it is the only rule that costs a network round trip,
+    # and by here at most one candidate is still standing.
+    cfp="$(candidate_env_fp "$rid")"
+    if [ -z "$cfp" ]; then
+        echo "  rejected $rid ($rsha): its log carries no execution-environment fingerprint, so the machine"
+        echo "    it ran on cannot be compared with this one"
+        rej_noenv=$((rej_noenv + 1)); continue
+    fi
+    if [ "$cfp" != "$ENV_FP" ]; then
+        echo "  rejected $rid ($rsha): SAME CONTENT, DIFFERENT MACHINE."
+        echo "    that run's environment: $cfp"
+        echo "    this run's environment: $ENV_FP"
+        echo "    A runner image, toolchain patch or container digest moved between the two. The verdict was"
+        echo "    produced somewhere else, so it is not evidence about here."
+        rej_env=$((rej_env + 1)); continue
+    fi
+
     echo "  MATCH: run $rid already validated this exact tree, and it qualifies on every rule"
     echo "    matched commit: $rsha"
     echo "    tree:           $rtree"
     echo "    started:        $rstarted ($((age / 60))m ago)"
     echo "    ancestor of this commit: yes"
+    echo "    execution environment: identical ($cfp)"
     echo "  Identical tree means identical content in every tracked path, INCLUDING this workflow definition,"
-    echo "  the validators it runs and governance/ci-reuse-policy.json. Only the steps that policy classifies"
-    echo "  TREE-PURE are satisfied by this evidence; every step classified ALWAYS still runs below."
+    echo "  the validators it runs and governance/ci-reuse-policy.json; and the environment that produced that"
+    echo "  verdict has been measured equal to this one. Only the steps that policy classifies TREE-PURE are"
+    echo "  satisfied by this evidence; every step classified ALWAYS still runs below."
     emit "hit=true"
     emit "tree=$TREE"
     emit "matched_run=$rid"
@@ -206,5 +294,7 @@ while read -r rid rsha rstarted; do
 done <<< "$CANDS"
 
 echo "  considered $n successful run(s) of $WF: $resolved resolvable, $tree_match with an identical tree."
-echo "  rejected -- object absent: $rej_unresolved, different tree: $rej_tree, not an ancestor: $rej_ancestry, too old: $rej_age, unreadable time: $rej_badtime"
-no_hit "no candidate satisfied all of: same gate, identical tree, ancestry, and age under ${MAX_AGE_HOURS}h"
+echo "  rejected -- object absent: $rej_unresolved, different tree: $rej_tree, not an ancestor: $rej_ancestry,"
+echo "              too old: $rej_age, unreadable time: $rej_badtime, different environment: $rej_env,"
+echo "              no environment fingerprint published: $rej_noenv"
+no_hit "no candidate satisfied all of: same gate, identical tree, ancestry, identical execution environment, and age under ${MAX_AGE_HOURS}h"

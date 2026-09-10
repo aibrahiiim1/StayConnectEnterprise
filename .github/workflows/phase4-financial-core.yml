@@ -57,6 +57,25 @@ jobs:
           python-version: '3.12'
 
 
+      # Not reuse-conditional, because the dependency gate later on is not: `npm audit` reads
+      # package-lock.json and needs no installed tree, so Node must be here on a reuse hit too. It also has
+      # to sit BEFORE the environment fingerprint, or the Node version this gate actually uses would not be
+      # inside the key that decides whether an earlier verdict is about the same machine.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: hotel-admin/package-lock.json
+
+      # MEASURE THE MACHINE BEFORE DECIDING WHETHER TO TRUST AN EARLIER ONE. `ubuntu-latest`, `Go 1.25, Node 20, Python 3.12` and
+      # version-tagged actions all resolve at run time, so an identical tree says nothing about the toolchain
+      # that would run the tests. This publishes a fingerprint of the resolved environment; the lookup below
+      # reads the candidate run's own fingerprint out of its log and refuses to reuse across a difference.
+      - name: Execution-environment fingerprint
+        id: env
+        run: bash scripts/ci/env-fingerprint.sh postgres:16-alpine
+
       # HAS THIS EXACT CONTENT ALREADY BEEN PROVEN GREEN BY THIS GATE, IN AN EQUIVALENT CONTEXT?
       #
       # This exists because the merge commit's tree was byte-identical to the pull-request head's tree in
@@ -76,6 +95,7 @@ jobs:
         id: reuse
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVIDENCE_ENV_FINGERPRINT: ${{ steps.env.outputs.fingerprint }}
         run: bash scripts/ci/evidence-reuse.sh phase4-financial-core.yml
       - name: Initialise evidence staging
         if: steps.reuse.outputs.hit != 'true'
@@ -184,15 +204,6 @@ jobs:
       # ---------------------------------------------------------------- Hotel-Admin financial operator UI
       # The operator screens are part of the Phase-4 software boundary: a recovery screen that grew a
       # "retry" button would be a way to double-charge a guest, and only a UI test catches that.
-      # Not reuse-conditional, because the dependency gate below is not: `npm audit` reads package-lock.json
-      # and needs no installed tree, so Node must be here on a reuse hit too.
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: npm
-          cache-dependency-path: hotel-admin/package-lock.json
-
       - name: Install the Hotel-Admin toolchain
         if: steps.reuse.outputs.hit != 'true'
         working-directory: hotel-admin

@@ -30,6 +30,15 @@ jobs:
         with:
           python-version: '3.12'
 
+      # MEASURE THE MACHINE BEFORE DECIDING WHETHER TO TRUST AN EARLIER ONE. `ubuntu-latest`, `Python 3.12` and
+      # version-tagged actions all resolve at run time, so an identical tree says nothing about the toolchain
+      # that would run the tests. This publishes a fingerprint of the resolved environment; the lookup below
+      # reads the candidate run's own fingerprint out of its log and refuses to reuse across a difference.
+      - name: Execution-environment fingerprint
+        id: env
+        # No image arguments: governance runs no container, so it resolves no image digests and stays off the registry.
+        run: bash scripts/ci/env-fingerprint.sh
+
       # HAS THIS EXACT CONTENT ALREADY BEEN PROVEN GREEN BY THIS GATE?
       #
       # Every delivery validated twice: once on the pull-request head, once on the merge commit. Across the
@@ -46,6 +55,7 @@ jobs:
         id: reuse
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVIDENCE_ENV_FINGERPRINT: ${{ steps.env.outputs.fingerprint }}
         run: bash scripts/ci/evidence-reuse.sh project-governance.yml
 
       # THE GUARD ON THE GUARD, and the first thing checked after the lookup. Reuse skips work on the claim
