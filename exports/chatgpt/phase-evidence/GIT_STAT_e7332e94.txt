@@ -1,4 +1,0 @@
-commit e7332e94dbddbba16ed35d702e7434a9f7102fc9
-Date:   Thu Sep 10 12:01:18 2026 +0300
-
-    Stop paying for the same proof twice, and stop proving it one case at a time
