@@ -1,0 +1,45 @@
+{
+  "_what_this_is": "THE AUTHORITATIVE, MACHINE-CHECKED RECORD OF HOW master IS PROTECTED. tools/validate-branch-protection.py reads this file, reads the LIVE state from GitHub, and FAILS the governance gate if they disagree. Documentation about protection that nothing verifies is how the previous gap survived: the rule text said four gates were required while GitHub required one, and no check could tell.",
+  "_mechanism": "Repository RULESET, not classic branch protection. Classic protection was DELETED on 2026-09-10 because it could not express what was needed: its `enforce_admins: false` let the sole administrator bypass every requirement, and it offers no way to state 'nobody may bypass'. A ruleset with an EMPTY bypass_actors list applies to everyone including the repository owner, pins each required check to the GitHub Actions app so a renamed or third-party context cannot satisfy it, and records its own change history.",
+  "_reading_trap": "GET /repos/{owner}/{repo}/branches/master/protection now returns 'Branch not protected'. That endpoint reports CLASSIC protection only and knows nothing about rulesets. The authoritative reads are GET /repos/{owner}/{repo}/rules/branches/master (effective rules) and GET /repos/{owner}/{repo}/rulesets (enforcement and bypass actors). Both are readable without a token on this public repository, which is why CI can verify them on every run.",
+  "repository": "aibrahiiim1/StayConnectEnterprise",
+  "branch": "master",
+  "ruleset_name": "master-protected-delivery",
+  "expected": {
+    "enforcement": "active",
+    "bypass_actors": [],
+    "required_status_checks": {
+      "strict": true,
+      "contexts": [
+        "governance",
+        "phase3-full-software-gate",
+        "phase4-financial-core-gate",
+        "phase5-post-stay-transfer-gate"
+      ],
+      "integration_id": 15368,
+      "_integration_note": "15368 is the GitHub Actions app. Pinning it means a check of the same NAME reported by any other app or by a user token cannot satisfy the requirement."
+    },
+    "pull_request": {
+      "required_approving_review_count": 0,
+      "required_review_thread_resolution": true,
+      "dismiss_stale_reviews_on_push": true,
+      "allowed_merge_methods": ["merge"],
+      "_merge_method_note": "Merge commits ONLY. Squash and rebase rewrite the tree, which would break the delivery-path property the CI evidence-reuse design depends on (the merge commit's tree being identical to the validated pull-request head) and would also destroy the one-to-one link between what was validated and what landed.",
+      "_approval_note": "ZERO, and this is a measured constraint rather than a preference. The repository has exactly ONE collaborator (aibrahiiim1), who authors every delivery, and GitHub refuses self-approval - verified live, the API answers 'Review Can not approve your own pull request'. A non-zero requirement is therefore satisfiable only by granting an administrator bypass, which is precisely the silent-bypass hole this model exists to close. The choice made is universal enforcement of everything that CAN be enforced over a nominal requirement that only a bypass makes workable. Raising this to 1 requires a second reviewing account and is recorded as an open Product-Owner decision."
+    },
+    "non_fast_forward": true,
+    "deletion": true,
+    "classic_branch_protection": "absent"
+  },
+  "workflow_job_bindings": {
+    "_why": "A required status context is a JOB NAME. Rename a job and the context never reports: the pull request can never go green, which is fail-closed but baffling, and the tempting 'fix' is to weaken the ruleset. This binding is asserted from the tree on every run so a rename is caught as an explicit error at pull-request time.",
+    "project-governance.yml": "governance",
+    "phase3-software.yml": "phase3-full-software-gate",
+    "phase4-financial-core.yml": "phase4-financial-core-gate",
+    "phase5-post-stay-transfer.yml": "phase5-post-stay-transfer-gate"
+  },
+  "residual_risks": {
+    "administrator_can_edit_the_rules": "An administrator cannot bypass these rules at merge time - proven by live test - but can still edit or delete the ruleset itself. No plan-level control exists on a user-owned repository to prevent that; org-level rulesets with enterprise controls would be required. The mitigations in place are that ruleset changes are recorded in the ruleset's own history, and that tools/validate-branch-protection.py fails the governance gate the moment the live configuration stops matching this file - so any WEAKENING that leaves the rules in place is caught immediately. Outright deletion of the ruleset cannot be detected by a check that the ruleset is what makes required.",
+    "deletion_rule_not_isolated_in_test": "The deletion rule is active, but the live attempt to delete master was refused by GitHub's inherent refusal to delete a repository's default branch, so the test could not isolate the rule's own contribution. Recorded as observed rather than claimed."
+  }
+}
