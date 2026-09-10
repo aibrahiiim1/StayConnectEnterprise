@@ -15,6 +15,18 @@ purpose. For step-by-step setup instructions see
 
 - **Login & session.** Gated by your operator login; re-validated every ~30s,
   otherwise returns you to `/login`. Email + **Sign out** at the bottom-left.
+- **The sidebar can be collapsed to an icon rail.** The button beside the
+  StayConnect mark collapses the menu to icons and expands it again; it is
+  labelled with what it will do ("Collapse sidebar" / "Expand sidebar") and works
+  from the keyboard. Collapsed, every icon still shows its full name as a tooltip
+  on hover **and** on keyboard focus, the current page keeps its highlight, and
+  your account and **Sign out** stay where they are. The magnifier reopens the
+  menu and puts the cursor straight in the filter, so "find a screen" never
+  requires expanding it first. Your choice is remembered on that device — across
+  navigation, refresh and later sessions — and the default is expanded. On phones
+  and narrow windows nothing changes: the menu is still the full labelled drawer
+  behind the ☰ button, because names like "Duplicate sources" are not guessable
+  from an icon.
 - **Roles decide what you see.** The menu has six groups; you only see items your
   role can read, and write controls (New/Edit/Delete) appear only if your role can
   write. The appliance enforces this server-side regardless of the UI.
