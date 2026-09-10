@@ -114,24 +114,48 @@ Before reporting completion: commit all authorized changes intentionally; push t
 
 **Repository-side enforcement (GH-MANDATORY-CI).** GitHub Actions is the authoritative merge gate. The workflow `.github/workflows/project-governance.yml` (workflow name **Project Governance**, job **governance**) runs on every pull request targeting `master`, every push to `master`, and manual `workflow_dispatch`; it checks out full history (`fetch-depth: 0`), runs `python tools/project-state.py validate`, `python tools/project-state.py check-generated`, `python tools/tests/project_state_validator/run_mutations.py` and `bash tools/validate-project-state.sh`, and then asserts the working tree is still clean — failing on any non-zero step. It uses read-only repository permissions and performs no deployment, database access, migrations or production tests. **A PR is not merge-ready until this check is green** — local validator output alone is insufficient for a delivered PR. The default branch should be protected to require the `governance` check.
 
-**What is actually enforced, and by what (WHO-ENFORCES-WHAT).** These are two different things and were
-previously reported as one. Stated exactly, as verified against the GitHub API:
+**What is actually enforced, and by what (WHO-ENFORCES-WHAT).** Verified against the GitHub API and
+re-verified by `tools/validate-branch-protection.py` on every governance run.
 
-*Enforced by branch protection on `master`* — **one** status context: `governance` (the job name of
-`.github/workflows/project-governance.yml`). Alongside it: `strict: true` (a branch must be up to date with
-`master` before merging), one required approving review, and required conversation resolution. Deletions are
-blocked. `enforce_admins` is **false** and force pushes are **allowed**, so an administrator can bypass these
-controls — that is the real model, not an omission. There are no repository rulesets; branch protection is
-the only enforcement surface.
+*The mechanism is a repository RULESET named `master-protected-delivery`, not classic branch protection.*
+Classic protection was **deleted** on 2026-09-10. It could not express what this project needs: its
+`enforce_admins: false` let the sole administrator bypass every requirement, it permitted force pushes, and
+it has no way to say "nobody may bypass". The ruleset has an **empty bypass-actor list**, so it applies to
+everyone including the repository owner.
 
-*Obligated by this rule, not by GitHub* — the three phase gates (`phase3-full-software-gate`,
-`phase4-financial-core-gate`, `phase5-post-stay-transfer-gate`). They run on every pull request to `master`
-and on every push to it, and §8 requires them green before a PR is called merge-ready. GitHub would **not**
-block a merge on them. Calling all four "required checks" overstates what the platform enforces, and this
-document does not.
+*Enforced by GitHub for every change to `master`, with no bypass actor:*
 
-Whether the three phase contexts should be added to branch protection is a Product-Owner decision about the
-security model, not a documentation fix, and is deliberately not taken here.
+- **all four mandatory gates** — `governance`, `phase3-full-software-gate`, `phase4-financial-core-gate`,
+  `phase5-post-stay-transfer-gate` — each **pinned to the GitHub Actions app (id 15368)**, so a check of the
+  same name from any other app or token cannot satisfy it;
+- **strict**: the branch must be up to date with `master` before merging;
+- **a pull request is required** — direct pushes to `master` are refused for everyone;
+- **conversation resolution** is required;
+- **merge commits only** — squash and rebase are blocked, because they rewrite the tree and would break both
+  the audit link between the validated pull-request head and what lands, and the CI evidence-reuse design
+  that depends on that tree being identical;
+- **force pushes are blocked** (`non_fast_forward`);
+- **branch deletion is blocked**.
+
+*Approving reviews are set to ZERO, and that is a measured constraint rather than a preference.* The
+repository has exactly one collaborator, who authors every delivery, and GitHub refuses self-approval —
+verified live: the API answers `Review Can not approve your own pull request`. A non-zero requirement is
+therefore satisfiable only by granting an administrator bypass, which is the silent hole this model exists
+to remove. Universal enforcement of everything that *can* be enforced was chosen over a nominal requirement
+that only a bypass makes workable. **Raising this to one approving review requires a second reviewing
+account and is an open Product-Owner decision**, recorded in `governance/branch-protection.json`.
+
+*A reading trap worth knowing.* `GET /repos/{owner}/{repo}/branches/master/protection` now answers
+**"Branch not protected"**. That endpoint reports classic protection only and knows nothing about rulesets.
+The authoritative reads are `GET /repos/{owner}/{repo}/rules/branches/master` and
+`GET /repos/{owner}/{repo}/rulesets`; both are readable without a token on this public repository, which is
+what lets CI verify them every run.
+
+*Residual, stated plainly.* An administrator cannot bypass these rules at merge time — proven by live test —
+but can still edit or delete the ruleset itself. No control exists on a user-owned repository to prevent
+that. The mitigation is that any **weakening that leaves the ruleset in place** fails the governance gate
+immediately, and ruleset edits are recorded in its own history; outright deletion cannot be caught by a
+check that the ruleset is what makes mandatory.
 
 **How the gates spend their time, and what is never recomputed twice (CI-REUSE).** The four gates run in
 parallel, so the delivery path is the slowest of them, twice: once on the pull-request head and once on the

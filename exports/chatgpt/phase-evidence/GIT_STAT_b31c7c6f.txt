@@ -1,0 +1,4 @@
+commit b31c7c6f87bf1e655fb08d84474818dda887e5c7
+Date:   Thu Sep 10 17:16:18 2026 +0300
+
+    Make GitHub enforce the delivery guarantees the rule already required
