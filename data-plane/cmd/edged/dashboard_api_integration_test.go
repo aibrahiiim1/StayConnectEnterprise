@@ -56,12 +56,17 @@ func seedSiteActivity(t *testing.T, f *apiFixture, roomNumber string) {
 		t.Fatalf("seed stay: %v", err)
 	}
 
-	// A PMS message that HAS been applied, so the PMS block has something to count on this site.
+	// A PMS message on this site's feed, so the PMS block has something to count.
+	//
+	// INSERTED AS PENDING WITH NO stay_id, because iam_v2.p3_stay_event_appendonly enforces exactly that: an
+	// event arrives unprocessed and unresolved, and only the applier may move it on. A fixture that wrote
+	// 'APPLIED' with a pre-resolved stay_id was rejected by the trigger -- correctly, and the test is corrected
+	// rather than the rule being worked around, because that rule is the Stay domain's append-only guarantee.
 	if _, err := f.pool.Exec(ctx, `
 		INSERT INTO iam_v2.stay_events(id,tenant_id,site_id,pms_interface_id,external_event_identity,
-		  event_type,processing_status,stay_id,received_at)
-		VALUES (gen_random_uuid(),$1,$2,$3::uuid,$4,'GUEST_IN','APPLIED',$5::uuid,now())`,
-		f.tenant, f.site, iface, fmt.Sprintf("EV-%s-%d", roomNumber, time.Now().UnixNano()), stay); err != nil {
+		  event_type,processing_status,received_at)
+		VALUES (gen_random_uuid(),$1,$2,$3::uuid,$4,'GUEST_IN','PENDING',now())`,
+		f.tenant, f.site, iface, fmt.Sprintf("EV-%s-%d", roomNumber, time.Now().UnixNano())); err != nil {
 		t.Fatalf("seed stay event: %v", err)
 	}
 
@@ -144,12 +149,14 @@ func TestIntegration_API_DashboardCountsOnlyItsOwnSite(t *testing.T) {
 		t.Fatalf("occupancy.arrivals_today = %v; want 1", v)
 	}
 
-	// The PMS block counts this site's feed only.
+	// The PMS block counts this site's feed only. The seeded events are PENDING (the domain admits them no other
+	// way), so `applied` is legitimately zero -- asserting that too keeps the test honest about what was seeded
+	// instead of quietly passing on a number it did not create.
 	if v := num(t, got, "pms", "events_today"); v != 1 {
 		t.Fatalf("pms.events_today = %v; site B's PMS traffic has leaked into site A", v)
 	}
-	if v := num(t, got, "pms", "events_applied_today"); v != 1 {
-		t.Fatalf("pms.events_applied_today = %v; want 1", v)
+	if v := num(t, got, "pms", "events_applied_today"); v != 0 {
+		t.Fatalf("pms.events_applied_today = %v; nothing was applied, so this must be 0", v)
 	}
 	ifaces, _ := got["pms"].(map[string]any)["interfaces"].([]any)
 	if len(ifaces) != 1 {
