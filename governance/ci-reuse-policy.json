@@ -1,0 +1,525 @@
+{
+  "_what_this_is": "THE REUSE CLASSIFICATION OF EVERY STEP OF EVERY REQUIRED GATE. Evidence reuse (scripts/ci/evidence-reuse.sh) skips work on the claim that a step's verdict is a pure function of the git tree. That claim is true for most steps and FALSE for some, so it is recorded here per step and enforced by tools/validate-ci-reuse-policy.py, which FAILS on any step nobody has classified.",
+  "_classes": {
+    "tree-pure": "The verdict depends on nothing but the content of the tree, so an earlier successful run of the same gate over an identical tree already answers it. Must carry `if: ... steps.reuse.outputs.hit != 'true'`.",
+    "always": "The verdict depends on something the tree does not fix - git history, wall-clock time, a live external service, pull-request context - or the step produces output this run owes. Must not reference the reuse output at all, and must record why.",
+    "reuse-only": "Runs only when evidence was reused, to record that fact. Must carry `if: steps.reuse.outputs.hit == 'true'`."
+  },
+  "_eligibility": "A hit additionally requires: the same workflow file, an IDENTICAL git tree, the matched commit being an ANCESTOR of the commit under validation, and the matched run being younger than EVIDENCE_REUSE_MAX_AGE_HOURS (24). Tree equality alone proves identical content, not identical history, moment or external world.",
+  "workflows": {
+    "phase3-software.yml": {
+      "steps": [
+        {
+          "name": "Check out the PR HEAD",
+          "reuse": "always",
+          "why": "infrastructure: the checkout every other step runs in."
+        },
+        {
+          "name": "Set up Go",
+          "reuse": "always",
+          "why": "infrastructure: toolchain setup, cheap and required before anything can be decided."
+        },
+        {
+          "name": "Set up Node (locked)",
+          "reuse": "always",
+          "why": "infrastructure: toolchain setup."
+        },
+        {
+          "name": "Set up Python",
+          "reuse": "always",
+          "why": "infrastructure: the interpreter the reuse lookup itself needs."
+        },
+        {
+          "name": "Tree-equality evidence reuse",
+          "reuse": "always",
+          "why": "it IS the lookup; it cannot be conditional on its own result."
+        },
+        {
+          "name": "Initialise evidence staging",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "gofmt (whole Phase-3 Go surface)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "go build (./...)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "go vet (./...)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "go test (all packages)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "go build + test (production build tag)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Factory-clean Production baseline (current-only, disposable PG)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Gate-P grants survive a reconcile (disposable PG)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Gate-P reconcile is safe to run (disposable PG)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "go test -race (all Phase-3 concurrency-sensitive paths)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Migration 0010 lifecycle + concurrency gate (disposable PG16)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "PG16 integration — all eleven Phase-3 suites (disposable PG16)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Production privilege model (real Gate-P roles, disposable PG16)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Phase-3 offline preflight",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Network-enforcement system tests (nft authorization + accountable tc + Session + durable bounds)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Ruleset-durability tests (restart/reboot convergence, carry-over, fingerprint)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Verified binary rollback tool (false-PASS regression)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Surgical live-dark nft foundation tests",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "REAL-KERNEL contract suite (disposable Linux network namespaces)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Staged-provisioning failure tests (accountable before forwarding)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Phase-3 enforcement-plane coherence checker (selftest)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Edge migration runner (selftest)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Appliance unit health (selftest)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "DHCP ownership-evidence checker (selftest)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Hotel Admin deployment integrity (selftest)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Hotel Admin certificate chain health (selftest)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Hotel Admin integrity guards — adversarial (selftest)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Service-unit installer — helper installation and verification (selftest)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "npm ci (locked dependencies)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "TypeScript typecheck",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Vitest",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Production build (Phase-3 flags OFF)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Install Playwright browser",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Playwright (Hotel-Admin + guest-portal real template + a11y)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Assemble the Phase-3 evidence artifact",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Evidence pointer for a reused verdict",
+          "reuse": "reuse-only",
+          "why": "records that this run's tree-pure verdict was reused, and publishes a pointer to the run that holds the full evidence."
+        },
+        {
+          "name": "Record the delivery HEAD for the artifact name",
+          "reuse": "always",
+          "why": "produced output, not a verdict: the artifact must be named for the commit being accepted."
+        },
+        {
+          "name": "Upload the Phase-3 evidence artifact",
+          "reuse": "always",
+          "why": "produced output. Guarding the upload meant the master leg published NO evidence for the commit that landed."
+        }
+      ]
+    },
+    "phase4-financial-core.yml": {
+      "steps": [
+        {
+          "name": "Check out the PR HEAD",
+          "reuse": "always",
+          "why": "infrastructure: the checkout every other step runs in."
+        },
+        {
+          "name": "Set up Go",
+          "reuse": "always",
+          "why": "infrastructure: toolchain setup, cheap and required before anything can be decided."
+        },
+        {
+          "name": "Set up Python",
+          "reuse": "always",
+          "why": "infrastructure: the interpreter the reuse lookup itself needs."
+        },
+        {
+          "name": "Tree-equality evidence reuse",
+          "reuse": "always",
+          "why": "it IS the lookup; it cannot be conditional on its own result."
+        },
+        {
+          "name": "Initialise evidence staging",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "gofmt",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "go build (./...)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "go vet (./...)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Financial-core unit matrix",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Financial-core race detector",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Migrations 0011-0026 + financial DB invariant gate (disposable PG16)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Payment concurrency proof (real concurrent PG16 sessions)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Least-privilege boundary as real PostgreSQL roles (disposable PG16)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Supported restore drill (real pg_dump / pg_restore, disposable PG16)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Financial-core PG16 integration matrix (disposable PG16)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Prove the integration gate reports a broken step",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "DARK assertion — no Phase-4 flag is enabled anywhere in the tree",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Set up Node",
+          "reuse": "always",
+          "why": "infrastructure for the always-run dependency gate, which reads package-lock.json and needs no installed tree."
+        },
+        {
+          "name": "Install the Hotel-Admin toolchain",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Hotel-Admin typecheck",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Hotel-Admin unit tests (financial operator surface)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Hotel-Admin production build with Phase-4 flags OFF",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Install Chrome for the browser tests",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Hotel-Admin E2E — the FULL browser suite",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Current-state parity self-test",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Current-state claims match the repository",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Dependency gate self-test",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Production dependency advisory gate",
+          "reuse": "always",
+          "why": "NOT TREE-PURE — live npm registry and today's date. `npm audit` sees advisories published after the tree was written, and acceptances are checked against an `expires_on` date, so the same bytes change verdict over time."
+        },
+        {
+          "name": "Assemble the Phase-4 financial-core evidence artifact",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Evidence pointer for a reused verdict",
+          "reuse": "reuse-only",
+          "why": "records that this run's tree-pure verdict was reused, and publishes a pointer to the run that holds the full evidence."
+        },
+        {
+          "name": "Record the HEAD for the artifact name",
+          "reuse": "always",
+          "why": "produced output, not a verdict: the artifact must be named for the commit being accepted."
+        },
+        {
+          "name": "Upload the Phase-4 financial-core evidence artifact",
+          "reuse": "always",
+          "why": "produced output. Guarding the upload meant the master leg published NO evidence for the commit that landed."
+        }
+      ]
+    },
+    "phase5-post-stay-transfer.yml": {
+      "steps": [
+        {
+          "name": "Check out the HEAD under test",
+          "reuse": "always",
+          "why": "infrastructure: the checkout every other step runs in."
+        },
+        {
+          "name": "Set up Go",
+          "reuse": "always",
+          "why": "infrastructure: toolchain setup, cheap and required before anything can be decided."
+        },
+        {
+          "name": "Set up Python",
+          "reuse": "always",
+          "why": "infrastructure: the interpreter the reuse lookup itself needs."
+        },
+        {
+          "name": "Tree-equality evidence reuse",
+          "reuse": "always",
+          "why": "it IS the lookup; it cannot be conditional on its own result."
+        },
+        {
+          "name": "Evidence-publication self-test (does the publisher refuse an incomplete run?)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Initialise evidence staging",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "gofmt",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "go build (./...)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "go vet (./...)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "go vet (integration && phase5)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Phase-5 unit matrix",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Phase-5 DARK guard",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Phase-5 database gates and integration matrix",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Phase-4 financial-core regression",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Assemble the Phase-5 evidence artifact",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Evidence pointer for a reused verdict",
+          "reuse": "reuse-only",
+          "why": "records that this run's tree-pure verdict was reused, and publishes a pointer to the run that holds the full evidence."
+        },
+        {
+          "name": "Record the HEAD for the artifact name",
+          "reuse": "always",
+          "why": "produced output, not a verdict: the artifact must be named for the commit being accepted."
+        },
+        {
+          "name": "Publish the Phase-5 evidence artifact",
+          "reuse": "always",
+          "why": "produced output. Guarding the upload meant the master leg published NO evidence for the commit that landed."
+        },
+        {
+          "name": "Prove the artifact really exists",
+          "reuse": "always",
+          "why": "asserts the publication this run performed; the artifact it checks is produced on every run."
+        }
+      ]
+    },
+    "project-governance.yml": {
+      "steps": [
+        {
+          "name": "Check out full history",
+          "reuse": "always",
+          "why": "infrastructure: the checkout every other step runs in, and the object graph the history checks read."
+        },
+        {
+          "name": "Set up Python",
+          "reuse": "always",
+          "why": "infrastructure: the interpreter the reuse lookup itself needs."
+        },
+        {
+          "name": "Tree-equality evidence reuse",
+          "reuse": "always",
+          "why": "it IS the lookup; it cannot be conditional on its own result."
+        },
+        {
+          "name": "CI reuse policy — every gate step is classified",
+          "reuse": "always",
+          "why": "the guard on the guard. A run that reuses evidence must first prove the classification it is relying on is intact, so this runs on every run."
+        },
+        {
+          "name": "CI reuse policy — negative tests",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Evidence-reuse eligibility self-test (ancestry, age, tree, fail-closed)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Structural project-state validation",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Generated-block consistency",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Generated-block contradiction rules — negative tests",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Merge-receipt timing self-test (does the rule catch the T0054 defect?)",
+          "reuse": "always",
+          "why": "NOT TREE-PURE — git history. It reads `git log -1 --format=%cI` for a real merge commit and drives the real validator against the real ledger."
+        },
+        {
+          "name": "Transition-receipt timestamps",
+          "reuse": "always",
+          "why": "NOT TREE-PURE — git history. It asks git for the commit that first introduced each receipt and for the committer date of the merge commit a receipt names. Identical content can carry different ancestry."
+        },
+        {
+          "name": "PR-metadata Zero-Stale (the one authoritative surface that is not committed)",
+          "reuse": "always",
+          "why": "NOT TREE-PURE — live GitHub state. It reads the pull-request body through the API in this run."
+        },
+        {
+          "name": "Adversarial mutation suite (COMPLETE matrix, no case limit)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Mutation-suite isolation regression (concurrency, forced kill, fail-closed)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Zero-stale keyword validation",
+          "reuse": "always",
+          "why": "NOT TREE-PURE — git object graph. Section 5 resolves the manifest's SOURCE_COMMIT against git and reports whether that commit exists."
+        },
+        {
+          "name": "Current-state semantic parity (every current surface vs the recorded facts)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Current-state parity — negative tests (the validator must catch what shipped before)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Rendered current state must not contradict the canonical PMS state or re-date a snapshot",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Evidence-artifact staleness (a post-closure artifact must not describe finished work as pending)",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Tooling must carry no control characters",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "The documented preflight suite SIZE is pass + fail, not pass",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Working tree must remain clean",
+          "reuse": "always",
+          "why": "NOT TREE-PURE — runner state after this run's steps. The always-run checks above still execute on a hit, so it still has something to assert."
+        }
+      ]
+    }
+  }
+}

@@ -429,13 +429,24 @@ jobs:
         id: evidence
         run: python3 scripts/ci/phase3_evidence.py
 
+      # A REUSED VERDICT STILL OWES AN ARTIFACT FOR THE COMMIT IT ACCEPTS. Guarding the upload along with
+      # everything else meant the master-leg runs produced NO evidence artifact at all, where every master run
+      # before reuse produced one. Assembling a full artifact here would be a fabrication -- the staging
+      # directory is empty because the steps that fill it were legitimately skipped -- so a hit writes a
+      # pointer to the run that holds the real evidence for this exact tree.
+      - name: Evidence pointer for a reused verdict
+        if: steps.reuse.outputs.hit == 'true'
+        env:
+          REUSE_MATCHED_RUN: ${{ steps.reuse.outputs.matched_run }}
+          REUSE_MATCHED_SHA: ${{ steps.reuse.outputs.matched_sha }}
+          REUSE_MATCHED_AT: ${{ steps.reuse.outputs.matched_at }}
+        run: bash scripts/ci/evidence-pointer.sh "$GITHUB_WORKSPACE/.phase3-artifact" "Phase-3 Software CI"
+
       - name: Record the delivery HEAD for the artifact name
-        if: steps.reuse.outputs.hit != 'true'
         id: head
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Upload the Phase-3 evidence artifact
-        if: steps.reuse.outputs.hit != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: phase3-software-evidence-${{ steps.head.outputs.sha }}

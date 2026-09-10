@@ -158,13 +158,24 @@ jobs:
         if: always() && steps.reuse.outputs.hit != 'true'
         run: python3 scripts/ci/phase5_evidence.py
 
+      # See the Phase-3 workflow for why a reused verdict still publishes an artifact under its own commit.
+      # This gate is also the one with a publisher that REFUSES an incomplete run, which is exactly why a hit
+      # writes a pointer rather than assembling something out of an empty staging directory.
+      - name: Evidence pointer for a reused verdict
+        if: steps.reuse.outputs.hit == 'true'
+        env:
+          REUSE_MATCHED_RUN: ${{ steps.reuse.outputs.matched_run }}
+          REUSE_MATCHED_SHA: ${{ steps.reuse.outputs.matched_sha }}
+          REUSE_MATCHED_AT: ${{ steps.reuse.outputs.matched_at }}
+        run: bash scripts/ci/evidence-pointer.sh "$GITHUB_WORKSPACE/.phase5-evidence" "Phase-5 Post-Stay and Transfer CI"
+
       - name: Record the HEAD for the artifact name
-        if: always() && steps.reuse.outputs.hit != 'true'
+        if: always()
         id: head
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Publish the Phase-5 evidence artifact
-        if: always() && steps.reuse.outputs.hit != 'true'
+        if: always()
         id: publish
         uses: actions/upload-artifact@v4
         with:
@@ -182,7 +193,7 @@ jobs:
       # this digest" -- so the ID and the digest are read back from the action that created them and the job
       # fails if either is absent.
       - name: Prove the artifact really exists
-        if: always() && steps.reuse.outputs.hit != 'true'
+        if: always()
         env:
           ART_ID: ${{ steps.publish.outputs.artifact-id }}
           ART_DIGEST: ${{ steps.publish.outputs.artifact-digest }}

@@ -48,6 +48,30 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash scripts/ci/evidence-reuse.sh project-governance.yml
 
+      # THE GUARD ON THE GUARD, and the first thing checked after the lookup. Reuse skips work on the claim
+      # that a step's verdict is a pure function of the tree. That claim was assumed for every step when reuse
+      # was introduced, and it was FALSE for four of them: the two transition-timing checks read the commit
+      # graph, the keyword validator checks a commit's existence, and the Phase-4 dependency gate queries the
+      # live npm registry against today's date. This asserts that every step of every gate carries a recorded
+      # classification and a guard that matches it, and FAILS on any step nobody has classified. It runs on
+      # every run, hit or not, so a gate can never reuse evidence without first proving its own rules intact.
+      - name: CI reuse policy — every gate step is classified
+        run: python tools/validate-ci-reuse-policy.py
+
+      # Does the enforcement above actually refuse the mistakes it exists to catch? A policy validator that
+      # passes on a correct repository is indistinguishable from one that returns zero. This drives the real
+      # validator against fixtures carrying each specific defect.
+      - name: CI reuse policy — negative tests
+        if: steps.reuse.outputs.hit != 'true'
+        run: python tools/tests/ci_reuse_policy/run_negative.py
+
+      # And does the LOOKUP refuse what it claims to? It reports a hit on the delivery path, which is also
+      # what a script returning "hit" unconditionally would do. This builds a real git repository with a known
+      # topology, stubs only the run history, and makes exactly one eligibility rule false at a time.
+      - name: Evidence-reuse eligibility self-test (ancestry, age, tree, fail-closed)
+        if: steps.reuse.outputs.hit != 'true'
+        run: bash scripts/ci/tests/evidence-reuse-selftest.sh
+
       - name: Structural project-state validation
         if: steps.reuse.outputs.hit != 'true'
         run: python tools/project-state.py validate
@@ -68,12 +92,16 @@ jobs:
       # listed exception and passes -- which is correct, and also indistinguishable from a rule that does
       # nothing. This drives the real validator with the grandfather list emptied and fails if the historical
       # defect gets through, so the rule is proven to bite BEFORE its verdict on the ledger is worth anything.
+      # NEVER REUSED. It reads `git log -1 --format=%cI` for a real merge commit and drives the real validator
+      # against the real ledger, so its verdict is a function of the COMMIT GRAPH, not of the tree.
       - name: Merge-receipt timing self-test (does the rule catch the T0054 defect?)
-        if: steps.reuse.outputs.hit != 'true'
         run: bash tools/validate-merge-receipt-times-selftest.sh
 
+      # NEVER REUSED, and this is the check that proved the first reuse design unsound. It asks git for the
+      # commit that FIRST INTRODUCED each receipt and for the committer date of the merge commit a receipt
+      # names -- neither of which the tree fixes. Two commits with identical content can have different
+      # ancestry, so a verdict borrowed from one of them is a verdict about a different question.
       - name: Transition-receipt timestamps
-        if: steps.reuse.outputs.hit != 'true'
         # Two rules. A receipt that claims a moment AFTER the commit that introduced it is describing its
         # own future. A receipt that records a pull-request merge and is dated BEFORE that merge is asserting
         # an event that had not happened -- which is what T0054 did, by 311 seconds. Checked here as well as
@@ -116,8 +144,9 @@ jobs:
         if: steps.reuse.outputs.hit != 'true'
         run: python tools/tests/project_state_validator/run_isolation_regression.py
 
+      # NEVER REUSED. Section 5 resolves the manifest's SOURCE_COMMIT against git and reports whether that
+      # commit EXISTS -- an object-graph question the tree does not answer.
       - name: Zero-stale keyword validation
-        if: steps.reuse.outputs.hit != 'true'
         run: bash tools/validate-project-state.sh
 
       - name: Current-state semantic parity (every current surface vs the recorded facts)
@@ -167,8 +196,9 @@ jobs:
         # Phase 3 Software CI's job. This drives the real validator against a stub preflight, offline.
         run: bash tools/tests/tooling/preflight-total-selftest.sh
 
+      # NEVER REUSED. It asserts something about THIS RUNNER after THIS RUN's steps, not about the tree. The
+      # always-run checks above still execute on a reuse hit, so there is still something for it to check.
       - name: Working tree must remain clean
-        if: steps.reuse.outputs.hit != 'true'
         run: |
           status="$(git status --porcelain --untracked-files=all)"
           if [ -n "$status" ]; then
