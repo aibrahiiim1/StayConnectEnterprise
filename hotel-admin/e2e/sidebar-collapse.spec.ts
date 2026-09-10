@@ -176,6 +176,33 @@ test("the active page stays visually clear in the rail", async ({ page }) => {
   expect(await bg(active)).not.toBe(await bg(page.getByRole("link", { name: "Stays" })));
 });
 
+test("an operator who asked for reduced motion gets none", async ({ page }) => {
+  // page.emulateMedia, NOT the `reducedMotion` fixture option: with this project's config the fixture option
+  // did not reach the page (matchMedia reported false), so a spec written that way would have asserted
+  // against an un-emulated browser and passed or failed for the wrong reason.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/dashboard");
+  await expect(collapseBtn(page)).toBeVisible();
+
+  // Effectively zero, not merely shorter: the setting means do not animate.
+  const duration = await desktopAside(page).evaluate((el) => getComputedStyle(el).transitionDuration);
+  expect(parseFloat(duration)).toBeLessThan(0.01);
+
+  // And it still WORKS -- removing the animation must not remove the behaviour.
+  await collapseBtn(page).click();
+  await expect(expandBtn(page)).toBeVisible();
+  await expect(desktopAside(page)).toHaveCSS("width", "56px");
+});
+
+test("motion is restrained by default, not absent", async ({ page }) => {
+  await page.goto("/dashboard");
+  await expect(collapseBtn(page)).toBeVisible();
+  const duration = await desktopAside(page).evaluate((el) => getComputedStyle(el).transitionDuration);
+  // Long enough to read as a state change, short enough not to be an effect.
+  expect(parseFloat(duration)).toBeGreaterThan(0);
+  expect(parseFloat(duration)).toBeLessThanOrEqual(0.3);
+});
+
 test("mobile keeps the labelled drawer and never shows the desktop rail", async ({ page }) => {
   await page.setViewportSize(MOBILE);
   await page.goto("/dashboard");
