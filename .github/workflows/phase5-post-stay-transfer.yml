@@ -66,6 +66,14 @@ jobs:
       # has not been shown to fail-close. This runs FIRST, before any gate can make the staging directory
       # look complete, and drives the real assembler against deliberately incomplete inputs.
 
+      # MEASURE THE MACHINE BEFORE DECIDING WHETHER TO TRUST AN EARLIER ONE. `ubuntu-latest`, `Go 1.25, Python 3.12` and
+      # version-tagged actions all resolve at run time, so an identical tree says nothing about the toolchain
+      # that would run the tests. This publishes a fingerprint of the resolved environment; the lookup below
+      # reads the candidate run's own fingerprint out of its log and refuses to reuse across a difference.
+      - name: Execution-environment fingerprint
+        id: env
+        run: bash scripts/ci/env-fingerprint.sh postgres:16-alpine
+
       # HAS THIS EXACT CONTENT ALREADY BEEN PROVEN GREEN BY THIS GATE, IN AN EQUIVALENT CONTEXT?
       #
       # This exists because the merge commit's tree was byte-identical to the pull-request head's tree in
@@ -85,6 +93,7 @@ jobs:
         id: reuse
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVIDENCE_ENV_FINGERPRINT: ${{ steps.env.outputs.fingerprint }}
         run: bash scripts/ci/evidence-reuse.sh phase5-post-stay-transfer.yml
       - name: Evidence-publication self-test (does the publisher refuse an incomplete run?)
         if: steps.reuse.outputs.hit != 'true'

@@ -5,7 +5,7 @@
     "always": "The verdict depends on something the tree does not fix - git history, wall-clock time, a live external service, pull-request context - or the step produces output this run owes. Must not reference the reuse output at all, and must record why.",
     "reuse-only": "Runs only when evidence was reused, to record that fact. Must carry `if: steps.reuse.outputs.hit == 'true'`."
   },
-  "_eligibility": "A hit additionally requires: the same workflow file, an IDENTICAL git tree, the matched commit being an ANCESTOR of the commit under validation, and the matched run being younger than EVIDENCE_REUSE_MAX_AGE_HOURS (24). Tree equality alone proves identical content, not identical history, moment or external world.",
+  "_eligibility": "A hit additionally requires: the same workflow file, an IDENTICAL git tree, the matched commit being an ANCESTOR of the commit under validation, an IDENTICAL MEASURED EXECUTION ENVIRONMENT (read back out of the candidate run's own job log), and the matched run being younger than EVIDENCE_REUSE_MAX_AGE_HOURS (24). Tree equality alone proves identical content, not identical history, machine, moment or external world. The age bound is a limit on exposure to inputs nobody named - it is a safety margin, not evidence of equality.",
   "workflows": {
     "phase3-software.yml": {
       "steps": [
@@ -28,6 +28,11 @@
           "name": "Set up Python",
           "reuse": "always",
           "why": "infrastructure: the interpreter the reuse lookup itself needs."
+        },
+        {
+          "name": "Execution-environment fingerprint",
+          "reuse": "always",
+          "why": "NOT A VERDICT AND NEVER REUSED — it MEASURES this run's machine (hosted image version, kernel, resolved Go/Node/npm/Python, container image digests) so the lookup can refuse a verdict produced under a different one. It must precede the decision that consumes it."
         },
         {
           "name": "Tree-equality evidence reuse",
@@ -209,6 +214,16 @@
           "why": "infrastructure: the interpreter the reuse lookup itself needs."
         },
         {
+          "name": "Set up Node",
+          "reuse": "always",
+          "why": "infrastructure for the always-run dependency gate, which reads package-lock.json and needs no installed tree; it also has to precede the environment fingerprint so the Node version this gate uses is inside the comparison key."
+        },
+        {
+          "name": "Execution-environment fingerprint",
+          "reuse": "always",
+          "why": "NOT A VERDICT AND NEVER REUSED — it MEASURES this run's machine (hosted image version, kernel, resolved Go/Node/npm/Python, container image digests) so the lookup can refuse a verdict produced under a different one. It must precede the decision that consumes it."
+        },
+        {
           "name": "Tree-equality evidence reuse",
           "reuse": "always",
           "why": "it IS the lookup; it cannot be conditional on its own result."
@@ -264,11 +279,6 @@
         {
           "name": "DARK assertion — no Phase-4 flag is enabled anywhere in the tree",
           "reuse": "tree-pure"
-        },
-        {
-          "name": "Set up Node",
-          "reuse": "always",
-          "why": "infrastructure for the always-run dependency gate, which reads package-lock.json and needs no installed tree."
         },
         {
           "name": "Install the Hotel-Admin toolchain",
@@ -348,6 +358,11 @@
           "name": "Set up Python",
           "reuse": "always",
           "why": "infrastructure: the interpreter the reuse lookup itself needs."
+        },
+        {
+          "name": "Execution-environment fingerprint",
+          "reuse": "always",
+          "why": "NOT A VERDICT AND NEVER REUSED — it MEASURES this run's machine (hosted image version, kernel, resolved Go/Node/npm/Python, container image digests) so the lookup can refuse a verdict produced under a different one. It must precede the decision that consumes it."
         },
         {
           "name": "Tree-equality evidence reuse",
@@ -431,6 +446,11 @@
           "name": "Set up Python",
           "reuse": "always",
           "why": "infrastructure: the interpreter the reuse lookup itself needs."
+        },
+        {
+          "name": "Execution-environment fingerprint",
+          "reuse": "always",
+          "why": "NOT A VERDICT AND NEVER REUSED — it MEASURES this run's machine (hosted image version, kernel, resolved Go/Node/npm/Python, container image digests) so the lookup can refuse a verdict produced under a different one. It must precede the decision that consumes it."
         },
         {
           "name": "Tree-equality evidence reuse",
@@ -521,5 +541,6 @@
         }
       ]
     }
-  }
+  },
+  "_environment": "`ubuntu-latest`, `go-version: '1.25'`, `node-version: '20'` and version-tagged actions all resolve at run time and can move inside the recency window. scripts/ci/env-fingerprint.sh measures what they resolved TO and the lookup compares it. Action versions are deliberately outside the fingerprint because no reuse-eligible step is an action - tools/validate-ci-reuse-policy.py FAILS the build if one ever is - so every action re-executes on every run and its behaviour is never inherited."
 }

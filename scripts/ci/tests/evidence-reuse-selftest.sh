@@ -7,8 +7,9 @@
 # purpose-built git repository with a KNOWN topology and a STUBBED run history, and asserts each eligibility
 # rule separately by making exactly one of them false at a time.
 #
-# The stub is the run-history JSON only. Everything the decision actually turns on -- tree hashes, ancestry --
-# is computed by git from real objects, so the rules are exercised rather than simulated.
+# Two things are stubbed: the run-history JSON, and what each candidate run measured its environment to be.
+# Everything the decision turns on -- tree hashes, ancestry, age arithmetic and the comparisons themselves --
+# is computed for real, so the rules are exercised rather than simulated.
 #
 # It touches no network, no database, no appliance, and it never writes inside the repository.
 set -uo pipefail
@@ -73,12 +74,22 @@ print(json.dumps({"workflow_runs": [
 ]}))' "$1" "$2" "$3"
 }
 
+# This run's measured environment, and what each candidate run measured. Only these two are stubbed; every
+# fact the decision actually turns on -- tree hashes, ancestry, the comparisons themselves -- is real.
+OURS="aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888"
+OTHER="9999888877776666555544443333222211110000ffffeeeeddddccccbbbbaaaa"
+NOFP='{}'
+
+fps(){ "$PY" -c 'import json,sys;print(json.dumps({sys.argv[1]: sys.argv[2]}))' "$1" "$2"; }
+
 # Drive the real script. OUTF is a fresh $GITHUB_OUTPUT each time, so `hit=` is read rather than guessed.
-drive(){ # drive <runs-json> [extra env assignments...]
+drive(){ # drive <runs-json> <candidate-fingerprint-map>
   OUTF="$W/out.$$"; : > "$OUTF"
   OUT="$(cd "$R" && env GITHUB_SHA="$M" GITHUB_RUN_ID=999 GITHUB_OUTPUT="$OUTF" \
         GITHUB_TOKEN="${TOKEN_OVERRIDE-stub}" GITHUB_REPOSITORY="owner/repo" \
-        EVIDENCE_REUSE_RUNS_JSON="$1" EVIDENCE_REUSE_MAX_AGE_HOURS="${AGE_OVERRIDE-24}" \
+        EVIDENCE_ENV_FINGERPRINT="${OURS_OVERRIDE-$OURS}" \
+        EVIDENCE_REUSE_RUNS_JSON="$1" EVIDENCE_REUSE_CANDIDATE_FP_JSON="$2" \
+        EVIDENCE_REUSE_MAX_AGE_HOURS="${AGE_OVERRIDE-24}" \
         bash "$SCRIPT" some-gate.yml 2>&1)"
   HIT="$(grep -E '^hit=' "$OUTF" | tail -1 | cut -d= -f2)"
 }
@@ -88,7 +99,7 @@ echo "  fixture: PR head A=${A:0:12}  merge M=${M:0:12}  unrelated-same-tree X=$
 
 # 1. THE LEGITIMATE CASE. Same gate, identical tree, ancestor, fresh. This must HIT, or every rejection below
 #    is meaningless -- a script that never matches passes all of them.
-drive "$(runs_json 111 "$A" "$FRESH")"
+drive "$(runs_json 111 "$A" "$FRESH")" "$(fps 111 "$OURS")"
 if [ "$HIT" = "true" ]; then
   case "$OUT" in *"MATCH: run 111"*) ok "the delivery case hits: identical tree on an ancestor, validated minutes ago" ;;
                  *) no "the delivery case hits" "hit=true but the match was not reported: $OUT" ;; esac
@@ -97,7 +108,7 @@ else
 fi
 
 # 2. CROSS-CONTEXT. Identical tree, same gate, fresh -- but an unrelated commit that is NOT an ancestor.
-drive "$(runs_json 222 "$X" "$FRESH")"
+drive "$(runs_json 222 "$X" "$FRESH")" "$(fps 222 "$OURS")"
 if [ "$HIT" = "true" ]; then
   no "an identical tree on a NON-ANCESTOR is refused" "cross-context evidence was reused"
 else
@@ -107,7 +118,7 @@ fi
 
 # 3. STALE EVIDENCE. Identical tree AND an ancestor, but the run is 100h old. This is the revert-of-a-revert
 #    shape: old content legitimately returns, and a months-old verdict must not return with it.
-drive "$(runs_json 333 "$A" "$STALE")"
+drive "$(runs_json 333 "$A" "$STALE")" "$(fps 333 "$OURS")"
 if [ "$HIT" = "true" ]; then
   no "evidence older than the age limit is refused" "a 100h-old verdict was reused"
 else
@@ -116,7 +127,7 @@ else
 fi
 
 # 4. DIFFERENT CONTENT. The rule the whole mechanism rests on.
-drive "$(runs_json 444 "$D" "$FRESH")"
+drive "$(runs_json 444 "$D" "$FRESH")" "$(fps 444 "$OURS")"
 if [ "$HIT" = "true" ]; then
   no "a different tree is refused" "a verdict about different content was reused"
 else
@@ -124,7 +135,7 @@ else
 fi
 
 # 5. NO TOKEN. Inability to establish equivalence must fail closed, not fail open.
-TOKEN_OVERRIDE="" drive "$(runs_json 555 "$A" "$FRESH")"
+TOKEN_OVERRIDE="" drive "$(runs_json 555 "$A" "$FRESH")" "$(fps 555 "$OURS")"
 if [ "$HIT" = "true" ]; then
   no "no token fails closed" "a hit was reported with no way to read the run history"
 else
@@ -133,7 +144,7 @@ else
 fi
 
 # 6. AN UNREADABLE TIMESTAMP. Age cannot be established, so equivalence cannot be established.
-drive "$(runs_json 666 "$A" "not-a-timestamp")"
+drive "$(runs_json 666 "$A" "not-a-timestamp")" "$(fps 666 "$OURS")"
 if [ "$HIT" = "true" ]; then
   no "an unreadable run time fails closed" "age was not established and the verdict was reused anyway"
 else
@@ -147,23 +158,57 @@ import json, sys
 print(json.dumps({"workflow_runs": [
     {"id": 777, "head_sha": sys.argv[1], "conclusion": "failure", "run_started_at": sys.argv[2]}
 ]}))' "$A" "$FRESH")"
-drive "$FAILED_JSON"
+drive "$FAILED_JSON" "$(fps 777 "$OURS")"
 if [ "$HIT" = "true" ]; then no "a FAILED run is never reused" "a failed run satisfied the gate"
 else ok "a failed run is never reused"; fi
 
 # 8. AN EMPTY HISTORY. No candidate is not a pass.
-drive '{"workflow_runs": []}'
+drive '{"workflow_runs": []}' "$NOFP"
 if [ "$HIT" = "true" ]; then no "an empty run history fails closed" "hit with nothing to match"
 else ok "an empty run history fails closed"; fi
 
 # 9. THE RUN CANNOT SATISFY ITSELF.
-drive "$(runs_json 999 "$A" "$FRESH")"   # 999 == GITHUB_RUN_ID
+drive "$(runs_json 999 "$A" "$FRESH")" "$(fps 999 "$OURS")"   # 999 == GITHUB_RUN_ID
 if [ "$HIT" = "true" ]; then no "a run cannot reuse its own result" "the run matched itself"
 else ok "a run cannot reuse its own result"; fi
+
+# 10. SAME CONTENT, DIFFERENT MACHINE. Identical tree, an ancestor, fresh -- but the candidate ran on a
+#     different runner image or toolchain. This is the gap the closure review found: `ubuntu-latest`, Go
+#     `1.25` and Node `20` all resolve at run time and can move inside the recency window, so without this
+#     rule a run could set up today's environment and then skip the build on a verdict produced under a
+#     different one.
+drive "$(runs_json 1010 "$A" "$FRESH")" "$(fps 1010 "$OTHER")"
+if [ "$HIT" = "true" ]; then
+  no "a candidate that ran in a DIFFERENT environment is refused" "a verdict from another machine was reused"
+else
+  case "$OUT" in *"SAME CONTENT, DIFFERENT MACHINE"*) ok "a candidate that ran in a DIFFERENT environment is refused, and says so" ;;
+                 *) no "a different environment is refused" "refused for the wrong reason: $OUT" ;; esac
+fi
+
+# 11. A CANDIDATE THAT PUBLISHED NO FINGERPRINT -- every run that predates this mechanism, and any run whose
+#     environment could not be measured. Unmeasurable is not comparable.
+drive "$(runs_json 1111 "$A" "$FRESH")" "$NOFP"
+if [ "$HIT" = "true" ]; then
+  no "a candidate with no environment fingerprint is refused" "an unmeasured environment was accepted"
+else
+  case "$OUT" in *"no execution-environment fingerprint"*) ok "a candidate with no environment fingerprint is refused" ;;
+                 *) no "a candidate with no environment fingerprint is refused" "wrong reason: $OUT" ;; esac
+fi
+
+# 12. THIS RUN COULD NOT MEASURE ITSELF. env-fingerprint.sh emits an EMPTY fingerprint when the image
+#     identity or a container digest will not resolve. Empty must refuse -- never match another empty, which
+#     is exactly how a placeholder would turn two unmeasured environments into an agreement.
+OURS_OVERRIDE="" drive "$(runs_json 1212 "$A" "$FRESH")" "$(fps 1212 "")"
+if [ "$HIT" = "true" ]; then
+  no "an unmeasurable local environment fails closed" "two unmeasured environments were treated as equal"
+else
+  case "$OUT" in *"published no execution-environment fingerprint"*) ok "an unmeasurable local environment fails closed" ;;
+                 *) no "an unmeasurable local environment fails closed" "wrong reason: $OUT" ;; esac
+fi
 
 echo "------------------------------------------------------------"
 echo "EVIDENCE_REUSE_SELFTEST pass=$pass fail=$fail"
 [ "$fail" -eq 0 ] || exit 1
 echo "the lookup hits on the real delivery shape and refuses cross-context, stale, different-content,"
-echo "unreadable, failed, absent and self-referential evidence"
+echo "different-environment, unmeasurable, unreadable, failed, absent and self-referential evidence"
 exit 0

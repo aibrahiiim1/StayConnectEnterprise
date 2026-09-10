@@ -184,9 +184,90 @@ def delete_policy(d):
 case("a missing policy file fails closed", delete_policy, "is missing")
 
 
+# 8. A REUSE-ELIGIBLE STEP THAT IS A GITHUB ACTION. An action's version is a moving tag the tree does not
+#    fix, and a run cannot measure the behaviour of an action it never executed. Keeping every `uses:` step
+#    unconditional is what lets the environment fingerprint restrict itself to what a setup action LEAVES
+#    BEHIND rather than trying to identify the action itself.
+def make_a_tree_pure_step_an_action(d):
+    p = wf_path(d, "project-governance.yml")
+    t = io.open(p, encoding="utf-8").read()
+    old = "      - name: Structural project-state validation\n        if: %s\n        run: python tools/project-state.py validate\n" % GUARD
+    assert old in t, "the anchor step is gone; this fixture needs updating"
+    new = "      - name: Structural project-state validation\n        if: %s\n        uses: actions/some-action@v1\n" % GUARD
+    io.open(p, "w", encoding="utf-8", newline="\n").write(t.replace(old, new, 1))
+
+
+case("a reuse-eligible step that is a GitHub action is refused",
+     make_a_tree_pure_step_an_action, "moving tag")
+
+
+# 9. THE ENVIRONMENT FINGERPRINT REMOVED. Without it the lookup has nothing to compare machines with, and a
+#    runner-image or toolchain change inside the recency window would be inherited in silence.
+def remove_the_fingerprint_step(d):
+    p = wf_path(d, "phase5-post-stay-transfer.yml")
+    t = io.open(p, encoding="utf-8").read()
+    old = "        run: bash scripts/ci/env-fingerprint.sh postgres:16-alpine\n"
+    assert old in t, "the fingerprint step is gone; this fixture needs updating"
+    io.open(p, "w", encoding="utf-8", newline="\n").write(t.replace(old, "        run: echo nothing\n", 1))
+
+
+case("removing the execution-environment fingerprint is refused",
+     remove_the_fingerprint_step, "exactly one execution-environment fingerprint")
+
+
+# 10. THE FINGERPRINT MADE REUSE-CONDITIONAL, so it would be absent on exactly the runs that need it.
+def guard_the_fingerprint_step(d):
+    p = wf_path(d, "phase5-post-stay-transfer.yml")
+    t = io.open(p, encoding="utf-8").read()
+    anchor = "      - name: Execution-environment fingerprint\n"
+    assert anchor in t
+    io.open(p, "w", encoding="utf-8", newline="\n").write(
+        t.replace(anchor, anchor + "        if: %s\n" % GUARD, 1))
+
+
+case("a reuse-conditional environment fingerprint is refused",
+     guard_the_fingerprint_step, "reuse-conditional")
+
+
+# 11. A TOOLCHAIN SET UP AFTER THE MEASUREMENT. Its version would sit outside the key that decides whether
+#     an earlier verdict is about the same machine. This is not hypothetical: Phase 4's Set up Node ran
+#     after the reuse decision until this closure moved it.
+def move_a_setup_after_the_fingerprint(d):
+    # RELOCATE the real, already-classified Set up Go rather than inventing a step, so this case tests the
+    # ordering rule and nothing else. An added step would be refused first for being unclassified, which
+    # would prove case 1 over again and this one not at all.
+    p = wf_path(d, "phase5-post-stay-transfer.yml")
+    t = io.open(p, encoding="utf-8").read()
+    setup = ("      - name: Set up Go\n        uses: actions/setup-go@v5\n        with:\n"
+             "          go-version: '1.25'\n          cache-dependency-path: data-plane/go.sum\n\n")
+    anchor = "      - name: Execution-environment fingerprint\n"
+    assert setup in t and anchor in t, "the fixture's setup or fingerprint step has changed"
+    t = t.replace(setup, "", 1)
+    io.open(p, "w", encoding="utf-8", newline="\n").write(t.replace(anchor, anchor + "\n" + setup, 1))
+
+
+case("a toolchain set up after the fingerprint is refused",
+     move_a_setup_after_the_fingerprint, "AFTER the environment fingerprint")
+
+
+# 12. THE LOOKUP NOT GIVEN THE FINGERPRINT: it would decide without ever comparing environments.
+def unwire_the_fingerprint(d):
+    p = wf_path(d, "project-governance.yml")
+    t = io.open(p, encoding="utf-8").read()
+    line = "          EVIDENCE_ENV_FINGERPRINT: ${{ steps.env.outputs.fingerprint }}\n"
+    assert line in t
+    io.open(p, "w", encoding="utf-8", newline="\n").write(t.replace(line, "", 1))
+
+
+case("a lookup that is not given the environment fingerprint is refused",
+     unwire_the_fingerprint, "not given EVIDENCE_ENV_FINGERPRINT")
+
+
 print("-" * 60)
 print("CI_REUSE_POLICY_NEGATIVE pass=%d fail=%d" % (passed, failed))
 if failed:
     sys.exit(1)
 print("the policy validator refuses an unclassified step, a guarded history-dependent step, guard drift in "
-      "both directions, an unexplained exemption, an unclassified gate, and its own absence")
+      "both directions, an unexplained exemption, an unclassified gate, its own absence, an action treated "
+      "as reuse-eligible, and every way the execution-environment measurement could be removed, guarded, "
+      "outrun by a later toolchain setup, or left unwired")

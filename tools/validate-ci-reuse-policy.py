@@ -152,6 +152,16 @@ def main():
                 if has_only:
                     fail("%s: step %r is classified tree-pure but is guarded to run ONLY on a hit"
                          % (wf, name))
+                # NO REUSE-ELIGIBLE STEP MAY BE A GITHUB ACTION. `actions/checkout@v4` and the setup
+                # actions are moving tags: what they resolve to is not fixed by the tree, and a run cannot
+                # measure the behaviour of an action it never executed. Keeping every `uses:` step
+                # unconditional means action drift is always re-executed and never inherited -- which is
+                # why the environment fingerprint can restrict itself to what a setup action LEAVES BEHIND
+                # (the resolved toolchain version) instead of trying to identify the action itself.
+                if re.search(r"^\s*uses:", body, re.M):
+                    fail("%s: step %r is a GitHub action classified tree-pure. An action's version is a "
+                         "moving tag the tree does not fix, so its result must never be inherited from an "
+                         "earlier run; classify it `always`." % (wf, name))
             elif cls == "always":
                 if mentions:
                     fail("%s: step %r is classified ALWAYS -- its verdict is not a function of the tree -- "
@@ -173,6 +183,55 @@ def main():
         for name, body in steps:
             if "evidence-reuse.sh" in body and "steps.reuse.outputs.hit" in body:
                 fail("%s: the reuse lookup %r is guarded by its own output" % (wf, name))
+
+        # ---------------------------------------------------------------------------------------------
+        # THE EXECUTION ENVIRONMENT MUST BE MEASURED, AND MEASURED FIRST.
+        #
+        # Tree equality fixes the code, not the machine. `ubuntu-latest`, `go-version: '1.25'` and
+        # `node-version: '20'` all resolve at run time and can move inside any recency window, so the
+        # lookup compares a fingerprint of the RESOLVED environment. That only works if the fingerprint is
+        # produced on every run and produced BEFORE the decision that consumes it -- both asserted here
+        # rather than left to whoever edits the workflow next.
+        fp_idx = [i for i, (n, b) in enumerate(steps) if "env-fingerprint.sh" in b]
+        reuse_idx = [i for i, (n, b) in enumerate(steps) if "evidence-reuse.sh" in b]
+        if len(fp_idx) != 1:
+            fail("%s: expected exactly one execution-environment fingerprint step, found %d. Without it "
+                 "the lookup cannot show that an earlier verdict came from the same machine."
+                 % (wf, len(fp_idx)))
+        if len(reuse_idx) != 1:
+            fail("%s: expected exactly one evidence-reuse lookup, found %d" % (wf, len(reuse_idx)))
+        if len(fp_idx) == 1 and len(reuse_idx) == 1:
+            if fp_idx[0] > reuse_idx[0]:
+                fail("%s: the environment fingerprint is produced AFTER the reuse decision, so the decision "
+                     "cannot have used it" % wf)
+            fp_name, fp_body = steps[fp_idx[0]]
+            if "steps.reuse.outputs.hit" in fp_body:
+                fail("%s: the environment fingerprint step %r is reuse-conditional; it must run on every "
+                     "run, or a hit could be decided against an unmeasured environment" % (wf, fp_name))
+            reuse_name, reuse_body = steps[reuse_idx[0]]
+            if "EVIDENCE_ENV_FINGERPRINT" not in reuse_body:
+                fail("%s: the reuse lookup %r is not given EVIDENCE_ENV_FINGERPRINT, so it would decide "
+                     "without comparing environments" % (wf, reuse_name))
+            # The lookup carries offline overrides so its own self-test can drive it without a network.
+            # Those are test hooks; a workflow that set one would be handing the gate its answer.
+            for override in ("EVIDENCE_REUSE_RUNS_JSON", "EVIDENCE_REUSE_CANDIDATE_FP_JSON",
+                             "EVIDENCE_REUSE_MAX_AGE_HOURS", "EVIDENCE_REUSE_LOOKBACK"):
+                if override in reuse_body:
+                    fail("%s: the reuse lookup %r sets %s. That is a self-test hook, and a gate must not "
+                         "supply its own evidence or relax its own bounds." % (wf, reuse_name, override))
+            # Everything before the fingerprint must be unconditional too: a toolchain installed after the
+            # measurement is a toolchain the measurement does not describe.
+            for n, b in steps[:fp_idx[0]]:
+                if "steps.reuse.outputs.hit" in b:
+                    fail("%s: step %r runs before the environment fingerprint but is reuse-conditional; "
+                         "the fingerprint would then describe a different setup than a full run does"
+                         % (wf, n))
+            # A setup action AFTER the fingerprint installs a toolchain the fingerprint never saw.
+            for n, b in steps[fp_idx[0]:]:
+                if re.search(r"^\s*uses: actions/setup-", b, re.M):
+                    fail("%s: %r sets up a toolchain AFTER the environment fingerprint, so that toolchain's "
+                         "version is outside the key that decides whether a reused verdict is comparable"
+                         % (wf, n))
 
     print("  classified: %d tree-pure, %d always (never skipped), %d reuse-only"
           % (total["tree-pure"], total["always"], total["reuse-only"]))
