@@ -68,12 +68,27 @@ jobs:
       - name: CI reuse policy — every gate step is classified
         run: python tools/validate-ci-reuse-policy.py
 
+      # NEVER REUSED — it reads the LIVE protection of master from GitHub. The gap this closes was not a
+      # missing rule but a missing check: the delivery rule required four gates while GitHub required one,
+      # admins bypassed everything and force pushes were allowed, and nothing compared the two statements.
+      # Now governance/branch-protection.json is the recorded model and this fails the gate the moment the
+      # live configuration stops matching it — a dropped context, strict off, a bypass actor, evaluate-only
+      # enforcement, widened merge methods. Unreachable means FAIL: unverifiable is not the same as fine.
+      - name: Master protection matches the recorded model
+        run: python tools/validate-branch-protection.py
+
       # Does the enforcement above actually refuse the mistakes it exists to catch? A policy validator that
       # passes on a correct repository is indistinguishable from one that returns zero. This drives the real
       # validator against fixtures carrying each specific defect.
       - name: CI reuse policy — negative tests
         if: steps.reuse.outputs.hit != 'true'
         run: python tools/tests/ci_reuse_policy/run_negative.py
+
+      # And the protection check, watched failing. A local server impersonates GitHub and serves a weakened
+      # configuration one defect at a time — hermetic, so this stays tree-pure.
+      - name: Master protection — negative tests
+        if: steps.reuse.outputs.hit != 'true'
+        run: python tools/tests/branch_protection/run_negative.py
 
       # And does the LOOKUP refuse what it claims to? It reports a hit on the delivery path, which is also
       # what a script returning "hit" unconditionally would do. This builds a real git repository with a known

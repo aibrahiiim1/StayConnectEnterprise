@@ -463,7 +463,16 @@
           "why": "the guard on the guard. A run that reuses evidence must first prove the classification it is relying on is intact, so this runs on every run."
         },
         {
+          "name": "Master protection matches the recorded model",
+          "reuse": "always",
+          "why": "NOT TREE-PURE — it reads the LIVE protection of master from the GitHub API (effective rules, ruleset enforcement, bypass actors). Reusing a verdict about how the repository is protected would mean reporting yesterday's protection as today's."
+        },
+        {
           "name": "CI reuse policy — negative tests",
+          "reuse": "tree-pure"
+        },
+        {
+          "name": "Master protection — negative tests",
           "reuse": "tree-pure"
         },
         {
