@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `0d6ff9b72b504e5df69e86bc62a0d605e94deb13`
-- **HEAD commit:** `9b5030e7be1f677c11465459682b3c649cdfa2cf`
-- **Provenance (generation HEAD = inventory_head):** `9b5030e7be1f677c11465459682b3c649cdfa2cf`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `eb5b78c5a39d70c2f7b114c8bd2b50fabf7949de`
+- **Provenance (generation HEAD = inventory_head):** `eb5b78c5a39d70c2f7b114c8bd2b50fabf7949de`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/sidebar-collapse`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 21
@@ -12,37 +12,37 @@
 
 | Path | Classification | Git status | Domain | Workstream | Rollback | Purpose (last commit subject in range) |
 |---|---|---|---|---|---|---|
-| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | (no commit subject in range) |
+| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: manifest, export packs and delivery head resynchronized |
 | `docs/user-guide/hotel-admin-reference.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Let the operator collapse the sidebar to an icon rail |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/GIT_STAT_24a3184f.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/GIT_STAT_9b5030e7.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Let the operator collapse the sidebar to an icon rail |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest, export packs and delivery head resynchronized |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest, export packs and delivery head resynchronized |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest, export packs and delivery head resynchronized |
+| `exports/chatgpt/phase-evidence/GIT_STAT_24a3184f.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Delivery: manifest, export packs and delivery head resynchronized |
+| `exports/chatgpt/phase-evidence/GIT_STAT_eb5b78c5.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest, export packs and delivery head resynchronized |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest, export packs and delivery head resynchronized |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest, export packs and delivery head resynchronized |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest, export packs and delivery head resynchronized |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest, export packs and delivery head resynchronized |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest, export packs and delivery head resynchronized |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: manifest, export packs and delivery head resynchronized |
 | `hotel-admin/app/(app)/layout.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Let the operator collapse the sidebar to an icon rail |
 | `hotel-admin/app/globals.css` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Let the operator collapse the sidebar to an icon rail |
 | `hotel-admin/app/layout.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Let the operator collapse the sidebar to an icon rail |
 | `hotel-admin/components/nav.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Let the operator collapse the sidebar to an icon rail |
-| `hotel-admin/e2e/sidebar-collapse.spec.ts` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Let the operator collapse the sidebar to an icon rail |
+| `hotel-admin/e2e/sidebar-collapse.spec.ts` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Pin the reduced-motion behaviour, and pin that motion still exists |
 | `hotel-admin/lib/sidebar-state.ts` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Let the operator collapse the sidebar to an icon rail |
 | `hotel-admin/test/design-system-invariants.test.ts` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Let the operator collapse the sidebar to an icon rail |
 
 ## Total diff statistics (`git diff --stat`)
 ```text
- docs/manifests/PostClosure-change-manifest.md      |  99 +++---
+ docs/manifests/PostClosure-change-manifest.md      | 121 +++-----
  docs/user-guide/hotel-admin-reference.md           |  12 +
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 333129 -> 333132 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 139891 -> 139879 bytes
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 333129 -> 333130 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 139891 -> 139890 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 43735 -> 43735 bytes
  .../chatgpt/phase-evidence/GIT_STAT_24a3184f.txt   |   4 -
- .../chatgpt/phase-evidence/GIT_STAT_9b5030e7.txt   |   4 +
+ .../chatgpt/phase-evidence/GIT_STAT_eb5b78c5.txt   |   4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   4 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
  exports/chatgpt/phase1b-planning/MANIFEST.md       |   2 +-
@@ -54,10 +54,10 @@
  hotel-admin/app/globals.css                        |  31 ++
  hotel-admin/app/layout.tsx                         |   7 +
  hotel-admin/components/nav.tsx                     | 334 +++++++++++++++------
- hotel-admin/e2e/sidebar-collapse.spec.ts           | 204 +++++++++++++
+ hotel-admin/e2e/sidebar-collapse.spec.ts           | 231 ++++++++++++++
  hotel-admin/lib/sidebar-state.ts                   |  92 ++++++
  hotel-admin/test/design-system-invariants.test.ts  |  19 +-
- 21 files changed, 712 insertions(+), 203 deletions(-)
+ 21 files changed, 752 insertions(+), 212 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -66,8 +66,8 @@ MM docs/manifests/PostClosure-change-manifest.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_24a3184f.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_9b5030e7.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_9b5030e7.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_eb5b78c5.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -79,5 +79,7 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: eb5b78c5 Pin the reduced-motion behaviour, and pin that motion still exists
+HISTORICAL: 1febe999 Delivery: manifest, export packs and delivery head resynchronized
 HISTORICAL: 9b5030e7 Let the operator collapse the sidebar to an icon rail
 ```

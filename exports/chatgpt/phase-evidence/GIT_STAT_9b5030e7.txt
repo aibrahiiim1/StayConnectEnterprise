@@ -1,4 +1,0 @@
-commit 9b5030e7be1f677c11465459682b3c649cdfa2cf
-Date:   Fri Sep 11 02:29:09 2026 +0300
-
-    Let the operator collapse the sidebar to an icon rail
