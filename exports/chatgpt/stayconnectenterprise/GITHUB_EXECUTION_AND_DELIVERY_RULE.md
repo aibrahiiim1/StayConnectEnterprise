@@ -114,6 +114,35 @@ Before reporting completion: commit all authorized changes intentionally; push t
 
 **Repository-side enforcement (GH-MANDATORY-CI).** GitHub Actions is the authoritative merge gate. The workflow `.github/workflows/project-governance.yml` (workflow name **Project Governance**, job **governance**) runs on every pull request targeting `master`, every push to `master`, and manual `workflow_dispatch`; it checks out full history (`fetch-depth: 0`), runs `python tools/project-state.py validate`, `python tools/project-state.py check-generated`, `python tools/tests/project_state_validator/run_mutations.py` and `bash tools/validate-project-state.sh`, and then asserts the working tree is still clean — failing on any non-zero step. It uses read-only repository permissions and performs no deployment, database access, migrations or production tests. **A PR is not merge-ready until this check is green** — local validator output alone is insufficient for a delivered PR. The default branch should be protected to require the `governance` check.
 
+**How the required gates spend their time, and what is never recomputed twice (CI-REUSE).** The four
+required checks run in parallel, so the delivery path is the slowest of them, twice: once on the
+pull-request head and once on the merge commit. Two things were measured and changed.
+
+*The adversarial mutation matrix is evaluated concurrently.* Each of its sixty cases costs a full double
+validation — the structural validator plus the keyword validator over the whole tree, about sixteen seconds
+on a runner — and they were evaluated one after another because they shared a single sandbox. Every worker
+now gets its OWN sandbox and the cases run at once. Nothing about the checking changed: every case still
+runs, both validators still run per case, `--require-full` still refuses a partial matrix, and the printed
+`MUTATION_CASES_EXECUTED` count is still asserted against the total. `MUTATION_MAX_CASES` forces serial
+execution, because that knob exists for the isolation regression's short overlapping child runs and giving
+those an internal fan-out would change what that regression measures.
+
+*Identical content is not validated twice.* Each gate first asks whether it has already proven THIS EXACT
+TREE green, via `scripts/ci/evidence-reuse.sh`. The key is the GIT TREE HASH, and the answer comes from the
+repository's own workflow-run history through the API, in that run. Two commits with the same tree have
+byte-identical content in every tracked path — and `.github/workflows/**`, `tools/**`, `scripts/**` and
+`governance/**` are all tracked, so an identical tree is also the same gate definition running the same
+validators over the same inputs. A changed check is a changed tree, and a changed tree never matches. Only
+successful runs of the SAME workflow count, so a green Phase-4 run can never satisfy governance. Every path
+that cannot establish a match — no token, an API error, no candidate, an object the checkout lacks — reports
+no hit and the full validation runs; reuse can remove duplicated work and can never be why something went
+unchecked. Checks whose input is NOT the tree are never reused: the PR-metadata Zero-Stale check reads the
+live pull-request body and runs unconditionally.
+
+This matters because the merge commit's tree was byte-identical to the pull-request head's tree in thirteen
+of the last thirteen merges — a merge introduces a commit, not content — so the post-merge run was
+re-deriving a verdict it already held.
+
 No Agent may bypass the governed execution wrapper or validators.
 
 ## 9. No stale leftovers
