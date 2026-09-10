@@ -178,8 +178,9 @@ jobs:
       # ---------------------------------------------------------------- Hotel-Admin financial operator UI
       # The operator screens are part of the Phase-4 software boundary: a recovery screen that grew a
       # "retry" button would be a way to double-charge a guest, and only a UI test catches that.
+      # Not reuse-conditional, because the dependency gate below is not: `npm audit` reads package-lock.json
+      # and needs no installed tree, so Node must be here on a reuse hit too.
       - name: Set up Node
-        if: steps.reuse.outputs.hit != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -248,21 +249,36 @@ jobs:
         if: steps.reuse.outputs.hit != 'true'
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-dependency-gate-selftest -- bash $GITHUB_WORKSPACE/scripts/ci/phase4-dependency-gate-selftest.sh"
 
+      # NEVER REUSED, and it is the clearest case in the repository. This gate is a function of THREE inputs,
+      # only one of which is the tree: `npm audit` queries the LIVE registry, so a tree that was clean
+      # yesterday is vulnerable the moment an advisory is published against a dependency it already pins; and
+      # dependency-judgement.py compares each acceptance's `expires_on` against TODAY, so an acceptance
+      # lapsing overnight turns the same bytes from PASS into FAIL. Reusing a tree-keyed verdict here would
+      # mean a newly published CVE, or an acceptance the Product Owner deliberately time-boxed, going
+      # unreported on the commit that actually lands on master. The self-test above stays reuse-eligible: it
+      # runs against fixtures and is a pure function of the tree.
       - name: Production dependency advisory gate
-        if: steps.reuse.outputs.hit != 'true'
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-dependency-gate -- bash $GITHUB_WORKSPACE/scripts/ci/phase4-dependency-gate.sh"
 
       - name: Assemble the Phase-4 financial-core evidence artifact
         if: always() && steps.reuse.outputs.hit != 'true'
         run: python3 scripts/ci/phase4_evidence.py
 
+      # See the Phase-3 workflow for why a reused verdict still publishes an artifact under its own commit.
+      - name: Evidence pointer for a reused verdict
+        if: steps.reuse.outputs.hit == 'true'
+        env:
+          REUSE_MATCHED_RUN: ${{ steps.reuse.outputs.matched_run }}
+          REUSE_MATCHED_SHA: ${{ steps.reuse.outputs.matched_sha }}
+          REUSE_MATCHED_AT: ${{ steps.reuse.outputs.matched_at }}
+        run: bash scripts/ci/evidence-pointer.sh "$GITHUB_WORKSPACE/.phase4-evidence" "Phase-4 Financial Core CI"
+
       - name: Record the HEAD for the artifact name
-        if: steps.reuse.outputs.hit != 'true'
         id: head
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Upload the Phase-4 financial-core evidence artifact
-        if: always() && steps.reuse.outputs.hit != 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: phase4-financial-core-evidence-${{ steps.head.outputs.sha }}

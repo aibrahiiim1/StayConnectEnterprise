@@ -1,0 +1,4 @@
+commit f6fe947eac7fdf9a83d3d45bd2546cf4acbff24c
+Date:   Thu Sep 10 14:12:54 2026 +0300
+
+    Reuse evidence only where the evidence key covers every input

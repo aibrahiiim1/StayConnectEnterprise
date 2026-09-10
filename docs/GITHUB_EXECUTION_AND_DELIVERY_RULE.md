@@ -127,21 +127,49 @@ runs, both validators still run per case, `--require-full` still refuses a parti
 execution, because that knob exists for the isolation regression's short overlapping child runs and giving
 those an internal fan-out would change what that regression measures.
 
-*Identical content is not validated twice.* Each gate first asks whether it has already proven THIS EXACT
-TREE green, via `scripts/ci/evidence-reuse.sh`. The key is the GIT TREE HASH, and the answer comes from the
-repository's own workflow-run history through the API, in that run. Two commits with the same tree have
-byte-identical content in every tracked path — and `.github/workflows/**`, `tools/**`, `scripts/**` and
-`governance/**` are all tracked, so an identical tree is also the same gate definition running the same
-validators over the same inputs. A changed check is a changed tree, and a changed tree never matches. Only
-successful runs of the SAME workflow count, so a green Phase-4 run can never satisfy governance. Every path
-that cannot establish a match — no token, an API error, no candidate, an object the checkout lacks — reports
-no hit and the full validation runs; reuse can remove duplicated work and can never be why something went
-unchecked. Checks whose input is NOT the tree are never reused: the PR-metadata Zero-Stale check reads the
-live pull-request body and runs unconditionally.
+*Identical content is not validated twice — but only where content is the whole input.* Each gate first asks
+whether it has already proven THIS EXACT TREE green, via `scripts/ci/evidence-reuse.sh`. This matters because
+the merge commit's tree was byte-identical to the pull-request head's tree in thirteen of the last thirteen
+merges — a merge introduces a commit, not content — so the post-merge run was re-deriving a verdict it
+already held.
 
-This matters because the merge commit's tree was byte-identical to the pull-request head's tree in thirteen
-of the last thirteen merges — a merge introduces a commit, not content — so the post-merge run was
-re-deriving a verdict it already held.
+**A tree hash is not a complete evidence key, and the first version of this mechanism wrongly assumed it
+was.** Tree equality proves two commits have identical CONTENT. It does not prove they have the same HISTORY,
+were judged at the same MOMENT, or ran against the same EXTERNAL WORLD. Four required checks depend on exactly
+those things: `tools/validate-transition-times.sh` and its self-test read the COMMIT GRAPH (`git log
+--diff-filter=A` for a receipt's introducing commit, `git log -1` for when a merge actually happened);
+`tools/validate-project-state.sh` resolves the manifest's `SOURCE_COMMIT` against the object graph; and
+`scripts/ci/phase4-dependency-gate.sh` queries the LIVE npm registry and compares acceptances against TODAY's
+date, so the same bytes turn from PASS to FAIL when an advisory is published or an acceptance lapses. A
+fifth case is not a check at all: the evidence artifacts are PRODUCED OUTPUT, and guarding their upload meant
+the commit that actually landed on master carried no evidence artifact.
+
+So reuse is governed by two separate mechanisms, both fail-closed.
+
+**What may be skipped is declared, not assumed.** `governance/ci-reuse-policy.json` classifies EVERY step of
+EVERY required gate as `tree-pure` (an earlier run over an identical tree already answers it), `always` (its
+inputs are not fixed by the tree, or it produces output this run owes — with the reason recorded), or
+`reuse-only`. `tools/validate-ci-reuse-policy.py` enforces the classification against the workflows in both
+directions and **fails on any step nobody has classified**, so a step added later cannot inherit a skip by
+having its guard copied from the step above it. That validator runs on every run, hit or not: a gate may
+never reuse evidence without first proving the rules it is relying on are intact.
+
+**What counts as equivalent evidence is four rules, not one.** A hit requires the SAME GATE (only successful
+runs of the same workflow — a green Phase-4 run can never satisfy governance); an IDENTICAL TREE (and
+`.github/workflows/**`, `tools/**`, `scripts/**` and `governance/**` are all tracked, so identical content is
+also the same gate definition, the same validators and the same policy file — a changed check is a changed
+tree, and a changed tree never matches); ANCESTRY, meaning the matched commit must be an ancestor of the one
+being validated, which is precisely the delivery relationship and is what rules out cross-context evidence
+from an unrelated branch or fork that happens to render the same tree; and RECENCY, a 24-hour bound that stops
+a verdict being RESURRECTED — a revert-of-a-revert restores old content and IS a descendant, so ancestry alone
+would let a months-old judgement stand for content being accepted today on a different runner image.
+
+Every path that cannot establish all four — no token, an API error, no candidate, an object the checkout
+lacks, an unreadable timestamp — reports no hit and the full validation runs. Reuse can remove duplicated work
+and can never be why something went unchecked. Both mechanisms are adversarially proven rather than asserted:
+`tools/tests/ci_reuse_policy/run_negative.py` drives the policy validator against fixtures carrying each
+specific defect, and `scripts/ci/tests/evidence-reuse-selftest.sh` drives the real lookup against a git
+repository with a known topology, making exactly one eligibility rule false at a time.
 
 No Agent may bypass the governed execution wrapper or validators.
 
