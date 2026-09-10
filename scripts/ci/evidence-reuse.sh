@@ -95,7 +95,7 @@ no_hit() { echo "  -> NO REUSE: $*"; echo "  the full validation will run."; emi
 PY=python3; python3 --version >/dev/null 2>&1 || PY=python
 "$PY" --version >/dev/null 2>&1 || { echo "  no usable python"; emit "hit=false"; exit 0; }
 
-echo "== evidence reuse: same gate + identical tree + ancestry + recency =="
+echo "== evidence reuse: same gate + identical tree + ancestry + identical environment, bounded by age =="
 
 TREE="$(git rev-parse "$SHA^{tree}" 2>/dev/null)"
 [ -n "$TREE" ] || no_hit "this commit's tree could not be resolved"

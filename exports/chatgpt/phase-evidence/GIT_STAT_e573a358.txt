@@ -1,0 +1,4 @@
+commit e573a3582ffb3494a79eb883c4982b6ae4f8bb57
+Date:   Thu Sep 10 16:09:00 2026 +0300
+
+    Name all five rules in the lookup's own banner
