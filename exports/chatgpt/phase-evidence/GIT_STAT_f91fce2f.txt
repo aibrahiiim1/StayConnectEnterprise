@@ -1,0 +1,4 @@
+commit f91fce2fc65747ea9770ad148446bc4e15aa6fb1
+Date:   Thu Sep 10 14:45:48 2026 +0300
+
+    Say what the gates actually do on a reuse hit

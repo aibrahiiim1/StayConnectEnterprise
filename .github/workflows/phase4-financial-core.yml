@@ -57,15 +57,21 @@ jobs:
           python-version: '3.12'
 
 
-      # HAS THIS EXACT CONTENT ALREADY BEEN PROVEN GREEN BY THIS GATE?
-      #
-      # Keyed by GIT TREE HASH and answered from GitHub's own run history. An identical tree is identical
-      # content in every tracked path -- including this workflow file, the scripts it calls and the sources
-      # under test -- so the verdict cannot differ. A changed check is a changed tree, and a changed tree
-      # never matches. Every failure path reports no hit, so the full gate runs.
+      # HAS THIS EXACT CONTENT ALREADY BEEN PROVEN GREEN BY THIS GATE, IN AN EQUIVALENT CONTEXT?
       #
       # This exists because the merge commit's tree was byte-identical to the pull-request head's tree in
       # thirteen of the last thirteen merges: the second run was re-deriving a verdict it already held.
+      #
+      # A HIT REQUIRES FOUR THINGS, not just a matching tree. The same workflow; an IDENTICAL TREE (and this
+      # file, the scripts it calls and the sources under test are all tracked, so a changed check is a
+      # changed tree and a changed tree never matches); ANCESTRY, so evidence from an unrelated branch that
+      # happens to render the same content can never be borrowed; and RECENCY, so an old verdict cannot be
+      # resurrected for content that returns later. Every failure path reports no hit and the full gate runs.
+      #
+      # A HIT DOES NOT SKIP EVERYTHING. Tree equality proves identical CONTENT -- not identical history, the
+      # same moment, or the same external world. governance/ci-reuse-policy.json classifies each step of this
+      # gate `tree-pure` or `always`, tools/validate-ci-reuse-policy.py enforces that classification and FAILS
+      # on any step nobody has classified, and the steps below carry the guard their classification requires.
       - name: Tree-equality evidence reuse
         id: reuse
         env:
