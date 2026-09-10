@@ -316,7 +316,19 @@ def run(cmd):
     # so invoking the SANDBOX copies makes them read and judge the sandbox.
     return subprocess.run(cmd, cwd=WORK, capture_output=True, text=True)
 def structural():
-    return run([sys.executable, os.path.join(WORK, "tools", "project-state.py"), "validate"]).returncode
+    """Every validator whose verdict is purely a function of the tree.
+
+    This is deliberately BOTH tree-structural validators rather than just project-state.py. The delivery
+    protocol (concurrency blocks, trigger hygiene, preflight coverage) is asserted from tracked files exactly
+    like the project-state rules are, and a mutation that reintroduces `workflow_dispatch` on a required gate
+    or deletes a concurrency block has to be DETECTED here or the mutation suite would be proving nothing
+    about it. A case is detected when the tree is refused -- by whichever structural validator owns that
+    rule.
+    """
+    rc = run([sys.executable, os.path.join(WORK, "tools", "project-state.py"), "validate"]).returncode
+    if rc:
+        return rc
+    return run([sys.executable, os.path.join(WORK, "tools", "validate-delivery-protocol.py")]).returncode
 def keyword():
     return run([BASH, os.path.join(WORK, "tools", "validate-project-state.sh")]).returncode
 def both_status():
@@ -574,6 +586,30 @@ MUTATIONS = [
  ("M58 runtime provenance denies a recorded runtime head", "governance/project-state.json",
    ("replace", [("SINGLE-COMMIT for every service binary, and stated as one.",
                  "MIXED, and deliberately not stated as a single SHA.")])),
+
+ # ---- delivery protocol (tools/validate-delivery-protocol.py) --------------------------------------------
+ # Each of these is a condition the repository was ACTUALLY IN before this rule existed, and each cost
+ # measurable delivery time. They are mutations rather than prose precisely because prose is what allowed the
+ # first two to persist unnoticed across all four gate workflows.
+ ("M61 a gate can be satisfied by workflow_dispatch again",
+  ".github/workflows/phase3-software.yml",
+   ("replace", [("permissions:\n  contents: read",
+                 "  workflow_dispatch:\n\npermissions:\n  contents: read")])),
+ ("M62 a superseded run is never cancelled (concurrency block removed)",
+  ".github/workflows/phase4-financial-core.yml",
+   ("replace", [("concurrency:\n  group:", "removed_concurrency:\n  group:")])),
+ ("M63 cancel-in-progress made unconditional, so a master run becomes cancellable",
+  ".github/workflows/phase5-post-stay-transfer.yml",
+   ("replace", [("cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
+                 "cancel-in-progress: true")])),
+ ("M64 the preflight hollowed out into a stub that still exits 0",
+  "tools/preflight.sh",
+   ("replace", [("python tools/check-fixture-parity.py || rc=1",
+                 "true  # check removed, label kept")])),
+ ("M65 the permanent protocol deregistered from the artifact registry",
+  "governance/artifact-registry.json",
+   ("replace", [('"path": "docs/FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md"',
+                 '"path": "docs/MISSING_PROTOCOL.md"')])),
 ]
 
 def apply(relpath, op):

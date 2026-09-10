@@ -1,4 +1,0 @@
-commit c01f87bf73104a975c168b39d254e19af2c10705
-Date:   Thu Sep 10 23:49:39 2026 +0300
-
-    PC-0006 deployed to PRE-LIVE and accepted live: record what is actually running

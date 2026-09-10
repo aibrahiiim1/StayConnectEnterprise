@@ -27,7 +27,30 @@ on:
     branches: [ master ]
   push:
     branches: [ master, 'phase/**' ]
-  workflow_dispatch:
+  # workflow_dispatch is DELIBERATELY ABSENT from this gate.
+  #
+  # A dispatched run reports a check with the SAME NAME as the pull_request run, because a required status
+  # context IS the job name. That has two consequences, both of which cost this project real delivery time:
+  # a dispatched run in progress blocks the merge of a PR whose own checks are already green, and a
+  # dispatched SUCCESS is a candidate the evidence-reuse lookup can inherit -- so a required check could be
+  # satisfied by a run that never evaluated a pull request. The gate must be earned on the event that
+  # actually proposes the change. To re-run after a genuine correction, re-run the FAILED JOBS of the
+  # pull_request run; do not dispatch a fresh one.
+
+# ---------------------------------------------------------------------------------------------------------
+# ONE RUN PER REF, AND A SUPERSEDED RUN IS CANCELLED INSTEAD OF BEING LEFT TO FINISH.
+#
+# Without this key -- and until now there was no `concurrency:` key in ANY of the four gate workflows -- every
+# push to a PR branch started a run that nothing ever stopped. The runs for the abandoned commits kept a
+# runner busy, kept writing evidence, and kept reporting a check whose name is REQUIRED, so an obsolete run
+# could still be "in progress" for an old commit while the branch had already moved on.
+#
+# cancel-in-progress is deliberately TRUE ONLY FOR pull_request. A push to master must never be cancelled:
+# master's green record is the thing the protection rule reads, and cancelling it would leave the default
+# branch with a check that is neither passing nor failing.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read

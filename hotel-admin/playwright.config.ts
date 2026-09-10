@@ -11,7 +11,10 @@ export default defineConfig({
   timeout: 120_000,
   fullyParallel: false,
   workers: 1,
-  reporter: [["list"]],
+  // The infra reporter runs ALONGSIDE list; it adds a verdict, it never replaces the per-test output and
+  // never changes the exit status. See e2e-infra-reporter.ts for the failure it exists to make legible.
+  reporter: [["list"], ["./e2e-infra-reporter.ts"]],
+  globalSetup: "./e2e-global-setup.ts",
   expect: { timeout: 25_000 },
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,
@@ -27,7 +30,15 @@ export default defineConfig({
     command: `npx next dev -p ${PORT} -H 127.0.0.1`,
     env: { NEXT_PUBLIC_PHASE2_ADMIN: "1", NEXT_PUBLIC_PHASE3_ADMIN: "1", NEXT_PUBLIC_PHASE4_ADMIN: "1", NEXT_PUBLIC_PHASE5_ADMIN: "1", NEXT_TELEMETRY_DISABLED: "1" },
     url: `http://127.0.0.1:${PORT}/login`,
-    reuseExistingServer: true,
+    // Locally, reusing a server that is already up saves a compile on every run. In CI it is a hazard: an
+    // adopted process is one Playwright did not configure (the `env` above applies only to a server it
+    // spawns itself) and does not tear down, so a stray server could silently serve a different build than
+    // the one under test.
+    reuseExistingServer: !process.env.CI,
+    // Surface the dev server's own output. Without this its crash -- the thing that turns one infrastructure
+    // fault into a screenful of connection errors -- is written nowhere the report can show.
+    stdout: "pipe",
+    stderr: "pipe",
     timeout: 180_000,
   },
 });

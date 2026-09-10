@@ -56,6 +56,12 @@
       "note": "Permanent Zero-Stale-Leftovers rule."
     },
     {
+      "id": "fast-delivery-protocol",
+      "path": "docs/FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md",
+      "status": "AUTHORITATIVE",
+      "note": "Permanent Fast Delivery and Parallel-Agent protocol: the measured bottlenecks of the PRs #108/#109 delivery, the local preflight that closes them, the CI hygiene rules (no workflow_dispatch on a required check; superseded pull-request runs cancelled while master runs never are), dependency-aware deployment order, the guest-data rule for delivery evidence, and the one-Delivery-Owner-per-branch parallel-agent contract. Machine-enforced by tools/validate-delivery-protocol.py."
+    },
+    {
       "id": "project-state",
       "path": "governance/project-state.json",
       "status": "AUTHORITATIVE",

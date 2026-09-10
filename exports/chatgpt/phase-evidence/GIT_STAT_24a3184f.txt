@@ -1,0 +1,4 @@
+commit 24a3184f9c514145680ef8587939e9e36e1022de
+Date:   Fri Sep 11 01:15:06 2026 +0300
+
+    Make the delivery path faster, and make the safe parts machine-enforced

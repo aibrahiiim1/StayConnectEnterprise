@@ -80,6 +80,11 @@
           "reuse": "tree-pure"
         },
         {
+          "name": "Disposable-PG fixture matches the migrations it stands in for",
+          "reuse": "tree-pure",
+          "why": "it compares two tracked files -- iam_v2_scratch/00_platform_fixture.sql and the data-plane/migrations chain -- plus the Go SQL literals that select from them. No database, no clock, no network: an identical tree cannot produce a different verdict."
+        },
+        {
           "name": "Migration 0010 lifecycle + concurrency gate (disposable PG16)",
           "reuse": "tree-pure"
         },
@@ -466,6 +471,11 @@
           "name": "Master protection matches the recorded model",
           "reuse": "always",
           "why": "NOT TREE-PURE — it reads the LIVE protection of master from the GitHub API (effective rules, ruleset enforcement, bypass actors). Reusing a verdict about how the repository is protected would mean reporting yesterday's protection as today's."
+        },
+        {
+          "name": "Delivery protocol — concurrency, trigger hygiene, preflight coverage",
+          "reuse": "tree-pure",
+          "why": "its entire verdict is a function of tracked files -- the four gate workflows' triggers and concurrency blocks, and the presence and content of the preflight, its protocol document and the PR template. It reads no clock, no live API and no git history, so an identical tree cannot produce a different answer."
         },
         {
           "name": "CI reuse policy — negative tests",
