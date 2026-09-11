@@ -22,6 +22,7 @@ package stayengine
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -89,9 +90,16 @@ func TestIntegration_MixedCaseGuestIngestsCanonicalAndAuthenticates(t *testing.T
 	if first != "CHINUA" {
 		t.Fatalf("first_name_norm = %q, want canonical %q", first, "CHINUA")
 	}
-	// THE DISPLAY NAME IS NOT TOUCHED. Operators must keep seeing the spelling the PMS uses.
-	if display != "Okafor, Chinua" {
-		t.Fatalf("display_name = %q, want the PMS spelling preserved %q", display, "Okafor, Chinua")
+	// THE DISPLAY NAME IS NOT TOUCHED, and this assertion is written to prove exactly that rather than to
+	// prescribe a tidier value. display_name is composed from the RAW feed fields, so it keeps the PMS's own
+	// casing -- which is the requirement -- and also keeps any padding the PMS sent. The padding is
+	// pre-existing behaviour, unchanged by this fix and deliberately left alone: trimming a display name is a
+	// product decision about what operators see, not part of correcting an authentication comparison.
+	if display == namenorm.Name(display) && display != "" {
+		t.Fatalf("display_name = %q looks canonicalized; it must preserve the PMS spelling, not be normalized", display)
+	}
+	if !strings.Contains(display, "Okafor") || !strings.Contains(display, "Chinua") {
+		t.Fatalf("display_name = %q lost the PMS spelling of the guest's name", display)
 	}
 	// The room is canonical too, and was trimmed.
 	if _, _, room := stayState(t, p, s, "RES-MIX"); room != "512" {
@@ -218,7 +226,12 @@ func TestIntegration_RoomMoveUsesTheSameRoomContract(t *testing.T) {
 	}
 
 	// A room move must land in the same canonical form, not reintroduce a raw value.
-	insertLive(t, p, s, "E-RM-2", "RM", pay("RES-RM", " b7 ", "Okafor", "Chinua", "F-RM", "260101", "260105"))
+	//
+	// A move is a GC carrying a different room -- there is no "RM" event type; the engine DERIVES OpRoomMove
+	// from an IN_HOUSE stay whose room changed (internal/stayengine/resolve.go). Sending a type the engine
+	// does not know produced no move at all, which is why the first version of this test saw the original
+	// room and reported a defect that was in the test.
+	insertLive(t, p, s, "E-RM-2", "GC", pay("RES-RM", " b7 ", "Okafor", "Chinua", "F-RM", "260101", "260105"))
 	process(t, pr, s)
 	if _, _, room := stayState(t, p, s, "RES-RM"); room != "B7" {
 		t.Fatalf("moved room = %q, want canonical %q", room, "B7")

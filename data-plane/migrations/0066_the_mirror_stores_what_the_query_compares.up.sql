@@ -75,7 +75,33 @@ CREATE TABLE IF NOT EXISTS iam_v2.backfill_0066_identity_text (
 
 COMMENT ON TABLE iam_v2.backfill_0066_identity_text IS
   'Rollback evidence for migration 0066. Holds guest names and therefore NEVER leaves the appliance: not into '
-  'Git, a PR body, CI output or a delivery artifact. Dropped by 0066.down.sql after restoring from it.';
+  'Git, a PR body, CI output or a delivery artifact. RETENTION: only until this release''s rollback window is '
+  'formally closed by the Product Owner, then dropped by the registered cleanup operation '
+  '(governance/artifact-registry.json :: backfill-0066-pii-retention). Dropped by 0066.down.sql on rollback.';
+
+-- ---------------------------------------------------------------------------------------------------------
+-- THIS TABLE IS A DUPLICATE PII STORE, so it is locked down to the owner and to nobody else.
+--
+-- The shadowed columns live in tables the service roles legitimately read; this copy exists only so the down
+-- migration can restore exact prior values. Nothing in the running product has any reason to read it, and an
+-- unrestricted copy of guest names sitting beside the real ones is a second place to leak from. REVOKE FROM
+-- PUBLIC is the part people forget: without it, every role inherits SELECT through PUBLIC and the lockdown
+-- below would be decorative.
+-- ---------------------------------------------------------------------------------------------------------
+REVOKE ALL ON iam_v2.backfill_0066_identity_text FROM PUBLIC;
+
+DO $$
+DECLARE r text;
+BEGIN
+  -- Every runtime service role, explicitly. A role that does not exist on this appliance is skipped rather
+  -- than failing the migration -- the set differs between an edge appliance and a scratch test database.
+  FOREACH r IN ARRAY ARRAY['svc_scd','svc_edged','svc_pmsd','svc_acctd','svc_netd','svc_portald']
+  LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
+      EXECUTE format('REVOKE ALL ON iam_v2.backfill_0066_identity_text FROM %I', r);
+    END IF;
+  END LOOP;
+END $$;
 
 -- ---------------------------------------------------------------------------------------------------------
 -- Capture, then correct. Guests.
