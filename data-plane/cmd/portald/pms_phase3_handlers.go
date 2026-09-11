@@ -35,7 +35,10 @@ type scdOffer struct {
 }
 
 type scdResolveResp struct {
-	Outcome       string     `json:"outcome"`
+	Outcome string `json:"outcome"`
+	// FailureClass is the coarse class scd computed for a non-success. It is forwarded into the guest's
+	// message and nowhere else; the exact reason stays in scd and in the attempt record.
+	FailureClass  string     `json:"failure_class"`
 	AuthContextID string     `json:"auth_context_id"`
 	ExpiresIn     int        `json:"expires_in_seconds"`
 	Offers        []scdOffer `json:"offers"`
@@ -43,9 +46,21 @@ type scdResolveResp struct {
 
 type scdGrantResp struct {
 	Outcome       string `json:"outcome"`
+	FailureClass  string `json:"failure_class"`
 	SessionID     string `json:"session_id"`
 	EntitlementID string `json:"entitlement_id"`
 }
+
+// The two classes portald may decide on its own. Everything else comes from scd: portald knows what it could
+// not do, never what the guest got wrong, and inventing a credential verdict here would be guessing.
+const (
+	classCredential = "CREDENTIAL"
+	classTechnical  = "TECHNICAL"
+	// classPostStay selects the wording the post-stay PIN path has always used. It is not a fourth guest
+	// class — it is the same "we could not verify" sentence, kept for a method whose guests have no room
+	// number or surname to be told to re-check.
+	classPostStay = "POST_STAY"
+)
 
 // phase3In is the guest's submission. Note what is NOT here: no ip, no mac, no stay, no interface, no price.
 //
@@ -110,18 +125,22 @@ func (h *handler) authPMSPhase3(w http.ResponseWriter, r *http.Request) {
 
 	var in phase3In
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in); err != nil {
-		h.phase3Fail(w, r, b, "malformed_request")
+		h.phase3Fail(w, r, b, "malformed_request", classCredential)
 		return
 	}
 	// IDENTITY, derived here and nowhere else.
+	//
+	// THESE TWO ARE TECHNICAL, and the distinction is not cosmetic. A device the appliance cannot place on a
+	// guest network has a networking problem, not a typing problem; telling that guest to re-read their
+	// surname would send them round a loop they cannot escape, because nothing they type will ever help.
 	ip := clientIP(r)
 	if ip == nil {
-		h.phase3Fail(w, r, b, "no_source_address")
+		h.phase3Fail(w, r, b, "no_source_address", classTechnical)
 		return
 	}
 	mac, ok := h.arpCache(ip)
 	if !ok {
-		h.phase3Fail(w, r, b, "device_not_on_guest_network")
+		h.phase3Fail(w, r, b, "device_not_on_guest_network", classTechnical)
 		return
 	}
 	device := map[string]string{"ip": ipString(ip), "mac": mac.String()}
@@ -138,10 +157,10 @@ func (h *handler) authPMSPhase3(w http.ResponseWriter, r *http.Request) {
 	}
 	switch len(res.Offers) {
 	case 0:
-		// A verified guest with nothing they may be granted is a configuration problem, not an identity one —
-		// but the guest cannot act on that difference, and an empty "choose your package" step is a dead end
-		// that looks like the portal is broken. It collapses to the uniform answer like everything else.
-		h.phase3Fail(w, r, b, "verified_without_offers")
+		// A verified guest with nothing they may be granted is a configuration problem, not an identity one.
+		// It is TECHNICAL for the same reason scd records it as its own result: their details were right, and
+		// "check your details" is advice that cannot help them.
+		h.phase3Fail(w, r, b, "verified_without_offers", classTechnical)
 	case 1:
 		h.phase3Grant(w, r, b, res.AuthContextID, res.Offers[0].PackageRevisionID, device)
 	default:
@@ -171,14 +190,14 @@ func (h *handler) phase3Resolve(w http.ResponseWriter, r *http.Request, b *phase
 	var out scdResolveResp
 	if !h.scdPhase3Call(b, "http://unix/v1/phase3/auth/pms/resolve", body, &out) {
 		// This covers an abandoned hop as well as a refused one: when the budget expires mid-flight the hop
-		// returns a context error and lands here, which is the same uniform answer at the same offset. The
-		// resolution is idempotent by request id, so the guest's retry returns the same Auth Context.
-		h.phase3Fail(w, r, b, "scd_unavailable")
+		// returns a context error and lands here. scd said nothing, so nothing about what the guest typed is
+		// known — TECHNICAL is the only honest class.
+		h.phase3Fail(w, r, b, "scd_unavailable", classTechnical)
 		return out, false
 	}
 	if out.Outcome != "VERIFIED" || out.AuthContextID == "" {
-		// Every resolver outcome that is not a clean single match collapses to the same guest answer here.
-		h.phase3Fail(w, r, b, "not_verified")
+		// scd decided. Its class crosses to the guest verbatim; portald deliberately re-derives nothing.
+		h.phase3Fail(w, r, b, "not_verified", out.FailureClass)
 		return out, false
 	}
 	return out, true
@@ -192,13 +211,14 @@ func (h *handler) phase3Grant(w http.ResponseWriter, r *http.Request, b *phase3B
 	})
 	var out scdGrantResp
 	if !h.scdPhase3Call(b, "http://unix/v1/phase3/auth/pms/grant", body, &out) {
-		h.phase3Fail(w, r, b, "scd_unavailable")
+		h.phase3Fail(w, r, b, "scd_unavailable", classTechnical)
 		return
 	}
 	if out.Outcome != "VERIFIED" || out.SessionID == "" {
 		// A grant that did not produce a session produced NO access. Reporting success here would leave the
-		// guest staring at a "you're connected" page on a network that will not carry their traffic.
-		h.phase3Fail(w, r, b, "grant_refused")
+		// guest staring at a "you are connected" page on a network that will not carry their traffic. The
+		// guest already proved who they are, so the class comes from scd rather than being assumed.
+		h.phase3Fail(w, r, b, "grant_refused", out.FailureClass)
 		return
 	}
 	writeJSONPortal(w, http.StatusOK, phase3Out{OK: true, SessionID: out.SessionID, RedirectTo: "/success"})
@@ -233,11 +253,11 @@ func (h *handler) scdPhase3Call(b *phase3Budget, url string, body []byte, out an
 // phase3Fail writes THE uniform non-success — through the SAME builder the legacy PMS path uses. Reusing it
 // is the point: two functions that each "write the uniform failure" are two places that can drift, and the
 // drift would only ever be discovered by an attacker noticing the difference.
-func (h *handler) phase3Fail(w http.ResponseWriter, r *http.Request, b *phase3Budget, reason string) {
-	// Every internal cause collapses to one outcome here. The real reason is logged and, for a resolution,
-	// already recorded durably by scd.
-	status, body, audit := buildGuestPMSResponse(outcomeNoMatch, reason, "", "")
-	slog.Info("phase3 guest auth not verified", "reason", audit.ReasonCode)
+func (h *handler) phase3Fail(w http.ResponseWriter, r *http.Request, b *phase3Budget, reason, class string) {
+	// The internal cause stays here; only the coarse class crosses to the guest. `class` is scd's when scd
+	// answered, and portald's own judgement when it did not get that far — see the call sites.
+	status, body, audit := buildGuestPMSResponse(outcomeNoMatch, reason, class, "", "")
+	slog.Info("phase3 guest auth not verified", "reason", audit.ReasonCode, "class", class)
 	// The wait happens BEFORE the write, and before the log line is of any use to the guest. Waiting after
 	// writing would be indistinguishable from not waiting at all: the bytes are already on the wire, and the
 	// clock the attacker reads stops when they arrive.

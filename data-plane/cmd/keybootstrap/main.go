@@ -62,6 +62,21 @@ func main() {
 	}
 	log.Printf("keybootstrap: voucher code-encryption key ready at %s", dekPath)
 
+	// 2b) Guest sign-in attempt DEK. It seals the credential half of iam_v2.sign_in_attempts: what a guest
+	// typed, and the values the mirror would have accepted.
+	//
+	// ITS ABSENCE MUST NOT COST A GUEST THEIR INTERNET, which is why scd treats this key differently from the
+	// voucher DEK. A missing voucher key means scd cannot issue a credential at all and refusing to start is
+	// correct. A missing key here means only that the DIAGNOSTIC half of an attempt record cannot be sealed,
+	// so scd records the attempt with those columns NULL, logs it loudly, and keeps authenticating. Creating
+	// it is still deployment's job — runtime is load-only, and a service that could mint its own key would
+	// silently orphan every row sealed under the previous one.
+	attemptsDEKPath := filepath.Join(secretsDir, "signin_attempts_dek.key")
+	if _, err := localkeys.CreateKeyIfAbsent(attemptsDEKPath); err != nil {
+		log.Fatalf("keybootstrap: sign-in attempt DEK: %v", err)
+	}
+	log.Printf("keybootstrap: sign-in attempt sealing key ready at %s", attemptsDEKPath)
+
 	// 3) OTP generation-1 key + DB lifecycle metadata, validated together.
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {

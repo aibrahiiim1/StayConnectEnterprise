@@ -26,6 +26,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -38,6 +39,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/authctx"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsresolve"
+	"github.com/stayconnect/enterprise/data-plane/internal/signinattempt"
 	"github.com/stayconnect/enterprise/data-plane/internal/staygrant"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/namenorm"
@@ -50,6 +52,9 @@ type phase3Auth struct {
 	resolver *pmsresolve.Resolver
 	ctxs     *authctx.Store
 	grants   *staygrant.Store
+	// attempts records what happened on every deliberate submission. Nil is inert: the arm keeps working and
+	// simply records nothing, which is what a build without a database pool gets.
+	attempts *signinattempt.Store
 	// contextTTL bounds how long a verified identity may sit unused before it has to be proven again.
 	contextTTL time.Duration
 }
@@ -77,19 +82,30 @@ func newPhase3Auth(cfg iamv2.PMSConfig, s *server) *phase3Auth {
 		// PHASE 6 (DARK by default): may this appliance create NEW entitlements in AGGREGATE_ONLINE_TIME
 		// mode? Only when the flag that also turns on the accrual tick is on. Off means the grant is
 		// refused rather than silently created with a budget nothing would ever consume.
-		grants:     staygrant.New(s.db).WithAggregateOnlineTime(phase6AggregateOn()),
+		grants: staygrant.New(s.db).WithAggregateOnlineTime(phase6AggregateOn()),
+		// The recorder is constructed with whatever keyring the daemon loaded. A nil keyring is not a failure
+		// here: attempts are still recorded, without their sealed half, and the operator is told so.
+		attempts:   signinattempt.NewStore(s.db, s.signInAttemptKeyring, signInAttemptDEKID),
 		contextTTL: 10 * time.Minute,
 	}
 }
 
 // ---- the uniform non-success contract --------------------------------------
 
-// Every failure on this path returns the SAME shape, the same HTTP status and the same body. A guest who
-// typed the wrong room, a guest whose stay does not exist, a guest whose evidence matched two stays, and a
-// guest whose PMS is unreachable must be indistinguishable — otherwise the endpoint is an oracle for "is room
-// 412 occupied", and the differences are exactly what an attacker enumerates.
+// Every failure on this path returns the SAME shape and the same HTTP status, and it carries exactly ONE
+// extra thing: a coarse CLASS saying whether the guest should re-check what they typed or whether the system
+// could not answer. Nothing else about the cause crosses this boundary.
 //
-// The real reason is recorded internally (resolution rows, audit, metrics) where operators can see it.
+// THE CLASS IS NEW AND IT IS NARROW. The Product Owner asked for it because the old single sentence was
+// useless in both directions: it told a guest whose details were right to re-check them, and it told a guest
+// who merely mistyped to contact Reception. What it must NOT become is an oracle, so the mapping from the
+// exact internal result to this class lives in internal/signinattempt.GuestClass and is built on one rule —
+// anything that depends on what the guest typed, or on what the mirror holds about THEIR room, is one class;
+// only conditions that are true for every guest on the site right now are the other. "No such room", "wrong
+// name", "checked out" and "two candidates" are therefore all the same answer, exactly as before.
+//
+// The exact reason is recorded internally — the resolution row, the sign-in attempt record, the log — where
+// operators can see it and guests cannot.
 const (
 	outcomeVerified    = "VERIFIED"
 	outcomeNotVerified = "NOT_VERIFIED"
@@ -97,6 +113,9 @@ const (
 
 type phase3Response struct {
 	Outcome string `json:"outcome"`
+	// FailureClass is one of signinattempt's four guest classes, present on every non-success. It is the ONLY
+	// thing about the cause that leaves this daemon towards a guest.
+	FailureClass string `json:"failure_class,omitempty"`
 	// AuthContextID, ExpiresIn and Offers are present ONLY on VERIFIED.
 	AuthContextID string        `json:"auth_context_id,omitempty"`
 	ExpiresIn     int           `json:"expires_in_seconds,omitempty"`
@@ -113,10 +132,14 @@ type phase3Offer struct {
 	UpKbps            int    `json:"up_kbps"`
 }
 
-// notVerified writes the single non-success answer. reason is for the log, never the guest.
-func notVerified(w http.ResponseWriter, reason string) {
-	slog.Info("phase3 auth: not verified", "reason", reason)
-	writeJSONScd(w, http.StatusOK, phase3Response{Outcome: outcomeNotVerified})
+// notVerified writes the non-success answer for an exact internal result. The result is for the log and the
+// attempt record; only its coarse class reaches the guest, and `detail` never leaves this process.
+func notVerified(w http.ResponseWriter, result signinattempt.Result, detail string) {
+	slog.Info("phase3 auth: not verified", "result", string(result), "detail", detail)
+	writeJSONScd(w, http.StatusOK, phase3Response{
+		Outcome:      outcomeNotVerified,
+		FailureClass: string(result.GuestClass()),
+	})
 }
 
 func writeJSONScd(w http.ResponseWriter, code int, v any) {
@@ -128,12 +151,35 @@ func writeJSONScd(w http.ResponseWriter, code int, v any) {
 // ---- device identity (server-derived) --------------------------------------
 
 type deviceIdentity struct {
-	Tenant       string
-	Site         string
-	DeviceID     string
-	GuestNetwork string
-	IP           net.IP
-	MAC          net.HardwareAddr
+	Tenant           string
+	Site             string
+	DeviceID         string
+	GuestNetwork     string
+	GuestNetworkName string
+	IP               net.IP
+	MAC              net.HardwareAddr
+}
+
+// The three ways deriving a device identity can fail are three DIFFERENT answers for an operator, and used
+// to be one. A body the server cannot read is the client's fault; an address on no mapped guest network is a
+// routing or configuration fault; a database that will not answer is ours. The guest sees a uniform envelope
+// in all three cases, and the attempt record does not.
+var (
+	errDeviceUnreadable = errors.New("device identity: unreadable")
+	errDeviceUnrouted   = errors.New("device identity: not on a mapped guest network")
+	errDeviceStore      = errors.New("device identity: store unavailable")
+)
+
+// deviceFailure classifies a device error into the structured result an operator reads.
+func deviceFailure(err error) signinattempt.Result {
+	switch {
+	case errors.Is(err, errDeviceUnrouted):
+		return signinattempt.RoutingOrInterfaceFailure
+	case errors.Is(err, errDeviceStore):
+		return signinattempt.ServiceUnavailable
+	default:
+		return signinattempt.MalformedSubmission
+	}
 }
 
 type wireDevice struct {
@@ -147,18 +193,18 @@ func (p *phase3Auth) device(ctx context.Context, d wireDevice) (deviceIdentity, 
 	var out deviceIdentity
 	ip := net.ParseIP(strings.TrimSpace(d.IP))
 	if ip == nil || ip.To4() == nil {
-		return out, errors.New("no usable source address")
+		return out, fmt.Errorf("%w: no usable source address", errDeviceUnreadable)
 	}
 	mac, err := net.ParseMAC(strings.TrimSpace(d.MAC))
 	if err != nil {
-		return out, errors.New("no usable hardware address")
+		return out, fmt.Errorf("%w: no usable hardware address", errDeviceUnreadable)
 	}
 	// The guest network is re-derived HERE from the address, against this appliance's own tables. A
 	// forwarded address that belongs to no enabled guest network is refused: Phase-3 resolution is scoped by
 	// network, and a request from outside every guest network has no scope to resolve in.
 	nc := p.srv.resolveNetwork(ctx, ip)
 	if nc.NetworkID == "" {
-		return out, errors.New("source address is not on a mapped guest network")
+		return out, fmt.Errorf("%w: source address is not on a mapped guest network", errDeviceUnrouted)
 	}
 	// The device row is the durable identity every later pin refers to. The conflict target is the table's
 	// own uniqueness — (tenant, site, appliance, mac) — not a shorter key that merely looks right: a mismatch
@@ -174,10 +220,10 @@ func (p *phase3Auth) device(ctx context.Context, d wireDevice) (deviceIdentity, 
 		RETURNING id::text`,
 		p.srv.tenID, p.srv.siteID, p.srv.applID, mac.String()).Scan(&id)
 	if err != nil {
-		return out, err
+		return out, fmt.Errorf("%w: %v", errDeviceStore, err)
 	}
-	return deviceIdentity{Tenant: p.srv.tenID, Site: p.srv.siteID,
-		DeviceID: id, GuestNetwork: nc.NetworkID, IP: ip, MAC: mac}, nil
+	return deviceIdentity{Tenant: p.srv.tenID, Site: p.srv.siteID, DeviceID: id,
+		GuestNetwork: nc.NetworkID, GuestNetworkName: nc.Name, IP: ip, MAC: mac}, nil
 }
 
 // ---- resolve ---------------------------------------------------------------
@@ -221,19 +267,35 @@ func combineVerification(verification, last, first, res string) (string, string,
 // resolveHandler proves the guest's identity STRICTLY across every PMS Interface mapped to their network, and
 // on success issues a one-time Auth Context. It grants nothing.
 func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
+	ctx := r.Context()
+
+	// THE ATTEMPT RECORD IS OPENED FIRST AND WRITTEN LAST, whatever happens in between.
+	//
+	// The deferred write is the whole reason every refusal now leaves something behind. The exits below are
+	// numerous and several are reached before a resolver, a stay or even a network exists — a malformed body,
+	// a device on no mapped network, a database that will not answer — and those were exactly the attempts
+	// that used to vanish. Setting a field and returning is all any branch has to remember to do.
+	at := signinattempt.Attempt{TenantID: p.srv.tenID, SiteID: p.srv.siteID, OccurredAt: started}
+	defer func() { p.recordAttempt(at, started) }()
+
 	var req phase3ResolveReq
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
-		notVerified(w, "malformed_request")
+		at.Result = signinattempt.MalformedSubmission
+		notVerified(w, at.Result, "malformed_request")
 		return
 	}
-	ctx := r.Context()
 	dev, err := p.device(ctx, req.Device)
 	if err != nil {
-		notVerified(w, "device_identity: "+err.Error())
+		at.Result = deviceFailure(err)
+		notVerified(w, at.Result, "device_identity: "+err.Error())
 		return
 	}
+	at.GuestNetworkID, at.GuestNetworkName = dev.GuestNetwork, dev.GuestNetworkName
+	at.DeviceIP, at.DeviceMAC = dev.IP.String(), signinattempt.NormalizeMAC(dev.MAC)
+
 	room := normalizeRoom(req.Room)
 	last := normalizeName(req.LastName)
 	first := normalizeName(req.FirstName)
@@ -241,45 +303,114 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 
 	last, first, res = combineVerification(req.Verification, last, first, res)
 
+	// WHAT THE GUEST TYPED, recorded before anything is decided about it. The raw value and the normalized
+	// form sit side by side because the difference between them is frequently the whole answer at the desk:
+	// a trailing space and a wrong name are the same refusal once both sides are trimmed.
+	submitted := submittedVerifier(req)
+	at.SubmittedRoom = room
+	at.VerifierKind = signinattempt.ClassifyVerifier(submitted)
+	at.Sensitive.SubmittedVerifier = submitted
+	at.Sensitive.NormalizedVerifier = normalizedVerifier(last, first, res)
+
 	if room == "" || (last == "" && first == "" && res == "") {
 		// Incomplete evidence is a non-success like any other: telling the guest WHICH field was missing is
 		// a small oracle, and the portal already knows what it asked for.
-		notVerified(w, "incomplete_evidence")
+		at.Result = signinattempt.MalformedSubmission
+		notVerified(w, at.Result, "incomplete_evidence")
 		return
 	}
 	// The request id is recorded as a uuid. Validating its SHAPE here means a malformed one is the ordinary
 	// uniform non-success — not a raw PostgreSQL cast error surfaced as "the resolver failed", which would
 	// both mislead an operator reading the logs and put database detail in them.
 	if !validRequestID(req.RequestID) {
-		notVerified(w, "malformed_request_id")
+		at.Result = signinattempt.MalformedSubmission
+		notVerified(w, at.Result, "malformed_request_id")
+		return
+	}
+	at.RequestID = strings.TrimSpace(req.RequestID)
+
+	// THE DURABLE THROTTLE, charged before any evidence is evaluated.
+	//
+	// It is the appliance's own mechanism, already built and already keyed on an irreversible HMAC of the
+	// address, the device and the room — never on the request id, so the per-submission ids the portal now
+	// mints cannot be used to walk around it. Its scopes are what matter here: the per-ROOM dimension is what
+	// makes enumeration expensive, because guessing surnames against one room is exactly the shape of the
+	// attack the uniform envelope exists to blunt.
+	//
+	// When the durable throttle is not enabled on an appliance this is a no-op that always allows, so wiring
+	// it changes nothing about who can sign in today. What it changes is that RATE_LIMITED now has a real
+	// producer and a real recorded reason, instead of being a state the record could describe and the system
+	// could never reach.
+	if allowed, _ := p.srv.throttleGuard(ctx, "pms", dev.IP, dev.MAC, room); !allowed {
+		at.Result = signinattempt.RateLimited
+		notVerified(w, at.Result, "throttled")
+		return
+	}
+
+	// CAN THE MIRROR ANSWER FOR ANYBODY? Asked BEFORE the room is looked at, and refused on before the
+	// evidence is evaluated at all. The ordering is the security property rather than an optimisation — see
+	// mirrorStateFor — and it is also what lets a guest be told "we cannot check right now" truthfully,
+	// instead of being told to re-check a surname that was never compared against anything.
+	mirror := p.mirrorStateFor(ctx, dev.GuestNetwork)
+	at.PMSTransportStatus = mirror.TransportStatus
+	at.MirrorLastCompleteSyncAt, at.MirrorAgeSeconds = mirror.LastCompleteSync, mirror.AgeSeconds
+	if !mirror.CanAuthoriseAnyone {
+		at.Result = signinattempt.MirrorStaleOrMissingChange
+		notVerified(w, at.Result, "mirror_cannot_authorise")
 		return
 	}
 
 	// The probe evaluates ONE interface's mirrored Stay state. It returns a determinate verdict or an
-	// indeterminate one; it never guesses, and the resolver waits for every interface before deciding.
+	// indeterminate one; it never guesses, and the resolver waits for every interface before deciding. The
+	// collector rides alongside and keeps the detail the verdict necessarily discards.
+	var seen observations
 	probe := pmsresolve.ProbeFunc(func(pctx context.Context, ifaceID string) (pmsresolve.CandidateOutcome, string, error) {
-		return p.probeInterface(pctx, ifaceID, room, last, first, res)
+		return p.probeInterface(pctx, &seen, ifaceID, room, last, first, res)
 	})
 
-	out, err := p.resolver.Resolve(ctx, p.srv.tenID, p.srv.siteID, dev.GuestNetwork, strings.TrimSpace(req.RequestID), probe)
+	out, err := p.resolver.Resolve(ctx, p.srv.tenID, p.srv.siteID, dev.GuestNetwork, at.RequestID, probe)
 	if err != nil {
-		notVerified(w, "resolver: "+err.Error())
+		at.Result = signinattempt.ServiceUnavailable
+		notVerified(w, at.Result, "resolver: "+err.Error())
 		return
 	}
+
+	// What the probes saw, folded into the record whether or not the resolution succeeded. On a refusal this
+	// IS the answer; on a success it is the corroboration.
+	roomExists, eligible, matched, anyFailed := seen.summarise()
+	at.RoomInMirror, at.EligibleStayCandidates = roomExists, eligible
+	at.PMSInterfaceID = matched.InterfaceID
+	if stay := firstNonEmpty(matched.MatchedStay, matched.CandidateStay); stay != "" {
+		f, fam, resv, guestID, others := p.acceptedValues(ctx, stay)
+		at.Sensitive.AcceptedFirstName = f
+		at.Sensitive.AcceptedFamilyName = fam
+		at.Sensitive.AcceptedReservationNumber = resv
+		at.Sensitive.AdditionalAcceptedGuests = others
+		at.MatchedStay, at.MatchedGuest = stay, guestID
+	}
+
 	if !out.GuestVisibleSuccess() {
+		at.Result = classifyRefusal(out, roomExists, eligible, anyFailed)
 		// One refusal reason is not like the others. A spent request id means the CLIENT re-used an id it had
 		// already had refused — which the portal no longer does — so it is the signature of a stale portal
 		// build or of something that is not the portal, and an operator looking at a guest who "cannot sign
-		// in" needs to see that rather than another indistinguishable NOT_VERIFIED. The guest's answer is the
-		// same uniform envelope as every other non-success; only the log differs.
+		// in" needs to see that rather than another indistinguishable NOT_VERIFIED.
 		if out.Reason == pmsresolve.ReasonSpentOnRefusal {
 			slog.Warn("phase3 auth: a resolution request id was re-used after it had already been refused; "+
 				"the submission was evaluated and refused rather than answered from the earlier record",
 				"guest_network", dev.GuestNetwork)
 		}
-		notVerified(w, "resolution_"+string(out.Resolution)+"_"+out.Reason)
+		// Nothing matched, so the record must not claim a matched stay. The accepted values gathered above
+		// from a LONE candidate stay stay in place deliberately: they are what WOULD have been accepted, and
+		// that comparison is the reason an operator opens this screen.
+		if matched.MatchedStay == "" {
+			at.MatchedStay, at.MatchedGuest = "", ""
+		}
+		notVerified(w, at.Result, "resolution_"+string(out.Resolution)+"_"+out.Reason)
 		return
 	}
+	at.MatchedStay = out.Stay
+	at.MatchedField = matched.MatchedField
 
 	// A REPLAYED resolution (the same request id submitted twice — a double tap, or a response the guest's
 	// phone never received) returns the stored outcome, and the stored row records the Stay, not the
@@ -289,7 +420,8 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 	iface := out.InterfaceID
 	if iface == "" {
 		if iface, err = p.interfaceForStay(ctx, out.Stay); err != nil {
-			notVerified(w, "replayed_resolution_interface_unresolvable")
+			at.Result = signinattempt.ServiceUnavailable
+			notVerified(w, at.Result, "replayed_resolution_interface_unresolvable")
 			return
 		}
 	}
@@ -297,23 +429,27 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 	// The REVISION is pinned server-side from the interface that verified: the guest never names which
 	// configuration their access was granted under, and the Auth Context records it so the later grant cannot
 	// drift onto a newer one.
+	at.PMSInterfaceID = iface
 	rev, err := p.publishedRevision(ctx, iface)
 	if err != nil {
-		notVerified(w, "no_published_revision")
+		at.Result = signinattempt.RoutingOrInterfaceFailure
+		notVerified(w, at.Result, "no_published_revision")
 		return
 	}
 	// THE OFFER SET the real eligibility engine says this verified Stay qualifies for — not the site's whole
 	// free catalogue. Two Stays verified a second apart can legitimately get different answers.
 	decisions, err := p.offersFor(ctx, out.Stay, iface, time.Now())
 	if err != nil {
-		notVerified(w, "offers: "+err.Error())
+		at.Result = signinattempt.ServiceUnavailable
+		notVerified(w, at.Result, "offers: "+err.Error())
 		return
 	}
 	if len(decisions) == 0 {
 		// A verified guest with nothing they qualify for is a CONFIGURATION or eligibility outcome, not an
-		// identity one. The guest gets the uniform answer either way — they cannot act on the difference —
-		// but the operator sees the real reason in the log and in the recorded resolution.
-		notVerified(w, "verified_but_no_eligible_package")
+		// identity one — and it is recorded as its own result rather than folded in with wrong surnames,
+		// because the two need opposite responses from whoever is helping the guest.
+		at.Result = signinattempt.VerifiedNoEligiblePackage
+		notVerified(w, at.Result, "verified_but_no_eligible_package")
 		return
 	}
 	evidenceVersion := decisions[0].EvidenceVersion
@@ -323,7 +459,8 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 	// check would have to fall back to "is this generally grantable?" — the exact weakening it replaces.
 	tx, err := p.srv.db.Begin(ctx)
 	if err != nil {
-		notVerified(w, "begin: "+err.Error())
+		at.Result = signinattempt.ServiceUnavailable
+		notVerified(w, at.Result, "begin: "+err.Error())
 		return
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
@@ -337,21 +474,30 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 		SELECT context_id::text, reused FROM iam_v2.issue_or_return_pms_context(
 			$1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6::uuid,$7::uuid,$8::uuid,$9)`,
 		p.srv.tenID, p.srv.siteID, iface, rev, out.Stay, dev.DeviceID, dev.GuestNetwork,
-		strings.TrimSpace(req.RequestID), int(p.contextTTL.Seconds())).Scan(&id, &reused); err != nil {
-		notVerified(w, "context_issue: "+err.Error())
+		at.RequestID, int(p.contextTTL.Seconds())).Scan(&id, &reused); err != nil {
+		// The context function refuses a Stay that is not eligible RIGHT NOW — checked out, without occupancy
+		// evidence, pinned to a superseded revision. That is a different fact from "the name was wrong", and
+		// it is recorded as one instead of joining the same undifferentiated refusal.
+		at.Result = signinattempt.StayNotEligible
+		notVerified(w, at.Result, "context_issue: "+err.Error())
 		return
 	}
 	// A reused context already carries the offer set it was issued with; the controlled writer is idempotent
 	// per (context, package), so a retry re-states the same set rather than widening it.
 	if err := p.recordOfferSet(ctx, tx, id, evidenceVersion, decisions,
 		time.Now().Add(p.contextTTL)); err != nil {
-		notVerified(w, "offer_record: "+err.Error())
+		at.Result = signinattempt.ServiceUnavailable
+		notVerified(w, at.Result, "offer_record: "+err.Error())
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
-		notVerified(w, "commit: "+err.Error())
+		at.Result = signinattempt.ServiceUnavailable
+		notVerified(w, at.Result, "commit: "+err.Error())
 		return
 	}
+	// The identity proof stands. Whether the guest ends up online depends on the grant that follows, which
+	// records its own attempt against the same request id.
+	at.Result = signinattempt.Verified
 
 	offers := make([]phase3Offer, 0, len(decisions))
 	for _, d := range decisions {
@@ -385,46 +531,100 @@ func validRequestID(s string) bool {
 	return true
 }
 
-// probeInterface answers, for ONE interface, whether the evidence identifies exactly one live Stay. Matching
-// more than one is AMBIGUOUS_LOCAL rather than a pick: choosing between two guests who share a room number is
-// exactly the decision this system must never make on its own.
-// probeInterface evaluates ONE interface's mirrored Stay state for the submitted evidence.
+// probeInterface evaluates ONE interface's mirrored Stay state for the submitted evidence, and records what
+// it SAW alongside the verdict it returns.
 //
 // Each identifier is matched against a field the PMS actually populated on this Stay — last name and first
 // name from stay_guests, reservation from the Stay itself. There is no fuzzy matching and nothing is
-// inferred: a value either equals a stored, normalised identity or it does not.
+// inferred: a value either equals a stored, normalised identity or it does not. Matching more than one live
+// Stay is AMBIGUOUS_LOCAL rather than a pick, because choosing between two guests who share a room number is
+// exactly the decision this system must never make on its own.
 //
-// first_name is matched because room_firstname has always been a selectable mode and never worked: the
-// portal sent the field, this probe ignored it, and every attempt failed as incomplete evidence.
-func (p *phase3Auth) probeInterface(ctx context.Context, ifaceID, room, last, first, res string) (pmsresolve.CandidateOutcome, string, error) {
+// WHY THE STATUS FILTER MOVED OUT OF THE WHERE CLAUSE. It used to select only stays that may authenticate, so
+// a room with a checked-out guest and a room that does not exist produced the identical empty result — and
+// therefore the identical refusal, with nothing anywhere to tell them apart. The query now returns every stay
+// on the room and the ELIGIBILITY IS APPLIED IN GO, which changes no verdict (an ineligible stay is still
+// never matched) and turns one undifferentiated failure into three distinguishable ones.
+//
+// The multi-word given name is worth stating explicitly because it looks like a bug and is the contract: the
+// PMS sends "FAMILY, FULL GIVEN NAME" and the mirror stores the whole given-name field in one column, so
+// first_name_norm may be "MARIA DEL CARMEN" and only that complete value matches. Individual words within it
+// are not accepted, and that is deliberate — accepting "MARIA" would admit anyone who guessed a common first
+// name for a room.
+func (p *phase3Auth) probeInterface(ctx context.Context, seen *observations, ifaceID, room, last, first, res string) (pmsresolve.CandidateOutcome, string, error) {
+	obs := probeObservation{InterfaceID: ifaceID}
 	rows, err := p.srv.db.Query(ctx, `
-		SELECT s.id::text
+		SELECT s.id::text,
+		       s.status IN ('IN_HOUSE','POST_STAY_ACTIVE') AS eligible,
+		       ($5 <> '' AND EXISTS (SELECT 1 FROM iam_v2.stay_guests g
+		                              WHERE g.stay_id = s.id AND g.last_name_norm = $5))  AS family_hit,
+		       ($6 <> '' AND EXISTS (SELECT 1 FROM iam_v2.stay_guests g
+		                              WHERE g.stay_id = s.id AND g.first_name_norm = $6)) AS first_hit,
+		       ($7 <> '' AND s.external_reservation_id = $7)                               AS reservation_hit
 		  FROM iam_v2.stays s
 		 WHERE s.tenant_id=$1 AND s.site_id=$2 AND s.pms_interface_id=$3
-		   AND s.status IN ('IN_HOUSE','POST_STAY_ACTIVE')
 		   AND s.normalized_room_number = $4
-		   AND ( ($5 <> '' AND EXISTS (SELECT 1 FROM iam_v2.stay_guests g
-		                                WHERE g.stay_id = s.id AND g.last_name_norm = $5))
-		      OR ($6 <> '' AND EXISTS (SELECT 1 FROM iam_v2.stay_guests g
-		                                WHERE g.stay_id = s.id AND g.first_name_norm = $6))
-		      OR ($7 <> '' AND s.external_reservation_id = $7) )
-		 LIMIT 3`, p.srv.tenID, p.srv.siteID, ifaceID, room, last, first, res)
+		 LIMIT 16`, p.srv.tenID, p.srv.siteID, ifaceID, room, last, first, res)
 	if err != nil {
 		// An interface whose state cannot be read is INDETERMINATE, never a determinate "no such guest".
+		obs.Failed = true
+		seen.add(obs)
 		return pmsresolve.Unavailable, "", err
 	}
 	defer rows.Close()
+
 	var matches []string
+	var eligibleStays []string
 	for rows.Next() {
 		var id string
-		if err := rows.Scan(&id); err != nil {
+		var eligible, familyHit, firstHit, reservationHit bool
+		if err := rows.Scan(&id, &eligible, &familyHit, &firstHit, &reservationHit); err != nil {
+			obs.Failed = true
+			seen.add(obs)
 			return pmsresolve.Unavailable, "", err
 		}
+		obs.RoomExists = true
+		if !eligible {
+			continue
+		}
+		eligibleStays = append(eligibleStays, id)
+		if !(familyHit || firstHit || reservationHit) {
+			continue
+		}
 		matches = append(matches, id)
+		// WHICH FIELD ADMITTED THEM, in a fixed precedence so the recorded answer is deterministic when one
+		// typed value happens to equal two accepted ones. Order follows how a guest is usually asked: family
+		// name, then given name, then the reservation identifier.
+		switch {
+		case familyHit:
+			obs.MatchedField = signinattempt.MatchedFamilyName
+		case firstHit:
+			obs.MatchedField = signinattempt.MatchedFirstName
+		default:
+			obs.MatchedField = signinattempt.MatchedReservationNumber
+		}
 	}
 	if err := rows.Err(); err != nil {
+		obs.Failed = true
+		seen.add(obs)
 		return pmsresolve.Unavailable, "", err
 	}
+
+	obs.EligibleStays = len(eligibleStays)
+	obs.Matches = len(matches)
+	if len(matches) == 1 {
+		obs.MatchedStay = matches[0]
+	} else {
+		obs.MatchedField = signinattempt.MatchedNone
+	}
+	// With exactly one eligible stay on the room there is no ambiguity about whose values WOULD have been
+	// accepted, so the comparison panel can show them. With several, it shows none: picking one would be
+	// inventing an expectation the guest never had.
+	if len(eligibleStays) == 1 {
+		obs.CandidateStay = eligibleStays[0]
+	}
+	seen.add(obs)
+
 	switch len(matches) {
 	case 0:
 		return pmsresolve.NoMatch, "", nil
@@ -433,6 +633,66 @@ func (p *phase3Auth) probeInterface(ctx context.Context, ifaceID, room, last, fi
 	default:
 		return pmsresolve.AmbiguousLocal, "", nil
 	}
+}
+
+// classifyRefusal turns the resolver's narrow verdict plus what the probes saw into the exact structured
+// reason an operator reads.
+//
+// THE ORDER OF THESE TESTS IS THE ANSWER. "Nothing matched" is the same verdict whether the room is absent,
+// present but ineligible, or present with candidates the value did not match, and those are three different
+// conversations at the desk. Getting them in the wrong order would produce a confident, wrong diagnosis —
+// worse than the single undifferentiated refusal this replaces.
+func classifyRefusal(out pmsresolve.Result, roomExists bool, eligible int, anyProbeFailed bool) signinattempt.Result {
+	if out.Reason == pmsresolve.ReasonSpentOnRefusal {
+		return signinattempt.SpentRequestID
+	}
+	switch out.Resolution {
+	case pmsresolve.ResAmbiguous:
+		return signinattempt.AmbiguousRoomCandidates
+	case pmsresolve.ResIndeterminate:
+		if out.Reason == "UNMAPPED" || out.Reason == "CANDIDATE_CAP_EXCEEDED" {
+			// The guest network maps to no usable interface, or to implausibly many. Neither is anything the
+			// guest typed.
+			return signinattempt.RoutingOrInterfaceFailure
+		}
+		return signinattempt.ServiceUnavailable
+	case pmsresolve.ResNoMatch:
+		switch {
+		case anyProbeFailed:
+			// A probe that could not answer must never be reported as "your details are wrong": we did not
+			// ask, so we do not know.
+			return signinattempt.ServiceUnavailable
+		case !roomExists:
+			return signinattempt.RoomNotInMirror
+		case eligible == 0:
+			return signinattempt.StayNotEligible
+		default:
+			return signinattempt.CredentialMismatch
+		}
+	default:
+		return signinattempt.ServiceUnavailable
+	}
+}
+
+// submittedVerifier returns the ONE value the guest typed, exactly as they typed it.
+//
+// Whichever sign-in mode the site runs, a guest fills in one box. room_any sends it as `verification`; the
+// explicit modes send it in the field they asked for. Recording the raw string is what makes the operator's
+// comparison honest — normalize it here and a trailing space becomes invisible, which is one of the failures
+// this screen exists to explain.
+func submittedVerifier(req phase3ResolveReq) string {
+	for _, v := range []string{req.Verification, req.LastName, req.FirstName, req.ReservationNumber} {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// normalizedVerifier returns the value the comparison actually used. The name fields are normalized
+// identically, so either serves; the reservation identifier is trim-only and is the fallback.
+func normalizedVerifier(last, first, res string) string {
+	return firstNonEmpty(last, first, res)
 }
 
 // interfaceForStay resolves the one PMS Interface a Stay belongs to, within this appliance's scope.
@@ -494,13 +754,27 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
-		notVerified(w, "malformed_request")
+		notVerified(w, signinattempt.MalformedSubmission, "malformed_request")
 		return
 	}
 	ctx := r.Context()
+
+	// THE GRANT COMPLETES AN ATTEMPT; IT DOES NOT START ONE.
+	//
+	// One deliberate Connect submission is one row, and the resolve already wrote it. This call is the second
+	// half of the same submission, so what it learns — the entitlement and session the guest ended up with, or
+	// the fact that a proved identity could not be granted access — is stamped onto that row through the same
+	// request id. Writing a second row here would double-count every successful sign-in and make "how many
+	// guests failed today" unanswerable.
+	requestID := p.requestIDForContext(ctx, strings.TrimSpace(req.AuthContextID))
+	grantResult := signinattempt.ServiceUnavailable
+	var grantedEntitlement, grantedSession string
+	defer func() { p.completeAttempt(requestID, grantResult, grantedEntitlement, grantedSession) }()
+
 	dev, err := p.device(ctx, req.Device)
 	if err != nil {
-		notVerified(w, "device_identity: "+err.Error())
+		grantResult = deviceFailure(err)
+		notVerified(w, grantResult, "device_identity: "+err.Error())
 		return
 	}
 
@@ -524,9 +798,10 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 		if werr != nil || !enforced {
 			slog.Warn("phase3 auth: retry found an existing grant whose enforcement is not confirmed",
 				"session", sid, "err", werr)
-			notVerified(w, "enforcement_not_confirmed")
+			notVerified(w, signinattempt.ServiceUnavailable, "enforcement_not_confirmed")
 			return
 		}
+		grantResult, grantedEntitlement, grantedSession = signinattempt.Verified, ent, sid
 		slog.Info("phase3 auth: returning the session an earlier grant already created",
 			"session", sid, "entitlement", ent)
 		writeJSONScd(w, http.StatusOK, phase3GrantResp{Outcome: outcomeVerified, SessionID: sid, EntitlementID: ent})
@@ -535,7 +810,7 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := p.srv.db.Begin(ctx)
 	if err != nil {
-		notVerified(w, "begin: "+err.Error())
+		notVerified(w, signinattempt.ServiceUnavailable, "begin: "+err.Error())
 		return
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
@@ -564,12 +839,15 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 		// real Room Login on this appliance spent a diagnosis cycle looking like a data problem. The guest
 		// still sees the uniform envelope either way; the difference is entirely in what the operator is told.
 		if errors.Is(err, pgx.ErrNoRows) {
-			notVerified(w, "package_not_offered_to_this_context")
+			// The context is real but this package was never offered to it. That is a stay-eligibility fact,
+			// not an identity one, and an operator needs to see the difference.
+			grantResult = signinattempt.VerifiedNoEligiblePackage
+			notVerified(w, grantResult, "package_not_offered_to_this_context")
 			return
 		}
 		slog.Error("phase3 grant: offer lock failed", "err", err,
 			"context", strings.TrimSpace(req.AuthContextID))
-		notVerified(w, "offer_lock_unavailable")
+		notVerified(w, signinattempt.ServiceUnavailable, "offer_lock_unavailable")
 		return
 	}
 	// The evidence must still be the evidence the offer was decided under. A Stay that moved room, changed
@@ -581,11 +859,14 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 		  JOIN iam_v2.auth_contexts c ON c.stay_id = s.id
 		 WHERE c.id=$1::uuid AND c.tenant_id=$2 AND c.site_id=$3`,
 		strings.TrimSpace(req.AuthContextID), p.srv.tenID, p.srv.siteID).Scan(&nowEvidence); err != nil {
-		notVerified(w, "stay_evidence_unreadable")
+		notVerified(w, signinattempt.ServiceUnavailable, "stay_evidence_unreadable")
 		return
 	}
 	if nowEvidence != offerEvidence {
-		notVerified(w, "stay_evidence_changed_since_the_offer")
+		// The stay moved room, changed rate or checked out between the offer and the grant. The identity was
+		// proved against facts that no longer hold.
+		grantResult = signinattempt.StayNotEligible
+		notVerified(w, grantResult, "stay_evidence_changed_since_the_offer")
 		return
 	}
 
@@ -598,19 +879,24 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 		PackageRevID: strings.TrimSpace(req.PackageRevID),
 	})
 	if err != nil {
-		// Every grant failure is the same uniform non-success: a guest must not be able to tell "that context
-		// was already used" from "that package needs payment" from "the stay already has access".
-		notVerified(w, "grant: "+err.Error())
+		// Every grant failure is the same uniform non-success to the GUEST: they must not be able to tell
+		// "that context was already used" from "that package needs payment" from "the stay already has
+		// access". The operator's record keeps the distinction that matters most of those — a stay that
+		// already holds access is an eligibility fact, not an internal fault.
+		if errors.Is(err, staygrant.ErrAlreadyEntitled) {
+			grantResult = signinattempt.StayNotEligible
+		}
+		notVerified(w, grantResult, "grant: "+err.Error())
 		return
 	}
 
 	sessionID, err := p.openSessionTx(ctx, tx, granted.EntitlementID, dev)
 	if err != nil {
-		notVerified(w, "session: "+err.Error())
+		notVerified(w, signinattempt.ServiceUnavailable, "session: "+err.Error())
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
-		notVerified(w, "commit: "+err.Error())
+		notVerified(w, signinattempt.ServiceUnavailable, "commit: "+err.Error())
 		return
 	}
 	// The rows are durable, but the guest is NOT online yet: nothing has been enforced in the kernel. Wait for
@@ -622,9 +908,10 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 		// claiming success now: that is the "connected" screen on a network that carries no packets.
 		slog.Warn("phase3 auth: grant committed but enforcement not confirmed",
 			"session", sessionID, "entitlement", granted.EntitlementID, "err", werr)
-		notVerified(w, "enforcement_not_confirmed")
+		notVerified(w, signinattempt.ServiceUnavailable, "enforcement_not_confirmed")
 		return
 	}
+	grantResult, grantedEntitlement, grantedSession = signinattempt.Verified, granted.EntitlementID, sessionID
 	slog.Info("phase3 auth: access granted and enforced",
 		"stay", granted.Stay, "entitlement", granted.EntitlementID, "session", sessionID)
 	writeJSONScd(w, http.StatusOK, phase3GrantResp{

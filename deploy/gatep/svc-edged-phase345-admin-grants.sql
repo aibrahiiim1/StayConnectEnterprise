@@ -148,6 +148,18 @@ GRANT EXECUTE ON FUNCTION iam_v2.request_full_resync(uuid, uuid, uuid, text) TO 
 -- reconcile, and package Edit would work until then and afterwards start refusing to open.
 GRANT EXECUTE ON FUNCTION iam_v2.p2_package_current_conditions(uuid, uuid, uuid) TO svc_edged;
 
+-- THE GUEST SIGN-IN ATTEMPTS SCREEN (migration 0067). SELECT only.
+--
+-- edged serves the operator list and detail. What it CANNOT do is read the guest credential half: those
+-- columns are AES-256-GCM ciphertext and edged holds no key, by the same split that keeps the voucher DEK in
+-- scd. An authorised operator's request for the submitted and accepted values is proxied to scd over the
+-- root-owned unix socket, so the permission check and the key live on opposite sides of a boundary and
+-- neither alone is enough.
+--
+-- Read-only is asserted by the migration before it commits: svc_edged holding INSERT or DELETE here would
+-- mean the operator API could manufacture or erase the record of a guest's sign-in.
+GRANT SELECT ON iam_v2.sign_in_attempts TO svc_edged;
+
 -- NOT granted, on purpose, and each absence is load-bearing:
 --   * DELETE on anything -- no admin read surface deletes;
 --   * any privilege on iam_v2 vouchers, guest credentials or session secrets;
