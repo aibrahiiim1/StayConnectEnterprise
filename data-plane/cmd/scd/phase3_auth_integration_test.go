@@ -28,6 +28,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/stayconnect/enterprise/data-plane/internal/signinattempt"
 )
 
 type authFixture struct {
@@ -406,10 +407,20 @@ func TestIntegration_Phase3Auth_ContextIsConsumedExactlyOnce(t *testing.T) {
 	}
 }
 
-// THE UNIFORM CONTRACT. Wrong room, wrong name, an ambiguous match, an off-network device and a malformed
-// body must be indistinguishable — same status, same body, byte for byte. Anything else makes the endpoint an
-// occupancy oracle.
-func TestIntegration_Phase3Auth_EveryNonSuccessIsIdentical(t *testing.T) {
+// THE DISCLOSURE CONTRACT, as it now stands.
+//
+// Everything that can describe ONE ROOM answers identically — same status, same bytes. A wrong room, a wrong
+// name, an ambiguous match and a submission the server could not read are indistinguishable, because anything
+// else lets somebody in the lobby submit room numbers and read off which are occupied.
+//
+// WHAT CHANGED, AND WHY IT IS NOT A WEAKENING. The response now carries a coarse failure CLASS, so a guest
+// can be told whether to re-check what they typed or to try again later. The line is drawn on one rule: a
+// result that depends on what the guest typed, or on what the mirror holds about THEIR room, is one class;
+// only conditions true for every guest on the site at that moment are the other. A device on no mapped guest
+// network is the second kind — it is a networking fault that would refuse every guest on that device, and it
+// tells an attacker nothing about any room. The reasoning lives in internal/signinattempt.GuestClass; this
+// test is the proof that the per-room half of it holds through the real handler.
+func TestIntegration_Phase3Auth_EveryPerRoomNonSuccessIsIdentical(t *testing.T) {
 	f := newAuthFixture(t)
 
 	cases := []struct {
@@ -422,9 +433,6 @@ func TestIntegration_Phase3Auth_EveryNonSuccessIsIdentical(t *testing.T) {
 		{"no evidence at all", f.resolveBody("", "", "", "0000000b-0000-4000-8000-000000000000")},
 		{"missing request id", f.resolveBody("412", "Okonkwo", "", "")},
 		{"malformed request id", f.resolveBody("412", "Okonkwo", "", "not-a-uuid")},
-		{"device not on a guest network", map[string]any{
-			"room": "412", "last_name": "Okonkwo", "request_id": "0000000c-0000-4000-8000-000000000000",
-			"device": map[string]string{"ip": "192.0.2.10", "mac": f.net.mac}}},
 		{"unusable hardware address", map[string]any{
 			"room": "412", "last_name": "Okonkwo", "request_id": "0000000d-0000-4000-8000-000000000000",
 			"device": map[string]string{"ip": f.net.guestIP, "mac": "not-a-mac"}}},
@@ -445,12 +453,45 @@ func TestIntegration_Phase3Auth_EveryNonSuccessIsIdentical(t *testing.T) {
 			if out.AuthContextID != "" || len(out.Offers) != 0 {
 				t.Fatalf("a non-success leaked a context or an offer: %s", canonicalBody)
 			}
+			if out.FailureClass != string(signinattempt.GuestCredential) {
+				t.Fatalf("a per-room refusal is class %q, want CREDENTIAL", out.FailureClass)
+			}
 			continue
 		}
 		if rec.Code != canonicalStatus || rec.Body.String() != canonicalBody {
-			t.Fatalf("%s is distinguishable from a plain no-match:\n  got  %d %s\n  want %d %s",
+			t.Fatalf("%s is distinguishable from a plain no-match — submitting room numbers would reveal "+
+				"which rooms are occupied:\n  got  %d %s\n  want %d %s",
 				c.name, rec.Code, rec.Body.String(), canonicalStatus, canonicalBody)
 		}
+	}
+}
+
+// A DEVICE ON NO MAPPED GUEST NETWORK IS THE OTHER KIND, and this is where the line sits.
+//
+// It is site-and-device state, not room state: every guest on that device gets it, no guest on any other
+// device does, and it identifies no room. Reporting it as "check your details" would send someone with a
+// networking problem round a loop nothing they type can escape.
+func TestIntegration_Phase3Auth_AnOffNetworkDeviceIsTechnicalNotCredential(t *testing.T) {
+	f := newAuthFixture(t)
+	raw, _ := json.Marshal(map[string]any{
+		"room": "412", "last_name": "Okonkwo", "request_id": "0000000c-0000-4000-8000-000000000000",
+		"device": map[string]string{"ip": "192.0.2.10", "mac": f.net.mac}})
+	rec := httptest.NewRecorder()
+	f.p3.resolveHandler(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(raw)))
+
+	var out phase3Response
+	if json.Unmarshal(rec.Body.Bytes(), &out) != nil {
+		t.Fatalf("undecodable body %q", rec.Body.String())
+	}
+	if rec.Code != http.StatusOK || out.Outcome != outcomeNotVerified {
+		t.Fatalf("unexpected answer: %d %s", rec.Code, rec.Body.String())
+	}
+	if out.FailureClass != string(signinattempt.GuestTechnical) {
+		t.Fatalf("failure_class = %q, want TECHNICAL", out.FailureClass)
+	}
+	// ...and it still discloses nothing else: no context, no offers, no reason.
+	if out.AuthContextID != "" || len(out.Offers) != 0 {
+		t.Fatalf("the refusal leaked a context or an offer: %s", rec.Body.String())
 	}
 }
 

@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0066, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0067, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -577,6 +577,40 @@ BEGIN
   UPDATE iam_v2.sessions SET state='ended', ended=now(), end_reason=p_reason WHERE id=p_session;
   RETURN 'ENDED';
 END; $$;
+
+
+--
+-- Name: complete_sign_in_attempt(uuid, uuid, uuid, text, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.complete_sign_in_attempt(p_tenant uuid, p_site uuid, p_request uuid, p_result text, p_entitlement uuid, p_session uuid) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_rows integer;
+BEGIN
+  IF p_request IS NULL THEN
+    RETURN 0;
+  END IF;
+  IF p_result NOT IN ('VERIFIED','SERVICE_UNAVAILABLE','STAY_NOT_ELIGIBLE','VERIFIED_NO_ELIGIBLE_PACKAGE') THEN
+    RAISE EXCEPTION 'complete_sign_in_attempt: % is not a terminal grant outcome', p_result;
+  END IF;
+  UPDATE iam_v2.sign_in_attempts
+     SET result         = p_result,
+         entitlement_id = COALESCE(p_entitlement, entitlement_id),
+         session_id     = COALESCE(p_session, session_id)
+   WHERE tenant_id = p_tenant AND site_id = p_site AND request_id = p_request
+     AND result = 'VERIFIED' AND session_id IS NULL;
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  RETURN v_rows;
+END $$;
+
+
+--
+-- Name: FUNCTION complete_sign_in_attempt(p_tenant uuid, p_site uuid, p_request uuid, p_result text, p_entitlement uuid, p_session uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.complete_sign_in_attempt(p_tenant uuid, p_site uuid, p_request uuid, p_result text, p_entitlement uuid, p_session uuid) IS 'Stamps the entitlement and session a proved identity ended in, or moves that one row to a terminal grant outcome. Exists so that svc_scd never holds UPDATE on iam_v2.sign_in_attempts: a service that could rewrite an attempt could rewrite the evidence of its own refusals. Idempotent and one-way -- it acts only on a row that is still VERIFIED with no session, and returns the number of rows it touched.';
 
 
 --
@@ -1939,6 +1973,35 @@ BEGIN
   END IF;
   RETURN NEW;
 END $$;
+
+
+--
+-- Name: p3_guest_network_mirror_state(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p3_guest_network_mirror_state(p_tenant uuid, p_site uuid, p_guest_network uuid) RETURNS TABLE(transport_status text, last_complete_sync_at timestamp with time zone, can_authorise boolean)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE(max(rt.transport_status), ''),
+         max(rt.last_complete_sync_at),
+         COALESCE(bool_or(iam_v2.p3_feed_authorizes(
+             pi.tenant_id, pi.site_id, pi.id, pi.current_revision_id, now())), false)
+    FROM iam_v2.guest_network_pms_map m
+    JOIN iam_v2.pms_interfaces pi
+      ON pi.tenant_id = m.tenant_id AND pi.site_id = m.site_id AND pi.id = m.pms_interface_id
+     AND pi.lifecycle_state = 'ACTIVE'
+    LEFT JOIN iam_v2.pms_interface_runtime rt
+      ON rt.tenant_id = pi.tenant_id AND rt.site_id = pi.site_id AND rt.pms_interface_id = pi.id
+   WHERE m.tenant_id = p_tenant AND m.site_id = p_site AND m.guest_network_id = p_guest_network;
+$$;
+
+
+--
+-- Name: FUNCTION p3_guest_network_mirror_state(p_tenant uuid, p_site uuid, p_guest_network uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.p3_guest_network_mirror_state(p_tenant uuid, p_site uuid, p_guest_network uuid) IS 'Transport status, last complete sync and "could the mirror authorise anybody" for the interfaces mapped to one guest network. Exists so svc_scd never needs privilege on iam_v2.pms_interface_runtime: the role being authorised must not read or rewrite the feed health it is authorised against. Exposes no guest, Stay, reservation or PMS credential.';
 
 
 --
@@ -7946,6 +8009,81 @@ CREATE TABLE iam_v2.settlements (
 
 
 --
+-- Name: sign_in_attempts; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.sign_in_attempts (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    occurred_at timestamp with time zone DEFAULT now() NOT NULL,
+    guest_network_id uuid,
+    guest_network_name text,
+    pms_interface_id uuid,
+    request_id uuid,
+    submitted_room text,
+    verifier_kind text DEFAULT 'UNKNOWN'::text NOT NULL,
+    result text NOT NULL,
+    matched_field text,
+    matched_stay_id uuid,
+    matched_guest_id uuid,
+    room_in_mirror boolean,
+    eligible_stay_candidates integer,
+    pms_transport_status text,
+    mirror_last_complete_sync_at timestamp with time zone,
+    mirror_age_seconds bigint,
+    latency_ms bigint,
+    entitlement_id uuid,
+    session_id uuid,
+    device_ip inet,
+    device_mac macaddr,
+    sensitive_ciphertext bytea,
+    sensitive_nonce bytea,
+    encryption_key_id uuid,
+    cipher_version integer,
+    CONSTRAINT sign_in_attempts_matched_field_check CHECK (((matched_field IS NULL) OR (matched_field = ANY (ARRAY['FIRST_NAME'::text, 'FAMILY_NAME'::text, 'RESERVATION_NUMBER'::text])))),
+    CONSTRAINT sign_in_attempts_result_check CHECK ((result = ANY (ARRAY['VERIFIED'::text, 'CREDENTIAL_MISMATCH'::text, 'ROOM_NOT_IN_MIRROR'::text, 'STAY_NOT_ELIGIBLE'::text, 'AMBIGUOUS_ROOM_CANDIDATES'::text, 'MIRROR_STALE_OR_MISSING_CHANGE'::text, 'RATE_LIMITED'::text, 'ROUTING_OR_INTERFACE_FAILURE'::text, 'SERVICE_UNAVAILABLE'::text, 'SPENT_REQUEST_ID'::text, 'MALFORMED_SUBMISSION'::text, 'VERIFIED_NO_ELIGIBLE_PACKAGE'::text]))),
+    CONSTRAINT sign_in_attempts_sealed_all_or_none CHECK ((((sensitive_ciphertext IS NULL) AND (sensitive_nonce IS NULL) AND (encryption_key_id IS NULL) AND (cipher_version IS NULL)) OR ((sensitive_ciphertext IS NOT NULL) AND (sensitive_nonce IS NOT NULL) AND (encryption_key_id IS NOT NULL) AND (cipher_version IS NOT NULL)))),
+    CONSTRAINT sign_in_attempts_verifier_kind_check CHECK ((verifier_kind = ANY (ARRAY['FULL_NAME'::text, 'RESERVATION_NUMBER_LIKE'::text, 'UNKNOWN'::text])))
+);
+
+
+--
+-- Name: TABLE sign_in_attempts; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.sign_in_attempts IS 'One row per deliberate guest Connect submission: the structured result, what the probe saw, the PMS mirror state at that instant, and the guest credential material SEALED with AES-256-GCM under an appliance-local key (internal/signinattempt). RETENTION: 30 days, swept by scd on a ticker; the sweep touches this table and nothing else. The sealed half NEVER leaves the appliance in clear -- not into a log, a journal, CI output, telemetry, an export or a governance artifact. Written by svc_scd; read by svc_edged, which does NOT hold the key and must ask scd to open a sealed row.';
+
+
+--
+-- Name: COLUMN sign_in_attempts.submitted_room; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.sign_in_attempts.submitted_room IS 'The room number as submitted, in clear: it is the operator''s primary filter and is already visible to the same audience on every screen that shows a stay.';
+
+
+--
+-- Name: COLUMN sign_in_attempts.result; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.sign_in_attempts.result IS 'The exact operator-visible reason. Distinct from what the guest is told: internal/signinattempt maps this to one of four coarse guest classes, and several distinct results deliberately share a class so that the portal does not become a way to enumerate which rooms are occupied.';
+
+
+--
+-- Name: COLUMN sign_in_attempts.matched_stay_id; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.sign_in_attempts.matched_stay_id IS 'The stay the evidence was compared against, when one existed. Deliberately NOT a foreign key: the record of a sign-in problem must outlive the stay it describes.';
+
+
+--
+-- Name: COLUMN sign_in_attempts.sensitive_ciphertext; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.sign_in_attempts.sensitive_ciphertext IS 'AES-256-GCM over a JSON envelope holding the submitted verifier (raw and normalized) and the accepted first/family/reservation values. AAD binds it to (tenant, site, attempt id), so a ciphertext moved between rows or sites fails authentication rather than describing the wrong guest.';
+
+
+--
 -- Name: site_checkout_grace_config; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -10192,6 +10330,22 @@ ALTER TABLE ONLY iam_v2.settlements
 
 
 --
+-- Name: sign_in_attempts sign_in_attempts_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.sign_in_attempts
+    ADD CONSTRAINT sign_in_attempts_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: sign_in_attempts sign_in_attempts_tenant_site_id_key; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.sign_in_attempts
+    ADD CONSTRAINT sign_in_attempts_tenant_site_id_key UNIQUE (tenant_id, site_id, id);
+
+
+--
 -- Name: site_checkout_grace_config site_checkout_grace_config_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -11052,6 +11206,34 @@ CREATE INDEX seb_attribution ON iam_v2.session_entitlement_bindings USING btree 
 --
 
 CREATE UNIQUE INDEX seb_one_open ON iam_v2.session_entitlement_bindings USING btree (session_id) WHERE (bound_until IS NULL);
+
+
+--
+-- Name: sign_in_attempts_expiry; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX sign_in_attempts_expiry ON iam_v2.sign_in_attempts USING btree (occurred_at);
+
+
+--
+-- Name: sign_in_attempts_request; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX sign_in_attempts_request ON iam_v2.sign_in_attempts USING btree (tenant_id, site_id, request_id);
+
+
+--
+-- Name: sign_in_attempts_site_recent; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX sign_in_attempts_site_recent ON iam_v2.sign_in_attempts USING btree (tenant_id, site_id, occurred_at DESC);
+
+
+--
+-- Name: sign_in_attempts_site_room; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX sign_in_attempts_site_room ON iam_v2.sign_in_attempts USING btree (tenant_id, site_id, submitted_room, occurred_at DESC);
 
 
 --
@@ -13281,6 +13463,14 @@ REVOKE ALL ON FUNCTION iam_v2.bootstrap_emergency_grace(p_tenant uuid, p_site uu
 
 
 --
+-- Name: FUNCTION complete_sign_in_attempt(p_tenant uuid, p_site uuid, p_request uuid, p_result text, p_entitlement uuid, p_session uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.complete_sign_in_attempt(p_tenant uuid, p_site uuid, p_request uuid, p_result text, p_entitlement uuid, p_session uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.complete_sign_in_attempt(p_tenant uuid, p_site uuid, p_request uuid, p_result text, p_entitlement uuid, p_session uuid) TO svc_scd;
+
+
+--
 -- Name: FUNCTION deauthorize_entitlement_device(p_ent uuid, p_device uuid, p_at timestamp with time zone, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -13517,6 +13707,14 @@ GRANT ALL ON FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_in
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p3_grace_config_version_guard() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION p3_guest_network_mirror_state(p_tenant uuid, p_site uuid, p_guest_network uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p3_guest_network_mirror_state(p_tenant uuid, p_site uuid, p_guest_network uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p3_guest_network_mirror_state(p_tenant uuid, p_site uuid, p_guest_network uuid) TO svc_scd;
 
 
 --
@@ -14473,6 +14671,14 @@ GRANT SELECT ON TABLE iam_v2.settlements TO sc_financial_operator;
 GRANT SELECT ON TABLE iam_v2.settlements TO sc_payment_outcome;
 GRANT SELECT,INSERT ON TABLE iam_v2.settlements TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.settlements TO svc_edged;
+
+
+--
+-- Name: TABLE sign_in_attempts; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE ON TABLE iam_v2.sign_in_attempts TO svc_scd;
+GRANT SELECT ON TABLE iam_v2.sign_in_attempts TO svc_edged;
 
 
 --

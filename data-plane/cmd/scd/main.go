@@ -51,6 +51,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/pms"
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsloader"
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
+	"github.com/stayconnect/enterprise/data-plane/internal/signinattempt"
 	"github.com/stayconnect/enterprise/data-plane/internal/sms"
 	"github.com/stayconnect/enterprise/data-plane/internal/social"
 	"github.com/stayconnect/enterprise/data-plane/internal/socialloader"
@@ -196,6 +197,10 @@ type server struct {
 	iamv2Cfg iamv2.Config
 	// applianceID is part of IAM-v2 device identity (tenant, site, appliance, MAC).
 	applianceID string
+
+	// signInAttemptKeyring seals the credential half of a guest sign-in attempt record. Nil when the key file
+	// is absent, which is DELIBERATELY not fatal: see loadSignInAttemptKeyring.
+	signInAttemptKeyring signinattempt.Keyring
 
 	// Phase 2 dark commerce (commercial packages). commerce is ALWAYS constructed but holds a nil
 	// repository while the master flag is OFF, so it issues zero Phase-2 SQL; commerceCfg gates whether
@@ -795,6 +800,9 @@ func main() {
 
 	// Phase 3 (DARK): the PMS auth slice. Constructed and mounted ONLY with the master + PMS-auth flags on.
 	// While dark, scd issues zero Phase-3 SQL and these paths do not exist.
+	// The sealing key is loaded BEFORE the arm is constructed, because the arm's recorder is built from it.
+	// Its absence is logged, not fatal: a missing audit key must not take a property's guest internet offline.
+	s.signInAttemptKeyring = loadSignInAttemptKeyring(c.SecretsDir)
 	if pmsCfg3, err := iamv2.LoadPMSConfigFromEnv(os.Getenv); err != nil {
 		slog.Error("scd: phase3 config fail-closed", "err", err)
 		os.Exit(1)
@@ -805,6 +813,9 @@ func main() {
 			os.Exit(1)
 		}
 		r.Post("/v1/phase3/auth/pms/resolve", s.p3auth.resolveHandler)
+		// The sealed half of a recorded attempt, opened for edged on an authorised operator's behalf. It is
+		// here rather than in edged because scd holds the key and edged does not — see the handler.
+		r.Post("/v1/phase3/signin-attempts/credentials", s.p3auth.signInAttemptCredentialsHandler)
 		r.Post("/v1/phase3/auth/pms/grant", s.p3auth.grantHandler)
 		// Read-only: why the device's most recent access ended, so the portal can say so instead of showing
 		// the ordinary sign-in page to a guest whose package ran out. Answers DATA, TIME or nothing.
@@ -920,6 +931,14 @@ func main() {
 	// Phase 1B — bounded-retention cleanup of durable throttle buckets (only when enabled).
 	if s.authThrottle != nil {
 		go s.authThrottle.RunCleanup(rootCtx, 5*time.Minute, time.Minute)
+	}
+
+	// THE THIRTY-DAY SWEEP for guest sign-in attempt records. Same shape as the throttle cleanup above,
+	// deliberately: this appliance has no database scheduler, and the owning service doing its own bounded
+	// DELETE on a ticker is the pattern that is already proven here. It runs only where the Phase-3 arm exists,
+	// because nothing else writes the table.
+	if s.p3auth != nil && s.p3auth.attempts != nil {
+		go s.p3auth.attempts.RunPurge(rootCtx, time.Hour)
 	}
 
 	// Phase 5.2 — NATS RPC surface. When SCD_NATS_URL is set, subscribe to

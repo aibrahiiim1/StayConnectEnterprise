@@ -78,7 +78,7 @@ func (h *handler) postStayIssue(w http.ResponseWriter, r *http.Request) {
 	body, _ := json.Marshal(map[string]any{"device": device})
 	var out scdPostStayResp
 	if !h.scdPhase3Call(b, "http://unix/v1/phase5/poststay/issue", body, &out) || out.Outcome != "ISSUED" {
-		h.phase3Fail(w, r, b, "poststay_issue_unavailable")
+		h.phase3Fail(w, r, b, "poststay_issue_unavailable", classPostStay)
 		return
 	}
 	b.wait(r)
@@ -114,7 +114,7 @@ func (h *handler) postStayAuth(w http.ResponseWriter, r *http.Request) {
 	if !h.scdPhase3Call(b, "http://unix/v1/phase5/auth/post-stay-pin", body, &out) || out.Outcome != "VERIFIED" {
 		// Wrong PIN, no PIN, expired, revoked, locked out, a stale episode, a device with no post-stay
 		// identity, and Phase 5 being dark are ALL this answer.
-		h.phase3Fail(w, r, b, "poststay_not_verified")
+		h.phase3Fail(w, r, b, "poststay_not_verified", classPostStay)
 		return
 	}
 	b.wait(r)
@@ -127,7 +127,7 @@ func (h *handler) postStayConvert(w http.ResponseWriter, r *http.Request, b *pha
 		"device": device, "auth_context_id": contextID, "package_revision_id": packageRevision})
 	var out scdPostStayResp
 	if !h.scdPhase3Call(b, "http://unix/v1/phase5/poststay/convert", body, &out) || out.Outcome != "GRANTED" {
-		h.phase3Fail(w, r, b, "poststay_convert_unavailable")
+		h.phase3Fail(w, r, b, "poststay_convert_unavailable", classPostStay)
 		return
 	}
 	b.wait(r)
@@ -143,7 +143,7 @@ func (h *handler) postStayDevice(w http.ResponseWriter, r *http.Request, b *phas
 // poststayFail keeps this flow's existing audit vocabulary exactly as it was: the shared helpers now name the
 // condition and the flow supplies its own prefix, so no recorded reason code changes.
 func (h *handler) poststayFail(w http.ResponseWriter, r *http.Request, b *phase3Budget, reason string) {
-	h.phase3Fail(w, r, b, "poststay_"+reason)
+	h.phase3Fail(w, r, b, "poststay_"+reason, classPostStay)
 }
 
 // uniformFail is how a flow says "this did not succeed" WITHOUT saying why. Every one of them writes 200,

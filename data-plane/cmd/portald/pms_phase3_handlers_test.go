@@ -133,29 +133,34 @@ func TestPhase3MultipleOffersAskTheGuest(t *testing.T) {
 	}
 }
 
-// THE CONTRACT. Every one of these is a different internal reality; the guest must not be able to tell them
-// apart from the response — same status, same bytes.
-func TestPhase3EveryFailureIsIndistinguishable(t *testing.T) {
+// THE CONTRACT, as it now stands. Everything that could describe ONE ROOM is byte-identical; only the
+// site-wide conditions are allowed their own sentence.
+//
+// It used to be every failure without exception, and that made the portal useless to a guest whose details
+// were correct on a property whose mirror could not answer. The line moved, and this is where it moved TO:
+// scd decides the class (internal/signinattempt.GuestClass, which is where the reasoning lives), portald
+// forwards it, and every case below that names a room shares one class and therefore one body.
+func TestPhase3EveryPerRoomFailureIsIndistinguishable(t *testing.T) {
+	// scd answers CREDENTIAL for all of these: no such room, wrong name, two candidates, an ineligible stay.
+	cred := map[string]any{"outcome": "NOT_VERIFIED", "failure_class": "CREDENTIAL"}
 	cases := []struct {
 		name string
 		stub *scdStub
 		body map[string]any
 	}{
-		{"no match", &scdStub{resolve: map[string]any{"outcome": "NOT_VERIFIED"}},
+		{"no match", &scdStub{resolve: cred},
 			map[string]any{"room": "999", "last_name": "Nobody", "request_id": "r1"}},
-		{"ambiguous", &scdStub{resolve: map[string]any{"outcome": "NOT_VERIFIED"}},
+		{"ambiguous", &scdStub{resolve: cred},
 			map[string]any{"room": "412", "last_name": "Shared", "request_id": "r2"}},
-		{"verified but no offers", &scdStub{resolve: map[string]any{"outcome": "VERIFIED", "auth_context_id": "c", "offers": []map[string]any{}}},
-			map[string]any{"room": "412", "last_name": "Okonkwo", "request_id": "r3"}},
-		{"grant refused", &scdStub{
+		{"room absent from the mirror", &scdStub{resolve: cred},
+			map[string]any{"room": "905", "last_name": "Okonkwo", "request_id": "r3"}},
+		{"stay not eligible", &scdStub{resolve: cred},
+			map[string]any{"room": "412", "last_name": "Okonkwo", "request_id": "r4"}},
+		{"grant refused on a credential ground", &scdStub{
 			resolve: map[string]any{"outcome": "VERIFIED", "auth_context_id": "c",
 				"offers": []map[string]any{{"package_revision_id": "p", "code": "STAY"}}},
-			grant: map[string]any{"outcome": "NOT_VERIFIED"}},
-			map[string]any{"room": "412", "last_name": "Okonkwo", "request_id": "r4"}},
-		{"scd refused the hop", &scdStub{status: http.StatusForbidden, resolve: map[string]any{}},
+			grant: map[string]any{"outcome": "NOT_VERIFIED", "failure_class": "CREDENTIAL"}},
 			map[string]any{"room": "412", "last_name": "Okonkwo", "request_id": "r5"}},
-		{"scd is dark (route absent)", &scdStub{status: http.StatusNotFound, resolve: map[string]any{}},
-			map[string]any{"room": "412", "last_name": "Okonkwo", "request_id": "r6"}},
 	}
 
 	var wantStatus int
@@ -170,26 +175,75 @@ func TestPhase3EveryFailureIsIndistinguishable(t *testing.T) {
 
 		if i == 0 {
 			wantStatus, wantBody = rec.Code, rec.Body.String()
-			// decoded into the LEGACY uniform type on purpose: the Phase-3 failure body must be exactly
-			// what the existing, already-tested contract produces, not merely something that looks like it
 			var out guestPMSResponse
 			if json.Unmarshal([]byte(wantBody), &out) != nil {
 				t.Fatalf("undecodable canonical body %q", wantBody)
 			}
 			if out.OK || out.Message != guestAuthMessage {
-				t.Fatalf("the canonical failure is not the uniform message: %q", wantBody)
+				t.Fatalf("the canonical per-room failure is not the incorrect-details message: %q", wantBody)
 			}
 			if leaksDetail(out) {
-				t.Fatalf("the uniform failure leaks detail: %q", wantBody)
+				t.Fatalf("the per-room failure leaks detail: %q", wantBody)
 			}
 			if term := bodyMentionsForbiddenTerm(out); term != "" {
-				t.Fatalf("the uniform message mentions %q", term)
+				t.Fatalf("the per-room message mentions %q", term)
 			}
 			continue
 		}
 		if rec.Code != wantStatus || rec.Body.String() != wantBody {
-			t.Fatalf("%s is distinguishable:\n  got  %d %s\n  want %d %s",
+			t.Fatalf("%s is distinguishable from another per-room failure — submitting room numbers would "+
+				"now reveal which rooms are occupied:\n  got  %d %s\n  want %d %s",
 				c.name, rec.Code, rec.Body.String(), wantStatus, wantBody)
+		}
+	}
+}
+
+// THE SITE-WIDE FAILURES may say so, and this pins WHICH ones portald decides for itself.
+//
+// portald only ever knows what IT could not do. It never sees a room, a stay or a name, so it can never
+// legitimately answer "your details are wrong" on its own — every one of these is technical, and a
+// credential answer here would be a guess about a guest it knows nothing about.
+func TestPhase3PortaldsOwnFailuresAreTechnicalAndDiscloseNothing(t *testing.T) {
+	cases := []struct {
+		name string
+		stub *scdStub
+	}{
+		{"scd refused the hop", &scdStub{status: http.StatusForbidden, resolve: map[string]any{}}},
+		{"scd is dark (route absent)", &scdStub{status: http.StatusNotFound, resolve: map[string]any{}}},
+		{"scd socket unavailable", &scdStub{failWith: errors.New("scd socket unavailable")}},
+		{"verified but no offers", &scdStub{resolve: map[string]any{
+			"outcome": "VERIFIED", "auth_context_id": "c", "offers": []map[string]any{}}}},
+	}
+	for _, c := range cases {
+		h := stubHandler(t, c.stub)
+		_, out := phase3Post(t, h, map[string]any{"room": "412", "last_name": "Okonkwo", "request_id": "r"})
+		if out.OK {
+			t.Fatalf("%s: reported success", c.name)
+		}
+		if out.Message != guestAuthTechnicalMessage {
+			t.Fatalf("%s: message = %q, want the technical one — telling this guest to re-check details "+
+				"they may have typed perfectly is advice that cannot help them", c.name, out.Message)
+		}
+		body := guestPMSResponse{OK: out.OK, Message: out.Message}
+		if term := bodyMentionsForbiddenTerm(body); term != "" {
+			t.Fatalf("%s: the technical message mentions %q", c.name, term)
+		}
+	}
+}
+
+// scd's class is FORWARDED, never re-derived. Two mappings from a reason to a guest class would drift, and
+// the one that lives in internal/signinattempt is the one that carries the reasoning.
+func TestPhase3ForwardsScdsClassVerbatim(t *testing.T) {
+	for class, want := range map[string]string{
+		"CREDENTIAL":   guestAuthMessage,
+		"TECHNICAL":    guestAuthTechnicalMessage,
+		"RATE_LIMITED": guestAuthRateLimitedMessage,
+	} {
+		h := stubHandler(t, &scdStub{resolve: map[string]any{
+			"outcome": "NOT_VERIFIED", "failure_class": class}})
+		_, out := phase3Post(t, h, map[string]any{"room": "412", "last_name": "X", "request_id": "r"})
+		if out.Message != want {
+			t.Errorf("class %s produced %q, want %q", class, out.Message, want)
 		}
 	}
 }
@@ -212,17 +266,23 @@ func TestPhase3UnknownDeviceNeverReachesScd(t *testing.T) {
 	}
 	var out phase3Out
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
-	if out.OK || out.Message != guestAuthMessage {
-		t.Fatalf("an unplaceable device got a distinguishable answer: %s", rec.Body.String())
+	// TECHNICAL, not credential: a device the appliance cannot place on a guest network has a networking
+	// problem, and nothing the guest types will ever fix it.
+	if out.OK || out.Message != guestAuthTechnicalMessage {
+		t.Fatalf("an unplaceable device was told to re-check what it typed: %s", rec.Body.String())
 	}
 }
 
-// A transport failure is not an error page. The guest gets the same message as a wrong room, because the
-// difference is not theirs to act on — and because "the hotel's system is down" is itself information.
-func TestPhase3TransportFailureIsTheSameMessage(t *testing.T) {
+// A transport failure is not an error page, and it is not the guest's fault either. They are told the
+// property cannot check right now — which is true, is the same for every guest in the building at that
+// moment, and identifies nobody.
+func TestPhase3TransportFailureIsTechnical(t *testing.T) {
 	h := stubHandler(t, &scdStub{failWith: errors.New("scd socket unavailable")})
 	_, out := phase3Post(t, h, map[string]any{"room": "412", "last_name": "Okonkwo", "request_id": "r"})
-	if out.OK || out.Message != guestAuthMessage {
-		t.Fatalf("a transport failure produced a distinguishable answer: %+v", out)
+	if out.OK || out.Message != guestAuthTechnicalMessage {
+		t.Fatalf("a transport failure produced %+v, want the technical message", out)
+	}
+	if bodyMentionsForbiddenTerm(guestPMSResponse{Message: out.Message}) != "" {
+		t.Fatal("the technical message discloses what failed")
 	}
 }

@@ -393,6 +393,12 @@ func main() {
 				mountResource(r, s, "pms-stays", s.pmsStaysRoutes)
 				mountResource(r, s, "pms-events", s.pmsEventsRoutes)
 				mountResource(r, s, "pms-resolutions", s.pmsResolutionsRoutes)
+				// GUEST SIGN-IN ATTEMPTS. Two resources, because the second permission is a real boundary and not a
+				// flag: the credential values hang off their OWN key, so a caller holding only the list permission is
+				// refused by middleware before the handler runs. Registered through mountResource for the reason
+				// recorded below — a route mounted directly inside requireAuth has authentication and no authorization.
+				mountResource(r, s, "guest-signin-attempts", s.signInAttemptsRoutes)
+				mountResource(r, s, "guest-signin-credentials", s.signInCredentialsRoutes)
 				mountResource(r, s, "checkout-grace", s.checkoutGraceConfigRoutes)
 				mountResource(r, s, "operational-alerts", s.operationalAlertsRoutes)
 				mountResource(r, s, "pms-interfaces", s.pmsInterfacesRoutes)

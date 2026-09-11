@@ -168,8 +168,37 @@ GRANT EXECUTE ON FUNCTION iam_v2.lock_pms_interface_runtime(uuid,uuid,uuid)   TO
 GRANT EXECUTE ON FUNCTION iam_v2.lock_stay(uuid,uuid,uuid)                    TO svc_scd;
 GRANT EXECUTE ON FUNCTION iam_v2.lock_origin_stay(uuid,uuid,uuid)             TO svc_scd;
 
+-- THE GUEST SIGN-IN ATTEMPT RECORD (migration 0067).
+--
+-- scd is the only writer: it is the authentication path, and it is the only service that holds the sealing
+-- key for the credential half. INSERT records the attempt; SELECT lets it open a sealed row when edged --
+-- which deliberately has no key -- asks on an authorised operator's behalf; DELETE is the thirty-day
+-- retention sweep, which is a stated part of the feature rather than housekeeping.
+--
+-- NO UPDATE, and that is the shape of the record: an attempt describes ONE instant and is never revised.
+-- A service that could rewrite it could rewrite the evidence of its own refusals.
+--
+-- This line exists because a grant written only in the migration is revoked by the first Gate-P reconcile:
+-- attempts would record until then and afterwards stop, silently, leaving the operator screen empty with no
+-- error anywhere.
+GRANT SELECT, INSERT, DELETE ON iam_v2.sign_in_attempts TO svc_scd;
+
+-- ...and the ONE narrow write it is allowed beyond INSERT: stamping the entitlement and session a proved
+-- identity ended in, one call later. EXECUTE on the scoped function rather than UPDATE on the table, for the
+-- same reason the offer lock is a function: UPDATE would also let the role rewrite the result and the
+-- comparison an operator reads.
+GRANT EXECUTE ON FUNCTION iam_v2.complete_sign_in_attempt(uuid,uuid,uuid,text,uuid,uuid) TO svc_scd;
+
+-- ...and the scoped reader that tells scd whether the local mirror can authorise ANYBODY, so that it can say
+-- "we cannot check right now" truthfully instead of telling a guest with correct details to re-check them.
+-- EXECUTE on the function, and NOT SELECT on iam_v2.pms_interface_runtime: the role being authorised must not
+-- be able to read the feed health it is authorised against. The first version of this read the table directly
+-- and the Gate-P privilege suite caught it refusing every guest on the property.
+GRANT EXECUTE ON FUNCTION iam_v2.p3_guest_network_mirror_state(uuid,uuid,uuid) TO svc_scd;
+
 -- NOT granted, on purpose:
---   * DELETE on anything -- no authentication path deletes;
+--   * DELETE on anything EXCEPT iam_v2.sign_in_attempts above -- no authentication path deletes
+--     authoritative state; the one DELETE granted is the attempts table's own retention sweep;
 --   * UPDATE on vouchers or guest_access_accounts from THIS file. Redemption
 --     and lockout accounting are writes the accepted domain performs through
 --     its own guarded paths; if a future adapter needs them they belong here as

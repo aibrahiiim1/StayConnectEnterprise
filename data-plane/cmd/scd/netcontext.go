@@ -10,6 +10,10 @@ import (
 // one guest network, so IP alone unambiguously determines the ingress bridge.
 type netContext struct {
 	NetworkID string
+	// Name is the operator's own label for the network ("Guest WiFi", "Conference"). It is carried so a
+	// sign-in attempt can be recorded against a network a human recognises; a uuid in an operator's list is
+	// a lookup they should not have to perform.
+	Name      string
 	VLANID    *int
 	Bridge    string
 	GatewayIP string
@@ -24,19 +28,19 @@ func (s *server) resolveNetwork(ctx context.Context, ip net.IP) netContext {
 	if s.db == nil || ip == nil {
 		return fallback
 	}
-	var netID, bridge, gw string
+	var netID, bridge, gw, name string
 	var vlan *int
 	err := s.db.QueryRow(ctx, `
-        SELECT id::text, bridge_name, host(gateway_ip), vlan_id
+        SELECT id::text, bridge_name, host(gateway_ip), vlan_id, COALESCE(name,'')
           FROM guest_networks
          WHERE enabled AND subnet_cidr >>= $1::inet
          ORDER BY masklen(subnet_cidr) DESC
          LIMIT 1
-    `, ip.String()).Scan(&netID, &bridge, &gw, &vlan)
+    `, ip.String()).Scan(&netID, &bridge, &gw, &vlan, &name)
 	if err != nil || bridge == "" {
 		return fallback
 	}
-	return netContext{NetworkID: netID, VLANID: vlan, Bridge: bridge, GatewayIP: gw}
+	return netContext{NetworkID: netID, Name: name, VLANID: vlan, Bridge: bridge, GatewayIP: gw}
 }
 
 // recordSessionNetwork stamps the session row with its network context after

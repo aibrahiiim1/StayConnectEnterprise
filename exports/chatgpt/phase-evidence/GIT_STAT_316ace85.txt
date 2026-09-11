@@ -1,4 +1,0 @@
-commit 316ace85762fdcad15d508354fc9b04ce90bb627
-Date:   Fri Sep 11 19:06:35 2026 +0300
-
-    The resilience specs assert the corrected request-id rule
