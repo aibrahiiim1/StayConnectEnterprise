@@ -16,6 +16,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -579,5 +580,54 @@ func TestIntegration_SignInAttempts_AmbiguousRoomShowsNoExpectedValues(t *testin
 	}
 	if s.SubmittedVerifier != "Shared" {
 		t.Fatalf("what the guest typed was not recorded: %q", s.SubmittedVerifier)
+	}
+}
+
+// RAW CREDENTIALS NEVER REACH A LOG, A JOURNAL OR CI OUTPUT.
+//
+// This is the property that is easiest to lose and hardest to notice: one helpful "reason" string carrying
+// the submitted value, and every appliance journal, every `journalctl` an engineer pastes into a ticket and
+// every CI transcript becomes a copy of the guest data the sealed column exists to protect. Recording it
+// encrypted and then printing it is worse than not recording it at all, because it looks solved.
+//
+// The whole default logger is captured for the duration of a complete sign-in — a wrong value, a correct
+// one, and a grant — and every byte it produced is searched.
+func TestIntegration_SignInAttempts_NoCredentialValueIsEverLogged(t *testing.T) {
+	f := newAuthFixture(t)
+	defer f.startEnforcementOwner(t)()
+	withSealingKey(t, f)
+	soleOccupant(t, f)
+	seedGivenName(t, f, "MARIA DEL CARMEN")
+
+	var captured bytes.Buffer
+	restore := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&captured, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer slog.SetDefault(restore)
+
+	post(t, f.p3.resolveHandler, f.verifyBody("412", "Nottheguest", f.reqID(t, 1)))
+	post(t, f.p3.resolveHandler, f.verifyBody("905", "Maria Del Carmen", f.reqID(t, 2)))
+	_, res := post(t, f.p3.resolveHandler, f.verifyBody("412", "Maria Del Carmen", f.reqID(t, 3)))
+	if res.Outcome != outcomeVerified {
+		t.Fatalf("setup: the correct value did not verify: %+v", res)
+	}
+	postGrant(t, f, res.AuthContextID, res.Offers[0].PackageRevisionID)
+
+	logged := strings.ToLower(captured.String())
+	if logged == "" {
+		t.Fatal("nothing was logged at all, so this test would pass for the wrong reason")
+	}
+	for _, secret := range []string{
+		"nottheguest",      // what the guest typed and got wrong
+		"maria del carmen", // what they typed and got right, and the accepted given name
+		"okonkwo",          // the accepted family name
+		"res-4001",         // the accepted reservation identifier
+	} {
+		if strings.Contains(logged, secret) {
+			t.Errorf("a credential value reached the log: %q", secret)
+		}
+	}
+	// The log SHOULD still be useful: the structured result is what an operator greps for.
+	if !strings.Contains(logged, "credential_mismatch") {
+		t.Error("the log carries no structured result, so it is neither safe nor useful")
 	}
 }
