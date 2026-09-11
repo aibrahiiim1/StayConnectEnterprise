@@ -199,6 +199,16 @@ docker exec "$C" psql -U postgres -d "$DB" -tAqc \
   "INSERT INTO public.schema_migrations(version) VALUES ('0064_the_allowance_a_stay_earned_is_frozen_when_it_is_granted') ON CONFLICT DO NOTHING;" >/dev/null
 
 
+# 0067 creates iam_v2.sign_in_attempts and iam_v2.complete_sign_in_attempt. cmd/scd's guest sign-in attempt
+# suite drives the real handlers and reads the table back, so without it every one of those tests fails on a
+# missing relation rather than on anything it is testing.
+if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1      < "$ROOT/data-plane/migrations/0067_a_refused_sign_in_leaves_a_record_somebody_can_read.up.sql" >/dev/null 2>&1; then
+  echo "0067 FAILED TO APPLY -- deterministic, not a flake"
+  docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1     < "$ROOT/data-plane/migrations/0067_a_refused_sign_in_leaves_a_record_somebody_can_read.up.sql" 2>&1 | tail -10
+  exit 1
+fi
+docker exec "$C" psql -U postgres -d "$DB" -tAqc   "INSERT INTO public.schema_migrations(version) VALUES ('0067_a_refused_sign_in_leaves_a_record_somebody_can_read') ON CONFLICT DO NOTHING;" >/dev/null
+
 built="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"
 if [ "${built:-0}" -lt 40 ]; then echo "INFRA: SCHEMA BUILD FAILED (iam_v2 tables=$built)"; exit 2; fi
 runtime_cols="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.columns WHERE table_schema='iam_v2' AND table_name='pms_interface_runtime' AND column_name='pinned_secret_generation_id';")"

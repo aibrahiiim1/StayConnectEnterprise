@@ -105,6 +105,16 @@ func (s *Store) Record(ctx context.Context, a Attempt) (string, error) {
 		return "", err
 	}
 
+	// A submission can fail before anything has classified what was typed — a body that would not decode, a
+	// device the appliance cannot place. The column is NOT NULL with a closed CHECK, so an unclassified
+	// attempt must arrive here as UNKNOWN rather than as an empty string that the database refuses. Coercing
+	// it here rather than at each call site is deliberate: the whole point of the deferred recorder is that a
+	// branch only has to set a result, and a second thing to remember would eventually be forgotten. It was:
+	// three early exits wrote nothing at all until this line existed.
+	if a.VerifierKind == "" {
+		a.VerifierKind = VerifierUnknown
+	}
+
 	var ct, nonce []byte
 	var keyID *string
 	var cipherVersion *int

@@ -151,6 +151,19 @@ const (
 
 // rolePerms maps site role → resource → permission. site_admin implicitly
 // has permWrite everywhere. Matrix per docs/ROLE_AND_SCOPE_MATRIX.md.
+//
+// TWO RESOURCE KEYS CARRY THE GUEST SIGN-IN PERMISSIONS, and the mapping to the names the Product Owner
+// uses is stated here because it is the only place both spellings appear:
+//
+//	guest-signin-attempts     = View_Guest_SignIn_Attempts     (the list, rooms, results, diagnostic reasons)
+//	guest-signin-credentials  = View_Guest_SignIn_Credentials  (the submitted and accepted values, unmasked)
+//
+// They are two KEYS rather than one key with two levels because this model has exactly one axis — read and
+// write — and the distinction being drawn is between two kinds of READ. A second key is how that is
+// expressed here without inventing a second permission mechanism alongside the one every other screen uses.
+// Mounting them as separate resources is also what makes the boundary server-enforced: the middleware
+// refuses a caller who lacks the second key before the handler runs, so hiding the button in the browser and
+// calling the API directly give the same answer.
 var rolePerms = map[string]map[string]perm{
 	"hotel_it_manager": {
 		"guest-accounts": permWrite,
@@ -191,8 +204,16 @@ var rolePerms = map[string]map[string]perm{
 		"guest-device-self-service": permWrite,
 		// Health & diagnostics: managers may run Recheck/Restart (write, step-up).
 		"diagnostics": permWrite,
+		// Guest sign-in attempts. The IT manager owns the PMS integration, and "which guests cannot sign in,
+		// and why" is the integration's most direct symptom — including the credential comparison, which is
+		// what turns "room sign-in is broken" into "this property's PMS spells names differently".
+		"guest-signin-attempts": permRead, "guest-signin-credentials": permRead,
 	},
 	"front_office_operator": {
+		// THE RECEPTION DESK, and the role this feature was asked for. They already hold the guest's room,
+		// stay and access credentials; the comparison panel is how they answer the guest standing in front
+		// of them instead of asking that guest to try again while somebody watches a log.
+		"guest-signin-attempts": permRead, "guest-signin-credentials": permRead,
 		"guest-accounts": permWrite, "sessions": permWrite,
 		// Phase 3 (DARK): front desk reads stays/events and triages alerts, but never edits the grace policy.
 		"pms-stays": permRead, "pms-events": permRead, "operational-alerts": permWrite, "checkout-grace": permRead,
@@ -215,6 +236,8 @@ var rolePerms = map[string]map[string]perm{
 		"diagnostics":               permRead,
 	},
 	"guest_relations_operator": {
+		// Same desk, same conversation with the guest, same need.
+		"guest-signin-attempts": permRead, "guest-signin-credentials": permRead,
 		"guest-accounts": permWrite, "sessions": permWrite,
 		"pms-stays": permRead, "pms-events": permRead, "operational-alerts": permWrite, "checkout-grace": permRead,
 		// Read-only on the integration: the front desk needs to see whether the PMS is reachable before
@@ -247,7 +270,12 @@ var rolePerms = map[string]map[string]perm{
 		"diagnostics": permRead,
 	},
 	"site_viewer": {
-		"guest-accounts": permRead, "sessions": permRead, "auth-methods": permRead,
+		// THE ATTEMPTS LIST, AND NOT THE CREDENTIALS. A viewer may see that sign-in is failing and for which
+		// rooms — the same class of operational evidence they already read everywhere else. What a read-only
+		// observer has no reason to hold is thirty days of what every guest typed, so the second key is
+		// deliberately absent rather than merely unused.
+		"guest-signin-attempts": permRead,
+		"guest-accounts":        permRead, "sessions": permRead, "auth-methods": permRead,
 		"walled-garden": permRead, "portal-branding": permRead, "notification-providers": permRead, "social-providers": permRead,
 		"stripe-accounts": permRead, "audit": permRead, "reports": permRead,
 		"backups": permRead, "license": permRead, "network": permRead, "diagnostics": permRead,

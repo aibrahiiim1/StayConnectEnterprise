@@ -43,6 +43,10 @@ type Matrix = Record<string, Record<string, Perm>>;
 // 403s on click.
 const MATRIX: Matrix = {
   hotel_it_manager: {
+    // Guest sign-in attempts. Two keys, mirroring edged exactly: the list, and the credential comparison.
+    // "View_Guest_SignIn_Attempts" and "View_Guest_SignIn_Credentials" are the same two permissions under
+    // the names the Product Owner uses.
+    "guest-signin-attempts": "read", "guest-signin-credentials": "read",
     // Phase 3 (DARK): the IT manager owns the PMS integration — publishing the
     // checkout-grace policy and clearing alerts are manager actions; stays,
     // events and resolutions are read-only evidence.
@@ -68,6 +72,8 @@ const MATRIX: Matrix = {
     reports: "read", backups: "read", license: "read", diagnostics: "write",
   },
   front_office_operator: {
+    // The reception desk: the role this screen was asked for, and the one that needs the comparison.
+    "guest-signin-attempts": "read", "guest-signin-credentials": "read",
     // Phase 6 (DARK): the desk answers "why can't I remove my old phone" and changes no capability.
     "guest-device-self-service": "read",
     "pms-stays": "read", "pms-events": "read", "operational-alerts": "write", "checkout-grace": "read",
@@ -78,6 +84,7 @@ const MATRIX: Matrix = {
     "auth-methods": "read", "walled-garden": "read", reports: "read", audit: "read", license: "read", backups: "read", diagnostics: "read",
   },
   guest_relations_operator: {
+    "guest-signin-attempts": "read", "guest-signin-credentials": "read",
     "guest-device-self-service": "read",
     "pms-stays": "read", "pms-events": "read", "operational-alerts": "write", "checkout-grace": "read",
     "pms-interfaces": "read", "pms-routing": "read", "pms-source-conflicts": "read",
@@ -99,6 +106,9 @@ const MATRIX: Matrix = {
     sessions: "read", reports: "read", audit: "read", license: "read", diagnostics: "read",
   },
   site_viewer: {
+    // The list only. A read-only observer has no reason to hold thirty days of what guests typed, so the
+    // credentials key is absent here rather than merely unused — and edged enforces that, not this file.
+    "guest-signin-attempts": "read",
     "guest-device-self-service": "read",
     "pms-stays": "read", "pms-events": "read", "pms-resolutions": "read", "checkout-grace": "read", "operational-alerts": "read",
     "pms-interfaces": "read", "pms-routing": "read", "pms-source-conflicts": "read",

@@ -258,6 +258,52 @@ export type PmsResolution = {
   guest_network_name?: string | null;
 };
 
+// GUEST SIGN-IN ATTEMPTS.
+//
+// Two shapes, because there are two permissions. SignInAttempt and SignInAttemptDetail carry NO credential
+// value of any kind — not masked, absent — and SignInAttemptCredentials is fetched from its own endpoint
+// behind its own permission. A single type with optional secret fields is how a surface that "hides" them in
+// one view eventually ships them in another.
+export type SignInAttempt = {
+  id: string;
+  occurred_at: string;
+  room: string;
+  guest_network: string;
+  result: string;
+  result_label: string;
+  succeeded: boolean;
+  verifier_kind: string;
+  mirror_age_seconds?: number | null;
+  pms_transport_status?: string | null;
+  device_ip?: string | null;
+  device_mac?: string | null;
+  request_id?: string | null;
+  latency_ms?: number | null;
+};
+
+export type SignInAttemptDetail = SignInAttempt & {
+  matched_field?: string | null;
+  matched_stay_id?: string | null;
+  room_in_mirror?: boolean | null;
+  eligible_stay_candidates?: number | null;
+  mirror_last_complete_sync_at?: string | null;
+  entitlement_id?: string | null;
+  session_id?: string | null;
+  // Whether a sealed half exists at all, so the panel can say "the key was unavailable when this was
+  // recorded" instead of showing an empty box that reads as a permission problem.
+  credentials_available: boolean;
+};
+
+export type SignInAttemptCredentials = {
+  available: boolean;
+  submitted_verifier?: string;
+  normalized_verifier?: string;
+  accepted_first_name?: string;
+  accepted_family_name?: string;
+  accepted_reservation_number?: string;
+  additional_accepted_guests?: number;
+};
+
 export type CheckoutGraceConfig = {
   grace_package_revision_id?: string | null;
   grace_duration_seconds: number;

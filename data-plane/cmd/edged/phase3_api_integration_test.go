@@ -143,6 +143,10 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 			mountResource(r, s, "pms-interfaces", s.pmsInterfacesRoutes)
 			mountResource(r, s, "pms-routing", s.pmsRoutingRoutes)
 			mountResource(r, s, "pms-source-conflicts", s.pmsSourceConflictsRoutes)
+			// Guest sign-in attempts, both halves. Mounted here so the list, the detail and the credential
+			// proxy are all exercised through the real router, the real role matrix and a real database.
+			mountResource(r, s, "guest-signin-attempts", s.signInAttemptsRoutes)
+			mountResource(r, s, "guest-signin-credentials", s.signInCredentialsRoutes)
 			// The operational snapshot the dashboard reads. Mounted here so its authorization and its
 			// site confinement are exercised through the REAL middleware chain and the real role matrix --
 			// see dashboard_api_integration_test.go for why a mocked assertion would not be worth having.

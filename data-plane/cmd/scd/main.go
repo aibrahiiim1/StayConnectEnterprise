@@ -813,6 +813,9 @@ func main() {
 			os.Exit(1)
 		}
 		r.Post("/v1/phase3/auth/pms/resolve", s.p3auth.resolveHandler)
+		// The sealed half of a recorded attempt, opened for edged on an authorised operator's behalf. It is
+		// here rather than in edged because scd holds the key and edged does not — see the handler.
+		r.Post("/v1/phase3/signin-attempts/credentials", s.p3auth.signInAttemptCredentialsHandler)
 		r.Post("/v1/phase3/auth/pms/grant", s.p3auth.grantHandler)
 		// Read-only: why the device's most recent access ended, so the portal can say so instead of showing
 		// the ordinary sign-in page to a guest whose package ran out. Answers DATA, TIME or nothing.

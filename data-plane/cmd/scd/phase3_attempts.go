@@ -16,8 +16,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
+	"net/http"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -269,4 +272,53 @@ func (p *phase3Auth) requestIDForContext(ctx context.Context, authContextID stri
 		return ""
 	}
 	return id
+}
+
+// ---- opening a sealed attempt for an authorised operator ---------------------
+
+// signInAttemptCredentialsHandler returns the sealed half of ONE attempt, in clear.
+//
+// WHY THIS LIVES IN SCD AND NOT IN EDGED. edged serves the operator API and runs unprivileged over HTTP; scd
+// runs as root behind a unix socket and is the only service that holds the sealing key. Putting the key in
+// edged would mean the process that answers an HTTP request could also decrypt every guest credential on the
+// appliance — so the permission check and the key deliberately sit on opposite sides of a boundary, and
+// neither alone is enough. This is the same split the voucher DEK already uses.
+//
+// WHAT THIS ENDPOINT IS NOT. It is not an authorisation decision. Reaching scd's socket at all requires being
+// a trusted local service, and WHICH operator may ask is settled by edged against the site role matrix before
+// the call is made. Restating that check here would be a second copy of a boundary that must have one.
+func (p *phase3Auth) signInAttemptCredentialsHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		AttemptID string `json:"attempt_id"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<14))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil || strings.TrimSpace(req.AttemptID) == "" {
+		writeJSONScd(w, http.StatusBadRequest, map[string]any{"error": "attempt_id is required"})
+		return
+	}
+	sensitive, ok, err := p.attempts.OpenSensitive(r.Context(), p.srv.tenID, p.srv.siteID,
+		strings.TrimSpace(req.AttemptID))
+	if err != nil {
+		slog.Error("phase3 auth: a sealed sign-in attempt could not be opened", "err", err)
+		writeJSONScd(w, http.StatusInternalServerError, map[string]any{"error": "unavailable"})
+		return
+	}
+	// A NO ROW and a ROW WITH NO SEALED HALF answer the same way on purpose. The first is an id from another
+	// site or an id that never existed; the second is an attempt recorded while the key was unavailable.
+	// Neither has values to show, and distinguishing them here would let a caller probe for the existence of
+	// attempts it is not entitled to see.
+	if !ok {
+		writeJSONScd(w, http.StatusOK, map[string]any{"available": false})
+		return
+	}
+	writeJSONScd(w, http.StatusOK, map[string]any{
+		"available":                   true,
+		"submitted_verifier":          sensitive.SubmittedVerifier,
+		"normalized_verifier":         sensitive.NormalizedVerifier,
+		"accepted_first_name":         sensitive.AcceptedFirstName,
+		"accepted_family_name":        sensitive.AcceptedFamilyName,
+		"accepted_reservation_number": sensitive.AcceptedReservationNumber,
+		"additional_accepted_guests":  sensitive.AdditionalAcceptedGuests,
+	})
 }

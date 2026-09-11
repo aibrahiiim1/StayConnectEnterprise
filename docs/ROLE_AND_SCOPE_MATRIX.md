@@ -47,6 +47,8 @@ Seven roles, enforced by edged per `/edge/v1` resource. Legend:
 | pms-providers (+test/cache/health) | W | W | R | R | – | R | R |
 | auth-methods | W | W | R | R | – | R | R |
 | guest-device-self-service | W | W | R | R | – | R | R |
+| guest-signin-attempts (`View_Guest_SignIn_Attempts`) | W | R | **R** | **R** | – | – | R |
+| guest-signin-credentials (`View_Guest_SignIn_Credentials`) | W | R | **R** | **R** | – | – | **–** |
 | walled-garden | W | W | R | R | – | R | R |
 | portal-branding | W | W | R | R | – | R | R |
 | payments (view) | W | W | R | R | – | **W** | R |
