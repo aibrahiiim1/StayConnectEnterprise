@@ -79,19 +79,36 @@ func TestTheResetSaysNothingNewToTheGuest(t *testing.T) {
 	}
 }
 
-func TestRetryCannotProduceASecondGrant(t *testing.T) {
+// THE REPLAY DEFECT, ASSERTED AT ITS SOURCE.
+//
+// The portal used to carry a request id across submissions and re-use it whenever a derived "attempt key"
+// looked unchanged. The key was built from last_name / first_name / reservation_number, and room_any — the
+// combined mode a property actually runs — puts the typed value in 'verification', which the key never read.
+// So every tap on one page sent the SAME id, the server replayed the resolution recorded under it, and a
+// corrected surname was answered by the guest's own typo until the page was reloaded.
+//
+// These assertions are about STATE, not about that one forgotten field. A page that keeps no request id
+// between submissions cannot freeze on any field, including one added later.
+func TestEveryDeliberateSubmissionMintsItsOwnRequestID(t *testing.T) {
 	s := phase3Script(t)
-	// The request id is retained across a failure ON PURPOSE: signing in again with the same details returns
-	// the SAME Auth Context rather than minting a second one, so the trip back to sign-in cannot become a
-	// route to two grants. Only a SUCCESSFUL grant clears it.
-	success := s[strings.Index(s, "if (j.ok && j.session_id)"):]
-	success = success[:strings.Index(success, "if (j.ok && j.needs_choice)")]
-	if !strings.Contains(success, "PMS_REQUEST_ID = ''") {
-		t.Error("a successful grant no longer clears the request id, so a replay could resolve again")
+
+	// (1) no page-level request-id state survives a submission, and no derivation decides whether to reuse
+	// one. Either would reintroduce the freeze.
+	for _, gone := range []string{"PMS_REQUEST_ID", "PMS_ATTEMPT_KEY", "phase3RequestID"} {
+		if strings.Contains(s, gone) {
+			t.Errorf("%s is back: a request id that outlives its submission can freeze a corrected one", gone)
+		}
 	}
-	reset := s[strings.Index(s, "function resetPhase3ToSignIn"):]
-	reset = reset[:strings.Index(reset, "function renderPhase3Choices")]
-	if strings.Contains(reset, "PMS_REQUEST_ID = ''") {
-		t.Error("the failure path clears the request id, which turns a lost-in-transit grant into a second resolution")
+
+	// (2) the id is minted where the deliberate submission is handled.
+	submit := s[strings.Index(s, "document.getElementById('form-pms').addEventListener('submit'"):]
+	if !strings.Contains(submit, "body.request_id = newRequestID();") {
+		t.Error("the sign-in submission does not mint a fresh request id")
+	}
+
+	// (3) and the minted value is still the canonical UUID the server accepts — the shape assertion itself
+	// lives in the browser test, which runs the function; this only proves the generator is what is called.
+	if !strings.Contains(s, "function newRequestID()") {
+		t.Fatal("newRequestID is gone, so the submission cannot be minting a canonical UUID")
 	}
 }

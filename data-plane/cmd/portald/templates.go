@@ -331,10 +331,6 @@ const landingHTML = `<!doctype html>
     // deliberately no branch here that renders a server reason — a page that could say "that room exists but
     // the name is wrong" is an occupancy oracle for anyone sitting in the lobby.
     let PHASE3_PMS = false;
-    let PMS_REQUEST_ID = '';
-    // PMS_ATTEMPT_KEY is the details the current request id belongs to. The id must survive a retry of the
-    // SAME attempt and must not survive a different one — see phase3RequestID below.
-    let PMS_ATTEMPT_KEY = '';
     let PMS_AUTH_CONTEXT = '';
     // THE ONE MESSAGE EVERY AUTHENTICATION NON-SUCCESS RENDERS.
     //
@@ -379,25 +375,30 @@ const landingHTML = `<!doctype html>
       return h.slice(0,8) + '-' + h.slice(8,12) + '-' + h.slice(12,16) + '-' + h.slice(16,20) + '-' + h.slice(20);
     }
 
-    // phase3RequestID decides whether this submission is a RETRY of the attempt already in flight or a NEW
-    // attempt, and returns the id accordingly.
+    // ONE DELIBERATE SUBMISSION, ONE RESOLUTION REQUEST ID. The id is minted where the guest's tap is
+    // handled — see the form's submit listener — and never reused by a later tap.
     //
-    // This distinction is the whole value of the request id, and getting it wrong fails in both directions.
-    // Minting a fresh id every time means a guest on a flaky lobby connection — the normal case for a captive
-    // portal — records a second resolution and a second Auth Context every time they tap again, which is
-    // precisely the duplication the id exists to prevent. Never minting a new one means a guest who mistyped
-    // their room is stuck replaying the failed attempt forever, because the server correctly returns the same
-    // answer for the same id.
+    // IT USED TO BE DERIVED FROM THE DETAILS, on the reasoning that "the same details" means "the same
+    // attempt", and that derivation is what froze room sign-in. The key it built read last_name, first_name
+    // and reservation_number; room_any — the combined mode, and the one a property actually runs so that a
+    // guest is not asked which KIND of identifier they hold — puts what the guest typed in 'verification',
+    // which the key never looked at. Every submission from one page therefore carried ONE id, the server
+    // correctly replayed the first resolution it had recorded for that id, and a guest who mistyped and then
+    // corrected their surname was answered by their own typo until they reloaded the page. The uniform
+    // failure message made that indistinguishable from a name that was genuinely wrong.
     //
-    // The details themselves are the discriminator: same details, same attempt.
-    function phase3RequestID(body) {
-      const key = JSON.stringify([body.room||'', body.last_name||'', body.first_name||'', body.reservation_number||'']);
-      if (key !== PMS_ATTEMPT_KEY || !PMS_REQUEST_ID) {
-        PMS_ATTEMPT_KEY = key;
-        PMS_REQUEST_ID = newRequestID();
-      }
-      return PMS_REQUEST_ID;
-    }
+    // The replacement does not try to be cleverer about which fields the key should read. It removes the
+    // question: any field a derivation forgets is another way to freeze the page, and there is no version of
+    // that function whose correctness does not depend on remembering to update it.
+    //
+    // WHAT MINTING FRESHLY DOES NOT COST. The id is still stable for the whole round trip, which is the only
+    // idempotency the transport needs: the submit button is disabled while the request is in flight and
+    // there is no automatic client-side retry, so one tap makes exactly one call. And duplicate ACCESS was
+    // never what this id prevented — a Stay may hold exactly one live Entitlement (the grant refuses a
+    // second and a unique index backs it), a retry from the same device against a context it already
+    // consumed returns the session that consumption produced, and a resolution that SUCCEEDED is still
+    // replayed verbatim for its own id. What a second id can now produce is a second recorded resolution for
+    // a second deliberate attempt, which is what an attempt is.
 
     // POST-STAY. The body is {pin} and nothing else. The server refuses unknown fields outright, so a page
     // that tried to "helpfully" include a room or a stay would break loudly instead of being quietly ignored
@@ -455,8 +456,6 @@ const landingHTML = `<!doctype html>
         j = await r.json().catch(function(){ return {}; });
       } catch (e) { j = {}; }
       if (j.ok && j.session_id) {
-        // A new attempt after this one must be a NEW resolution, not a replay of a spent request id.
-        PMS_REQUEST_ID = ''; PMS_ATTEMPT_KEY = '';
         window.location = (j.redirect_to || '/success') + '?s=' + encodeURIComponent(j.session_id);
         return true;
       }
@@ -468,11 +467,14 @@ const landingHTML = `<!doctype html>
       // EVERY other answer — including a transport failure — is the same message. No branch here reads the
       // server's outcome, the site configuration, or anything else: one assignment, one string.
       //
-      // The request id is deliberately KEPT. A non-success can mean the guest's details were wrong, but it can
-      // equally mean the attempt was abandoned at the server's response-time budget or lost in transit with
-      // the resolution already recorded. Discarding the id would turn the second of those into a duplicate
-      // resolution; keeping it lets the retry return the same Auth Context. A guest who corrects their details
-      // gets a new id automatically, because the details are what the id is keyed to.
+      // NOTHING ABOUT THE FAILED ATTEMPT IS CARRIED FORWARD. This function cannot tell a wrong surname from a
+      // reply that was lost after the server had already recorded a resolution — that is the uniform envelope
+      // working as designed — so it must not make the next submission depend on which of those it was. It used
+      // to keep the request id on the reasoning that a lost reply should be retried rather than duplicated,
+      // and the cost of that was the guest who mistyped: the next tap carried the spent id, the server
+      // replayed the refusal recorded under it, and the corrected surname was never compared against anything.
+      // The next tap now mints its own id and is evaluated on its own evidence, and the server no longer
+      // treats a recorded refusal as an answer binding on a later request.
       //
       // The boolean is for the CALLER, not the guest: the package-choice handler needs to know whether the
       // offer set it is displaying is still worth showing. It carries no more information than "this did not
@@ -492,9 +494,11 @@ const landingHTML = `<!doctype html>
     // told whether the grant failed because the Auth Context was already spent, because the offer expired, or
     // for an internal reason. So it cannot know whether pressing the same button again is a safe retry or an
     // attempt to spend a consumed context. Going back to sign-in is safe under every one of those readings,
-    // and it costs the guest nothing, because the request id is deliberately retained: signing in again with
-    // the same details returns the SAME Auth Context rather than creating a second one, so no duplicate grant
-    // can arise from the retry.
+    // and what makes it safe is a SERVER invariant rather than anything this page remembers: signing in again
+    // proves identity again and may well produce a second Auth Context, but a Stay holds exactly one live
+    // Entitlement, so the second context cannot become a second grant. The page deliberately keeps no state
+    // from the failed attempt — a portal that had to remember the right thing to stay safe would be one
+    // forgotten assignment away from not being.
     function resetPhase3ToSignIn(errEl) {
       const box = document.getElementById('pms-choices');
       const form = document.getElementById('form-pms');
@@ -572,9 +576,12 @@ const landingHTML = `<!doctype html>
                             '&t=' + encodeURIComponent(j.duration_seconds || 0);
           return;
         }
-        // PHASE 3: the Stay-resolution flow. The request id makes a double-tap or a retry on a bad
-        // connection resolve ONCE — without it the guest's second attempt records a second resolution.
-        body.request_id = phase3RequestID(body);
+        // PHASE 3: the Stay-resolution flow. THIS tap is one resolution request, so it gets an id of its
+        // own, minted here where the deliberate submission begins. It bounds the round trip — a reply lost
+        // in transit could be retried against the same id and resolve once — and it deliberately does not
+        // outlive the tap: the next tap is a new submission of whatever the guest has now typed, and has to
+        // be evaluated on that evidence rather than answered from what the last one recorded.
+        body.request_id = newRequestID();
         await submitPhase3(body, errEl);
       } finally { btn.disabled = false; }
     });
