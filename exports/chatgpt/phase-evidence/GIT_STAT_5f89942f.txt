@@ -1,0 +1,4 @@
+commit 5f89942fbb122af78758c806d78991af68c4ebbb
+Date:   Sat Sep 12 01:32:46 2026 +0300
+
+    The mirror's condition comes through a scoped reader, not the runtime table
