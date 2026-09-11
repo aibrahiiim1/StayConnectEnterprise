@@ -39,6 +39,8 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsresolve"
 	"github.com/stayconnect/enterprise/data-plane/internal/staygrant"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/namenorm"
 )
 
 // phase3Auth is scd's Phase-3 arm. A nil value is inert, which is what a dark appliance gets: the routes are
@@ -764,10 +766,10 @@ func (p *phase3Auth) bridgeFor(ctx context.Context, ip net.IP) string {
 // Both sides of a comparison must be normalized the same way or the match silently depends on how the guest
 // typed it. The PMS mirror stores normalized values; these functions are the guest-side half of that contract.
 
-func normalizeRoom(s string) string {
-	return strings.ToUpper(strings.TrimSpace(s))
-}
+// These now DELEGATE. They used to hold their own copy of the transformation, which is how the write side
+// was able to drift away from them unnoticed -- the contract was asserted in a comment here and implemented
+// nowhere else. There is one implementation, in internal/namenorm, and both sides import it.
 
-func normalizeName(s string) string {
-	return strings.ToUpper(strings.TrimSpace(s))
-}
+func normalizeRoom(s string) string { return namenorm.Room(s) }
+
+func normalizeName(s string) string { return namenorm.Name(s) }

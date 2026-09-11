@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/namenorm"
 )
 
 // Sharer is one occupant of a Stay as the PMS reports it. Sharers are LEGAL and ordinary: a Stay may have any
@@ -65,19 +67,29 @@ func applySharers(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID st
 				return err
 			}
 		}
+		// THE SHARER PATH WRITES THE SAME `_norm` COLUMNS AND WAS MISSED BY THE FIRST PASS OF THIS FIX.
+		// Primary-guest normalization alone would have left every additional occupant raw, so a second guest
+		// on the booking still could not sign in.
+		//
+		// The lookup below is normalized TOO, and that is not cosmetic: it identifies an existing occupant by
+		// name when the PMS sends no external guest id. Normalizing only the writes would make it stop
+		// matching the rows already stored raw, and every sharer event would then INSERT a duplicate occupant
+		// instead of updating one. Both sides move together or neither does.
 		var id string
 		err := tx.QueryRow(ctx, `SELECT id::text FROM iam_v2.stay_guests
 			WHERE stay_id=$1 AND (
 			      (COALESCE($2,'') <> '' AND external_guest_id = $2)
 			   OR (COALESCE($2,'') = '' AND COALESCE(first_name_norm,'')=COALESCE(NULLIF($3,''),'')
 			       AND COALESCE(last_name_norm,'')=COALESCE(NULLIF($4,''),'')))
-			LIMIT 1`, stayID, s.ExternalGuestID, s.FirstName, s.LastName).Scan(&id)
+			LIMIT 1`, stayID, s.ExternalGuestID,
+			namenorm.Name(s.FirstName), namenorm.Name(s.LastName)).Scan(&id)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 			if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.stay_guests
 				(tenant_id, site_id, pms_interface_id, stay_id, external_guest_id, first_name_norm, last_name_norm, display_name, is_primary)
 				VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),NULLIF($7,''),NULLIF($8,''),$9)`,
-				tenant, site, iface, stayID, s.ExternalGuestID, s.FirstName, s.LastName, display, s.IsPrimary); err != nil {
+				tenant, site, iface, stayID, s.ExternalGuestID,
+				namenorm.Name(s.FirstName), namenorm.Name(s.LastName), display, s.IsPrimary); err != nil {
 				return err
 			}
 		case err != nil:
@@ -88,7 +100,8 @@ func applySharers(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID st
 				last_name_norm=COALESCE(NULLIF($2,''),last_name_norm),
 				display_name=COALESCE(NULLIF($3,''),display_name),
 				is_primary = CASE WHEN $4 THEN true ELSE is_primary END
-				WHERE id=$5`, s.FirstName, s.LastName, display, s.IsPrimary, id); err != nil {
+				WHERE id=$5`, namenorm.Name(s.FirstName), namenorm.Name(s.LastName),
+				display, s.IsPrimary, id); err != nil {
 				return err
 			}
 		}

@@ -5,7 +5,7 @@
 // non-authoritative hint only. The engine issues NO financial command and implements NO PMS Posting.
 package stayengine
 
-import "strings"
+import "github.com/stayconnect/enterprise/data-plane/internal/namenorm"
 
 // EventType is the closed set of domain event types the engine ingests (authoritative Protel map).
 type EventType string
@@ -128,4 +128,8 @@ func Resolve(ev InboxEvent, cur *StayView) Decision {
 	}
 }
 
-func normRoom(s string) string { return strings.TrimSpace(s) }
+// TRIM ONLY WAS THE ROOM HALF OF THE SAME ASYMMETRY. The authentication query upper-cases the room the guest
+// types, so a stored "a12" could never match a typed "A12". It stayed invisible because the property where
+// the defect surfaced numbers its rooms with digits, and digits are unaffected by case -- a property of one
+// hotel's data, not a guarantee. Alphanumeric rooms are ordinary.
+func normRoom(s string) string { return namenorm.Room(s) }

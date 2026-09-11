@@ -96,6 +96,56 @@ network — not from guest devices and not from the internet. Cloud operators wh
 need site data see it through fleet telemetry, never through a direct connection
 to the appliance.
 
+## 5A. PMS transport offline is an OPERATING MODE, not an incident
+
+**This is an authoritative operating rule. Read it before opening an incident about a disconnected PMS.**
+
+StayConnect is **local-first**. The appliance authenticates guests, enforces entitlements and runs sessions
+from its own site database. The PMS link is how the guest list gets there; it is **not** a dependency of
+serving guests.
+
+On PRE-LIVE the Product Owner **deliberately stops the PMS connection**, because that interface is shared with
+another system. A `DISCONNECTED` transport or a `DIAL_FAILED` error on its own is therefore an **expected
+condition**, and on its own it means nothing about whether guests can get online.
+
+### What keeps working while the transport is offline
+
+- **Room sign-in for every stay already published into the local mirror.** The resolver reads the mirror, not
+  the PMS.
+- Free and manual packages, vouchers and guest accounts.
+- Entitlement enforcement, shaping and accounting.
+- Every existing session.
+
+### What cannot work, and must be said plainly
+
+Arrivals, departures and changes the PMS made **after the last completed sync are unknown locally** until the
+link is restored. A guest who checked in during the outage is not in the mirror and cannot sign in by room.
+The UI must state this limitation rather than implying the guest list is current.
+
+### What StayConnect must NOT do
+
+It must **not** automatically restart, resync, reconnect or reconfigure a PMS interface because the transport
+is offline. The offline state is intentional; "helpfully" reconnecting fights the operator for a shared
+resource. Reconnection and resync are operator-initiated actions.
+
+### Health wording must separate four distinct facts
+
+An operator needs these kept apart, because conflating them is what turns an intentional state into a
+false alarm:
+
+1. **PMS transport** — online or offline.
+2. **Local mirror** — present and usable, or not.
+3. **Mirror age** — when the guest list was last completely synced.
+4. **Actual guest-sign-in impairment** — whether a guest can get online right now.
+
+Preferred wording:
+
+> PMS is currently offline. Guest sign-in continues from the local guest list last updated at *[time]*. New PMS
+> changes will appear after reconnection.
+
+**Do not classify the system as globally impaired while the local mirror remains usable.** "PMS disconnected"
+and "guests cannot get online" are different statements, and only the second is an incident.
+
 ## 6. Sync agent (inside scd)
 
 - **Outbox writer**: every reportable local event (heartbeat, health snapshot,
