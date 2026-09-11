@@ -189,6 +189,13 @@ GRANT SELECT, INSERT, DELETE ON iam_v2.sign_in_attempts TO svc_scd;
 -- comparison an operator reads.
 GRANT EXECUTE ON FUNCTION iam_v2.complete_sign_in_attempt(uuid,uuid,uuid,text,uuid,uuid) TO svc_scd;
 
+-- ...and the scoped reader that tells scd whether the local mirror can authorise ANYBODY, so that it can say
+-- "we cannot check right now" truthfully instead of telling a guest with correct details to re-check them.
+-- EXECUTE on the function, and NOT SELECT on iam_v2.pms_interface_runtime: the role being authorised must not
+-- be able to read the feed health it is authorised against. The first version of this read the table directly
+-- and the Gate-P privilege suite caught it refusing every guest on the property.
+GRANT EXECUTE ON FUNCTION iam_v2.p3_guest_network_mirror_state(uuid,uuid,uuid) TO svc_scd;
+
 -- NOT granted, on purpose:
 --   * DELETE on anything EXCEPT iam_v2.sign_in_attempts above -- no authentication path deletes
 --     authoritative state; the one DELETE granted is the attempts table's own retention sweep;

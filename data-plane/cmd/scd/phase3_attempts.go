@@ -150,19 +150,17 @@ type mirrorState struct {
 // trivially true, so what remains is exactly the feed-health half — connected-and-in-sync, or a published
 // roster that still stands. It is therefore strictly more permissive than the real per-stay check, which is
 // what makes it safe to refuse on: if it says no, no stay could have passed either.
+//
+// IT GOES THROUGH A SCOPED READER RATHER THAN READING pms_interface_runtime. svc_scd deliberately holds no
+// privilege on that table: the role being authorised must not read, still less rewrite, the feed health it is
+// authorised against. The first version of this queried it directly, and the permission error did not produce
+// a missing diagnostic — it made "can the mirror authorise anybody" answer NO, and every guest on the
+// property was refused. The Gate-P privilege suite caught it before it reached an appliance.
 func (p *phase3Auth) mirrorStateFor(ctx context.Context, guestNetwork string) mirrorState {
 	var st mirrorState
 	row := p.srv.db.QueryRow(ctx, `
-		SELECT COALESCE(max(rt.transport_status), ''),
-		       max(rt.last_complete_sync_at),
-		       bool_or(iam_v2.p3_feed_authorizes(pi.tenant_id, pi.site_id, pi.id, pi.current_revision_id, now()))
-		  FROM iam_v2.guest_network_pms_map m
-		  JOIN iam_v2.pms_interfaces pi
-		    ON pi.tenant_id=m.tenant_id AND pi.site_id=m.site_id AND pi.id=m.pms_interface_id
-		   AND pi.lifecycle_state='ACTIVE'
-		  LEFT JOIN iam_v2.pms_interface_runtime rt
-		    ON rt.tenant_id=pi.tenant_id AND rt.site_id=pi.site_id AND rt.pms_interface_id=pi.id
-		 WHERE m.tenant_id=$1 AND m.site_id=$2 AND m.guest_network_id=$3`,
+		SELECT transport_status, last_complete_sync_at, can_authorise
+		  FROM iam_v2.p3_guest_network_mirror_state($1::uuid,$2::uuid,$3::uuid)`,
 		p.srv.tenID, p.srv.siteID, guestNetwork)
 	var can *bool
 	if err := row.Scan(&st.TransportStatus, &st.LastCompleteSync, &can); err != nil {

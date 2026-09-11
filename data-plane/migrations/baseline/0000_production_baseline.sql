@@ -1976,6 +1976,35 @@ END $$;
 
 
 --
+-- Name: p3_guest_network_mirror_state(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p3_guest_network_mirror_state(p_tenant uuid, p_site uuid, p_guest_network uuid) RETURNS TABLE(transport_status text, last_complete_sync_at timestamp with time zone, can_authorise boolean)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE(max(rt.transport_status), ''),
+         max(rt.last_complete_sync_at),
+         COALESCE(bool_or(iam_v2.p3_feed_authorizes(
+             pi.tenant_id, pi.site_id, pi.id, pi.current_revision_id, now())), false)
+    FROM iam_v2.guest_network_pms_map m
+    JOIN iam_v2.pms_interfaces pi
+      ON pi.tenant_id = m.tenant_id AND pi.site_id = m.site_id AND pi.id = m.pms_interface_id
+     AND pi.lifecycle_state = 'ACTIVE'
+    LEFT JOIN iam_v2.pms_interface_runtime rt
+      ON rt.tenant_id = pi.tenant_id AND rt.site_id = pi.site_id AND rt.pms_interface_id = pi.id
+   WHERE m.tenant_id = p_tenant AND m.site_id = p_site AND m.guest_network_id = p_guest_network;
+$$;
+
+
+--
+-- Name: FUNCTION p3_guest_network_mirror_state(p_tenant uuid, p_site uuid, p_guest_network uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.p3_guest_network_mirror_state(p_tenant uuid, p_site uuid, p_guest_network uuid) IS 'Transport status, last complete sync and "could the mirror authorise anybody" for the interfaces mapped to one guest network. Exists so svc_scd never needs privilege on iam_v2.pms_interface_runtime: the role being authorised must not read or rewrite the feed health it is authorised against. Exposes no guest, Stay, reservation or PMS credential.';
+
+
+--
 -- Name: p3_history_appendonly(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -13678,6 +13707,14 @@ GRANT ALL ON FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_in
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p3_grace_config_version_guard() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION p3_guest_network_mirror_state(p_tenant uuid, p_site uuid, p_guest_network uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p3_guest_network_mirror_state(p_tenant uuid, p_site uuid, p_guest_network uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p3_guest_network_mirror_state(p_tenant uuid, p_site uuid, p_guest_network uuid) TO svc_scd;
 
 
 --

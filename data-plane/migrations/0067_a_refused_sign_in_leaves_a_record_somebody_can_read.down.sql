@@ -14,6 +14,7 @@
 
 BEGIN;
 
+DROP FUNCTION IF EXISTS iam_v2.p3_guest_network_mirror_state(uuid,uuid,uuid);
 DROP FUNCTION IF EXISTS iam_v2.complete_sign_in_attempt(uuid,uuid,uuid,text,uuid,uuid);
 DROP INDEX IF EXISTS iam_v2.sign_in_attempts_request;
 DROP INDEX IF EXISTS iam_v2.sign_in_attempts_expiry;

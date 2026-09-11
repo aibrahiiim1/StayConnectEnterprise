@@ -277,6 +277,66 @@ BEGIN
   END IF;
 END $ownfn$;
 
+
+-- ---------------------------------------------------------------------------------------------------------
+-- THE MIRROR'S CONDITION, WITHOUT HANDING SCD THE RUNTIME TABLE.
+--
+-- To tell a guest "we cannot check right now" truthfully, and to record what the feed looked like at that
+-- instant, scd needs three facts about the interfaces its guest network maps to: the transport status, when
+-- the roster was last fully published, and whether anything could be authorised at all.
+--
+-- It must NOT get them by reading iam_v2.pms_interface_runtime. svc_scd deliberately holds no privilege on
+-- that table -- the role being authorised must not be able to read, still less rewrite, the feed health it is
+-- authorised against -- and the Gate-P privilege suite enforces exactly that. The first version of this
+-- feature queried the table directly, and the consequence was not a missing diagnostic: the permission error
+-- made "can the mirror authorise anybody" answer NO, and every guest on the property was refused. Caught by
+-- that suite before it ever reached an appliance.
+--
+-- So the three facts come through a scoped reader, the same shape as every other narrow read in this schema.
+-- It returns an aggregate over the caller's own tenant, site and guest network, and it exposes no guest, no
+-- Stay, no reservation and no PMS credential. The freshness argument is now(), which makes the predicate's
+-- age term trivially true so that what remains is the FEED-HEALTH half -- strictly more permissive than the
+-- real per-stay check, which is what makes it safe to refuse on.
+-- ---------------------------------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION iam_v2.p3_guest_network_mirror_state(
+    p_tenant uuid, p_site uuid, p_guest_network uuid)
+  RETURNS TABLE (transport_status text, last_complete_sync_at timestamptz, can_authorise boolean)
+  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+  SELECT COALESCE(max(rt.transport_status), ''),
+         max(rt.last_complete_sync_at),
+         COALESCE(bool_or(iam_v2.p3_feed_authorizes(
+             pi.tenant_id, pi.site_id, pi.id, pi.current_revision_id, now())), false)
+    FROM iam_v2.guest_network_pms_map m
+    JOIN iam_v2.pms_interfaces pi
+      ON pi.tenant_id = m.tenant_id AND pi.site_id = m.site_id AND pi.id = m.pms_interface_id
+     AND pi.lifecycle_state = 'ACTIVE'
+    LEFT JOIN iam_v2.pms_interface_runtime rt
+      ON rt.tenant_id = pi.tenant_id AND rt.site_id = pi.site_id AND rt.pms_interface_id = pi.id
+   WHERE m.tenant_id = p_tenant AND m.site_id = p_site AND m.guest_network_id = p_guest_network;
+$fn$;
+
+COMMENT ON FUNCTION iam_v2.p3_guest_network_mirror_state(uuid,uuid,uuid) IS
+  'Transport status, last complete sync and "could the mirror authorise anybody" for the interfaces mapped to '
+  'one guest network. Exists so svc_scd never needs privilege on iam_v2.pms_interface_runtime: the role being '
+  'authorised must not read or rewrite the feed health it is authorised against. Exposes no guest, Stay, '
+  'reservation or PMS credential.';
+
+REVOKE ALL ON FUNCTION iam_v2.p3_guest_network_mirror_state(uuid,uuid,uuid) FROM PUBLIC;
+DO $grantmirror$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_scd') THEN
+    GRANT EXECUTE ON FUNCTION iam_v2.p3_guest_network_mirror_state(uuid,uuid,uuid) TO svc_scd;
+  END IF;
+END
+$grantmirror$;
+
+DO $ownmirror$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'iam_v2_owner') THEN
+    EXECUTE 'ALTER FUNCTION iam_v2.p3_guest_network_mirror_state(uuid,uuid,uuid) OWNER TO iam_v2_owner';
+  END IF;
+END $ownmirror$;
+
 -- ---------------------------------------------------------------------------------------------------------
 -- Re-assert on the database this migration just changed, rather than assuming.
 -- ---------------------------------------------------------------------------------------------------------
@@ -323,6 +383,22 @@ BEGIN
   IF has_function_privilege('public',
         'iam_v2.complete_sign_in_attempt(uuid,uuid,uuid,text,uuid,uuid)', 'EXECUTE') THEN
     RAISE EXCEPTION '0067: PUBLIC can complete a sign-in attempt';
+  END IF;
+
+  IF NOT has_function_privilege('svc_scd',
+        'iam_v2.p3_guest_network_mirror_state(uuid,uuid,uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION '0067: svc_scd cannot read the mirror state; every guest would be refused as if the '
+                    'mirror were stale';
+  END IF;
+  -- The whole point of the reader: the TABLE stays forbidden. If svc_scd ever gains privilege on it directly,
+  -- the reader has become decoration and the boundary it protects is gone.
+  IF has_table_privilege('svc_scd', 'iam_v2.pms_interface_runtime', 'SELECT') THEN
+    RAISE EXCEPTION '0067: svc_scd holds SELECT on iam_v2.pms_interface_runtime; the scoped reader exists so '
+                    'that it does not';
+  END IF;
+  IF has_function_privilege('public',
+        'iam_v2.p3_guest_network_mirror_state(uuid,uuid,uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION '0067: PUBLIC can read the mirror state';
   END IF;
 
   IF has_table_privilege('public', 'iam_v2.sign_in_attempts', 'SELECT') THEN
