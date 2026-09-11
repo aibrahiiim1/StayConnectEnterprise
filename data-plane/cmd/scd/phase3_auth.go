@@ -267,6 +267,16 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !out.GuestVisibleSuccess() {
+		// One refusal reason is not like the others. A spent request id means the CLIENT re-used an id it had
+		// already had refused — which the portal no longer does — so it is the signature of a stale portal
+		// build or of something that is not the portal, and an operator looking at a guest who "cannot sign
+		// in" needs to see that rather than another indistinguishable NOT_VERIFIED. The guest's answer is the
+		// same uniform envelope as every other non-success; only the log differs.
+		if out.Reason == pmsresolve.ReasonSpentOnRefusal {
+			slog.Warn("phase3 auth: a resolution request id was re-used after it had already been refused; "+
+				"the submission was evaluated and refused rather than answered from the earlier record",
+				"guest_network", dev.GuestNetwork)
+		}
 		notVerified(w, "resolution_"+string(out.Resolution)+"_"+out.Reason)
 		return
 	}

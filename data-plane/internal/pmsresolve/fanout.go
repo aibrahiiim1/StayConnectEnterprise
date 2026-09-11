@@ -50,12 +50,25 @@ func NewResolver(pool *pgxpool.Pool) *Resolver {
 type Result struct {
 	Outcome
 	Stay string
-	// Replayed is true when this request id had already been resolved and the STORED outcome was returned
-	// unchanged (the probes are not re-run and no second row is written).
+	// Replayed is true when this request id had already been resolved SUCCESSFULLY and that stored outcome was
+	// returned unchanged (the probes are not re-run and no second row is written). It is never true for a
+	// non-success: see Resolve.
 	Replayed bool
 	// Candidates is the complete vector the decision was made on, in stable interface order.
 	Candidates []Candidate
 }
+
+// ReasonSpentOnRefusal — this request id already carries a RECORDED REFUSAL, and re-evaluating it against the
+// evidence presented now produced a success. The two cannot both be true of one resolution request, and the
+// recorded one cannot be corrected: scd holds INSERT on iam_v2.auth_resolutions and deliberately not UPDATE,
+// because a service that can rewrite the record of why a guest was admitted is a service whose audit trail
+// proves nothing. Admitting a guest whose authority cannot be recorded is the failure this refuses.
+//
+// No conforming caller reaches it. A request id identifies ONE deliberate submission, so a second submission
+// carries a second id and is resolved and recorded on its own terms. Reaching this means a client re-used a
+// spent id — a stale portal build, or something that is not the portal — so the guest gets the uniform
+// refusal and scd logs it as the distinct condition it is, rather than as one more wrong surname.
+const ReasonSpentOnRefusal = "REQUEST_ID_SPENT_ON_AN_EARLIER_REFUSAL"
 
 // Resolve gathers every mapped interface's verdict CONCURRENTLY, waits for the whole vector (a slow VERIFIED
 // must still beat a fast NO_MATCH), applies the strict decision, and records it IDEMPOTENTLY against the
@@ -65,10 +78,26 @@ func (r *Resolver) Resolve(ctx context.Context, tenant, site, guestNetwork, requ
 	if requestID == "" {
 		return res, ErrNoRequestID
 	}
-	// (1) already resolved? replay the stored outcome without re-probing anything.
-	if prev, ok, err := r.load(ctx, tenant, site, requestID); err != nil {
+	// (1) ALREADY RESOLVED? REPLAY IS A PROPERTY OF SUCCESS, AND ONLY OF SUCCESS.
+	//
+	// A stored VERIFIED resolution is replayed verbatim, without re-probing anything. That is what makes a
+	// successful identity proof idempotent: the same request id yields the same Stay, so a double tap or a
+	// reply the guest's phone never received converges on the one Auth Context instead of minting a second.
+	//
+	// A stored NON-VERIFIED resolution is NOT a verdict binding on anything that comes later. It is the record
+	// of one refused attempt, and the evidence in front of us now may be different — a guest who mistyped a
+	// surname and corrected it presents a different fact about the world than the one that was refused. This
+	// used to replay it, and that froze the portal page: the first typo answered every later submission, and
+	// because every non-success renders one uniform sentence, the guest could not tell that their correction
+	// had never been compared against anything at all.
+	//
+	// So a request id whose stored outcome is anything other than VERIFIED is RE-EVALUATED below, against
+	// current state, with every probe actually run. Nothing is replayed.
+	prev, spent, err := r.load(ctx, tenant, site, requestID)
+	if err != nil {
 		return res, err
-	} else if ok {
+	}
+	if spent && prev.Resolution == ResVerified {
 		prev.Replayed = true
 		return prev, nil
 	}
@@ -126,18 +155,48 @@ func (r *Resolver) Resolve(ctx context.Context, tenant, site, guestNetwork, requ
 		res.Stay = ""
 	}
 
-	// (4) record idempotently. A concurrent racer that won the unique index means this request was already
-	// resolved: return the STORED outcome so every caller of one request id sees the same answer.
+	// (4) RECORD. The unique index is what makes this idempotent, and the interesting case is the one where it
+	// refuses the insert — either because the id already carried a refusal that step (1) chose to re-evaluate,
+	// or because a concurrent racer on the same id got there first. Both hand back the STORED row, and both
+	// are answered by the same rule.
+	if spent {
+		return r.reconcile(prev, res, cands), nil
+	}
 	stored, err := r.store(ctx, tenant, site, guestNetwork, requestID, res)
 	if err != nil {
 		return Result{}, err
 	}
 	if stored != nil {
-		stored.Candidates = cands
-		stored.Replayed = true
-		return *stored, nil
+		return r.reconcile(*stored, res, cands), nil
 	}
 	return res, nil
+}
+
+// reconcile answers what a caller sees when a request id already carries a stored resolution and the probes
+// have just been run again for it. `stored` is the durable record; `fresh` is what this evaluation decided.
+//
+// The rule follows from the record being append-only (see ReasonSpentOnRefusal):
+//
+//   - stored VERIFIED — the success stands and is replayed. Every caller of one request id sees one Stay,
+//     which is what stops a retry becoming a second Auth Context.
+//   - stored refused, fresh refused — the fresh evaluation IS the answer. The probes genuinely ran; the guest
+//     is refused because they are refused now, not because they were refused before. The stored row already
+//     records the attempt, so nothing new is written.
+//   - stored refused, fresh VERIFIED — irreconcilable. One request id cannot be both, and the refusal cannot
+//     be overwritten, so this fails closed rather than granting access whose authority is unrecordable.
+func (r *Resolver) reconcile(stored, fresh Result, cands []Candidate) Result {
+	if stored.Resolution == ResVerified {
+		stored.Candidates = cands
+		stored.Replayed = true
+		return stored
+	}
+	if fresh.Resolution == ResVerified {
+		return Result{
+			Outcome:    Outcome{Resolution: ResIndeterminate, Reason: ReasonSpentOnRefusal},
+			Candidates: cands,
+		}
+	}
+	return fresh
 }
 
 func (r *Resolver) mapped(ctx context.Context, tenant, site, guestNetwork string) ([]string, error) {
