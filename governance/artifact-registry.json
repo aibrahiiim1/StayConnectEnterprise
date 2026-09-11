@@ -291,6 +291,12 @@
       "path": "docs/acceptance/evidence/phase1b/T0010-SOFTWARE-GATE.txt",
       "status": "AUTHORITATIVE",
       "note": "Phase 1B software-gate evidence: build/vet/test, migrations, Gate-P dry run, dark/security proofs."
+    },
+    {
+      "id": "backfill-0066-pii-retention",
+      "path": "data-plane/migrations/0066_the_mirror_stores_what_the_query_compares.up.sql",
+      "status": "RETAINED_PENDING_REMOVAL",
+      "note": "iam_v2.backfill_0066_identity_text is a DUPLICATE PII STORE created on purpose: it holds the guest first/last names as they stood before migration 0066 normalized them, so 0066.down.sql can restore the exact prior values rather than guessing at casing it cannot invert. It is REVOKEd from PUBLIC and from every svc_* runtime role, so only the migration owner can read it, and it never leaves the appliance. REMOVAL GATE: the Product Owner formally closing this release's rollback window. At that point the table is dropped by a controlled operation; until then it is retained deliberately, not by neglect. This entry exists so an indefinite second copy of guest names cannot survive unnoticed -- the Zero-Stale-Leftovers rule requires a retained item to name its reason, its owner and its removal gate."
     }
   ]
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/checkout"
+	"github.com/stayconnect/enterprise/data-plane/internal/namenorm"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
@@ -291,7 +292,7 @@ func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, e
 		return cur.ID, "APPLIED", "", nil
 
 	case OpRoomMove:
-		if _, err = tx.Exec(ctx, `UPDATE iam_v2.stays SET normalized_room_number=NULLIF($2,'') WHERE id=$1`, cur.ID, ev.Room); err != nil {
+		if _, err = tx.Exec(ctx, `UPDATE iam_v2.stays SET normalized_room_number=NULLIF($2,'') WHERE id=$1`, cur.ID, namenorm.Room(ev.Room)); err != nil {
 			return "", "", "", err
 		}
 		// A room move is the PMS saying where this guest is NOW, so it refreshes occupancy like an arrival.
@@ -344,7 +345,8 @@ func createStay(ctx context.Context, tx pgx.Tx, tenant, site, iface string, ev I
 		 normalized_room_number, status, lifecycle_version, arrival, departure)
 		VALUES ($1,$2,$3,$4,$4, NULLIF($5,''), 'IN_HOUSE', 1, $6, $7)
 		RETURNING id::text`,
-		tenant, site, iface, ev.Reservation, ev.Room, parseYYMMDD(ev.ArrivalRaw), parseYYMMDD(ev.DepartureRaw)).Scan(&stayID); err != nil {
+		tenant, site, iface, ev.Reservation, namenorm.Room(ev.Room),
+		parseYYMMDD(ev.ArrivalRaw), parseYYMMDD(ev.DepartureRaw)).Scan(&stayID); err != nil {
 		return "", err
 	}
 	// occupancy + folio facts are written by applyOccupancyFacts on BOTH the create and update paths, so the
@@ -377,13 +379,19 @@ func upsertPrimaryGuest(ctx context.Context, tx pgx.Tx, tenant, site, iface, sta
 	} else if ev.LastName == "" {
 		display = ev.FirstName
 	}
+	// THE `_norm` COLUMNS GET NORMALIZED VALUES. They did not: ev.FirstName and ev.LastName went in exactly
+	// as the PMS sent them, while the authentication query compared them against an upper-cased input. A feed
+	// that sends "Anderson" instead of "ANDERSON" therefore produced a row that could never match, and the
+	// guest was told to check their details or contact reception. `display` is built from the RAW values
+	// above and stays untouched -- the operator must still see the guest's name as the PMS spells it.
 	_, err := tx.Exec(ctx, `INSERT INTO iam_v2.stay_guests
 		(tenant_id, site_id, pms_interface_id, stay_id, first_name_norm, last_name_norm, display_name, is_primary)
 		VALUES ($1,$2,$3,$4, NULLIF($5,''), NULLIF($6,''), NULLIF($7,''), true)
 		ON CONFLICT (stay_id) WHERE is_primary
 		DO UPDATE SET first_name_norm=EXCLUDED.first_name_norm, last_name_norm=EXCLUDED.last_name_norm,
 		             display_name=EXCLUDED.display_name`,
-		tenant, site, iface, stayID, ev.FirstName, ev.LastName, display)
+		tenant, site, iface, stayID,
+		namenorm.Name(ev.FirstName), namenorm.Name(ev.LastName), display)
 	return err
 }
 

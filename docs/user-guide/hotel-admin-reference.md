@@ -15,6 +15,14 @@ purpose. For step-by-step setup instructions see
 
 - **Login & session.** Gated by your operator login; re-validated every ~30s,
   otherwise returns you to `/login`. Email + **Sign out** at the bottom-left.
+- **"PMS offline" does not mean guests are cut off.** The appliance keeps its own copy of the guest list, so
+  room sign-in, vouchers, guest accounts, packages and every session in progress continue working while the
+  PMS link is down — this is a normal operating mode on this property, not a fault. What you lose is *news*:
+  arrivals and changes the PMS made since the last completed sync are not known here until the link is back,
+  so a guest who checked in during the outage cannot sign in by room number yet. Judge the situation on four
+  separate facts, not one: is the PMS link up, is the local guest list present, how old is it, and can a guest
+  actually get online. Only the last one is an outage. See
+  [Edge architecture §5A](../EDGE_ARCHITECTURE.md).
 - **The sidebar can be collapsed to an icon rail.** The button beside the
   StayConnect mark collapses the menu to icons and expands it again; it is
   labelled with what it will do ("Collapse sidebar" / "Expand sidebar") and works
