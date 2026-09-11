@@ -14,9 +14,17 @@ import { join } from "node:path";
 //   * they pick a package on a keyboard, or with a screen reader, or on a phone-sized viewport;
 //   * they hit Back after connecting.
 //
-// The request-id rule is the through-line for the first three, and it is the one place where a plausible
-// implementation is wrong in both directions: a fresh id on every tap duplicates resolutions on exactly the
-// flaky connections a captive portal exists to serve, and a permanent id makes a typo uncorrectable.
+// The request-id rule is the through-line for the first three, and it is where this page was wrong.
+//
+// The id used to be DERIVED from the typed details, so that "the same details" meant "the same attempt". The
+// intent was to stop a flaky lobby connection turning one tap into two resolutions. The cost was that any
+// field the derivation forgot froze the page — and it forgot `verification`, the field room_any puts the
+// guest's one typed value in, so a corrected surname was answered by the original typo until a reload.
+//
+// The rule now is simply: ONE DELIBERATE SUBMISSION, ONE REQUEST ID. What the derivation was protecting is
+// protected where it belongs and always was — the submit button is disabled for the duration of a request so
+// one tap makes one call, and a Stay may hold exactly one live Entitlement, so a second Auth Context cannot
+// become a second grant (asserted against a real database in cmd/scd's Phase-3 integration suite).
 
 const templatesGo = join(__dirname, "../../data-plane/cmd/portald/templates.go");
 
@@ -73,10 +81,15 @@ const FAIL = { ok: false, message: UNIFORM_MESSAGE };
 
 // ---------------------------------------------------------------- the request-id rule
 
-test("a retry with the same details reuses the request id, so one attempt stays one resolution", async ({ page }) => {
-  // The realistic sequence: the request is abandoned or lost, the guest sees the uniform message and taps
-  // Connect again without changing anything. Server-side that second call must be recognisable as the SAME
-  // attempt, or it mints a second Auth Context for one guest tapping one button twice.
+test("tapping Connect again after a refusal is a new attempt with a new request id", async ({ page }) => {
+  // The realistic sequence: the guest sees the uniform message and taps Connect again without changing
+  // anything. That is a DELIBERATE second submission and it must be evaluated, so it carries an id of its own.
+  //
+  // This used to assert the opposite — that the second call reused the first id — on the reasoning that one
+  // guest tapping one button twice should be one resolution. The reasoning conflated two different events:
+  // an impatient double tap during a request in flight (which the disabled button already prevents, see "a
+  // double tap sends one request, not two") and a considered retry after an answer has been rendered. Only
+  // the first is the same attempt. Treating the second as a replay is what made a stored refusal permanent.
   const calls: Call[] = [];
   await serve(page, calls, (n) => (n === 0 ? FAIL : { ok: true, session_id: "s", redirect_to: "/success" }));
 
@@ -89,12 +102,18 @@ test("a retry with the same details reuses the request id, so one attempt stays 
 
   expect(calls).toHaveLength(2);
   expect(String(calls[0].body.request_id ?? "")).not.toBe("");
-  expect(calls[1].body.request_id).toBe(calls[0].body.request_id);
+  expect(calls[1].body.request_id).not.toBe(calls[0].body.request_id);
 });
 
-test("a dropped connection is retried under the same request id", async ({ page }) => {
+test("a dropped connection leaves the page able to try again", async ({ page }) => {
   // The fetch itself throws — no response at all. The guest cannot tell this from a wrong room, and must not
-  // be able to; but the client knows, and the resolution may well have been recorded before the drop.
+  // be able to.
+  //
+  // The old contract retried under the SAME id, so that a resolution recorded just before the drop would be
+  // replayed rather than duplicated. That is the case the correction gives up, deliberately: the client
+  // cannot distinguish "recorded then lost" from "never evaluated", and paying for the first case with a
+  // page that freezes in the second is the wrong trade. What it costs is one extra recorded resolution on a
+  // dropped connection; what the old behaviour cost was a guest who could not correct a typo.
   const calls: Call[] = [];
   await serve(page, calls, (n) => (n === 0 ? null : { ok: true, session_id: "s", redirect_to: "/success" }));
 
@@ -106,7 +125,7 @@ test("a dropped connection is retried under the same request id", async ({ page 
   await expect(page.getByRole("heading", { name: "You are online" })).toBeVisible();
 
   expect(calls).toHaveLength(2);
-  expect(calls[1].body.request_id).toBe(calls[0].body.request_id);
+  expect(calls[1].body.request_id).not.toBe(calls[0].body.request_id);
 });
 
 test("correcting a mistyped room is a NEW attempt with a new request id", async ({ page }) => {
@@ -346,9 +365,15 @@ test("a refused choice takes the offers down and returns the guest to sign-in", 
   expect(calls[3].body.package_revision_id).toBe("p2");
 });
 
-test("the retry after a refused choice reuses the request id, so it cannot double-grant", async ({ page }) => {
-  // Returning to sign-in must not become a route to two grants. The request id is cleared only by a
-  // SUCCESSFUL grant, so the second resolution returns the same Auth Context rather than a second one.
+test("signing in again after a refused choice is a new attempt, and reaches a grantable package", async ({ page }) => {
+  // Returning to sign-in must not become a route to two grants — and it does not, but the reason is a SERVER
+  // invariant rather than anything this page remembers. A Stay holds exactly one live Entitlement, so the
+  // second Auth Context cannot become a second grant whatever id produced it. (Proved against a real database
+  // in cmd/scd: TestIntegration_Phase3Auth_RepeatingASuccessCannotDoubleGrant.)
+  //
+  // This used to assert that the page re-sent the FIRST id. That made the page's own memory load-bearing for
+  // a safety property, which is the arrangement that failed: one forgotten field in the derivation and the
+  // same memory silently became a trap instead of a guard.
   const calls: Call[] = [];
   await serve(page, calls, (n) =>
     n === 0 || n === 2
@@ -368,7 +393,9 @@ test("the retry after a refused choice reuses the request id, so it cannot doubl
 
   const first = calls[0].body.request_id;
   expect(first).toBeTruthy();
-  expect(calls[2].body.request_id).toBe(first);
+  expect(calls[2].body.request_id).not.toBe(first);
+  // The re-sign-in reached the offer set again, so the guest has something to press rather than a dead page.
+  await expect(page.locator("#pms-choices button.choice")).toHaveCount(1);
 });
 
 test("an empty choice list is the uniform message, not an empty screen", async ({ page }) => {
