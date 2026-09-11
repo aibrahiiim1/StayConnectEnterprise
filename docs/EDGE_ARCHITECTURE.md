@@ -122,11 +122,30 @@ Arrivals, departures and changes the PMS made **after the last completed sync ar
 link is restored. A guest who checked in during the outage is not in the mirror and cannot sign in by room.
 The UI must state this limitation rather than implying the guest list is current.
 
-### What StayConnect must NOT do
+### What must not happen automatically — and what must keep happening
 
-It must **not** automatically restart, resync, reconnect or reconfigure a PMS interface because the transport
-is offline. The offline state is intentional; "helpfully" reconnecting fights the operator for a shared
-resource. Reconnection and resync are operator-initiated actions.
+The distinction is between **retrying a connection** and **taking an operational decision**. The first is the
+connector doing its job; the second is a machine overruling the operator.
+
+**Must NOT happen automatically because the transport is offline:**
+
+- restarting `pmsd`, `scd` or any other service;
+- launching a Full Resync;
+- changing PMS routing, the interface revision, credentials or any other PMS configuration;
+- raising a global impairment state or paging anyone, while the local mirror is present and usable.
+
+**Must CONTINUE to happen — this is normal, expected behaviour and must not be suppressed:**
+
+- **Ordinary transport retry and reconnection**, on the connector's existing backoff contract. The PMS
+  endpoint is deliberately taken away and deliberately given back; when the Product Owner makes it available
+  again the interface is expected to reconnect **by itself**, with no operator action. A rule that forbade
+  automatic reconnection would turn every intentional offline window into a manual recovery task, which is
+  the opposite of the intent.
+- **The established post-reconnection catch-up**, unchanged. Whatever safe automatic synchronisation the
+  connector already performs once the link returns stays exactly as it is; nothing in this section alters it.
+
+So: reconnect freely, and resync according to the existing contract. Do not restart services, do not launch a
+Full Resync as a reaction to the outage itself, and do not rewrite configuration.
 
 ### Health wording must separate four distinct facts
 
