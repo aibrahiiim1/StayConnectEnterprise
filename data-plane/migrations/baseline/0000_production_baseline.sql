@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0065, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0066, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -1205,6 +1205,26 @@ END $$;
 --
 
 COMMENT ON FUNCTION iam_v2.lock_stay(p_tenant uuid, p_site uuid, p_stay uuid) IS 'Takes the L1 Stay lock on ONE iam_v2.stays row and returns nothing. Exists so the guest-auth services can hold the lock their lock order starts from without holding UPDATE on iam_v2.stays, which is the stay engine''s to write. Tenant- and site-scoped; a missing Stay is not an error, because the caller''s pin set refuses it on its own terms.';
+
+
+--
+-- Name: norm_identity_text(text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.norm_identity_text(s text) RETURNS text
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE
+    AS $_$
+  SELECT CASE WHEN s IS NULL THEN NULL
+              ELSE upper(regexp_replace(regexp_replace(s, '^\s+', ''), '\s+$', ''))
+         END
+$_$;
+
+
+--
+-- Name: FUNCTION norm_identity_text(s text); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.norm_identity_text(s text) IS 'Canonical form for the *_norm identity columns: Unicode-aware trim then upper-case. Must stay identical to data-plane/internal/namenorm. Introduced by migration 0066.';
 
 
 --
@@ -6470,6 +6490,30 @@ CREATE TABLE iam_v2.auth_resolutions (
 
 
 --
+-- Name: backfill_0066_identity_text; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.backfill_0066_identity_text (
+    kind text NOT NULL,
+    row_id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    prior_first_name text,
+    prior_last_name text,
+    prior_room text,
+    captured_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT backfill_0066_identity_text_kind_check CHECK ((kind = ANY (ARRAY['stay_guest'::text, 'stay_room'::text])))
+);
+
+
+--
+-- Name: TABLE backfill_0066_identity_text; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.backfill_0066_identity_text IS 'Rollback evidence for migration 0066. Holds guest names and therefore NEVER leaves the appliance: not into Git, a PR body, CI output or a delivery artifact. RETENTION: only until this release''s rollback window is formally closed by the Product Owner, then dropped by the registered cleanup operation (governance/artifact-registry.json :: backfill-0066-pii-retention). Dropped by 0066.down.sql on rollback.';
+
+
+--
 -- Name: checkout_grace_policy_publications; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -9121,6 +9165,14 @@ ALTER TABLE ONLY iam_v2.auth_contexts
 
 ALTER TABLE ONLY iam_v2.auth_resolutions
     ADD CONSTRAINT auth_resolutions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: backfill_0066_identity_text backfill_0066_identity_text_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.backfill_0066_identity_text
+    ADD CONSTRAINT backfill_0066_identity_text_pkey PRIMARY KEY (kind, row_id);
 
 
 --
@@ -14682,7 +14734,7 @@ GRANT SELECT,INSERT ON TABLE public.network_health_checks TO svc_netd;
 --
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.network_interfaces TO svc_edged;
-GRANT SELECT,INSERT ON TABLE public.network_interfaces TO svc_netd;
+GRANT SELECT,INSERT,UPDATE ON TABLE public.network_interfaces TO svc_netd;
 
 
 --
