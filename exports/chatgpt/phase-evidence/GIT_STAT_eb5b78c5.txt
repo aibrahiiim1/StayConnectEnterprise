@@ -1,4 +1,0 @@
-commit eb5b78c5a39d70c2f7b114c8bd2b50fabf7949de
-Date:   Fri Sep 11 02:34:11 2026 +0300
-
-    Pin the reduced-motion behaviour, and pin that motion still exists
