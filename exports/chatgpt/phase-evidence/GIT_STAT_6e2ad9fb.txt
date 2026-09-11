@@ -1,4 +1,0 @@
-commit 6e2ad9fb2d53423d55ba11bd6a88631477537eda
-Date:   Fri Sep 11 15:09:01 2026 +0300
-
-    Green the regression, and stop the rollback evidence becoming a PII store
