@@ -135,7 +135,14 @@ GRANT SELECT,INSERT,UPDATE        ON public.operators                  TO svc_ed
 GRANT SELECT,INSERT,UPDATE,DELETE ON public.pms_providers              TO svc_edged;
 GRANT SELECT,INSERT,UPDATE,DELETE ON public.social_oauth_providers     TO svc_edged;
 GRANT SELECT,INSERT,UPDATE,DELETE ON public.stripe_accounts            TO svc_edged;
-GRANT SELECT,INSERT,UPDATE        ON public.sync_outbox                TO svc_edged;
+-- edged ENQUEUES and never drains. It writes one kind of record (service_health) and reads the queue for the
+-- health screen; the drain loop, the retry bookkeeping and the sent_at stamp all belong to scd. UPDATE was
+-- granted here historically and was never used, and it is the one privilege that would let the admin API mark
+-- an undelivered record as sent — the single way to make a backlog disappear without delivering it. Recovery,
+-- which is a legitimate edged action, goes through public.sync_outbox_recover_exhausted so that clearing the
+-- abandoned flag and recording who cleared it cannot be separated.
+GRANT SELECT,INSERT               ON public.sync_outbox                TO svc_edged;
+REVOKE UPDATE                     ON public.sync_outbox              FROM svc_edged;
 GRANT SELECT,INSERT               ON public.sync_checkpoints           TO svc_edged;
 GRANT SELECT,UPDATE               ON public.tenants                    TO svc_edged;
 GRANT SELECT,INSERT,UPDATE        ON public.tenant_effective_limits    TO svc_edged;

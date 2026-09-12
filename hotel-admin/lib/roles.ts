@@ -50,6 +50,12 @@ const MATRIX: Matrix = {
     // Guest sign-in protection: the property's thresholds are a configuration decision, which is this
     // role's territory, and whoever sets the threshold may waive one instance of it.
     "guest-signin-protection": "write", "guest-signin-restrictions": "write",
+    // Unresolved departures are the PMS integration's backlog, and re-evaluating one can end a stay
+    // through the ordinary checkout policy — an integration decision, not a guest-service one.
+    "pms-reconciliation": "write",
+    // Reporting to the cloud is appliance infrastructure. Two keys: a retention period is a policy,
+    // releasing thousands of abandoned records onto the wire is an action with a far end.
+    "cloud-sync-settings": "write", "cloud-sync-recovery": "write",
     // Phase 3 (DARK): the IT manager owns the PMS integration — publishing the
     // checkout-grace policy and clearing alerts are manager actions; stays,
     // events and resolutions are read-only evidence.
@@ -80,6 +86,9 @@ const MATRIX: Matrix = {
     // The desk RELEASES and does not re-tune: the restricted guest is standing there now, but making
     // "five" into "twenty" for the whole property must not be the quickest way to help one person.
     "guest-signin-restrictions": "write", "guest-signin-protection": "read",
+    // The desk READS the reconciliation cases — "is this guest still checked in according to the PMS"
+    // is a reception question — and acts on none of them, because the outcome can revoke access.
+    "pms-reconciliation": "read",
     // Phase 6 (DARK): the desk answers "why can't I remove my old phone" and changes no capability.
     "guest-device-self-service": "read",
     "pms-stays": "read", "pms-events": "read", "operational-alerts": "write", "checkout-grace": "read",
@@ -95,6 +104,8 @@ const MATRIX: Matrix = {
     "guest-device-self-service": "read",
     "pms-stays": "read", "pms-events": "read", "operational-alerts": "write", "checkout-grace": "read",
     "pms-interfaces": "read", "pms-routing": "read", "pms-source-conflicts": "read",
+    // Same desk, same conversation, same read-only relationship with the engine.
+    "pms-reconciliation": "read",
     "post-stay-profiles": "write", "stay-transfers": "write",
     "guest-accounts": "write", sessions: "write",
     "auth-methods": "read", reports: "read",
@@ -121,6 +132,10 @@ const MATRIX: Matrix = {
     "guest-device-self-service": "read",
     "pms-stays": "read", "pms-events": "read", "pms-resolutions": "read", "checkout-grace": "read", "operational-alerts": "read",
     "pms-interfaces": "read", "pms-routing": "read", "pms-source-conflicts": "read",
+    // The reconciliation backlog and the cloud queue's history are evidence of the kind a viewer already
+    // reads — including the recovery log, which records what somebody did about it. Acts on neither.
+    "pms-reconciliation": "read",
+    "cloud-sync-settings": "read", "cloud-sync-recovery": "read",
     "commercial-packages": "read",
     "post-stay-profiles": "read", "stay-transfers": "read",
     "financial-review": "read", "financial-ops": "read",

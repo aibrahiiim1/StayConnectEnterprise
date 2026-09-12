@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0068, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0069, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -577,6 +577,86 @@ BEGIN
   UPDATE iam_v2.sessions SET state='ended', ended=now(), end_reason=p_reason WHERE id=p_session;
   RETURN 'ENDED';
 END; $$;
+
+
+--
+-- Name: cloud_sync_settings_changes_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.cloud_sync_settings_changes_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RAISE EXCEPTION 'iam_v2.cloud_sync_settings_changes is append-only: % refused', TG_OP
+        USING ERRCODE = 'restrict_violation';
+END;
+$$;
+
+
+--
+-- Name: cloud_sync_settings_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.cloud_sync_settings_get(p_tenant uuid, p_site uuid) RETURNS TABLE(delivered_retention_days integer, config_version bigint, updated_at timestamp with time zone, is_default boolean)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+    SELECT COALESCE(s.delivered_retention_days, 30),
+           COALESCE(s.config_version, 0),
+           s.updated_at,
+           (s.tenant_id IS NULL)
+      FROM (SELECT p_tenant AS t, p_site AS s) k
+      LEFT JOIN iam_v2.site_cloud_sync_settings s
+             ON s.tenant_id = k.t AND s.site_id = k.s;
+$$;
+
+
+--
+-- Name: cloud_sync_settings_set(uuid, uuid, integer, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.cloud_sync_settings_set(p_tenant uuid, p_site uuid, p_days integer, p_operator text, p_reason text DEFAULT NULL::text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE
+    v_old integer;
+    v_new_version bigint;
+BEGIN
+    IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
+        RAISE EXCEPTION 'cloud sync settings: an operator identity is required'
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF p_days IS NULL OR p_days < 1 OR p_days > 365 THEN
+        RAISE EXCEPTION 'delivered record retention must be between 1 and 365 days (got %)', p_days
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    PERFORM pg_advisory_xact_lock(hashtext('cloud_sync_settings'), hashtext(p_site::text));
+
+    SELECT s.delivered_retention_days INTO v_old
+      FROM iam_v2.site_cloud_sync_settings s
+     WHERE s.tenant_id = p_tenant AND s.site_id = p_site
+       FOR UPDATE;
+
+    INSERT INTO iam_v2.site_cloud_sync_settings AS s
+           (tenant_id, site_id, delivered_retention_days, config_version, updated_at)
+    VALUES (p_tenant, p_site, p_days, 1, now())
+    ON CONFLICT (tenant_id, site_id) DO UPDATE
+       SET delivered_retention_days = EXCLUDED.delivered_retention_days,
+           config_version = s.config_version + 1,
+           updated_at = now()
+    RETURNING s.config_version INTO v_new_version;
+
+    INSERT INTO iam_v2.cloud_sync_settings_changes
+           (tenant_id, site_id, changed_by, reason,
+            old_delivered_retention_days, new_delivered_retention_days, new_config_version)
+    VALUES (p_tenant, p_site, btrim(p_operator), NULLIF(btrim(COALESCE(p_reason,'')), ''),
+            v_old, p_days, v_new_version);
+
+    RETURN v_new_version;
+END;
+$$;
 
 
 --
@@ -5700,6 +5780,57 @@ COMMENT ON FUNCTION iam_v2.p6_tick_online_time(p_tenant uuid, p_site uuid, p_now
 
 
 --
+-- Name: pms_reoffer_stay_event(uuid, uuid, uuid, uuid, text, text, jsonb); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_reoffer_stay_event(p_tenant uuid, p_site uuid, p_iface uuid, p_event uuid, p_operator text, p_reason text, p_evidence jsonb DEFAULT '{}'::jsonb) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE
+    v_status text;
+    v_code   text;
+    v_at     timestamptz;
+BEGIN
+    IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
+        RAISE EXCEPTION 'reoffer: an operator identity is required'
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF p_reason IS NULL OR length(btrim(p_reason)) < 3 THEN
+        RAISE EXCEPTION 'reoffer: a reason of at least 3 characters is required'
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+
+    SELECT se.processing_status, se.review_code, se.processed_at
+      INTO v_status, v_code, v_at
+      FROM iam_v2.stay_events se
+     WHERE se.id = p_event AND se.tenant_id = p_tenant
+       AND se.site_id = p_site AND se.pms_interface_id = p_iface
+       FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RETURN false;
+    END IF;
+    IF v_status <> 'MANUAL_REVIEW' THEN
+        RETURN false;
+    END IF;
+
+    INSERT INTO iam_v2.stay_event_reoffers
+           (tenant_id, site_id, pms_interface_id, stay_event_id, requested_by, reason,
+            prior_processing_status, prior_review_code, prior_processed_at, evidence)
+    VALUES (p_tenant, p_site, p_iface, p_event, btrim(p_operator), btrim(p_reason),
+            v_status, v_code, v_at, COALESCE(p_evidence, '{}'::jsonb));
+
+    UPDATE iam_v2.stay_events
+       SET processing_status = 'PENDING', review_code = NULL, processed_at = NULL
+     WHERE id = p_event;
+
+    RETURN true;
+END;
+$$;
+
+
+--
 -- Name: publish_checkout_grace_config(uuid, uuid, uuid, integer, integer, integer, bigint, integer, text, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -6280,6 +6411,20 @@ $_$;
 
 
 --
+-- Name: stay_event_reoffers_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.stay_event_reoffers_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RAISE EXCEPTION 'iam_v2.stay_event_reoffers is append-only: % refused', TG_OP
+        USING ERRCODE = 'restrict_violation';
+END;
+$$;
+
+
+--
 -- Name: supersede_entitlement_transition(uuid, text, timestamp with time zone, text); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -6544,6 +6689,133 @@ BEGIN
   THEN RAISE EXCEPTION 'secret generation identity is immutable (only superseded_at may change)'; END IF;
   RETURN NEW;
 END; $$;
+
+
+--
+-- Name: sync_outbox_accounting(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.sync_outbox_accounting() RETURNS TABLE(delivered bigint, pending bigint, exhausted bigint, total bigint, oldest_pending timestamp with time zone, newest_created timestamp with time zone, oldest_exhausted timestamp with time zone, bytes bigint)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+    RETURN QUERY
+    SELECT count(*) FILTER (WHERE o.sent_at IS NOT NULL),
+           count(*) FILTER (WHERE o.sent_at IS NULL AND o.dead = false),
+           count(*) FILTER (WHERE o.sent_at IS NULL AND o.dead = true),
+           count(*),
+           min(o.created_at) FILTER (WHERE o.sent_at IS NULL AND o.dead = false),
+           max(o.created_at),
+           min(o.created_at) FILTER (WHERE o.sent_at IS NULL AND o.dead = true),
+           pg_total_relation_size('public.sync_outbox')
+      FROM public.sync_outbox o;
+END;
+$$;
+
+
+--
+-- Name: sync_outbox_prune_delivered(integer); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.sync_outbox_prune_delivered(p_days integer) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+    v_deleted bigint;
+BEGIN
+    IF p_days IS NULL OR p_days < 1 OR p_days > 365 THEN
+        RAISE EXCEPTION 'delivered record retention must be between 1 and 365 days (got %)', p_days
+            USING ERRCODE = 'check_violation';
+    END IF;
+    WITH gone AS (
+        DELETE FROM public.sync_outbox
+         WHERE sent_at IS NOT NULL
+           AND sent_at < now() - make_interval(days => p_days)
+        RETURNING 1
+    )
+    SELECT count(*) INTO v_deleted FROM gone;
+    RETURN v_deleted;
+END;
+$$;
+
+
+--
+-- Name: sync_outbox_recover_exhausted(text, text, integer); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.sync_outbox_recover_exhausted(p_operator text, p_reason text, p_limit integer DEFAULT 1000) RETURNS TABLE(rows_recovered integer, seq_from bigint, seq_to bigint, exhausted_remaining bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+    v_count integer := 0;
+    v_from bigint;
+    v_to bigint;
+    v_oldest timestamptz;
+    v_remaining bigint;
+BEGIN
+    IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
+        RAISE EXCEPTION 'sync outbox recovery: an operator identity is required'
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF p_reason IS NULL OR length(btrim(p_reason)) < 3 THEN
+        RAISE EXCEPTION 'sync outbox recovery: a reason of at least 3 characters is required'
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF p_limit IS NULL OR p_limit < 1 OR p_limit > 20000 THEN
+        RAISE EXCEPTION 'sync outbox recovery: batch size must be between 1 and 20000 (got %)', p_limit
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    -- One recovery at a time. Two concurrent callers would otherwise each release an overlapping batch and
+    -- both report having moved it.
+    PERFORM pg_advisory_xact_lock(hashtext('sync_outbox_recover'));
+
+    WITH picked AS (
+        SELECT o.seq
+          FROM public.sync_outbox o
+         WHERE o.sent_at IS NULL AND o.dead = true
+         ORDER BY o.seq ASC
+         LIMIT p_limit
+         FOR UPDATE
+    ), moved AS (
+        UPDATE public.sync_outbox o
+           SET dead = false, attempts = 0, next_attempt_at = now()
+          FROM picked
+         WHERE o.seq = picked.seq
+        RETURNING o.seq, o.created_at
+    )
+    SELECT count(*)::integer, min(seq), max(seq), min(created_at)
+      INTO v_count, v_from, v_to, v_oldest
+      FROM moved;
+
+    SELECT count(*) INTO v_remaining
+      FROM public.sync_outbox o
+     WHERE o.sent_at IS NULL AND o.dead = true;
+
+    INSERT INTO public.sync_outbox_recovery_log
+           (requested_by, reason, rows_recovered, seq_from, seq_to, oldest_created_at, exhausted_remaining)
+    VALUES (btrim(p_operator), btrim(p_reason), v_count, v_from, v_to, v_oldest, v_remaining);
+
+    RETURN QUERY SELECT v_count, v_from, v_to, v_remaining;
+END;
+$$;
+
+
+--
+-- Name: sync_outbox_recovery_log_append_only(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.sync_outbox_recovery_log_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RAISE EXCEPTION 'public.sync_outbox_recovery_log is append-only: % refused', TG_OP
+        USING ERRCODE = 'restrict_violation';
+END;
+$$;
 
 
 SET default_tablespace = '';
@@ -6850,6 +7122,25 @@ CREATE TABLE iam_v2.checkout_grace_policy_publications (
     published_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT checkout_grace_policy_publications_config_version_check CHECK ((config_version >= 1)),
     CONSTRAINT checkout_grace_policy_publications_reason_code_check CHECK (((reason_code IS NULL) OR (reason_code ~ '^[A-Z][A-Z0-9_]{0,63}$'::text)))
+);
+
+
+--
+-- Name: cloud_sync_settings_changes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.cloud_sync_settings_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by text NOT NULL,
+    reason text,
+    old_delivered_retention_days integer,
+    new_delivered_retention_days integer NOT NULL,
+    new_config_version bigint NOT NULL,
+    CONSTRAINT cloud_sync_settings_changes_changed_by_check CHECK ((length(btrim(changed_by)) > 0)),
+    CONSTRAINT cloud_sync_settings_changes_reason_check CHECK (((reason IS NULL) OR (length(reason) <= 500)))
 );
 
 
@@ -7926,6 +8217,274 @@ CREATE TABLE iam_v2.pms_postings (
 
 
 --
+-- Name: stay_event_reoffers; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.stay_event_reoffers (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    pms_interface_id uuid NOT NULL,
+    stay_event_id uuid NOT NULL,
+    requested_at timestamp with time zone DEFAULT now() NOT NULL,
+    requested_by text NOT NULL,
+    reason text NOT NULL,
+    prior_processing_status text NOT NULL,
+    prior_review_code text,
+    prior_processed_at timestamp with time zone,
+    evidence jsonb DEFAULT '{}'::jsonb NOT NULL,
+    CONSTRAINT ser_evidence_is_object CHECK ((jsonb_typeof(evidence) = 'object'::text)),
+    CONSTRAINT stay_event_reoffers_reason_check CHECK (((length(btrim(reason)) >= 3) AND (length(reason) <= 500))),
+    CONSTRAINT stay_event_reoffers_requested_by_check CHECK ((length(btrim(requested_by)) > 0))
+);
+
+
+--
+-- Name: TABLE stay_event_reoffers; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.stay_event_reoffers IS 'Append-only record of every PMS event returned to the ingestion engine for re-evaluation, with the terminal state it held before and the evidence the operator acted on. Carries no guest name.';
+
+
+--
+-- Name: stay_events; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.stay_events (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    pms_interface_id uuid NOT NULL,
+    stay_id uuid,
+    external_event_identity text NOT NULL,
+    event_type text NOT NULL,
+    pms_timestamp_raw text,
+    pms_timestamp_utc timestamp with time zone,
+    source_timezone text,
+    received_at timestamp with time zone DEFAULT now() NOT NULL,
+    sequence_version bigint DEFAULT 0 NOT NULL,
+    normalization_version integer DEFAULT 1 NOT NULL,
+    clock_suspect boolean DEFAULT false NOT NULL,
+    payload jsonb DEFAULT '{}'::jsonb NOT NULL,
+    processing_status text DEFAULT 'PENDING'::text NOT NULL,
+    processed_at timestamp with time zone,
+    review_code text,
+    admission_kind text DEFAULT 'LIVE'::text NOT NULL,
+    admission_runtime_generation bigint DEFAULT 0 NOT NULL,
+    resync_generation bigint DEFAULT 0 NOT NULL,
+    fingerprint_key_version integer DEFAULT 0 NOT NULL,
+    CONSTRAINT se_admission_coherent CHECK ((((admission_kind = 'LIVE'::text) AND (resync_generation = 0)) OR ((admission_kind = 'RESYNC'::text) AND (resync_generation > 0)))),
+    CONSTRAINT stay_events_admission_kind_check CHECK ((admission_kind = ANY (ARRAY['LIVE'::text, 'RESYNC'::text]))),
+    CONSTRAINT stay_events_admission_runtime_generation_check CHECK ((admission_runtime_generation >= 0)),
+    CONSTRAINT stay_events_fingerprint_key_version_check CHECK ((fingerprint_key_version >= 0)),
+    CONSTRAINT stay_events_processing_status_check CHECK ((processing_status = ANY (ARRAY['PENDING'::text, 'APPLIED'::text, 'SKIPPED_DUPLICATE'::text, 'MANUAL_REVIEW'::text, 'FAILED'::text]))),
+    CONSTRAINT stay_events_resync_generation_check CHECK ((resync_generation >= 0)),
+    CONSTRAINT stay_events_review_code_check CHECK (((review_code IS NULL) OR (length(review_code) <= 200)))
+);
+
+
+--
+-- Name: stays; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.stays (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    pms_interface_id uuid NOT NULL,
+    external_reservation_id text NOT NULL,
+    external_stay_identity text NOT NULL,
+    normalized_room_number text,
+    status text NOT NULL,
+    lifecycle_version integer DEFAULT 1 NOT NULL,
+    posting_allowed boolean DEFAULT false NOT NULL,
+    posting_block_reason text,
+    posting_permission_source text,
+    posting_checked_at timestamp with time zone,
+    last_applied_event_version bigint DEFAULT 0 NOT NULL,
+    vip boolean,
+    travel_agent text,
+    room_type text,
+    arrival date,
+    departure date,
+    effective_checkout_at timestamp with time zone,
+    occupancy_evidence_at timestamp with time zone,
+    occupancy_ingested_at timestamp with time zone,
+    occupancy_revision_id uuid,
+    occupancy_normalization_version integer,
+    occupancy_clock_suspect boolean,
+    occupancy_evidence_version bigint DEFAULT 0 NOT NULL,
+    rate_plan text,
+    last_applied_event_id uuid,
+    CONSTRAINT posting_only_in_house CHECK (((posting_allowed = false) OR (status = 'IN_HOUSE'::text))),
+    CONSTRAINT stays_effco_only_after_checkout CHECK (((effective_checkout_at IS NULL) OR (status = ANY (ARRAY['CHECKED_OUT'::text, 'POST_STAY_ACTIVE'::text])))),
+    CONSTRAINT stays_evidence_version_coherent CHECK ((((occupancy_evidence_at IS NULL) AND (occupancy_evidence_version = 0)) OR ((occupancy_evidence_at IS NOT NULL) AND (occupancy_evidence_version > 0)))),
+    CONSTRAINT stays_occupancy_all_or_none CHECK ((((occupancy_evidence_at IS NULL) AND (occupancy_ingested_at IS NULL) AND (occupancy_revision_id IS NULL) AND (occupancy_normalization_version IS NULL) AND (occupancy_clock_suspect IS NULL)) OR ((occupancy_evidence_at IS NOT NULL) AND (occupancy_ingested_at IS NOT NULL) AND (occupancy_revision_id IS NOT NULL) AND (occupancy_normalization_version IS NOT NULL) AND (occupancy_clock_suspect IS NOT NULL)))),
+    CONSTRAINT stays_occupancy_evidence_version_check CHECK ((occupancy_evidence_version >= 0)),
+    CONSTRAINT stays_occupancy_norm_pos CHECK (((occupancy_normalization_version IS NULL) OR (occupancy_normalization_version > 0))),
+    CONSTRAINT stays_status_check CHECK ((status = ANY (ARRAY['RESERVED'::text, 'IN_HOUSE'::text, 'CHECKED_OUT'::text, 'POST_STAY_ACTIVE'::text, 'CANCELLED'::text, 'NO_SHOW'::text])))
+);
+
+
+--
+-- Name: pms_reconciliation_cases; Type: VIEW; Schema: iam_v2; Owner: -
+--
+
+CREATE VIEW iam_v2.pms_reconciliation_cases AS
+ WITH rt AS (
+         SELECT pms_interface_runtime.tenant_id,
+            pms_interface_runtime.site_id,
+            pms_interface_runtime.pms_interface_id,
+            pms_interface_runtime.published_resync_generation,
+            pms_interface_runtime.sync_stage,
+            pms_interface_runtime.last_complete_sync_at
+           FROM iam_v2.pms_interface_runtime
+        ), roster AS (
+         SELECT se.tenant_id,
+            se.site_id,
+            se.pms_interface_id,
+            btrim(COALESCE((se.payload ->> 'reservation'::text), ''::text)) AS reservation,
+            upper(btrim(COALESCE((se.payload ->> 'room'::text), ''::text))) AS room
+           FROM (iam_v2.stay_events se
+             JOIN rt ON (((rt.tenant_id = se.tenant_id) AND (rt.site_id = se.site_id) AND (rt.pms_interface_id = se.pms_interface_id))))
+          WHERE ((se.admission_kind = 'RESYNC'::text) AND (se.resync_generation = rt.published_resync_generation) AND (rt.published_resync_generation > 0) AND (se.event_type = ANY (ARRAY['GI'::text, 'GC'::text])))
+        ), ev AS (
+         SELECT se.id,
+            se.tenant_id,
+            se.site_id,
+            se.pms_interface_id,
+            se.received_at,
+            se.pms_timestamp_utc,
+            se.clock_suspect,
+            se.review_code,
+            se.resync_generation,
+            btrim(COALESCE((se.payload ->> 'reservation'::text), ''::text)) AS reservation,
+            upper(btrim(COALESCE((se.payload ->> 'room'::text), ''::text))) AS room
+           FROM iam_v2.stay_events se
+          WHERE ((se.event_type = 'GO'::text) AND (se.processing_status = 'MANUAL_REVIEW'::text))
+        ), grouped AS (
+         SELECT ev.tenant_id,
+            ev.site_id,
+            ev.pms_interface_id,
+                CASE
+                    WHEN (ev.reservation <> ''::text) THEN ('reservation:'::text || ev.reservation)
+                    ELSE ('room:'::text || ev.room)
+                END AS case_key,
+            max(ev.reservation) AS reservation,
+            max(ev.room) AS room,
+            (count(*))::integer AS repeat_count,
+            (count(DISTINCT ev.resync_generation))::integer AS generations,
+            min(ev.received_at) AS first_seen_at,
+            max(ev.received_at) AS last_seen_at,
+            (array_agg(ev.id ORDER BY ev.received_at DESC, ev.id DESC))[1] AS latest_event_id,
+            (array_agg(ev.review_code ORDER BY ev.received_at DESC, ev.id DESC))[1] AS latest_review_code,
+            (array_agg(
+                CASE
+                    WHEN (ev.clock_suspect OR (ev.pms_timestamp_utc IS NULL)) THEN ev.received_at
+                    ELSE ev.pms_timestamp_utc
+                END ORDER BY ev.received_at DESC, ev.id DESC))[1] AS event_at
+           FROM ev
+          GROUP BY ev.tenant_id, ev.site_id, ev.pms_interface_id,
+                CASE
+                    WHEN (ev.reservation <> ''::text) THEN ('reservation:'::text || ev.reservation)
+                    ELSE ('room:'::text || ev.room)
+                END
+        ), enriched AS (
+         SELECT g.tenant_id,
+            g.site_id,
+            g.pms_interface_id,
+            g.case_key,
+            g.reservation,
+            g.room,
+            g.repeat_count,
+            g.generations,
+            g.first_seen_at,
+            g.last_seen_at,
+            g.latest_event_id,
+            g.latest_review_code,
+            g.event_at,
+            rt.published_resync_generation,
+            rt.sync_stage,
+            rt.last_complete_sync_at,
+            ( SELECT (count(*))::integer AS count
+                   FROM iam_v2.stays s
+                  WHERE ((s.tenant_id = g.tenant_id) AND (s.site_id = g.site_id) AND (s.pms_interface_id = g.pms_interface_id) AND (s.status = 'IN_HOUSE'::text) AND (((g.reservation <> ''::text) AND (s.external_reservation_id = g.reservation)) OR ((g.reservation = ''::text) AND (s.normalized_room_number = g.room))))) AS candidate_stays,
+            ( SELECT s.id
+                   FROM iam_v2.stays s
+                  WHERE ((s.tenant_id = g.tenant_id) AND (s.site_id = g.site_id) AND (s.pms_interface_id = g.pms_interface_id) AND (s.status = 'IN_HOUSE'::text) AND (((g.reservation <> ''::text) AND (s.external_reservation_id = g.reservation)) OR ((g.reservation = ''::text) AND (s.normalized_room_number = g.room))))
+                  ORDER BY s.id
+                 LIMIT 1) AS candidate_stay_id,
+            ( SELECT s.arrival
+                   FROM iam_v2.stays s
+                  WHERE ((s.tenant_id = g.tenant_id) AND (s.site_id = g.site_id) AND (s.pms_interface_id = g.pms_interface_id) AND (s.status = 'IN_HOUSE'::text) AND (((g.reservation <> ''::text) AND (s.external_reservation_id = g.reservation)) OR ((g.reservation = ''::text) AND (s.normalized_room_number = g.room))))
+                  ORDER BY s.id
+                 LIMIT 1) AS candidate_arrival,
+            (EXISTS ( SELECT 1
+                   FROM roster ro
+                  WHERE ((ro.tenant_id = g.tenant_id) AND (ro.site_id = g.site_id) AND (ro.pms_interface_id = g.pms_interface_id) AND (((g.reservation <> ''::text) AND (ro.reservation = g.reservation)) OR ((g.reservation = ''::text) AND (ro.room = g.room)))))) AS roster_present
+           FROM (grouped g
+             LEFT JOIN rt ON (((rt.tenant_id = g.tenant_id) AND (rt.site_id = g.site_id) AND (rt.pms_interface_id = g.pms_interface_id))))
+        )
+ SELECT tenant_id,
+    site_id,
+    pms_interface_id,
+    case_key,
+    reservation,
+    room,
+    repeat_count,
+    generations,
+    first_seen_at,
+    last_seen_at,
+    event_at,
+    latest_event_id,
+    latest_review_code,
+    candidate_stays,
+    candidate_stay_id,
+    candidate_arrival,
+    roster_present,
+    last_complete_sync_at,
+    ( SELECT (count(*))::integer AS count
+           FROM iam_v2.stay_event_reoffers r
+          WHERE (r.stay_event_id = e.latest_event_id)) AS reoffer_count,
+        CASE
+            WHEN ((candidate_stays = 0) AND (reservation = ''::text)) THEN 'SUPERSEDED_ROOM_EMPTY'::text
+            WHEN (candidate_stays = 0) THEN 'NEEDS_PMS_EVIDENCE'::text
+            WHEN (candidate_stays > 1) THEN 'ROOM_SHARED'::text
+            WHEN ((reservation = ''::text) AND (candidate_arrival IS NOT NULL) AND (candidate_arrival > ((event_at AT TIME ZONE 'UTC'::text))::date)) THEN 'LATER_OCCUPANT'::text
+            WHEN (last_complete_sync_at IS NULL) THEN 'NEEDS_PMS_EVIDENCE'::text
+            WHEN roster_present THEN 'ROSTER_CONTRADICTS'::text
+            ELSE 'RESOLVABLE'::text
+        END AS resolution_state
+   FROM enriched e;
+
+
+--
+-- Name: VIEW pms_reconciliation_cases; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON VIEW iam_v2.pms_reconciliation_cases IS 'One row per DISTINCT unresolved PMS departure, with the number of recorded copies beside it and a resolution state computed from current roster and occupancy evidence. Collapses copies for counting; deletes and hides nothing.';
+
+
+--
+-- Name: pms_rooms_multi_occupancy; Type: VIEW; Schema: iam_v2; Owner: -
+--
+
+CREATE VIEW iam_v2.pms_rooms_multi_occupancy AS
+ SELECT tenant_id,
+    site_id,
+    pms_interface_id,
+    normalized_room_number AS room,
+    (count(*))::integer AS stays_in_room,
+    min(arrival) AS earliest_arrival,
+    max(departure) AS latest_planned_departure,
+    array_agg(id ORDER BY arrival, id) AS stay_ids
+   FROM iam_v2.stays s
+  WHERE ((status = 'IN_HOUSE'::text) AND (COALESCE(normalized_room_number, ''::text) <> ''::text))
+  GROUP BY tenant_id, site_id, pms_interface_id, normalized_room_number
+ HAVING (count(*) > 1);
+
+
+--
 -- Name: pms_source_conflicts; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -7939,6 +8498,37 @@ CREATE TABLE iam_v2.pms_source_conflicts (
     resolution text,
     CONSTRAINT psc_order CHECK ((interface_a < interface_b))
 );
+
+
+--
+-- Name: pms_stays_past_departure; Type: VIEW; Schema: iam_v2; Owner: -
+--
+
+CREATE VIEW iam_v2.pms_stays_past_departure AS
+ WITH roster AS (
+         SELECT se.tenant_id,
+            se.site_id,
+            se.pms_interface_id,
+            btrim(COALESCE((se.payload ->> 'reservation'::text), ''::text)) AS reservation,
+            upper(btrim(COALESCE((se.payload ->> 'room'::text), ''::text))) AS room
+           FROM (iam_v2.stay_events se
+             JOIN iam_v2.pms_interface_runtime r ON (((r.tenant_id = se.tenant_id) AND (r.site_id = se.site_id) AND (r.pms_interface_id = se.pms_interface_id))))
+          WHERE ((se.admission_kind = 'RESYNC'::text) AND (se.resync_generation = r.published_resync_generation) AND (r.published_resync_generation > 0) AND (se.event_type = ANY (ARRAY['GI'::text, 'GC'::text])))
+        )
+ SELECT tenant_id,
+    site_id,
+    pms_interface_id,
+    id AS stay_id,
+    normalized_room_number AS room,
+    external_reservation_id AS reservation,
+    arrival,
+    departure,
+    (CURRENT_DATE - departure) AS days_past_departure,
+    (EXISTS ( SELECT 1
+           FROM roster ro
+          WHERE ((ro.tenant_id = s.tenant_id) AND (ro.site_id = s.site_id) AND (ro.pms_interface_id = s.pms_interface_id) AND ((ro.reservation = s.external_reservation_id) OR ((ro.reservation = ''::text) AND (ro.room = s.normalized_room_number)))))) AS roster_present
+   FROM iam_v2.stays s
+  WHERE ((status = 'IN_HOUSE'::text) AND (departure IS NOT NULL) AND (departure < CURRENT_DATE));
 
 
 --
@@ -8444,6 +9034,35 @@ CREATE TABLE iam_v2.site_checkout_grace_config (
 
 
 --
+-- Name: site_cloud_sync_settings; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.site_cloud_sync_settings (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    delivered_retention_days integer DEFAULT 30 NOT NULL,
+    config_version bigint DEFAULT 1 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT scs_retention_days_bounds CHECK (((delivered_retention_days >= 1) AND (delivered_retention_days <= 365))),
+    CONSTRAINT scs_version_positive CHECK ((config_version >= 1))
+);
+
+
+--
+-- Name: TABLE site_cloud_sync_settings; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.site_cloud_sync_settings IS 'Per-site settings for reporting to the StayConnect cloud. Absence of a row means the approved defaults (delivered records kept 30 days), never "retention is off".';
+
+
+--
+-- Name: COLUMN site_cloud_sync_settings.delivered_retention_days; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.site_cloud_sync_settings.delivered_retention_days IS 'How many days a SUCCESSFULLY DELIVERED sync record is kept before it is removed, in days. Records still waiting, and records the appliance gave up on, are never removed by this setting.';
+
+
+--
 -- Name: site_guest_signin_protection; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -8472,43 +9091,6 @@ COMMENT ON TABLE iam_v2.site_guest_signin_protection IS 'Per-site guest sign-in 
 --
 
 COMMENT ON COLUMN iam_v2.site_guest_signin_protection.observation_window_seconds IS 'The ROLLING window. Failures older than this stop counting continuously, not at a clock boundary: a guest who mistypes twice at 10:00:59 and three times at 10:01:01 is one run of five, not two clean slates.';
-
-
---
--- Name: stay_events; Type: TABLE; Schema: iam_v2; Owner: -
---
-
-CREATE TABLE iam_v2.stay_events (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    tenant_id uuid NOT NULL,
-    site_id uuid NOT NULL,
-    pms_interface_id uuid NOT NULL,
-    stay_id uuid,
-    external_event_identity text NOT NULL,
-    event_type text NOT NULL,
-    pms_timestamp_raw text,
-    pms_timestamp_utc timestamp with time zone,
-    source_timezone text,
-    received_at timestamp with time zone DEFAULT now() NOT NULL,
-    sequence_version bigint DEFAULT 0 NOT NULL,
-    normalization_version integer DEFAULT 1 NOT NULL,
-    clock_suspect boolean DEFAULT false NOT NULL,
-    payload jsonb DEFAULT '{}'::jsonb NOT NULL,
-    processing_status text DEFAULT 'PENDING'::text NOT NULL,
-    processed_at timestamp with time zone,
-    review_code text,
-    admission_kind text DEFAULT 'LIVE'::text NOT NULL,
-    admission_runtime_generation bigint DEFAULT 0 NOT NULL,
-    resync_generation bigint DEFAULT 0 NOT NULL,
-    fingerprint_key_version integer DEFAULT 0 NOT NULL,
-    CONSTRAINT se_admission_coherent CHECK ((((admission_kind = 'LIVE'::text) AND (resync_generation = 0)) OR ((admission_kind = 'RESYNC'::text) AND (resync_generation > 0)))),
-    CONSTRAINT stay_events_admission_kind_check CHECK ((admission_kind = ANY (ARRAY['LIVE'::text, 'RESYNC'::text]))),
-    CONSTRAINT stay_events_admission_runtime_generation_check CHECK ((admission_runtime_generation >= 0)),
-    CONSTRAINT stay_events_fingerprint_key_version_check CHECK ((fingerprint_key_version >= 0)),
-    CONSTRAINT stay_events_processing_status_check CHECK ((processing_status = ANY (ARRAY['PENDING'::text, 'APPLIED'::text, 'SKIPPED_DUPLICATE'::text, 'MANUAL_REVIEW'::text, 'FAILED'::text]))),
-    CONSTRAINT stay_events_resync_generation_check CHECK ((resync_generation >= 0)),
-    CONSTRAINT stay_events_review_code_check CHECK (((review_code IS NULL) OR (length(review_code) <= 200)))
-);
 
 
 --
@@ -8557,49 +9139,6 @@ CREATE TABLE iam_v2.stay_links (
     to_stay uuid NOT NULL,
     reason text NOT NULL,
     CONSTRAINT stay_links_reason_check CHECK ((reason = ANY (ARRAY['CROSS_PMS_TRANSFER'::text, 'POST_STAY'::text])))
-);
-
-
---
--- Name: stays; Type: TABLE; Schema: iam_v2; Owner: -
---
-
-CREATE TABLE iam_v2.stays (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    tenant_id uuid NOT NULL,
-    site_id uuid NOT NULL,
-    pms_interface_id uuid NOT NULL,
-    external_reservation_id text NOT NULL,
-    external_stay_identity text NOT NULL,
-    normalized_room_number text,
-    status text NOT NULL,
-    lifecycle_version integer DEFAULT 1 NOT NULL,
-    posting_allowed boolean DEFAULT false NOT NULL,
-    posting_block_reason text,
-    posting_permission_source text,
-    posting_checked_at timestamp with time zone,
-    last_applied_event_version bigint DEFAULT 0 NOT NULL,
-    vip boolean,
-    travel_agent text,
-    room_type text,
-    arrival date,
-    departure date,
-    effective_checkout_at timestamp with time zone,
-    occupancy_evidence_at timestamp with time zone,
-    occupancy_ingested_at timestamp with time zone,
-    occupancy_revision_id uuid,
-    occupancy_normalization_version integer,
-    occupancy_clock_suspect boolean,
-    occupancy_evidence_version bigint DEFAULT 0 NOT NULL,
-    rate_plan text,
-    last_applied_event_id uuid,
-    CONSTRAINT posting_only_in_house CHECK (((posting_allowed = false) OR (status = 'IN_HOUSE'::text))),
-    CONSTRAINT stays_effco_only_after_checkout CHECK (((effective_checkout_at IS NULL) OR (status = ANY (ARRAY['CHECKED_OUT'::text, 'POST_STAY_ACTIVE'::text])))),
-    CONSTRAINT stays_evidence_version_coherent CHECK ((((occupancy_evidence_at IS NULL) AND (occupancy_evidence_version = 0)) OR ((occupancy_evidence_at IS NOT NULL) AND (occupancy_evidence_version > 0)))),
-    CONSTRAINT stays_occupancy_all_or_none CHECK ((((occupancy_evidence_at IS NULL) AND (occupancy_ingested_at IS NULL) AND (occupancy_revision_id IS NULL) AND (occupancy_normalization_version IS NULL) AND (occupancy_clock_suspect IS NULL)) OR ((occupancy_evidence_at IS NOT NULL) AND (occupancy_ingested_at IS NOT NULL) AND (occupancy_revision_id IS NOT NULL) AND (occupancy_normalization_version IS NOT NULL) AND (occupancy_clock_suspect IS NOT NULL)))),
-    CONSTRAINT stays_occupancy_evidence_version_check CHECK ((occupancy_evidence_version >= 0)),
-    CONSTRAINT stays_occupancy_norm_pos CHECK (((occupancy_normalization_version IS NULL) OR (occupancy_normalization_version > 0))),
-    CONSTRAINT stays_status_check CHECK ((status = ANY (ARRAY['RESERVED'::text, 'IN_HOUSE'::text, 'CHECKED_OUT'::text, 'POST_STAY_ACTIVE'::text, 'CANCELLED'::text, 'NO_SHOW'::text])))
 );
 
 
@@ -9474,6 +10013,34 @@ CREATE TABLE public.sync_outbox (
 
 
 --
+-- Name: sync_outbox_recovery_log; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sync_outbox_recovery_log (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    requested_at timestamp with time zone DEFAULT now() NOT NULL,
+    requested_by text NOT NULL,
+    reason text NOT NULL,
+    rows_recovered integer NOT NULL,
+    seq_from bigint,
+    seq_to bigint,
+    oldest_created_at timestamp with time zone,
+    exhausted_remaining bigint NOT NULL,
+    CONSTRAINT sync_outbox_recovery_log_exhausted_remaining_check CHECK ((exhausted_remaining >= 0)),
+    CONSTRAINT sync_outbox_recovery_log_reason_check CHECK (((length(btrim(reason)) >= 3) AND (length(reason) <= 500))),
+    CONSTRAINT sync_outbox_recovery_log_requested_by_check CHECK ((length(btrim(requested_by)) > 0)),
+    CONSTRAINT sync_outbox_recovery_log_rows_recovered_check CHECK ((rows_recovered >= 0))
+);
+
+
+--
+-- Name: TABLE sync_outbox_recovery_log; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.sync_outbox_recovery_log IS 'Append-only record of every time exhausted-retry sync records were returned to the queue. Payloads are never copied here.';
+
+
+--
 -- Name: sync_outbox_seq_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
@@ -9733,6 +10300,14 @@ ALTER TABLE ONLY iam_v2.checkout_grace_policy_publications
 
 ALTER TABLE ONLY iam_v2.checkout_grace_policy_publications
     ADD CONSTRAINT checkout_grace_policy_publications_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: cloud_sync_settings_changes cloud_sync_settings_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.cloud_sync_settings_changes
+    ADD CONSTRAINT cloud_sync_settings_changes_pkey PRIMARY KEY (id);
 
 
 --
@@ -10744,11 +11319,27 @@ ALTER TABLE ONLY iam_v2.site_checkout_grace_config
 
 
 --
+-- Name: site_cloud_sync_settings site_cloud_sync_settings_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.site_cloud_sync_settings
+    ADD CONSTRAINT site_cloud_sync_settings_pkey PRIMARY KEY (tenant_id, site_id);
+
+
+--
 -- Name: site_guest_signin_protection site_guest_signin_protection_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
 ALTER TABLE ONLY iam_v2.site_guest_signin_protection
     ADD CONSTRAINT site_guest_signin_protection_pkey PRIMARY KEY (tenant_id, site_id);
+
+
+--
+-- Name: stay_event_reoffers stay_event_reoffers_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.stay_event_reoffers
+    ADD CONSTRAINT stay_event_reoffers_pkey PRIMARY KEY (id);
 
 
 --
@@ -11224,6 +11815,14 @@ ALTER TABLE ONLY public.sync_outbox
 
 
 --
+-- Name: sync_outbox_recovery_log sync_outbox_recovery_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sync_outbox_recovery_log
+    ADD CONSTRAINT sync_outbox_recovery_log_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: system_network_audit system_network_audit_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -11289,6 +11888,13 @@ CREATE INDEX aps_changes_lookup ON iam_v2.appliance_product_setting_changes USIN
 --
 
 CREATE UNIQUE INDEX auth_resolutions_req_idem ON iam_v2.auth_resolutions USING btree (tenant_id, site_id, resolution_request_id) WHERE (resolution_request_id IS NOT NULL);
+
+
+--
+-- Name: cloud_sync_settings_changes_recent_idx; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX cloud_sync_settings_changes_recent_idx ON iam_v2.cloud_sync_settings_changes USING btree (tenant_id, site_id, changed_at DESC);
 
 
 --
@@ -11656,6 +12262,20 @@ CREATE INDEX sign_in_attempts_site_room ON iam_v2.sign_in_attempts USING btree (
 
 
 --
+-- Name: stay_event_reoffers_event_idx; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX stay_event_reoffers_event_idx ON iam_v2.stay_event_reoffers USING btree (stay_event_id, requested_at DESC);
+
+
+--
+-- Name: stay_event_reoffers_scope_idx; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX stay_event_reoffers_scope_idx ON iam_v2.stay_event_reoffers USING btree (tenant_id, site_id, requested_at DESC);
+
+
+--
 -- Name: stay_folio_default; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
@@ -12017,6 +12637,13 @@ CREATE TRIGGER ao_review BEFORE DELETE OR UPDATE ON iam_v2.posting_review_action
 --
 
 CREATE TRIGGER charge_gate BEFORE INSERT ON iam_v2.pms_postings FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_posting_charge_gate();
+
+
+--
+-- Name: cloud_sync_settings_changes cloud_sync_settings_changes_no_update; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER cloud_sync_settings_changes_no_update BEFORE DELETE OR UPDATE ON iam_v2.cloud_sync_settings_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.cloud_sync_settings_changes_append_only();
 
 
 --
@@ -12647,6 +13274,20 @@ CREATE TRIGGER purchase_quote_pin_equal BEFORE INSERT OR UPDATE ON iam_v2.purcha
 --
 
 CREATE TRIGGER sg_guard BEFORE DELETE OR UPDATE ON iam_v2.pms_interface_secret_generations FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_secret_gen_guard();
+
+
+--
+-- Name: stay_event_reoffers stay_event_reoffers_no_update; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER stay_event_reoffers_no_update BEFORE DELETE OR UPDATE ON iam_v2.stay_event_reoffers FOR EACH ROW EXECUTE FUNCTION iam_v2.stay_event_reoffers_append_only();
+
+
+--
+-- Name: sync_outbox_recovery_log sync_outbox_recovery_log_no_update; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER sync_outbox_recovery_log_no_update BEFORE DELETE OR UPDATE ON public.sync_outbox_recovery_log FOR EACH ROW EXECUTE FUNCTION public.sync_outbox_recovery_log_append_only();
 
 
 --
@@ -13889,6 +14530,23 @@ REVOKE ALL ON FUNCTION iam_v2.bootstrap_emergency_grace(p_tenant uuid, p_site uu
 
 
 --
+-- Name: FUNCTION cloud_sync_settings_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.cloud_sync_settings_get(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.cloud_sync_settings_get(p_tenant uuid, p_site uuid) TO svc_scd;
+GRANT ALL ON FUNCTION iam_v2.cloud_sync_settings_get(p_tenant uuid, p_site uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION cloud_sync_settings_set(p_tenant uuid, p_site uuid, p_days integer, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.cloud_sync_settings_set(p_tenant uuid, p_site uuid, p_days integer, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.cloud_sync_settings_set(p_tenant uuid, p_site uuid, p_days integer, p_operator text, p_reason text) TO svc_edged;
+
+
+--
 -- Name: FUNCTION complete_sign_in_attempt(p_tenant uuid, p_site uuid, p_request uuid, p_result text, p_entitlement uuid, p_session uuid); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -14645,6 +15303,14 @@ GRANT ALL ON FUNCTION iam_v2.p6_tick_online_time(p_tenant uuid, p_site uuid, p_n
 
 
 --
+-- Name: FUNCTION pms_reoffer_stay_event(p_tenant uuid, p_site uuid, p_iface uuid, p_event uuid, p_operator text, p_reason text, p_evidence jsonb); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.pms_reoffer_stay_event(p_tenant uuid, p_site uuid, p_iface uuid, p_event uuid, p_operator text, p_reason text, p_evidence jsonb) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_reoffer_stay_event(p_tenant uuid, p_site uuid, p_iface uuid, p_event uuid, p_operator text, p_reason text, p_evidence jsonb) TO svc_edged;
+
+
+--
 -- Name: FUNCTION publish_checkout_grace_config(p_tenant uuid, p_site uuid, p_pkg_rev uuid, p_duration integer, p_down integer, p_up integer, p_quota bigint, p_dev_limit integer, p_dev_policy text, p_eligibility integer); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -14733,6 +15399,31 @@ GRANT ALL ON FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at 
 
 
 --
+-- Name: FUNCTION sync_outbox_accounting(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.sync_outbox_accounting() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.sync_outbox_accounting() TO svc_scd;
+GRANT ALL ON FUNCTION public.sync_outbox_accounting() TO svc_edged;
+
+
+--
+-- Name: FUNCTION sync_outbox_prune_delivered(p_days integer); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.sync_outbox_prune_delivered(p_days integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.sync_outbox_prune_delivered(p_days integer) TO svc_scd;
+
+
+--
+-- Name: FUNCTION sync_outbox_recover_exhausted(p_operator text, p_reason text, p_limit integer); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.sync_outbox_recover_exhausted(p_operator text, p_reason text, p_limit integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.sync_outbox_recover_exhausted(p_operator text, p_reason text, p_limit integer) TO svc_edged;
+
+
+--
 -- Name: TABLE accounting_checkpoints; Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -14788,6 +15479,13 @@ GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.auth_contexts TO svc_scd;
 
 GRANT SELECT,INSERT ON TABLE iam_v2.auth_resolutions TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.auth_resolutions TO svc_edged;
+
+
+--
+-- Name: TABLE cloud_sync_settings_changes; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.cloud_sync_settings_changes TO svc_edged;
 
 
 --
@@ -15057,10 +15755,56 @@ GRANT SELECT ON TABLE iam_v2.pms_postings TO svc_edged;
 
 
 --
+-- Name: TABLE stay_event_reoffers; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.stay_event_reoffers TO svc_edged;
+
+
+--
+-- Name: TABLE stay_events; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.stay_events TO svc_edged;
+GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.stay_events TO svc_pmsd;
+
+
+--
+-- Name: TABLE stays; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.stays TO svc_scd;
+GRANT SELECT ON TABLE iam_v2.stays TO svc_acctd;
+GRANT SELECT ON TABLE iam_v2.stays TO svc_edged;
+GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.stays TO svc_pmsd;
+
+
+--
+-- Name: TABLE pms_reconciliation_cases; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.pms_reconciliation_cases TO svc_edged;
+
+
+--
+-- Name: TABLE pms_rooms_multi_occupancy; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.pms_rooms_multi_occupancy TO svc_edged;
+
+
+--
 -- Name: TABLE pms_source_conflicts; Type: ACL; Schema: iam_v2; Owner: -
 --
 
 GRANT SELECT ON TABLE iam_v2.pms_source_conflicts TO svc_edged;
+
+
+--
+-- Name: TABLE pms_stays_past_departure; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.pms_stays_past_departure TO svc_edged;
 
 
 --
@@ -15185,14 +15929,6 @@ GRANT SELECT ON TABLE iam_v2.site_checkout_grace_config TO svc_pmsd;
 
 
 --
--- Name: TABLE stay_events; Type: ACL; Schema: iam_v2; Owner: -
---
-
-GRANT SELECT ON TABLE iam_v2.stay_events TO svc_edged;
-GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.stay_events TO svc_pmsd;
-
-
---
 -- Name: TABLE stay_folios; Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -15207,16 +15943,6 @@ GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.stay_folios TO svc_pmsd;
 GRANT SELECT ON TABLE iam_v2.stay_guests TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.stay_guests TO svc_edged;
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.stay_guests TO svc_pmsd;
-
-
---
--- Name: TABLE stays; Type: ACL; Schema: iam_v2; Owner: -
---
-
-GRANT SELECT ON TABLE iam_v2.stays TO svc_scd;
-GRANT SELECT ON TABLE iam_v2.stays TO svc_acctd;
-GRANT SELECT ON TABLE iam_v2.stays TO svc_edged;
-GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.stays TO svc_pmsd;
 
 
 --
@@ -15536,6 +16262,13 @@ GRANT SELECT,INSERT ON TABLE public.sync_checkpoints TO svc_edged;
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.sync_outbox TO svc_scd;
 GRANT SELECT,INSERT,UPDATE ON TABLE public.sync_outbox TO svc_edged;
+
+
+--
+-- Name: TABLE sync_outbox_recovery_log; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT ON TABLE public.sync_outbox_recovery_log TO svc_edged;
 
 
 --

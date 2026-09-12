@@ -1,0 +1,111 @@
+{
+  "transition_id": "T0121",
+  "seq": 121,
+  "timestamp": "2026-09-12T16:00:00Z",
+  "timestamp_derivation": "After the Product Owner's manual PRE-LIVE acceptance of guest sign-in protection (recorded below), after the standing read-only access grant and the consolidated-delivery authorization, and after Protel was reconnected by the Product Owner and a complete roster synchronization was observed at 15:51:29Z on 172.21.60.25; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "PRE_LIVE_GUEST_SIGNIN_PROTECTION_ACCEPTED_AND_CONSOLIDATED_CORRECTION_DELIVERY",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_LIVE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_ACCEPTED_PRE_LIVE",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_LIVE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_ACCEPTED_PRE_LIVE",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": false,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap. No numbered phase advances. PRE-LIVE remains PRE-LIVE and Go-Live remains NOT AUTHORIZED.",
+  "decision": "D40",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new numbered decision. The Product Owner's instruction was explicit that acceptance records and scoped authorizations ride in this delivery rather than opening one of their own, and that unnecessary numbered decisions are not to be introduced. The authorizations recorded here are mission-scoped and expire with the mission (CLAUDE.md 0A.7, 12).",
+  "po_authorization_ref": "Product-Owner instruction EXECUTE ONE CONSOLIDATED STAYCONNECT DELIVERY THROUGH IMPLEMENTATION, VERIFICATION, PROTECTED MERGE, DEPLOYMENT AND OPERATIONAL ACCEPTANCE (2026-09-12), which supersedes the previous consolidated-delivery and PMS-addendum prompts.",
+
+  "product_owner_acceptance_delivery_c": {
+    "subject": "Configurable guest sign-in rate limiting and operator-managed temporary restrictions (migration 0068, merged 11c7ca9f via PR #115, deployed to PRE-LIVE 172.21.60.25).",
+    "observed_manually_by_the_product_owner": [
+      "A guest with correct details signed in successfully.",
+      "A device that submitted incorrect details repeatedly was restricted from trying again.",
+      "The restriction expired on its own after approximately one minute, with no operator action.",
+      "An operator Release ended a restriction and the device was able to attempt again."
+    ],
+    "boundary_between_manual_observation_and_automated_assertion": "The four observations above are Product-Owner manual live results. They do NOT establish the exact fifth-attempt boundary or second-level timing: the Product Owner stated explicitly that those were not measured by hand. The precise threshold, the rolling sixty-second window and the sixty-second expiry are asserted by the automated suites retained with Delivery C — cmd/scd/phase3_signin_protection_integration_test.go, cmd/edged/signin_protection_integration_test.go, internal/signinattempt/policy_test.go and hotel-admin/e2e/guest-signin-protection.spec.ts. Neither body of evidence is presented as the other.",
+    "no_guest_data": "No guest name, room number or reservation number appears in this record, by the Product Owner's instruction and by the standing rule that delivery evidence is published."
+  },
+
+  "corrected_statement_of_record": {
+    "what_was_said": "That an intentionally disconnected PMS necessarily prevents guest credential evaluation.",
+    "why_it_was_wrong": "The appliance authorises from its last-good mirrored roster. A DISCONNECTED transport is not by itself a guest-authentication outage: successful authentication and credential-failure counting were both observed live while the PMS feed was down.",
+    "what_must_not_be_inferred": "This does not mean every mirrored stay is eligible, nor that all offline conditions have been tested. Eligibility is decided per stay by the mirror-trust and freshness rules, not by transport state."
+  },
+
+  "environment_of_record": {
+    "central": "150.0.0.252, associated with sc-central.echofusion.com. Verified this mission: ctrlapi subscribed to telemetry.>, hb.*, appliances.*.commands.results and appliances.*.updates.status on the mutually-authenticated NATS listener on 4223; nats-authz live on $SYS.REQ.USER.AUTH.",
+    "pre_live_appliance": "172.21.60.25. PRE-LIVE remains PRE-LIVE; Go-Live is not authorized.",
+    "development_reference_appliance": "172.21.60.23 is RETIRED as an operational target. It is removed from current operational instructions and must not be contacted. Its historical accepted evidence is preserved unchanged — a retired target is not a falsified record.",
+    "pms": "Protel FIAS was reconnected by the Product Owner. Transport CONNECTED and a complete roster synchronization published 589 records (591 in-house) at 2026-09-12T15:51:29Z."
+  },
+
+  "mission_scoped_authorizations": {
+    "granted_for_this_mission_only": [
+      "Inspect Central and PRE-LIVE using existing authorized access.",
+      "Implement and deploy the scoped application changes.",
+      "Make the StayConnect telemetry configuration changes on Central and PRE-LIVE.",
+      "Perform targeted service restarts required by these changes.",
+      "Recover the appliance's exhausted-retry telemetry records.",
+      "Perform supported PMS roster synchronization if necessary.",
+      "Apply evidence-backed corrections to StayConnect's local mirror and processing state.",
+      "Rotate the database credential exposed during the previous investigation."
+    ],
+    "explicitly_not_granted": [
+      "Unrelated changes.",
+      "Weakening security controls.",
+      "Editing reservations or guest records in Protel.",
+      "Issuing financial transactions.",
+      "Go-Live or cutover."
+    ],
+    "expiry": "These authorizations are scoped to this mission and do not carry into a later one (CLAUDE.md 0A.7 and 12)."
+  },
+
+  "defect": [
+    "Active Sessions and session details showed the SERVICE PLAN's data allowance beside the ENTITLEMENT's usage. A guest granted 7 GB by a per-stay-night package read as '1.2 GB of 100 MB' — a guest apparently far over their limit who had not been cut off. The two halves of the meter described different objects.",
+    "Central's telemetry consumer wrote its deduplication mark and the telemetry row as two separate statements, with a compensating DELETE on failure. The compensation runs on the context that just failed, so in exactly the case it exists for it cannot run. What survives is a dedupe mark with no telemetry row: the appliance's retry carries the same sequence, is told 'already processed', marks it sent and moves on. The record is lost silently at both ends.",
+    "Records that exhausted their retries were marked dead and never offered again by any code path, and nothing in the product could clear the flag. On the PRE-LIVE appliance that is the OLDEST 9,395 records of 86,731 — a contiguous block at the head of the sequence that would have been skipped the moment the link came up, leaving a gap at Central that neither side would report.",
+    "Delivered records were never removed. 76 MB and growing at roughly 180 rows an hour on the disk that also holds the guest database.",
+    "The operator wording inferred the cause of a stuck queue from its SIZE: 'a backlog this size means the queue is not draining — check Cloud connection'. It cannot distinguish a severed link from a connected appliance whose receiver is absent, from a receiver that refuses, from a large queue draining normally — four problems with four different owners, only one of which is the hotel's.",
+    "A room-keyed departure was applied to whichever single IN_HOUSE stay matched the room, with no chronology test. Because an unapplied departure is restaged on every reconnect, old departures are repeatedly re-offered against rooms whose occupant has changed. Measured on PRE-LIVE: 83 of 397 distinct unresolved departures named a room whose current guest arrived AFTER the departure was raised. Each would have checked out a resident guest and revoked their access.",
+    "The dashboard counted MANUAL_REVIEW ROWS, for all time, ungrouped. One unresolved departure restaged across 220-plus generations counted once per copy, so the property was shown 12,026 'messages needing attention' for 397 actual decisions. A list of twelve thousand is a list nobody opens.",
+    "svc_edged held UPDATE on public.sync_outbox and never used it. It is the one privilege that would let the admin API mark an undelivered record as sent — the single way to make a backlog disappear without delivering it."
+  ],
+
+  "fix": [
+    "cmd/edged/resources_sessions.go: the shared sessionCols projection reads COALESCE(e.data_quota_bytes, spr.data_quota_bytes), character-for-character what internal/enforce and internal/checkout decide a guest's limit from. List and detail correct together because they share the constant. Time is deliberately unchanged: entitlements carry no time_quota_seconds override.",
+    "control-plane/internal/fleet/fleet.go: the dedupe mark and the telemetry row are one transaction. A failure rolls back both, so the appliance's retry is a first delivery rather than a swallowed duplicate. A deduplication table makes replay SAFE; it does not on its own make delivery exactly-once.",
+    "Migration 0069: public.sync_outbox_recover_exhausted returns a bounded batch of abandoned records to the queue oldest-sequence-first and writes an append-only log row saying who asked and why, in one call. public.sync_outbox_prune_delivered removes DELIVERED records only — its WHERE clause names sent_at IS NOT NULL and takes no parameter that could widen it. public.sync_outbox_accounting places every record in exactly one bucket so 'recovered' is checkable rather than asserted.",
+    "Migration 0069: iam_v2.site_cloud_sync_settings holds delivered-record retention, default 30 days, bounds 1-365, site-scoped, with an append-only change log and definer read/write functions. No runtime role holds UPDATE on the settings table or INSERT on the log, so the audit row is mandatory by privilege.",
+    "internal/outbox: the drain loop records what its last attempt LEARNED — transport unavailable, receiver unavailable, receiver rejected, draining, idle — and the operator wording reports that instead of inferring a cause from the queue's depth. Catch-up draining is bounded at twenty batches a tick so a backlog finishes in minutes without one appliance opening the throttle on a shared far end.",
+    "internal/stayengine: a room-keyed departure is refused as GO_STALE_ROOM_DEPARTURE when the single matching stay ARRIVED after the departure was raised. The anchor is stays.arrival, not occupancy_evidence_at: the latter records when the PMS last spoke about an occupancy and is restamped by every roster — 449 of 839 in-house stays had been restamped within two hours of one resync, and a rule built on it would have referred almost the whole property to review.",
+    "Migration 0069: iam_v2.pms_reconciliation_cases collapses the restaged copies of one departure into ONE case, with the repeat count shown beside it, and classifies each from current evidence. The dashboard counts cases. Nothing is deleted, no event history is rewritten and no case is hidden: a case with no answer stays on the list labelled with the evidence it needs.",
+    "Migration 0069: iam_v2.pms_reoffer_stay_event hands one recorded MANUAL_REVIEW departure back to the SAME ingestion engine, copying its prior terminal state and the operator's evidence into an append-only log first. There is deliberately no second checkout path: the engine applies the same resolution rules and the same Checkout Converter it would have used originally.",
+    "deploy/gatep/gatep-grants.sql: svc_edged's privilege on public.sync_outbox is narrowed to SELECT,INSERT. edged enqueues and never drains; recovery goes through the definer function so that clearing the abandoned flag and recording who cleared it cannot be separated."
+  ],
+
+  "verification": {
+    "migration_0069": "Applied and rolled back against a disposable PostgreSQL 16 carrying the regenerated production baseline. Bounds, append-only triggers, the definer read/write pair, the recovery batch and the three views all exercised.",
+    "phase5_pg_integration": "PASS, including four new session-allowance integration tests that run the real shared projection against a real database: an entitlement override reports its frozen grant, a plan-derived entitlement keeps the plan's figure, unlimited stays NULL rather than becoming zero, and the projection agrees with the enforcement expression for every shape.",
+    "prod_privilege": "PASS with fifteen new assertions for 0069, including that svc_edged cannot move a PMS event's processing state directly, cannot write either audit log directly, and cannot mark an undelivered record as sent.",
+    "hotel_admin_unit": "276/276 vitest. The two assertions that encoded the size-based 'not draining' wording were rewritten, because that behaviour is the defect this delivery corrects.",
+    "unit": "New pure-function suites for the departure chronology rule and for the delivery-state classification, each carrying the measured numbers that justify it.",
+    "factory_clean_baseline": "Production baseline regenerated from the migration chain; it contains the 0069 objects and still constructs none of the superseded guest-IAM tables."
+  },
+
+  "not_done_and_why": {
+    "no_stay_closed_from_the_backlog_without_evidence": "After the fresh complete roster, the 397 distinct unresolved departures classify as 107 superseded (the room is empty; nothing outstanding), 101 room-shared (undecidable from a room number by construction), 101 contradicted by the PMS's own current in-house list, 83 later-occupant, 1 needing evidence, and 4 RESOLVABLE. Only the last may be re-evaluated. Nothing was closed on a planned departure date, no event was discarded, and no dashboard count was altered to hide an unresolved case.",
+    "no_go_live": "PRE-LIVE remains PRE-LIVE. Go-Live is not authorized and was not performed."
+  }
+}

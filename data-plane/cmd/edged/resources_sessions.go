@@ -110,6 +110,17 @@ type edgeSessionRow struct {
 // Every added join is LEFT. A session whose Entitlement, Stay or package row cannot be read must still appear
 // in the list: an operator hunting a device they cannot account for is exactly who needs the row that will not
 // resolve, and dropping it would make the screen quietly incomplete.
+//
+// THE DATA ALLOWANCE SHOWN IS THE ONE BEING ENFORCED. It reads COALESCE(e.data_quota_bytes,
+// spr.data_quota_bytes), which is character-for-character what enforce.go and checkout.go decide a guest's
+// limit from. A PER_STAY_NIGHT grant freezes its own allowance onto the Entitlement at grant time — nights ×
+// the configured GB — and the pinned plan revision answers for every entitlement granted before that mode
+// existed. Projecting spr.data_quota_bytes alone, as this did, showed the property the plan's underlying
+// number instead: a guest granted 7 GB for a seven-night stay was displayed as "used 1.2 GB of 100 MB", which
+// reads as a guest hugely over their limit who has somehow not been cut off. The usage beside it
+// (e.consumed_data_bytes) was always the Entitlement's, so the two halves of the meter described different
+// things. There is deliberately no equivalent for time: entitlements carry no time_quota_seconds override, so
+// the plan revision is the only source and spr.time_quota_seconds is already correct.
 const sessionCols = `s.id, s.ip::text, s.mac::text, s.state,
        s.started AS started_at, s.started AS last_activity_at,
        s.ended AS ended_at, s.expires_at, s.end_reason, s.bytes_up, s.bytes_down,
@@ -132,7 +143,7 @@ const sessionCols = `s.id, s.ip::text, s.mac::text, s.state,
        st.id::text, st.normalized_room_number, st.external_reservation_id,
        ip.code, NULLIF(ipr.display->>'name',''),
        sp.code, spr.down_kbps, spr.up_kbps, spr.max_concurrent_devices,
-       spr.data_quota_bytes, e.consumed_data_bytes,
+       COALESCE(e.data_quota_bytes, spr.data_quota_bytes), e.consumed_data_bytes,
        spr.time_quota_seconds, e.consumed_online_seconds,
        (SELECT count(DISTINCT d.mac)::int FROM iam_v2.sessions d
          WHERE d.entitlement_id = s.entitlement_id AND d.state = 'active')`

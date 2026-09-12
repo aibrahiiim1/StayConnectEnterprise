@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Users, LogOut, Monitor, Shield, ScrollText, Hotel, Send, KeyRound,
   Wallet, BadgeCheck, Paintbrush, Archive, Network, Wifi, History, Router, Cloud,
   ServerCog, Lock, Activity, Package, Gauge, Smartphone, LogIn, Search, X,
-  PanelLeftClose, PanelLeftOpen,
+  PanelLeftClose, PanelLeftOpen, ClipboardCheck,
 } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 
@@ -98,6 +98,7 @@ const SECTIONS: Section[] = [
       { href: "/stay-events",          label: "PMS activity",         icon: Send,   resource: "pms-events",           enabled: CAP_PMS, keywords: "feed messages check in out log" },
       { href: "/pms-resolutions",      label: "Guest sign-in checks", icon: Send,   resource: "pms-resolutions",      enabled: CAP_PMS, keywords: "room verification failures evidence" },
     { href: "/guest-signin-attempts", label: "Guest sign-in attempts", icon: KeyRound, resource: "guest-signin-attempts", enabled: CAP_PMS, keywords: "attempt failed reason room typed credential mismatch why cannot connect" },
+      { href: "/pms-reconciliation",   label: "Unresolved departures", icon: ClipboardCheck, resource: "pms-reconciliation", enabled: CAP_PMS, keywords: "checkout not applied departure unmatched room shared overstay past departure date manual review reconcile" },
       { href: "/pms-source-conflicts", label: "Duplicate sources",    icon: Shield, resource: "pms-source-conflicts", enabled: CAP_PMS, keywords: "conflict two interfaces same room" },
       { href: "/stay-transfers",       label: "Cross-PMS transfer",   icon: Send,   resource: "stay-transfers",       enabled: CAP_POST_STAY, keywords: "move stay between systems" },
     ],

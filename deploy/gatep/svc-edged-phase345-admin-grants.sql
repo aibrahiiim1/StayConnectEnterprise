@@ -189,3 +189,34 @@ GRANT EXECUTE ON FUNCTION iam_v2.guest_signin_release(uuid,uuid,uuid,text,text) 
 --   * UPDATE on iam_v2.site_guest_signin_protection or iam_v2.guest_signin_restrictions, and INSERT on
 --     iam_v2.guest_signin_protection_changes: an operator API that could write the change log directly could
 --     write a change that did not happen, or make one that did happen look like another operator's.
+
+-- CLOUD SYNC AND PMS RECONCILIATION (migration 0069).
+--
+-- Three operator surfaces, three permission keys, and the same privilege shape as everything above it: SELECT
+-- on what a screen reads, EXECUTE on the definer functions that write, and no table write privilege anywhere.
+--
+-- WHY NO UPDATE ON iam_v2.stay_events. Re-offering a departure moves that event's processing state back to
+-- PENDING so the ingestion engine reconsiders it. That is a legitimate operator action and it is audited: the
+-- prior terminal state and the evidence the operator acted on are copied into iam_v2.stay_event_reoffers
+-- inside the same function, in the same transaction. An edged holding UPDATE on stay_events directly could
+-- move an event's state with no record that anybody decided to — and the outcome of that decision can check a
+-- guest out and revoke their access.
+--
+-- WHY NO UPDATE ON public.sync_outbox. Recovery clears the flag on records the appliance abandoned and writes
+-- the append-only log row saying who released them and why, in one call. Split them and a recovery could
+-- happen with nothing recording it; and an operator API with UPDATE on the queue could also mark undelivered
+-- records as sent, which is the one way to make a backlog disappear without delivering it.
+--
+-- The three views run as their owner, which is how a role with no SELECT on iam_v2.stays or iam_v2.stay_events
+-- reads the reconciliation lists: a scoped projection rather than the tables underneath.
+GRANT SELECT  ON iam_v2.pms_reconciliation_cases   TO svc_edged;
+GRANT SELECT  ON iam_v2.pms_rooms_multi_occupancy  TO svc_edged;
+GRANT SELECT  ON iam_v2.pms_stays_past_departure   TO svc_edged;
+GRANT SELECT  ON iam_v2.stay_event_reoffers        TO svc_edged;
+GRANT SELECT  ON iam_v2.cloud_sync_settings_changes TO svc_edged;
+GRANT SELECT  ON public.sync_outbox_recovery_log   TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.cloud_sync_settings_get(uuid,uuid)                                  TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.cloud_sync_settings_set(uuid,uuid,integer,text,text)                TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_reoffer_stay_event(uuid,uuid,uuid,uuid,text,text,jsonb)         TO svc_edged;
+GRANT EXECUTE ON FUNCTION public.sync_outbox_recover_exhausted(text,text,integer)                    TO svc_edged;
+GRANT EXECUTE ON FUNCTION public.sync_outbox_accounting()                                            TO svc_edged;

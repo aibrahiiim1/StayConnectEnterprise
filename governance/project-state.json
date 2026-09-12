@@ -1093,14 +1093,14 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0120",
+  "latest_transition_id": "T0121",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
   },
   "acceptance_candidate_head": "ac6816456be0e5bbaf2aa1c67c36b33032328ccb",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD of the Phase-6 change manifest. delivery_head is that commit plus one delivery-only commit; the manifest is generated from the STAGED tree so its path set already covers the complete base..delivery_head diff.",
-  "inventory_head": "6a54af533a50654ae0777f1964fa0acfc2e3d5dc",
+  "inventory_head": "39a27a1a750e2588cce2db307d443b47ee6a9cfb",
   "delivery_head_note": "delivery_head (the Phase-6 PR HEAD) = inventory_head + one delivery-only commit. Its exact 40-character SHA is recorded in the PR body and verified to resolve on the authoritative remote before the delivery is reported.",
   "roadmap_exhaustion": {
     "recorded_by": "D28 / T0065 (2026-08-17)",
@@ -1319,14 +1319,17 @@
     "verified_by": "scripts/factory-clean-baseline-verify.sh (FACTORY_CLEAN_BASELINE = PASS; 8104 catalog facts identical to the upgrade path's end state) -- T0082"
   },
   "development_reference_appliance": {
-    "_note": "THE DEVELOPMENT APPLIANCE, AS ITS ACCEPTED EVIDENCE RECORDS IT. Historical/live-dark runtime state, UNTOUCHED by the Zero-Legacy work. Nothing here describes the Fresh Production baseline, and nothing here has been cut over, migrated or changed.",
+    "_note": "RETIRED AS AN OPERATIONAL TARGET, 2026-09-12, by Product-Owner instruction. Do not contact it. Everything below is HISTORICAL: it is the accepted evidence this appliance produced, preserved exactly as it was recorded. Retiring a target does not entitle anybody to rewrite what it proved, and the accepted records that reference it stay as they are.",
     "host": "172.21.60.23",
-    "classification": "DEVELOPMENT. Reference and evidence only, NEVER an installation source.",
+    "classification": "RETIRED DEVELOPMENT REFERENCE. Historical evidence only. NEVER an installation source, never an operational target, and no longer to be contacted for diagnosis.",
     "modified_by_zero_legacy_work": false,
     "runtime_state": "Whatever its accepted trial evidence records (D31/T0068 onward): the IAM-v2 runtime wiring is installed with selected surfaces enabled, and its superseded guest-IAM schema and runtime are STILL PRESENT there. The repository no longer builds that shape; this appliance was not rebuilt to match.",
     "iam_v2_tables_live": 68,
     "iam_v2_tables_live_note": "68 is this appliance's LIVE value at its last read, not the current repository baseline. A factory-clean build from the current repository produces 74. The difference is that this appliance has not been rebuilt, which is the intended state: it is evidence of what was accepted, not a target.",
-    "cutover_performed": false
+    "cutover_performed": false,
+    "status": "RETIRED",
+    "retired_on": "2026-09-12",
+    "operational_targets_note": "The current operational targets are Central 150.0.0.252 (sc-central.echofusion.com) and the PRE-LIVE appliance 172.21.60.25. This host is neither."
   },
   "production_appliance": {
     "_note": "THE FRESH PRODUCTION APPLIANCE, AS DEPLOYED. UPDATED FORWARD as the appliance changed. This dict is a SOURCE for the generated current-state blocks, so leaving it frozen makes every rendered doc contradict the register: it sat at its T0083 values through enrollment (D37), licensing, guest-network configuration, PMS commissioning and the live fresh sync (T0097/T0098), which is exactly the drift ZERO_STALE exists to prevent.",
@@ -1583,14 +1586,13 @@
   },
   "current_delivery": {
     "kind": "POST_CLOSURE_CORRECTIONS",
-    "decision": "D38",
+    "decision": "D40",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "d4e1dc769b6f3450ab407682b4d0dfd3fd2e8ad8",
-    "base_note": "The master merge commit of PR #114, which closed Guest Sign-in Attempts. The guest sign-in rate limiting and operator-managed restriction delivery begins exactly where that one ended, so the two lineages abut without overlapping.",
-    "head": "6d6fc0fb52a5e3db03681cb2bb8349e04228c820",
-    "head_note": "The delivery head for configurable guest sign-in protection: the committed HEAD immediately before the delivery-only commit that rebuilds the manifest, the export packs and this pointer.",
-    "note": "D36: post-closure corrective work is its own delivery lineage with its own manifest. The numbered phases are closed and their manifests are HISTORICAL — each remains a faithful record of what that phase delivered and is never range-checked against a later HEAD. While this key is present it names THE current delivery manifest, and that manifest is what the path/status equality check applies to.",
-    "decision_status": "ACCEPTED by the Product Owner as an explicit mission authorization: implement configurable guest sign-in rate limiting and operator-managed temporary restrictions, and carry the work to verified closure through the protected PR path with a PRE-LIVE deployment to 172.21.60.25 and live verification that the policy is active. The authorization names the commit, push, PR, merge and that one deployment target, and nothing beyond them. PRE-LIVE remains PRE-LIVE; Go-Live is not authorised."
+    "base": "11c7ca9f361c919aa6fcf13cdf342be3621f2cfd",
+    "base_note": "The master merge commit of PR #115, which closed guest sign-in protection. This consolidated correction delivery begins exactly where that one ended.",
+    "head": "39a27a1a750e2588cce2db307d443b47ee6a9cfb",
+    "head_note": "Set by the delivery-only commit that rebuilds the manifest, the export packs and this pointer.",
+    "note": "One consolidated delivery, by Product-Owner instruction: the session allowance display, the Central telemetry dedupe transaction, the cloud-sync recovery/retention/accounting, the PMS reconciliation corrections, the credential rotation, and the agreed project records. T0121 is its receipt."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

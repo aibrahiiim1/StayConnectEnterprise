@@ -126,20 +126,6 @@ func (c *Consumer) handle(ctx context.Context, m *nats.Msg) {
 		return
 	}
 
-	// Dedupe gate first: replays ack without a second telemetry row.
-	tag, err := c.DB.Exec(dbctx, `
-        INSERT INTO fleet_telemetry_dedupe (appliance_id, seq)
-        VALUES ($1, $2) ON CONFLICT DO NOTHING
-    `, msg.ApplianceID, msg.Seq)
-	if err != nil {
-		respond(m, http500)
-		return
-	}
-	if tag.RowsAffected() == 0 {
-		respond(m, http200) // already processed — idempotent ack
-		return
-	}
-
 	ts := msg.TS
 	if ts.IsZero() || ts.After(time.Now().Add(24*time.Hour)) {
 		ts = time.Now().UTC() // clock-skew guard: never index far-future rows
@@ -149,14 +135,48 @@ func (c *Consumer) handle(ctx context.Context, m *nats.Msg) {
 	if siteID != "" {
 		siteArg = siteID
 	}
-	if _, err := c.DB.Exec(dbctx, `
+
+	// THE DEDUPE MARK AND THE RECORD IT SPEAKS FOR ARE ONE TRANSACTION.
+	//
+	// They were two statements with a compensating DELETE on failure, and that is not the same thing. The
+	// compensation runs on the context that just failed, so the case it exists for — a timeout, a lost
+	// connection, this process being killed between the two writes — is exactly the case where it cannot run.
+	// What survives then is a dedupe row with no telemetry row: permanent, because the appliance's retry
+	// carries the same seq, reads RowsAffected() == 0 and is told "already processed". The appliance marks it
+	// sent and moves on. The record is gone, nothing reports it, and the loss is invisible on both sides.
+	//
+	// A deduplication table makes replay SAFE. It does not, on its own, make delivery exactly-once — that
+	// needs the mark and the write to commit or fail together, which is what this does. A duplicate delivery
+	// now rolls back to nothing and is retried; a first delivery commits both rows or neither.
+	tx, err := c.DB.Begin(dbctx)
+	if err != nil {
+		respond(m, http500)
+		return
+	}
+	defer func() { _ = tx.Rollback(dbctx) }() // no-op after a successful Commit
+
+	tag, err := tx.Exec(dbctx, `
+        INSERT INTO fleet_telemetry_dedupe (appliance_id, seq)
+        VALUES ($1, $2) ON CONFLICT DO NOTHING
+    `, msg.ApplianceID, msg.Seq)
+	if err != nil {
+		respond(m, http500)
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		respond(m, http200) // already processed — idempotent ack, nothing to commit
+		return
+	}
+	if _, err := tx.Exec(dbctx, `
         INSERT INTO fleet_telemetry (ts, tenant_id, site_id, appliance_id, kind, seq, payload)
         VALUES ($1,$2,$3,$4,$5,$6,$7)
     `, ts, tenantID, siteArg, msg.ApplianceID, msg.Kind, msg.Seq, clean); err != nil {
-		// Roll the dedupe row back so the appliance's retry can land.
-		_, _ = c.DB.Exec(dbctx,
-			`DELETE FROM fleet_telemetry_dedupe WHERE appliance_id = $1 AND seq = $2`,
-			msg.ApplianceID, msg.Seq)
+		respond(m, http500) // deferred Rollback releases the dedupe mark with it
+		return
+	}
+	if err := tx.Commit(dbctx); err != nil {
+		// Not acked as delivered. The appliance retries the same seq; because the mark was never committed,
+		// the retry is a first delivery rather than a swallowed duplicate.
 		respond(m, http500)
 		return
 	}

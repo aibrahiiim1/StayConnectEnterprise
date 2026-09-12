@@ -1007,7 +1007,11 @@ func main() {
 	// publishes when connected. Aggregated summaries only — no guest PII.
 	scdStarted := time.Now()
 	if c.ApplianceID != "" {
-		s.obx = &outbox.Outbox{DB: pool, NC: natsConn, ApplianceID: c.ApplianceID}
+		// Tenant and site come along so retention can read the property's own setting. They may still be
+		// empty here (an appliance awaiting assignment); RetentionDays falls back to the approved default
+		// rather than skipping retention, because an unassigned appliance still fills a disk.
+		s.obx = &outbox.Outbox{DB: pool, NC: natsConn, ApplianceID: c.ApplianceID,
+			TenantID: c.TenantID, SiteID: c.SiteID}
 		s.obx.Start(rootCtx)
 		go s.telemetryLoop(rootCtx, scdStarted)
 		s.enqueueLicenseAck(rootCtx)

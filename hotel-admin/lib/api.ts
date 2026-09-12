@@ -3,6 +3,8 @@
 // connected to exactly one site DB) so no tenant_id/site_id params anywhere.
 // Cookies flow naturally same-origin; no credentials: 'include' needed.
 
+import type { OutboxFigures } from "@/lib/health-words";
+
 export class ApiError extends Error {
   status: number;
   code: string;          // machine-readable, e.g. "forbidden"
@@ -621,7 +623,7 @@ export type EdgeHealth = {
   // reports license_state="Active" with no license — this flag disambiguates so
   // the dashboard shows "Pending activation" instead of a false "Active".
   license_installed?: boolean;
-  sync_outbox?: { enabled: boolean; pending?: number; dead?: number; oldest_pending?: string | null };
+  sync_outbox?: OutboxFigures;
 };
 
 // ReportsSummary mirrors the aggregates edged computes from local data —
@@ -1026,7 +1028,7 @@ export type CloudStatus = {
     last_cloud_validation?: string | null;
     cloud_stale?: boolean;
   };
-  outbox: { enabled?: boolean; pending?: number; dead?: number; oldest_pending?: string | null };
+  outbox: OutboxFigures;
   connection: { state?: string; reachable?: boolean; cert_valid?: boolean; http_code?: number; error?: string };
 };
 
@@ -1353,4 +1355,104 @@ export type ReviewPostingDetail = {
   available_actions: string[];
   evidence_contract?: { source_types: string[] };
   limitations: string[];
+};
+
+// ---------------------------------------------------------------------------------------------------------
+// CLOUD SYNC — how long delivered records are kept, and rescuing the ones the appliance gave up on.
+// ---------------------------------------------------------------------------------------------------------
+
+export type CloudSyncSettings = {
+  delivered_retention_days: number;
+  is_default: boolean;
+  /** The server's own bounds, sent so the form cannot validate against a copy that has drifted. */
+  limits: { min_days: number; max_days: number };
+  last_change?: {
+    changed_at: string;
+    changed_by: string;
+    reason?: string;
+    old_delivered_retention_days?: number | null;
+    new_delivered_retention_days: number;
+    new_config_version: number;
+  } | null;
+};
+
+export type CloudSyncRecovery = {
+  requested_at: string;
+  requested_by: string;
+  reason: string;
+  recovered: number;
+  seq_from?: number;
+  seq_to?: number;
+  oldest_created_at?: string | null;
+  exhausted_remaining: number;
+};
+
+// ---------------------------------------------------------------------------------------------------------
+// PMS RECONCILIATION — unresolved departures as cases, not as rows.
+// ---------------------------------------------------------------------------------------------------------
+
+/**
+ * resolution_state is computed by the server from current evidence, and the UI never re-derives it.
+ *
+ *  RESOLVABLE             one candidate stay, it began before the departure, and the PMS's own latest
+ *                         complete roster does not contain it. The only state that may be re-evaluated.
+ *  SUPERSEDED_ROOM_EMPTY  the room holds nobody now. Nothing outstanding, and nothing to close.
+ *  ROOM_SHARED            more than one stay in the room — undecidable from a room number, by construction.
+ *  LATER_OCCUPANT         the one stay in that room arrived AFTER the departure was raised.
+ *  ROSTER_CONTRADICTS     the PMS's current roster still lists this stay as in house.
+ *  NEEDS_PMS_EVIDENCE     everything else, including anything seen with no complete roster to compare to.
+ */
+export type ReconciliationState =
+  | "RESOLVABLE"
+  | "SUPERSEDED_ROOM_EMPTY"
+  | "ROOM_SHARED"
+  | "LATER_OCCUPANT"
+  | "ROSTER_CONTRADICTS"
+  | "NEEDS_PMS_EVIDENCE";
+
+export type ReconciliationCase = {
+  case_key: string;
+  reservation?: string;
+  room?: string;
+  /** How many recorded copies of this one departure exist. Shown, not hidden — it describes the feed. */
+  repeat_count: number;
+  generations: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  event_at?: string;
+  latest_event_id: string;
+  review_code?: string;
+  candidate_stays: number;
+  candidate_stay_id?: string;
+  roster_present: boolean;
+  reoffer_count: number;
+  resolution_state: ReconciliationState;
+  actionable: boolean;
+};
+
+export type ReconciliationSummary = {
+  cases: number;
+  recorded_rows: number;
+  actionable_cases: number;
+  by_state: { state: ReconciliationState; cases: number; recorded_rows: number; actionable: boolean }[];
+  rooms_multi_occupancy: number;
+  stays_past_departure: number;
+  stays_past_departure_absent_from_roster: number;
+};
+
+export type MultiOccupancyRoom = {
+  room: string;
+  stays_in_room: number;
+  earliest_arrival?: string | null;
+  latest_planned_departure?: string | null;
+};
+
+export type StayPastDeparture = {
+  stay_id: string;
+  room?: string;
+  reservation?: string;
+  arrival?: string | null;
+  departure?: string | null;
+  days_past_departure: number;
+  roster_present: boolean;
 };

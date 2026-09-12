@@ -409,6 +409,14 @@ func main() {
 				mountResource(r, s, "pms-interfaces", s.pmsInterfacesRoutes)
 				mountResource(r, s, "pms-routing", s.pmsRoutingRoutes)
 				mountResource(r, s, "pms-source-conflicts", s.pmsSourceConflictsRoutes)
+				// Unresolved departures as CASES. Read is wide because "which guests does the PMS and the
+				// mirror disagree about" is a question the desk asks; write is the one action that hands a
+				// recorded event back to the ingestion engine, which is not a desk decision.
+				mountResource(r, s, "pms-reconciliation", s.pmsReconciliationRoutes)
+				// Reporting to the cloud. Two keys again: setting how long delivered records are kept, and
+				// releasing records the appliance gave up on, are different powers.
+				mountResource(r, s, "cloud-sync-settings", s.cloudSyncSettingsRoutes)
+				mountResource(r, s, "cloud-sync-recovery", s.cloudSyncRecoveryRoutes)
 			}
 			// Phase 5 (DARK): the operator post-stay surface. Mounted only when the Phase-5 master flag
 			// AND its admin flag are both ON; while dark this path does not exist.

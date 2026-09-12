@@ -224,6 +224,14 @@ var rolePerms = map[string]map[string]perm{
 		// device's restriction comes with it: whoever may set the threshold may certainly waive one instance
 		// of it.
 		"guest-signin-protection": permWrite, "guest-signin-restrictions": permWrite,
+		// Unresolved departures are the PMS integration's own backlog, and re-evaluating one is an
+		// integration decision rather than a guest-service one: it hands a recorded event back to the
+		// ingestion engine, which may then check a stay out through the ordinary checkout policy.
+		"pms-reconciliation": permWrite,
+		// Reporting to the cloud is appliance infrastructure, which is this role's territory. The two keys
+		// stay separate: a retention period is a policy, and releasing nine thousand abandoned records onto
+		// the wire is an action with a far end that has to absorb it.
+		"cloud-sync-settings": permWrite, "cloud-sync-recovery": permWrite,
 	},
 	"front_office_operator": {
 		// THE RECEPTION DESK, and the role this feature was asked for. They already hold the guest's room,
@@ -242,6 +250,10 @@ var rolePerms = map[string]map[string]perm{
 		// Read-only on the integration: the front desk needs to see whether the PMS is reachable before
 		// telling a guest to try again, but must not be able to publish or rotate anything.
 		"pms-interfaces": permRead, "pms-routing": permRead, "pms-source-conflicts": permRead,
+		// The desk READS the reconciliation cases and acts on none of them. "Is this guest still checked in
+		// according to the PMS" is a question reception answers hourly, and the list is the honest form of
+		// it. Handing an old departure back to the engine is not: its outcome can revoke a guest's access.
+		"pms-reconciliation": permRead,
 		// Phase 5 (DARK): the front desk is where a guest who lost their post-stay PIN actually turns up,
 		// so this role can rotate and revoke -- under step-up, a mandatory reason and audit like everyone
 		// else. Reset is a rotation; revoke is terminal for the episode.
@@ -266,6 +278,8 @@ var rolePerms = map[string]map[string]perm{
 		// Read-only on the integration: the front desk needs to see whether the PMS is reachable before
 		// telling a guest to try again, but must not be able to publish or rotate anything.
 		"pms-interfaces": permRead, "pms-routing": permRead, "pms-source-conflicts": permRead,
+		// Same desk, same conversation, same read-only relationship with the engine.
+		"pms-reconciliation": permRead,
 		"post-stay-profiles": permWrite,
 		"stay-transfers":     permWrite,
 		"auth-methods":       permRead, "reports": permRead,
@@ -308,6 +322,10 @@ var rolePerms = map[string]map[string]perm{
 		"commercial-packages": permRead,
 		// Phase 3 (DARK): a viewer sees the evidence and never acts on it.
 		"pms-stays": permRead, "pms-events": permRead, "pms-resolutions": permRead,
+		// The reconciliation backlog and the cloud queue's history are evidence of the same kind — including
+		// the recovery log, which records what somebody did about it. A viewer reads both and acts on neither.
+		"pms-reconciliation":  permRead,
+		"cloud-sync-settings": permRead, "cloud-sync-recovery": permRead,
 		"checkout-grace": permRead, "operational-alerts": permRead,
 		"pms-interfaces": permRead, "pms-routing": permRead, "pms-source-conflicts": permRead,
 		// Phase 5 (DARK): a viewer sees WHETHER a post-stay identity can authenticate, and never acts on it.
