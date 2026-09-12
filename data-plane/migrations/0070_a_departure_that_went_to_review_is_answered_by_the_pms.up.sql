@@ -167,6 +167,65 @@ BEGIN
 END;
 $own$;
 
+
+-- ---------------------------------------------------------------------------------------------------------
+-- A LATENT MIS-KEY IN iam_v2.pms_stays_past_departure, corrected while it is still latent.
+--
+-- The roster-membership test read:  ro.reservation = s.external_reservation_id
+--                                OR (ro.reservation = '' AND ro.room = s.normalized_room_number)
+--
+-- The second branch keys on the ROSTER's reservation being empty. Every roster row this PMS sends carries a
+-- reservation number -- 454 of 454, measured -- so that branch is dead, and a stay with no reservation id of
+-- its own would be reported ABSENT even when its room is plainly on the roster.
+--
+-- It produces the right answer today only because every affected stay happens to carry a reservation. The
+-- condition belongs on the STAY, which is the thing being looked up:
+--
+--   has a reservation  -> present iff the roster carries THAT reservation
+--   has none           -> present iff the roster carries that room, which is the best available evidence
+--
+-- AND THE ROOM BRANCH STAYS NARROW ON PURPOSE. Matching a reservation-bearing stay by room would say
+-- "present" because SOMEBODY is in that room -- which, on this appliance, is wrong for 315 of the 356
+-- overstayed stays: the room is on the roster under a DIFFERENT reservation. A different guest in the same
+-- room is not this stay, and treating it as one is the same room-is-not-an-identity error the departure
+-- chronology rule exists to prevent.
+-- ---------------------------------------------------------------------------------------------------------
+CREATE OR REPLACE VIEW iam_v2.pms_stays_past_departure AS
+    WITH roster AS (
+        SELECT se.tenant_id, se.site_id, se.pms_interface_id,
+               btrim(COALESCE(se.payload->>'reservation','')) AS reservation,
+               upper(btrim(COALESCE(se.payload->>'room',''))) AS room
+          FROM iam_v2.stay_events se
+          JOIN iam_v2.pms_interface_runtime r
+            ON r.tenant_id = se.tenant_id AND r.site_id = se.site_id
+           AND r.pms_interface_id = se.pms_interface_id
+         WHERE se.admission_kind = 'RESYNC'
+           AND se.resync_generation = r.published_resync_generation
+           AND r.published_resync_generation > 0
+           AND se.event_type IN ('GI','GC')
+    )
+    SELECT s.tenant_id, s.site_id, s.pms_interface_id, s.id AS stay_id,
+           s.normalized_room_number AS room,
+           s.external_reservation_id AS reservation,
+           s.arrival, s.departure,
+           (CURRENT_DATE - s.departure)::int AS days_past_departure,
+           EXISTS (SELECT 1 FROM roster ro
+                    WHERE ro.tenant_id = s.tenant_id AND ro.site_id = s.site_id
+                      AND ro.pms_interface_id = s.pms_interface_id
+                      AND ((COALESCE(s.external_reservation_id,'') <> ''
+                            AND ro.reservation = s.external_reservation_id)
+                        OR (COALESCE(s.external_reservation_id,'') = ''
+                            AND ro.room = s.normalized_room_number))) AS roster_present,
+           -- Said separately because "not listed" and "somebody else is in that room now" are different
+           -- facts, and the second is the one that tells an operator the room has been re-let.
+           EXISTS (SELECT 1 FROM roster ro
+                    WHERE ro.tenant_id = s.tenant_id AND ro.site_id = s.site_id
+                      AND ro.pms_interface_id = s.pms_interface_id
+                      AND ro.room = s.normalized_room_number
+                      AND ro.reservation IS DISTINCT FROM s.external_reservation_id) AS room_now_holds_another_stay
+      FROM iam_v2.stays s
+     WHERE s.status = 'IN_HOUSE' AND s.departure IS NOT NULL AND s.departure < CURRENT_DATE;
+
 COMMENT ON VIEW iam_v2.pms_reconciliation_cases IS
   'One row per DISTINCT unresolved PMS departure, with the number of recorded copies beside it and a resolution state computed from current roster and occupancy evidence. READ-ONLY: a departure that went to review is resolved by the PMS sending one that can be applied, never by replaying the old one -- stay_events is one-way and a checkout boundary must be an APPLIED GO event. Collapses copies for counting; deletes and hides nothing.';
 

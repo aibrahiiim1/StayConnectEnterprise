@@ -210,7 +210,7 @@ func (s *server) listStaysPastDeparture(w http.ResponseWriter, r *http.Request) 
 	defer cancel()
 	rows, err := s.db.Query(ctx, `
 		SELECT stay_id::text, COALESCE(room,''), COALESCE(reservation,''),
-		       arrival, departure, days_past_departure, roster_present
+		       arrival, departure, days_past_departure, roster_present, room_now_holds_another_stay
 		  FROM iam_v2.pms_stays_past_departure
 		 WHERE tenant_id=$1 AND site_id=$2
 		 ORDER BY days_past_departure DESC, room LIMIT 500`, s.tenantID, s.siteID)
@@ -227,12 +227,15 @@ func (s *server) listStaysPastDeparture(w http.ResponseWriter, r *http.Request) 
 		Departure     *time.Time `json:"departure,omitempty"`
 		DaysPast      int        `json:"days_past_departure"`
 		RosterPresent bool       `json:"roster_present"`
+		// "Not listed" and "somebody else is in that room now" are different facts. The second is the one
+		// that says the room has been re-let, which is what an operator actually needs to know.
+		RoomReLet bool `json:"room_now_holds_another_stay"`
 	}
 	out := []stayOut{}
 	for rows.Next() {
 		var o stayOut
 		if err := rows.Scan(&o.StayID, &o.Room, &o.Reservation, &o.Arrival, &o.Departure,
-			&o.DaysPast, &o.RosterPresent); err != nil {
+			&o.DaysPast, &o.RosterPresent, &o.RoomReLet); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "stays_unreadable", err.Error())
 			return
 		}

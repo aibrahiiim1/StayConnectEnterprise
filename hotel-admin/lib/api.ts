@@ -1455,4 +1455,6 @@ export type StayPastDeparture = {
   departure?: string | null;
   days_past_departure: number;
   roster_present: boolean;
+  /** Stronger than "not listed": the PMS has that room under a DIFFERENT reservation, so it has been re-let. */
+  room_now_holds_another_stay: boolean;
 };

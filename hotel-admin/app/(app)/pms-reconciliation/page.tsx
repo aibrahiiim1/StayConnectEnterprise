@@ -347,6 +347,13 @@ export default function PMSReconciliationPage() {
                         <Badge tone="info" dot>
                           Still listed — they may have extended
                         </Badge>
+                      ) : s.room_now_holds_another_stay ? (
+                        // The strongest statement this screen can make, and the one an operator can act on:
+                        // the PMS has that room under a different reservation, so it has been re-let and our
+                        // record of this guest is stale beyond doubt.
+                        <Badge tone="err" dot>
+                          Room re-let — the PMS has it under another reservation
+                        </Badge>
                       ) : (
                         <Badge tone="warn" dot>
                           Not listed — our mirror may be behind

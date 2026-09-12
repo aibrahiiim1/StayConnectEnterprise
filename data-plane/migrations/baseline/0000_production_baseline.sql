@@ -8428,7 +8428,10 @@ CREATE VIEW iam_v2.pms_stays_past_departure AS
     (CURRENT_DATE - departure) AS days_past_departure,
     (EXISTS ( SELECT 1
            FROM roster ro
-          WHERE ((ro.tenant_id = s.tenant_id) AND (ro.site_id = s.site_id) AND (ro.pms_interface_id = s.pms_interface_id) AND ((ro.reservation = s.external_reservation_id) OR ((ro.reservation = ''::text) AND (ro.room = s.normalized_room_number)))))) AS roster_present
+          WHERE ((ro.tenant_id = s.tenant_id) AND (ro.site_id = s.site_id) AND (ro.pms_interface_id = s.pms_interface_id) AND (((COALESCE(s.external_reservation_id, ''::text) <> ''::text) AND (ro.reservation = s.external_reservation_id)) OR ((COALESCE(s.external_reservation_id, ''::text) = ''::text) AND (ro.room = s.normalized_room_number)))))) AS roster_present,
+    (EXISTS ( SELECT 1
+           FROM roster ro
+          WHERE ((ro.tenant_id = s.tenant_id) AND (ro.site_id = s.site_id) AND (ro.pms_interface_id = s.pms_interface_id) AND (ro.room = s.normalized_room_number) AND (ro.reservation IS DISTINCT FROM s.external_reservation_id)))) AS room_now_holds_another_stay
    FROM iam_v2.stays s
   WHERE ((status = 'IN_HOUSE'::text) AND (departure IS NOT NULL) AND (departure < CURRENT_DATE));
 
