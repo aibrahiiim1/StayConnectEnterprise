@@ -271,9 +271,46 @@ apply_one(){ # $1=file  atomic lock-then-ledger
       printf "\nINSERT INTO public.schema_migrations(version) VALUES ('%s') ON CONFLICT DO NOTHING;\n" "$ver"
       printf "\\\\else\n\\\\echo SKIP_AFTER_LOCK\n\\\\endif\n"
       printf "SELECT pg_advisory_unlock(%s);\n" "$key"
-    } | $EDGE_PSQL 2>&1
+    } | $EDGE_PSQL -v ON_ERROR_STOP=1 2>&1
   )"
-  if echo "$out" | grep -q "APPLYING_UNDER_LOCK"; then echo "  apply $ver (under lock)"; return 10
+  rc=$?
+  # ON_ERROR_STOP IS FORCED HERE AND NOT LEFT TO THE CALLER, because without it a FAILED migration is
+  # recorded as APPLIED and can never be retried.
+  #
+  # The mechanism: the migration file carries its own BEGIN/COMMIT, so the ledger INSERT this runner appends
+  # is necessarily OUTSIDE it. When a statement fails and psql keeps going, the transaction is aborted, the
+  # migration's COMMIT degrades to ROLLBACK -- and then the appended INSERT runs in its own implicit
+  # transaction and succeeds. The result is a ledger row asserting a migration applied, with none of its
+  # objects present and no path that will ever try it again.
+  #
+  # With ON_ERROR_STOP psql exits at the first error, so the INSERT is never reached and $rc is non-zero.
+  # A caller that passes its own ON_ERROR_STOP is unaffected: this flag comes last and psql takes the last.
+  if echo "$out" | grep -q "APPLYING_UNDER_LOCK"; then
+    # THE ECHO IS NOT THE PROOF, AND TREATING IT AS ONE REPORTED A FAILED MIGRATION AS APPLIED.
+    #
+    # APPLYING_UNDER_LOCK is printed BEFORE the migration body runs. Under ON_ERROR_STOP a failing
+    # migration aborts and its own BEGIN/COMMIT rolls the whole thing back -- including the ledger INSERT --
+    # but the echo has already been emitted, so this branch was taken and the runner printed
+    # EDGE_MIGRATE_OK applied=1 over a database it had not changed.
+    #
+    # Observed, not theorised: 0069 reported applied=1 against a live appliance while the ledger row and
+    # every object it creates were absent, because the applying role could not create in the target schema.
+    # A deployment that trusted the runner would have carried on to restart daemons against a schema that
+    # was never migrated.
+    #
+    # Two independent proofs, because they fail in different directions: psql's exit status catches the
+    # migration that errored, and the ledger row catches the apply that produced no record of itself.
+    if [ "$rc" != "0" ]; then
+      echo "RUNNER ERROR: $ver FAILED (psql exit $rc) -- nothing was applied" >&2
+      echo "$out" | grep -iE "^(ERROR|FATAL|psql:)" | head -5 >&2
+      exit 4
+    fi
+    if [ "$(q "SELECT count(*) FROM public.schema_migrations WHERE version='$ver'")" != "1" ]; then
+      echo "RUNNER ERROR: $ver was attempted but left NO ledger row -- the apply FAILED and rolled back" >&2
+      echo "$out" | grep -iE "^(ERROR|FATAL|psql:)" | head -5 >&2
+      exit 4
+    fi
+    echo "  apply $ver (under lock)"; return 10
   elif echo "$out" | grep -q "SKIP_AFTER_LOCK"; then echo "  skip-after-lock $ver (already applied)"; return 11
   else echo "RUNNER ERROR for $ver:"; echo "$out" | tail -5 >&2; exit 4; fi
 }
