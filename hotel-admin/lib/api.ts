@@ -1395,7 +1395,8 @@ export type CloudSyncRecovery = {
  * resolution_state is computed by the server from current evidence, and the UI never re-derives it.
  *
  *  RESOLVABLE             one candidate stay, it began before the departure, and the PMS's own latest
- *                         complete roster does not contain it. The only state that may be re-evaluated.
+ *                         complete roster does not contain it — so a departure sent from the PMS for that
+ *                         room will apply cleanly. NOT an action this system can take on its own.
  *  SUPERSEDED_ROOM_EMPTY  the room holds nobody now. Nothing outstanding, and nothing to close.
  *  ROOM_SHARED            more than one stay in the room — undecidable from a room number, by construction.
  *  LATER_OCCUPANT         the one stay in that room arrived AFTER the departure was raised.
@@ -1425,16 +1426,15 @@ export type ReconciliationCase = {
   candidate_stays: number;
   candidate_stay_id?: string;
   roster_present: boolean;
-  reoffer_count: number;
   resolution_state: ReconciliationState;
-  actionable: boolean;
+  /** True for every case: the PMS resolves them, never this screen. The state says which evidence is due. */
+  needs_pms_evidence: boolean;
 };
 
 export type ReconciliationSummary = {
   cases: number;
   recorded_rows: number;
-  actionable_cases: number;
-  by_state: { state: ReconciliationState; cases: number; recorded_rows: number; actionable: boolean }[];
+  by_state: { state: ReconciliationState; cases: number; recorded_rows: number }[];
   rooms_multi_occupancy: number;
   stays_past_departure: number;
   stays_past_departure_absent_from_roster: number;

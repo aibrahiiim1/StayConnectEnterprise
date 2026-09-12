@@ -50,7 +50,7 @@ Seven roles, enforced by edged per `/edge/v1` resource. Legend:
 | guest-signin-attempts (`View_Guest_SignIn_Attempts`) | W | R | **R** | **R** | – | – | R |
 | guest-signin-credentials (`View_Guest_SignIn_Credentials`) | W | R | **R** | **R** | – | – | **–** |
 | guest-signin-protection (`Manage_Guest_SignIn_Protection`) | W | **W** | R | R | – | – | R |
-| pms-reconciliation (`Manage_PMS_Reconciliation`) | W | **W** | R | R | – | – | R |
+| pms-reconciliation (`View_PMS_Reconciliation`) | R | R | R | R | – | – | R |
 | cloud-sync-settings (`Manage_Cloud_Sync_Settings`) | W | **W** | – | – | – | – | R |
 | cloud-sync-recovery (`Run_Cloud_Sync_Recovery`) | W | **W** | – | – | – | – | R |
 | guest-signin-restrictions (`Release_Guest_SignIn_Restriction`) | W | **W** | **W** | **W** | – | – | R |
@@ -70,11 +70,12 @@ Seven roles, enforced by edged per `/edge/v1` resource. Legend:
 * `guest-signin-attempts` — the list, the rooms, the results and the diagnostic reasons.
 * `guest-signin-credentials` — what the guest typed and what the property would have accepted.
 * `guest-signin-protection` — **W** changes the property's thresholds, window and waiting period.
-* `pms-reconciliation` — **R** reads the unresolved-departure cases, the rooms holding several stays and the
-  stays past their planned departure. **W** additionally hands one recorded departure back to the PMS
-  ingestion engine, whose answer may check a stay out through the ordinary checkout policy and revoke that
-  guest's access. That is why the desk holds R and not W: reception needs the list to answer a guest, and the
-  decision that can disconnect somebody belongs with the role that owns the integration.
+* `pms-reconciliation` — **read-only for every role, including site_admin.** It lists the unresolved
+  departures, the rooms holding several stays and the stays past their planned departure. There is no write
+  form because there is no local action: a departure that went to review is resolved by the PMS sending one
+  that can be applied. A PMS event is one-way once terminal, and a checkout boundary must be an *applied*
+  departure event, so replaying an old one is not something the product can do — and a write permission would
+  promise a power it does not have.
 * `cloud-sync-settings` — **W** sets how long DELIVERED cloud-reporting records are kept. It reaches nothing
   that has not been delivered.
 * `cloud-sync-recovery` — **W** releases records the appliance gave up on back onto the queue. Separate from

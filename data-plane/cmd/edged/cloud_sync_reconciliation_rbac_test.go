@@ -8,9 +8,10 @@ package main
 //   * cloud-sync-settings   changes how long DELIVERED records are kept. A policy.
 //   * cloud-sync-recovery   releases thousands of abandoned records back onto the wire, at a far end that
 //                           serves the whole fleet. An action with consequences somewhere else.
-//   * pms-reconciliation    WRITE hands a recorded departure back to the ingestion engine, which may then
-//                           check a stay out through the ordinary checkout policy and revoke a guest's
-//                           access. READ is just a list, and the desk needs the list.
+//   * pms-reconciliation    READ ONLY, for every role. There is no local action: a departure that went to
+//                           review is resolved by the PMS sending one that can be applied, because
+//                           stay_events is one-way and a checkout boundary must be an APPLIED GO event.
+//                           A write permission would promise a power the product does not have.
 //
 // The reception desk therefore reads reconciliation and can act on none of it, and touches the cloud queue
 // not at all.
@@ -43,7 +44,6 @@ func cloudSyncRBACRouter(s *server) http.Handler {
 		mountResource(r, s, "pms-reconciliation", func() http.Handler {
 			rr := chi.NewRouter()
 			rr.Get("/", reached)
-			rr.Post("/{eventID}/re-evaluate", reached)
 			return rr
 		})
 	})
@@ -58,24 +58,23 @@ func TestCloudSyncAndReconciliation_PermissionModel(t *testing.T) {
 	const deny = http.StatusForbidden
 
 	cases := []struct {
-		role                                 string
-		readSettings, writeSettings          int
-		readRecovery, doRecovery             int
-		readReconciliation, doReconciliation int
+		role                        string
+		readSettings, writeSettings int
+		readRecovery, doRecovery    int
+		readReconciliation          int
 	}{
-		{"site_admin", reach, reach, reach, reach, reach, reach},
+		{"site_admin", reach, reach, reach, reach, reach},
 		// The IT manager owns the appliance's infrastructure and the PMS integration.
-		{"hotel_it_manager", reach, reach, reach, reach, reach, reach},
-		// THE DESK READS THE CASES AND ACTS ON NONE OF THEM. Re-evaluating can end a stay and revoke a
-		// guest's access; that is not a reception decision. The cloud queue is not a desk concern at all.
-		{"front_office_operator", deny, deny, deny, deny, reach, deny},
-		{"guest_relations_operator", deny, deny, deny, deny, reach, deny},
+		{"hotel_it_manager", reach, reach, reach, reach, reach},
+		// The desk reads the cases. The cloud queue is not a desk concern at all.
+		{"front_office_operator", deny, deny, deny, deny, reach},
+		{"guest_relations_operator", deny, deny, deny, deny, reach},
 		// A viewer sees all three as evidence — including the recovery log, which records what somebody did
-		// about the queue — and acts on none of them.
-		{"site_viewer", reach, deny, reach, deny, reach, deny},
+		// about the queue — and acts on the one action it is offered, never.
+		{"site_viewer", reach, deny, reach, deny, reach},
 		// Roles with no relationship to either subject reach nothing.
-		{"voucher_operator", deny, deny, deny, deny, deny, deny},
-		{"payments_operator", deny, deny, deny, deny, deny, deny},
+		{"voucher_operator", deny, deny, deny, deny, deny},
+		{"payments_operator", deny, deny, deny, deny, deny},
 	}
 
 	for _, c := range cases {
@@ -89,7 +88,6 @@ func TestCloudSyncAndReconciliation_PermissionModel(t *testing.T) {
 			{"read recovery history", http.MethodGet, "/cloud-sync-recovery/", c.readRecovery},
 			{"run a recovery", http.MethodPost, "/cloud-sync-recovery/", c.doRecovery},
 			{"read reconciliation cases", http.MethodGet, "/pms-reconciliation/", c.readReconciliation},
-			{"re-evaluate a departure", http.MethodPost, "/pms-reconciliation/abc/re-evaluate", c.doReconciliation},
 		}
 		for _, k := range checks {
 			if got := protectionDo(t, h, k.method, k.path, cookie); got != k.want {
@@ -116,45 +114,30 @@ func TestCloudSyncRecovery_ReadingDoesNotCarryRunning(t *testing.T) {
 	}
 }
 
-// The one that would disconnect a guest: a desk role must never reach the re-evaluate route, whose outcome
-// runs the checkout policy.
-func TestReconciliation_TheDeskCannotReEvaluate(t *testing.T) {
-	s := &server{sessions: newSessionStore(time.Hour)}
-	h := cloudSyncRBACRouter(s)
-
-	for _, role := range []string{"front_office_operator", "guest_relations_operator", "site_viewer"} {
-		cookie := loginAs(t, s, []string{role})
-		if got := protectionDo(t, h, http.MethodGet, "/pms-reconciliation/", cookie); got != http.StatusTeapot {
-			t.Errorf("%s: should read the cases, got %d", role, got)
-		}
-		if got := protectionDo(t, h, http.MethodPost, "/pms-reconciliation/abc/re-evaluate", cookie); got != http.StatusForbidden {
-			t.Errorf("%s: reached the re-evaluate route (%d); its outcome can revoke a guest's access", role, got)
-		}
+// THE ACTION DOES NOT EXIST, FOR ANYBODY — including site_admin.
+//
+// This is the assertion that keeps the product honest about what it can do. A departure that went to review
+// cannot be replayed: iam_v2.stay_events is strictly one-way (the p3_stay_event_appendonly trigger refuses
+// any change to a terminal row), and separately a checkout boundary must be an APPLIED GO event. A route
+// offering to try would fail at the database every time, and an operator would reasonably read that failure
+// as the appliance being broken rather than as the design saying no.
+//
+// It walks the REAL route tree rather than a fixture, so re-adding a write route fails here.
+func TestReconciliation_ThereIsNoLocalAction(t *testing.T) {
+	s := &server{}
+	var mutating []string
+	err := chi.Walk(s.pmsReconciliationRoutes().(chi.Routes),
+		func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+			if method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions {
+				mutating = append(mutating, method+" "+route)
+			}
+			return nil
+		})
+	if err != nil {
+		t.Fatalf("walking the reconciliation routes: %v", err)
 	}
-}
-
-// actionableState is the single gate between a case and the button. It is asserted here rather than only in
-// the browser because the server refuses the route on the same predicate, and a second copy of "which states
-// are safe" is how the screen and the server come to disagree.
-func TestActionableState_OnlyResolvable(t *testing.T) {
-	safe := []string{"RESOLVABLE"}
-	refused := []string{
-		"SUPERSEDED_ROOM_EMPTY", // nobody is in the room; nothing to close
-		"ROOM_SHARED",           // sharing is ordinary and makes a room-keyed departure undecidable
-		"LATER_OCCUPANT",        // applying it would check out a resident guest
-		"ROSTER_CONTRADICTS",    // the PMS's own fresh roster says they are still in house
-		"NEEDS_PMS_EVIDENCE",
-		"", // an unknown state must never be actionable
-	}
-	for _, s := range safe {
-		if !actionableState(s) {
-			t.Errorf("%s should be actionable", s)
-		}
-	}
-	for _, s := range refused {
-		if actionableState(s) {
-			t.Errorf("%s must not be actionable", s)
-		}
+	if len(mutating) != 0 {
+		t.Errorf("pms-reconciliation exposes %v; the PMS resolves these cases, not this screen", mutating)
 	}
 }
 
