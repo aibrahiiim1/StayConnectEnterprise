@@ -60,7 +60,8 @@ for m in 0007_auth_throttle_buckets 0009_phase2_commerce 0010_phase3_stay_resolu
          0062_the_crossing_sample_still_belongs_to_the_entitlement_that_spent_it \
          0063_scoped_reader_for_current_package_conditions \
          0064_the_allowance_a_stay_earned_is_frozen_when_it_is_granted \
-         0067_a_refused_sign_in_leaves_a_record_somebody_can_read; do
+         0067_a_refused_sign_in_leaves_a_record_somebody_can_read \
+         0068_the_hotel_decides_how_many_wrong_guesses_are_too_many; do
   # 0050 is out of numeric sequence with the rest of this list on purpose: this gate runs internal/authctx,
   # whose PMS arm now calls iam_v2.p3_feed_authorizes. Without it those tests fail with "function does not
   # exist" rather than on anything Phase 5 owns. It is applied last, after everything it redefines.
@@ -75,14 +76,15 @@ done
 
 base="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc \
   "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2' AND table_type='BASE TABLE';")"
-# 69, not 68, since 0067: this gate runs ./cmd/edged with no -run filter, so the guest sign-in attempts API
-# suite compiles and RUNS here. It reads iam_v2.sign_in_attempts, which 0067 creates. Without the migration
-# those tests fail on a missing relation rather than on anything they are testing, and the count below is the
-# check that would have caught a chain that silently did not build it.
-if [ "${base:-0}" != "69" ]; then
-  echo "INFRA: the chain did not build (iam_v2 base tables=$base, expected 69)"; exit 2
+# 72, not 68: this gate runs ./cmd/edged with no -run filter, so the guest sign-in attempts API suite and the
+# sign-in protection suite both compile and RUN here. 0067 adds iam_v2.sign_in_attempts; 0068 adds the
+# protection policy, its append-only change log and the restriction table. Without them those tests fail on
+# missing relations rather than on anything they are testing, and this count is the check that would catch a
+# chain which silently did not build them.
+if [ "${base:-0}" != "72" ]; then
+  echo "INFRA: the chain did not build (iam_v2 base tables=$base, expected 72)"; exit 2
 fi
-echo "  chain built: 69 iam_v2 base tables through 0029 + 0067"
+echo "  chain built: 72 iam_v2 base tables through 0029 + 0067 + 0068"
 
 fail=0
 run_gate(){

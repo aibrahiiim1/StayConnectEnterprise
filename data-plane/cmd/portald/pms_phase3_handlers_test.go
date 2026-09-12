@@ -235,12 +235,14 @@ func TestPhase3PortaldsOwnFailuresAreTechnicalAndDiscloseNothing(t *testing.T) {
 // the one that lives in internal/signinattempt is the one that carries the reasoning.
 func TestPhase3ForwardsScdsClassVerbatim(t *testing.T) {
 	for class, want := range map[string]string{
-		"CREDENTIAL":   guestAuthMessage,
-		"TECHNICAL":    guestAuthTechnicalMessage,
-		"RATE_LIMITED": guestAuthRateLimitedMessage,
+		"CREDENTIAL": guestAuthMessage,
+		"TECHNICAL":  guestAuthTechnicalMessage,
+		// RATE_LIMITED carries the SERVER's remaining seconds. The number below is scd's, and the sentence
+		// the guest reads has to be built from that same number rather than from anything portald decided.
+		"RATE_LIMITED": guestAuthRateLimitedMessage(37),
 	} {
 		h := stubHandler(t, &scdStub{resolve: map[string]any{
-			"outcome": "NOT_VERIFIED", "failure_class": class}})
+			"outcome": "NOT_VERIFIED", "failure_class": class, "retry_after_seconds": 37}})
 		_, out := phase3Post(t, h, map[string]any{"room": "412", "last_name": "X", "request_id": "r"})
 		if out.Message != want {
 			t.Errorf("class %s produced %q, want %q", class, out.Message, want)

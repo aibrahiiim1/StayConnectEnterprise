@@ -158,6 +158,17 @@ const (
 //	guest-signin-attempts     = View_Guest_SignIn_Attempts     (the list, rooms, results, diagnostic reasons)
 //	guest-signin-credentials  = View_Guest_SignIn_Credentials  (the submitted and accepted values, unmasked)
 //
+// TWO MORE CARRY GUEST SIGN-IN PROTECTION, and they are separate from both of the above and from each other:
+//
+//	guest-signin-protection    = Manage_Guest_SignIn_Protection  (WRITE changes the property's thresholds)
+//	guest-signin-restrictions  = Release_Guest_SignIn_Restriction (WRITE ends ONE device's wait early)
+//
+// The blast radii are not comparable. A release affects one device for the remainder of one restriction; a
+// policy change affects every guest on the property until somebody changes it back. So the desk holds the
+// release and reads the policy, and neither key implies the other or implies the credentials key — an
+// operator who can end a restriction still cannot read what anybody typed, and still cannot weaken the
+// control that created it.
+//
 // They are two KEYS rather than one key with two levels because this model has exactly one axis — read and
 // write — and the distinction being drawn is between two kinds of READ. A second key is how that is
 // expressed here without inventing a second permission mechanism alongside the one every other screen uses.
@@ -208,12 +219,23 @@ var rolePerms = map[string]map[string]perm{
 		// and why" is the integration's most direct symptom — including the credential comparison, which is
 		// what turns "room sign-in is broken" into "this property's PMS spells names differently".
 		"guest-signin-attempts": permRead, "guest-signin-credentials": permRead,
+		// The protection policy is a property-wide configuration decision, which is this role's own
+		// territory — the same reasoning that puts auth-methods and checkout-grace here. Releasing one
+		// device's restriction comes with it: whoever may set the threshold may certainly waive one instance
+		// of it.
+		"guest-signin-protection": permWrite, "guest-signin-restrictions": permWrite,
 	},
 	"front_office_operator": {
 		// THE RECEPTION DESK, and the role this feature was asked for. They already hold the guest's room,
 		// stay and access credentials; the comparison panel is how they answer the guest standing in front
 		// of them instead of asking that guest to try again while somebody watches a log.
 		"guest-signin-attempts": permRead, "guest-signin-credentials": permRead,
+		// THE DESK RELEASES, AND DOES NOT RE-TUNE. A guest who has just locked themselves out is standing at
+		// reception now, so the desk must be able to end that one wait — and is the only place that can see
+		// the guest and judge it. Changing the property's thresholds is a different decision made once, by
+		// the role that owns configuration, so the policy is read-only here: a desk under pressure must not
+		// be able to make "five" into "twenty" for everybody as the quickest way to help one person.
+		"guest-signin-restrictions": permWrite, "guest-signin-protection": permRead,
 		"guest-accounts": permWrite, "sessions": permWrite,
 		// Phase 3 (DARK): front desk reads stays/events and triages alerts, but never edits the grace policy.
 		"pms-stays": permRead, "pms-events": permRead, "operational-alerts": permWrite, "checkout-grace": permRead,
@@ -238,6 +260,7 @@ var rolePerms = map[string]map[string]perm{
 	"guest_relations_operator": {
 		// Same desk, same conversation with the guest, same need.
 		"guest-signin-attempts": permRead, "guest-signin-credentials": permRead,
+		"guest-signin-restrictions": permWrite, "guest-signin-protection": permRead,
 		"guest-accounts": permWrite, "sessions": permWrite,
 		"pms-stays": permRead, "pms-events": permRead, "operational-alerts": permWrite, "checkout-grace": permRead,
 		// Read-only on the integration: the front desk needs to see whether the PMS is reachable before
@@ -275,7 +298,10 @@ var rolePerms = map[string]map[string]perm{
 		// observer has no reason to hold is thirty days of what every guest typed, so the second key is
 		// deliberately absent rather than merely unused.
 		"guest-signin-attempts": permRead,
-		"guest-accounts":        permRead, "sessions": permRead, "auth-methods": permRead,
+		// A viewer sees WHAT the policy is and WHICH devices are waiting it out — both are operational
+		// evidence of the same kind they read everywhere else — and acts on neither.
+		"guest-signin-protection": permRead, "guest-signin-restrictions": permRead,
+		"guest-accounts": permRead, "sessions": permRead, "auth-methods": permRead,
 		"walled-garden": permRead, "portal-branding": permRead, "notification-providers": permRead, "social-providers": permRead,
 		"stripe-accounts": permRead, "audit": permRead, "reports": permRead,
 		"backups": permRead, "license": permRead, "network": permRead, "diagnostics": permRead,

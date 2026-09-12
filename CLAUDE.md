@@ -147,6 +147,25 @@ never reproduce the record. Commit messages are immutable — check before commi
 
 ---
 
+## 0C. OPERATIONAL VALUES ARE SETTINGS, NOT CONSTANTS
+
+**Standing Product-Owner rule, 2026-09-12. It applies to all future work in this repository until the Product
+Owner changes it.** The full form, with the reasoning, the per-setting checklist and the worked example, is
+[`docs/OPERATIONAL_SETTINGS_POLICY.md`](docs/OPERATIONAL_SETTINGS_POLICY.md).
+
+> Operational values that a hotel administrator may reasonably need to change—such as attempt thresholds,
+> waiting periods, retention periods and operational limits—must be available as persisted settings in the
+> administration UI. Each setting requires a default, unit, explanation, appropriate scope, permission checks,
+> validation and change auditing. Changing such values must not normally require editing code or redeploying.
+> Reuse the established configuration system and maintain one source of truth.
+
+This does **not** require exposing protocol constants, cryptographic parameters or internal implementation
+details as user settings, and it is **not** authorization to open a project-wide settings refactor (§0 scope
+discipline still applies). It governs work as it is done: when the thing you are building carries an
+operational number, that number ships as a setting.
+
+---
+
 ### 1. Execute, do not review
 
 When the user requests a code change, configuration change, database change, deployment action, production action, file edit, deletion, migration, commit, push, or other repository operation:

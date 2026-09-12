@@ -133,7 +133,7 @@ func TestDeviceFailure_TellsTheGuestNothingAboutTheCause(t *testing.T) {
 // THE AUTHENTICATION SURFACE IS UNCHANGED. The fix is scoped to the device routes: a real Phase-3 failure must
 // still answer with the stay message, or this became a regression in the other direction.
 func TestDeviceFailure_AuthenticationSurfaceStillSaysWhatItAlwaysSaid(t *testing.T) {
-	_, body, _ := buildGuestPMSResponse(outcomeNoMatch, "room_not_found", classCredential, "", "")
+	_, body, _ := buildGuestPMSResponse(outcomeNoMatch, "room_not_found", classCredential, "", "", 0)
 	if body.Message != guestAuthMessage {
 		t.Fatalf("the authentication failure message changed to %q", body.Message)
 	}

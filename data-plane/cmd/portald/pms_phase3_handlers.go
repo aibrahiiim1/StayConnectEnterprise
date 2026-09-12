@@ -38,10 +38,13 @@ type scdResolveResp struct {
 	Outcome string `json:"outcome"`
 	// FailureClass is the coarse class scd computed for a non-success. It is forwarded into the guest's
 	// message and nowhere else; the exact reason stays in scd and in the attempt record.
-	FailureClass  string     `json:"failure_class"`
-	AuthContextID string     `json:"auth_context_id"`
-	ExpiresIn     int        `json:"expires_in_seconds"`
-	Offers        []scdOffer `json:"offers"`
+	FailureClass string `json:"failure_class"`
+	// RetryAfterSeconds is the server's remaining restriction time on a rate-limited refusal. portald passes
+	// it through to the guest untouched; it never computes, extends or shortens it.
+	RetryAfterSeconds int        `json:"retry_after_seconds"`
+	AuthContextID     string     `json:"auth_context_id"`
+	ExpiresIn         int        `json:"expires_in_seconds"`
+	Offers            []scdOffer `json:"offers"`
 }
 
 type scdGrantResp struct {
@@ -97,6 +100,9 @@ type phase3In struct {
 type phase3Out struct {
 	OK      bool   `json:"ok"`
 	Message string `json:"message,omitempty"`
+	// RetryAfterSeconds is the server's remaining restriction time, present only on a restricted refusal. The
+	// page counts it down so the guest watches the wait shrink; it never decides when the wait is over.
+	RetryAfterSeconds int `json:"retry_after_seconds,omitempty"`
 
 	SessionID  string `json:"session_id,omitempty"`
 	RedirectTo string `json:"redirect_to,omitempty"`
@@ -196,8 +202,9 @@ func (h *handler) phase3Resolve(w http.ResponseWriter, r *http.Request, b *phase
 		return out, false
 	}
 	if out.Outcome != "VERIFIED" || out.AuthContextID == "" {
-		// scd decided. Its class crosses to the guest verbatim; portald deliberately re-derives nothing.
-		h.phase3Fail(w, r, b, "not_verified", out.FailureClass)
+		// scd decided. Its class crosses to the guest verbatim; portald deliberately re-derives nothing —
+		// including the remaining wait, which is the server's own number and is forwarded as it arrived.
+		h.phase3FailRetryAfter(w, r, b, "not_verified", out.FailureClass, out.RetryAfterSeconds)
 		return out, false
 	}
 	return out, true
@@ -254,9 +261,16 @@ func (h *handler) scdPhase3Call(b *phase3Budget, url string, body []byte, out an
 // is the point: two functions that each "write the uniform failure" are two places that can drift, and the
 // drift would only ever be discovered by an attacker noticing the difference.
 func (h *handler) phase3Fail(w http.ResponseWriter, r *http.Request, b *phase3Budget, reason, class string) {
+	h.phase3FailRetryAfter(w, r, b, reason, class, 0)
+}
+
+// phase3FailRetryAfter is the same refusal carrying the server's remaining restriction time. Every other
+// failure goes through phase3Fail and therefore cannot accidentally acquire a retry hint.
+func (h *handler) phase3FailRetryAfter(w http.ResponseWriter, r *http.Request, b *phase3Budget,
+	reason, class string, retryAfter int) {
 	// The internal cause stays here; only the coarse class crosses to the guest. `class` is scd's when scd
 	// answered, and portald's own judgement when it did not get that far — see the call sites.
-	status, body, audit := buildGuestPMSResponse(outcomeNoMatch, reason, class, "", "")
+	status, body, audit := buildGuestPMSResponse(outcomeNoMatch, reason, class, "", "", retryAfter)
 	slog.Info("phase3 guest auth not verified", "reason", audit.ReasonCode, "class", class)
 	// The wait happens BEFORE the write, and before the log line is of any use to the guest. Waiting after
 	// writing would be indistinguishable from not waiting at all: the bytes are already on the wire, and the

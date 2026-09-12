@@ -304,6 +304,61 @@ export type SignInAttemptCredentials = {
   additional_accepted_guests?: number;
 };
 
+// ---- guest sign-in protection ------------------------------------------------------
+//
+// The policy and the restrictions are separate types behind separate permissions, for the same reason the
+// attempts and the credentials are: a single shape with optional fields is how a boundary that holds in one
+// view stops holding in the next.
+
+export type GuestSignInProtection = {
+  max_failed_attempts: number;
+  observation_window_seconds: number;
+  restriction_seconds: number;
+  // The site has never saved a policy and is running on the approved defaults. NOT "protection is off" —
+  // there is no off.
+  is_default: boolean;
+  // The server's own bounds, sent so the form validates against the same numbers the server enforces
+  // instead of a copy that can drift.
+  limits: {
+    min_failed_attempts: number;
+    max_failed_attempts: number;
+    min_observation_window_seconds: number;
+    max_observation_window_seconds: number;
+    min_restriction_seconds: number;
+    max_restriction_seconds: number;
+  };
+  last_change?: GuestSignInProtectionChange | null;
+};
+
+export type GuestSignInProtectionChange = {
+  changed_at: string;
+  changed_by: string;
+  reason?: string;
+  // Absent on a site's first saved policy: there was no stored row to report.
+  old_max_failed_attempts?: number | null;
+  old_observation_window_seconds?: number | null;
+  old_restriction_seconds?: number | null;
+  new_max_failed_attempts: number;
+  new_observation_window_seconds: number;
+  new_restriction_seconds: number;
+};
+
+export type GuestSignInRestriction = {
+  id: string;
+  device_mac: string;
+  guest_network?: string;
+  // UNVERIFIED INPUT — the room this device last TYPED. The field name says so, and every label that
+  // renders it says so too.
+  last_submitted_room?: string;
+  failure_count: number;
+  reason: string;
+  restricted_at: string;
+  expires_at: string;
+  // Computed by the server at the moment of the read, so a screen left open overnight cannot count down
+  // against a clock that drifted from the appliance's.
+  remaining_seconds: number;
+};
+
 export type CheckoutGraceConfig = {
   grace_package_revision_id?: string | null;
   grace_duration_seconds: number;

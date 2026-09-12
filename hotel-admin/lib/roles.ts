@@ -47,6 +47,9 @@ const MATRIX: Matrix = {
     // "View_Guest_SignIn_Attempts" and "View_Guest_SignIn_Credentials" are the same two permissions under
     // the names the Product Owner uses.
     "guest-signin-attempts": "read", "guest-signin-credentials": "read",
+    // Guest sign-in protection: the property's thresholds are a configuration decision, which is this
+    // role's territory, and whoever sets the threshold may waive one instance of it.
+    "guest-signin-protection": "write", "guest-signin-restrictions": "write",
     // Phase 3 (DARK): the IT manager owns the PMS integration — publishing the
     // checkout-grace policy and clearing alerts are manager actions; stays,
     // events and resolutions are read-only evidence.
@@ -74,6 +77,9 @@ const MATRIX: Matrix = {
   front_office_operator: {
     // The reception desk: the role this screen was asked for, and the one that needs the comparison.
     "guest-signin-attempts": "read", "guest-signin-credentials": "read",
+    // The desk RELEASES and does not re-tune: the restricted guest is standing there now, but making
+    // "five" into "twenty" for the whole property must not be the quickest way to help one person.
+    "guest-signin-restrictions": "write", "guest-signin-protection": "read",
     // Phase 6 (DARK): the desk answers "why can't I remove my old phone" and changes no capability.
     "guest-device-self-service": "read",
     "pms-stays": "read", "pms-events": "read", "operational-alerts": "write", "checkout-grace": "read",
@@ -85,6 +91,7 @@ const MATRIX: Matrix = {
   },
   guest_relations_operator: {
     "guest-signin-attempts": "read", "guest-signin-credentials": "read",
+    "guest-signin-restrictions": "write", "guest-signin-protection": "read",
     "guest-device-self-service": "read",
     "pms-stays": "read", "pms-events": "read", "operational-alerts": "write", "checkout-grace": "read",
     "pms-interfaces": "read", "pms-routing": "read", "pms-source-conflicts": "read",
@@ -109,6 +116,8 @@ const MATRIX: Matrix = {
     // The list only. A read-only observer has no reason to hold thirty days of what guests typed, so the
     // credentials key is absent here rather than merely unused — and edged enforces that, not this file.
     "guest-signin-attempts": "read",
+    // A viewer sees what the policy is and which devices are waiting it out, and acts on neither.
+    "guest-signin-protection": "read", "guest-signin-restrictions": "read",
     "guest-device-self-service": "read",
     "pms-stays": "read", "pms-events": "read", "pms-resolutions": "read", "checkout-grace": "read", "operational-alerts": "read",
     "pms-interfaces": "read", "pms-routing": "read", "pms-source-conflicts": "read",

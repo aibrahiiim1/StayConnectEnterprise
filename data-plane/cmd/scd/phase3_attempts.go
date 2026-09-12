@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -240,6 +241,46 @@ func (p *phase3Auth) recordAttempt(at signinattempt.Attempt, started time.Time) 
 	defer cancel()
 	if _, err := p.attempts.Record(ctx, at); err != nil {
 		slog.Warn("phase3 auth: the sign-in attempt could not be recorded", "err", err, "result", at.Result)
+		// The policy counts the attempt ROWS, so an attempt that was not recorded is an attempt that did not
+		// happen as far as the threshold is concerned. Reporting it anyway would count an event the operator
+		// screen cannot show them.
+		return
+	}
+	p.applyProtection(ctx, at)
+}
+
+// applyProtection tells the policy what happened, after the attempt row exists.
+//
+// AFTER, not before: the rolling count is derived from the attempt rows themselves, so reporting a failure
+// before its row is written would count one fewer than the operator sees. And a success clears the counter
+// rather than adding to it, because a guest who has just proved who they are has demonstrated the one thing
+// the counter exists to doubt.
+func (p *phase3Auth) applyProtection(ctx context.Context, at signinattempt.Attempt) {
+	if p.protection == nil || at.DeviceMAC == "" {
+		return
+	}
+	mac, err := net.ParseMAC(at.DeviceMAC)
+	if err != nil {
+		return
+	}
+	switch {
+	case at.Result.Succeeded():
+		if err := p.protection.NoteSuccess(ctx, p.srv.tenID, p.srv.siteID, mac); err != nil {
+			slog.Warn("phase3 auth: a successful sign-in did not clear its device counter", "err", err)
+		}
+	case at.Result.CountsAsCredentialFailure():
+		restricted, expires, count, err := p.protection.NoteFailure(ctx, p.srv.tenID, p.srv.siteID, mac,
+			at.GuestNetworkID, at.GuestNetworkName, at.SubmittedRoom)
+		if err != nil {
+			slog.Warn("phase3 auth: a wrong credential was not counted", "err", err)
+			return
+		}
+		if restricted {
+			// Worth a line at INFO: an operator looking at "why can this guest not get online" should find
+			// the moment the property started refusing that device, without the room or anything they typed.
+			slog.Info("phase3 auth: guest sign-in restricted for a device after repeated wrong credentials",
+				"failures", count, "expires_at", expires, "guest_network", at.GuestNetworkName)
+		}
 	}
 }
 

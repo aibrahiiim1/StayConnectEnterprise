@@ -55,6 +55,8 @@ type phase3Auth struct {
 	// attempts records what happened on every deliberate submission. Nil is inert: the arm keeps working and
 	// simply records nothing, which is what a build without a database pool gets.
 	attempts *signinattempt.Store
+	// protection is the site's guest sign-in rate policy. Nil is inert for the same reason.
+	protection *signinattempt.ProtectionStore
 	// contextTTL bounds how long a verified identity may sit unused before it has to be proven again.
 	contextTTL time.Duration
 }
@@ -85,7 +87,10 @@ func newPhase3Auth(cfg iamv2.PMSConfig, s *server) *phase3Auth {
 		grants: staygrant.New(s.db).WithAggregateOnlineTime(phase6AggregateOn()),
 		// The recorder is constructed with whatever keyring the daemon loaded. A nil keyring is not a failure
 		// here: attempts are still recorded, without their sealed half, and the operator is told so.
-		attempts:   signinattempt.NewStore(s.db, s.signInAttemptKeyring, signInAttemptDEKID),
+		attempts: signinattempt.NewStore(s.db, s.signInAttemptKeyring, signInAttemptDEKID),
+		// The policy reads its own numbers from the site database on every decision, so an operator changing
+		// them in Hotel Admin takes effect on the next submission with no restart, rebuild or deployment.
+		protection: signinattempt.NewProtectionStore(s.db),
 		contextTTL: 10 * time.Minute,
 	}
 }
@@ -116,6 +121,10 @@ type phase3Response struct {
 	// FailureClass is one of signinattempt's four guest classes, present on every non-success. It is the ONLY
 	// thing about the cause that leaves this daemon towards a guest.
 	FailureClass string `json:"failure_class,omitempty"`
+	// RetryAfterSeconds is present only on a RATE_LIMITED refusal. It is the SERVER's remaining time, which
+	// is what the guest counts down; a browser that ignores it gains nothing, because the same gate refuses
+	// the next submission.
+	RetryAfterSeconds int `json:"retry_after_seconds,omitempty"`
 	// AuthContextID, ExpiresIn and Offers are present ONLY on VERIFIED.
 	AuthContextID string        `json:"auth_context_id,omitempty"`
 	ExpiresIn     int           `json:"expires_in_seconds,omitempty"`
@@ -135,10 +144,18 @@ type phase3Offer struct {
 // notVerified writes the non-success answer for an exact internal result. The result is for the log and the
 // attempt record; only its coarse class reaches the guest, and `detail` never leaves this process.
 func notVerified(w http.ResponseWriter, result signinattempt.Result, detail string) {
+	notVerifiedRetryAfter(w, result, detail, 0)
+}
+
+// notVerifiedRetryAfter is the same answer carrying the server's remaining restriction time. It exists as a
+// separate entry point so that every other refusal keeps the exact shape it had: a retry hint on a wrong
+// surname would tell a guesser how long to wait between guesses.
+func notVerifiedRetryAfter(w http.ResponseWriter, result signinattempt.Result, detail string, retryAfter int) {
 	slog.Info("phase3 auth: not verified", "result", string(result), "detail", detail)
 	writeJSONScd(w, http.StatusOK, phase3Response{
-		Outcome:      outcomeNotVerified,
-		FailureClass: string(result.GuestClass()),
+		Outcome:           outcomeNotVerified,
+		FailureClass:      string(result.GuestClass()),
+		RetryAfterSeconds: retryAfter,
 	})
 }
 
@@ -329,22 +346,34 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	at.RequestID = strings.TrimSpace(req.RequestID)
 
-	// THE DURABLE THROTTLE, charged before any evidence is evaluated.
+	// GUEST SIGN-IN PROTECTION, asked before any evidence is evaluated.
 	//
-	// It is the appliance's own mechanism, already built and already keyed on an irreversible HMAC of the
-	// address, the device and the room — never on the request id, so the per-submission ids the portal now
-	// mints cannot be used to walk around it. Its scopes are what matter here: the per-ROOM dimension is what
-	// makes enumeration expensive, because guessing surnames against one room is exactly the shape of the
-	// attack the uniform envelope exists to blunt.
+	// THIS REPLACED A ROOM-SCOPED THROTTLE. The previous call charged the appliance's generic durable throttle
+	// with the ROOM as one of its scopes, and the Product Owner ruled that out for a reason worth recording:
+	// restricting a room number locks out the guest who actually lives there while the attacker — who chose
+	// that number — simply moves to the next one. It made a denial of service against any guest trivial. The
+	// address was no better, because a guest network NATs and an address is a floor.
 	//
-	// When the durable throttle is not enabled on an appliance this is a no-op that always allows, so wiring
-	// it changes nothing about who can sign in today. What it changes is that RATE_LIMITED now has a real
-	// producer and a real recorded reason, instead of being a state the record could describe and the system
-	// could never reach.
-	if allowed, _ := p.srv.throttleGuard(ctx, "pms", dev.IP, dev.MAC, room); !allowed {
-		at.Result = signinattempt.RateLimited
-		notVerified(w, at.Result, "throttled")
-		return
+	// The device is what is doing the guessing, and the MAC used here is the one the APPLIANCE read from its
+	// own neighbour table — never a value the client sent, so no cookie, request id or reopened page moves it.
+	// It is not unspoofable and is not claimed to be; see internal/signinattempt for the honest limit.
+	//
+	// AN ERROR IS NOT AN ALLOW. A gate that cannot be read is a service failure, answered with the technical
+	// message — which also does not count as a wrong credential, so a broken database cannot restrict anybody
+	// either. The alternative, treating an error as permission to proceed, would make one failing query the
+	// way to switch the control off.
+	if p.protection != nil {
+		gate, gerr := p.protection.Check(ctx, p.srv.tenID, p.srv.siteID, dev.MAC)
+		if gerr != nil {
+			at.Result = signinattempt.ServiceUnavailable
+			notVerified(w, at.Result, "protection_gate_unreadable: "+gerr.Error())
+			return
+		}
+		if gate.Restricted {
+			at.Result = signinattempt.RateLimited
+			notVerifiedRetryAfter(w, at.Result, "restricted", gate.RemainingSeconds)
+			return
+		}
 	}
 
 	// CAN THE MIRROR ANSWER FOR ANYBODY? Asked BEFORE the room is looked at, and refused on before the
