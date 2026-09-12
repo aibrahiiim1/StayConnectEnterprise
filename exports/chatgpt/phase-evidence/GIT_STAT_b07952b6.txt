@@ -1,0 +1,4 @@
+commit b07952b6f1a9c7a8430253508d99089fbb45531d
+Date:   Sat Sep 12 22:01:51 2026 +0300
+
+    The queue's own objects move to iam_v2, because a live migration is applied by a role that cannot create in public
