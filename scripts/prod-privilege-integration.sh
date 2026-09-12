@@ -192,7 +192,44 @@ assert_priv "PUBLIC holds nothing on the policy" \
 assert_priv "PUBLIC cannot ask the gate" \
   "SELECT has_function_privilege('public','iam_v2.guest_signin_gate(uuid,uuid,macaddr)','EXECUTE')" f
 
-[ "$fails" = "0" ] || { echo "  FAIL: $fails guest sign-in protection privilege assertion(s) — fix deploy/gatep, not this file"; exit 1; }
+# ---------------------------------------------------------------------------------------------------------
+# CLOUD SYNC AND PMS RECONCILIATION (0069), against the REAL service roles after a Gate-P reconcile.
+#
+# Two audit trails are made mandatory BY PRIVILEGE here rather than by convention, and each has a specific
+# thing it prevents:
+#
+#   * no UPDATE on iam_v2.stay_events for svc_edged — a re-offer moves a departure's processing state back to
+#     PENDING, and the outcome of the engine reconsidering it can check a guest out and revoke their access.
+#     Direct UPDATE would let that happen with nothing recording that anybody decided it.
+#   * no UPDATE on public.sync_outbox for svc_edged — recovery clears the abandoned flag AND writes who
+#     released the records, in one call. Direct UPDATE would also permit marking undelivered records as sent,
+#     which is the one way to empty a backlog without delivering it.
+# ---------------------------------------------------------------------------------------------------------
+echo "== cloud sync and PMS reconciliation: the privilege model (0069) =="
+assert_priv "svc_edged may read the reconciliation cases"   "SELECT has_table_privilege('svc_edged','iam_v2.pms_reconciliation_cases','SELECT')" t
+assert_priv "svc_edged may re-offer a departure through the audited function"   "SELECT has_function_privilege('svc_edged','iam_v2.pms_reoffer_stay_event(uuid,uuid,uuid,uuid,text,text,jsonb)','EXECUTE')" t
+assert_priv "svc_edged CANNOT move a PMS event's processing state directly"   "SELECT has_table_privilege('svc_edged','iam_v2.stay_events','UPDATE')" f
+assert_priv "svc_edged CANNOT write the re-offer log directly"   "SELECT has_table_privilege('svc_edged','iam_v2.stay_event_reoffers','INSERT')" f
+
+assert_priv "svc_edged may read the retention setting"   "SELECT has_function_privilege('svc_edged','iam_v2.cloud_sync_settings_get(uuid,uuid)','EXECUTE')" t
+assert_priv "svc_edged may change retention through the audited function"   "SELECT has_function_privilege('svc_edged','iam_v2.cloud_sync_settings_set(uuid,uuid,integer,text,text)','EXECUTE')" t
+assert_priv "svc_edged CANNOT write the retention setting directly"   "SELECT has_table_privilege('svc_edged','iam_v2.site_cloud_sync_settings','UPDATE')" f
+assert_priv "svc_edged CANNOT write the retention change log directly"   "SELECT has_table_privilege('svc_edged','iam_v2.cloud_sync_settings_changes','INSERT')" f
+
+assert_priv "svc_edged may recover abandoned records through the audited function"   "SELECT has_function_privilege('svc_edged','public.sync_outbox_recover_exhausted(text,text,integer)','EXECUTE')" t
+assert_priv "svc_edged CANNOT write the recovery log directly"   "SELECT has_table_privilege('svc_edged','public.sync_outbox_recovery_log','INSERT')" f
+assert_priv "svc_edged CANNOT mark an undelivered record as sent"   "SELECT has_table_privilege('svc_edged','public.sync_outbox','UPDATE')" f
+
+# scd prunes DELIVERED records and does not recover abandoned ones. A daemon that could recover could do it
+# on a loop; releasing records back onto the wire is an operator decision with a far end that absorbs it.
+assert_priv "svc_scd may prune delivered records"   "SELECT has_function_privilege('svc_scd','public.sync_outbox_prune_delivered(integer)','EXECUTE')" t
+assert_priv "svc_scd CANNOT recover abandoned records"   "SELECT has_function_privilege('svc_scd','public.sync_outbox_recover_exhausted(text,text,integer)','EXECUTE')" f
+
+assert_priv "PUBLIC holds nothing on the retention setting"   "SELECT has_table_privilege('public','iam_v2.site_cloud_sync_settings','SELECT')" f
+assert_priv "PUBLIC cannot recover the queue"   "SELECT has_function_privilege('public','public.sync_outbox_recover_exhausted(text,text,integer)','EXECUTE')" f
+assert_priv "PUBLIC cannot re-offer a departure"   "SELECT has_function_privilege('public','iam_v2.pms_reoffer_stay_event(uuid,uuid,uuid,uuid,text,text,jsonb)','EXECUTE')" f
+
+[ "$fails" = "0" ] || { echo "  FAIL: $fails privilege assertion(s) — fix deploy/gatep, not this file"; exit 1; }
 
 PORT="$(docker inspect -f '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}' "$C")"
 export PHASE3_TEST_DSN="postgres://postgres:postgres@127.0.0.1:${PORT}/${DB}?sslmode=disable"

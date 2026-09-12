@@ -378,10 +378,30 @@ func (s *server) dashPMS(ctx context.Context) dashPms {
 
 	_ = s.db.QueryRow(ctx, `
 		SELECT count(*) FILTER (WHERE received_at >= date_trunc('day', now())),
-		       count(*) FILTER (WHERE received_at >= date_trunc('day', now()) AND processing_status = 'APPLIED'),
-		       count(*) FILTER (WHERE processing_status = 'MANUAL_REVIEW')
+		       count(*) FILTER (WHERE received_at >= date_trunc('day', now()) AND processing_status = 'APPLIED')
 		  FROM iam_v2.stay_events WHERE tenant_id = $1 AND site_id = $2
-	`, s.tenantID, s.siteID).Scan(&p.EventsToday, &p.EventsApplied, &p.EventsReview)
+	`, s.tenantID, s.siteID).Scan(&p.EventsToday, &p.EventsApplied)
+
+	// THE REVIEW NUMBER COUNTS DEPARTURES, NOT ROWS.
+	//
+	// It counted rows, for all time, with no grouping — and a departure that cannot be placed is restaged on
+	// every reconnect, so one unresolved checkout became a row per generation. This property was shown
+	// "12 026 messages need attention" for 397 actual cases. Nobody works a list of twelve thousand, so the
+	// warning was read as broken and ignored, which is worse than not having it.
+	//
+	// The count is NOT reduced by hiding anything: pms_reconciliation_cases collapses the copies of one
+	// departure and drops none of them, and the copies are still shown, per case, on the reconciliation
+	// screen. What changed is that the number now says how many decisions are outstanding.
+	if err := s.db.QueryRow(ctx, `
+		SELECT count(*) FROM iam_v2.pms_reconciliation_cases WHERE tenant_id = $1 AND site_id = $2
+	`, s.tenantID, s.siteID).Scan(&p.EventsReview); err != nil {
+		// Before 0069 the view does not exist. Fall back to the row count rather than reporting zero: a
+		// stale-but-honest number beats a reassuring wrong one.
+		_ = s.db.QueryRow(ctx, `
+			SELECT count(*) FROM iam_v2.stay_events
+			 WHERE tenant_id = $1 AND site_id = $2 AND processing_status = 'MANUAL_REVIEW'
+		`, s.tenantID, s.siteID).Scan(&p.EventsReview)
+	}
 
 	p.section = section{Available: true}
 	return p

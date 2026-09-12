@@ -107,10 +107,14 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 	// with the event because the Stay's occupancy evidence is stamped from them — see stampOccupancyEvidence.
 	var evReceivedAt time.Time
 	var evClockSuspect bool
+	// NULLABLE, and scanned as such. pms_timestamp_utc is absent whenever the connector could not derive a
+	// trustworthy instant from the frame, which is ordinary — a non-pointer here fails every event that has
+	// no PMS time, including in fixtures that never set one.
+	var evPMSAt *time.Time
 	var pinnedRevision string
 	var pinnedNormVersion int
 	err = tx.QueryRow(ctx, `SELECT se.id::text, se.external_event_identity, se.event_type, se.payload,
-		       se.received_at, se.clock_suspect, COALESCE(r.pinned_revision_id::text,''),
+		       se.received_at, se.clock_suspect, se.pms_timestamp_utc, COALESCE(r.pinned_revision_id::text,''),
 		       COALESCE((SELECT rv.normalization_version FROM iam_v2.pms_interface_revisions rv
 		                  WHERE rv.id = r.pinned_revision_id), 0)
 		FROM iam_v2.stay_events se
@@ -121,7 +125,7 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 		ORDER BY se.received_at, se.id
 		FOR UPDATE OF se SKIP LOCKED
 		LIMIT 1`, tenant, site, iface).Scan(&eventID, &identity, &eventType, &raw,
-		&evReceivedAt, &evClockSuspect, &pinnedRevision, &pinnedNormVersion)
+		&evReceivedAt, &evClockSuspect, &evPMSAt, &pinnedRevision, &pinnedNormVersion)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, nil
@@ -192,12 +196,38 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 			}
 			return true, tx.Commit(ctx)
 		}
-		lerr = tx.QueryRow(ctx, `SELECT id::text, status, lifecycle_version, COALESCE(normalized_room_number,'')
+		// A ROOM NUMBER IS NOT AN IDENTITY, AND IT IS REUSED THE SAME AFTERNOON.
+		//
+		// The match above says only "somebody is in 412 now". It does not say the somebody is the person this
+		// departure is about. A GO raised on Tuesday and a guest who arrived on Thursday both answer to 412,
+		// and checking that guest out would disconnect a resident guest on the strength of a three-digit
+		// string — with the Checkout Converter revoking their access on the way past.
+		//
+		// This is not hypothetical. A departure that cannot be applied stays PENDING, and every reconnect
+		// restages the whole roster, so an unresolved GO is re-offered against a room whose occupant has since
+		// changed. The longer the feed was interrupted, the more certain the mismatch.
+		//
+		// So the candidate must have been in the room ALREADY when the PMS raised the event. stays.arrival is
+		// the PMS's own statement of when they came in; if it is later than the event, this is a subsequent
+		// occupant and the departure belongs to somebody who has already gone. See roomDepartureIsStale for
+		// why occupancy_evidence_at — the obvious-looking alternative — answers a different question and
+		// would refer almost the whole property to review after any reconnect.
+		var arrival *time.Time
+		lerr = tx.QueryRow(ctx, `SELECT id::text, status, lifecycle_version, COALESCE(normalized_room_number,''),
+			       arrival::timestamptz
 			FROM iam_v2.stays
 			WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3
 			  AND status='IN_HOUSE' AND normalized_room_number=$4
 			FOR UPDATE`, tenant, site, iface, normRoom(ev.Room)).
-			Scan(&sv.ID, &sv.Status, &sv.LifecycleVersion, &sv.Room)
+			Scan(&sv.ID, &sv.Status, &sv.LifecycleVersion, &sv.Room, &arrival)
+		if lerr == nil && roomDepartureIsStale(eventAtFor(evPMSAt, evReceivedAt, evClockSuspect), arrival) {
+			// The refusal is the whole point of the guard, so it is not silent: the case appears on the
+			// reconciliation screen under this code, with the arrival that caused it.
+			if ferr := failEvent(ctx, tx, eventID, "MANUAL_REVIEW", "GO_STALE_ROOM_DEPARTURE"); ferr != nil {
+				return false, ferr
+			}
+			return true, tx.Commit(ctx)
+		}
 	} else {
 		lerr = tx.QueryRow(ctx, `SELECT id::text, status, lifecycle_version, COALESCE(normalized_room_number,'')
 			FROM iam_v2.stays

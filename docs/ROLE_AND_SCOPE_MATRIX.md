@@ -50,6 +50,9 @@ Seven roles, enforced by edged per `/edge/v1` resource. Legend:
 | guest-signin-attempts (`View_Guest_SignIn_Attempts`) | W | R | **R** | **R** | – | – | R |
 | guest-signin-credentials (`View_Guest_SignIn_Credentials`) | W | R | **R** | **R** | – | – | **–** |
 | guest-signin-protection (`Manage_Guest_SignIn_Protection`) | W | **W** | R | R | – | – | R |
+| pms-reconciliation (`Manage_PMS_Reconciliation`) | W | **W** | R | R | – | – | R |
+| cloud-sync-settings (`Manage_Cloud_Sync_Settings`) | W | **W** | – | – | – | – | R |
+| cloud-sync-recovery (`Run_Cloud_Sync_Recovery`) | W | **W** | – | – | – | – | R |
 | guest-signin-restrictions (`Release_Guest_SignIn_Restriction`) | W | **W** | **W** | **W** | – | – | R |
 | walled-garden | W | W | R | R | – | R | R |
 | portal-branding | W | W | R | R | – | R | R |
@@ -67,6 +70,16 @@ Seven roles, enforced by edged per `/edge/v1` resource. Legend:
 * `guest-signin-attempts` — the list, the rooms, the results and the diagnostic reasons.
 * `guest-signin-credentials` — what the guest typed and what the property would have accepted.
 * `guest-signin-protection` — **W** changes the property's thresholds, window and waiting period.
+* `pms-reconciliation` — **R** reads the unresolved-departure cases, the rooms holding several stays and the
+  stays past their planned departure. **W** additionally hands one recorded departure back to the PMS
+  ingestion engine, whose answer may check a stay out through the ordinary checkout policy and revoke that
+  guest's access. That is why the desk holds R and not W: reception needs the list to answer a guest, and the
+  decision that can disconnect somebody belongs with the role that owns the integration.
+* `cloud-sync-settings` — **W** sets how long DELIVERED cloud-reporting records are kept. It reaches nothing
+  that has not been delivered.
+* `cloud-sync-recovery` — **W** releases records the appliance gave up on back onto the queue. Separate from
+  the setting on purpose: one is a retention policy, the other is an action whose consequences land on a far
+  end shared by the whole fleet. Reading the recovery history does not carry permission to run one.
 * `guest-signin-restrictions` — **W** releases ONE device's wait early, with a mandatory reason.
 
 The blast radii are not comparable. A release affects one device for the remainder of one wait; a policy

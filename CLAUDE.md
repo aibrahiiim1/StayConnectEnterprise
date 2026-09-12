@@ -166,6 +166,33 @@ operational number, that number ships as a setting.
 
 ---
 
+## 0D. CURRENT ENVIRONMENT, AND WHAT IS NO LONGER A TARGET
+
+**Standing record, 2026-09-12.** Supersedes every earlier address list in this file.
+
+| Role | Host | Notes |
+|---|---|---|
+| **Central** | `150.0.0.252` (`sc-central.echofusion.com`) | Control plane: `ctrlapi`, `cloud-admin`, `nats-authz`, the mutually-authenticated NATS listener on `4223`, and the fleet telemetry consumer. Verify the actual endpoints and TLS identity before connecting; do not assume them from this table. |
+| **PRE-LIVE appliance** | `172.21.60.25` | The only appliance. **PRE-LIVE remains PRE-LIVE. Go-Live is not authorised.** |
+| ~~Development reference appliance~~ | ~~`172.21.60.23`~~ | **RETIRED.** Not an operational target. Do not contact it, do not diagnose against it, do not treat it as a source of anything. |
+
+**Retiring a target does not falsify its records.** The accepted evidence `172.21.60.23` produced stays exactly as
+it was written, in `governance/` and in the accepted documents that cite it. Do not rewrite historical evidence
+to remove a retired reference — a record of what was true then is not a claim about what is true now.
+
+**PMS.** Protel FIAS is connected. Keep the configured connection operational, and preserve local-first
+behaviour for future intentional disconnections: the appliance authorises guests from its last-good mirrored
+roster and must go on doing so when the feed drops.
+
+**A correction of record, because the wrong version was stated and acted on.** *An intentionally disconnected
+PMS does not by itself prevent guest authentication.* The appliance authorises from the mirror; a
+`DISCONNECTED` transport is a feed-health fact, not a guest-authentication outage, and both successful
+sign-ins and credential-failure counting have been observed live while the feed was down. What must **not** be
+inferred from that is the opposite error: eligibility is still decided per stay by the mirror-trust and
+freshness rules, not every mirrored stay is eligible, and not all offline conditions have been tested.
+
+---
+
 ### 1. Execute, do not review
 
 When the user requests a code change, configuration change, database change, deployment action, production action, file edit, deletion, migration, commit, push, or other repository operation:

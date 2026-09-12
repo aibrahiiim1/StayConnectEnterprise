@@ -33,10 +33,33 @@ type Outbox struct {
 	NC          *nats.Conn // may be nil (offline/dev) — drain simply waits
 	ApplianceID string
 
+	// Scope for the per-site retention setting. Empty means "not known yet", and retention then runs at the
+	// approved default rather than not at all.
+	TenantID string
+	SiteID   string
+
 	// Tunables (zero values get defaults from Start).
 	DrainEvery  time.Duration
 	MaxAttempts int
 	ReqTimeout  time.Duration
+
+	// MaxCatchUpBatches bounds how many full batches one tick may drain back-to-back.
+	//
+	// WHY IT IS NOT 1. A batch is 100 records every 15 seconds, which is ample for the 180 records an hour
+	// this appliance produces and hopeless for a backlog: 86 000 records would take three and a half hours
+	// of ticking, and a recovery nobody can watch finish is a recovery nobody trusts. Draining again
+	// immediately while a batch comes back full turns that into minutes.
+	//
+	// WHY IT IS NOT UNBOUNDED. The far end serves every appliance in the fleet, and an appliance that
+	// discovers a backlog must not answer by opening the throttle for as long as it takes. Twenty batches a
+	// tick is 2 000 records per 15 seconds from one appliance — fast enough to finish while somebody is
+	// looking, slow enough that the fleet is not the thing that pays for it.
+	MaxCatchUpBatches int
+
+	// RetentionEvery is how often delivered records older than the site's retention are removed.
+	RetentionEvery time.Duration
+
+	lastOutcome Outcome
 }
 
 // Enqueue stores one telemetry record. kind must be one of the cloud's
@@ -63,6 +86,12 @@ func (o *Outbox) Start(ctx context.Context) {
 	if o.ReqTimeout == 0 {
 		o.ReqTimeout = 5 * time.Second
 	}
+	if o.MaxCatchUpBatches == 0 {
+		o.MaxCatchUpBatches = 20
+	}
+	if o.RetentionEvery == 0 {
+		o.RetentionEvery = 6 * time.Hour
+	}
 	go func() {
 		t := time.NewTicker(o.DrainEvery)
 		defer t.Stop()
@@ -71,13 +100,52 @@ func (o *Outbox) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				if n, err := o.DrainOnce(ctx); err != nil {
-					slog.Debug("outbox: drain pass ended", "sent", n, "err", err)
+				// Keep draining while batches come back full: a backlog is finished in minutes instead of
+				// hours, and a steady-state queue still costs exactly one pass.
+				for i := 0; i < o.MaxCatchUpBatches; i++ {
+					n, err := o.DrainOnce(ctx)
+					if err != nil {
+						slog.Debug("outbox: drain pass ended", "sent", n, "err", err)
+						break
+					}
+					if n < drainBatch {
+						break
+					}
+					if ctx.Err() != nil {
+						return
+					}
+				}
+			}
+		}
+	}()
+	go func() {
+		// Retention runs on its own slower clock. It is deliberately NOT part of the drain loop: a queue
+		// that cannot drain is exactly when somebody would most like the disk to stop filling, and tying
+		// the two together would stop retention precisely then.
+		t := time.NewTicker(o.RetentionEvery)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				days := o.RetentionDays(ctx, o.TenantID, o.SiteID)
+				n, err := o.PruneDelivered(ctx, days)
+				if err != nil {
+					slog.Debug("outbox: retention pass failed", "err", err)
+					continue
+				}
+				if n > 0 {
+					slog.Info("outbox: delivered records removed by retention", "removed", n, "retention_days", days)
 				}
 			}
 		}
 	}()
 }
+
+// drainBatch is the LIMIT in DrainOnce's SELECT, named so the catch-up loop can tell a full batch from a
+// short one without repeating the literal.
+const drainBatch = 100
 
 type row struct {
 	Seq      int64
@@ -91,6 +159,7 @@ type row struct {
 // per-appliance ordering holds; returns how many rows were acked.
 func (o *Outbox) DrainOnce(ctx context.Context) (int, error) {
 	if o.NC == nil || !o.NC.IsConnected() {
+		o.noteOutcome(StateTransportUnavailable, 0, "no connection to the messaging transport")
 		return 0, errors.New("nats unavailable")
 	}
 	rows, err := o.DB.Query(ctx, `
@@ -114,10 +183,19 @@ func (o *Outbox) DrainOnce(ctx context.Context) (int, error) {
 	}
 	rows.Close()
 
+	if len(pending) == 0 {
+		o.noteOutcome(StateIdle, 0, "")
+		return 0, nil
+	}
+
 	sent := 0
 	for _, r := range pending {
 		if err := o.publish(ctx, r); err != nil {
 			o.recordFailure(ctx, r, err)
+			// Say WHICH failure this was. "Not draining" covers a severed network, an absent consumer and a
+			// receiver that does not recognise this appliance, and the three need different people.
+			state, detail := classifyPublishError(err, o.NC != nil && o.NC.IsConnected())
+			o.noteOutcome(state, sent, detail)
 			return sent, err // stop: keep seq order
 		}
 		if _, err := o.DB.Exec(ctx,
@@ -133,6 +211,7 @@ func (o *Outbox) DrainOnce(ctx context.Context) (int, error) {
             ON CONFLICT (name) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
         `, sent)
 	}
+	o.noteOutcome(StateDraining, sent, "")
 	return sent, nil
 }
 

@@ -230,3 +230,16 @@ GRANT EXECUTE ON FUNCTION iam_v2.guest_signin_note_success(uuid,uuid,macaddr)   
 --     tables -- authenticating a guest is not a reason to reach either;
 --   * any privilege on iam_v2.site_guest_signin_protection,
 --     iam_v2.guest_signin_protection_changes or iam_v2.guest_signin_restrictions -- see the block above.
+
+-- CLOUD SYNC RETENTION (migration 0069). scd owns the queue and runs its retention pass; it reads the site's
+-- configured period and calls the prune function.
+--
+-- NO RECOVERY HERE, deliberately. Releasing records the appliance gave up on is an operator decision with a
+-- far end that has to absorb the result, and a daemon that could do it on its own could do it on a loop. scd
+-- gets the two read-and-prune operations and not the third.
+--
+-- The prune function reaches DELIVERED records only — its WHERE clause names sent_at IS NOT NULL and takes no
+-- parameter that could widen it — so this grant cannot remove a record that has not reached the cloud.
+GRANT EXECUTE ON FUNCTION iam_v2.cloud_sync_settings_get(uuid,uuid)        TO svc_scd;
+GRANT EXECUTE ON FUNCTION public.sync_outbox_prune_delivered(integer)      TO svc_scd;
+GRANT EXECUTE ON FUNCTION public.sync_outbox_accounting()                  TO svc_scd;

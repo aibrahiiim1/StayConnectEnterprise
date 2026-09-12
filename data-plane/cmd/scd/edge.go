@@ -241,13 +241,25 @@ func (s *server) outboxStats(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"enabled": false})
 		return
 	}
-	pending, dead, oldest, err := s.obx.Stats(r.Context())
+	acct, err := s.obx.Account(r.Context())
 	if err != nil {
 		httpErr(w, http.StatusInternalServerError, "stats failed")
 		return
 	}
+	out := s.obx.LastOutcome()
+	// pending/dead/oldest_pending keep their names and meaning so nothing reading this breaks. What is new
+	// is the rest: how many were DELIVERED (previously unknowable from here, which is why "is it draining?"
+	// had to be guessed from the pending count moving), how much disk the queue holds, whether the three
+	// buckets still account for every record, and what the last attempt actually learned.
 	writeJSON(w, http.StatusOK, map[string]any{
-		"enabled": true, "pending": pending, "dead": dead, "oldest_pending": oldest,
+		"enabled": true,
+		"pending": acct.Pending, "dead": acct.Exhausted, "oldest_pending": acct.OldestPending,
+		"delivered": acct.Delivered, "total": acct.Total, "bytes": acct.Bytes,
+		"oldest_exhausted": acct.OldestExhausted, "balanced": acct.Balanced(),
+		"retention_days": s.obx.RetentionDays(r.Context(), s.tenID, s.siteID),
+		"delivery": map[string]any{
+			"state": string(out.State), "at": out.At, "sent": out.Sent, "detail": out.Detail,
+		},
 	})
 }
 

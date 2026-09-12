@@ -20,6 +20,30 @@ export type OutboxFigures = {
   pending?: number;
   dead?: number;
   oldest_pending?: string | null;
+  /** Delivered, and the whole-table accounting that makes "recovered" checkable rather than asserted. */
+  delivered?: number;
+  total?: number;
+  bytes?: number;
+  oldest_exhausted?: string | null;
+  balanced?: boolean;
+  retention_days?: number;
+  /**
+   * What the LAST delivery attempt learned — evidence, not a size threshold. The four failure states are
+   * genuinely different problems: no connection at all, a connection with nothing listening at the far end,
+   * a far end that answered and refused, or a queue that is simply large and draining.
+   */
+  delivery?: {
+    state?:
+      | "UNKNOWN"
+      | "TRANSPORT_UNAVAILABLE"
+      | "RECEIVER_UNAVAILABLE"
+      | "RECEIVER_REJECTED"
+      | "DRAINING"
+      | "IDLE";
+    at?: string;
+    sent?: number;
+    detail?: string;
+  };
 };
 
 export type Explained = {
@@ -56,12 +80,54 @@ export function describeOutbox(o?: OutboxFigures | null): Explained {
 
   const pending = n(o.pending);
   const dead = n(o.dead);
+  const state = o.delivery?.state ?? "UNKNOWN";
 
-  // The thresholds are about SHAPE, not size. A few hundred items mid-flight is an ordinary busy period; tens
-  // of thousands means nothing has drained for a long time, which is a connection problem rather than a busy
-  // one. "Dead" is never ordinary — it is work the appliance has abandoned.
-  const backlogTone: Tone = pending >= 10_000 ? "err" : pending >= 1_000 ? "warn" : "ok";
-  const tone: Tone = dead > 0 ? (backlogTone === "err" ? "err" : "warn") : backlogTone;
+  // WHY THE QUEUE IS NOT DRAINING IS A FACT, NOT AN INFERENCE FROM ITS SIZE.
+  //
+  // This used to read the size and conclude: ten thousand waiting meant "the queue is not draining — check
+  // Cloud connection." That sentence sent an operator to look at a network that was working perfectly. It
+  // cannot distinguish a severed link from a connected appliance whose telemetry receiver is not running,
+  // from a receiver that does not recognise this appliance, from a large queue draining normally at speed.
+  // Those are four different problems with four different owners, and only one of them is the hotel's.
+  //
+  // The appliance now records what its last delivery attempt actually learned, and these sentences report
+  // that. Size still decides how LOUD the message is; it no longer decides what the message says.
+  const explain: Record<string, { line: string; tone: Tone; headline?: string }> = {
+    TRANSPORT_UNAVAILABLE: {
+      line:
+        "The appliance currently has no connection to the StayConnect cloud, so nothing can be sent. " +
+        "Records are kept safely and go out when the connection returns.",
+      tone: "warn",
+      headline: "No connection to the cloud",
+    },
+    RECEIVER_UNAVAILABLE: {
+      line:
+        "The appliance can reach the StayConnect cloud, but nothing there is listening for this " +
+        "appliance's reports. This is a cloud-side problem — the hotel network is not the cause.",
+      tone: "err",
+      headline: "The cloud is not listening",
+    },
+    RECEIVER_REJECTED: {
+      line:
+        "The StayConnect cloud answered and refused the records. Retrying will not change that; it needs " +
+        "someone to look at how this appliance is registered.",
+      tone: "err",
+      headline: "The cloud refused the records",
+    },
+    DRAINING: { line: "The queue is being sent now, oldest first.", tone: "ok", headline: "Sending" },
+    IDLE: { line: "", tone: "ok" },
+    UNKNOWN: { line: "The appliance has not tried to send since it last started.", tone: "default" },
+  };
+  const reason = explain[state] ?? explain.UNKNOWN;
+
+  // Size sets the floor on severity. A backlog draining normally is still worth noticing at ten thousand,
+  // because "normal" at that depth still means somebody should know it happened.
+  const sizeTone: Tone = pending >= 10_000 ? "warn" : "ok";
+  const worse = (a: Tone, b: Tone): Tone =>
+    a === "err" || b === "err" ? "err" : a === "warn" || b === "warn" ? "warn" : a === "ok" || b === "ok" ? "ok" : "default";
+  // Records the appliance gave up on are never ordinary: they are outside the retry machinery entirely and
+  // will not move again until somebody recovers them.
+  const tone: Tone = dead > 0 ? worse("warn", worse(reason.tone, sizeTone)) : worse(reason.tone, sizeTone);
 
   const parts: string[] = [];
   if (pending === 0 && dead === 0) {
@@ -75,12 +141,11 @@ export function describeOutbox(o?: OutboxFigures | null): Explained {
     if (dead > 0) {
       parts.push(
         `${num(dead)} ${dead === 1 ? "record was" : "records were"} retried until the appliance gave up on ` +
-          `${dead === 1 ? "it" : "them"}.`,
+          `${dead === 1 ? "it" : "them"}. ${dead === 1 ? "It" : "They"} will not be sent again until ` +
+          `${dead === 1 ? "it is" : "they are"} recovered — Cloud connection has the button.`,
       );
     }
-    if (backlogTone !== "ok") {
-      parts.push("A backlog this size means the queue is not draining — check Cloud connection.");
-    }
+    if (reason.line) parts.push(reason.line);
   }
   // The reassurance goes LAST and is always present: it is the answer to the question the numbers provoke.
   parts.push(
@@ -90,9 +155,11 @@ export function describeOutbox(o?: OutboxFigures | null): Explained {
   const headline =
     pending === 0 && dead === 0
       ? "Up to date"
-      : dead > 0
-        ? `${num(pending)} waiting · ${num(dead)} given up`
-        : `${num(pending)} waiting`;
+      : reason.headline
+        ? reason.headline
+        : dead > 0
+          ? `${num(pending)} waiting · ${num(dead)} given up`
+          : `${num(pending)} waiting`;
 
   return { headline, summary: parts.join(" "), tone };
 }

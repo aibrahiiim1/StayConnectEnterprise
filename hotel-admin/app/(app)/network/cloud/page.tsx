@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Callout } from "@/components/ui/error-banner";
 import { canWrite } from "@/lib/roles";
+import { CloudSyncQueueCard } from "@/components/cloud-sync-queue";
 import { errMsg } from "@/lib/utils";
-import { describeOutbox } from "@/lib/health-words";
 import { Cloud, RefreshCw, Activity, Download } from "lucide-react";
 
 function Row({ k, v }: { k: string; v: React.ReactNode }) {
@@ -46,6 +46,10 @@ export default function CloudConnectionPage() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const writable = canWrite("network", roles);
+  // The queue card owns two permissions of its own: setting the retention period and recovering records the
+  // appliance gave up on are different powers from editing the cloud connection, and from each other.
+  const canSetRetention = canWrite("cloud-sync-settings", roles);
+  const canRecover = canWrite("cloud-sync-recovery", roles);
 
   async function load() {
     try { setSt(await api.get<CloudStatus>("/network/cloud")); }
@@ -71,9 +75,6 @@ export default function CloudConnectionPage() {
 
   if (!st) return <div className="p-6 text-sm text-muted-foreground">{err ?? "Loading cloud connection…"}</div>;
   const c = st.cloud, l = st.license, o = st.outbox, conn = st.connection;
-  // Described in one place (lib/health-words) so this page, the dashboard and the header pill cannot end up
-  // telling an operator three different things about the same queue.
-  const outbox = describeOutbox(o ? { enabled: !!o.enabled, pending: o.pending, dead: o.dead, oldest_pending: o.oldest_pending } : null);
 
   return (
     <div className="space-y-6">
@@ -150,39 +151,19 @@ export default function CloudConnectionPage() {
         </Card>
 
         {/*
-          THE OUTBOX, WITH ITS MEANING ATTACHED.
+          THE QUEUE, ITS ACCOUNTING, ITS RETENTION AND THE ONE ACTION THAT RESCUES IT.
           ------------------------------------------------------------------------------------------------
           This card was headed "Telemetry outbox" and listed "Pending", "Dead-letter" and "Oldest pending" as
-          four bare values. "Dead-letter" is message-queue vocabulary, not hotel vocabulary, and nothing on the
-          page said whether a large figure meant guests were affected — which is the only question an operator
-          actually has about it. The numbers are unchanged; the sentence that makes them usable is new, and it
-          is shared with the dashboard and the health pill so all three say the same thing.
+          bare values. "Dead-letter" is message-queue vocabulary, not hotel vocabulary; nothing said whether a
+          large figure meant guests were affected; and the records the appliance had given up on could not be
+          reached by any button in the product. See components/cloud-sync-queue.tsx for what replaced it.
         */}
-        <Card>
-          <CardHeader><CardTitle>Reporting to the StayConnect cloud</CardTitle></CardHeader>
-          <CardBody className="space-y-3">
-            <Row k="In use" v={o.enabled ? "yes" : "no"} />
-            <Row
-              k="Waiting to be sent"
-              v={<b className={((o.pending ?? 0) > 0) ? "text-warning-subtle-foreground" : ""}>
-                {(o.pending ?? 0).toLocaleString()}
-              </b>}
-            />
-            <Row
-              k="Given up on"
-              v={<b className={((o.dead ?? 0) > 0) ? "text-destructive" : ""}>
-                {(o.dead ?? 0).toLocaleString()}
-              </b>}
-            />
-            <Row k="Oldest still waiting" v={o.oldest_pending ?? "—"} />
-            <Callout
-              tone={outbox.tone === "ok" ? "success" : outbox.tone === "err" ? "warning" : outbox.tone === "warn" ? "warning" : "neutral"}
-              title={outbox.headline}
-            >
-              {outbox.summary}
-            </Callout>
-          </CardBody>
-        </Card>
+        <CloudSyncQueueCard
+          outbox={o}
+          canSetRetention={canSetRetention}
+          canRecover={canRecover}
+          onChanged={load}
+        />
       </div>
 
       {writable && (
