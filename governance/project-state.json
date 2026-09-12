@@ -1100,7 +1100,7 @@
   },
   "acceptance_candidate_head": "ac6816456be0e5bbaf2aa1c67c36b33032328ccb",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD of the Phase-6 change manifest. delivery_head is that commit plus one delivery-only commit; the manifest is generated from the STAGED tree so its path set already covers the complete base..delivery_head diff.",
-  "inventory_head": "b07952b6f1a9c7a8430253508d99089fbb45531d",
+  "inventory_head": "c6ea2533686210928b9ec01d221e65bf460a7624",
   "delivery_head_note": "delivery_head (the Phase-6 PR HEAD) = inventory_head + one delivery-only commit. Its exact 40-character SHA is recorded in the PR body and verified to resolve on the authoritative remote before the delivery is reported.",
   "roadmap_exhaustion": {
     "recorded_by": "D28 / T0065 (2026-08-17)",
@@ -1590,7 +1590,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "11c7ca9f361c919aa6fcf13cdf342be3621f2cfd",
     "base_note": "The master merge commit of PR #115, which closed guest sign-in protection. This consolidated correction delivery begins exactly where that one ended.",
-    "head": "b07952b6f1a9c7a8430253508d99089fbb45531d",
+    "head": "c6ea2533686210928b9ec01d221e65bf460a7624",
     "head_note": "Set by the delivery-only commit that rebuilds the manifest, the export packs and this pointer.",
     "note": "One consolidated delivery, by Product-Owner instruction: the session allowance display, the Central telemetry dedupe transaction, the cloud-sync recovery/retention/accounting, the PMS reconciliation corrections, the credential rotation, and the agreed project records. Merged once as 244d9dd6; this lineage carries the deployment-time correction that moved the queue's operator objects into iam_v2. T0121 is the receipt."
   },
