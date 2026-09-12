@@ -532,17 +532,22 @@ shown beside it — that number is a fact about the feed and is not hidden.
 
 | State | Meaning | What would resolve it |
 |---|---|---|
-| **Can be re-evaluated** | One matching stay, it began before the departure was raised, and it is absent from the PMS's own latest complete in-house list. | Nothing — the action is available. |
+| **The PMS can settle this now** | One matching stay, it began before the departure was raised, and it is absent from the PMS's own latest complete in-house list. | A departure sent from the PMS for that room will apply cleanly. |
 | **Nothing outstanding** | Nobody is in that room now. | Nothing is waiting. This is **not** proof the departure was applied. |
 | **Room has more than one stay** | Sharing a room is ordinary and legal. | The reservation number from the PMS. |
 | **A later guest is in that room** | The current occupant arrived **after** this departure. Applying it would check out a resident guest. | The reservation number from the PMS. |
 | **The PMS still lists them as in house** | Fresh authoritative evidence contradicts the older departure. | The PMS resolving its own disagreement. |
 | **Needs evidence from the PMS** | Usually: no complete in-house list has been received to compare against. | A completed full synchronisation. |
 
-**Re-evaluate does not check anybody out.** It hands the recorded departure back to the same ingestion engine
-that received it, which applies the same rules and the same checkout policy it would have applied originally —
-including access and grace. If it still cannot be matched, the case returns to the list with the reason. It
-needs a typed reason and is recorded with the operator's name and the evidence the decision was based on.
+**There is no action on this screen, and that is the answer rather than a gap.** A departure the appliance
+could not place is resolved by the PMS sending one it *can* place — typically once somebody corrects the
+record there. Two deliberate invariants make that the only route: a PMS event is one-way (once it reaches a
+terminal state its result is frozen), and a checkout boundary must be an *applied* departure event. The PMS
+is the source of truth for whether a guest has left, and the appliance asserting it from a re-reading of an
+old message would be claiming to know something it does not.
+
+The list is the value: 397 distinct departures instead of 12,271 rows, each labelled with the evidence it is
+waiting for, so the desk knows which rooms to ask the PMS about.
 
 **Three rules this screen will not break**, because breaking any of them disconnects a resident guest:
 
