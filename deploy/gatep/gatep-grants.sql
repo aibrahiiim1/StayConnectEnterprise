@@ -142,6 +142,14 @@ GRANT SELECT,INSERT,UPDATE,DELETE ON public.stripe_accounts            TO svc_ed
 -- which is a legitimate edged action, goes through public.sync_outbox_recover_exhausted so that clearing the
 -- abandoned flag and recording who cleared it cannot be separated.
 GRANT SELECT,INSERT               ON public.sync_outbox                TO svc_edged;
+
+-- iam_v2_owner owns the three SECURITY DEFINER functions that read, recover and prune the queue (0069).
+-- A definer function runs with its OWNER's privileges, so the owner needs them on the table it touches;
+-- this is that, and nothing wider. iam_v2_owner is a NOLOGIN owner role -- no service authenticates as it,
+-- so this grants no runtime reach to anybody. It is written HERE rather than in the migration because only
+-- the table's owner may grant on it, and a live-site migration is deliberately applied by a non-superuser
+-- that does not own public.
+GRANT SELECT,UPDATE,DELETE        ON public.sync_outbox                TO iam_v2_owner;
 REVOKE UPDATE                     ON public.sync_outbox              FROM svc_edged;
 GRANT SELECT,INSERT               ON public.sync_checkpoints           TO svc_edged;
 GRANT SELECT,UPDATE               ON public.tenants                    TO svc_edged;

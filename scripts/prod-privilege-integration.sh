@@ -216,17 +216,34 @@ assert_priv "svc_edged may change retention through the audited function"   "SEL
 assert_priv "svc_edged CANNOT write the retention setting directly"   "SELECT has_table_privilege('svc_edged','iam_v2.site_cloud_sync_settings','UPDATE')" f
 assert_priv "svc_edged CANNOT write the retention change log directly"   "SELECT has_table_privilege('svc_edged','iam_v2.cloud_sync_settings_changes','INSERT')" f
 
-assert_priv "svc_edged may recover abandoned records through the audited function"   "SELECT has_function_privilege('svc_edged','public.sync_outbox_recover_exhausted(text,text,integer)','EXECUTE')" t
-assert_priv "svc_edged CANNOT write the recovery log directly"   "SELECT has_table_privilege('svc_edged','public.sync_outbox_recovery_log','INSERT')" f
+assert_priv "svc_edged may recover abandoned records through the audited function"   "SELECT has_function_privilege('svc_edged','iam_v2.sync_outbox_recover_exhausted(text,text,integer)','EXECUTE')" t
+assert_priv "svc_edged CANNOT write the recovery log directly"   "SELECT has_table_privilege('svc_edged','iam_v2.sync_outbox_recovery_log','INSERT')" f
 assert_priv "svc_edged CANNOT mark an undelivered record as sent"   "SELECT has_table_privilege('svc_edged','public.sync_outbox','UPDATE')" f
 
 # scd prunes DELIVERED records and does not recover abandoned ones. A daemon that could recover could do it
 # on a loop; releasing records back onto the wire is an operator decision with a far end that absorbs it.
-assert_priv "svc_scd may prune delivered records"   "SELECT has_function_privilege('svc_scd','public.sync_outbox_prune_delivered(integer)','EXECUTE')" t
-assert_priv "svc_scd CANNOT recover abandoned records"   "SELECT has_function_privilege('svc_scd','public.sync_outbox_recover_exhausted(text,text,integer)','EXECUTE')" f
+assert_priv "svc_scd may prune delivered records"   "SELECT has_function_privilege('svc_scd','iam_v2.sync_outbox_prune_delivered(integer)','EXECUTE')" t
+assert_priv "svc_scd CANNOT recover abandoned records"   "SELECT has_function_privilege('svc_scd','iam_v2.sync_outbox_recover_exhausted(text,text,integer)','EXECUTE')" f
+
+# THE CONSTRAINT THAT DECIDED WHERE 0069's QUEUE OBJECTS LIVE, asserted so it cannot be rediscovered on an
+# appliance at deploy time -- which is exactly how it WAS discovered.
+#
+# A live-site migration is applied by a least-privilege non-superuser; edge-migrate.sh refuses anything else.
+# That role is iam_v2_owner, and it holds no CREATE on schema public. A migration creating objects there
+# fails whole with "permission denied for schema public" -- and the runner's success check greps only for its
+# own pre-apply echo, so it reports EDGE_MIGRATE_OK for an apply that rolled back entirely.
+#
+# So the operator-facing queue objects live in iam_v2 where that role may create them, the queue TABLE stays
+# in public where 0001 put it, and the definer functions reach it on a grant Gate-P makes.
+assert_priv "iam_v2_owner CANNOT create in schema public (the constraint 0069 is shaped by)"   "SELECT has_schema_privilege('iam_v2_owner','public','CREATE')" f
+assert_priv "iam_v2_owner CAN read the queue it must account for"   "SELECT has_table_privilege('iam_v2_owner','public.sync_outbox','SELECT')" t
+assert_priv "iam_v2_owner CAN return abandoned records (definer runs as the owner)"   "SELECT has_table_privilege('iam_v2_owner','public.sync_outbox','UPDATE')" t
+assert_priv "iam_v2_owner CAN remove delivered records under retention"   "SELECT has_table_privilege('iam_v2_owner','public.sync_outbox','DELETE')" t
+assert_priv "the queue's operator functions live in iam_v2"   "SELECT count(*)=4 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname IN ('sync_outbox_recover_exhausted','sync_outbox_prune_delivered','sync_outbox_accounting','sync_outbox_recovery_log_append_only')" t
+assert_priv "and none was left behind in public"   "SELECT count(*)=0 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname LIKE 'sync_outbox!_%' ESCAPE '!'" t
 
 assert_priv "PUBLIC holds nothing on the retention setting"   "SELECT has_table_privilege('public','iam_v2.site_cloud_sync_settings','SELECT')" f
-assert_priv "PUBLIC cannot recover the queue"   "SELECT has_function_privilege('public','public.sync_outbox_recover_exhausted(text,text,integer)','EXECUTE')" f
+assert_priv "PUBLIC cannot recover the queue"   "SELECT has_function_privilege('public','iam_v2.sync_outbox_recover_exhausted(text,text,integer)','EXECUTE')" f
 assert_priv "PUBLIC cannot re-offer a departure"   "SELECT has_function_privilege('public','iam_v2.pms_reoffer_stay_event(uuid,uuid,uuid,uuid,text,text,jsonb)','EXECUTE')" f
 
 [ "$fails" = "0" ] || { echo "  FAIL: $fails privilege assertion(s) — fix deploy/gatep, not this file"; exit 1; }

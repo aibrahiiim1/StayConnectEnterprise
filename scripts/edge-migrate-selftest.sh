@@ -225,6 +225,41 @@ else
 fi
 undo
 
+echo "== 8. A MIGRATION THAT FAILS IS NOT REPORTED AS APPLIED =="
+# The case this check was added for, and it is not hypothetical: the runner used to decide the outcome by
+# grepping its own pre-apply echo out of psql's output. APPLYING_UNDER_LOCK is printed BEFORE the migration
+# body runs, so a migration that aborted under ON_ERROR_STOP and rolled back -- taking the ledger INSERT with
+# it -- still produced EDGE_MIGRATE_OK applied=1 over a database the runner had not changed. A deployment
+# that trusted it would carry on to restart daemons against an unmigrated schema. That is what happened with
+# 0069 against a live appliance, where the applying role could not create in the target schema.
+#
+# The ledger row is written in the same transaction as the migration, so it exists if and only if the
+# migration committed. Here a deliberately broken migration must be REFUSED, not reported as applied.
+ledger_reset; mk_commerce
+cat > "$MIGDIR/0098_selftest_fails.up.sql" <<'SQL'
+BEGIN;
+CREATE TABLE public.selftest_should_not_survive (id int);
+SELECT 1 FROM this_relation_does_not_exist;
+COMMIT;
+SQL
+BADSHA="$(sha256sum "$MIGDIR/0098_selftest_fails.up.sql" | awk '{print $1}')"
+badout="$(EDGE_PSQL="$PSQL" bash "$RUN" --apply-role edge_apply --only 0098_selftest_fails   --expect-db "$DB" --target-kind live-site --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION   --expect-sha256 "$BADSHA" 2>&1)"; badrc=$?
+badledger="$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0098_selftest_fails'")"
+badtable="$(Q "SELECT count(*) FROM pg_class WHERE relname='selftest_should_not_survive'")"
+if [ "$badrc" != "0" ] && ! echo "$badout" | grep -q "EDGE_MIGRATE_OK"; then
+  ok "a failing migration is refused, not reported as applied"
+else
+  no "a failing migration was reported as applied (rc=$badrc)" "$badout"
+fi
+if [ "${badledger:-0}" = "0" ] && [ "${badtable:-0}" = "0" ]; then
+  ok "...and it left neither a ledger row nor a half-created object"
+else
+  no "a failed migration left ledger=$badledger object=$badtable behind"
+fi
+Q "DELETE FROM public.schema_migrations WHERE version='0098_selftest_fails';" >/dev/null
+rm -f "$MIGDIR/0098_selftest_fails.up.sql"
+undo
+
 echo "============================================================"
 if [ "$fail" = "0" ]; then echo "EDGE_MIGRATE_SELFTEST = PASS ($pass cases)"; exit 0; fi
 echo "EDGE_MIGRATE_SELFTEST = FAIL"; exit 1

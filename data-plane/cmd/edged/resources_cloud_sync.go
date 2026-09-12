@@ -185,7 +185,7 @@ func (s *server) getCloudSyncRecovery(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.db.Query(ctx, `
 		SELECT requested_at, requested_by, reason, rows_recovered,
 		       seq_from, seq_to, oldest_created_at, exhausted_remaining
-		  FROM public.sync_outbox_recovery_log
+		  FROM iam_v2.sync_outbox_recovery_log
 		 ORDER BY requested_at DESC LIMIT 50`)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "recovery_log_unreadable", err.Error())
@@ -260,7 +260,7 @@ func (s *server) postCloudSyncRecovery(w http.ResponseWriter, r *http.Request) {
 	var remaining int64
 	if err := s.db.QueryRow(ctx,
 		`SELECT rows_recovered, seq_from, seq_to, exhausted_remaining
-		   FROM public.sync_outbox_recover_exhausted($1,$2,$3)`,
+		   FROM iam_v2.sync_outbox_recover_exhausted($1,$2,$3)`,
 		actor, reason, limit).Scan(&recovered, &from, &to, &remaining); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "recovery_failed", err.Error())
 		return

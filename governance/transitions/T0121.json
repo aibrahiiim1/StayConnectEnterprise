@@ -25,7 +25,6 @@
   "new_decision_created": false,
   "new_decision_rationale": "No new numbered decision. The Product Owner's instruction was explicit that acceptance records and scoped authorizations ride in this delivery rather than opening one of their own, and that unnecessary numbered decisions are not to be introduced. The authorizations recorded here are mission-scoped and expire with the mission (CLAUDE.md 0A.7, 12).",
   "po_authorization_ref": "Product-Owner instruction EXECUTE ONE CONSOLIDATED STAYCONNECT DELIVERY THROUGH IMPLEMENTATION, VERIFICATION, PROTECTED MERGE, DEPLOYMENT AND OPERATIONAL ACCEPTANCE (2026-09-12), which supersedes the previous consolidated-delivery and PMS-addendum prompts.",
-
   "product_owner_acceptance_delivery_c": {
     "subject": "Configurable guest sign-in rate limiting and operator-managed temporary restrictions (migration 0068, merged 11c7ca9f via PR #115, deployed to PRE-LIVE 172.21.60.25).",
     "observed_manually_by_the_product_owner": [
@@ -37,20 +36,17 @@
     "boundary_between_manual_observation_and_automated_assertion": "The four observations above are Product-Owner manual live results. They do NOT establish the exact fifth-attempt boundary or second-level timing: the Product Owner stated explicitly that those were not measured by hand. The precise threshold, the rolling sixty-second window and the sixty-second expiry are asserted by the automated suites retained with Delivery C — cmd/scd/phase3_signin_protection_integration_test.go, cmd/edged/signin_protection_integration_test.go, internal/signinattempt/policy_test.go and hotel-admin/e2e/guest-signin-protection.spec.ts. Neither body of evidence is presented as the other.",
     "no_guest_data": "No guest name, room number or reservation number appears in this record, by the Product Owner's instruction and by the standing rule that delivery evidence is published."
   },
-
   "corrected_statement_of_record": {
     "what_was_said": "That an intentionally disconnected PMS necessarily prevents guest credential evaluation.",
     "why_it_was_wrong": "The appliance authorises from its last-good mirrored roster. A DISCONNECTED transport is not by itself a guest-authentication outage: successful authentication and credential-failure counting were both observed live while the PMS feed was down.",
     "what_must_not_be_inferred": "This does not mean every mirrored stay is eligible, nor that all offline conditions have been tested. Eligibility is decided per stay by the mirror-trust and freshness rules, not by transport state."
   },
-
   "environment_of_record": {
     "central": "150.0.0.252, associated with sc-central.echofusion.com. Verified this mission: ctrlapi subscribed to telemetry.>, hb.*, appliances.*.commands.results and appliances.*.updates.status on the mutually-authenticated NATS listener on 4223; nats-authz live on $SYS.REQ.USER.AUTH.",
     "pre_live_appliance": "172.21.60.25. PRE-LIVE remains PRE-LIVE; Go-Live is not authorized.",
     "development_reference_appliance": "172.21.60.23 is RETIRED as an operational target. It is removed from current operational instructions and must not be contacted. Its historical accepted evidence is preserved unchanged — a retired target is not a falsified record.",
     "pms": "Protel FIAS was reconnected by the Product Owner. Transport CONNECTED and a complete roster synchronization published 589 records (591 in-house) at 2026-09-12T15:51:29Z."
   },
-
   "mission_scoped_authorizations": {
     "granted_for_this_mission_only": [
       "Inspect Central and PRE-LIVE using existing authorized access.",
@@ -71,7 +67,6 @@
     ],
     "expiry": "These authorizations are scoped to this mission and do not carry into a later one (CLAUDE.md 0A.7 and 12)."
   },
-
   "defect": [
     "Active Sessions and session details showed the SERVICE PLAN's data allowance beside the ENTITLEMENT's usage. A guest granted 7 GB by a per-stay-night package read as '1.2 GB of 100 MB' — a guest apparently far over their limit who had not been cut off. The two halves of the meter described different objects.",
     "Central's telemetry consumer wrote its deduplication mark and the telemetry row as two separate statements, with a compensating DELETE on failure. The compensation runs on the context that just failed, so in exactly the case it exists for it cannot run. What survives is a dedupe mark with no telemetry row: the appliance's retry carries the same sequence, is told 'already processed', marks it sent and moves on. The record is lost silently at both ends.",
@@ -82,7 +77,6 @@
     "The dashboard counted MANUAL_REVIEW ROWS, for all time, ungrouped. One unresolved departure restaged across 220-plus generations counted once per copy, so the property was shown 12,026 'messages needing attention' for 397 actual decisions. A list of twelve thousand is a list nobody opens.",
     "svc_edged held UPDATE on public.sync_outbox and never used it. It is the one privilege that would let the admin API mark an undelivered record as sent — the single way to make a backlog disappear without delivering it."
   ],
-
   "fix": [
     "cmd/edged/resources_sessions.go: the shared sessionCols projection reads COALESCE(e.data_quota_bytes, spr.data_quota_bytes), character-for-character what internal/enforce and internal/checkout decide a guest's limit from. List and detail correct together because they share the constant. Time is deliberately unchanged: entitlements carry no time_quota_seconds override.",
     "control-plane/internal/fleet/fleet.go: the dedupe mark and the telemetry row are one transaction. A failure rolls back both, so the appliance's retry is a first delivery rather than a swallowed duplicate. A deduplication table makes replay SAFE; it does not on its own make delivery exactly-once.",
@@ -94,18 +88,23 @@
     "Migration 0069: iam_v2.pms_reoffer_stay_event hands one recorded MANUAL_REVIEW departure back to the SAME ingestion engine, copying its prior terminal state and the operator's evidence into an append-only log first. There is deliberately no second checkout path: the engine applies the same resolution rules and the same Checkout Converter it would have used originally.",
     "deploy/gatep/gatep-grants.sql: svc_edged's privilege on public.sync_outbox is narrowed to SELECT,INSERT. edged enqueues and never drains; recovery goes through the definer function so that clearing the abandoned flag and recording who cleared it cannot be separated."
   ],
-
   "verification": {
     "migration_0069": "Applied and rolled back against a disposable PostgreSQL 16 carrying the regenerated production baseline. Bounds, append-only triggers, the definer read/write pair, the recovery batch and the three views all exercised.",
     "phase5_pg_integration": "PASS, including four new session-allowance integration tests that run the real shared projection against a real database: an entitlement override reports its frozen grant, a plan-derived entitlement keeps the plan's figure, unlimited stays NULL rather than becoming zero, and the projection agrees with the enforcement expression for every shape.",
     "prod_privilege": "PASS with fifteen new assertions for 0069, including that svc_edged cannot move a PMS event's processing state directly, cannot write either audit log directly, and cannot mark an undelivered record as sent.",
     "hotel_admin_unit": "276/276 vitest. The two assertions that encoded the size-based 'not draining' wording were rewritten, because that behaviour is the defect this delivery corrects.",
     "unit": "New pure-function suites for the departure chronology rule and for the delivery-state classification, each carrying the measured numbers that justify it.",
-    "factory_clean_baseline": "Production baseline regenerated from the migration chain; it contains the 0069 objects and still constructs none of the superseded guest-IAM tables."
+    "factory_clean_baseline": "Production baseline regenerated from the migration chain; it contains the 0069 objects and still constructs none of the superseded guest-IAM tables.",
+    "live_shaped_migration_apply": "0069 applied under SET ROLE iam_v2_owner against a scratch database shaped like the live one -- iam_v2 owned by iam_v2_owner, no CREATE on public, the Gate-P grant present -- producing 7 objects and 6 functions with no error, and the recovery, prune and accounting functions exercised end to end as the definer owner."
   },
-
   "not_done_and_why": {
     "no_stay_closed_from_the_backlog_without_evidence": "After the fresh complete roster, the 397 distinct unresolved departures classify as 107 superseded (the room is empty; nothing outstanding), 101 room-shared (undecidable from a room number by construction), 101 contradicted by the PMS's own current in-house list, 83 later-occupant, 1 needing evidence, and 4 RESOLVABLE. Only the last may be re-evaluated. Nothing was closed on a planned departure date, no event was discarded, and no dashboard count was altered to hide an unresolved case.",
     "no_go_live": "PRE-LIVE remains PRE-LIVE. Go-Live is not authorized and was not performed."
+  },
+  "deployment_findings": {
+    "_note": "Found while DEPLOYING this delivery, not while writing it. Recorded because each one is a live condition that existed before the delivery and would have gone on existing after it.",
+    "gatep_runner_tree_was_stale": "gatep-reconcile.sh resolves its source as $ROOT/deploy/gatep, which is /opt/stayconnect/gatep-run/deploy/gatep -- NOT the /opt/stayconnect/deploy/gatep that recent deliveries had been updating. The runner's tree carried ZERO references to guest_signin (0068), sign_in_attempts (0067) and lock_auth_context_offer. A reconcile run from it would have revoked svc_scd's EXECUTE on the guest sign-in gate and the offer-lock functions, breaking guest sign-in protection and package selection property-wide -- which is T0120 recurring for the same reason. Both trees were backed up and synced from the delivery head, and ten privileges are now asserted after every reconcile.",
+    "migration_runner_reports_success_on_a_rolled_back_apply": "FIXED IN THIS DELIVERY, and it was worse than first recorded. edge-migrate.sh decided the outcome by grepping its own pre-apply echo (APPLYING_UNDER_LOCK) out of psql's output, so an apply that rolled back still printed EDGE_MIGRATE_OK applied=1 -- observed directly when 0069 reported applied=1 against the live appliance while the ledger row and every object were absent. Writing a regression revealed the second and more serious half: the migration file carries its own BEGIN/COMMIT, so the ledger INSERT the runner appends is OUTSIDE it. Without ON_ERROR_STOP a failed statement aborts the transaction, the migration's COMMIT degrades to ROLLBACK, and the appended INSERT then commits on its own -- leaving a ledger row asserting a migration applied, with none of its objects present and NO path that would ever retry it. The runner now forces ON_ERROR_STOP rather than trusting the caller's EDGE_PSQL, and requires BOTH a zero psql exit status and the ledger row before reporting success. scripts/edge-migrate-selftest.sh gains case 8, which applies a deliberately broken migration and requires it to be refused with neither a ledger row nor a half-created object; the suite passes 14 cases. No poisoned ledger row exists on the PRE-LIVE appliance: the 0069 attempt was made with ON_ERROR_STOP supplied in EDGE_PSQL, and the ledger was confirmed to carry no 0069 row.",
+    "live_site_migrations_are_applied_by_a_non_superuser": "edge-migrate.sh refuses a superuser execution role for target-kind=live-site, correctly. That role is iam_v2_owner, which holds no CREATE on schema public. 0069 originally created its queue objects in public beside public.sync_outbox and therefore could not be applied at all. CI never caught it because every gate applies migrations as the container superuser. The migration now creates those objects in iam_v2, the queue table stays where 0001 put it, and the definer functions reach it on one narrow Gate-P grant (SELECT/UPDATE/DELETE to a NOLOGIN owner role). scripts/prod-privilege-integration.sh now asserts all three halves so this is caught on a runner rather than on an appliance."
   }
 }

@@ -174,10 +174,23 @@ $$;
 -- ---------------------------------------------------------------------------------------------------------
 -- 2. Recovering records the appliance gave up on.
 --
+-- THESE LIVE IN iam_v2 WHILE public.sync_outbox DOES NOT, AND THAT ASYMMETRY IS DELIBERATE.
+--
+-- A live-site migration is applied by a least-privilege NON-superuser -- the runner refuses anything else,
+-- and it is right to. That role is iam_v2_owner, which holds no CREATE on schema public: a migration that
+-- created objects there fails whole with "permission denied for schema public". The alternatives were to
+-- grant iam_v2_owner CREATE on public, which widens a role permanently to solve one migration's problem,
+-- or to apply as a superuser, which is the control the runner exists to enforce.
+--
+-- So the OBJECTS live where the migration's own role may create them, and the TABLE stays exactly where
+-- 0001 put it. The functions reach it as SECURITY DEFINER, and the three privileges that requires --
+-- SELECT, UPDATE and DELETE on public.sync_outbox for iam_v2_owner -- are granted by Gate-P, which runs as
+-- the role that owns that table. No runtime service role gains anything: iam_v2_owner is a NOLOGIN owner.
+--
 -- The log is written first and is append-only, so a recovery cannot happen without the row that says who
 -- asked for it, why, which sequence range moved and how old the oldest record was.
 -- ---------------------------------------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS public.sync_outbox_recovery_log (
+CREATE TABLE IF NOT EXISTS iam_v2.sync_outbox_recovery_log (
     id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     requested_at  timestamptz NOT NULL DEFAULT now(),
     requested_by  text NOT NULL CHECK (length(btrim(requested_by)) > 0),
@@ -189,21 +202,21 @@ CREATE TABLE IF NOT EXISTS public.sync_outbox_recovery_log (
     exhausted_remaining bigint NOT NULL CHECK (exhausted_remaining >= 0)
 );
 
-COMMENT ON TABLE public.sync_outbox_recovery_log IS
+COMMENT ON TABLE iam_v2.sync_outbox_recovery_log IS
   'Append-only record of every time exhausted-retry sync records were returned to the queue. Payloads are never copied here.';
 
-CREATE OR REPLACE FUNCTION public.sync_outbox_recovery_log_append_only()
+CREATE OR REPLACE FUNCTION iam_v2.sync_outbox_recovery_log_append_only()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    RAISE EXCEPTION 'public.sync_outbox_recovery_log is append-only: % refused', TG_OP
+    RAISE EXCEPTION 'iam_v2.sync_outbox_recovery_log is append-only: % refused', TG_OP
         USING ERRCODE = 'restrict_violation';
 END;
 $$;
 
-DROP TRIGGER IF EXISTS sync_outbox_recovery_log_no_update ON public.sync_outbox_recovery_log;
+DROP TRIGGER IF EXISTS sync_outbox_recovery_log_no_update ON iam_v2.sync_outbox_recovery_log;
 CREATE TRIGGER sync_outbox_recovery_log_no_update
-    BEFORE UPDATE OR DELETE ON public.sync_outbox_recovery_log
-    FOR EACH ROW EXECUTE FUNCTION public.sync_outbox_recovery_log_append_only();
+    BEFORE UPDATE OR DELETE ON iam_v2.sync_outbox_recovery_log
+    FOR EACH ROW EXECUTE FUNCTION iam_v2.sync_outbox_recovery_log_append_only();
 
 -- Recover a BOUNDED batch of exhausted records, oldest sequence first.
 --
@@ -219,10 +232,10 @@ CREATE TRIGGER sync_outbox_recovery_log_no_update
 -- The payload is not read, not copied and not modified. attempts is reset so the row gets a full retry
 -- budget rather than dying again on its next failure; last_error is kept, because why it died the first time
 -- is the most useful thing about it.
-CREATE OR REPLACE FUNCTION public.sync_outbox_recover_exhausted(
+CREATE OR REPLACE FUNCTION iam_v2.sync_outbox_recover_exhausted(
     p_operator text, p_reason text, p_limit integer DEFAULT 1000
 ) RETURNS TABLE (rows_recovered integer, seq_from bigint, seq_to bigint, exhausted_remaining bigint)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, public, pg_temp AS $$
 DECLARE
     v_count integer := 0;
     v_from bigint;
@@ -269,7 +282,7 @@ BEGIN
       FROM public.sync_outbox o
      WHERE o.sent_at IS NULL AND o.dead = true;
 
-    INSERT INTO public.sync_outbox_recovery_log
+    INSERT INTO iam_v2.sync_outbox_recovery_log
            (requested_by, reason, rows_recovered, seq_from, seq_to, oldest_created_at, exhausted_remaining)
     VALUES (btrim(p_operator), btrim(p_reason), v_count, v_from, v_to, v_oldest, v_remaining);
 
@@ -279,9 +292,9 @@ $$;
 
 -- Retention for DELIVERED records only. The WHERE clause names sent_at IS NOT NULL and nothing else: there is
 -- no parameter, flag or code path in this function that can reach a record which has not been delivered.
-CREATE OR REPLACE FUNCTION public.sync_outbox_prune_delivered(p_days integer)
+CREATE OR REPLACE FUNCTION iam_v2.sync_outbox_prune_delivered(p_days integer)
 RETURNS bigint
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, public, pg_temp AS $$
 DECLARE
     v_deleted bigint;
 BEGIN
@@ -303,7 +316,7 @@ $$;
 -- Every record in exactly one bucket, plus the ages and the size. This exists so "the backlog is recovered"
 -- can be CHECKED: delivered + pending + exhausted = total, and an operator or a report can say which of the
 -- three a record ended up in rather than inferring it from a falling number.
-CREATE OR REPLACE FUNCTION public.sync_outbox_accounting()
+CREATE OR REPLACE FUNCTION iam_v2.sync_outbox_accounting()
 RETURNS TABLE (
     delivered bigint, pending bigint, exhausted bigint, total bigint,
     oldest_pending timestamptz, newest_created timestamptz,
@@ -314,7 +327,7 @@ RETURNS TABLE (
 -- fixture that builds iam_v2 alone, including the one the gates run these migrations against. A plpgsql body
 -- resolves at call time, so the migration applies on an iam_v2-only schema and the function works wherever
 -- the queue actually exists. The same reasoning already applies to the two functions above it.
-LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = iam_v2, public, pg_temp AS $$
 BEGIN
     RETURN QUERY
     SELECT count(*) FILTER (WHERE o.sent_at IS NOT NULL),
@@ -625,13 +638,13 @@ COMMENT ON VIEW iam_v2.pms_reconciliation_cases IS
 REVOKE ALL ON iam_v2.site_cloud_sync_settings FROM PUBLIC;
 REVOKE ALL ON iam_v2.cloud_sync_settings_changes FROM PUBLIC;
 REVOKE ALL ON iam_v2.stay_event_reoffers FROM PUBLIC;
-REVOKE ALL ON public.sync_outbox_recovery_log FROM PUBLIC;
+REVOKE ALL ON iam_v2.sync_outbox_recovery_log FROM PUBLIC;
 REVOKE ALL ON FUNCTION iam_v2.cloud_sync_settings_get(uuid, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION iam_v2.cloud_sync_settings_set(uuid, uuid, integer, text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION iam_v2.pms_reoffer_stay_event(uuid, uuid, uuid, uuid, text, text, jsonb) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.sync_outbox_recover_exhausted(text, text, integer) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.sync_outbox_prune_delivered(integer) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.sync_outbox_accounting() FROM PUBLIC;
+REVOKE ALL ON FUNCTION iam_v2.sync_outbox_recover_exhausted(text, text, integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION iam_v2.sync_outbox_prune_delivered(integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION iam_v2.sync_outbox_accounting() FROM PUBLIC;
 
 DO $grant$
 DECLARE
@@ -644,22 +657,22 @@ BEGIN
         -- it, re-offer an event without logging it, or recover the queue without logging it.
         GRANT SELECT ON iam_v2.cloud_sync_settings_changes TO svc_edged;
         GRANT SELECT ON iam_v2.stay_event_reoffers TO svc_edged;
-        GRANT SELECT ON public.sync_outbox_recovery_log TO svc_edged;
+        GRANT SELECT ON iam_v2.sync_outbox_recovery_log TO svc_edged;
         GRANT SELECT ON iam_v2.pms_reconciliation_cases TO svc_edged;
         GRANT SELECT ON iam_v2.pms_rooms_multi_occupancy TO svc_edged;
         GRANT SELECT ON iam_v2.pms_stays_past_departure TO svc_edged;
         GRANT EXECUTE ON FUNCTION iam_v2.cloud_sync_settings_get(uuid, uuid) TO svc_edged;
         GRANT EXECUTE ON FUNCTION iam_v2.cloud_sync_settings_set(uuid, uuid, integer, text, text) TO svc_edged;
         GRANT EXECUTE ON FUNCTION iam_v2.pms_reoffer_stay_event(uuid, uuid, uuid, uuid, text, text, jsonb) TO svc_edged;
-        GRANT EXECUTE ON FUNCTION public.sync_outbox_recover_exhausted(text, text, integer) TO svc_edged;
-        GRANT EXECUTE ON FUNCTION public.sync_outbox_accounting() TO svc_edged;
+        GRANT EXECUTE ON FUNCTION iam_v2.sync_outbox_recover_exhausted(text, text, integer) TO svc_edged;
+        GRANT EXECUTE ON FUNCTION iam_v2.sync_outbox_accounting() TO svc_edged;
     END IF;
 
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_scd') THEN
         -- scd owns the queue. It reads the retention setting and applies it; it has no operator action.
         GRANT EXECUTE ON FUNCTION iam_v2.cloud_sync_settings_get(uuid, uuid) TO svc_scd;
-        GRANT EXECUTE ON FUNCTION public.sync_outbox_prune_delivered(integer) TO svc_scd;
-        GRANT EXECUTE ON FUNCTION public.sync_outbox_accounting() TO svc_scd;
+        GRANT EXECUTE ON FUNCTION iam_v2.sync_outbox_prune_delivered(integer) TO svc_scd;
+        GRANT EXECUTE ON FUNCTION iam_v2.sync_outbox_accounting() TO svc_scd;
     END IF;
 
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_pmsd') THEN
@@ -673,8 +686,8 @@ BEGIN
             EXECUTE format('REVOKE ALL ON iam_v2.site_cloud_sync_settings FROM %I', r);
             EXECUTE format('REVOKE ALL ON iam_v2.cloud_sync_settings_changes FROM %I', r);
             EXECUTE format('REVOKE ALL ON iam_v2.stay_event_reoffers FROM %I', r);
-            EXECUTE format('REVOKE ALL ON public.sync_outbox_recovery_log FROM %I', r);
-            EXECUTE format('REVOKE ALL ON FUNCTION public.sync_outbox_recover_exhausted(text, text, integer) FROM %I', r);
+            EXECUTE format('REVOKE ALL ON iam_v2.sync_outbox_recovery_log FROM %I', r);
+            EXECUTE format('REVOKE ALL ON FUNCTION iam_v2.sync_outbox_recover_exhausted(text, text, integer) FROM %I', r);
             EXECUTE format('REVOKE ALL ON FUNCTION iam_v2.pms_reoffer_stay_event(uuid, uuid, uuid, uuid, text, text, jsonb) FROM %I', r);
         END IF;
     END LOOP;
@@ -687,6 +700,7 @@ BEGIN
         ALTER TABLE iam_v2.site_cloud_sync_settings   OWNER TO iam_v2_owner;
         ALTER TABLE iam_v2.cloud_sync_settings_changes OWNER TO iam_v2_owner;
         ALTER TABLE iam_v2.stay_event_reoffers        OWNER TO iam_v2_owner;
+        ALTER TABLE iam_v2.sync_outbox_recovery_log   OWNER TO iam_v2_owner;
         ALTER VIEW  iam_v2.pms_reconciliation_cases   OWNER TO iam_v2_owner;
         ALTER VIEW  iam_v2.pms_rooms_multi_occupancy  OWNER TO iam_v2_owner;
         ALTER VIEW  iam_v2.pms_stays_past_departure   OWNER TO iam_v2_owner;
@@ -717,7 +731,7 @@ BEGIN
         IF has_table_privilege('svc_edged','iam_v2.stay_event_reoffers','INSERT') THEN
             RAISE EXCEPTION '0069: svc_edged can write the re-offer log directly';
         END IF;
-        IF has_table_privilege('svc_edged','public.sync_outbox_recovery_log','INSERT') THEN
+        IF has_table_privilege('svc_edged','iam_v2.sync_outbox_recovery_log','INSERT') THEN
             RAISE EXCEPTION '0069: svc_edged can write the recovery log directly';
         END IF;
         IF has_table_privilege('svc_edged','iam_v2.stay_events','UPDATE') THEN

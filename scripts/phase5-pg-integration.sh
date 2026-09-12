@@ -76,17 +76,17 @@ done
 
 base="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc \
   "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2' AND table_type='BASE TABLE';")"
-# 75, not 68: this gate runs ./cmd/edged with no -run filter, so the guest sign-in attempts API suite, the
+# 76, not 68: this gate runs ./cmd/edged with no -run filter, so the guest sign-in attempts API suite, the
 # sign-in protection suite and the cloud-sync/reconciliation suites all compile and RUN here. 0067 adds
 # iam_v2.sign_in_attempts; 0068 adds the protection policy, its append-only change log and the restriction
 # table; 0069 adds the cloud-sync settings, their change log and the stay-event re-offer log (its
 # public.sync_outbox_recovery_log and its three views are outside this count by construction — it counts
 # iam_v2 BASE TABLEs). Without them those tests fail on missing relations rather than on anything they are
 # testing, and this count is the check that would catch a chain which silently did not build them.
-if [ "${base:-0}" != "75" ]; then
-  echo "INFRA: the chain did not build (iam_v2 base tables=$base, expected 75)"; exit 2
+if [ "${base:-0}" != "76" ]; then
+  echo "INFRA: the chain did not build (iam_v2 base tables=$base, expected 76)"; exit 2
 fi
-echo "  chain built: 75 iam_v2 base tables through 0029 + 0067 + 0068 + 0069"
+echo "  chain built: 76 iam_v2 base tables through 0029 + 0067 + 0068 + 0069"
 
 fail=0
 run_gate(){

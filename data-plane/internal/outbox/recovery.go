@@ -131,7 +131,7 @@ func (o *Outbox) Account(ctx context.Context) (Accounting, error) {
 	var a Accounting
 	err := o.DB.QueryRow(ctx, `SELECT delivered, pending, exhausted, total,
 	                                  oldest_pending, newest_created, oldest_exhausted, bytes
-	                             FROM public.sync_outbox_accounting()`).
+	                             FROM iam_v2.sync_outbox_accounting()`).
 		Scan(&a.Delivered, &a.Pending, &a.Exhausted, &a.Total,
 			&a.OldestPending, &a.NewestCreated, &a.OldestExhausted, &a.Bytes)
 	return a, err
@@ -153,7 +153,7 @@ func (o *Outbox) RecoverExhausted(ctx context.Context, operator, reason string, 
 	var from, to *int64
 	err := o.DB.QueryRow(ctx,
 		`SELECT rows_recovered, seq_from, seq_to, exhausted_remaining
-		   FROM public.sync_outbox_recover_exhausted($1, $2, $3)`,
+		   FROM iam_v2.sync_outbox_recover_exhausted($1, $2, $3)`,
 		operator, reason, limit).Scan(&r.Recovered, &from, &to, &r.Remaining)
 	if err != nil {
 		return r, err
@@ -171,7 +171,7 @@ func (o *Outbox) RecoverExhausted(ctx context.Context, operator, reason string, 
 // else: the function's WHERE clause names sent_at IS NOT NULL and takes no parameter that could widen it.
 func (o *Outbox) PruneDelivered(ctx context.Context, days int) (int64, error) {
 	var n int64
-	err := o.DB.QueryRow(ctx, `SELECT public.sync_outbox_prune_delivered($1)`, days).Scan(&n)
+	err := o.DB.QueryRow(ctx, `SELECT iam_v2.sync_outbox_prune_delivered($1)`, days).Scan(&n)
 	return n, err
 }
 
