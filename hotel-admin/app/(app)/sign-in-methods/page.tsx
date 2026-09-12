@@ -18,7 +18,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { api, ApiError, ListResp, PmsInterface, PmsInterfaceHealth, PmsGuestNetworkRoute } from "@/lib/api";
+import { api, ApiError, ListResp, PmsInterface, PmsInterfaceHealth, PmsGuestNetworkRoute, Whoami } from "@/lib/api";
+import { canWrite } from "@/lib/roles";
+import { GuestSignInProtectionCard } from "@/components/guest-signin-protection";
 import { roomSignInReadiness } from "@/lib/pms-availability";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -71,6 +73,14 @@ const LEGACY_EITHER = "either";
 const capitalise = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
 export default function SignInMethodsPage() {
+  // The role is read once and FAILS CLOSED while it loads: an editable field that appears and then turns
+  // read-only is worse than one that arrives read-only and unlocks. edged enforces the real gate either way.
+  const [roles, setRoles] = useState<string[] | null>(null);
+  useEffect(() => {
+    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
+  }, []);
+  const mayChangeProtection = roles === null ? false : canWrite("guest-signin-protection", roles);
+
   const [cfg, setCfg] = useState<AuthMethods | null>(null);
   const [notify, setNotify] = useState<NotifyProvider[]>([]);
   const [social, setSocial] = useState<SocialProvider[]>([]);
@@ -169,6 +179,11 @@ export default function SignInMethodsPage() {
 
       {err ? <ErrorBanner err={err} /> : null}
       {note && <p className="text-sm text-success-subtle-foreground" role="status">{note}</p>}
+
+      {/* Placed directly above the methods rather than in a settings page of its own: the numbers are about
+          guests signing in, and this is the screen an operator is already on when they decide that five
+          attempts is too few for their property. */}
+      <GuestSignInProtectionCard canWrite={mayChangeProtection} />
 
       <MethodCard
         icon={<Ticket size={16} />}

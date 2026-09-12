@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0067, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0068, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -824,6 +824,264 @@ BEGIN
   IF r.time_accounting_mode <> 'VALIDITY_WINDOW' THEN RETURN 'PLAN_TIME_ACCOUNTING'; END IF;
   RETURN NULL;
 END $_$;
+
+
+--
+-- Name: guest_signin_gate(uuid, uuid, macaddr); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.guest_signin_gate(p_tenant uuid, p_site uuid, p_mac macaddr) RETURNS TABLE(restricted boolean, expires_at timestamp with time zone, remaining_seconds integer)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE(r.expires_at > now() AND r.released_at IS NULL, false),
+         CASE WHEN r.expires_at > now() AND r.released_at IS NULL THEN r.expires_at END,
+         CASE WHEN r.expires_at > now() AND r.released_at IS NULL
+              THEN GREATEST(1, CEIL(EXTRACT(EPOCH FROM (r.expires_at - now())))::int) END
+    FROM (SELECT 1) one
+    LEFT JOIN iam_v2.guest_signin_restrictions r
+      ON r.tenant_id = p_tenant AND r.site_id = p_site AND r.device_mac = p_mac;
+$$;
+
+
+--
+-- Name: FUNCTION guest_signin_gate(p_tenant uuid, p_site uuid, p_mac macaddr); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.guest_signin_gate(p_tenant uuid, p_site uuid, p_mac macaddr) IS 'Whether this device is currently refused, and for how much longer. remaining_seconds is the SERVER''s answer and is what the guest is shown counting down -- a browser that ignores it gains nothing, because this same gate refuses the next submission.';
+
+
+--
+-- Name: guest_signin_note_failure(uuid, uuid, macaddr, uuid, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.guest_signin_note_failure(p_tenant uuid, p_site uuid, p_mac macaddr, p_network uuid, p_network_name text, p_room text) RETURNS TABLE(restricted boolean, expires_at timestamp with time zone, failure_count integer)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE
+  v_max int; v_window int; v_block int;
+  v_reset timestamptz; v_count int; v_expires timestamptz; v_active boolean;
+BEGIN
+  IF p_mac IS NULL THEN
+    -- Nothing to attribute the failure to, so nothing to restrict. A submission that failed before the
+    -- appliance could identify the device is not a credential guess anyway.
+    RETURN QUERY SELECT false, NULL::timestamptz, 0;
+    RETURN;
+  END IF;
+
+  SELECT g.max_failed_attempts, g.observation_window_seconds, g.restriction_seconds
+    INTO v_max, v_window, v_block
+    FROM iam_v2.guest_signin_protection_get(p_tenant, p_site) g;
+
+  -- Make sure the device has a row, so counter_reset_at exists to count from and the update below has
+  -- something to lock.
+  INSERT INTO iam_v2.guest_signin_restrictions (tenant_id, site_id, device_mac, guest_network_id,
+                                                guest_network_name, last_submitted_room)
+  VALUES (p_tenant, p_site, p_mac, p_network, NULLIF(p_network_name,''), NULLIF(p_room,''))
+  ON CONFLICT (tenant_id, site_id, device_mac) DO UPDATE
+     SET guest_network_id    = COALESCE(EXCLUDED.guest_network_id, iam_v2.guest_signin_restrictions.guest_network_id),
+         guest_network_name  = COALESCE(EXCLUDED.guest_network_name, iam_v2.guest_signin_restrictions.guest_network_name),
+         last_submitted_room = COALESCE(EXCLUDED.last_submitted_room, iam_v2.guest_signin_restrictions.last_submitted_room),
+         updated_at          = now();
+
+  -- Take the row lock BEFORE counting, so two concurrent fifth failures serialise here rather than both
+  -- deciding to create a restriction from the same count.
+  SELECT r.counter_reset_at, (r.expires_at > now() AND r.released_at IS NULL)
+    INTO v_reset, v_active
+    FROM iam_v2.guest_signin_restrictions r
+   WHERE r.tenant_id = p_tenant AND r.site_id = p_site AND r.device_mac = p_mac
+     FOR UPDATE;
+
+  -- THE ROLLING COUNT, derived from the attempts themselves. Only the two codes that mean "the value you
+  -- submitted did not identify a stay" are counted; see the header.
+  SELECT count(*) INTO v_count
+    FROM iam_v2.sign_in_attempts a
+   WHERE a.tenant_id = p_tenant AND a.site_id = p_site AND a.device_mac = p_mac
+     AND a.result IN ('CREDENTIAL_MISMATCH','ROOM_NOT_IN_MIRROR')
+     AND a.occurred_at > now() - make_interval(secs => v_window)
+     AND a.occurred_at > v_reset;
+
+  IF v_active OR v_count < v_max THEN
+    -- Already refused (do not extend), or not there yet.
+    RETURN QUERY SELECT COALESCE(v_active,false),
+                        (SELECT r.expires_at FROM iam_v2.guest_signin_restrictions r
+                          WHERE r.tenant_id=p_tenant AND r.site_id=p_site AND r.device_mac=p_mac
+                            AND r.released_at IS NULL AND r.expires_at > now()),
+                        v_count;
+    RETURN;
+  END IF;
+
+  v_expires := now() + make_interval(secs => v_block);
+  UPDATE iam_v2.guest_signin_restrictions
+     SET restricted_at = now(), expires_at = v_expires, failure_count = v_count,
+         reason = 'FAILED_CREDENTIAL_THRESHOLD',
+         -- The fresh counter begins the moment the refusal ends, so the device is not instantly restricted
+         -- again by the same five failures it has already served the time for.
+         counter_reset_at = v_expires,
+         released_at = NULL, released_by = NULL, release_reason = NULL,
+         updated_at = now()
+   WHERE tenant_id = p_tenant AND site_id = p_site AND device_mac = p_mac;
+
+  RETURN QUERY SELECT true, v_expires, v_count;
+END $$;
+
+
+--
+-- Name: FUNCTION guest_signin_note_failure(p_tenant uuid, p_site uuid, p_mac macaddr, p_network uuid, p_network_name text, p_room text); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.guest_signin_note_failure(p_tenant uuid, p_site uuid, p_mac macaddr, p_network uuid, p_network_name text, p_room text) IS 'Counts this device''s wrong credentials over the site''s rolling window and creates a restriction when the threshold is reached. Counts ONLY CREDENTIAL_MISMATCH and ROOM_NOT_IN_MIRROR. Takes the device row lock before counting, so concurrent failures serialise, and refuses to extend a restriction that is already running.';
+
+
+--
+-- Name: guest_signin_note_success(uuid, uuid, macaddr); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.guest_signin_note_success(p_tenant uuid, p_site uuid, p_mac macaddr) RETURNS void
+    LANGUAGE sql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  UPDATE iam_v2.guest_signin_restrictions
+     SET counter_reset_at = now(), updated_at = now()
+   WHERE tenant_id = p_tenant AND site_id = p_site AND device_mac = p_mac;
+$$;
+
+
+--
+-- Name: guest_signin_protection_changes_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.guest_signin_protection_changes_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'iam_v2.guest_signin_protection_changes is append-only: % refused', TG_OP
+    USING ERRCODE = 'restrict_violation';
+END $$;
+
+
+--
+-- Name: guest_signin_protection_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.guest_signin_protection_get(p_tenant uuid, p_site uuid) RETURNS TABLE(max_failed_attempts integer, observation_window_seconds integer, restriction_seconds integer, config_version bigint, updated_at timestamp with time zone, is_default boolean)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE(s.max_failed_attempts, 5),
+         COALESCE(s.observation_window_seconds, 60),
+         COALESCE(s.restriction_seconds, 60),
+         COALESCE(s.config_version, 1),
+         s.updated_at,
+         (s.tenant_id IS NULL)
+    FROM (SELECT 1) one
+    LEFT JOIN iam_v2.site_guest_signin_protection s
+      ON s.tenant_id = p_tenant AND s.site_id = p_site;
+$$;
+
+
+--
+-- Name: FUNCTION guest_signin_protection_get(p_tenant uuid, p_site uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.guest_signin_protection_get(p_tenant uuid, p_site uuid) IS 'The site''s EFFECTIVE guest sign-in protection policy: the stored row, or the approved defaults when no row exists. is_default says which, so a screen can tell an operator whether anyone has ever changed it. This is the single source the enforcement functions, the operator API and the UI all read.';
+
+
+--
+-- Name: guest_signin_protection_set(uuid, uuid, integer, integer, integer, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.guest_signin_protection_set(p_tenant uuid, p_site uuid, p_max integer, p_window integer, p_restriction integer, p_operator text, p_reason text DEFAULT NULL::text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_version bigint; v_old_max int; v_old_window int; v_old_block int;
+BEGIN
+  IF p_operator IS NULL OR btrim(p_operator) = '' THEN
+    RAISE EXCEPTION 'an operator label is required: "somebody changed it" is not an audit record'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_max IS NULL OR p_max < 3 OR p_max > 20 THEN
+    RAISE EXCEPTION 'maximum failed attempts must be between 3 and 20 (got %)', p_max;
+  END IF;
+  IF p_window IS NULL OR p_window < 30 OR p_window > 3600 THEN
+    RAISE EXCEPTION 'the observation window must be between 30 and 3600 seconds (got %)', p_window;
+  END IF;
+  IF p_restriction IS NULL OR p_restriction < 30 OR p_restriction > 3600 THEN
+    RAISE EXCEPTION 'the restriction duration must be between 30 and 3600 seconds (got %)', p_restriction;
+  END IF;
+
+  -- Serialise concurrent edits on this site, so two operators saving at once produce two ordered change rows
+  -- rather than one silently overwriting the other's audit.
+  PERFORM pg_advisory_xact_lock(hashtext('guest_signin_protection'), hashtext(p_site::text));
+
+  SELECT s.max_failed_attempts, s.observation_window_seconds, s.restriction_seconds
+    INTO v_old_max, v_old_window, v_old_block
+    FROM iam_v2.site_guest_signin_protection s
+   WHERE s.tenant_id = p_tenant AND s.site_id = p_site
+     FOR UPDATE;
+
+  INSERT INTO iam_v2.site_guest_signin_protection AS s
+    (tenant_id, site_id, max_failed_attempts, observation_window_seconds, restriction_seconds)
+  VALUES (p_tenant, p_site, p_max, p_window, p_restriction)
+  ON CONFLICT (tenant_id, site_id) DO UPDATE
+     SET max_failed_attempts        = EXCLUDED.max_failed_attempts,
+         observation_window_seconds = EXCLUDED.observation_window_seconds,
+         restriction_seconds        = EXCLUDED.restriction_seconds,
+         config_version             = s.config_version + 1,
+         updated_at                 = now()
+  RETURNING s.config_version INTO v_version;
+
+  INSERT INTO iam_v2.guest_signin_protection_changes
+    (tenant_id, site_id, changed_by, change_reason,
+     old_max_failed_attempts, old_observation_window_seconds, old_restriction_seconds,
+     new_max_failed_attempts, new_observation_window_seconds, new_restriction_seconds, new_config_version)
+  VALUES (p_tenant, p_site, btrim(p_operator), NULLIF(btrim(COALESCE(p_reason,'')),''),
+          v_old_max, v_old_window, v_old_block,
+          p_max, p_window, p_restriction, v_version);
+
+  RETURN v_version;
+END $$;
+
+
+--
+-- Name: FUNCTION guest_signin_protection_set(p_tenant uuid, p_site uuid, p_max integer, p_window integer, p_restriction integer, p_operator text, p_reason text); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.guest_signin_protection_set(p_tenant uuid, p_site uuid, p_max integer, p_window integer, p_restriction integer, p_operator text, p_reason text) IS 'Stores a validated guest sign-in protection policy and returns its new config_version. Takes effect on the NEXT decision -- the enforcement functions read this table on every evaluation, so no restart, rebuild or deployment is involved. Restrictions already in force keep the expiry they were recorded with; shortening the duration does not retroactively free anyone, and lengthening it does not retroactively extend them.';
+
+
+--
+-- Name: guest_signin_release(uuid, uuid, uuid, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.guest_signin_release(p_tenant uuid, p_site uuid, p_id uuid, p_operator text, p_reason text) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_rows integer;
+BEGIN
+  IF p_reason IS NULL OR length(btrim(p_reason)) < 3 THEN
+    RAISE EXCEPTION 'a release reason is required';
+  END IF;
+  UPDATE iam_v2.guest_signin_restrictions
+     SET released_at = now(), released_by = NULLIF(btrim(p_operator),''),
+         release_reason = btrim(p_reason),
+         counter_reset_at = now(),
+         updated_at = now()
+   WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_id
+     AND released_at IS NULL AND expires_at > now();
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  RETURN v_rows;
+END $$;
+
+
+--
+-- Name: FUNCTION guest_signin_release(p_tenant uuid, p_site uuid, p_id uuid, p_operator text, p_reason text); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.guest_signin_release(p_tenant uuid, p_site uuid, p_id uuid, p_operator text, p_reason text) IS 'Ends one active restriction and starts a fresh counter for that device. Grants NO access: the guest must still authenticate correctly. Requires a reason, is scoped to the caller''s own site, and returns the number of rows it changed so a caller cannot mistake "already expired" for "released".';
 
 
 --
@@ -7129,6 +7387,83 @@ CREATE TABLE iam_v2.guest_principals (
 
 
 --
+-- Name: guest_signin_protection_changes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.guest_signin_protection_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by text NOT NULL,
+    change_reason text,
+    old_max_failed_attempts integer,
+    old_observation_window_seconds integer,
+    old_restriction_seconds integer,
+    new_max_failed_attempts integer NOT NULL,
+    new_observation_window_seconds integer NOT NULL,
+    new_restriction_seconds integer NOT NULL,
+    new_config_version bigint NOT NULL,
+    CONSTRAINT guest_signin_protection_changes_actor CHECK ((length(btrim(changed_by)) > 0))
+);
+
+
+--
+-- Name: TABLE guest_signin_protection_changes; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.guest_signin_protection_changes IS 'Append-only history of every change to a site''s guest sign-in protection policy, written in the SAME transaction as the change by iam_v2.guest_signin_protection_set. No runtime role holds UPDATE on the settings table, so a policy cannot move without this record: the audit is mandatory by privilege rather than by convention.';
+
+
+--
+-- Name: guest_signin_restrictions; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.guest_signin_restrictions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    device_mac macaddr NOT NULL,
+    guest_network_id uuid,
+    guest_network_name text,
+    last_submitted_room text,
+    restricted_at timestamp with time zone,
+    expires_at timestamp with time zone,
+    failure_count integer,
+    reason text,
+    counter_reset_at timestamp with time zone DEFAULT '-infinity'::timestamp with time zone NOT NULL,
+    released_at timestamp with time zone,
+    released_by text,
+    release_reason text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT guest_signin_restrictions_all_or_none CHECK ((((restricted_at IS NULL) AND (expires_at IS NULL) AND (failure_count IS NULL) AND (reason IS NULL)) OR ((restricted_at IS NOT NULL) AND (expires_at IS NOT NULL) AND (failure_count IS NOT NULL) AND (reason IS NOT NULL)))),
+    CONSTRAINT guest_signin_restrictions_reason_check CHECK (((reason IS NULL) OR (reason = 'FAILED_CREDENTIAL_THRESHOLD'::text)))
+);
+
+
+--
+-- Name: TABLE guest_signin_restrictions; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.guest_signin_restrictions IS 'One row per guest device per site. Carries the current restriction when there is one, and always carries counter_reset_at -- the instant before which failures no longer count, which is how expiry, a successful sign-in and a manual release all start a fresh counter through one mechanism. Scoped to the DEVICE, never the room (which would lock out the guest who lives there) and never the address (which on a NATed guest network is a floor).';
+
+
+--
+-- Name: COLUMN guest_signin_restrictions.device_mac; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.guest_signin_restrictions.device_mac IS 'The hardware address the APPLIANCE read from its own neighbour table for the request source -- never a client-supplied value, so no cookie, request id or header can move it. NOT unspoofable: a device on the guest VLAN can change its MAC and obtain a fresh counter.';
+
+
+--
+-- Name: COLUMN guest_signin_restrictions.last_submitted_room; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.guest_signin_restrictions.last_submitted_room IS 'UNVERIFIED INPUT: the room this device last typed. Never treat it as the identity of a person.';
+
+
+--
 -- Name: internet_package_revisions; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -8106,6 +8441,37 @@ CREATE TABLE iam_v2.site_checkout_grace_config (
     CONSTRAINT site_checkout_grace_config_config_version_check CHECK ((config_version >= 1)),
     CONSTRAINT site_checkout_grace_config_grace_device_limit_policy_check CHECK (((grace_device_limit_policy IS NULL) OR (grace_device_limit_policy = 'REJECT_NEW_DEVICE'::text)))
 );
+
+
+--
+-- Name: site_guest_signin_protection; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.site_guest_signin_protection (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    max_failed_attempts integer DEFAULT 5 NOT NULL,
+    observation_window_seconds integer DEFAULT 60 NOT NULL,
+    restriction_seconds integer DEFAULT 60 NOT NULL,
+    config_version bigint DEFAULT 1 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT guest_signin_protection_bounds CHECK ((((max_failed_attempts >= 3) AND (max_failed_attempts <= 20)) AND ((observation_window_seconds >= 30) AND (observation_window_seconds <= 3600)) AND ((restriction_seconds >= 30) AND (restriction_seconds <= 3600)))),
+    CONSTRAINT guest_signin_protection_version CHECK ((config_version >= 1))
+);
+
+
+--
+-- Name: TABLE site_guest_signin_protection; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.site_guest_signin_protection IS 'Per-site guest sign-in protection policy: how many wrong-credential submissions from one device, over what rolling window, are refused for how long. ABSENCE OF A ROW MEANS THE APPROVED DEFAULTS (5 / 60s / 60s), not "disabled" -- there is no enable flag, because a policy that must be switched on is off wherever nobody remembered. Read by the enforcement functions and by the operator API through iam_v2.guest_signin_protection_get, so enforcement, API and UI cannot disagree about the current values.';
+
+
+--
+-- Name: COLUMN site_guest_signin_protection.observation_window_seconds; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.site_guest_signin_protection.observation_window_seconds IS 'The ROLLING window. Failures older than this stop counting continuously, not at a clock boundary: a guest who mistypes twice at 10:00:59 and three times at 10:01:01 is one run of five, not two clean slates.';
 
 
 --
@@ -9714,6 +10080,30 @@ ALTER TABLE ONLY iam_v2.guest_principals
 
 
 --
+-- Name: guest_signin_protection_changes guest_signin_protection_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.guest_signin_protection_changes
+    ADD CONSTRAINT guest_signin_protection_changes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: guest_signin_restrictions guest_signin_restrictions_device_key; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.guest_signin_restrictions
+    ADD CONSTRAINT guest_signin_restrictions_device_key UNIQUE (tenant_id, site_id, device_mac);
+
+
+--
+-- Name: guest_signin_restrictions guest_signin_restrictions_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.guest_signin_restrictions
+    ADD CONSTRAINT guest_signin_restrictions_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: internet_package_revisions internet_package_revisions_package_id_revision_no_key; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -10351,6 +10741,14 @@ ALTER TABLE ONLY iam_v2.sign_in_attempts
 
 ALTER TABLE ONLY iam_v2.site_checkout_grace_config
     ADD CONSTRAINT site_checkout_grace_config_pkey PRIMARY KEY (tenant_id, site_id);
+
+
+--
+-- Name: site_guest_signin_protection site_guest_signin_protection_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.site_guest_signin_protection
+    ADD CONSTRAINT site_guest_signin_protection_pkey PRIMARY KEY (tenant_id, site_id);
 
 
 --
@@ -10992,6 +11390,20 @@ CREATE UNIQUE INDEX gnpm_one_default ON iam_v2.guest_network_pms_map USING btree
 
 
 --
+-- Name: guest_signin_protection_changes_lookup; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX guest_signin_protection_changes_lookup ON iam_v2.guest_signin_protection_changes USING btree (tenant_id, site_id, changed_at DESC);
+
+
+--
+-- Name: guest_signin_restrictions_active; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX guest_signin_restrictions_active ON iam_v2.guest_signin_restrictions USING btree (tenant_id, site_id, expires_at DESC);
+
+
+--
 -- Name: internet_packages_active_lookup; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
@@ -11206,6 +11618,13 @@ CREATE INDEX seb_attribution ON iam_v2.session_entitlement_bindings USING btree 
 --
 
 CREATE UNIQUE INDEX seb_one_open ON iam_v2.session_entitlement_bindings USING btree (session_id) WHERE (bound_until IS NULL);
+
+
+--
+-- Name: sign_in_attempts_device_recent; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX sign_in_attempts_device_recent ON iam_v2.sign_in_attempts USING btree (tenant_id, site_id, device_mac, occurred_at DESC);
 
 
 --
@@ -11605,6 +12024,13 @@ CREATE TRIGGER charge_gate BEFORE INSERT ON iam_v2.pms_postings FOR EACH ROW EXE
 --
 
 CREATE TRIGGER ent_guard BEFORE INSERT OR UPDATE ON iam_v2.entitlements FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_entitlement_guard();
+
+
+--
+-- Name: guest_signin_protection_changes guest_signin_protection_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER guest_signin_protection_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.guest_signin_protection_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.guest_signin_protection_changes_append_only();
 
 
 --
@@ -13520,6 +13946,61 @@ GRANT ALL ON FUNCTION iam_v2.grace_package_mismatch_reason(p_tenant uuid, p_site
 
 
 --
+-- Name: FUNCTION guest_signin_gate(p_tenant uuid, p_site uuid, p_mac macaddr); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.guest_signin_gate(p_tenant uuid, p_site uuid, p_mac macaddr) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.guest_signin_gate(p_tenant uuid, p_site uuid, p_mac macaddr) TO svc_scd;
+
+
+--
+-- Name: FUNCTION guest_signin_note_failure(p_tenant uuid, p_site uuid, p_mac macaddr, p_network uuid, p_network_name text, p_room text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.guest_signin_note_failure(p_tenant uuid, p_site uuid, p_mac macaddr, p_network uuid, p_network_name text, p_room text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.guest_signin_note_failure(p_tenant uuid, p_site uuid, p_mac macaddr, p_network uuid, p_network_name text, p_room text) TO svc_scd;
+
+
+--
+-- Name: FUNCTION guest_signin_note_success(p_tenant uuid, p_site uuid, p_mac macaddr); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.guest_signin_note_success(p_tenant uuid, p_site uuid, p_mac macaddr) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.guest_signin_note_success(p_tenant uuid, p_site uuid, p_mac macaddr) TO svc_scd;
+
+
+--
+-- Name: FUNCTION guest_signin_protection_changes_append_only(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.guest_signin_protection_changes_append_only() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION guest_signin_protection_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.guest_signin_protection_get(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.guest_signin_protection_get(p_tenant uuid, p_site uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION guest_signin_protection_set(p_tenant uuid, p_site uuid, p_max integer, p_window integer, p_restriction integer, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.guest_signin_protection_set(p_tenant uuid, p_site uuid, p_max integer, p_window integer, p_restriction integer, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.guest_signin_protection_set(p_tenant uuid, p_site uuid, p_max integer, p_window integer, p_restriction integer, p_operator text, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION guest_signin_release(p_tenant uuid, p_site uuid, p_id uuid, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.guest_signin_release(p_tenant uuid, p_site uuid, p_id uuid, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.guest_signin_release(p_tenant uuid, p_site uuid, p_id uuid, p_operator text, p_reason text) TO svc_edged;
+
+
+--
 -- Name: FUNCTION ingest_absolute_counters(p_tenant uuid, p_site uuid, p_session uuid, p_source_device uuid, p_bridge text, p_class_minor integer, p_epoch bigint, p_abs_up bigint, p_abs_down bigint, p_sampled_at timestamp with time zone); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -14446,6 +14927,20 @@ GRANT SELECT,INSERT ON TABLE iam_v2.guest_principal_identities TO svc_scd;
 --
 
 GRANT SELECT,INSERT ON TABLE iam_v2.guest_principals TO svc_scd;
+
+
+--
+-- Name: TABLE guest_signin_protection_changes; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.guest_signin_protection_changes TO svc_edged;
+
+
+--
+-- Name: TABLE guest_signin_restrictions; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.guest_signin_restrictions TO svc_edged;
 
 
 --

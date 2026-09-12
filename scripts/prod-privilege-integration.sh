@@ -128,6 +128,72 @@ docker exec "$C" psql -U postgres -d "$DB" -tAqc \
           '  |  lock helper EXECUTE by PUBLIC: ' ||
           has_function_privilege('public','iam_v2.lock_auth_context_offer(uuid,uuid,uuid,uuid)','EXECUTE')"
 
+# GUEST SIGN-IN PROTECTION (0068), against the REAL service roles after a Gate-P reconcile.
+#
+# This block exists because of what Delivery B cost: svc_scd read a table it had no privilege on, every suite
+# passed as superuser, and the first real guest on the appliance was refused — along with every other guest on
+# the property. The privileges below are asserted rather than printed, because a printed matrix is only read
+# when somebody already suspects something.
+#
+# Each line is a property, not a preference:
+#   scd may ask the gate and report outcomes, and holds NO table privilege — it cannot read the restriction
+#   list, change the policy it is subject to, or release anybody;
+#   edged may read both tables and call the three operator functions, and holds NO UPDATE on either table and
+#   no INSERT on the change log — so there is no privilege that moves the policy without recording who moved
+#   it, and none that writes a change record that did not happen.
+echo "== guest sign-in protection: the privilege model (0068) =="
+fails=0
+assert_priv() {  # description | SQL returning boolean | expected
+  got="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "$2" 2>&1 | tr -d '[:space:]')"
+  if [ "$got" != "$3" ]; then
+    echo "  FAIL: $1 -> '$got', expected '$3'"
+    fails=$((fails+1))
+  else
+    echo "  ok: $1"
+  fi
+}
+
+assert_priv "svc_scd may ask the gate" \
+  "SELECT has_function_privilege('svc_scd','iam_v2.guest_signin_gate(uuid,uuid,macaddr)','EXECUTE')" t
+assert_priv "svc_scd may report a wrong credential" \
+  "SELECT has_function_privilege('svc_scd','iam_v2.guest_signin_note_failure(uuid,uuid,macaddr,uuid,text,text)','EXECUTE')" t
+assert_priv "svc_scd may report a success" \
+  "SELECT has_function_privilege('svc_scd','iam_v2.guest_signin_note_success(uuid,uuid,macaddr)','EXECUTE')" t
+assert_priv "svc_scd CANNOT change the policy it is subject to" \
+  "SELECT has_function_privilege('svc_scd','iam_v2.guest_signin_protection_set(uuid,uuid,integer,integer,integer,text,text)','EXECUTE')" f
+assert_priv "svc_scd CANNOT release a restriction" \
+  "SELECT has_function_privilege('svc_scd','iam_v2.guest_signin_release(uuid,uuid,uuid,text,text)','EXECUTE')" f
+assert_priv "svc_scd CANNOT read the restriction list" \
+  "SELECT has_table_privilege('svc_scd','iam_v2.guest_signin_restrictions','SELECT')" f
+assert_priv "svc_scd CANNOT read the policy table directly" \
+  "SELECT has_table_privilege('svc_scd','iam_v2.site_guest_signin_protection','SELECT')" f
+
+assert_priv "svc_edged may read the restrictions" \
+  "SELECT has_table_privilege('svc_edged','iam_v2.guest_signin_restrictions','SELECT')" t
+assert_priv "svc_edged may read the change log" \
+  "SELECT has_table_privilege('svc_edged','iam_v2.guest_signin_protection_changes','SELECT')" t
+assert_priv "svc_edged may read the effective policy" \
+  "SELECT has_function_privilege('svc_edged','iam_v2.guest_signin_protection_get(uuid,uuid)','EXECUTE')" t
+assert_priv "svc_edged may change the policy through the audited function" \
+  "SELECT has_function_privilege('svc_edged','iam_v2.guest_signin_protection_set(uuid,uuid,integer,integer,integer,text,text)','EXECUTE')" t
+assert_priv "svc_edged may release through the audited function" \
+  "SELECT has_function_privilege('svc_edged','iam_v2.guest_signin_release(uuid,uuid,uuid,text,text)','EXECUTE')" t
+assert_priv "svc_edged CANNOT write the settings table directly" \
+  "SELECT has_table_privilege('svc_edged','iam_v2.site_guest_signin_protection','UPDATE')" f
+assert_priv "svc_edged CANNOT write a restriction directly" \
+  "SELECT has_table_privilege('svc_edged','iam_v2.guest_signin_restrictions','UPDATE')" f
+assert_priv "svc_edged CANNOT write the change log directly" \
+  "SELECT has_table_privilege('svc_edged','iam_v2.guest_signin_protection_changes','INSERT')" f
+
+assert_priv "PUBLIC holds nothing on the restrictions" \
+  "SELECT has_table_privilege('public','iam_v2.guest_signin_restrictions','SELECT')" f
+assert_priv "PUBLIC holds nothing on the policy" \
+  "SELECT has_table_privilege('public','iam_v2.site_guest_signin_protection','SELECT')" f
+assert_priv "PUBLIC cannot ask the gate" \
+  "SELECT has_function_privilege('public','iam_v2.guest_signin_gate(uuid,uuid,macaddr)','EXECUTE')" f
+
+[ "$fails" = "0" ] || { echo "  FAIL: $fails guest sign-in protection privilege assertion(s) — fix deploy/gatep, not this file"; exit 1; }
+
 PORT="$(docker inspect -f '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}' "$C")"
 export PHASE3_TEST_DSN="postgres://postgres:postgres@127.0.0.1:${PORT}/${DB}?sslmode=disable"
 # ONLY the prodprivilege tests. -run Integration pulled in every other cmd/scd integration suite, whose

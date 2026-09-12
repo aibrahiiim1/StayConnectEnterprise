@@ -49,6 +49,8 @@ Seven roles, enforced by edged per `/edge/v1` resource. Legend:
 | guest-device-self-service | W | W | R | R | – | R | R |
 | guest-signin-attempts (`View_Guest_SignIn_Attempts`) | W | R | **R** | **R** | – | – | R |
 | guest-signin-credentials (`View_Guest_SignIn_Credentials`) | W | R | **R** | **R** | – | – | **–** |
+| guest-signin-protection (`Manage_Guest_SignIn_Protection`) | W | **W** | R | R | – | – | R |
+| guest-signin-restrictions (`Release_Guest_SignIn_Restriction`) | W | **W** | **W** | **W** | – | – | R |
 | walled-garden | W | W | R | R | – | R | R |
 | portal-branding | W | W | R | R | – | R | R |
 | payments (view) | W | W | R | R | – | **W** | R |
@@ -59,6 +61,19 @@ Seven roles, enforced by edged per `/edge/v1` resource. Legend:
 | audit | W(R) | R | R | R | – | R | R |
 | reports | R | R | R | R | – | R | R |
 | backups (view/trigger) | W | W | R | R | – | R | R |
+
+**The four guest sign-in keys are four keys on purpose, and none implies another.**
+
+* `guest-signin-attempts` — the list, the rooms, the results and the diagnostic reasons.
+* `guest-signin-credentials` — what the guest typed and what the property would have accepted.
+* `guest-signin-protection` — **W** changes the property's thresholds, window and waiting period.
+* `guest-signin-restrictions` — **W** releases ONE device's wait early, with a mandatory reason.
+
+The blast radii are not comparable. A release affects one device for the remainder of one wait; a policy
+change affects every guest on the property until somebody changes it back. So the reception desk holds the
+release and reads the policy: a desk under pressure must not be able to turn "five attempts" into "twenty"
+for everybody as the quickest way to help one person. Holding the release key also carries no access to
+credential values — releasing a restriction permits another attempt, and grants nobody anything.
 
 Summary of intent:
 

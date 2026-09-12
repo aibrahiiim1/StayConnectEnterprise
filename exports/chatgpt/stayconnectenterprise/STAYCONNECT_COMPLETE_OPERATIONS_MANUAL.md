@@ -30,6 +30,7 @@
 12. [Worked examples: VLAN 100 & VLAN 200](#12-worked-examples-vlan-100--vlan-200)
 13. [DHCP, DNS, NAT & the captive portal](#13-dhcp-dns-nat--the-captive-portal)
 14. [Guest authentication methods](#14-guest-authentication-methods)
+14a. [Guest sign-in protection (configurable)](#14a-guest-sign-in-protection-configurable)
 15. [Access plans & vouchers](#15-access-plans--vouchers)
 16. [Integrations: PMS, OTP, Social, Payments](#16-integrations-pms-otp-social-payments)
 17. [Walled garden](#17-walled-garden)
@@ -443,6 +444,74 @@ page's Entitlements table shows the licensed features; voucher and
 username/password are always available).
 Make sure the portal, payment and OAuth callback hosts are reachable **before**
 login via the **Walled garden** (§17).
+
+---
+
+## 14a. Guest sign-in protection (configurable)
+
+Repeated incorrect room sign-ins from the **same device** cause that device to be asked to wait before it can
+try again. It is always on — there is no switch — and the three numbers that decide how strict it is are
+editable in **Hotel Admin → Sign-in methods → Guest sign-in protection**.
+
+| Setting | Unit | Default | Allowed | What it does |
+|---|---|---|---|---|
+| Maximum failed attempts | attempts | **5** | 3–20 | How many incorrect sign-ins from one device are allowed before it has to wait. |
+| Observation window | seconds | **60** | 30–3600 | Attempts older than this stop counting. The window moves continuously (rolling), so it cannot be sidestepped by waiting for a clock boundary. |
+| Wait after too many attempts | seconds | **60** | 30–3600 | How long the device is asked to wait. Attempts made during the wait do not extend it. |
+
+**Scope is the device, on its site and guest network.** Not the room — restricting a room number would lock
+out the guest who actually lives there while whoever chose that number simply moves to the next one. Not the
+address — a guest network NATs, so an address is a floor. The hardware address used is the one the appliance
+reads from its own neighbour table, never a value the browser sends, so refreshing the page, reopening the
+portal, clearing cookies or typing a different room does not reset anything.
+
+*Honest limit:* a MAC address is not unspoofable. Someone on the guest VLAN who changes their device address
+gets a fresh counter. What the control buys is that casual enumeration stops being free, that no guest is ever
+restricted by another guest's behaviour, and that every restriction is attributable and releasable by a named
+member of staff.
+
+**What counts, and what does not.** Only an incorrect credential counts:
+
+* `CREDENTIAL_MISMATCH` — the room exists and has an eligible stay, but the value entered matched nothing.
+* `ROOM_NOT_IN_MIRROR` — no stay on any mapped interface carries that room number.
+
+Nothing else does. A stale or unreachable PMS mirror, a routing or interface failure, an internal error, a
+malformed submission, an ambiguous room, a stay outside its eligibility window and an attempt already refused
+for waiting all leave the counter untouched — a property whose PMS feed is down must not lock out its own
+guests on top of it. A **successful** sign-in clears that device's counter immediately.
+
+**What the guest sees.** *"Too many attempts. Please wait N seconds and try again."* — counting down from the
+server's own expiry. A browser that ignores the countdown gains nothing: the appliance refuses the next
+submission itself.
+
+**Existing sessions are never disconnected.** A guest already online stays online.
+
+**Ending a wait early.** **Hotel Admin → Guest sign-in attempts → Active restrictions** lists every device
+currently waiting, with its guest network, the last room it typed (shown as *unverified input* — it is what
+somebody typed, not where anyone is staying), the failure count, when the wait started and ends, a link to
+that device's sign-in attempts, and a **Release** action.
+
+Release needs the *Release guest sign-in restriction* permission and a short reason; who released it, which
+device, when and why are recorded. **Releasing allows another attempt — it does not sign anybody in.** The
+guest still has to enter details the property accepts.
+
+**Who can do what** (see ROLE_AND_SCOPE_MATRIX.md §3):
+
+| Role | Change the settings | Release a restriction |
+|---|---|---|
+| Site admin | yes | yes |
+| Hotel IT manager | yes | yes |
+| Front office operator | no (read-only) | yes |
+| Guest relations operator | no (read-only) | yes |
+| Site viewer | no | no |
+
+The desk releases and does not re-tune, deliberately: turning "five" into "twenty" for the whole property
+must not be the quickest way to help one person.
+
+**Changes take effect immediately**, on the next sign-in attempt — no restart, rebuild or deployment. They
+apply to what happens **next**: a device already waiting keeps the time it was given, and shortening the
+setting does not end a wait already running. Use **Release** for that. Every settings change records the
+operator, the previous values and the new values.
 
 ---
 

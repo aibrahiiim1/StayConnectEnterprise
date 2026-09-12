@@ -202,12 +202,28 @@ docker exec "$C" psql -U postgres -d "$DB" -tAqc \
 # 0067 creates iam_v2.sign_in_attempts and iam_v2.complete_sign_in_attempt. cmd/scd's guest sign-in attempt
 # suite drives the real handlers and reads the table back, so without it every one of those tests fails on a
 # missing relation rather than on anything it is testing.
-if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1      < "$ROOT/data-plane/migrations/0067_a_refused_sign_in_leaves_a_record_somebody_can_read.up.sql" >/dev/null 2>&1; then
+if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+     < "$ROOT/data-plane/migrations/0067_a_refused_sign_in_leaves_a_record_somebody_can_read.up.sql" >/dev/null 2>&1; then
   echo "0067 FAILED TO APPLY -- deterministic, not a flake"
-  docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1     < "$ROOT/data-plane/migrations/0067_a_refused_sign_in_leaves_a_record_somebody_can_read.up.sql" 2>&1 | tail -10
+  docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+    < "$ROOT/data-plane/migrations/0067_a_refused_sign_in_leaves_a_record_somebody_can_read.up.sql" 2>&1 | tail -15
   exit 1
 fi
-docker exec "$C" psql -U postgres -d "$DB" -tAqc   "INSERT INTO public.schema_migrations(version) VALUES ('0067_a_refused_sign_in_leaves_a_record_somebody_can_read') ON CONFLICT DO NOTHING;" >/dev/null
+docker exec "$C" psql -U postgres -d "$DB" -tAqc \
+  "INSERT INTO public.schema_migrations(version) VALUES ('0067_a_refused_sign_in_leaves_a_record_somebody_can_read') ON CONFLICT DO NOTHING;" >/dev/null
+
+# 0068 adds the guest sign-in protection policy, its append-only change log, the restriction table and the
+# scoped operations that enforce them. cmd/scd drives those operations through the real handlers and cmd/edged
+# serves the operator surface over the same tables; without it both suites fail on missing functions.
+if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+     < "$ROOT/data-plane/migrations/0068_the_hotel_decides_how_many_wrong_guesses_are_too_many.up.sql" >/dev/null 2>&1; then
+  echo "0068 FAILED TO APPLY -- deterministic, not a flake"
+  docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+    < "$ROOT/data-plane/migrations/0068_the_hotel_decides_how_many_wrong_guesses_are_too_many.up.sql" 2>&1 | tail -15
+  exit 1
+fi
+docker exec "$C" psql -U postgres -d "$DB" -tAqc \
+  "INSERT INTO public.schema_migrations(version) VALUES ('0068_the_hotel_decides_how_many_wrong_guesses_are_too_many') ON CONFLICT DO NOTHING;" >/dev/null
 
 built="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"
 if [ "${built:-0}" -lt 40 ]; then echo "INFRA: SCHEMA BUILD FAILED (iam_v2 tables=$built)"; exit 2; fi

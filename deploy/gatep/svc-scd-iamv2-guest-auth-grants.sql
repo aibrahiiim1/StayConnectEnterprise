@@ -196,6 +196,29 @@ GRANT EXECUTE ON FUNCTION iam_v2.complete_sign_in_attempt(uuid,uuid,uuid,text,uu
 -- and the Gate-P privilege suite caught it refusing every guest on the property.
 GRANT EXECUTE ON FUNCTION iam_v2.p3_guest_network_mirror_state(uuid,uuid,uuid) TO svc_scd;
 
+-- GUEST SIGN-IN PROTECTION (migration 0068) — THREE FUNCTIONS, AND NOT ONE TABLE PRIVILEGE.
+--
+-- scd is the service the control acts upon. It asks the gate whether a device may submit, and it reports
+-- what the submission turned out to be. That is the whole of its relationship with this feature.
+--
+-- WHAT IT DELIBERATELY CANNOT DO, and each absence is the point:
+--   * SELECT on iam_v2.site_guest_signin_protection — it cannot read the policy table directly, so there is
+--     no path by which it reads one set of numbers while the operator screen shows another; both go through
+--     guest_signin_protection_get, which the enforcement functions call internally;
+--   * anything at all on iam_v2.guest_signin_protection_set — a service that could rewrite its own
+--     thresholds could switch off the control it is subject to, quietly and without an operator;
+--   * SELECT on iam_v2.guest_signin_restrictions — scd needs one answer about one device, not the property's
+--     list of who is currently locked out;
+--   * EXECUTE on iam_v2.guest_signin_release — releasing is a named human's decision, recorded with a reason.
+--
+-- These lines exist because a grant written only in the migration is revoked by the first Gate-P reconcile.
+-- The failure that would produce is severe and silent in the wrong direction: the gate check would start
+-- erroring, every guest submission would answer "we cannot verify right now", and room sign-in would be down
+-- for the whole property with nothing in the migration history to explain it.
+GRANT EXECUTE ON FUNCTION iam_v2.guest_signin_gate(uuid,uuid,macaddr)                        TO svc_scd;
+GRANT EXECUTE ON FUNCTION iam_v2.guest_signin_note_failure(uuid,uuid,macaddr,uuid,text,text) TO svc_scd;
+GRANT EXECUTE ON FUNCTION iam_v2.guest_signin_note_success(uuid,uuid,macaddr)                TO svc_scd;
+
 -- NOT granted, on purpose:
 --   * DELETE on anything EXCEPT iam_v2.sign_in_attempts above -- no authentication path deletes
 --     authoritative state; the one DELETE granted is the attempts table's own retention sweep;
@@ -204,4 +227,6 @@ GRANT EXECUTE ON FUNCTION iam_v2.p3_guest_network_mirror_state(uuid,uuid,uuid) T
 --     its own guarded paths; if a future adapter needs them they belong here as
 --     their own lines, with the failure that prompted them recorded;
 --   * any privilege on the Phase-4 financial ledger or the commerce admin
---     tables -- authenticating a guest is not a reason to reach either.
+--     tables -- authenticating a guest is not a reason to reach either;
+--   * any privilege on iam_v2.site_guest_signin_protection,
+--     iam_v2.guest_signin_protection_changes or iam_v2.guest_signin_restrictions -- see the block above.

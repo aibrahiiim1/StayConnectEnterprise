@@ -399,6 +399,11 @@ func main() {
 				// recorded below — a route mounted directly inside requireAuth has authentication and no authorization.
 				mountResource(r, s, "guest-signin-attempts", s.signInAttemptsRoutes)
 				mountResource(r, s, "guest-signin-credentials", s.signInCredentialsRoutes)
+				// Guest sign-in protection: the policy, and the restrictions it creates. Two keys, because
+				// changing the property's thresholds and ending one device's wait are different powers —
+				// see resources_signin_protection.go. Neither carries the credentials key.
+				mountResource(r, s, "guest-signin-protection", s.signInProtectionRoutes)
+				mountResource(r, s, "guest-signin-restrictions", s.signInRestrictionsRoutes)
 				mountResource(r, s, "checkout-grace", s.checkoutGraceConfigRoutes)
 				mountResource(r, s, "operational-alerts", s.operationalAlertsRoutes)
 				mountResource(r, s, "pms-interfaces", s.pmsInterfacesRoutes)

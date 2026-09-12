@@ -348,6 +348,65 @@ const landingHTML = `<!doctype html>
     // on the site, and never varies with what was typed.
     const PHASE3_FAIL = 'We could not verify your stay. Please check your details or contact reception.';
 
+    // THE SERVER'S SENTENCE IS THE ONE THE GUEST READS.
+    //
+    // This page used to assign PHASE3_FAIL for every non-success and never look at what the server sent,
+    // which was correct while there was exactly one sentence. There is no longer one: the property now
+    // distinguishes "check what you typed" from "we cannot check right now" from "you are being asked to
+    // wait", and that distinction is decided ON THE SERVER, in internal/signinattempt.GuestClass, where the
+    // reasoning about what each answer discloses lives. Rendering the server's message keeps exactly one
+    // place that decides what a guest is told; re-deriving it here would be a second place to keep correct.
+    //
+    // PHASE3_FAIL remains the fallback for a transport failure or an empty body — cases where no server
+    // sentence exists and the page must still say something that discloses nothing.
+    function phase3Message(j) {
+      return (j && typeof j.message === 'string' && j.message) ? j.message : PHASE3_FAIL;
+    }
+
+    // PHASE3_WAIT_UNTIL is the moment the SERVER said it would consider another submission. It is a local
+    // convenience for the countdown and for keeping the button quiet — it is never the thing that decides
+    // whether a submission is accepted. A guest who edits it, reloads the page or opens a new tab simply
+    // meets the same refusal from the appliance, which holds the restriction in its own database.
+    let PHASE3_WAIT_UNTIL = 0;
+    let PHASE3_WAIT_TIMER = 0;
+
+    // phase3Countdown renders the wait shrinking, second by second.
+    //
+    // THE WORDING COMES FROM THE SERVER, THE NUMBER TICKS LOCALLY. The template is built by replacing the
+    // number in the server's own sentence with a placeholder, so this page never carries a second copy of
+    // the text. A message with no number in it — which is what the server sends when it has no remaining
+    // time to quote — is shown once and not counted down, because counting down a number nobody gave us is
+    // the one thing worse than not counting down at all.
+    function phase3Countdown(errEl, message, seconds) {
+      if (PHASE3_WAIT_TIMER) { clearInterval(PHASE3_WAIT_TIMER); PHASE3_WAIT_TIMER = 0; }
+      const form = document.getElementById('form-pms');
+      const btn = form ? form.querySelector('button[type=submit]') : null;
+      if (!(seconds > 0) || !/[0-9]+/.test(message)) {
+        errEl.textContent = message;
+        PHASE3_WAIT_UNTIL = 0;
+        return;
+      }
+      const tmpl = message.replace(/[0-9]+/, '%WAIT%');
+      PHASE3_WAIT_UNTIL = Date.now() + seconds * 1000;
+      const render = function () {
+        const left = Math.ceil((PHASE3_WAIT_UNTIL - Date.now()) / 1000);
+        if (left <= 0) {
+          clearInterval(PHASE3_WAIT_TIMER);
+          PHASE3_WAIT_TIMER = 0;
+          PHASE3_WAIT_UNTIL = 0;
+          // The wait is over as far as this page knows. It does NOT announce that the guest is now allowed
+          // in — only that they may ask again, which the server will answer for itself.
+          errEl.textContent = 'You can try again now.';
+          if (btn) btn.disabled = false;
+          return;
+        }
+        errEl.textContent = tmpl.replace('%WAIT%', String(left));
+        if (btn) btn.disabled = true;
+      };
+      render();
+      PHASE3_WAIT_TIMER = setInterval(render, 1000);
+    }
+
     // newRequestID returns a CANONICAL RFC-4122 UUID — 36 characters, dashed — because that is the only
     // shape the server accepts.
     //
@@ -479,7 +538,10 @@ const landingHTML = `<!doctype html>
       // The boolean is for the CALLER, not the guest: the package-choice handler needs to know whether the
       // offer set it is displaying is still worth showing. It carries no more information than "this did not
       // succeed", which the guest can already see.
-      errEl.textContent = PHASE3_FAIL;
+      //
+      // retry_after_seconds is present on exactly one answer — the restricted one — and it is the SERVER's
+      // remaining time. phase3Countdown renders it shrinking; it decides nothing.
+      phase3Countdown(errEl, phase3Message(j), j.retry_after_seconds || 0);
       return false;
     }
 
@@ -505,7 +567,8 @@ const landingHTML = `<!doctype html>
       box.innerHTML = '';
       box.style.display = 'none';
       form.style.display = '';
-      // The same uniform message as every other failure. Nothing here says which stage failed.
+      // The uniform message. A failed GRANT is not a failed identity check, so there is no server sentence
+      // to prefer here and nothing about which stage failed.
       errEl.textContent = PHASE3_FAIL;
       const btn = form.querySelector('button[type=submit]');
       if (btn) btn.disabled = false;
@@ -583,7 +646,12 @@ const landingHTML = `<!doctype html>
         // be evaluated on that evidence rather than answered from what the last one recorded.
         body.request_id = newRequestID();
         await submitPhase3(body, errEl);
-      } finally { btn.disabled = false; }
+      } finally {
+        // A submission that ended in a restriction leaves the button disabled until the countdown clears it.
+        // This is courtesy, not enforcement: the appliance refuses an early submission whatever this page
+        // does with its own button.
+        if (!PHASE3_WAIT_UNTIL || Date.now() >= PHASE3_WAIT_UNTIL) btn.disabled = false;
+      }
     });
   </script>
 </body></html>`

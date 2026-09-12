@@ -227,3 +227,44 @@ func ClassifyVerifier(s string) VerifierKind {
 func isLetter(r rune) bool {
 	return r == 'ß' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r > 0x7f
 }
+
+// CountsAsCredentialFailure reports whether this result is a guest submitting a value that did not identify
+// a stay — the only thing the sign-in protection policy counts.
+//
+// THE SET IS DELIBERATELY TWO CODES, AND EVERY EXCLUSION IS A DECISION.
+//
+//	CREDENTIAL_MISMATCH  — the room is in the mirror with an eligible stay and the value matched none of its
+//	                       accepted values. This is a wrong guess, and it is half of what an enumerator does.
+//	ROOM_NOT_IN_MIRROR   — no stay carries that room. Walking room numbers is the OTHER half, and excluding it
+//	                       would leave the cheapest enumeration entirely uncounted.
+//
+// Everything else is excluded because counting it would restrict a guest for something that is not their
+// mistake:
+//
+//   - STAY_NOT_ELIGIBLE — the guest may have typed their own name perfectly; the stay checked out. Locking
+//     them out for their hotel's checkout time is punishing the wrong party.
+//   - AMBIGUOUS_ROOM_CANDIDATES — the value MATCHED, twice. That is the property's data, not a wrong guess.
+//   - MALFORMED_SUBMISSION — a blank field or an unreadable body. It is a client fault and carries no guess
+//     to be wrong about; counting it would let a broken portal build restrict every guest in the hotel.
+//   - MIRROR_STALE_OR_MISSING_CHANGE, ROUTING_OR_INTERFACE_FAILURE, SERVICE_UNAVAILABLE, SPENT_REQUEST_ID,
+//     VERIFIED_NO_ELIGIBLE_PACKAGE — the Product Owner's rule stated directly: a technical failure, an
+//     unavailable service, a database error or an inability to evaluate the mirror is never a wrong
+//     credential. During an outage every guest would otherwise be restricted within five taps, and the
+//     restriction list would fill with people who did nothing wrong at the exact moment the desk is busiest.
+//   - RATE_LIMITED — an attempt refused BY this policy must never feed it. That is what would turn a sixty
+//     second restriction into a permanent one for anyone who keeps tapping, which the Product Owner
+//     explicitly ruled out.
+//   - VERIFIED — a success clears the counter rather than adding to it.
+func (r Result) CountsAsCredentialFailure() bool {
+	switch r {
+	case CredentialMismatch, RoomNotInMirror:
+		return true
+	default:
+		return false
+	}
+}
+
+// CountingResults is the same set as data, for the SQL side and for tests. The database predicate and this
+// function must name the same codes; a divergence would mean the count an operator reads and the count the
+// policy acts on are different numbers.
+var CountingResults = []Result{CredentialMismatch, RoomNotInMirror}

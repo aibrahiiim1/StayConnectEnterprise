@@ -23,7 +23,8 @@ import { KeyRound, Search, RefreshCw, ShieldAlert } from "lucide-react";
 import {
   api, ListResp, SignInAttempt, SignInAttemptDetail, SignInAttemptCredentials, Whoami,
 } from "@/lib/api";
-import { canRead } from "@/lib/roles";
+import { canRead, canWrite } from "@/lib/roles";
+import { ActiveRestrictions } from "@/components/guest-signin-restrictions";
 import { formatDate, formatRelative } from "@/lib/utils";
 import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
 import { Card, CardBody } from "@/components/ui/card";
@@ -98,6 +99,29 @@ const RANGES = [
   { value: "720", label: "Last 30 days (everything retained)" },
 ];
 
+// TabButton is local on purpose: two tabs on one screen do not earn a shared component, and the next screen
+// that needs tabs should decide its own shape rather than inherit this one.
+function TabButton({ active, onClick, children }: {
+  active: boolean; onClick: () => void; children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={
+        "-mb-px border-b-2 px-3 py-2 text-sm transition-colors " +
+        (active
+          ? "border-primary font-medium text-foreground"
+          : "border-transparent text-muted-foreground hover:text-foreground")
+      }
+    >
+      {children}
+    </button>
+  );
+}
+
 function tone(result: string) {
   return RESULT_WORDS[result]?.tone ?? "neutral";
 }
@@ -134,6 +158,16 @@ export default function GuestSignInAttemptsPage() {
     api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
   }, []);
   const maySeeCredentials = roles === null ? false : canRead("guest-signin-credentials", roles);
+  // THREE SEPARATE PERMISSIONS, AND NONE IMPLIES ANOTHER. Seeing the restrictions is not seeing what guests
+  // typed, and releasing one is not permission to change the property's thresholds. edged enforces all three;
+  // this file only decides what to offer.
+  const maySeeRestrictions = roles === null ? false : canRead("guest-signin-restrictions", roles);
+  const mayRelease = roles === null ? false : canWrite("guest-signin-restrictions", roles);
+
+  // The two halves of one question: why a guest could not connect, and whether their device is being asked to
+  // wait before trying again. A tab rather than a second page, because an operator moves between them while
+  // the guest is still standing there.
+  const [tab, setTab] = useState<"attempts" | "restrictions">("attempts");
 
   const load = useCallback(async (manual = false) => {
     if (manual) setRefreshing(true);
@@ -213,6 +247,34 @@ export default function GuestSignInAttemptsPage() {
 
       <ErrorBanner err={err} />
 
+      {maySeeRestrictions && (
+        <div className="flex gap-1 border-b border-border" role="tablist" aria-label="Guest sign-in">
+          <TabButton active={tab === "attempts"} onClick={() => setTab("attempts")}>
+            Sign-in attempts
+          </TabButton>
+          <TabButton active={tab === "restrictions"} onClick={() => setTab("restrictions")}>
+            Active restrictions
+          </TabButton>
+        </div>
+      )}
+
+      {tab === "restrictions" ? (
+        <ActiveRestrictions
+          canRelease={mayRelease}
+          onShowAttempts={(mac) => {
+            // "The related sign-in attempts" is the same list, filtered to that device. Widening the period
+            // as well, because the attempts that caused a restriction can already be older than the default
+            // window by the time somebody looks.
+            setTab("attempts");
+            setQuery(mac);
+            setRoom("");
+            setResult("");
+            setKind("");
+            setRange("24");
+          }}
+        />
+      ) : (
+      <>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Attempts" value={rows === null ? "—" : counts.total} hint="in the selected period" />
         <StatCard label="Did not connect" value={rows === null ? "—" : counts.failed} tone={counts.failed ? "warn" : "default"} />
@@ -312,6 +374,8 @@ export default function GuestSignInAttemptsPage() {
           </Table>
         )}
       </Card>
+      </>
+      )}
 
       <DetailDialog
         open={detail !== null}

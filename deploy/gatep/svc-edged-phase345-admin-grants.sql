@@ -160,8 +160,32 @@ GRANT EXECUTE ON FUNCTION iam_v2.p2_package_current_conditions(uuid, uuid, uuid)
 -- mean the operator API could manufacture or erase the record of a guest's sign-in.
 GRANT SELECT ON iam_v2.sign_in_attempts TO svc_edged;
 
+-- GUEST SIGN-IN PROTECTION (migration 0068): read the policy and the restrictions, change the policy through
+-- one definer function, release one restriction through another.
+--
+-- NO UPDATE ON EITHER TABLE, and that is what makes the change log mandatory rather than conventional. The
+-- settings write and the append-only change row happen inside iam_v2.guest_signin_protection_set in one
+-- transaction, so there is no privilege anywhere that moves this property's thresholds without recording who
+-- moved them and what they were before. The same holds for a release: it clears the restriction and writes
+-- who released it and why, in one call, and no role can do the first half without the second.
+--
+-- SELECT on the two tables is the screens: the active-restriction list, and the policy's own history. The
+-- INSERTs happen inside the functions.
+--
+-- These lines exist for the same reason as the ones above: a migration-only GRANT is wiped by the next
+-- reconcile, and the protection settings screen would save successfully until then and start refusing
+-- afterwards.
+GRANT SELECT ON iam_v2.guest_signin_restrictions       TO svc_edged;
+GRANT SELECT ON iam_v2.guest_signin_protection_changes TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.guest_signin_protection_get(uuid,uuid)                                     TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.guest_signin_protection_set(uuid,uuid,integer,integer,integer,text,text)   TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.guest_signin_release(uuid,uuid,uuid,text,text)                             TO svc_edged;
+
 -- NOT granted, on purpose, and each absence is load-bearing:
 --   * DELETE on anything -- no admin read surface deletes;
 --   * any privilege on iam_v2 vouchers, guest credentials or session secrets;
 --   * INSERT/UPDATE on the financial ledger, postings, attempts or settlements: the financial screens
---     REVIEW, and the operations that act on them are capability-gated elsewhere.
+--     REVIEW, and the operations that act on them are capability-gated elsewhere;
+--   * UPDATE on iam_v2.site_guest_signin_protection or iam_v2.guest_signin_restrictions, and INSERT on
+--     iam_v2.guest_signin_protection_changes: an operator API that could write the change log directly could
+--     write a change that did not happen, or make one that did happen look like another operator's.

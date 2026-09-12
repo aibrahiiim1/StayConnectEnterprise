@@ -28,7 +28,7 @@ func TestEveryFailureIsByteIdentical(t *testing.T) {
 	}
 	var first []byte
 	for i, o := range outcomes {
-		status, body, audit := buildGuestPMSResponse(o.outcome, o.reason, o.class, "", "")
+		status, body, audit := buildGuestPMSResponse(o.outcome, o.reason, o.class, "", "", 0)
 		if status != 200 {
 			t.Fatalf("%s: status %d — a distinct status is itself a signal", o.outcome, status)
 		}
@@ -68,7 +68,7 @@ func TestEveryFailureIsByteIdentical(t *testing.T) {
 func TestTheGuestLearnsWhatToDoAndNothingMore(t *testing.T) {
 	seen := map[string]string{}
 	for _, class := range []string{classCredential, classTechnical, "RATE_LIMITED"} {
-		_, body, _ := buildGuestPMSResponse(outcomeNoMatch, "internal", class, "", "")
+		_, body, _ := buildGuestPMSResponse(outcomeNoMatch, "internal", class, "", "", 45)
 		if body.Message == "" {
 			t.Fatalf("class %s produced no message", class)
 		}
@@ -84,7 +84,7 @@ func TestTheGuestLearnsWhatToDoAndNothingMore(t *testing.T) {
 
 	// The credential message must tell the guest what is accepted. A guest whose given name is stored as
 	// several words in one field has to be told to enter the FULL name, or they will keep typing one word.
-	cred := messageForClass(classCredential)
+	cred := messageForClass(classCredential, 0)
 	for _, want := range []string{"room number", "full first name", "family name", "reservation number"} {
 		if !containsFold(cred, want) {
 			t.Errorf("the incorrect-details message does not mention %q: %q", want, cred)
@@ -95,8 +95,8 @@ func TestTheGuestLearnsWhatToDoAndNothingMore(t *testing.T) {
 	if containsFold(cred, "contact reception") {
 		t.Errorf("an ordinary wrong value tells the guest to contact Reception: %q", cred)
 	}
-	if !containsFold(messageForClass(classTechnical), "contact reception") {
-		t.Errorf("the technical message does not offer Reception: %q", messageForClass(classTechnical))
+	if !containsFold(messageForClass(classTechnical, 0), "contact reception") {
+		t.Errorf("the technical message does not offer Reception: %q", messageForClass(classTechnical, 0))
 	}
 }
 
@@ -105,7 +105,7 @@ func TestTheGuestLearnsWhatToDoAndNothingMore(t *testing.T) {
 // answer look like a system fault.
 func TestAnUnknownClassFallsToTheCredentialMessage(t *testing.T) {
 	for _, class := range []string{"", "SOMETHING_NEW", "verified", "credential"} {
-		if got := messageForClass(class); got != guestAuthMessage {
+		if got := messageForClass(class, 0); got != guestAuthMessage {
 			t.Errorf("class %q produced %q, want the incorrect-details message", class, got)
 		}
 	}
@@ -114,7 +114,7 @@ func TestAnUnknownClassFallsToTheCredentialMessage(t *testing.T) {
 // The post-stay PIN flow keeps the wording it always had. Its guests have no room number, family name or
 // reservation number to re-read, so the room sign-in sentence would be advice they cannot act on.
 func TestPostStayKeepsItsOwnWording(t *testing.T) {
-	_, body, _ := buildGuestPMSResponse(outcomeNoMatch, "poststay_not_verified", classPostStay, "", "")
+	_, body, _ := buildGuestPMSResponse(outcomeNoMatch, "poststay_not_verified", classPostStay, "", "", 0)
 	if body.Message != guestPostStayMessage {
 		t.Fatalf("the post-stay message changed to %q", body.Message)
 	}
@@ -128,7 +128,7 @@ func TestPostStayKeepsItsOwnWording(t *testing.T) {
 
 // A successful verification legitimately returns the guest's own session — and nothing about the resolution.
 func TestSuccessReturnsOnlyTheGuestsOwnSession(t *testing.T) {
-	status, body, audit := buildGuestPMSResponse(outcomeVerified, "SINGLE_VERIFIED", "", "sess-42", "/success")
+	status, body, audit := buildGuestPMSResponse(outcomeVerified, "SINGLE_VERIFIED", "", "sess-42", "/success", 0)
 	if status != 200 || !body.OK || body.SessionID != "sess-42" || body.RedirectTo != "/success" {
 		t.Fatalf("unexpected success body: %d %+v", status, body)
 	}
@@ -152,7 +152,7 @@ func TestSuccessReturnsOnlyTheGuestsOwnSession(t *testing.T) {
 // The wire response must not be cacheable and must not vary in shape.
 func TestWireResponseIsUncacheableAndUniform(t *testing.T) {
 	rec := httptest.NewRecorder()
-	_, body, _ := buildGuestPMSResponse(outcomeNoMatch, "NO_INTERFACE_MATCH", classCredential, "", "")
+	_, body, _ := buildGuestPMSResponse(outcomeNoMatch, "NO_INTERFACE_MATCH", classCredential, "", "", 0)
 	writeGuestPMSResponse(rec, 200, body)
 	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
 		t.Fatalf("Cache-Control = %q, want no-store", got)

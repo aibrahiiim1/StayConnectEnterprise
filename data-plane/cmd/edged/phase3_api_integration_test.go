@@ -147,6 +147,11 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 			// proxy are all exercised through the real router, the real role matrix and a real database.
 			mountResource(r, s, "guest-signin-attempts", s.signInAttemptsRoutes)
 			mountResource(r, s, "guest-signin-credentials", s.signInCredentialsRoutes)
+			// Guest sign-in protection: the policy and the restrictions it creates, mounted for the same
+			// reason — the permission split, the site confinement and the audit are properties of the real
+			// router and a real database together.
+			mountResource(r, s, "guest-signin-protection", s.signInProtectionRoutes)
+			mountResource(r, s, "guest-signin-restrictions", s.signInRestrictionsRoutes)
 			// The operational snapshot the dashboard reads. Mounted here so its authorization and its
 			// site confinement are exercised through the REAL middleware chain and the real role matrix --
 			// see dashboard_api_integration_test.go for why a mocked assertion would not be worth having.
