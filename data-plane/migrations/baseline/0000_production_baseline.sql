@@ -6471,6 +6471,133 @@ END $_$;
 
 
 --
+-- Name: sync_outbox_accounting(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.sync_outbox_accounting() RETURNS TABLE(delivered bigint, pending bigint, exhausted bigint, total bigint, oldest_pending timestamp with time zone, newest_created timestamp with time zone, oldest_exhausted timestamp with time zone, bytes bigint)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'public', 'pg_temp'
+    AS $$
+BEGIN
+    RETURN QUERY
+    SELECT count(*) FILTER (WHERE o.sent_at IS NOT NULL),
+           count(*) FILTER (WHERE o.sent_at IS NULL AND o.dead = false),
+           count(*) FILTER (WHERE o.sent_at IS NULL AND o.dead = true),
+           count(*),
+           min(o.created_at) FILTER (WHERE o.sent_at IS NULL AND o.dead = false),
+           max(o.created_at),
+           min(o.created_at) FILTER (WHERE o.sent_at IS NULL AND o.dead = true),
+           pg_total_relation_size('public.sync_outbox')
+      FROM public.sync_outbox o;
+END;
+$$;
+
+
+--
+-- Name: sync_outbox_prune_delivered(integer); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.sync_outbox_prune_delivered(p_days integer) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'public', 'pg_temp'
+    AS $$
+DECLARE
+    v_deleted bigint;
+BEGIN
+    IF p_days IS NULL OR p_days < 1 OR p_days > 365 THEN
+        RAISE EXCEPTION 'delivered record retention must be between 1 and 365 days (got %)', p_days
+            USING ERRCODE = 'check_violation';
+    END IF;
+    WITH gone AS (
+        DELETE FROM public.sync_outbox
+         WHERE sent_at IS NOT NULL
+           AND sent_at < now() - make_interval(days => p_days)
+        RETURNING 1
+    )
+    SELECT count(*) INTO v_deleted FROM gone;
+    RETURN v_deleted;
+END;
+$$;
+
+
+--
+-- Name: sync_outbox_recover_exhausted(text, text, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.sync_outbox_recover_exhausted(p_operator text, p_reason text, p_limit integer DEFAULT 1000) RETURNS TABLE(rows_recovered integer, seq_from bigint, seq_to bigint, exhausted_remaining bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'public', 'pg_temp'
+    AS $$
+DECLARE
+    v_count integer := 0;
+    v_from bigint;
+    v_to bigint;
+    v_oldest timestamptz;
+    v_remaining bigint;
+BEGIN
+    IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
+        RAISE EXCEPTION 'sync outbox recovery: an operator identity is required'
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF p_reason IS NULL OR length(btrim(p_reason)) < 3 THEN
+        RAISE EXCEPTION 'sync outbox recovery: a reason of at least 3 characters is required'
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF p_limit IS NULL OR p_limit < 1 OR p_limit > 20000 THEN
+        RAISE EXCEPTION 'sync outbox recovery: batch size must be between 1 and 20000 (got %)', p_limit
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    -- One recovery at a time. Two concurrent callers would otherwise each release an overlapping batch and
+    -- both report having moved it.
+    PERFORM pg_advisory_xact_lock(hashtext('sync_outbox_recover'));
+
+    WITH picked AS (
+        SELECT o.seq
+          FROM public.sync_outbox o
+         WHERE o.sent_at IS NULL AND o.dead = true
+         ORDER BY o.seq ASC
+         LIMIT p_limit
+         FOR UPDATE
+    ), moved AS (
+        UPDATE public.sync_outbox o
+           SET dead = false, attempts = 0, next_attempt_at = now()
+          FROM picked
+         WHERE o.seq = picked.seq
+        RETURNING o.seq, o.created_at
+    )
+    SELECT count(*)::integer, min(seq), max(seq), min(created_at)
+      INTO v_count, v_from, v_to, v_oldest
+      FROM moved;
+
+    SELECT count(*) INTO v_remaining
+      FROM public.sync_outbox o
+     WHERE o.sent_at IS NULL AND o.dead = true;
+
+    INSERT INTO iam_v2.sync_outbox_recovery_log
+           (requested_by, reason, rows_recovered, seq_from, seq_to, oldest_created_at, exhausted_remaining)
+    VALUES (btrim(p_operator), btrim(p_reason), v_count, v_from, v_to, v_oldest, v_remaining);
+
+    RETURN QUERY SELECT v_count, v_from, v_to, v_remaining;
+END;
+$$;
+
+
+--
+-- Name: sync_outbox_recovery_log_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.sync_outbox_recovery_log_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RAISE EXCEPTION 'iam_v2.sync_outbox_recovery_log is append-only: % refused', TG_OP
+        USING ERRCODE = 'restrict_violation';
+END;
+$$;
+
+
+--
 -- Name: terminate_entitlement_at_boundary(uuid, timestamp with time zone, text); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -6689,133 +6816,6 @@ BEGIN
   THEN RAISE EXCEPTION 'secret generation identity is immutable (only superseded_at may change)'; END IF;
   RETURN NEW;
 END; $$;
-
-
---
--- Name: sync_outbox_accounting(); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.sync_outbox_accounting() RETURNS TABLE(delivered bigint, pending bigint, exhausted bigint, total bigint, oldest_pending timestamp with time zone, newest_created timestamp with time zone, oldest_exhausted timestamp with time zone, bytes bigint)
-    LANGUAGE plpgsql STABLE SECURITY DEFINER
-    SET search_path TO 'public', 'pg_temp'
-    AS $$
-BEGIN
-    RETURN QUERY
-    SELECT count(*) FILTER (WHERE o.sent_at IS NOT NULL),
-           count(*) FILTER (WHERE o.sent_at IS NULL AND o.dead = false),
-           count(*) FILTER (WHERE o.sent_at IS NULL AND o.dead = true),
-           count(*),
-           min(o.created_at) FILTER (WHERE o.sent_at IS NULL AND o.dead = false),
-           max(o.created_at),
-           min(o.created_at) FILTER (WHERE o.sent_at IS NULL AND o.dead = true),
-           pg_total_relation_size('public.sync_outbox')
-      FROM public.sync_outbox o;
-END;
-$$;
-
-
---
--- Name: sync_outbox_prune_delivered(integer); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.sync_outbox_prune_delivered(p_days integer) RETURNS bigint
-    LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'public', 'pg_temp'
-    AS $$
-DECLARE
-    v_deleted bigint;
-BEGIN
-    IF p_days IS NULL OR p_days < 1 OR p_days > 365 THEN
-        RAISE EXCEPTION 'delivered record retention must be between 1 and 365 days (got %)', p_days
-            USING ERRCODE = 'check_violation';
-    END IF;
-    WITH gone AS (
-        DELETE FROM public.sync_outbox
-         WHERE sent_at IS NOT NULL
-           AND sent_at < now() - make_interval(days => p_days)
-        RETURNING 1
-    )
-    SELECT count(*) INTO v_deleted FROM gone;
-    RETURN v_deleted;
-END;
-$$;
-
-
---
--- Name: sync_outbox_recover_exhausted(text, text, integer); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.sync_outbox_recover_exhausted(p_operator text, p_reason text, p_limit integer DEFAULT 1000) RETURNS TABLE(rows_recovered integer, seq_from bigint, seq_to bigint, exhausted_remaining bigint)
-    LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'public', 'pg_temp'
-    AS $$
-DECLARE
-    v_count integer := 0;
-    v_from bigint;
-    v_to bigint;
-    v_oldest timestamptz;
-    v_remaining bigint;
-BEGIN
-    IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
-        RAISE EXCEPTION 'sync outbox recovery: an operator identity is required'
-            USING ERRCODE = 'invalid_parameter_value';
-    END IF;
-    IF p_reason IS NULL OR length(btrim(p_reason)) < 3 THEN
-        RAISE EXCEPTION 'sync outbox recovery: a reason of at least 3 characters is required'
-            USING ERRCODE = 'invalid_parameter_value';
-    END IF;
-    IF p_limit IS NULL OR p_limit < 1 OR p_limit > 20000 THEN
-        RAISE EXCEPTION 'sync outbox recovery: batch size must be between 1 and 20000 (got %)', p_limit
-            USING ERRCODE = 'check_violation';
-    END IF;
-
-    -- One recovery at a time. Two concurrent callers would otherwise each release an overlapping batch and
-    -- both report having moved it.
-    PERFORM pg_advisory_xact_lock(hashtext('sync_outbox_recover'));
-
-    WITH picked AS (
-        SELECT o.seq
-          FROM public.sync_outbox o
-         WHERE o.sent_at IS NULL AND o.dead = true
-         ORDER BY o.seq ASC
-         LIMIT p_limit
-         FOR UPDATE
-    ), moved AS (
-        UPDATE public.sync_outbox o
-           SET dead = false, attempts = 0, next_attempt_at = now()
-          FROM picked
-         WHERE o.seq = picked.seq
-        RETURNING o.seq, o.created_at
-    )
-    SELECT count(*)::integer, min(seq), max(seq), min(created_at)
-      INTO v_count, v_from, v_to, v_oldest
-      FROM moved;
-
-    SELECT count(*) INTO v_remaining
-      FROM public.sync_outbox o
-     WHERE o.sent_at IS NULL AND o.dead = true;
-
-    INSERT INTO public.sync_outbox_recovery_log
-           (requested_by, reason, rows_recovered, seq_from, seq_to, oldest_created_at, exhausted_remaining)
-    VALUES (btrim(p_operator), btrim(p_reason), v_count, v_from, v_to, v_oldest, v_remaining);
-
-    RETURN QUERY SELECT v_count, v_from, v_to, v_remaining;
-END;
-$$;
-
-
---
--- Name: sync_outbox_recovery_log_append_only(); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.sync_outbox_recovery_log_append_only() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
-BEGIN
-    RAISE EXCEPTION 'public.sync_outbox_recovery_log is append-only: % refused', TG_OP
-        USING ERRCODE = 'restrict_violation';
-END;
-$$;
 
 
 SET default_tablespace = '';
@@ -9143,6 +9143,34 @@ CREATE TABLE iam_v2.stay_links (
 
 
 --
+-- Name: sync_outbox_recovery_log; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.sync_outbox_recovery_log (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    requested_at timestamp with time zone DEFAULT now() NOT NULL,
+    requested_by text NOT NULL,
+    reason text NOT NULL,
+    rows_recovered integer NOT NULL,
+    seq_from bigint,
+    seq_to bigint,
+    oldest_created_at timestamp with time zone,
+    exhausted_remaining bigint NOT NULL,
+    CONSTRAINT sync_outbox_recovery_log_exhausted_remaining_check CHECK ((exhausted_remaining >= 0)),
+    CONSTRAINT sync_outbox_recovery_log_reason_check CHECK (((length(btrim(reason)) >= 3) AND (length(reason) <= 500))),
+    CONSTRAINT sync_outbox_recovery_log_requested_by_check CHECK ((length(btrim(requested_by)) > 0)),
+    CONSTRAINT sync_outbox_recovery_log_rows_recovered_check CHECK ((rows_recovered >= 0))
+);
+
+
+--
+-- Name: TABLE sync_outbox_recovery_log; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.sync_outbox_recovery_log IS 'Append-only record of every time exhausted-retry sync records were returned to the queue. Payloads are never copied here.';
+
+
+--
 -- Name: v_financial_payments; Type: VIEW; Schema: iam_v2; Owner: -
 --
 
@@ -10010,34 +10038,6 @@ CREATE TABLE public.sync_outbox (
     dead boolean DEFAULT false NOT NULL,
     last_error text
 );
-
-
---
--- Name: sync_outbox_recovery_log; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.sync_outbox_recovery_log (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    requested_at timestamp with time zone DEFAULT now() NOT NULL,
-    requested_by text NOT NULL,
-    reason text NOT NULL,
-    rows_recovered integer NOT NULL,
-    seq_from bigint,
-    seq_to bigint,
-    oldest_created_at timestamp with time zone,
-    exhausted_remaining bigint NOT NULL,
-    CONSTRAINT sync_outbox_recovery_log_exhausted_remaining_check CHECK ((exhausted_remaining >= 0)),
-    CONSTRAINT sync_outbox_recovery_log_reason_check CHECK (((length(btrim(reason)) >= 3) AND (length(reason) <= 500))),
-    CONSTRAINT sync_outbox_recovery_log_requested_by_check CHECK ((length(btrim(requested_by)) > 0)),
-    CONSTRAINT sync_outbox_recovery_log_rows_recovered_check CHECK ((rows_recovered >= 0))
-);
-
-
---
--- Name: TABLE sync_outbox_recovery_log; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON TABLE public.sync_outbox_recovery_log IS 'Append-only record of every time exhausted-retry sync records were returned to the queue. Payloads are never copied here.';
 
 
 --
@@ -11439,6 +11439,14 @@ ALTER TABLE ONLY iam_v2.stays
 
 
 --
+-- Name: sync_outbox_recovery_log sync_outbox_recovery_log_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.sync_outbox_recovery_log
+    ADD CONSTRAINT sync_outbox_recovery_log_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: voucher_batches voucher_batches_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -11812,14 +11820,6 @@ ALTER TABLE ONLY public.sync_checkpoints
 
 ALTER TABLE ONLY public.sync_outbox
     ADD CONSTRAINT sync_outbox_pkey PRIMARY KEY (seq);
-
-
---
--- Name: sync_outbox_recovery_log sync_outbox_recovery_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.sync_outbox_recovery_log
-    ADD CONSTRAINT sync_outbox_recovery_log_pkey PRIMARY KEY (id);
 
 
 --
@@ -13284,10 +13284,10 @@ CREATE TRIGGER stay_event_reoffers_no_update BEFORE DELETE OR UPDATE ON iam_v2.s
 
 
 --
--- Name: sync_outbox_recovery_log sync_outbox_recovery_log_no_update; Type: TRIGGER; Schema: public; Owner: -
+-- Name: sync_outbox_recovery_log sync_outbox_recovery_log_no_update; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER sync_outbox_recovery_log_no_update BEFORE DELETE OR UPDATE ON public.sync_outbox_recovery_log FOR EACH ROW EXECUTE FUNCTION public.sync_outbox_recovery_log_append_only();
+CREATE TRIGGER sync_outbox_recovery_log_no_update BEFORE DELETE OR UPDATE ON iam_v2.sync_outbox_recovery_log FOR EACH ROW EXECUTE FUNCTION iam_v2.sync_outbox_recovery_log_append_only();
 
 
 --
@@ -15390,37 +15390,37 @@ REVOKE ALL ON FUNCTION iam_v2.supersede_entitlement_transition(p_target uuid, p_
 
 
 --
+-- Name: FUNCTION sync_outbox_accounting(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.sync_outbox_accounting() FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.sync_outbox_accounting() TO svc_scd;
+GRANT ALL ON FUNCTION iam_v2.sync_outbox_accounting() TO svc_edged;
+
+
+--
+-- Name: FUNCTION sync_outbox_prune_delivered(p_days integer); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.sync_outbox_prune_delivered(p_days integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.sync_outbox_prune_delivered(p_days integer) TO svc_scd;
+
+
+--
+-- Name: FUNCTION sync_outbox_recover_exhausted(p_operator text, p_reason text, p_limit integer); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.sync_outbox_recover_exhausted(p_operator text, p_reason text, p_limit integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.sync_outbox_recover_exhausted(p_operator text, p_reason text, p_limit integer) TO svc_edged;
+
+
+--
 -- Name: FUNCTION terminate_entitlement_at_boundary(p_ent uuid, p_at timestamp with time zone, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
 --
 
 REVOKE ALL ON FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at timestamp with time zone, p_reason text) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at timestamp with time zone, p_reason text) TO svc_acctd;
 GRANT ALL ON FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at timestamp with time zone, p_reason text) TO svc_pmsd;
-
-
---
--- Name: FUNCTION sync_outbox_accounting(); Type: ACL; Schema: public; Owner: -
---
-
-REVOKE ALL ON FUNCTION public.sync_outbox_accounting() FROM PUBLIC;
-GRANT ALL ON FUNCTION public.sync_outbox_accounting() TO svc_scd;
-GRANT ALL ON FUNCTION public.sync_outbox_accounting() TO svc_edged;
-
-
---
--- Name: FUNCTION sync_outbox_prune_delivered(p_days integer); Type: ACL; Schema: public; Owner: -
---
-
-REVOKE ALL ON FUNCTION public.sync_outbox_prune_delivered(p_days integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.sync_outbox_prune_delivered(p_days integer) TO svc_scd;
-
-
---
--- Name: FUNCTION sync_outbox_recover_exhausted(p_operator text, p_reason text, p_limit integer); Type: ACL; Schema: public; Owner: -
---
-
-REVOKE ALL ON FUNCTION public.sync_outbox_recover_exhausted(p_operator text, p_reason text, p_limit integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.sync_outbox_recover_exhausted(p_operator text, p_reason text, p_limit integer) TO svc_edged;
 
 
 --
@@ -15946,6 +15946,13 @@ GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.stay_guests TO svc_pmsd;
 
 
 --
+-- Name: TABLE sync_outbox_recovery_log; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.sync_outbox_recovery_log TO svc_edged;
+
+
+--
 -- Name: TABLE v_financial_payments; Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -16261,14 +16268,8 @@ GRANT SELECT,INSERT ON TABLE public.sync_checkpoints TO svc_edged;
 --
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.sync_outbox TO svc_scd;
-GRANT SELECT,INSERT,UPDATE ON TABLE public.sync_outbox TO svc_edged;
-
-
---
--- Name: TABLE sync_outbox_recovery_log; Type: ACL; Schema: public; Owner: -
---
-
-GRANT SELECT ON TABLE public.sync_outbox_recovery_log TO svc_edged;
+GRANT SELECT,INSERT ON TABLE public.sync_outbox TO svc_edged;
+GRANT SELECT,DELETE,UPDATE ON TABLE public.sync_outbox TO iam_v2_owner;
 
 
 --
