@@ -207,9 +207,16 @@ assert_priv "PUBLIC cannot ask the gate" \
 # ---------------------------------------------------------------------------------------------------------
 echo "== cloud sync and PMS reconciliation: the privilege model (0069) =="
 assert_priv "svc_edged may read the reconciliation cases"   "SELECT has_table_privilege('svc_edged','iam_v2.pms_reconciliation_cases','SELECT')" t
-assert_priv "svc_edged may re-offer a departure through the audited function"   "SELECT has_function_privilege('svc_edged','iam_v2.pms_reoffer_stay_event(uuid,uuid,uuid,uuid,text,text,jsonb)','EXECUTE')" t
+# THE RE-OFFER FUNCTION MUST NOT EXIST (0070). It shipped in 0069 and could never work: stay_events is
+# one-way and a checkout boundary must be an APPLIED GO event. It is asserted ABSENT rather than merely
+# unused, because a function that cannot succeed is worse than no function -- an operator reading its failure
+# would conclude the appliance is broken rather than that the design says no.
+assert_priv "the re-offer function is GONE, not merely ungranted"   "SELECT to_regprocedure('iam_v2.pms_reoffer_stay_event(uuid,uuid,uuid,uuid,text,text,jsonb)') IS NULL" t
+assert_priv "and its log table is gone with it"   "SELECT to_regclass('iam_v2.stay_event_reoffers') IS NULL" t
+# Unchanged and now load-bearing on its own: with the re-offer function gone, this is the only thing standing
+# between the admin API and a PMS event's processing state. The database trigger refuses it too; this refuses
+# it a layer earlier.
 assert_priv "svc_edged CANNOT move a PMS event's processing state directly"   "SELECT has_table_privilege('svc_edged','iam_v2.stay_events','UPDATE')" f
-assert_priv "svc_edged CANNOT write the re-offer log directly"   "SELECT has_table_privilege('svc_edged','iam_v2.stay_event_reoffers','INSERT')" f
 
 assert_priv "svc_edged may read the retention setting"   "SELECT has_function_privilege('svc_edged','iam_v2.cloud_sync_settings_get(uuid,uuid)','EXECUTE')" t
 assert_priv "svc_edged may change retention through the audited function"   "SELECT has_function_privilege('svc_edged','iam_v2.cloud_sync_settings_set(uuid,uuid,integer,text,text)','EXECUTE')" t
@@ -244,7 +251,6 @@ assert_priv "and none was left behind in public"   "SELECT count(*)=0 FROM pg_pr
 
 assert_priv "PUBLIC holds nothing on the retention setting"   "SELECT has_table_privilege('public','iam_v2.site_cloud_sync_settings','SELECT')" f
 assert_priv "PUBLIC cannot recover the queue"   "SELECT has_function_privilege('public','iam_v2.sync_outbox_recover_exhausted(text,text,integer)','EXECUTE')" f
-assert_priv "PUBLIC cannot re-offer a departure"   "SELECT has_function_privilege('public','iam_v2.pms_reoffer_stay_event(uuid,uuid,uuid,uuid,text,text,jsonb)','EXECUTE')" f
 
 [ "$fails" = "0" ] || { echo "  FAIL: $fails privilege assertion(s) — fix deploy/gatep, not this file"; exit 1; }
 

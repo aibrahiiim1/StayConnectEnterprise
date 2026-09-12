@@ -6,6 +6,13 @@
 // departures; each one had been restaged on every reconnect for three weeks. A list of twelve thousand is a
 // list nobody opens, so the warning was true and ignored, which is the worst state a warning can be in.
 //
+// THERE IS NO ACTION ON THIS PAGE, AND THAT IS THE ANSWER RATHER THAN A GAP. It briefly had a "re-evaluate"
+// button that handed a recorded departure back to the ingestion engine. It could never have worked:
+// stay_events is strictly one-way, and a checkout boundary must be an APPLIED departure event. A departure
+// that went to review is resolved by the PMS sending one that can be applied — the PMS is the source of
+// truth for whether a guest has left, and this system asserting it from a re-read of an old message would be
+// claiming to know something it does not.
+//
 // THE FOUR RULES THIS PAGE OBEYS, all of them because breaking one would disconnect a resident guest:
 //
 //   1. A PLANNED DEPARTURE DATE IS NOT A CHECKOUT. "Past their departure date" is its own tab and closes
@@ -26,18 +33,15 @@ import {
   api, ReconciliationCase, ReconciliationState, ReconciliationSummary,
   MultiOccupancyRoom, StayPastDeparture, Whoami,
 } from "@/lib/api";
-import { canWrite } from "@/lib/roles";
 import { formatDate } from "@/lib/utils";
 import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
 import { Card, CardBody } from "@/components/ui/card";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner, Callout } from "@/components/ui/error-banner";
 import { SkeletonRows } from "@/components/ui/misc";
-import { DialogForm } from "@/components/ui/dialog";
 
 // STATE_WORDS is the vocabulary. Each entry says what the state means and, for the ones that cannot be
 // acted on, WHAT EVIDENCE IS MISSING — because "we can't do anything" without a reason is indistinguishable
@@ -47,11 +51,12 @@ const STATE_WORDS: Record<
   { label: string; tone: "ok" | "warn" | "err" | "info" | "neutral"; meaning: string }
 > = {
   RESOLVABLE: {
-    label: "Can be re-evaluated",
+    label: "The PMS can settle this now",
     tone: "ok",
     meaning:
       "Exactly one stay matches, it began before this departure was raised, and the PMS's own latest " +
-      "complete in-house list does not contain it. Two independent facts agree that this guest has left.",
+      "complete in-house list does not contain it. Two independent facts agree that this guest has left, " +
+      "so a departure sent from the PMS for this room will apply cleanly.",
   },
   SUPERSEDED_ROOM_EMPTY: {
     label: "Nothing outstanding",
@@ -102,14 +107,7 @@ export default function PMSReconciliationPage() {
   const [tab, setTab] = useState<"cases" | "rooms" | "past">("cases");
   const [filter, setFilter] = useState<ReconciliationState | "">("");
   const [err, setErr] = useState<unknown>(null);
-  const [note, setNote] = useState("");
 
-  const [target, setTarget] = useState<ReconciliationCase | null>(null);
-  const [reason, setReason] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [actionErr, setActionErr] = useState<unknown>(null);
-
-  const canAct = canWrite("pms-reconciliation", roles);
 
   const load = useCallback(async () => {
     try {
@@ -138,27 +136,6 @@ export default function PMSReconciliationPage() {
     void load();
   }, [load]);
 
-  async function reEvaluate(e: React.FormEvent) {
-    e.preventDefault();
-    if (!target) return;
-    setBusy(true);
-    setActionErr(null);
-    try {
-      const res = await api.post<{ note: string }>(
-        `/pms-reconciliation/${target.latest_event_id}/re-evaluate`,
-        { reason: reason.trim() },
-      );
-      setNote(res.note);
-      setTarget(null);
-      setReason("");
-      await load();
-    } catch (e2) {
-      setActionErr(e2);
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <PageShell>
       <PageHeader
@@ -167,12 +144,6 @@ export default function PMSReconciliationPage() {
       />
 
       <ErrorBanner err={err} />
-      {note && (
-        <p className="text-sm text-success-subtle-foreground" role="status">
-          {note}
-        </p>
-      )}
-
       {/* THE HEADLINE THAT REPLACED A ROW COUNT. Both numbers are shown: the number of decisions, and the
           number of recorded copies behind them. The second is the single most useful fact about this feed
           and is exactly what the old count was reporting as if it were the first. */}
@@ -184,9 +155,9 @@ export default function PMSReconciliationPage() {
           hint="One departure is restaged every time the PMS connection is re-established."
         />
         <StatCard
-          label="Can be re-evaluated now"
-          value={summary ? num(summary.actionable_cases) : "—"}
-          hint="The rest need evidence, not another attempt."
+          label="The PMS could settle now"
+          value={summary ? num(summary.by_state.find((b) => b.state === "RESOLVABLE")?.cases ?? 0) : "—"}
+          hint="Two independent facts already agree; a departure sent from the PMS would apply cleanly."
         />
         <StatCard
           label="Rooms with more than one stay"
@@ -195,10 +166,15 @@ export default function PMSReconciliationPage() {
         />
       </div>
 
-      <Callout tone="neutral" title="What this screen will not do">
-        It does not close a stay because a planned departure date has passed, does not treat two stays in one
-        room as a duplicate, and never applies an old room-only departure to whoever is in that room today.
-        A case it cannot answer stays on this list and says which evidence is missing.
+      <Callout tone="neutral" title="How a case on this list is resolved">
+        <strong>By the PMS, not from here.</strong> A departure the appliance could not place is answered when
+        the PMS sends one it can — that is why there is no button on this page. The property&apos;s lever is
+        the PMS record itself.
+        <br />
+        <br />
+        This screen does not close a stay because a planned departure date has passed, does not treat two
+        stays in one room as a duplicate, and never applies an old room-only departure to whoever is in that
+        room today. A case it cannot answer stays on this list and says which evidence is missing.
       </Callout>
 
       <Toolbar>
@@ -258,7 +234,6 @@ export default function PMSReconciliationPage() {
                     <TH>Departure raised</TH>
                     <TH>Recorded copies</TH>
                     <TH>State</TH>
-                    <TH />
                   </TR>
                 </THead>
                 <tbody>
@@ -282,27 +257,6 @@ export default function PMSReconciliationPage() {
                             {w?.label ?? c.resolution_state}
                           </Badge>
                           <p className="mt-1 max-w-md text-xs text-muted-foreground">{w?.meaning}</p>
-                          {c.reoffer_count > 0 && (
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              Re-evaluated {num(c.reoffer_count)} time
-                              {c.reoffer_count === 1 ? "" : "s"} already.
-                            </p>
-                          )}
-                        </TD>
-                        <TD className="whitespace-nowrap">
-                          {canAct && c.actionable && (
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              onClick={() => {
-                                setTarget(c);
-                                setReason("");
-                                setActionErr(null);
-                              }}
-                            >
-                              Re-evaluate
-                            </Button>
-                          )}
                         </TD>
                       </TR>
                     );
@@ -393,6 +347,13 @@ export default function PMSReconciliationPage() {
                         <Badge tone="info" dot>
                           Still listed — they may have extended
                         </Badge>
+                      ) : s.room_now_holds_another_stay ? (
+                        // The strongest statement this screen can make, and the one an operator can act on:
+                        // the PMS has that room under a different reservation, so it has been re-let and our
+                        // record of this guest is stale beyond doubt.
+                        <Badge tone="err" dot>
+                          Room re-let — the PMS has it under another reservation
+                        </Badge>
                       ) : (
                         <Badge tone="warn" dot>
                           Not listed — our mirror may be behind
@@ -407,62 +368,6 @@ export default function PMSReconciliationPage() {
         </Card>
       )}
 
-      <DialogForm
-        open={target !== null}
-        onOpenChange={(v) => {
-          if (!v && !busy) {
-            setTarget(null);
-            setActionErr(null);
-          }
-        }}
-        title="Re-evaluate this departure"
-        description="It goes back to the PMS ingestion engine, which decides — this does not check anyone out by itself."
-        submitLabel="Re-evaluate"
-        busy={busy}
-        busyLabel="Sending…"
-        error={actionErr}
-        disabled={reason.trim().length < 3}
-        onSubmit={reEvaluate}
-      >
-        {target && (
-          <>
-            <dl className="grid grid-cols-2 gap-2 text-sm">
-              <dt className="text-muted-foreground">Room</dt>
-              <dd className="font-mono text-xs">{target.room || "—"}</dd>
-              <dt className="text-muted-foreground">Reservation</dt>
-              <dd className="font-mono text-xs">{target.reservation || "—"}</dd>
-              <dt className="text-muted-foreground">Departure raised</dt>
-              <dd>{target.event_at ? formatDate(target.event_at) : "—"}</dd>
-              <dt className="text-muted-foreground">Matching stays in house</dt>
-              <dd>{target.candidate_stays}</dd>
-              <dt className="text-muted-foreground">On the PMS&apos;s current list</dt>
-              <dd>{target.roster_present ? "yes" : "no"}</dd>
-            </dl>
-            <div className="space-y-1">
-              <label htmlFor="recon-reason" className="block text-sm font-medium">
-                Reason <span className="font-normal text-muted-foreground">(recorded with your name)</span>
-              </label>
-              <Input
-                id="recon-reason"
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                maxLength={200}
-                placeholder="e.g. confirmed departed with the front desk and the PMS in-house list"
-                aria-describedby="recon-reason-help"
-              />
-              <p id="recon-reason-help" className="text-xs text-muted-foreground">
-                At least 3 characters. The evidence this decision was based on is recorded alongside it.
-              </p>
-            </div>
-            <Callout tone="warning" title="The engine decides, not this button">
-              The recorded departure is handed back to the same PMS ingestion engine that received it. If it
-              matches one eligible stay, the stay is checked out through the property&apos;s normal checkout
-              policy, including its access and grace rules. If it still cannot be matched, it returns to this
-              list with the reason.
-            </Callout>
-          </>
-        )}
-      </DialogForm>
     </PageShell>
   );
 }

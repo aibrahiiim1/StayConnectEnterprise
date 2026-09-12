@@ -50,9 +50,8 @@ const MATRIX: Matrix = {
     // Guest sign-in protection: the property's thresholds are a configuration decision, which is this
     // role's territory, and whoever sets the threshold may waive one instance of it.
     "guest-signin-protection": "write", "guest-signin-restrictions": "write",
-    // Unresolved departures are the PMS integration's backlog, and re-evaluating one can end a stay
-    // through the ordinary checkout policy — an integration decision, not a guest-service one.
-    "pms-reconciliation": "write",
+    // Unresolved departures are READ-ONLY for every role. There is no local action: the PMS resolves them.
+    "pms-reconciliation": "read",
     // Reporting to the cloud is appliance infrastructure. Two keys: a retention period is a policy,
     // releasing thousands of abandoned records onto the wire is an action with a far end.
     "cloud-sync-settings": "write", "cloud-sync-recovery": "write",
@@ -86,8 +85,7 @@ const MATRIX: Matrix = {
     // The desk RELEASES and does not re-tune: the restricted guest is standing there now, but making
     // "five" into "twenty" for the whole property must not be the quickest way to help one person.
     "guest-signin-restrictions": "write", "guest-signin-protection": "read",
-    // The desk READS the reconciliation cases — "is this guest still checked in according to the PMS"
-    // is a reception question — and acts on none of them, because the outcome can revoke access.
+    // "Is this guest still checked in according to the PMS" is a reception question; this list answers it.
     "pms-reconciliation": "read",
     // Phase 6 (DARK): the desk answers "why can't I remove my old phone" and changes no capability.
     "guest-device-self-service": "read",

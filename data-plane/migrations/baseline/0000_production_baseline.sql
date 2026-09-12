@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0069, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0070, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -5780,57 +5780,6 @@ COMMENT ON FUNCTION iam_v2.p6_tick_online_time(p_tenant uuid, p_site uuid, p_now
 
 
 --
--- Name: pms_reoffer_stay_event(uuid, uuid, uuid, uuid, text, text, jsonb); Type: FUNCTION; Schema: iam_v2; Owner: -
---
-
-CREATE FUNCTION iam_v2.pms_reoffer_stay_event(p_tenant uuid, p_site uuid, p_iface uuid, p_event uuid, p_operator text, p_reason text, p_evidence jsonb DEFAULT '{}'::jsonb) RETURNS boolean
-    LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'iam_v2', 'pg_temp'
-    AS $$
-DECLARE
-    v_status text;
-    v_code   text;
-    v_at     timestamptz;
-BEGIN
-    IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
-        RAISE EXCEPTION 'reoffer: an operator identity is required'
-            USING ERRCODE = 'invalid_parameter_value';
-    END IF;
-    IF p_reason IS NULL OR length(btrim(p_reason)) < 3 THEN
-        RAISE EXCEPTION 'reoffer: a reason of at least 3 characters is required'
-            USING ERRCODE = 'invalid_parameter_value';
-    END IF;
-
-    SELECT se.processing_status, se.review_code, se.processed_at
-      INTO v_status, v_code, v_at
-      FROM iam_v2.stay_events se
-     WHERE se.id = p_event AND se.tenant_id = p_tenant
-       AND se.site_id = p_site AND se.pms_interface_id = p_iface
-       FOR UPDATE;
-
-    IF NOT FOUND THEN
-        RETURN false;
-    END IF;
-    IF v_status <> 'MANUAL_REVIEW' THEN
-        RETURN false;
-    END IF;
-
-    INSERT INTO iam_v2.stay_event_reoffers
-           (tenant_id, site_id, pms_interface_id, stay_event_id, requested_by, reason,
-            prior_processing_status, prior_review_code, prior_processed_at, evidence)
-    VALUES (p_tenant, p_site, p_iface, p_event, btrim(p_operator), btrim(p_reason),
-            v_status, v_code, v_at, COALESCE(p_evidence, '{}'::jsonb));
-
-    UPDATE iam_v2.stay_events
-       SET processing_status = 'PENDING', review_code = NULL, processed_at = NULL
-     WHERE id = p_event;
-
-    RETURN true;
-END;
-$$;
-
-
---
 -- Name: publish_checkout_grace_config(uuid, uuid, uuid, integer, integer, integer, bigint, integer, text, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -6408,20 +6357,6 @@ CREATE FUNCTION iam_v2.selectable_grace_packages(p_tenant uuid, p_site uuid) RET
     FROM candidate c
    ORDER BY c.package_code, c.revision_no DESC;
 $_$;
-
-
---
--- Name: stay_event_reoffers_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
---
-
-CREATE FUNCTION iam_v2.stay_event_reoffers_append_only() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
-BEGIN
-    RAISE EXCEPTION 'iam_v2.stay_event_reoffers is append-only: % refused', TG_OP
-        USING ERRCODE = 'restrict_violation';
-END;
-$$;
 
 
 --
@@ -8217,36 +8152,6 @@ CREATE TABLE iam_v2.pms_postings (
 
 
 --
--- Name: stay_event_reoffers; Type: TABLE; Schema: iam_v2; Owner: -
---
-
-CREATE TABLE iam_v2.stay_event_reoffers (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    tenant_id uuid NOT NULL,
-    site_id uuid NOT NULL,
-    pms_interface_id uuid NOT NULL,
-    stay_event_id uuid NOT NULL,
-    requested_at timestamp with time zone DEFAULT now() NOT NULL,
-    requested_by text NOT NULL,
-    reason text NOT NULL,
-    prior_processing_status text NOT NULL,
-    prior_review_code text,
-    prior_processed_at timestamp with time zone,
-    evidence jsonb DEFAULT '{}'::jsonb NOT NULL,
-    CONSTRAINT ser_evidence_is_object CHECK ((jsonb_typeof(evidence) = 'object'::text)),
-    CONSTRAINT stay_event_reoffers_reason_check CHECK (((length(btrim(reason)) >= 3) AND (length(reason) <= 500))),
-    CONSTRAINT stay_event_reoffers_requested_by_check CHECK ((length(btrim(requested_by)) > 0))
-);
-
-
---
--- Name: TABLE stay_event_reoffers; Type: COMMENT; Schema: iam_v2; Owner: -
---
-
-COMMENT ON TABLE iam_v2.stay_event_reoffers IS 'Append-only record of every PMS event returned to the ingestion engine for re-evaluation, with the terminal state it held before and the evidence the operator acted on. Carries no guest name.';
-
-
---
 -- Name: stay_events; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -8443,9 +8348,6 @@ CREATE VIEW iam_v2.pms_reconciliation_cases AS
     candidate_arrival,
     roster_present,
     last_complete_sync_at,
-    ( SELECT (count(*))::integer AS count
-           FROM iam_v2.stay_event_reoffers r
-          WHERE (r.stay_event_id = e.latest_event_id)) AS reoffer_count,
         CASE
             WHEN ((candidate_stays = 0) AND (reservation = ''::text)) THEN 'SUPERSEDED_ROOM_EMPTY'::text
             WHEN (candidate_stays = 0) THEN 'NEEDS_PMS_EVIDENCE'::text
@@ -8462,7 +8364,7 @@ CREATE VIEW iam_v2.pms_reconciliation_cases AS
 -- Name: VIEW pms_reconciliation_cases; Type: COMMENT; Schema: iam_v2; Owner: -
 --
 
-COMMENT ON VIEW iam_v2.pms_reconciliation_cases IS 'One row per DISTINCT unresolved PMS departure, with the number of recorded copies beside it and a resolution state computed from current roster and occupancy evidence. Collapses copies for counting; deletes and hides nothing.';
+COMMENT ON VIEW iam_v2.pms_reconciliation_cases IS 'One row per DISTINCT unresolved PMS departure, with the number of recorded copies beside it and a resolution state computed from current roster and occupancy evidence. READ-ONLY: a departure that went to review is resolved by the PMS sending one that can be applied, never by replaying the old one -- stay_events is one-way and a checkout boundary must be an APPLIED GO event. Collapses copies for counting; deletes and hides nothing.';
 
 
 --
@@ -8526,7 +8428,10 @@ CREATE VIEW iam_v2.pms_stays_past_departure AS
     (CURRENT_DATE - departure) AS days_past_departure,
     (EXISTS ( SELECT 1
            FROM roster ro
-          WHERE ((ro.tenant_id = s.tenant_id) AND (ro.site_id = s.site_id) AND (ro.pms_interface_id = s.pms_interface_id) AND ((ro.reservation = s.external_reservation_id) OR ((ro.reservation = ''::text) AND (ro.room = s.normalized_room_number)))))) AS roster_present
+          WHERE ((ro.tenant_id = s.tenant_id) AND (ro.site_id = s.site_id) AND (ro.pms_interface_id = s.pms_interface_id) AND (((COALESCE(s.external_reservation_id, ''::text) <> ''::text) AND (ro.reservation = s.external_reservation_id)) OR ((COALESCE(s.external_reservation_id, ''::text) = ''::text) AND (ro.room = s.normalized_room_number)))))) AS roster_present,
+    (EXISTS ( SELECT 1
+           FROM roster ro
+          WHERE ((ro.tenant_id = s.tenant_id) AND (ro.site_id = s.site_id) AND (ro.pms_interface_id = s.pms_interface_id) AND (ro.room = s.normalized_room_number) AND (ro.reservation IS DISTINCT FROM s.external_reservation_id)))) AS room_now_holds_another_stay
    FROM iam_v2.stays s
   WHERE ((status = 'IN_HOUSE'::text) AND (departure IS NOT NULL) AND (departure < CURRENT_DATE));
 
@@ -11335,14 +11240,6 @@ ALTER TABLE ONLY iam_v2.site_guest_signin_protection
 
 
 --
--- Name: stay_event_reoffers stay_event_reoffers_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
---
-
-ALTER TABLE ONLY iam_v2.stay_event_reoffers
-    ADD CONSTRAINT stay_event_reoffers_pkey PRIMARY KEY (id);
-
-
---
 -- Name: stay_events stay_events_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -12259,20 +12156,6 @@ CREATE INDEX sign_in_attempts_site_recent ON iam_v2.sign_in_attempts USING btree
 --
 
 CREATE INDEX sign_in_attempts_site_room ON iam_v2.sign_in_attempts USING btree (tenant_id, site_id, submitted_room, occurred_at DESC);
-
-
---
--- Name: stay_event_reoffers_event_idx; Type: INDEX; Schema: iam_v2; Owner: -
---
-
-CREATE INDEX stay_event_reoffers_event_idx ON iam_v2.stay_event_reoffers USING btree (stay_event_id, requested_at DESC);
-
-
---
--- Name: stay_event_reoffers_scope_idx; Type: INDEX; Schema: iam_v2; Owner: -
---
-
-CREATE INDEX stay_event_reoffers_scope_idx ON iam_v2.stay_event_reoffers USING btree (tenant_id, site_id, requested_at DESC);
 
 
 --
@@ -13274,13 +13157,6 @@ CREATE TRIGGER purchase_quote_pin_equal BEFORE INSERT OR UPDATE ON iam_v2.purcha
 --
 
 CREATE TRIGGER sg_guard BEFORE DELETE OR UPDATE ON iam_v2.pms_interface_secret_generations FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_secret_gen_guard();
-
-
---
--- Name: stay_event_reoffers stay_event_reoffers_no_update; Type: TRIGGER; Schema: iam_v2; Owner: -
---
-
-CREATE TRIGGER stay_event_reoffers_no_update BEFORE DELETE OR UPDATE ON iam_v2.stay_event_reoffers FOR EACH ROW EXECUTE FUNCTION iam_v2.stay_event_reoffers_append_only();
 
 
 --
@@ -15303,14 +15179,6 @@ GRANT ALL ON FUNCTION iam_v2.p6_tick_online_time(p_tenant uuid, p_site uuid, p_n
 
 
 --
--- Name: FUNCTION pms_reoffer_stay_event(p_tenant uuid, p_site uuid, p_iface uuid, p_event uuid, p_operator text, p_reason text, p_evidence jsonb); Type: ACL; Schema: iam_v2; Owner: -
---
-
-REVOKE ALL ON FUNCTION iam_v2.pms_reoffer_stay_event(p_tenant uuid, p_site uuid, p_iface uuid, p_event uuid, p_operator text, p_reason text, p_evidence jsonb) FROM PUBLIC;
-GRANT ALL ON FUNCTION iam_v2.pms_reoffer_stay_event(p_tenant uuid, p_site uuid, p_iface uuid, p_event uuid, p_operator text, p_reason text, p_evidence jsonb) TO svc_edged;
-
-
---
 -- Name: FUNCTION publish_checkout_grace_config(p_tenant uuid, p_site uuid, p_pkg_rev uuid, p_duration integer, p_down integer, p_up integer, p_quota bigint, p_dev_limit integer, p_dev_policy text, p_eligibility integer); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -15752,13 +15620,6 @@ GRANT SELECT ON TABLE iam_v2.pms_interfaces TO svc_pmsd;
 
 GRANT SELECT ON TABLE iam_v2.pms_postings TO sc_financial_operator;
 GRANT SELECT ON TABLE iam_v2.pms_postings TO svc_edged;
-
-
---
--- Name: TABLE stay_event_reoffers; Type: ACL; Schema: iam_v2; Owner: -
---
-
-GRANT SELECT ON TABLE iam_v2.stay_event_reoffers TO svc_edged;
 
 
 --
