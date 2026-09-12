@@ -1,0 +1,4 @@
+commit 66b62d8bf749ae99b0125632615ac034b7130935
+Date:   Sat Sep 12 13:24:42 2026 +0300
+
+    Delivery: manifest, export packs and delivery head resynchronized

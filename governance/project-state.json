@@ -1585,12 +1585,12 @@
     "kind": "POST_CLOSURE_CORRECTIONS",
     "decision": "D38",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "0fbd1cc0609adeb5e33aafdb87b9c0a3048c34ca",
-    "base_note": "The master merge commit of PR #113, which closed the failed-resolution replay correction. The Guest Sign-in Attempts delivery begins exactly where that one ended, so the two lineages abut without overlapping.",
-    "head": "ef3cccc7e13ed0894b0913680408f633ea9a1488",
-    "head_note": "The delivery head for Guest Sign-in Attempts: the committed HEAD immediately before the delivery-only commit that rebuilds the manifest, the export packs and this pointer.",
+    "base": "d4e1dc769b6f3450ab407682b4d0dfd3fd2e8ad8",
+    "base_note": "The master merge commit of PR #114, which closed Guest Sign-in Attempts. The guest sign-in rate limiting and operator-managed restriction delivery begins exactly where that one ended, so the two lineages abut without overlapping.",
+    "head": "6d6fc0fb52a5e3db03681cb2bb8349e04228c820",
+    "head_note": "The delivery head for configurable guest sign-in protection: the committed HEAD immediately before the delivery-only commit that rebuilds the manifest, the export packs and this pointer.",
     "note": "D36: post-closure corrective work is its own delivery lineage with its own manifest. The numbered phases are closed and their manifests are HISTORICAL — each remains a faithful record of what that phase delivered and is never range-checked against a later HEAD. While this key is present it names THE current delivery manifest, and that manifest is what the path/status equality check applies to.",
-    "decision_status": "ACCEPTED by the Product Owner as an explicit mission authorization: rebuild the Hotel Admin design system and operator screens, keep Network routing editable for site_admin, and carry the work to verified closure through the protected PR path with a PRE-LIVE deployment to 172.21.60.25 and live acceptance. The authorization names the commit, push, PR, merge and that one deployment target, and nothing beyond them."
+    "decision_status": "ACCEPTED by the Product Owner as an explicit mission authorization: implement configurable guest sign-in rate limiting and operator-managed temporary restrictions, and carry the work to verified closure through the protected PR path with a PRE-LIVE deployment to 172.21.60.25 and live verification that the policy is active. The authorization names the commit, push, PR, merge and that one deployment target, and nothing beyond them. PRE-LIVE remains PRE-LIVE; Go-Live is not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
