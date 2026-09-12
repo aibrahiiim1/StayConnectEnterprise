@@ -515,6 +515,79 @@ operator, the previous values and the new values.
 
 ---
 
+## 14b. Unresolved departures (PMS reconciliation)
+
+**Hotel Admin → Property management system → Unresolved departures.**
+
+This PMS reports every checkout as a departure carrying a **room number and no reservation number**. When the
+room does not identify exactly one in-house stay, the departure cannot be applied and waits for a human. Two
+things then used to happen that made the backlog unusable: a waiting departure is **restaged on every
+reconnect**, and the dashboard counted rows. One unresolved checkout became thousands of "messages needing
+attention".
+
+The screen now counts **decisions**, not rows. One departure is one case, with the number of recorded copies
+shown beside it — that number is a fact about the feed and is not hidden.
+
+**What a case can say, and what it needs:**
+
+| State | Meaning | What would resolve it |
+|---|---|---|
+| **Can be re-evaluated** | One matching stay, it began before the departure was raised, and it is absent from the PMS's own latest complete in-house list. | Nothing — the action is available. |
+| **Nothing outstanding** | Nobody is in that room now. | Nothing is waiting. This is **not** proof the departure was applied. |
+| **Room has more than one stay** | Sharing a room is ordinary and legal. | The reservation number from the PMS. |
+| **A later guest is in that room** | The current occupant arrived **after** this departure. Applying it would check out a resident guest. | The reservation number from the PMS. |
+| **The PMS still lists them as in house** | Fresh authoritative evidence contradicts the older departure. | The PMS resolving its own disagreement. |
+| **Needs evidence from the PMS** | Usually: no complete in-house list has been received to compare against. | A completed full synchronisation. |
+
+**Re-evaluate does not check anybody out.** It hands the recorded departure back to the same ingestion engine
+that received it, which applies the same rules and the same checkout policy it would have applied originally —
+including access and grace. If it still cannot be matched, the case returns to the list with the reason. It
+needs a typed reason and is recorded with the operator's name and the evidence the decision was based on.
+
+**Three rules this screen will not break**, because breaking any of them disconnects a resident guest:
+
+* a **planned departure date is not a checkout** — "Past their departure date" is its own tab and closes nothing;
+* **two stays in one room are not a duplicate** — shared occupancy is ordinary;
+* an **old room-only departure is never applied to today's occupant**.
+
+The engine enforces the third one itself: a departure whose matching stay arrived later is refused as
+`GO_STALE_ROOM_DEPARTURE` rather than applied.
+
+---
+
+## 14c. Reporting to the StayConnect cloud
+
+**Hotel Admin → Network → Cloud connection.**
+
+The appliance keeps working when the cloud is unreachable. Everything it reports upward — usage totals,
+health, alerts — is written to a local queue first and sent later. **No guest is affected by this queue**:
+sign-in, speed and the PMS all run locally.
+
+**The card accounts for every record**: delivered, waiting, given up on, and the total. If the three do not add
+up, the card says so rather than showing the smaller number.
+
+**Why a queue is not draining is reported as a fact, not guessed from its size.** The four states are different
+problems with different owners:
+
+* **No connection to the cloud** — the appliance cannot reach it. Records are safe and go out when it returns.
+* **The cloud is not listening** — the appliance reaches the cloud and nothing there is consuming this
+  appliance's reports. **Cloud-side; the hotel network is not the cause.**
+* **The cloud refused the records** — it answered and declined. Retrying will not help; how this appliance is
+  registered needs looking at.
+* **Sending** — the queue is draining, oldest first. A large queue that is moving is progress, not a fault.
+
+**Keep delivered records for (days)** — default **30**, allowed 1–365. It removes records that have **already
+been delivered**. Records still waiting, and records the appliance gave up on, are **never** removed by it: a
+queue that cannot be delivered is not made to look empty by deleting it.
+
+**Recover these records** appears when the appliance has given up on some. Retries are finite, and a record
+that exhausts them is set aside and will not be sent again on its own. Recovery returns a bounded batch to the
+queue, oldest first; nothing is deleted or altered, and the cloud records each record once however many times
+it arrives. It needs a typed reason, is recorded with the operator's name, and may need running more than once
+— the card shows how many are left.
+
+---
+
 ## 15. Access plans & vouchers
 
 **Access plan** (Hotel Admin → **Guest access plans** → **New plan**): Code, Name,
