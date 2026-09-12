@@ -1,4 +1,0 @@
-commit 64592792a152978619b0e67c14fc2e43c7a25e9e
-Date:   Sat Sep 12 23:34:13 2026 +0300
-
-    A departure that went to review is answered by the PMS, not by replaying it
