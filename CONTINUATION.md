@@ -73,12 +73,29 @@ Access/entitlement consequence: the whole appliance holds 21 entitlements. The 1
 NONE (those guests never signed in), so no guest lost or regained access through any of this. The 10
 entitlements attached to CHECKED_OUT stays are all TERMINATED, which is correct.
 
-## Remaining, in priority order
+## DONE: Central non-licensing removal (code + data)
 
-1. Central: remove non-licensing functionality (`fleet`, `commands`, `updates`, `configpush`, `heartbeat`,
-   `transport` + their API/UI/jobs) and the disposable telemetry rows (251 166 `fleet_telemetry`,
-   251 286 dedupe). Keep everything licensing and local operation need. Do NOT delete a shared package
-   because its name appears in the list -- `metrics` is used by licensing paths, `stripe`/`payments` is
-   commercial billing, not appliance telemetry.
-2. Wire reconciliation into pmsd/edged + Hotel Admin UI, and run migration 0072 on the appliance.
-3. Gates, protected merge, remaining deployment, live verification, governance sync.
+`ebeca837` removes ~4 000 lines: internal/{fleet,commands,updates,configpush,heartbeat,transport}; the
+fleet/usage/sessions/pms_admin/commands/updates APIs; the NATS transport selection, heartbeat consumer,
+fleet consumer and command/update result consumers in ctrlapi; cmd/nats-authz and cmd/nats-acctest; and the
+cloud-admin fleet page. `github.com/nats-io/*` is no longer a control-plane dependency at all.
+
+KEPT on purpose: `internal/metrics` (payments, router, licensing paths), `internal/stripe` (commercial
+billing, not appliance telemetry), and `PMSProvider`/`strDeref`/`newUUIDv4`, moved to
+`internal/api/shared_helpers.go` because they merely happened to live inside deleted files.
+
+Central migration `0045` applied LIVE to 150.0.0.252: dropped fleet_telemetry (251 166 rows),
+fleet_telemetry_dedupe (251 286), usage_counters, appliance_commands, appliance_update_assignments.
+Zero inbound foreign keys were verified first. Telemetry tables remaining: 0.
+
+Verified after: ctrlapi restarted and healthz=200; appliance licence Active, cloud_stale=false, evaluated
+every minute; scd/pmsd/edged/portald all active.
+
+## Remaining
+
+1. **Deploy the new ctrlapi binary to Central.** The telemetry code is removed in source and the DATA is
+   gone, but 150.0.0.252 still runs the previous ctrlapi build. Harmless (nothing sends to it, and the
+   tables are gone) but the removal is not complete on the host until the binary ships.
+2. Wire reconciliation into pmsd/edged + a Hotel Admin screen, and apply migration 0072 to the appliance.
+   0072 is written, tested and committed but NOT yet applied anywhere.
+3. Gates, protected merge, governance sync.
