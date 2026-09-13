@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net"
+	"sort"
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/pms"
@@ -138,11 +139,14 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 	sink.OnFullSyncRequested()
 
 	resyncing := true // a DR is outstanding; we are awaiting DS…DE (gates duplicate DR requests only)
-	// Per-sweep observation, reset at every DS. A map rather than a counter because a PMS may name the same
-	// room twice in one sweep and "the building" is a set, not a tally.
-	roomsSeen := map[string]struct{}{}
+	// Per-sweep observation, reset at every DS. Two SETS rather than one set and two counters, because the
+	// question "did this sweep contradict itself?" cannot be asked of a tally. A room the PMS reports as both
+	// occupied and empty in the same sweep is not a building this system can reason about, and it must not be
+	// possible to close a guest's stay on the strength of it.
+	occupiedSeen := map[string]struct{}{}
+	vacantSeen := map[string]struct{}{}
 	rosterRecords := 0
-	vacantRooms := 0
+	vacantRecords := 0
 	// skippedNoIdentity counts well-formed records this ownership cycle carried that describe no keyable Stay.
 	// It is a running total rather than a per-resync one on purpose: the number an operator wants is "how much
 	// of this roster is unusable", and a counter that reset on every DS would only ever show the tail.
@@ -241,9 +245,10 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			// PMS describing the building, and that description is the only thing that can prove a roster
 			// COMPLETE. Counting it here, at observation, is what stops the completeness test depending on
 			// the admission rule.
-			roomsSeen = map[string]struct{}{}
+			occupiedSeen = map[string]struct{}{}
+			vacantSeen = map[string]struct{}{}
 			rosterRecords = 0
-			vacantRooms = 0
+			vacantRecords = 0
 			// PER-ROSTER, NOT PER-CONNECTION. skippedNoIdentity was a running total for the whole ownership
 			// cycle, so a second full sync inherited the first one's rejects and an operator reading "40
 			// skipped" on a clean roster had no way to know 40 of them belonged to an earlier sync. Reset
@@ -258,7 +263,28 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			// recorded observation would be one reconciliation could never judge complete, and it would defer
 			// for ever waiting for evidence that was thrown away at exactly this moment.
 			if resyncing {
-				sink.RecordCoverage(len(roomsSeen), rosterRecords, vacantRooms)
+				// The union is the building this sweep described; the intersection is where it contradicted
+				// itself. Both are reported: an operator needs to know a sweep was self-inconsistent, and
+				// reconciliation must refuse to close anything until it is not.
+				union := make([]string, 0, len(occupiedSeen)+len(vacantSeen))
+				conflicts := 0
+				for r := range occupiedSeen {
+					union = append(union, r)
+					if _, both := vacantSeen[r]; both {
+						conflicts++
+					}
+				}
+				for r := range vacantSeen {
+					if _, dup := occupiedSeen[r]; !dup {
+						union = append(union, r)
+					}
+				}
+				sort.Strings(union) // deterministic, so the stored identity set is comparable run to run
+				if conflicts > 0 && a.log != nil {
+					a.log.Warn("pmsd: sweep reported rooms as both occupied and empty; reconciliation will refuse",
+						"interface", a.iface.ID, "conflicting_rooms", conflicts)
+				}
+				sink.RecordCoverage(union, rosterRecords, vacantRecords, conflicts)
 			}
 			// Flush the exact skipped total before the publish stamps COMPLETE, so the finished sync reports
 			// what it actually rejected rather than the last multiple of 25.
@@ -298,8 +324,8 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 				// OBSERVED, then refused. The room is part of the building this sweep described; the record
 				// is not a departure anybody announced.
 				if room := roomOf(pr); room != "" {
-					roomsSeen[room] = struct{}{}
-					vacantRooms++
+					vacantSeen[room] = struct{}{}
+					vacantRecords++
 				}
 				skippedNoIdentity++
 				if a.log != nil {
@@ -369,7 +395,8 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			// while the barrier is up, admit durably when synced). The durable row is authoritative — there is
 			// no in-memory-queue-overflow gap here. Any DB/ownership failure closes the transport.
 			if resyncing && ev.RoomNumber != "" {
-				roomsSeen[pms.NormalizeRoom(ev.RoomNumber)] = struct{}{}
+				// One contract, the same one the vacant branch uses. See roomKey.
+				occupiedSeen[roomKey(ev.RoomNumber)] = struct{}{}
 				if pr.RecordType != RecGO {
 					rosterRecords++
 				}

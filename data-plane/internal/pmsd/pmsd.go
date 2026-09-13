@@ -281,7 +281,7 @@ type Repo interface {
 	// g must not exceed the allocated seq. ErrStaleGeneration if ownership moved.
 	// RecordResyncCoverage stores what one completed sweep observed: distinct rooms named, the occupied
 	// records among them, and the vacant rooms seen but deliberately not admitted as departures.
-	RecordResyncCoverage(ctx context.Context, req ResyncScope, generation int64, rooms, roster, vacant int) error
+	RecordResyncCoverage(ctx context.Context, req ResyncScope, generation int64, rooms []string, roster, vacant, conflicts int) error
 	// ReconcileRoster closes the stays a COMPLETE published roster no longer lists. Called once per published
 	// generation; a refusal is a decision the run ledger records, not an error.
 	ReconcileRoster(ctx context.Context, req ResyncScope, generation int64) (ReconcileOutcome, error)
@@ -357,7 +357,7 @@ type AxisSink interface {
 	// among them, and the vacant rooms it saw and deliberately did not admit. It is called once per DS..DE,
 	// before the generation publishes, because a published roster with no recorded observation is one
 	// reconciliation can never judge complete.
-	RecordCoverage(rooms, rosterRecords, vacantRooms int)
+	RecordCoverage(rooms []string, rosterRecords, vacantRecords, conflictingRooms int)
 	// OnFullSyncRequested marks the moment a DR has been accepted by the serialized writer and the connector
 	// is waiting for the PMS to begin. Called for the AUTOMATIC initial sync as well as for an operator's,
 	// because an operator watching a reconnect needs to see the same stages either way.

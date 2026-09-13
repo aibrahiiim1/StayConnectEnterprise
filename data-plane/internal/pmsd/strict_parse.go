@@ -3,6 +3,8 @@ package pmsd
 import (
 	"errors"
 	"strings"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/pms"
 )
 
 // ErrRecordMalformed is the single typed parse error for a FIAS record body that violates the strict grammar.
@@ -245,12 +247,24 @@ func extractTypedDomainFields(pr ParsedRecord) (typedDomainFields, error) {
 	return f, nil
 }
 
-// roomOf returns the normalized room a parsed record names, or "" when it names none. Used to count what a
-// sweep OBSERVED, including records that are deliberately never admitted.
+// roomKey is THE room-identity contract for this connector, and there is deliberately only one of it.
+//
+// Coverage briefly had two: vacant rooms were keyed on a trimmed value and occupied rooms on
+// pms.NormalizeRoom, which also lowercases. On a property whose rooms are all digits the two agree and
+// nothing shows; on one with "A12" they disagree, the same room counts twice, and rooms_named comes out
+// HIGHER than the building. That is the dangerous direction -- an inflated count makes a partial sweep look
+// complete, and completeness is what licenses closing a guest's stay.
+//
+// Every room identity in this package goes through here: the occupied set, the vacant set, the union that
+// becomes coverage, and the intersection that detects a contradiction.
+func roomKey(s string) string { return pms.NormalizeRoom(s) }
+
+// roomOf returns the room identity a parsed record names under the contract above, or "" when it names
+// none. Used to record what a sweep OBSERVED, including records that are deliberately never admitted.
 func roomOf(pr ParsedRecord) string {
 	for _, p := range pr.Fields {
 		if p.Code == fcRoom {
-			return strings.TrimSpace(p.Value)
+			return roomKey(p.Value)
 		}
 	}
 	return ""

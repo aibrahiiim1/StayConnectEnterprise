@@ -479,10 +479,10 @@ func (r *pgRepo) UpdateSyncStage(ctx context.Context, u StageUpdate) error {
 // rather than an INSERT, so svc_pmsd holds no write on the table and a coverage row with no sweep behind it
 // is not expressible.
 func (r *pgRepo) RecordResyncCoverage(ctx context.Context, req ResyncScope, generation int64,
-	rooms, roster, vacant int) error {
+	rooms []string, roster, vacant, conflicts int) error {
 	_, err := r.pool.Exec(ctx,
-		`SELECT iam_v2.pms_record_resync_coverage($1,$2,$3,$4,$5,$6,$7)`,
-		req.TenantID, req.SiteID, req.PMSInterfaceID, generation, rooms, roster, vacant)
+		`SELECT iam_v2.pms_record_resync_coverage($1,$2,$3,$4,$5,$6,$7,$8)`,
+		req.TenantID, req.SiteID, req.PMSInterfaceID, generation, rooms, roster, vacant, conflicts)
 	return err
 }
 

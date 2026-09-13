@@ -730,7 +730,7 @@ func (r *fakeRepo) InHouseCount(ctx context.Context, ax axisBase) *int64 {
 	return &n
 }
 
-func (r *fakeRepo) RecordResyncCoverage(_ context.Context, _ ResyncScope, _ int64, _, _, _ int) error {
+func (r *fakeRepo) RecordResyncCoverage(_ context.Context, _ ResyncScope, _ int64, _ []string, _, _, _ int) error {
 	return nil
 }
 

@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0073, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0074, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -5901,6 +5901,23 @@ $$;
 
 
 --
+-- Name: pms_known_room_inventory(uuid, uuid, uuid, bigint, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_known_room_inventory(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_lookback integer) RETURNS TABLE(room text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+    SELECT DISTINCT r
+      FROM iam_v2.pms_resync_coverage c, LATERAL unnest(c.rooms) r
+     WHERE c.tenant_id = p_tenant AND c.site_id = p_site AND c.pms_interface_id = p_iface
+       AND c.conflicting_rooms = 0
+       AND c.resync_generation <= p_generation
+       AND c.resync_generation > p_generation - p_lookback;
+$$;
+
+
+--
 -- Name: pms_reconciliation_settings_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -5975,22 +5992,33 @@ $$;
 
 
 --
--- Name: pms_record_resync_coverage(uuid, uuid, uuid, bigint, integer, integer, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
+-- Name: pms_record_resync_coverage(uuid, uuid, uuid, bigint, text[], integer, integer, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
-CREATE FUNCTION iam_v2.pms_record_resync_coverage(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_rooms integer, p_roster integer, p_vacant integer) RETURNS void
+CREATE FUNCTION iam_v2.pms_record_resync_coverage(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_rooms text[], p_roster integer, p_vacant integer, p_conflicts integer DEFAULT 0) RETURNS void
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
 BEGIN
     INSERT INTO iam_v2.pms_resync_coverage AS c
-        (tenant_id, site_id, pms_interface_id, resync_generation, rooms_named, roster_records, vacant_rooms)
-    VALUES (p_tenant, p_site, p_iface, p_generation, p_rooms, p_roster, p_vacant)
+        (tenant_id, site_id, pms_interface_id, resync_generation,
+         rooms_named, roster_records, vacant_rooms, rooms, conflicting_rooms)
+    VALUES (p_tenant, p_site, p_iface, p_generation,
+            COALESCE(array_length(p_rooms, 1), 0), p_roster, p_vacant,
+            COALESCE(p_rooms, '{}'), COALESCE(p_conflicts, 0))
     ON CONFLICT (tenant_id, site_id, pms_interface_id, resync_generation) DO UPDATE
-       SET rooms_named = EXCLUDED.rooms_named,
-           roster_records = EXCLUDED.roster_records,
-           vacant_rooms = EXCLUDED.vacant_rooms,
-           observed_at = now();
+       SET rooms_named       = COALESCE(array_length(EXCLUDED.rooms, 1), 0),
+           roster_records    = EXCLUDED.roster_records,
+           vacant_rooms      = EXCLUDED.vacant_rooms,
+           rooms             = EXCLUDED.rooms,
+           conflicting_rooms = EXCLUDED.conflicting_rooms,
+           observed_at       = now();
+
+    -- Bounded history. One row per sweep and this property resyncs constantly, so without this the table
+    -- grows for ever to answer a question that only ever looks at recent generations.
+    DELETE FROM iam_v2.pms_resync_coverage d
+     WHERE d.tenant_id = p_tenant AND d.site_id = p_site AND d.pms_interface_id = p_iface
+       AND d.resync_generation <= p_generation - 500;
 END;
 $$;
 
@@ -6023,7 +6051,8 @@ CREATE FUNCTION iam_v2.pms_roster_reconcile(p_tenant uuid, p_site uuid, p_iface 
 DECLARE
     v_floor int; v_cap int; v_tol int; v_look int;
     v_roster int; v_mirror int; v_absent int; v_closed int := 0; v_protected int := 0;
-    v_rooms int; v_expected int := 0;
+    v_rooms int; v_expected int := 0; v_missing int := 0; v_conflicts int := 0;
+    v_have boolean := false;
     v_published bigint; v_boundary timestamptz; v_run uuid; v_outcome text;
     v_sync text; v_cont text; v_scope int;
 BEGIN
@@ -6057,15 +6086,23 @@ BEGIN
      WHERE s.tenant_id = p_tenant AND s.site_id = p_site AND s.pms_interface_id = p_iface
        AND s.status = 'IN_HOUSE';
 
-    -- OBSERVED coverage for this generation, and the building as recent sweeps have described it.
-    SELECT c.rooms_named INTO v_rooms FROM iam_v2.pms_resync_coverage c
+    SELECT true, c.rooms_named, c.conflicting_rooms INTO v_have, v_rooms, v_conflicts
+      FROM iam_v2.pms_resync_coverage c
      WHERE c.tenant_id = p_tenant AND c.site_id = p_site AND c.pms_interface_id = p_iface
        AND c.resync_generation = p_generation;
 
-    SELECT COALESCE(max(c.rooms_named), 0) INTO v_expected FROM iam_v2.pms_resync_coverage c
-     WHERE c.tenant_id = p_tenant AND c.site_id = p_site AND c.pms_interface_id = p_iface
-       AND c.resync_generation <= p_generation
-       AND c.resync_generation > p_generation - v_look;
+    -- COMPLETENESS BY IDENTITY. Not "did it name enough rooms" but "which rooms of the building did it fail
+    -- to name". A wing swapped for a wing keeps the count and fails this.
+    IF v_have THEN
+        SELECT count(*) INTO v_expected
+          FROM iam_v2.pms_known_room_inventory(p_tenant, p_site, p_iface, p_generation, v_look);
+        SELECT count(*) INTO v_missing FROM (
+            SELECT room FROM iam_v2.pms_known_room_inventory(p_tenant, p_site, p_iface, p_generation, v_look)
+            EXCEPT
+            SELECT r FROM iam_v2.pms_resync_coverage c, LATERAL unnest(c.rooms) r
+             WHERE c.tenant_id = p_tenant AND c.site_id = p_site AND c.pms_interface_id = p_iface
+               AND c.resync_generation = p_generation) m;
+    END IF;
 
     CREATE TEMP TABLE _absent ON COMMIT DROP AS
     SELECT s.id, s.external_reservation_id
@@ -6103,10 +6140,13 @@ BEGIN
         v_outcome := 'REFUSED_GENERATION_NOT_LATEST';
     ELSIF v_sync IS DISTINCT FROM 'IN_SYNC' OR v_cont IS DISTINCT FROM 'CONTINUOUS' THEN
         v_outcome := 'REFUSED_LINK_NOT_HEALTHY';
-    ELSIF v_rooms IS NULL THEN
-        -- No observation recorded for this sweep. Defer; the next complete resync writes one.
+    ELSIF NOT v_have THEN
         v_outcome := 'REFUSED_NO_COVERAGE_EVIDENCE';
-    ELSIF v_expected > 0 AND v_rooms < v_expected - v_tol THEN
+    ELSIF v_conflicts > 0 THEN
+        -- The sweep disagreed with itself about the state of a room. Nothing here is safe to act on, and no
+        -- operator can adjudicate it -- only the next uncontradicted sweep can.
+        v_outcome := 'REFUSED_CONFLICTING_OBSERVATIONS';
+    ELSIF v_expected > 0 AND v_missing > v_tol THEN
         v_outcome := 'REFUSED_ROSTER_INCOMPLETE';
     ELSIF v_roster < v_floor THEN
         v_outcome := 'REFUSED_ROSTER_TOO_SMALL';
@@ -8846,6 +8886,9 @@ CREATE TABLE iam_v2.pms_resync_coverage (
     roster_records integer NOT NULL,
     vacant_rooms integer NOT NULL,
     observed_at timestamp with time zone DEFAULT now() NOT NULL,
+    rooms text[] DEFAULT '{}'::text[] NOT NULL,
+    conflicting_rooms integer DEFAULT 0 NOT NULL,
+    CONSTRAINT prc_conflicts_sane CHECK ((conflicting_rooms >= 0)),
     CONSTRAINT prc_counts_sane CHECK (((rooms_named >= 0) AND (roster_records >= 0) AND (vacant_rooms >= 0)))
 );
 
@@ -8855,6 +8898,20 @@ CREATE TABLE iam_v2.pms_resync_coverage (
 --
 
 COMMENT ON TABLE iam_v2.pms_resync_coverage IS 'What each completed resync OBSERVED: distinct rooms named, split into occupied (admitted) and vacant (observed but never admitted as departures). Evidence about a sweep, never about a guest.';
+
+
+--
+-- Name: COLUMN pms_resync_coverage.rooms; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.pms_resync_coverage.rooms IS 'The room identities this sweep named, normalized and sorted. Completeness is a set difference against recent sweeps, not a count. Rooms are spaces, not people: no reservation, name, stay or event is stored here.';
+
+
+--
+-- Name: COLUMN pms_resync_coverage.conflicting_rooms; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.pms_resync_coverage.conflicting_rooms IS 'Rooms this sweep reported BOTH occupied and empty. Any value above zero makes the generation unusable for reconciliation.';
 
 
 --
@@ -8900,7 +8957,7 @@ CREATE TABLE iam_v2.pms_roster_reconciliation_runs (
     run_by text NOT NULL,
     reason text,
     CONSTRAINT pms_roster_reconciliation_runs_mode_check CHECK ((mode = ANY (ARRAY['DRY_RUN'::text, 'APPLY'::text]))),
-    CONSTRAINT pms_roster_reconciliation_runs_outcome_check CHECK ((outcome = ANY (ARRAY['COMPLETED'::text, 'REFUSED_ROSTER_TOO_SMALL'::text, 'REFUSED_GENERATION_UNPUBLISHED'::text, 'REFUSED_CAP_EXCEEDED'::text, 'REFUSED_GENERATION_NOT_LATEST'::text, 'REFUSED_LINK_NOT_HEALTHY'::text, 'REFUSED_ROSTER_INCOMPLETE'::text, 'REFUSED_SCOPE_MISMATCH'::text, 'REFUSED_NO_COVERAGE_EVIDENCE'::text]))),
+    CONSTRAINT pms_roster_reconciliation_runs_outcome_check CHECK ((outcome = ANY (ARRAY['COMPLETED'::text, 'REFUSED_ROSTER_TOO_SMALL'::text, 'REFUSED_GENERATION_UNPUBLISHED'::text, 'REFUSED_CAP_EXCEEDED'::text, 'REFUSED_GENERATION_NOT_LATEST'::text, 'REFUSED_LINK_NOT_HEALTHY'::text, 'REFUSED_ROSTER_INCOMPLETE'::text, 'REFUSED_SCOPE_MISMATCH'::text, 'REFUSED_NO_COVERAGE_EVIDENCE'::text, 'REFUSED_CONFLICTING_OBSERVATIONS'::text]))),
     CONSTRAINT pms_roster_reconciliation_runs_reason_check CHECK (((reason IS NULL) OR (length(reason) <= 500))),
     CONSTRAINT pms_roster_reconciliation_runs_run_by_check CHECK ((length(btrim(run_by)) > 0))
 );
