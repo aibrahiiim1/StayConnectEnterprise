@@ -1,0 +1,30 @@
+{
+  "transition_id": "T0125",
+  "seq": 125,
+  "timestamp": "2026-09-13T19:30:00Z",
+  "timestamp_derivation": "After the room-identity contract, conflict detection and identity-based coverage were proven by five Go regressions and an end-to-end SQL proof; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "PRE_LIVE_RECONCILIATION_ROOM_IDENTITY_AND_CONFLICT_SAFETY",
+  "gaps_closed": {
+    "one_room_contract": "The vacant observation path keyed rooms on a trimmed value while the occupied path also lowercased. On digit-only rooms the two agree, which is why it survived review; on 'A12' the same room counts twice and rooms_named exceeds the building, making a PARTIAL sweep look COMPLETE. roomKey is now the single contract for every identity in the connector.",
+    "coverage_by_identity": "Completeness was a count. A sweep naming the right NUMBER of the wrong rooms passed it. Coverage now stores room identities and completeness is a set difference against the inventory recent uncontradicted sweeps describe. Proven: a sweep naming 60 rooms of which 10 are not in the building is refused where a count passes it.",
+    "conflict_detection": "A room reported occupied AND empty inside one generation was invisible to a count. It now yields REFUSED_CONFLICTING_OBSERVATIONS, closes nothing, and the contradicted generation cannot contribute to the room inventory either."
+  },
+  "sharers_preserved": "Two reservations in one room remain fully supported: one identity, zero conflicts, two admitted events, two roster records. This is the case the original defect turned on.",
+  "known_tradeoff": "A bogus sweep contributes its rooms to the inventory union for the lookback window, so reconciliation stays cautious for a few generations rather than immediately. It self-heals as the generation ages out, and erring toward refusing is correct for a mechanism that closes guests' stays.",
+  "standing_exception": "docs/operations/STANDING_PMS_EXCEPTION_GO_UNKNOWN_STAY.md records the one departure this appliance cannot place: a LIVE Guest-Out of 2026-08-23 carrying a valid reservation for which no arrival was ever received. No stay is fabricated, the case is not hidden, and the two decisions that could resolve it are written down.",
+  "automatic_operation_preserved": "pmsd still records coverage and reconciles on every complete published generation. Nothing added here requires an operator action.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-13: complete the remaining reconciliation safety fixes -- one shared room-normalisation contract, coverage verified by room identity, explicit conflict detection preventing closures, end-to-end regressions, and the standing exception documented without fabrication.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}
