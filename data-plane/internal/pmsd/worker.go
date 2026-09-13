@@ -216,10 +216,11 @@ type workerSink struct {
 
 	// What the sweep now in flight OBSERVED. Held until the publish succeeds: coverage describes an
 	// authoritative roster, and a sweep that never published never produced one.
-	covSeen   bool
-	covRooms  int
-	covRoster int
-	covVacant int
+	covSeen      bool
+	covRooms     []string
+	covRoster    int
+	covVacant    int
+	covConflicts int
 }
 
 // stage writes durable operator-visible progress. Progress reporting must never break a sync, so a failed
@@ -291,8 +292,9 @@ func (s *workerSink) OnResyncStart(at time.Time) error {
 // RecordCoverage stores what the sweep observed on the sink, to be persisted with the publish. It is held
 // rather than written immediately so that an interrupted sweep -- one that never reaches DE's publish --
 // leaves no coverage row claiming a roster that never became authoritative.
-func (s *workerSink) RecordCoverage(rooms, rosterRecords, vacantRooms int) {
-	s.covRooms, s.covRoster, s.covVacant = rooms, rosterRecords, vacantRooms
+func (s *workerSink) RecordCoverage(rooms []string, rosterRecords, vacantRecords, conflictingRooms int) {
+	s.covRooms, s.covRoster, s.covVacant = rooms, rosterRecords, vacantRecords
+	s.covConflicts = conflictingRooms
 	s.covSeen = true
 }
 
@@ -322,7 +324,7 @@ func (s *workerSink) OnResyncComplete(at time.Time, _ string) error {
 	// property that resyncs produces a fresh authoritative generation every time.
 	if s.covSeen {
 		if err := s.w.repo.RecordResyncCoverage(s.ctx, ResyncScope{s.ax()}, s.resyncGen,
-			s.covRooms, s.covRoster, s.covVacant); err != nil {
+			s.covRooms, s.covRoster, s.covVacant, s.covConflicts); err != nil {
 			s.w.deps.log().Warn("pmsd: could not record what the sweep observed; reconciliation will defer",
 				"err", err, "generation", s.resyncGen)
 		}

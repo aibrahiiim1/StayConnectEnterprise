@@ -15,7 +15,12 @@ import (
 // recordingSink captures axis calls + domain events for protocol assertions.
 // coverageReport is what a sweep told the sink it OBSERVED, so a test can assert that vacant rooms are
 // counted as part of the building even though they are never admitted as departures.
-type coverageReport struct{ Rooms, Roster, Vacant int }
+type coverageReport struct {
+	Rooms     []string
+	Roster    int
+	Vacant    int
+	Conflicts int
+}
 
 type recordingSink struct {
 	mu sync.Mutex
@@ -585,8 +590,8 @@ func TestAdapter_CoverageCountsTheBuildingNotTheAdmissions(t *testing.T) {
 		t.Fatalf("a completed sweep must report its observation exactly once, got %d", len(sink.coverage))
 	}
 	c := sink.coverage[0]
-	if c.Rooms != 4 {
-		t.Errorf("the sweep described 4 rooms; coverage says %d — the vacant rooms are part of the building", c.Rooms)
+	if len(c.Rooms) != 4 {
+		t.Errorf("the sweep described 4 rooms; coverage says %d — the vacant rooms are part of the building", len(c.Rooms))
 	}
 	if c.Roster != 2 {
 		t.Errorf("occupied records = %d, want 2", c.Roster)
@@ -633,12 +638,181 @@ func TestAdapter_CoverageIsPerSweep(t *testing.T) {
 	if len(sink.coverage) != 2 {
 		t.Fatalf("two sweeps, two observations; got %d", len(sink.coverage))
 	}
-	if sink.coverage[0].Rooms != 2 {
-		t.Errorf("first sweep named 2 rooms, coverage says %d", sink.coverage[0].Rooms)
+	if len(sink.coverage[0].Rooms) != 2 {
+		t.Errorf("first sweep named 2 rooms, coverage says %d", len(sink.coverage[0].Rooms))
 	}
-	if sink.coverage[1].Rooms != 3 {
+	if len(sink.coverage[1].Rooms) != 3 {
 		t.Errorf("second sweep named 3 rooms, coverage says %d — the count did not reset at DS",
-			sink.coverage[1].Rooms)
+			len(sink.coverage[1].Rooms))
+	}
+}
+
+// roomsOf renders a coverage report's identities for an assertion message.
+func (c coverageReport) has(room string) bool {
+	for _, r := range c.Rooms {
+		if r == room {
+			return true
+		}
+	}
+	return false
+}
+
+// TestAdapter_RoomIdentityIsOneContract is the regression for a latent flaw found by read-only audit: the
+// vacant path keyed rooms on a trimmed value while the occupied path also lowercased. On a property whose
+// rooms are digits the two agree and nothing shows. On one with "A12" the same room counts TWICE, and
+// rooms_named comes out larger than the building -- which makes a PARTIAL sweep look complete, and
+// completeness is what licenses closing a guest's stay.
+//
+// Here one room is named "A12" while occupied and "a12" while vacant. That is one room and one
+// contradiction, never two rooms.
+func TestAdapter_RoomIdentityIsOneContract(t *testing.T) {
+	adapter, server := newAdapterOverPipe(t)
+	sink := &recordingSink{q: NewBoundedQueue(16, time.Second)}
+
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		br := bufio.NewReader(server)
+		for i := 0; i < 5; i++ {
+			if _, err := pms.ReadFramedRecord(br); err != nil {
+				return
+			}
+		}
+		for _, rec := range []string{
+			"DS|",
+			"GI|RNA12|G#3001|", // occupied, upper case
+			"GI|RNB07|G#3002|",
+			"GO|RN a12 |", // the SAME room, lower case and padded
+			"DE|",
+		} {
+			if err := pms.WriteFramedRecord(server, rec); err != nil {
+				return
+			}
+		}
+		time.Sleep(30 * time.Millisecond)
+		_ = server.Close()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = adapter.Serve(ctx, sink)
+	<-serverDone
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.coverage) != 1 {
+		t.Fatalf("expected one observation, got %d", len(sink.coverage))
+	}
+	c := sink.coverage[0]
+	if len(c.Rooms) != 2 {
+		t.Errorf("A12 and a12 are ONE room: expected 2 identities, got %d (%v)", len(c.Rooms), c.Rooms)
+	}
+	if !c.has("a12") || !c.has("b07") {
+		t.Errorf("identities must be normalized under one contract, got %v", c.Rooms)
+	}
+	if c.Conflicts != 1 {
+		t.Errorf("the same room reported occupied and empty is ONE conflict, got %d", c.Conflicts)
+	}
+}
+
+// TestAdapter_ConflictingObservationIsReported proves a sweep that reports a room both occupied and empty
+// says so. Under a count this is invisible -- one room, two observations, totals still add up -- and
+// reconciliation would close stays on a building it cannot describe.
+func TestAdapter_ConflictingObservationIsReported(t *testing.T) {
+	adapter, server := newAdapterOverPipe(t)
+	sink := &recordingSink{q: NewBoundedQueue(16, time.Second)}
+
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		br := bufio.NewReader(server)
+		for i := 0; i < 5; i++ {
+			if _, err := pms.ReadFramedRecord(br); err != nil {
+				return
+			}
+		}
+		for _, rec := range []string{
+			"DS|",
+			"GI|RN301|G#4001|",
+			"GI|RN302|G#4002|",
+			"GO|RN301|", // 301 is occupied AND empty in the same sweep
+			"GO|RN303|", // an ordinary vacant room
+			"DE|",
+		} {
+			if err := pms.WriteFramedRecord(server, rec); err != nil {
+				return
+			}
+		}
+		time.Sleep(30 * time.Millisecond)
+		_ = server.Close()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = adapter.Serve(ctx, sink)
+	<-serverDone
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	c := sink.coverage[0]
+	if c.Conflicts != 1 {
+		t.Errorf("room 301 was reported occupied and empty: conflicts = %d, want 1", c.Conflicts)
+	}
+	if len(c.Rooms) != 3 {
+		t.Errorf("the union is 301, 302, 303 = 3 identities, got %d (%v)", len(c.Rooms), c.Rooms)
+	}
+}
+
+// TestAdapter_SharersAreNotConflicts keeps the legitimate case working. Two reservations in one room is
+// ordinary hotel life -- it is what made a room-keyed departure undecidable in the first place -- and it
+// must never be mistaken for the contradiction above.
+func TestAdapter_SharersAreNotConflicts(t *testing.T) {
+	adapter, server := newAdapterOverPipe(t)
+	sink := &recordingSink{q: NewBoundedQueue(16, time.Second)}
+
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		br := bufio.NewReader(server)
+		for i := 0; i < 5; i++ {
+			if _, err := pms.ReadFramedRecord(br); err != nil {
+				return
+			}
+		}
+		for _, rec := range []string{
+			"DS|",
+			"GI|RN401|G#5001|", // two guests
+			"GI|RN401|G#5002|", // sharing one room
+			"GO|RN402|",
+			"DE|",
+		} {
+			if err := pms.WriteFramedRecord(server, rec); err != nil {
+				return
+			}
+		}
+		time.Sleep(30 * time.Millisecond)
+		_ = server.Close()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = adapter.Serve(ctx, sink)
+	<-serverDone
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.events) != 2 {
+		t.Fatalf("both sharers must be admitted as events, got %d", len(sink.events))
+	}
+	c := sink.coverage[0]
+	if c.Conflicts != 0 {
+		t.Errorf("sharers are not a contradiction: conflicts = %d, want 0", c.Conflicts)
+	}
+	if len(c.Rooms) != 2 {
+		t.Errorf("two records in one room plus one vacant = 2 identities, got %d (%v)", len(c.Rooms), c.Rooms)
+	}
+	if c.Roster != 2 {
+		t.Errorf("occupied RECORDS = %d, want 2 — the record count keeps both sharers", c.Roster)
 	}
 }
 
@@ -757,8 +931,8 @@ func (s *recordingSink) RecordSkipped(n int64) {
 	s.skippedReports = append(s.skippedReports, n)
 }
 
-func (s *recordingSink) RecordCoverage(rooms, rosterRecords, vacantRooms int) {
+func (s *recordingSink) RecordCoverage(rooms []string, rosterRecords, vacantRecords, conflicts int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.coverage = append(s.coverage, coverageReport{rooms, rosterRecords, vacantRooms})
+	s.coverage = append(s.coverage, coverageReport{rooms, rosterRecords, vacantRecords, conflicts})
 }
