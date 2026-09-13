@@ -1,0 +1,4 @@
+commit cdb85634dd15e1cb08e74523f51ff6b6be364b39
+Date:   Sun Sep 13 23:46:26 2026 +0300
+
+    Governance: T0126 records the inventory-aging defect and its fix
