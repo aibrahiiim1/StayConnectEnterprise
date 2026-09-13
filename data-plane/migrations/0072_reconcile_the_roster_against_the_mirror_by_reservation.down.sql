@@ -14,7 +14,7 @@ BEGIN;
 DROP FUNCTION IF EXISTS iam_v2.pms_dispose_snapshot_cases(uuid, uuid, uuid, text, text);
 DROP FUNCTION IF EXISTS iam_v2.pms_roster_reconcile(uuid, uuid, uuid, bigint, text, boolean, text);
 DROP FUNCTION IF EXISTS iam_v2.pms_roster_of_generation(uuid, uuid, uuid, bigint);
-DROP FUNCTION IF EXISTS iam_v2.pms_reconciliation_settings_set(uuid, uuid, integer, integer, text, text);
+DROP FUNCTION IF EXISTS iam_v2.pms_reconciliation_settings_set(uuid, uuid, integer, integer, text, text, integer, integer);
 DROP FUNCTION IF EXISTS iam_v2.pms_reconciliation_settings_get(uuid, uuid);
 
 DROP TRIGGER IF EXISTS pms_case_resolutions_no_update ON iam_v2.pms_case_resolutions;
