@@ -14,6 +14,44 @@ import {
 } from "@/lib/health-words";
 
 describe("describeOutbox", () => {
+  // LICENSING ONLY IS A DECISION AND MUST NOT READ AS A FAULT.
+  //
+  // The property decided its operations stay on its own appliance and Central serves it for licensing alone.
+  // The danger is not that the screen looks wrong — it is that it looks ACTIONABLE, because the obvious
+  // repair for "cloud reporting is not working" is to turn cloud reporting back on. These assertions are the
+  // ones that stop a future operator undoing an approved decision by following the UI.
+  it("states licensing-only plainly, with no fault tone and nothing to reconnect", () => {
+    const r = describeOutbox({ enabled: false, mode: "LICENSING_ONLY", pending: 0, dead: 0 });
+    expect(r.headline).toBe("Licensing only");
+    expect(r.tone).toBe("default");
+    expect(r.summary).toMatch(/licence only/i);
+    expect(r.summary).toMatch(/intentionally switched off/i);
+    expect(r.summary).toMatch(/nothing needs reconnecting/i);
+  });
+
+  it("never nudges towards reconnecting or blames a backlog when licensing-only", () => {
+    // Even with a queue behind it, which is exactly the situation after reporting is switched off: the
+    // records it produced while enabled are still on disk.
+    const r = describeOutbox({ enabled: false, mode: "LICENSING_ONLY", pending: 87_000, dead: 0 });
+    expect(r.tone).toBe("default");
+    expect(r.summary).not.toMatch(/not draining|check Cloud connection|waiting to be sent|gave up/i);
+    expect(r.headline).not.toMatch(/waiting|given up/i);
+  });
+
+  it("still answers the only question an operator has about a cloud message", () => {
+    const r = describeOutbox({ enabled: false, mode: "LICENSING_ONLY" });
+    expect(r.summary).toMatch(/guest internet, sign-in, the PMS connection, sessions and accounting/i);
+    expect(r.summary).toMatch(/locally/i);
+  });
+
+  // FULL mode must be unaffected: this delivery changes what one appliance does, not what the wording engine
+  // can express.
+  it("leaves full-reporting behaviour intact", () => {
+    const r = describeOutbox({ enabled: true, mode: "FULL", pending: 5000, dead: 0, delivery: { state: "RECEIVER_UNAVAILABLE" } });
+    expect(r.tone).toBe("err");
+    expect(r.headline).toMatch(/not listening/i);
+  });
+
   // WHY THE QUEUE IS NOT DRAINING IS A FACT, NOT AN INFERENCE FROM ITS SIZE.
   //
   // The old rule read the pending count and concluded "the queue is not draining — check Cloud connection".

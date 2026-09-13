@@ -1,0 +1,4 @@
+commit f485944cc0b1896c83f6e7422f461cafe9eedb7d
+Date:   Sun Sep 13 05:21:15 2026 +0300
+
+    Central serves this appliance for licensing only

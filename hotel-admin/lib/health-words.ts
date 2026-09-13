@@ -17,6 +17,9 @@ export type Tone = "ok" | "warn" | "err" | "default";
 
 export type OutboxFigures = {
   enabled: boolean;
+  /** What this appliance may say to Central. LICENSING_ONLY is a decision, not a fault. */
+  mode?: "LICENSING_ONLY" | "FULL";
+  reason?: string;
   pending?: number;
   dead?: number;
   oldest_pending?: string | null;
@@ -68,6 +71,27 @@ const num = (v: number) => v.toLocaleString();
  * locally. A large backlog is a reporting problem, not an outage.
  */
 export function describeOutbox(o?: OutboxFigures | null): Explained {
+  // LICENSING ONLY IS A DECISION, AND MUST NOT READ AS A FAULT.
+  //
+  // This is the state the property is actually in: the hotel decided its operations stay on its own
+  // appliance, and Central serves it for licensing alone. An operator seeing "not draining" or a nudge to
+  // check the cloud connection would be reading a correct configuration as a problem, and the obvious
+  // "repair" is the one thing that must not happen — turning the reporting back on.
+  //
+  // So there is no tone above neutral here, no call to action, and no mention of a backlog. What there IS:
+  // a plain statement of what still works, because the question behind every cloud message on this screen
+  // is whether guests are affected.
+  if (o && o.mode === "LICENSING_ONLY") {
+    return {
+      headline: "Licensing only",
+      summary:
+        "This appliance uses the StayConnect cloud for its licence only. Operational reporting is " +
+        "intentionally switched off, so nothing is being sent and nothing needs reconnecting. Guest " +
+        "internet, sign-in, the PMS connection, sessions and accounting all run locally on this appliance " +
+        "and are unaffected.",
+      tone: "default",
+    };
+  }
   if (!o || !o.enabled) {
     return {
       headline: "Not in use",

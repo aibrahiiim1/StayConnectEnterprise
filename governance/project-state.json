@@ -1093,14 +1093,14 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0121",
+  "latest_transition_id": "T0122",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
   },
   "acceptance_candidate_head": "ac6816456be0e5bbaf2aa1c67c36b33032328ccb",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD of the Phase-6 change manifest. delivery_head is that commit plus one delivery-only commit; the manifest is generated from the STAGED tree so its path set already covers the complete base..delivery_head diff.",
-  "inventory_head": "58f708ce82f877d617e3a47e9fe1824b20dbc066",
+  "inventory_head": "f485944cc0b1896c83f6e7422f461cafe9eedb7d",
   "delivery_head_note": "delivery_head (the Phase-6 PR HEAD) = inventory_head + one delivery-only commit. Its exact 40-character SHA is recorded in the PR body and verified to resolve on the authoritative remote before the delivery is reported.",
   "roadmap_exhaustion": {
     "recorded_by": "D28 / T0065 (2026-08-17)",
@@ -1588,11 +1588,11 @@
     "kind": "POST_CLOSURE_CORRECTIONS",
     "decision": "D40",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "11c7ca9f361c919aa6fcf13cdf342be3621f2cfd",
-    "base_note": "The master merge commit of PR #115, which closed guest sign-in protection. This consolidated correction delivery begins exactly where that one ended.",
-    "head": "58f708ce82f877d617e3a47e9fe1824b20dbc066",
+    "base": "7f0e928b96db9d118ff85d7804ee945607610bc7",
+    "base_note": "The master merge commit of PR #118. This delivery begins exactly where that one ended.",
+    "head": "f485944cc0b1896c83f6e7422f461cafe9eedb7d",
     "head_note": "Set by the delivery-only commit that rebuilds the manifest, the export packs and this pointer.",
-    "note": "One consolidated delivery, by Product-Owner instruction: the session allowance display, the Central telemetry dedupe transaction, the cloud-sync recovery/retention/accounting, the PMS reconciliation corrections, the credential rotation, and the agreed project records. Merged once as 244d9dd6; this lineage carries the deployment-time correction that moved the queue's operator objects into iam_v2. T0121 is the receipt."
+    "note": "Central serves this appliance for licensing only (T0122). Supersedes the telemetry activation completed under T0121, which worked and was disabled by decision."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
@@ -1695,5 +1695,15 @@
   ],
   "observations": [
     "DATA-HYGIENE OBSERVATION, NON-BLOCKING, NOTHING MODIFIED (2026-09-09). The dataset carries additional IN_HOUSE Stay rows for room 4202 (an 11-night 2026-08-28 to 2026-09-08 and an earlier 11-night) and separate rows for room 14202, whose number merely contains '4202'. The room-4202 acceptance was unambiguous: only the current 4-night stay holds an Entitlement. No Stay was edited, deleted or reclassified, and none should be on the strength of this note; it is recorded so the rows are not mistaken later for a double grant."
-  ]
+  ],
+  "central_relationship": {
+    "_note": "STANDING PRODUCT-OWNER DECISION, 2026-09-13: Central serves this appliance for LICENSING ONLY. It supersedes the earlier authorisation to activate operational telemetry. The telemetry link was built, completed and verified (87,742 records delivered, both sides reconciled, zero orphaned) and was then DISABLED BY DECISION. It is not a defect, and reconnecting telemetry must never be proposed as a repair.",
+    "mode": "LICENSING_ONLY",
+    "enforced_by": "iam_v2.site_cloud_mode + internal/cloudmode; every uncertainty (no row, no scope, unreadable setting, unrecognised value) resolves to LICENSING_ONLY so the mode cannot silently reactivate through defaults, restart or reconciliation.",
+    "retained": "HTTPS to ctrlapi only: /v1/appliances/register, /enroll; /v1/appliance/csr, /certificate; /v1/appliance/license, /offline-reconcile; /v1/appliance/hello (licence enforcement -- how a deleted appliance stops serving on a stale cached licence); /v1/appliance/assignment, /assignment-registry, /assignment/ack.",
+    "stopped": "The whole NATS transport: telemetry publishes (usage, health, service_health, license_ack), remote guest-session revoke, remote PMS test/cache/health, the tenant PMS config broadcast, the signed command channel, the software-update agent.",
+    "license_ack_is_not_licensing": "Central stores it as a telemetry row; nothing consumes it and no licence operation depends on it. A report ABOUT licensing is not licensing.",
+    "historical_records": "Retained on both sides. Nothing purged, no table dropped, no queued record replayed. The existing 30-day delivered-record retention still runs locally.",
+    "receipt": "T0122"
+  }
 }

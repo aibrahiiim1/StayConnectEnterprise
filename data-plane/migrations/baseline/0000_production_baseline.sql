@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0070, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0071, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -577,6 +577,79 @@ BEGIN
   UPDATE iam_v2.sessions SET state='ended', ended=now(), end_reason=p_reason WHERE id=p_session;
   RETURN 'ENDED';
 END; $$;
+
+
+--
+-- Name: cloud_mode_changes_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.cloud_mode_changes_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RAISE EXCEPTION 'iam_v2.cloud_mode_changes is append-only: % refused', TG_OP
+        USING ERRCODE = 'restrict_violation';
+END;
+$$;
+
+
+--
+-- Name: cloud_mode_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.cloud_mode_get(p_tenant uuid, p_site uuid) RETURNS TABLE(mode text, config_version bigint, updated_at timestamp with time zone, is_default boolean)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+    SELECT COALESCE(m.mode, 'LICENSING_ONLY'),
+           COALESCE(m.config_version, 0),
+           m.updated_at,
+           (m.tenant_id IS NULL)
+      FROM (SELECT p_tenant AS t, p_site AS s) k
+      LEFT JOIN iam_v2.site_cloud_mode m ON m.tenant_id = k.t AND m.site_id = k.s;
+$$;
+
+
+--
+-- Name: cloud_mode_set(uuid, uuid, text, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.cloud_mode_set(p_tenant uuid, p_site uuid, p_mode text, p_operator text, p_reason text DEFAULT NULL::text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE
+    v_old text;
+    v_new_version bigint;
+BEGIN
+    IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
+        RAISE EXCEPTION 'cloud mode: an operator identity is required'
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF p_mode IS NULL OR p_mode NOT IN ('LICENSING_ONLY','FULL') THEN
+        RAISE EXCEPTION 'cloud mode must be LICENSING_ONLY or FULL (got %)', p_mode
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    PERFORM pg_advisory_xact_lock(hashtext('cloud_mode'), hashtext(p_site::text));
+
+    SELECT m.mode INTO v_old FROM iam_v2.site_cloud_mode m
+     WHERE m.tenant_id = p_tenant AND m.site_id = p_site FOR UPDATE;
+
+    INSERT INTO iam_v2.site_cloud_mode AS m (tenant_id, site_id, mode, config_version, updated_at)
+    VALUES (p_tenant, p_site, p_mode, 1, now())
+    ON CONFLICT (tenant_id, site_id) DO UPDATE
+       SET mode = EXCLUDED.mode, config_version = m.config_version + 1, updated_at = now()
+    RETURNING m.config_version INTO v_new_version;
+
+    INSERT INTO iam_v2.cloud_mode_changes
+           (tenant_id, site_id, changed_by, reason, old_mode, new_mode, new_config_version)
+    VALUES (p_tenant, p_site, btrim(p_operator), NULLIF(btrim(COALESCE(p_reason,'')), ''),
+            v_old, p_mode, v_new_version);
+
+    RETURN v_new_version;
+END;
+$$;
 
 
 --
@@ -7061,6 +7134,25 @@ CREATE TABLE iam_v2.checkout_grace_policy_publications (
 
 
 --
+-- Name: cloud_mode_changes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.cloud_mode_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by text NOT NULL,
+    reason text,
+    old_mode text,
+    new_mode text NOT NULL,
+    new_config_version bigint NOT NULL,
+    CONSTRAINT cloud_mode_changes_changed_by_check CHECK ((length(btrim(changed_by)) > 0)),
+    CONSTRAINT cloud_mode_changes_reason_check CHECK (((reason IS NULL) OR (length(reason) <= 500)))
+);
+
+
+--
 -- Name: cloud_sync_settings_changes; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -8939,6 +9031,28 @@ CREATE TABLE iam_v2.site_checkout_grace_config (
 
 
 --
+-- Name: site_cloud_mode; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.site_cloud_mode (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    mode text DEFAULT 'LICENSING_ONLY'::text NOT NULL,
+    config_version bigint DEFAULT 1 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT scm_mode_known CHECK ((mode = ANY (ARRAY['LICENSING_ONLY'::text, 'FULL'::text]))),
+    CONSTRAINT scm_version_positive CHECK ((config_version >= 1))
+);
+
+
+--
+-- Name: TABLE site_cloud_mode; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.site_cloud_mode IS 'What this site may say to Central. LICENSING_ONLY (the default, and what absence of a row means): licence, appliance identity, certificate lifecycle and the signed assignment, over HTTPS only. FULL additionally opens the cloud telemetry transport. Changing it takes an audited write; there is no UI switch.';
+
+
+--
 -- Name: site_cloud_sync_settings; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -10208,6 +10322,14 @@ ALTER TABLE ONLY iam_v2.checkout_grace_policy_publications
 
 
 --
+-- Name: cloud_mode_changes cloud_mode_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.cloud_mode_changes
+    ADD CONSTRAINT cloud_mode_changes_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: cloud_sync_settings_changes cloud_sync_settings_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -11224,6 +11346,14 @@ ALTER TABLE ONLY iam_v2.site_checkout_grace_config
 
 
 --
+-- Name: site_cloud_mode site_cloud_mode_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.site_cloud_mode
+    ADD CONSTRAINT site_cloud_mode_pkey PRIMARY KEY (tenant_id, site_id);
+
+
+--
 -- Name: site_cloud_sync_settings site_cloud_sync_settings_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -11785,6 +11915,13 @@ CREATE INDEX aps_changes_lookup ON iam_v2.appliance_product_setting_changes USIN
 --
 
 CREATE UNIQUE INDEX auth_resolutions_req_idem ON iam_v2.auth_resolutions USING btree (tenant_id, site_id, resolution_request_id) WHERE (resolution_request_id IS NOT NULL);
+
+
+--
+-- Name: cloud_mode_changes_recent_idx; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX cloud_mode_changes_recent_idx ON iam_v2.cloud_mode_changes USING btree (tenant_id, site_id, changed_at DESC);
 
 
 --
@@ -12520,6 +12657,13 @@ CREATE TRIGGER ao_review BEFORE DELETE OR UPDATE ON iam_v2.posting_review_action
 --
 
 CREATE TRIGGER charge_gate BEFORE INSERT ON iam_v2.pms_postings FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_posting_charge_gate();
+
+
+--
+-- Name: cloud_mode_changes cloud_mode_changes_no_update; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER cloud_mode_changes_no_update BEFORE DELETE OR UPDATE ON iam_v2.cloud_mode_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.cloud_mode_changes_append_only();
 
 
 --
@@ -14406,6 +14550,22 @@ REVOKE ALL ON FUNCTION iam_v2.bootstrap_emergency_grace(p_tenant uuid, p_site uu
 
 
 --
+-- Name: FUNCTION cloud_mode_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.cloud_mode_get(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.cloud_mode_get(p_tenant uuid, p_site uuid) TO svc_scd;
+GRANT ALL ON FUNCTION iam_v2.cloud_mode_get(p_tenant uuid, p_site uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION cloud_mode_set(p_tenant uuid, p_site uuid, p_mode text, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.cloud_mode_set(p_tenant uuid, p_site uuid, p_mode text, p_operator text, p_reason text) FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION cloud_sync_settings_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -15347,6 +15507,13 @@ GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.auth_contexts TO svc_scd;
 
 GRANT SELECT,INSERT ON TABLE iam_v2.auth_resolutions TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.auth_resolutions TO svc_edged;
+
+
+--
+-- Name: TABLE cloud_mode_changes; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.cloud_mode_changes TO svc_edged;
 
 
 --

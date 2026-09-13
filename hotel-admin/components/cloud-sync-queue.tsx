@@ -82,6 +82,11 @@ export function CloudSyncQueueCard({
 
   const words = describeOutbox(outbox);
   const o = outbox ?? { enabled: false };
+  // LICENSING ONLY CHANGES WHAT THIS CARD IS FOR. It stops being a queue you act on and becomes a statement
+  // of what the appliance does and does not send. Recovery is hidden because returning records to a queue
+  // with no transport would promise a delivery that cannot happen; retention stays visible because it still
+  // runs, and it is the one number here that still changes anything.
+  const licensingOnly = o.mode === "LICENSING_ONLY";
   const exhausted = o.dead ?? 0;
   const unbalanced = o.balanced === false;
 
@@ -174,7 +179,24 @@ export function CloudSyncQueueCard({
           </p>
         )}
 
-        <Row k="In use" v={o.enabled ? "yes" : "no"} />
+        <Row
+          k="Cloud role"
+          v={
+            licensingOnly ? (
+              <Badge tone="info">Licensing only</Badge>
+            ) : (
+              <Badge tone="default">{o.enabled ? "Licence and reporting" : "Not in use"}</Badge>
+            )
+          }
+        />
+        {licensingOnly && (
+          <p className="text-xs text-muted-foreground">
+            This appliance contacts the StayConnect cloud for its licence, its own identity and the
+            certificate that authenticates them — and for nothing else. Operational reporting is switched off
+            by decision, not by a fault. The figures below are the records this appliance produced while
+            reporting was enabled; they are kept, not sent.
+          </p>
+        )}
         <Row k="Delivered" v={num(o.delivered)} />
         <Row
           k="Waiting to be sent"
@@ -214,7 +236,7 @@ export function CloudSyncQueueCard({
           {words.summary}
         </Callout>
 
-        {canRecover && exhausted > 0 && (
+        {canRecover && exhausted > 0 && !licensingOnly && (
           <div className="space-y-2 rounded-md border border-border p-3">
             <p className="text-sm">
               <strong>{num(exhausted)}</strong> record{exhausted === 1 ? " was" : "s were"} retried until the
