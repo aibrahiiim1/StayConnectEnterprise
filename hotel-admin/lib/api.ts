@@ -1440,6 +1440,52 @@ export type ReconciliationSummary = {
   stays_past_departure_absent_from_roster: number;
 };
 
+/** Why a reconciliation run did or did not act. Every refusal is a guard with a reason, not an error. */
+export type ReconcileOutcome =
+  | "COMPLETED"
+  | "REFUSED_ROSTER_INCOMPLETE"
+  | "REFUSED_GENERATION_NOT_LATEST"
+  | "REFUSED_GENERATION_UNPUBLISHED"
+  | "REFUSED_LINK_NOT_HEALTHY"
+  | "REFUSED_SCOPE_MISMATCH"
+  | "REFUSED_ROSTER_TOO_SMALL"
+  | "REFUSED_CAP_EXCEEDED";
+
+export type ReconcileRun = {
+  outcome: ReconcileOutcome;
+  roster_size: number;
+  mirror_in_house: number;
+  absent_from_roster: number;
+  stays_closed: number;
+  rooms_enumerated: number;
+  rooms_expected: number;
+  protected_by_newer_events: number;
+  run_id?: string;
+};
+
+export type RosterReconciliationState = {
+  settings: {
+    roster_trust_min: number;
+    inventory_tolerance: number;
+    inventory_lookback: number;
+    max_close_per_run: number;
+    config_version: number;
+    is_default: boolean;
+  };
+  generation: number;
+  preview: ReconcileRun;
+  undisposed_cases: number;
+  pms_interface_id: string;
+};
+
+export type ReconcileRunRecord = ReconcileRun & {
+  mode: "DRY_RUN" | "APPLY";
+  resync_generation: number;
+  run_at: string;
+  run_by: string;
+  reason: string;
+};
+
 export type MultiOccupancyRoom = {
   room: string;
   stays_in_room: number;

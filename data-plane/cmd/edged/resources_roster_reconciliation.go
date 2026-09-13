@@ -1,0 +1,287 @@
+package main
+
+// Roster reconciliation: the operator surface for closing stays the PMS no longer lists.
+//
+// WHY THIS IS A SEPARATE KEY FROM pms-reconciliation. Reading "which guests does the PMS and the mirror
+// disagree about" is a question the desk asks hourly. Closing three hundred stays in one action is not the
+// same power, and a role that may do the first has no business doing the second by accident. So the case
+// list stays where it was, read-only for everyone, and this resource carries the action.
+//
+// WHAT CHANGED SINCE THE CASE LIST WAS WRITTEN. Its comment said there is no local action, because
+// stay_events is one-way and a checkout boundary must be an APPLIED GO event. That is still true of an
+// individual recorded departure, and nothing here rewrites one. What is new is that a COMPLETE published
+// roster is authoritative evidence in its own right: it is the PMS stating, in full, who is in the building.
+// Closing a stay it does not mention is a deduction from a complete statement, not a re-interpretation of a
+// departure the engine already refused.
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
+)
+
+type reconcileRunOut struct {
+	Outcome          string  `json:"outcome"`
+	RosterSize       int     `json:"roster_size"`
+	MirrorInHouse    int     `json:"mirror_in_house"`
+	AbsentFromRoster int     `json:"absent_from_roster"`
+	StaysClosed      int     `json:"stays_closed"`
+	RoomsEnumerated  int     `json:"rooms_enumerated"`
+	RoomsExpected    int     `json:"rooms_expected"`
+	Protected        int     `json:"protected_by_newer_events"`
+	RunID            *string `json:"run_id,omitempty"`
+}
+
+func (s *server) rosterReconciliationRoutes() http.Handler {
+	r := chi.NewRouter()
+	r.Get("/", s.rosterReconciliationState)
+	r.Get("/runs", s.listReconciliationRuns)
+	r.Post("/preview", s.previewRosterReconcile)
+	r.Post("/apply", s.applyRosterReconcile)
+	r.Post("/dispose-snapshots", s.disposeSnapshotCases)
+	r.Put("/settings", s.updateReconciliationSettings)
+	return r
+}
+
+// rosterReconciliationState answers the one question the screen opens with: what would happen if I ran this
+// now, and on what evidence. It is a DRY RUN, so opening the page never changes anything.
+func (s *server) rosterReconciliationState(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+
+	var (
+		floor, tol, look, cap_ int
+		version                int64
+		isDefault              bool
+	)
+	if err := s.db.QueryRow(ctx, `SELECT roster_trust_min, inventory_tolerance, inventory_lookback,
+		max_close_per_run, config_version, is_default
+		FROM iam_v2.pms_reconciliation_settings_get($1::uuid,$2::uuid)`,
+		s.tenantID, s.siteID).Scan(&floor, &tol, &look, &cap_, &version, &isDefault); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "settings_unreadable", err.Error())
+		return
+	}
+
+	iface, gen, ok := s.currentInterfaceAndGeneration(w, r)
+	if !ok {
+		return
+	}
+
+	preview, ok := s.runReconcile(w, r, iface, gen, false, "opened the reconciliation screen")
+	if !ok {
+		return
+	}
+
+	var pending int
+	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.stay_events e
+		 WHERE e.tenant_id=$1 AND e.site_id=$2 AND e.processing_status='MANUAL_REVIEW'
+		   AND NOT EXISTS (SELECT 1 FROM iam_v2.pms_case_resolutions x WHERE x.stay_event_id=e.id)`,
+		s.tenantID, s.siteID).Scan(&pending)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"settings": map[string]any{
+			"roster_trust_min": floor, "inventory_tolerance": tol,
+			"inventory_lookback": look, "max_close_per_run": cap_,
+			"config_version": version, "is_default": isDefault,
+		},
+		"generation":       gen,
+		"preview":          preview,
+		"undisposed_cases": pending,
+		"pms_interface_id": iface,
+	})
+}
+
+func (s *server) currentInterfaceAndGeneration(w http.ResponseWriter, r *http.Request) (string, int64, bool) {
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	var iface string
+	var gen int64
+	err := s.db.QueryRow(ctx, `SELECT pms_interface_id::text, published_resync_generation
+		  FROM iam_v2.pms_interface_runtime WHERE tenant_id=$1 AND site_id=$2
+		 ORDER BY published_resync_generation DESC LIMIT 1`, s.tenantID, s.siteID).Scan(&iface, &gen)
+	if err != nil {
+		jsonErr(w, http.StatusServiceUnavailable, "no_interface_runtime",
+			"no PMS interface runtime for this site")
+		return "", 0, false
+	}
+	return iface, gen, true
+}
+
+// runReconcile is the single call site for the reconcile function, so preview and apply cannot drift apart.
+func (s *server) runReconcile(w http.ResponseWriter, r *http.Request, iface string, gen int64,
+	apply bool, reason string) (*reconcileRunOut, bool) {
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+
+	sess := sessFrom(r.Context())
+	operator := "unknown"
+	if sess != nil {
+		operator = sess.Email
+		if strings.TrimSpace(operator) == "" {
+			operator = sess.OperatorID
+		}
+	}
+
+	var out reconcileRunOut
+	err := s.db.QueryRow(ctx, `SELECT outcome, roster_size, mirror_in_house, absent_from_roster,
+		stays_closed, rooms_enumerated, rooms_expected, protected, run_id::text
+		FROM iam_v2.pms_roster_reconcile($1::uuid,$2::uuid,$3::uuid,$4::bigint,$5,$6,$7)`,
+		s.tenantID, s.siteID, iface, gen, operator, apply, reason).
+		Scan(&out.Outcome, &out.RosterSize, &out.MirrorInHouse, &out.AbsentFromRoster,
+			&out.StaysClosed, &out.RoomsEnumerated, &out.RoomsExpected, &out.Protected, &out.RunID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "reconcile_failed", err.Error())
+		return nil, false
+	}
+	return &out, true
+}
+
+func (s *server) previewRosterReconcile(w http.ResponseWriter, r *http.Request) {
+	iface, gen, ok := s.currentInterfaceAndGeneration(w, r)
+	if !ok {
+		return
+	}
+	out, ok := s.runReconcile(w, r, iface, gen, false, bodyReason(r))
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *server) applyRosterReconcile(w http.ResponseWriter, r *http.Request) {
+	iface, gen, ok := s.currentInterfaceAndGeneration(w, r)
+	if !ok {
+		return
+	}
+	reason := bodyReason(r)
+	if strings.TrimSpace(reason) == "" {
+		jsonErr(w, http.StatusBadRequest, "reason_required",
+			"closing stays in bulk requires a recorded reason")
+		return
+	}
+	out, ok := s.runReconcile(w, r, iface, gen, true, reason)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// disposeSnapshotCases answers the historical roster-snapshot cases in bulk. It closes no stay and changes
+// no event: it appends a disposition saying what those records actually were.
+func (s *server) disposeSnapshotCases(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	iface, _, ok := s.currentInterfaceAndGeneration(w, r)
+	if !ok {
+		return
+	}
+	sess := sessFrom(r.Context())
+	operator := "unknown"
+	if sess != nil {
+		operator = sess.Email
+	}
+	var n int
+	if err := s.db.QueryRow(ctx,
+		`SELECT iam_v2.pms_dispose_snapshot_cases($1::uuid,$2::uuid,$3::uuid,$4,$5)`,
+		s.tenantID, s.siteID, iface, operator, bodyReason(r)).Scan(&n); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "dispose_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"disposed": n})
+}
+
+func (s *server) listReconciliationRuns(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	rows, err := s.db.Query(ctx, `SELECT mode, outcome, roster_size, mirror_in_house, absent_from_roster,
+		stays_closed, rooms_enumerated, rooms_expected, protected_by_newer_events,
+		resync_generation, run_at, run_by, COALESCE(reason,'')
+		FROM iam_v2.pms_roster_reconciliation_runs
+		WHERE tenant_id=$1 AND site_id=$2 ORDER BY run_at DESC LIMIT 100`, s.tenantID, s.siteID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "runs_unreadable", err.Error())
+		return
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var mode, outcome, runBy, reason string
+		var roster, mirror, absent, closed, rooms, expected, protected int
+		var gen int64
+		var at any
+		if err := rows.Scan(&mode, &outcome, &roster, &mirror, &absent, &closed, &rooms, &expected,
+			&protected, &gen, &at, &runBy, &reason); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "runs_unreadable", err.Error())
+			return
+		}
+		out = append(out, map[string]any{
+			"mode": mode, "outcome": outcome, "roster_size": roster, "mirror_in_house": mirror,
+			"absent_from_roster": absent, "stays_closed": closed, "rooms_enumerated": rooms,
+			"rooms_expected": expected, "protected_by_newer_events": protected,
+			"resync_generation": gen, "run_at": at, "run_by": runBy, "reason": reason,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"runs": out})
+}
+
+func (s *server) updateReconciliationSettings(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	var in struct {
+		RosterTrustMin     *int   `json:"roster_trust_min"`
+		InventoryTolerance *int   `json:"inventory_tolerance"`
+		InventoryLookback  *int   `json:"inventory_lookback"`
+		MaxClosePerRun     *int   `json:"max_close_per_run"`
+		Reason             string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+		return
+	}
+	sess := sessFrom(r.Context())
+	operator := "unknown"
+	if sess != nil {
+		operator = sess.Email
+	}
+	// Read current values so a partial update changes only what was sent.
+	var floor, tol, look, cap_ int
+	var version int64
+	var isDefault bool
+	if err := s.db.QueryRow(ctx, `SELECT roster_trust_min, inventory_tolerance, inventory_lookback,
+		max_close_per_run, config_version, is_default
+		FROM iam_v2.pms_reconciliation_settings_get($1::uuid,$2::uuid)`,
+		s.tenantID, s.siteID).Scan(&floor, &tol, &look, &cap_, &version, &isDefault); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "settings_unreadable", err.Error())
+		return
+	}
+	if in.RosterTrustMin != nil {
+		floor = *in.RosterTrustMin
+	}
+	if in.MaxClosePerRun != nil {
+		cap_ = *in.MaxClosePerRun
+	}
+	if in.InventoryTolerance != nil {
+		tol = *in.InventoryTolerance
+	}
+	if in.InventoryLookback != nil {
+		look = *in.InventoryLookback
+	}
+	var newVersion int64
+	if err := s.db.QueryRow(ctx,
+		`SELECT iam_v2.pms_reconciliation_settings_set($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8)`,
+		s.tenantID, s.siteID, floor, cap_, operator, in.Reason, tol, look).Scan(&newVersion); err != nil {
+		jsonErr(w, http.StatusBadRequest, "settings_rejected", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"config_version": newVersion})
+}
+
+func bodyReason(r *http.Request) string {
+	var in struct {
+		Reason string `json:"reason"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&in)
+	return strings.TrimSpace(in.Reason)
+}
