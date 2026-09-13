@@ -244,3 +244,14 @@ func extractTypedDomainFields(pr ParsedRecord) (typedDomainFields, error) {
 	}
 	return f, nil
 }
+
+// roomOf returns the normalized room a parsed record names, or "" when it names none. Used to count what a
+// sweep OBSERVED, including records that are deliberately never admitted.
+func roomOf(pr ParsedRecord) string {
+	for _, p := range pr.Fields {
+		if p.Code == fcRoom {
+			return strings.TrimSpace(p.Value)
+		}
+	}
+	return ""
+}
