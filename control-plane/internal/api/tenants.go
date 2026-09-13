@@ -56,7 +56,6 @@ func (b *Base) TenantsRoutes() http.Handler {
 	r.With(RequireReauth(b.Redis)).Put("/{tenantID}/limit-overrides", b.setOverride)
 	r.With(RequireReauth(b.Redis)).Delete("/{tenantID}/limit-overrides/{key}", b.deleteOverride)
 	r.Get("/{tenantID}/audit", b.listAudit)
-	r.Mount("/{tenantID}/usage", b.UsageRoutes())
 
 	return r
 }
