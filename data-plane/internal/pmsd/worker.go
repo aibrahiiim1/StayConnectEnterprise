@@ -28,17 +28,37 @@ func (w *worker) stop(grace time.Duration) {
 }
 
 func (w *worker) run(ctx context.Context) {
-	bo := newBackoff(w.deps.BackoffMin, w.deps.BackoffMax, w.deps.rnd)
+	// The bounds are read fresh on every cycle rather than captured once, so an operator widening the
+	// backoff for a PMS that restarts nightly takes effect on the next reconnect instead of the next
+	// deployment. An unreadable setting falls back to the compiled defaults and says so once -- a
+	// configuration problem must never be a reason to stop reconnecting to a hotel's PMS.
+	settings := ConnectionSettings{
+		BackoffMin: w.deps.BackoffMin, BackoffMax: w.deps.BackoffMax,
+		StableResetAfter: w.deps.StableResetAfter,
+	}
+	bo := newBackoff(settings.BackoffMin, settings.BackoffMax, w.deps.rnd)
+	warned := false
 	for {
 		if ctx.Err() != nil {
 			return
+		}
+		if s, err := w.repo.LoadConnectionSettings(ctx, w.iface.TenantID, w.iface.SiteID); err == nil {
+			if s != settings {
+				settings = s
+				bo = newBackoff(settings.BackoffMin, settings.BackoffMax, w.deps.rnd)
+			}
+			warned = false
+		} else if !warned {
+			warned = true
+			w.deps.log().Warn("pmsd: reconnect bounds unreadable; using compiled defaults",
+				"err", err, "interface", w.iface.ID)
 		}
 		w.attempt++
 		stable, err := w.ownAndServe(ctx)
 		if ctx.Err() != nil {
 			return
 		}
-		if err == nil || stable >= w.deps.StableResetAfter {
+		if err == nil || stable >= settings.StableResetAfter {
 			bo.reset()
 		}
 		select {

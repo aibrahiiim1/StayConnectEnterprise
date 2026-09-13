@@ -816,6 +816,118 @@ func TestAdapter_SharersAreNotConflicts(t *testing.T) {
 	}
 }
 
+// TestAdapter_InterruptedSweepPublishesNothing verifies the recovery guarantee that everything else rests
+// on: a socket lost MID-ROSTER must leave no trace. No coverage observation, so reconciliation cannot later
+// measure completeness against half a building; no publish, so the last known-good mirror keeps serving
+// guests untouched.
+//
+// This is the first half of the failure-to-recovery sequence and it is verification of EXISTING behaviour,
+// not new work -- written down because the guarantee was relied upon and never asserted.
+func TestAdapter_InterruptedSweepPublishesNothing(t *testing.T) {
+	adapter, server := newAdapterOverPipe(t)
+	sink := &recordingSink{q: NewBoundedQueue(16, time.Second)}
+
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		br := bufio.NewReader(server)
+		for i := 0; i < 5; i++ {
+			if _, err := pms.ReadFramedRecord(br); err != nil {
+				return
+			}
+		}
+		// A roster starts and the link dies in the middle of it. No DE ever arrives.
+		for _, rec := range []string{"DS|", "GI|RN501|G#6001|", "GO|RN502|"} {
+			if err := pms.WriteFramedRecord(server, rec); err != nil {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+		_ = server.Close() // the socket dies mid-sweep
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = adapter.Serve(ctx, sink)
+	<-serverDone
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.coverage) != 0 {
+		t.Errorf("an interrupted sweep must report NO observation, got %d: %+v", len(sink.coverage), sink.coverage)
+	}
+	if sink.resyncStart != 1 {
+		t.Errorf("the sweep did start (DS seen): resyncStart = %d, want 1", sink.resyncStart)
+	}
+	if sink.resyncComplete != 0 {
+		t.Errorf("no DE arrived, so nothing may be published: resyncComplete = %d, want 0", sink.resyncComplete)
+	}
+}
+
+// TestAdapter_RecoversWithAFreshSweepAfterInterruption is the second half: after the interruption the
+// connector does not resume the broken roster, it asks for a whole new one. Recovery through the PMS's own
+// mechanism -- a DR, then a complete DS..DE -- and the observation that finally gets recorded describes the
+// WHOLE building, never the fragment that was in flight when the link died.
+func TestAdapter_RecoversWithAFreshSweepAfterInterruption(t *testing.T) {
+	adapter, server := newAdapterOverPipe(t)
+	sink := &recordingSink{q: NewBoundedQueue(32, time.Second)}
+
+	var requested []string
+	var mu sync.Mutex
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		br := bufio.NewReader(server)
+		for i := 0; i < 5; i++ { // startup handshake
+			body, err := pms.ReadFramedRecord(br)
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			requested = append(requested, pms.RecordID(body))
+			mu.Unlock()
+		}
+		// First sweep dies mid-roster.
+		for _, rec := range []string{"DS|", "GI|RN601|G#7001|", "GO|RN602|"} {
+			if err := pms.WriteFramedRecord(server, rec); err != nil {
+				return
+			}
+		}
+		// The link recovers in place: a complete sweep follows, describing the whole building.
+		for _, rec := range []string{
+			"DS|", "GI|RN601|G#7001|", "GI|RN602|G#7002|", "GO|RN603|", "DE|",
+		} {
+			if err := pms.WriteFramedRecord(server, rec); err != nil {
+				return
+			}
+		}
+		time.Sleep(30 * time.Millisecond)
+		_ = server.Close()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = adapter.Serve(ctx, sink)
+	<-serverDone
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.coverage) != 1 {
+		t.Fatalf("exactly one COMPLETE sweep may report an observation, got %d", len(sink.coverage))
+	}
+	c := sink.coverage[0]
+	if len(c.Rooms) != 3 {
+		t.Errorf("the recovered sweep describes the whole building (601, 602, 603), got %d: %v",
+			len(c.Rooms), c.Rooms)
+	}
+	if c.Conflicts != 0 {
+		t.Errorf("the abandoned fragment must not leak into the recovered sweep: conflicts = %d", c.Conflicts)
+	}
+	if sink.resyncComplete != 1 {
+		t.Errorf("exactly one generation may publish, got %d", sink.resyncComplete)
+	}
+}
+
 // TestAdapter_InitialResyncRequestsDR proves §G/§H: after the startup handshake the adapter raises the
 // barrier (RequireInitialResync) and sends the initial DR resync request through the single writer, before
 // any live admission.

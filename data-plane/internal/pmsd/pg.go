@@ -505,3 +505,21 @@ func (r *pgRepo) ReconcileRoster(ctx context.Context, req ResyncScope, generatio
 			&o.RoomsEnumerated, &o.RoomsExpected, &o.Protected)
 	return o, err
 }
+
+// LoadConnectionSettings reads this site's reconnect bounds. Absence of a row yields the approved defaults
+// from the definer function, so a fresh appliance reconnects sensibly before anyone has configured anything.
+func (r *pgRepo) LoadConnectionSettings(ctx context.Context, tenantID, siteID string) (ConnectionSettings, error) {
+	var minMs, maxMs, stableS int
+	err := r.pool.QueryRow(ctx,
+		`SELECT backoff_min_ms, backoff_max_ms, stable_reset_seconds
+		   FROM iam_v2.pms_connection_settings_get($1::uuid,$2::uuid)`, tenantID, siteID).
+		Scan(&minMs, &maxMs, &stableS)
+	if err != nil {
+		return ConnectionSettings{}, err
+	}
+	return ConnectionSettings{
+		BackoffMin:       time.Duration(minMs) * time.Millisecond,
+		BackoffMax:       time.Duration(maxMs) * time.Millisecond,
+		StableResetAfter: time.Duration(stableS) * time.Second,
+	}, nil
+}

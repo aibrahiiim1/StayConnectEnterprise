@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -80,7 +81,29 @@ func (s *server) rosterReconciliationState(w http.ResponseWriter, r *http.Reques
 		   AND NOT EXISTS (SELECT 1 FROM iam_v2.pms_case_resolutions x WHERE x.stay_event_id=e.id)`,
 		s.tenantID, s.siteID).Scan(&pending)
 
+	// WHAT IS STANDING IN THE WAY, in the same response as the state itself. A blocker is derived from facts
+	// already recorded -- there is nothing to acknowledge and nothing to clear -- so it appears exactly as
+	// long as the condition lasts. Each one says whether guests are affected, because a PMS link alarm reads
+	// as an outage unless it states plainly that the mirror is still authorising people.
+	blockers := []map[string]any{}
+	if rows, err := s.db.Query(ctx,
+		`SELECT blocker, since, detail, guests_affected
+		   FROM iam_v2.pms_integration_blockers($1::uuid,$2::uuid)`, s.tenantID, s.siteID); err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var kind, detail string
+			var since *time.Time
+			var affected bool
+			if err := rows.Scan(&kind, &since, &detail, &affected); err == nil {
+				blockers = append(blockers, map[string]any{
+					"blocker": kind, "since": since, "detail": detail, "guests_affected": affected,
+				})
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
+		"blockers": blockers,
 		"settings": map[string]any{
 			"roster_trust_min": floor, "inventory_tolerance": tol,
 			"inventory_lookback": look, "max_close_per_run": cap_,
