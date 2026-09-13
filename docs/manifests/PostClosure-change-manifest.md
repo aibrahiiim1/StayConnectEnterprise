@@ -2,7 +2,7 @@
 
 - **Base commit:** `8b76113af0c747cf1bb8ba74dc6838a2292d044a`
 - **HEAD commit:** `88372ebff654b11cc5b46fded8f6d2c8306c627b`
-- **Provenance (generation HEAD = inventory_head):** `75974759d3279e61603ee546d9c271dd6937916e`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `0390fa03ee4db65dd8a9b273218bcff39a2e066c`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/central-licensing-removal-and-pms-departures`
 - **Remote branch:** `origin/delivery/central-licensing-removal-and-pms-departures`
 - **Changed files:** 52
@@ -12,7 +12,7 @@
 
 | Path | Classification | Git status | Domain | Workstream | Rollback | Purpose (last commit subject in range) |
 |---|---|---|---|---|---|---|
-| `.github/workflows/project-governance.yml` | MODIFIED | `M` | configuration | CI | rollback RESTORES prior content | (no commit subject in range) |
+| `.github/workflows/project-governance.yml` | MODIFIED | `M` | configuration | CI | rollback RESTORES prior content | Authenticate the ruleset read, so "unverifiable" stops meaning "unlucky" |
 | `CONTINUATION.md` | CREATED | `A` | other | OTHER | rollback REMOVES it | Finish the Central removal on the host, and prove the PMS fix over a full resync |
 | `cloud-admin/app/(app)/fleet/page.tsx` | DELETED | `D` | runtime | RUNTIME | rollback RESTORES it | Delete the telemetry Central no longer collects |
 | `control-plane/cmd/ctrlapi/main.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Remove Central's non-licensing surfaces, and the transport under them |
@@ -56,7 +56,7 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: manifest, generated blocks and delivery head resynchronized |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: manifest, generated blocks and delivery head resynchronized |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: manifest, generated blocks and delivery head resynchronized |
-| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Regenerate the baseline for 0072, and put T0123 before the commit that introduced it |
+| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Authenticate the ruleset read, so "unverifiable" stops meaning "unlucky" |
 | `docs/manifests/central-licensing-removal-and-pms-departures.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: advance to T0123 and record the complete manifest |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest, generated blocks and delivery head resynchronized |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest, generated blocks and delivery head resynchronized |
@@ -111,7 +111,7 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   2 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   2 +-
  docs/context/StayConnect-IAM-Handoff.md            |   2 +-
- docs/manifests/PostClosure-change-manifest.md      | 219 ++++----
+ docs/manifests/PostClosure-change-manifest.md      | 221 ++++----
  ...central-licensing-removal-and-pms-departures.md | 121 +++++
  .../chatgpt/stayconnectenterprise/00-START-HERE.md |   2 +-
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   2 +-
@@ -119,16 +119,17 @@
  governance/transitions/T0123.json                  |  50 ++
  .../app/(app)/roster-reconciliation/page.tsx       | 234 +++++++++
  hotel-admin/lib/api.ts                             |  46 ++
- 52 files changed, 2370 insertions(+), 4147 deletions(-)
+ 52 files changed, 2372 insertions(+), 4147 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-M  .github/workflows/project-governance.yml
+(clean)
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 0390fa03 Authenticate the ruleset read, so "unverifiable" stops meaning "unlucky"
 HISTORICAL: 75974759 Regenerate the baseline for 0072, and put T0123 before the commit that introduced it
 HISTORICAL: 1516fd96 Delivery: the manifest lists itself
 HISTORICAL: 5a3e8c42 Delivery: manifest, generated blocks and delivery head resynchronized
