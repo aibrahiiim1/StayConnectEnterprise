@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0074, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0075, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -5908,12 +5908,64 @@ CREATE FUNCTION iam_v2.pms_known_room_inventory(p_tenant uuid, p_site uuid, p_if
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
-    SELECT DISTINCT r
-      FROM iam_v2.pms_resync_coverage c, LATERAL unnest(c.rooms) r
+    SELECT unnest(i.rooms) FROM iam_v2.pms_room_inventory i
+     WHERE i.tenant_id = p_tenant AND i.site_id = p_site AND i.pms_interface_id = p_iface;
+$$;
+
+
+--
+-- Name: pms_rebaseline_room_inventory(uuid, uuid, uuid, bigint, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_rebaseline_room_inventory(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_operator text, p_reason text) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_rooms text[]; v_before text[]; v_ver bigint; v_conflicts int;
+BEGIN
+    IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
+        RAISE EXCEPTION 'room inventory: an operator identity is required'
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF p_reason IS NULL OR length(btrim(p_reason)) = 0 THEN
+        RAISE EXCEPTION 'room inventory: shrinking the known building requires a recorded reason'
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+
+    SELECT c.rooms, c.conflicting_rooms INTO v_rooms, v_conflicts
+      FROM iam_v2.pms_resync_coverage c
      WHERE c.tenant_id = p_tenant AND c.site_id = p_site AND c.pms_interface_id = p_iface
-       AND c.conflicting_rooms = 0
-       AND c.resync_generation <= p_generation
-       AND c.resync_generation > p_generation - p_lookback;
+       AND c.resync_generation = p_generation;
+    IF v_rooms IS NULL THEN
+        RAISE EXCEPTION 'room inventory: generation % has no recorded observation to adopt', p_generation
+            USING ERRCODE = 'no_data_found';
+    END IF;
+    IF v_conflicts > 0 THEN
+        RAISE EXCEPTION 'room inventory: generation % contradicted itself and cannot define the building',
+            p_generation USING ERRCODE = 'check_violation';
+    END IF;
+
+    SELECT i.rooms INTO v_before FROM iam_v2.pms_room_inventory i
+     WHERE i.tenant_id = p_tenant AND i.site_id = p_site AND i.pms_interface_id = p_iface FOR UPDATE;
+
+    INSERT INTO iam_v2.pms_room_inventory AS i
+           (tenant_id, site_id, pms_interface_id, rooms, established_from, config_version)
+    VALUES (p_tenant, p_site, p_iface, v_rooms, p_generation, 1)
+    ON CONFLICT (tenant_id, site_id, pms_interface_id) DO UPDATE
+       SET rooms = EXCLUDED.rooms, established_from = p_generation,
+           updated_at = now(), config_version = i.config_version + 1
+    RETURNING i.config_version INTO v_ver;
+
+    INSERT INTO iam_v2.pms_room_inventory_changes
+           (tenant_id, site_id, pms_interface_id, changed_by, reason, change_kind,
+            rooms_before, rooms_after, removed, added, new_config_version)
+    VALUES (p_tenant, p_site, p_iface, btrim(p_operator), btrim(p_reason), 'REBASELINED',
+            COALESCE(array_length(v_before,1),0), COALESCE(array_length(v_rooms,1),0),
+            COALESCE(ARRAY(SELECT unnest(v_before) EXCEPT SELECT unnest(v_rooms)), '{}'),
+            COALESCE(ARRAY(SELECT unnest(v_rooms) EXCEPT SELECT unnest(COALESCE(v_before,'{}'))), '{}'),
+            v_ver);
+    RETURN COALESCE(array_length(v_rooms,1),0);
+END;
 $$;
 
 
@@ -6024,6 +6076,20 @@ $$;
 
 
 --
+-- Name: pms_room_inventory_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_room_inventory_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RAISE EXCEPTION 'iam_v2.pms_room_inventory_changes is append-only: % refused', TG_OP
+        USING ERRCODE = 'restrict_violation';
+END;
+$$;
+
+
+--
 -- Name: pms_roster_of_generation(uuid, uuid, uuid, bigint); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -6052,9 +6118,9 @@ DECLARE
     v_floor int; v_cap int; v_tol int; v_look int;
     v_roster int; v_mirror int; v_absent int; v_closed int := 0; v_protected int := 0;
     v_rooms int; v_expected int := 0; v_missing int := 0; v_conflicts int := 0;
-    v_have boolean := false;
+    v_have boolean := false; v_swept text[]; v_known text[]; v_added text[];
     v_published bigint; v_boundary timestamptz; v_run uuid; v_outcome text;
-    v_sync text; v_cont text; v_scope int;
+    v_sync text; v_cont text; v_scope int; v_ver bigint;
 BEGIN
     IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
         RAISE EXCEPTION 'roster reconciliation: an operator identity is required'
@@ -6086,22 +6152,34 @@ BEGIN
      WHERE s.tenant_id = p_tenant AND s.site_id = p_site AND s.pms_interface_id = p_iface
        AND s.status = 'IN_HOUSE';
 
-    SELECT true, c.rooms_named, c.conflicting_rooms INTO v_have, v_rooms, v_conflicts
+    SELECT true, c.rooms_named, c.conflicting_rooms, c.rooms
+      INTO v_have, v_rooms, v_conflicts, v_swept
       FROM iam_v2.pms_resync_coverage c
      WHERE c.tenant_id = p_tenant AND c.site_id = p_site AND c.pms_interface_id = p_iface
        AND c.resync_generation = p_generation;
 
-    -- COMPLETENESS BY IDENTITY. Not "did it name enough rooms" but "which rooms of the building did it fail
-    -- to name". A wing swapped for a wing keeps the count and fails this.
-    IF v_have THEN
-        SELECT count(*) INTO v_expected
-          FROM iam_v2.pms_known_room_inventory(p_tenant, p_site, p_iface, p_generation, v_look);
-        SELECT count(*) INTO v_missing FROM (
-            SELECT room FROM iam_v2.pms_known_room_inventory(p_tenant, p_site, p_iface, p_generation, v_look)
-            EXCEPT
-            SELECT r FROM iam_v2.pms_resync_coverage c, LATERAL unnest(c.rooms) r
-             WHERE c.tenant_id = p_tenant AND c.site_id = p_site AND c.pms_interface_id = p_iface
-               AND c.resync_generation = p_generation) m;
+    SELECT i.rooms INTO v_known FROM iam_v2.pms_room_inventory i
+     WHERE i.tenant_id = p_tenant AND i.site_id = p_site AND i.pms_interface_id = p_iface;
+
+    -- BOOTSTRAP. The first uncontradicted sweep establishes the building; there is nothing else it could be
+    -- established from, and refusing for ever would make the feature unreachable on a new appliance.
+    IF v_known IS NULL AND v_have AND v_conflicts = 0 AND COALESCE(array_length(v_swept,1),0) > 0 THEN
+        INSERT INTO iam_v2.pms_room_inventory
+               (tenant_id, site_id, pms_interface_id, rooms, established_from, config_version)
+        VALUES (p_tenant, p_site, p_iface, v_swept, p_generation, 1)
+        RETURNING rooms, config_version INTO v_known, v_ver;
+        INSERT INTO iam_v2.pms_room_inventory_changes
+               (tenant_id, site_id, pms_interface_id, changed_by, reason, change_kind,
+                rooms_before, rooms_after, added, new_config_version)
+        VALUES (p_tenant, p_site, p_iface, btrim(p_operator),
+                'established from the first uncontradicted sweep', 'ESTABLISHED',
+                0, COALESCE(array_length(v_swept,1),0), v_swept, v_ver);
+    END IF;
+
+    v_expected := COALESCE(array_length(v_known,1),0);
+    IF v_have AND v_known IS NOT NULL THEN
+        SELECT count(*) INTO v_missing
+          FROM (SELECT unnest(v_known) EXCEPT SELECT unnest(COALESCE(v_swept,'{}'))) m;
     END IF;
 
     CREATE TEMP TABLE _absent ON COMMIT DROP AS
@@ -6143,8 +6221,6 @@ BEGIN
     ELSIF NOT v_have THEN
         v_outcome := 'REFUSED_NO_COVERAGE_EVIDENCE';
     ELSIF v_conflicts > 0 THEN
-        -- The sweep disagreed with itself about the state of a room. Nothing here is safe to act on, and no
-        -- operator can adjudicate it -- only the next uncontradicted sweep can.
         v_outcome := 'REFUSED_CONFLICTING_OBSERVATIONS';
     ELSIF v_expected > 0 AND v_missing > v_tol THEN
         v_outcome := 'REFUSED_ROSTER_INCOMPLETE';
@@ -6165,6 +6241,27 @@ BEGIN
             v_roster, v_mirror, v_absent, 0, v_boundary, btrim(p_operator),
             NULLIF(btrim(COALESCE(p_reason,'')),''), COALESCE(v_rooms,0), v_expected, v_protected)
     RETURNING id INTO v_run;
+
+    IF v_outcome = 'COMPLETED' THEN
+        -- GROWTH, and only here: a sweep that accounted for the building may add rooms to it. A sweep that
+        -- could not is refused above and never reaches this point, so a degraded feed cannot enlarge the
+        -- building any more than it can shrink it.
+        SELECT COALESCE(ARRAY(SELECT unnest(COALESCE(v_swept,'{}')) EXCEPT SELECT unnest(v_known)), '{}')
+          INTO v_added;
+        IF COALESCE(array_length(v_added,1),0) > 0 THEN
+            UPDATE iam_v2.pms_room_inventory
+               SET rooms = ARRAY(SELECT DISTINCT unnest(rooms || v_added) ORDER BY 1),
+                   updated_at = now(), config_version = config_version + 1
+             WHERE tenant_id = p_tenant AND site_id = p_site AND pms_interface_id = p_iface
+            RETURNING config_version INTO v_ver;
+            INSERT INTO iam_v2.pms_room_inventory_changes
+                   (tenant_id, site_id, pms_interface_id, changed_by, reason, change_kind,
+                    rooms_before, rooms_after, added, new_config_version)
+            VALUES (p_tenant, p_site, p_iface, btrim(p_operator),
+                    'a complete sweep named rooms not previously known', 'GREW',
+                    v_expected, v_expected + array_length(v_added,1), v_added, v_ver);
+        END IF;
+    END IF;
 
     IF v_outcome = 'COMPLETED' AND p_apply THEN
         UPDATE iam_v2.stays s
@@ -8915,6 +9012,54 @@ COMMENT ON COLUMN iam_v2.pms_resync_coverage.conflicting_rooms IS 'Rooms this sw
 
 
 --
+-- Name: pms_room_inventory; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.pms_room_inventory (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    pms_interface_id uuid NOT NULL,
+    rooms text[] NOT NULL,
+    established_at timestamp with time zone DEFAULT now() NOT NULL,
+    established_from bigint,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    config_version bigint DEFAULT 1 NOT NULL,
+    CONSTRAINT pri_version_positive CHECK ((config_version >= 1))
+);
+
+
+--
+-- Name: TABLE pms_room_inventory; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.pms_room_inventory IS 'The rooms this property is known to have. Grows only from sweeps that already passed completeness; shrinks only by an audited operator decision. A feed that stops mentioning rooms must never be able to shrink it.';
+
+
+--
+-- Name: pms_room_inventory_changes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.pms_room_inventory_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    pms_interface_id uuid NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by text NOT NULL,
+    reason text,
+    change_kind text NOT NULL,
+    rooms_before integer DEFAULT 0 NOT NULL,
+    rooms_after integer DEFAULT 0 NOT NULL,
+    removed text[] DEFAULT '{}'::text[] NOT NULL,
+    added text[] DEFAULT '{}'::text[] NOT NULL,
+    new_config_version bigint NOT NULL,
+    CONSTRAINT pms_room_inventory_changes_change_kind_check CHECK ((change_kind = ANY (ARRAY['ESTABLISHED'::text, 'GREW'::text, 'REBASELINED'::text]))),
+    CONSTRAINT pms_room_inventory_changes_changed_by_check CHECK ((length(btrim(changed_by)) > 0)),
+    CONSTRAINT pms_room_inventory_changes_reason_check CHECK (((reason IS NULL) OR (length(reason) <= 500)))
+);
+
+
+--
 -- Name: pms_rooms_multi_occupancy; Type: VIEW; Schema: iam_v2; Owner: -
 --
 
@@ -11567,6 +11712,22 @@ ALTER TABLE ONLY iam_v2.pms_resync_coverage
 
 
 --
+-- Name: pms_room_inventory_changes pms_room_inventory_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.pms_room_inventory_changes
+    ADD CONSTRAINT pms_room_inventory_changes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: pms_room_inventory pms_room_inventory_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.pms_room_inventory
+    ADD CONSTRAINT pms_room_inventory_pkey PRIMARY KEY (tenant_id, site_id, pms_interface_id);
+
+
+--
 -- Name: pms_roster_reconciliation_runs pms_roster_reconciliation_runs_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -13851,6 +14012,13 @@ CREATE TRIGGER pms_reconciliation_settings_changes_no_update BEFORE DELETE OR UP
 
 
 --
+-- Name: pms_room_inventory_changes pms_room_inventory_changes_no_update; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER pms_room_inventory_changes_no_update BEFORE DELETE OR UPDATE ON iam_v2.pms_room_inventory_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.pms_room_inventory_append_only();
+
+
+--
 -- Name: purchases purchase_quote_pin_equal; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
@@ -15921,6 +16089,27 @@ REVOKE ALL ON FUNCTION iam_v2.p6_termination_evidence_matches_transition() FROM 
 
 REVOKE ALL ON FUNCTION iam_v2.p6_tick_online_time(p_tenant uuid, p_site uuid, p_now timestamp with time zone, p_max_charge_seconds integer, p_capped_entitlements uuid[], p_caps timestamp with time zone[]) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.p6_tick_online_time(p_tenant uuid, p_site uuid, p_now timestamp with time zone, p_max_charge_seconds integer, p_capped_entitlements uuid[], p_caps timestamp with time zone[]) TO svc_acctd;
+
+
+--
+-- Name: FUNCTION pms_known_room_inventory(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_lookback integer); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.pms_known_room_inventory(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_lookback integer) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION pms_rebaseline_room_inventory(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.pms_rebaseline_room_inventory(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_operator text, p_reason text) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION pms_roster_reconcile(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_operator text, p_apply boolean, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.pms_roster_reconcile(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_operator text, p_apply boolean, p_reason text) FROM PUBLIC;
 
 
 --
