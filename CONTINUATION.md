@@ -1,7 +1,8 @@
 # Continuation checkpoint
 
 Branch: `delivery/central-licensing-removal-and-pms-departures` (off master `8b76113a`).
-Nothing merged. Nothing deployed. Appliance `172.21.60.25` and Central `150.0.0.252` unchanged.
+Nothing merged yet. PARTLY DEPLOYED: the PMS fix is live on `172.21.60.25` and Central `150.0.0.252` has
+had its telemetry dropped. See the DONE sections below for exactly what changed on each host.
 
 ## Commits so far
 
@@ -17,8 +18,8 @@ Nothing merged. Nothing deployed. Appliance `172.21.60.25` and Central `150.0.0.
 * LIVE departures 565/565 carry `G#`; RESYNC departures 14 125, none carry `G#`.
 * A resync enumerates the whole building: GI/GC = occupied, GO = vacant. Totals 588/589/589/589 over
   eleven generations while occupancy moved 445/467/479/454. This is the completeness test.
-* Mirror 821 IN_HOUSE vs 445 rostered at generation 246. 6 stays are CHECKED_OUT while the latest roster
-  still lists them -> wrongly closed by room-keyed resync inference.
+* Mirror 821 IN_HOUSE vs 445 rostered at generation 246. (An earlier reading of this as "6 stays wrongly
+  closed" was WRONG -- see the audit section below; they were live departures after the snapshot.)
 * Appliance: one real interface `ddff5d07-f588-4f1f-8133-a0f393524476` (protel-fias, ACTIVE), 1 568 stays,
   zero test-pattern records. There are no obsolete test records in PMS data.
 * Central: `fleet_telemetry` 251 166 rows / 13 appliance identities / 2026-07-12..2026-09-13;
@@ -91,11 +92,30 @@ Zero inbound foreign keys were verified first. Telemetry tables remaining: 0.
 Verified after: ctrlapi restarted and healthz=200; appliance licence Active, cloud_stale=false, evaluated
 every minute; scd/pmsd/edged/portald all active.
 
+## DONE: Central removal completed on the host
+
+`ctrlapi` rebuilt in `golang:1.25.12` and installed on 150.0.0.252 (rollback:
+`/opt/stayconnect/rollback/central-5e3a60ec/ctrlapi.bak`). healthz 200, readyz 200.
+`stayconnect-nats-authz` stopped and DISABLED; the `sc-central-nats` and `sc-central-nats-mtls` listeners
+stopped. Central now has no NATS surface at all.
+
+Licensing verified unaffected throughout: the appliance's licence still evaluates Active with
+cloud_stale=false every minute, and scd/pmsd/edged/portald/netd are all active.
+
+## FINAL live proof of the PMS fix
+
+Resync generation 248 completed AFTER deployment:
+
+| gen | roster records | snapshot GO admitted |
+|---|---|---|
+| 246 (before) | 445 | 143 |
+| 247 (before) | 439 | 149 |
+| **248 (after)** | **424** | **0** |
+
+Review backlog frozen at 13 717 and no longer growing.
+
 ## Remaining
 
-1. **Deploy the new ctrlapi binary to Central.** The telemetry code is removed in source and the DATA is
-   gone, but 150.0.0.252 still runs the previous ctrlapi build. Harmless (nothing sends to it, and the
-   tables are gone) but the removal is not complete on the host until the binary ships.
-2. Wire reconciliation into pmsd/edged + a Hotel Admin screen, and apply migration 0072 to the appliance.
+1. Wire reconciliation into pmsd/edged + a Hotel Admin screen, and apply migration 0072 to the appliance.
    0072 is written, tested and committed but NOT yet applied anywhere.
 3. Gates, protected merge, governance sync.
