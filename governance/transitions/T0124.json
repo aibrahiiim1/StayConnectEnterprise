@@ -1,8 +1,8 @@
 {
   "transition_id": "T0124",
   "seq": 124,
-  "timestamp": "2026-09-13T18:30:00Z",
-  "timestamp_derivation": "After the historical snapshot-artifact cleanup executed on the appliance and the coverage fix was proven on a disposable PG16; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "timestamp": "2026-09-13T18:05:00Z",
+  "timestamp_derivation": "After the historical snapshot-artifact cleanup executed on the appliance and after the coverage fix was proven on a disposable PG16; before the author timestamp of the commit that introduced this receipt (18:07:35Z). Per T0091, in the order T0108 requires.",
   "record_type": "PRE_LIVE_ROSTER_RECONCILIATION_BECOMES_AUTOMATIC",
   "defect_found_by_live_verification": {
     "what": "Completeness was measured by counting rooms in ADMITTED stay_events. The connector fix stopped admitting vacant-room GO records, which are exactly the ones that made a sweep countable.",
