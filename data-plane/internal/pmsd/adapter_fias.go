@@ -267,9 +267,14 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			// link was down is closed by roster reconciliation against the COMPLETE published generation,
 			// which compares reservation to reservation instead of guessing from a room.
 			//
-			// The LIVE room-only path is deliberately left alone. It has applied 547 real checkouts, and
-			// narrowing it on the strength of three weeks of evidence would trade a working safety net for a
-			// tidier rule.
+			// THE LIVE ROOM-ONLY PATH IS LEFT ALONE, AND IT IS DORMANT, NOT LOAD-BEARING. Correcting an
+			// earlier misreading of this same data: there are no live room-only departures at all. Every one
+			// of the 565 LIVE GO frames carried G#. The 547 room-only departures that DID apply were all
+			// RESYNC frames resolved by room -- the very inference this system is forbidden to make, since a
+			// room's later occupant is a different guest. Six of them closed a stay the roster still lists.
+			//
+			// So this branch is kept as a safety net for a PMS that might one day announce a departure
+			// without a reservation, not because anything currently depends on it.
 			if pr.RecordType == RecGO && resyncing && reservationAbsent(pr) {
 				skippedNoIdentity++
 				if a.log != nil {

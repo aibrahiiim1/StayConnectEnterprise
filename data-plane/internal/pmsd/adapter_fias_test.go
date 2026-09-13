@@ -487,8 +487,8 @@ func TestAdapter_RosterSnapshotDepartureIsNotAnEvent(t *testing.T) {
 			"GO|RN1409|G#777|",
 			"DS|",
 			"DE|",
-			// (3) LIVE and room only — the existing safety net, which has applied 547 real checkouts and is
-			// deliberately untouched.
+			// (3) LIVE and room only — a dormant safety net. No such frame has ever been observed (all 565
+			// live departures carried G#); it is kept for a PMS that might one day send one.
 			"GO|RN1410|",
 		} {
 			if err := pms.WriteFramedRecord(server, rec); err != nil {
