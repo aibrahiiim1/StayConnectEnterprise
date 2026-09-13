@@ -2,7 +2,7 @@
 
 - **Base commit:** `0582eb7847be23583c9fc6c03d6c6c16f5601b79`
 - **HEAD commit:** `90b981b081aff31ea02bc12893e52e57e1b994c5`
-- **Provenance (generation HEAD = inventory_head):** `dff8cabeb877166163e13830997701b8c012fa3b`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `08fdccc3cb222964a4c7633472cb0edd0e1829da`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/automatic-roster-reconciliation`
 - **Remote branch:** `origin/delivery/automatic-roster-reconciliation`
 - **Changed files:** 36
@@ -27,20 +27,20 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0124 records the coverage defect, the automatic flow and the executed cleanup |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0124 records the coverage defect, the automatic flow and the executed cleanup |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0124 records the coverage defect, the automatic flow and the executed cleanup |
-| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: export packs rebuilt for T0124 |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: export packs rebuilt for T0124 |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: export packs rebuilt for T0124 |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: export packs rebuilt for T0124 |
+| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
 | `exports/chatgpt/phase-evidence/GIT_STAT_505bab35.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Delivery: export packs rebuilt for T0124 |
-| `exports/chatgpt/phase-evidence/GIT_STAT_dff8cabe.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: export packs rebuilt for T0124 |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: export packs rebuilt for T0124 |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: export packs rebuilt for T0124 |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: export packs rebuilt for T0124 |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: export packs rebuilt for T0124 |
+| `exports/chatgpt/phase-evidence/GIT_STAT_dff8cabe.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: packs and manifest resynchronized |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: export packs rebuilt for T0124 |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0124 records the coverage defect, the automatic flow and the executed cleanup |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: export packs rebuilt for T0124 |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0124 records the coverage defect, the automatic flow and the executed cleanup |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: export packs rebuilt for T0124 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: export packs rebuilt for T0124 |
@@ -66,7 +66,7 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   2 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   2 +-
  docs/context/StayConnect-IAM-Handoff.md            |   2 +-
- docs/manifests/PostClosure-change-manifest.md      | 187 +++++----------
+ docs/manifests/PostClosure-change-manifest.md      | 224 ++++++------------
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 338377 -> 338377 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 139867 -> 139884 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 43740 -> 43736 bytes
@@ -87,26 +87,17 @@
  .../StayConnect-IAM-Phase1B-Plan.md                |   2 +-
  governance/project-state.json                      |  12 +-
  governance/transitions/T0124.json                  |  40 ++++
- 36 files changed, 811 insertions(+), 352 deletions(-)
+ 36 files changed, 828 insertions(+), 372 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_b02f7732.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_dff8cabe.txt
-M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/MANIFEST.md
-M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
+(clean)
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 08fdccc3 Delivery: packs and manifest resynchronized
 HISTORICAL: dff8cabe Governance: T0124 must precede the commit that carries it
 HISTORICAL: 6d63bcb9 Delivery: export packs rebuilt for T0124
 HISTORICAL: b02f7732 Delivery: manifest resynchronized
