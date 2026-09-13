@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0127",
+  "seq": 127,
+  "timestamp": "2026-09-14T00:30:00Z",
+  "timestamp_derivation": "After existing recovery was verified and the full failure-to-recovery sequence was demonstrated on a disposable PG16; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "PRE_LIVE_PMS_INTEGRATION_COMPLETED_AS_AN_AUTOMATIC_FLOW",
+  "verified_first_unchanged": {
+    "reconnect": "Bounded exponential backoff with jitter, reset after a stable period. Retries are indefinite by design: a PMS returning overnight must be picked up unattended.",
+    "interrupted_sweep": "A socket lost mid-roster publishes nothing and records no observation, so the last known-good mirror keeps serving guests and completeness can never be measured against half a building. Now asserted by TestAdapter_InterruptedSweepPublishesNothing.",
+    "recovery": "A fresh DR and a whole new DS..DE, never a resumption of the fragment in flight. Now asserted by TestAdapter_RecoversWithAFreshSweepAfterInterruption."
+  },
+  "added": {
+    "connection_settings": "backoff_min_ms, backoff_max_ms, stable_reset_seconds, link_down_alert_seconds, blocked_after_refusals -- audited, bounded, defaulted, read fresh on every reconnect cycle. The connector reads and cannot write them.",
+    "integration_blockers": "LINK_DOWN, RECONCILIATION_BLOCKED and DEPARTURE_FOR_UNKNOWN_STAY, DERIVED from facts already recorded. No job, no writer, nothing to acknowledge; a blocker exists exactly as long as its condition does. Each states whether guests are affected, because a link alarm reads as an outage unless it says the mirror is still authorising people."
+  },
+  "defect_fixed": "pms_roster_reconcile used TEMP TABLE ... ON COMMIT DROP, which survives until the transaction commits rather than until the function returns, so a second call in one transaction failed outright. pmsd calls it once per transaction so production never saw it; the first controlled test to drive three generations in one block hit it immediately.",
+  "demonstration": "Healthy (no blockers) -> link down 20 minutes (mirror untouched, LINK_DOWN visible, guests unaffected) -> three degraded sweeps naming 40 of 60 rooms (all REFUSED_ROSTER_INCOMPLETE, nothing closed, all 60 guests keep access, RECONCILIATION_BLOCKED naming the reason) -> full recovery (COMPLETED, 5 genuine departures closed automatically, blocker clears itself, building never shrank).",
+  "invariants_preserved": "No departure is inferred from a vacant-room snapshot; the room inventory never shrinks because rooms leave the feed; no guest data is fabricated; post-snapshot arrivals and changes remain protected; the historical snapshot backlog stays resolved.",
+  "standing_exception": "GO_UNKNOWN_STAY remains documented in docs/operations/STANDING_PMS_EXCEPTION_GO_UNKNOWN_STAY.md and is now also surfaced as the DEPARTURE_FOR_UNKNOWN_STAY blocker -- an external question, stated as one.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-14: complete the PMS integration as an automatic operational flow -- verify existing recovery first, then implement what is missing through supported Protel mechanisms with bounded retries and editable audited settings, without repair buttons or manual reconciliation.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}
