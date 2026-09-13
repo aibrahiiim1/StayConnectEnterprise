@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0071, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0072, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -5853,6 +5853,322 @@ COMMENT ON FUNCTION iam_v2.p6_tick_online_time(p_tenant uuid, p_site uuid, p_now
 
 
 --
+-- Name: pms_case_resolutions_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_case_resolutions_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RAISE EXCEPTION 'iam_v2.pms_case_resolutions is append-only: % refused', TG_OP
+        USING ERRCODE = 'restrict_violation';
+END;
+$$;
+
+
+--
+-- Name: pms_dispose_snapshot_cases(uuid, uuid, uuid, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_dispose_snapshot_cases(p_tenant uuid, p_site uuid, p_iface uuid, p_operator text, p_note text DEFAULT NULL::text) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_n integer;
+BEGIN
+    IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
+        RAISE EXCEPTION 'case disposition: an operator identity is required'
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    INSERT INTO iam_v2.pms_case_resolutions
+        (tenant_id, site_id, pms_interface_id, stay_event_id, disposition, evidence_kind, evidence_ref,
+         resolved_by, note)
+    SELECT e.tenant_id, e.site_id, e.pms_interface_id, e.id,
+           'NOT_A_DEPARTURE_ROSTER_SNAPSHOT', 'ADMISSION_KIND',
+           'RESYNC generation ' || e.resync_generation::text,
+           btrim(p_operator), NULLIF(btrim(COALESCE(p_note,'')),'')
+      FROM iam_v2.stay_events e
+     WHERE e.tenant_id = p_tenant AND e.site_id = p_site AND e.pms_interface_id = p_iface
+       AND e.event_type = 'GO'
+       AND e.processing_status = 'MANUAL_REVIEW'
+       AND e.admission_kind = 'RESYNC'
+       AND btrim(COALESCE(e.payload->>'reservation','')) = ''
+    ON CONFLICT (stay_event_id) DO NOTHING;
+    GET DIAGNOSTICS v_n = ROW_COUNT;
+    RETURN v_n;
+END;
+$$;
+
+
+--
+-- Name: pms_reconciliation_settings_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_reconciliation_settings_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RAISE EXCEPTION 'iam_v2.pms_reconciliation_settings_changes is append-only: % refused', TG_OP
+        USING ERRCODE = 'restrict_violation';
+END;
+$$;
+
+
+--
+-- Name: pms_reconciliation_settings_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_reconciliation_settings_get(p_tenant uuid, p_site uuid) RETURNS TABLE(roster_trust_min integer, inventory_tolerance integer, inventory_lookback integer, max_close_per_run integer, config_version bigint, is_default boolean)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+    SELECT COALESCE(s.roster_trust_min, 50),
+           COALESCE(s.inventory_tolerance, 2),
+           COALESCE(s.inventory_lookback, 10),
+           COALESCE(s.max_close_per_run, 500),
+           COALESCE(s.config_version, 0),
+           (s.tenant_id IS NULL)
+      FROM (SELECT p_tenant AS t, p_site AS s) k
+      LEFT JOIN iam_v2.pms_reconciliation_settings s ON s.tenant_id = k.t AND s.site_id = k.s;
+$$;
+
+
+--
+-- Name: pms_reconciliation_settings_set(uuid, uuid, integer, integer, text, text, integer, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_reconciliation_settings_set(p_tenant uuid, p_site uuid, p_floor integer, p_cap integer, p_operator text, p_reason text DEFAULT NULL::text, p_tolerance integer DEFAULT NULL::integer, p_lookback integer DEFAULT NULL::integer) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_old jsonb; v_ver bigint;
+BEGIN
+    IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
+        RAISE EXCEPTION 'reconciliation settings: an operator identity is required'
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtext('pms_recon_settings'), hashtext(p_site::text));
+    SELECT to_jsonb(s) INTO v_old FROM iam_v2.pms_reconciliation_settings s
+     WHERE s.tenant_id = p_tenant AND s.site_id = p_site FOR UPDATE;
+
+    INSERT INTO iam_v2.pms_reconciliation_settings AS s
+           (tenant_id, site_id, roster_trust_min, max_close_per_run,
+            inventory_tolerance, inventory_lookback, config_version, updated_at)
+    VALUES (p_tenant, p_site, p_floor, p_cap,
+            COALESCE(p_tolerance, 2), COALESCE(p_lookback, 10), 1, now())
+    ON CONFLICT (tenant_id, site_id) DO UPDATE
+       SET roster_trust_min = EXCLUDED.roster_trust_min,
+           max_close_per_run = EXCLUDED.max_close_per_run,
+           inventory_tolerance = COALESCE(p_tolerance, s.inventory_tolerance),
+           inventory_lookback = COALESCE(p_lookback, s.inventory_lookback),
+           config_version = s.config_version + 1, updated_at = now()
+    RETURNING s.config_version INTO v_ver;
+
+    INSERT INTO iam_v2.pms_reconciliation_settings_changes
+           (tenant_id, site_id, changed_by, reason, old_values, new_values, new_config_version)
+    VALUES (p_tenant, p_site, btrim(p_operator), NULLIF(btrim(COALESCE(p_reason,'')),''), v_old,
+            jsonb_build_object('roster_trust_min', p_floor, 'max_close_per_run', p_cap,
+                               'inventory_tolerance', p_tolerance, 'inventory_lookback', p_lookback), v_ver);
+    RETURN v_ver;
+END;
+$$;
+
+
+--
+-- Name: pms_roster_of_generation(uuid, uuid, uuid, bigint); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_roster_of_generation(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint) RETURNS TABLE(reservation text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+    SELECT DISTINCT btrim(e.payload->>'reservation')
+      FROM iam_v2.stay_events e
+     WHERE e.tenant_id = p_tenant AND e.site_id = p_site AND e.pms_interface_id = p_iface
+       AND e.resync_generation = p_generation
+       AND e.event_type IN ('GI','GC')
+       AND btrim(COALESCE(e.payload->>'reservation','')) <> '';
+$$;
+
+
+--
+-- Name: pms_roster_reconcile(uuid, uuid, uuid, bigint, text, boolean, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_roster_reconcile(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_operator text, p_apply boolean DEFAULT false, p_reason text DEFAULT NULL::text) RETURNS TABLE(outcome text, roster_size integer, mirror_in_house integer, absent_from_roster integer, stays_closed integer, rooms_enumerated integer, rooms_expected integer, protected integer, run_id uuid)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE
+    v_floor int; v_cap int; v_tol int; v_look int;
+    v_roster int; v_mirror int; v_absent int; v_closed int := 0; v_protected int := 0;
+    v_rooms int := 0; v_expected int := 0;
+    v_published bigint; v_boundary timestamptz; v_run uuid; v_outcome text;
+    v_sync text; v_cont text; v_scope int;
+BEGIN
+    IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
+        RAISE EXCEPTION 'roster reconciliation: an operator identity is required'
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtext('pms_roster_reconcile'), hashtext(p_iface::text));
+
+    SELECT s.roster_trust_min, s.max_close_per_run, s.inventory_tolerance, s.inventory_lookback
+      INTO v_floor, v_cap, v_tol, v_look
+      FROM iam_v2.pms_reconciliation_settings_get(p_tenant, p_site) s;
+
+    -- SCOPE. The interface must actually belong to this tenant and site. Reconciling one property's mirror
+    -- against another property's roster would close every guest in the building, so the binding is checked
+    -- rather than assumed from the caller passing three ids that look plausible together.
+    SELECT count(*) INTO v_scope FROM iam_v2.pms_interfaces i
+     WHERE i.id = p_iface AND i.tenant_id = p_tenant AND i.site_id = p_site;
+
+    SELECT r.published_resync_generation, r.sync_status, r.continuity_status
+      INTO v_published, v_sync, v_cont
+      FROM iam_v2.pms_interface_runtime r
+     WHERE r.tenant_id = p_tenant AND r.site_id = p_site AND r.pms_interface_id = p_iface;
+
+    -- THE BOUNDARY, and the reason it is this and not something friendlier: the last moment of the roster
+    -- generation is the first instant this system can honestly say it knew the stay had ended. A planned
+    -- departure date would be a guess about the past, and an empty room proves only that somebody left,
+    -- never who.
+    SELECT max(e.received_at) INTO v_boundary
+      FROM iam_v2.stay_events e
+     WHERE e.tenant_id = p_tenant AND e.site_id = p_site AND e.pms_interface_id = p_iface
+       AND e.resync_generation = p_generation;
+
+    SELECT count(*) INTO v_roster
+      FROM iam_v2.pms_roster_of_generation(p_tenant, p_site, p_iface, p_generation);
+
+    SELECT count(*) INTO v_mirror FROM iam_v2.stays s
+     WHERE s.tenant_id = p_tenant AND s.site_id = p_site AND s.pms_interface_id = p_iface
+       AND s.status = 'IN_HOUSE';
+
+    -- COMPLETENESS, PROVEN AGAINST THE BUILDING RATHER THAN ASSUMED FROM A COUNT.
+    --
+    -- A count of occupied rooms cannot tell a full roster from half of one -- occupancy legitimately moves,
+    -- so "445 reservations" is equally consistent with a complete sweep of a full house and with a truncated
+    -- response from a busy one. What does distinguish them is that this PMS enumerates the WHOLE PROPERTY on
+    -- every resync: occupied rooms arrive as GI/GC, vacant rooms as GO, and the two together are the room
+    -- inventory. Measured over eleven consecutive generations the split moved constantly -- 445/143, 467/122,
+    -- 479/110, 454/135 -- and the TOTAL did not: 588, 589, 589, 589.
+    --
+    -- So completeness is: did this generation enumerate the building? A generation that names materially
+    -- fewer rooms than the property is known to have is a partial answer, and a partial answer must never be
+    -- read as "the guests it failed to mention have left".
+    SELECT count(DISTINCT btrim(e.payload->>'room')) INTO v_rooms
+      FROM iam_v2.stay_events e
+     WHERE e.tenant_id = p_tenant AND e.site_id = p_site AND e.pms_interface_id = p_iface
+       AND e.resync_generation = p_generation AND e.event_type IN ('GI','GC','GO')
+       AND btrim(COALESCE(e.payload->>'room','')) <> '';
+
+    SELECT COALESCE(max(c), 0) INTO v_expected FROM (
+        SELECT count(DISTINCT btrim(e.payload->>'room')) AS c
+          FROM iam_v2.stay_events e
+         WHERE e.tenant_id = p_tenant AND e.site_id = p_site AND e.pms_interface_id = p_iface
+           AND e.admission_kind = 'RESYNC'
+           AND e.resync_generation <= p_generation
+           AND e.resync_generation > p_generation - v_look
+           AND e.event_type IN ('GI','GC','GO')
+           AND btrim(COALESCE(e.payload->>'room','')) <> ''
+         GROUP BY e.resync_generation) x;
+
+    -- Candidates, by RESERVATION and never by room.
+    --
+    -- PROTECTION FOR ANYTHING THE PMS HAS SAID SINCE. A snapshot is evidence about the moment it was taken,
+    -- and it stops being evidence about a stay the instant the PMS says something newer. An arrival, a room
+    -- move, a rate change, a correction -- any event received after the boundary means this stay's current
+    -- truth is NOT in that roster, so the roster's silence about it proves nothing. Those stays are counted
+    -- and reported, never closed. That covers the late arrival (no stay yet when the sweep ran) and the
+    -- change-after-snapshot (a stay the roster listed, then updated) in one rule instead of two.
+    CREATE TEMP TABLE _absent ON COMMIT DROP AS
+    SELECT s.id, s.external_reservation_id
+      FROM iam_v2.stays s
+     WHERE s.tenant_id = p_tenant AND s.site_id = p_site AND s.pms_interface_id = p_iface
+       AND s.status = 'IN_HOUSE'
+       AND btrim(COALESCE(s.external_reservation_id,'')) <> ''
+       AND (v_boundary IS NULL OR s.arrival IS NULL OR s.arrival <= v_boundary)
+       AND NOT EXISTS (
+           SELECT 1 FROM iam_v2.pms_roster_of_generation(p_tenant, p_site, p_iface, p_generation) g
+            WHERE g.reservation = btrim(s.external_reservation_id))
+       AND NOT EXISTS (
+           SELECT 1 FROM iam_v2.stay_events e2
+            WHERE e2.tenant_id = p_tenant AND e2.site_id = p_site AND e2.pms_interface_id = p_iface
+              AND v_boundary IS NOT NULL AND e2.received_at > v_boundary
+              AND (e2.stay_id = s.id
+                   OR btrim(COALESCE(e2.payload->>'reservation','')) = btrim(s.external_reservation_id)));
+    SELECT count(*) INTO v_absent FROM _absent;
+
+    -- How many were held back by that protection, so the number is visible rather than inferred from a gap.
+    SELECT count(*) INTO v_protected
+      FROM iam_v2.stays s
+     WHERE s.tenant_id = p_tenant AND s.site_id = p_site AND s.pms_interface_id = p_iface
+       AND s.status = 'IN_HOUSE'
+       AND btrim(COALESCE(s.external_reservation_id,'')) <> ''
+       AND NOT EXISTS (
+           SELECT 1 FROM iam_v2.pms_roster_of_generation(p_tenant, p_site, p_iface, p_generation) g
+            WHERE g.reservation = btrim(s.external_reservation_id))
+       AND NOT EXISTS (SELECT 1 FROM _absent a WHERE a.id = s.id);
+
+    IF v_scope <> 1 THEN
+        v_outcome := 'REFUSED_SCOPE_MISMATCH';
+    ELSIF v_published IS NULL OR v_published < p_generation THEN
+        v_outcome := 'REFUSED_GENERATION_UNPUBLISHED';
+    ELSIF v_published <> p_generation THEN
+        -- A superseded roster describes a building that has since changed. Replaying one would close guests
+        -- who have arrived since it was taken.
+        v_outcome := 'REFUSED_GENERATION_NOT_LATEST';
+    ELSIF v_sync IS DISTINCT FROM 'IN_SYNC' OR v_cont IS DISTINCT FROM 'CONTINUOUS' THEN
+        -- The link is currently faulted or resyncing. Whatever the last published generation said, the
+        -- connector is telling us it no longer trusts its own picture.
+        v_outcome := 'REFUSED_LINK_NOT_HEALTHY';
+    ELSIF v_expected > 0 AND v_rooms < v_expected - v_tol THEN
+        v_outcome := 'REFUSED_ROSTER_INCOMPLETE';
+    ELSIF v_roster < v_floor THEN
+        v_outcome := 'REFUSED_ROSTER_TOO_SMALL';
+    ELSIF v_absent > v_cap THEN
+        v_outcome := 'REFUSED_CAP_EXCEEDED';
+    ELSE
+        v_outcome := 'COMPLETED';
+    END IF;
+
+    INSERT INTO iam_v2.pms_roster_reconciliation_runs
+        (tenant_id, site_id, pms_interface_id, resync_generation, mode, outcome,
+         roster_size, mirror_in_house, absent_from_roster, stays_closed, boundary_at, run_by, reason,
+         rooms_enumerated, rooms_expected, protected_by_newer_events)
+    VALUES (p_tenant, p_site, p_iface, p_generation,
+            CASE WHEN p_apply THEN 'APPLY' ELSE 'DRY_RUN' END, v_outcome,
+            v_roster, v_mirror, v_absent, 0, v_boundary, btrim(p_operator),
+            NULLIF(btrim(COALESCE(p_reason,'')),''), v_rooms, v_expected, v_protected)
+    RETURNING id INTO v_run;
+
+    IF v_outcome = 'COMPLETED' AND p_apply THEN
+        UPDATE iam_v2.stays s
+           SET status = 'CHECKED_OUT', effective_checkout_at = v_boundary
+          FROM _absent a
+         WHERE s.id = a.id AND s.status = 'IN_HOUSE';
+        GET DIAGNOSTICS v_closed = ROW_COUNT;
+
+        INSERT INTO iam_v2.pms_case_resolutions
+            (tenant_id, site_id, pms_interface_id, stay_event_id, stay_id, disposition,
+             evidence_kind, evidence_ref, run_id, resolved_by, note)
+        SELECT e.tenant_id, e.site_id, e.pms_interface_id, e.id, e.stay_id,
+               'DEPARTED_CONFIRMED_BY_ROSTER', 'PUBLISHED_ROSTER_GENERATION',
+               'generation ' || p_generation::text, v_run, btrim(p_operator), NULL
+          FROM iam_v2.stay_events e
+          JOIN _absent a ON a.id = e.stay_id
+         WHERE e.processing_status = 'MANUAL_REVIEW'
+        ON CONFLICT (stay_event_id) DO NOTHING;
+
+        UPDATE iam_v2.pms_roster_reconciliation_runs SET stays_closed = v_closed WHERE id = v_run;
+    END IF;
+
+    RETURN QUERY SELECT v_outcome, v_roster, v_mirror, v_absent, v_closed,
+                        v_rooms, v_expected, v_protected, v_run;
+END;
+$$;
+
+
+--
 -- Name: publish_checkout_grace_config(uuid, uuid, uuid, integer, integer, integer, bigint, integer, text, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -8047,6 +8363,32 @@ COMMENT ON COLUMN iam_v2.payment_transactions.provider_txn_ref IS 'The reference
 
 
 --
+-- Name: pms_case_resolutions; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.pms_case_resolutions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    pms_interface_id uuid NOT NULL,
+    stay_event_id uuid NOT NULL,
+    stay_id uuid,
+    disposition text NOT NULL,
+    evidence_kind text NOT NULL,
+    evidence_ref text,
+    run_id uuid,
+    resolved_at timestamp with time zone DEFAULT now() NOT NULL,
+    resolved_by text NOT NULL,
+    note text,
+    CONSTRAINT pms_case_resolutions_disposition_check CHECK ((disposition = ANY (ARRAY['DEPARTED_CONFIRMED_BY_ROSTER'::text, 'NOT_A_DEPARTURE_ROSTER_SNAPSHOT'::text, 'ALREADY_CLOSED'::text, 'NEEDS_PMS_EVIDENCE'::text]))),
+    CONSTRAINT pms_case_resolutions_evidence_kind_check CHECK ((evidence_kind = ANY (ARRAY['PUBLISHED_ROSTER_GENERATION'::text, 'ADMISSION_KIND'::text, 'STAY_STATE'::text, 'NONE'::text]))),
+    CONSTRAINT pms_case_resolutions_evidence_ref_check CHECK (((evidence_ref IS NULL) OR (length(evidence_ref) <= 200))),
+    CONSTRAINT pms_case_resolutions_note_check CHECK (((note IS NULL) OR (length(note) <= 500))),
+    CONSTRAINT pms_case_resolutions_resolved_by_check CHECK ((length(btrim(resolved_by)) > 0))
+);
+
+
+--
 -- Name: pms_interface_pnumber_seq; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -8460,6 +8802,53 @@ COMMENT ON VIEW iam_v2.pms_reconciliation_cases IS 'One row per DISTINCT unresol
 
 
 --
+-- Name: pms_reconciliation_settings; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.pms_reconciliation_settings (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    roster_trust_min integer DEFAULT 50 NOT NULL,
+    inventory_tolerance integer DEFAULT 2 NOT NULL,
+    inventory_lookback integer DEFAULT 10 NOT NULL,
+    max_close_per_run integer DEFAULT 500 NOT NULL,
+    config_version bigint DEFAULT 1 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT prs_cap_sane CHECK (((max_close_per_run >= 1) AND (max_close_per_run <= 100000))),
+    CONSTRAINT prs_floor_sane CHECK (((roster_trust_min >= 1) AND (roster_trust_min <= 100000))),
+    CONSTRAINT prs_lookback_sane CHECK (((inventory_lookback >= 1) AND (inventory_lookback <= 1000))),
+    CONSTRAINT prs_tolerance_sane CHECK (((inventory_tolerance >= 0) AND (inventory_tolerance <= 10000))),
+    CONSTRAINT prs_version_positive CHECK ((config_version >= 1))
+);
+
+
+--
+-- Name: TABLE pms_reconciliation_settings; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.pms_reconciliation_settings IS 'Bounds for roster/mirror reconciliation. inventory_tolerance/inventory_lookback decide when a resync generation counts as a COMPLETE sweep of the property. roster_trust_min is a backstop floor. max_close_per_run is the most stays a single run may close before it stops for a human.';
+
+
+--
+-- Name: pms_reconciliation_settings_changes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.pms_reconciliation_settings_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by text NOT NULL,
+    reason text,
+    old_values jsonb,
+    new_values jsonb NOT NULL,
+    new_config_version bigint NOT NULL,
+    CONSTRAINT pms_reconciliation_settings_changes_changed_by_check CHECK ((length(btrim(changed_by)) > 0)),
+    CONSTRAINT pms_reconciliation_settings_changes_reason_check CHECK (((reason IS NULL) OR (length(reason) <= 500)))
+);
+
+
+--
 -- Name: pms_rooms_multi_occupancy; Type: VIEW; Schema: iam_v2; Owner: -
 --
 
@@ -8476,6 +8865,36 @@ CREATE VIEW iam_v2.pms_rooms_multi_occupancy AS
   WHERE ((status = 'IN_HOUSE'::text) AND (COALESCE(normalized_room_number, ''::text) <> ''::text))
   GROUP BY tenant_id, site_id, pms_interface_id, normalized_room_number
  HAVING (count(*) > 1);
+
+
+--
+-- Name: pms_roster_reconciliation_runs; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.pms_roster_reconciliation_runs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    pms_interface_id uuid NOT NULL,
+    resync_generation bigint NOT NULL,
+    mode text NOT NULL,
+    outcome text NOT NULL,
+    rooms_enumerated integer DEFAULT 0 NOT NULL,
+    rooms_expected integer DEFAULT 0 NOT NULL,
+    protected_by_newer_events integer DEFAULT 0 NOT NULL,
+    roster_size integer DEFAULT 0 NOT NULL,
+    mirror_in_house integer DEFAULT 0 NOT NULL,
+    absent_from_roster integer DEFAULT 0 NOT NULL,
+    stays_closed integer DEFAULT 0 NOT NULL,
+    boundary_at timestamp with time zone,
+    run_at timestamp with time zone DEFAULT now() NOT NULL,
+    run_by text NOT NULL,
+    reason text,
+    CONSTRAINT pms_roster_reconciliation_runs_mode_check CHECK ((mode = ANY (ARRAY['DRY_RUN'::text, 'APPLY'::text]))),
+    CONSTRAINT pms_roster_reconciliation_runs_outcome_check CHECK ((outcome = ANY (ARRAY['COMPLETED'::text, 'REFUSED_ROSTER_TOO_SMALL'::text, 'REFUSED_GENERATION_UNPUBLISHED'::text, 'REFUSED_CAP_EXCEEDED'::text, 'REFUSED_GENERATION_NOT_LATEST'::text, 'REFUSED_LINK_NOT_HEALTHY'::text, 'REFUSED_ROSTER_INCOMPLETE'::text, 'REFUSED_SCOPE_MISMATCH'::text]))),
+    CONSTRAINT pms_roster_reconciliation_runs_reason_check CHECK (((reason IS NULL) OR (length(reason) <= 500))),
+    CONSTRAINT pms_roster_reconciliation_runs_run_by_check CHECK ((length(btrim(run_by)) > 0))
+);
 
 
 --
@@ -10922,6 +11341,22 @@ ALTER TABLE ONLY iam_v2.payment_transactions
 
 
 --
+-- Name: pms_case_resolutions pms_case_resolutions_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.pms_case_resolutions
+    ADD CONSTRAINT pms_case_resolutions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: pms_case_resolutions pms_case_resolutions_stay_event_id_key; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.pms_case_resolutions
+    ADD CONSTRAINT pms_case_resolutions_stay_event_id_key UNIQUE (stay_event_id);
+
+
+--
 -- Name: pms_interface_pnumber_seq pms_interface_pnumber_seq_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -11039,6 +11474,30 @@ ALTER TABLE ONLY iam_v2.pms_postings
 
 ALTER TABLE ONLY iam_v2.pms_postings
     ADD CONSTRAINT pms_postings_tenant_id_site_id_pms_interface_id_id_key UNIQUE (tenant_id, site_id, pms_interface_id, id);
+
+
+--
+-- Name: pms_reconciliation_settings_changes pms_reconciliation_settings_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.pms_reconciliation_settings_changes
+    ADD CONSTRAINT pms_reconciliation_settings_changes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: pms_reconciliation_settings pms_reconciliation_settings_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.pms_reconciliation_settings
+    ADD CONSTRAINT pms_reconciliation_settings_pkey PRIMARY KEY (tenant_id, site_id);
+
+
+--
+-- Name: pms_roster_reconciliation_runs pms_roster_reconciliation_runs_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.pms_roster_reconciliation_runs
+    ADD CONSTRAINT pms_roster_reconciliation_runs_pkey PRIMARY KEY (id);
 
 
 --
@@ -12125,6 +12584,20 @@ CREATE INDEX package_eligibility_rules_by_revision ON iam_v2.package_eligibility
 --
 
 CREATE INDEX package_revision_visibility ON iam_v2.internet_package_revisions USING btree (tenant_id, site_id, package_id, visible_from, visible_until);
+
+
+--
+-- Name: pms_case_resolutions_scope_idx; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX pms_case_resolutions_scope_idx ON iam_v2.pms_case_resolutions USING btree (tenant_id, site_id, pms_interface_id, disposition);
+
+
+--
+-- Name: pms_roster_recon_runs_recent_idx; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX pms_roster_recon_runs_recent_idx ON iam_v2.pms_roster_reconciliation_runs USING btree (tenant_id, site_id, run_at DESC);
 
 
 --
@@ -13290,6 +13763,20 @@ CREATE TRIGGER pa_oneway BEFORE DELETE OR UPDATE ON iam_v2.posting_attempts FOR 
 
 
 --
+-- Name: pms_case_resolutions pms_case_resolutions_no_update; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER pms_case_resolutions_no_update BEFORE DELETE OR UPDATE ON iam_v2.pms_case_resolutions FOR EACH ROW EXECUTE FUNCTION iam_v2.pms_case_resolutions_append_only();
+
+
+--
+-- Name: pms_reconciliation_settings_changes pms_reconciliation_settings_changes_no_update; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER pms_reconciliation_settings_changes_no_update BEFORE DELETE OR UPDATE ON iam_v2.pms_reconciliation_settings_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.pms_reconciliation_settings_append_only();
+
+
+--
 -- Name: purchases purchase_quote_pin_equal; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
@@ -13826,6 +14313,30 @@ ALTER TABLE ONLY iam_v2.payment_transactions
 
 ALTER TABLE ONLY iam_v2.payment_transactions
     ADD CONSTRAINT payment_transactions_tenant_id_site_id_settlement_id_paren_fkey FOREIGN KEY (tenant_id, site_id, settlement_id, parent_transaction_id) REFERENCES iam_v2.payment_transactions(tenant_id, site_id, settlement_id, id);
+
+
+--
+-- Name: pms_case_resolutions pms_case_resolutions_run_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.pms_case_resolutions
+    ADD CONSTRAINT pms_case_resolutions_run_id_fkey FOREIGN KEY (run_id) REFERENCES iam_v2.pms_roster_reconciliation_runs(id);
+
+
+--
+-- Name: pms_case_resolutions pms_case_resolutions_stay_event_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.pms_case_resolutions
+    ADD CONSTRAINT pms_case_resolutions_stay_event_id_fkey FOREIGN KEY (stay_event_id) REFERENCES iam_v2.stay_events(id);
+
+
+--
+-- Name: pms_case_resolutions pms_case_resolutions_stay_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.pms_case_resolutions
+    ADD CONSTRAINT pms_case_resolutions_stay_id_fkey FOREIGN KEY (stay_id) REFERENCES iam_v2.stays(id);
 
 
 --

@@ -1,8 +1,8 @@
 {
   "transition_id": "T0123",
   "seq": 123,
-  "timestamp": "2026-09-13T16:00:00Z",
-  "timestamp_derivation": "After the live deployment of the PMS departure fix (2026-09-13T15:14Z) and the Central telemetry removal (2026-09-13T15:19Z), both recorded below; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "timestamp": "2026-09-13T15:40:00Z",
+  "timestamp_derivation": "After the live deployment of the PMS departure fix (15:14Z) and the Central telemetry removal and NATS shutdown (15:19-15:22Z), both recorded below; before the author timestamp of the commit that introduced this receipt (15:46:05Z). Per T0091, in the order T0108 requires.",
   "record_type": "PRE_LIVE_PMS_DEPARTURE_INGESTION_CORRECTED_AND_CENTRAL_NON_LICENSING_REMOVED",
   "deviation": {
     "what_happened": "Three artefacts were deployed to live hosts BEFORE the four required gates ran and before the protected merge: pmsd and edged to the PRE-LIVE appliance 172.21.60.25 at 15:14Z, and ctrlapi plus migration 0045 to Central 150.0.0.252 at 15:19-15:22Z.",
