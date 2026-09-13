@@ -1,8 +1,8 @@
 {
   "transition_id": "T0127",
   "seq": 127,
-  "timestamp": "2026-09-14T00:30:00Z",
-  "timestamp_derivation": "After existing recovery was verified and the full failure-to-recovery sequence was demonstrated on a disposable PG16; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "timestamp": "2026-09-13T21:45:00Z",
+  "timestamp_derivation": "After existing recovery was verified and the full failure-to-recovery sequence was demonstrated on a disposable PG16; before the author timestamp of the commit that introduced this receipt (21:53:24Z). Per T0091, in the order T0108 requires.",
   "record_type": "PRE_LIVE_PMS_INTEGRATION_COMPLETED_AS_AN_AUTOMATIC_FLOW",
   "verified_first_unchanged": {
     "reconnect": "Bounded exponential backoff with jitter, reset after a stable period. Retries are indefinite by design: a PMS returning overnight must be picked up unattended.",
