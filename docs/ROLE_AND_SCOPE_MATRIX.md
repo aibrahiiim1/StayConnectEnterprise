@@ -52,6 +52,7 @@ Seven roles, enforced by edged per `/edge/v1` resource. Legend:
 | guest-signin-protection (`Manage_Guest_SignIn_Protection`) | W | **W** | R | R | – | – | R |
 | pms-reconciliation (`View_PMS_Reconciliation`) | R | R | R | R | – | – | R |
 | cloud-sync-settings (`Manage_Cloud_Sync_Settings`) | W | **W** | – | – | – | – | R |
+| cloud operating mode | *(no role: read-only display; changed only with the owner role, audited)* | | | | | | |
 | cloud-sync-recovery (`Run_Cloud_Sync_Recovery`) | W | **W** | – | – | – | – | R |
 | guest-signin-restrictions (`Release_Guest_SignIn_Restriction`) | W | **W** | **W** | **W** | – | – | R |
 | walled-garden | W | W | R | R | – | R | R |
@@ -78,6 +79,11 @@ Seven roles, enforced by edged per `/edge/v1` resource. Legend:
   promise a power it does not have.
 * `cloud-sync-settings` — **W** sets how long DELIVERED cloud-reporting records are kept. It reaches nothing
   that has not been delivered.
+* **cloud operating mode** — deliberately has **no permission key at all**. This appliance is licensing-only
+  by Product-Owner decision, and the decision says the model must not be contradicted by a casual UI switch.
+  The mode is displayed on Cloud connection and changed only by a deliberate write with the owner role,
+  recorded in an append-only change log. `svc_scd` and `svc_edged` hold read access and nothing more —
+  a daemon that could rewrite the rule it is subject to is not subject to it.
 * `cloud-sync-recovery` — **W** releases records the appliance gave up on back onto the queue. Separate from
   the setting on purpose: one is a retention policy, the other is an action whose consequences land on a far
   end shared by the whole fleet. Reading the recovery history does not carry permission to run one.

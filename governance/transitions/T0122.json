@@ -1,0 +1,70 @@
+{
+  "transition_id": "T0122",
+  "seq": 122,
+  "timestamp": "2026-09-13T00:30:00Z",
+  "timestamp_derivation": "After the Product-Owner decision of 2026-09-13 that Central serves this appliance for licensing only, and after the dependency trace that decision required; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "PRE_LIVE_CENTRAL_SERVES_THIS_APPLIANCE_FOR_LICENSING_ONLY",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_LIVE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_ACCEPTED_PRE_LIVE",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_LIVE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_ACCEPTED_PRE_LIVE",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": false,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap. No numbered phase advances. PRE-LIVE remains PRE-LIVE and Go-Live remains NOT AUTHORIZED.",
+  "decision": "D40",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new numbered decision. This is a standing operating-model decision recorded here and in CLAUDE.md 0E; the Product Owner's instruction was to persist it in project state, documentation and agent instructions rather than to open a numbered register entry.",
+  "po_authorization_ref": "Product-Owner decision CENTRAL MUST SERVE THIS HOTEL APPLIANCE FOR LICENSING ONLY (2026-09-13), which explicitly supersedes the previous authorisation to activate operational telemetry and reporting for this appliance.",
+  "supersedes": {
+    "what": "The telemetry activation authorised and completed under T0121.",
+    "and_this_matters": "The link was BUILT, COMPLETED AND VERIFIED: 9,468 abandoned records recovered, 87,742 delivered, appliance and Central reconciled at the same count with zero orphaned marks. It is switched off because the hotel's operations belong on the hotel's appliance, NOT because it failed. Historical delivery evidence stays accurate: the connection existed, worked, and was then disabled by this decision. A future session finding the transport closed is looking at a decision, not a defect, and must not propose reconnecting telemetry as a repair."
+  },
+  "dependency_trace": {
+    "method": "Every Central-bound path enumerated from source before anything was changed: HTTP callers, NATS publishes and subscriptions, background workers and polling.",
+    "retained_http_only": [
+      "/v1/appliances/register and /v1/appliances/enroll -- appliance identity.",
+      "/v1/appliance/csr and /v1/appliance/certificate -- the certificate that authenticates every call above and below, and its renewal.",
+      "/v1/appliance/license and /v1/appliance/offline-reconcile -- licence activation, retrieval, renewal, validation.",
+      "/v1/appliance/hello -- licence ENFORCEMENT rather than chat: it is the mechanism by which an appliance deleted at Central discovers it is orphaned and STOPS serving on a stale cached licence. Removing it would weaken licensing, which this decision forbids.",
+      "/v1/appliance/assignment, /assignment-registry, /assignment/ack -- the signed tenant/site binding the licence is scoped to, re-verified locally on every boot."
+    ],
+    "stopped": [
+      "Telemetry outbox publishes: usage, health, service_health, license_ack.",
+      "scd.<applianceID>.revoke -- remote disconnection of a named guest IP. Operational, never licensing.",
+      "scd.<applianceID>.pms.test / .cache / .health -- remote PMS operations.",
+      "config.<tenantID>.pms -- remote PMS configuration broadcast.",
+      "appliances.<applianceID>.commands -- the signed command channel.",
+      "appliances.<applianceID>.updates -- the software-update agent.",
+      "nft.<siteID> -- site peer synchronisation. This site has exactly one appliance, so it had no peers; the wrapper degrades to local-only, which is its existing behaviour without NATS."
+    ],
+    "license_ack_is_not_licensing": "The only licensing-SHAPED message on the NATS transport. Central accepts it as one of its telemetry kinds and stores a fleet_telemetry row; no handler consumes it and no licence operation depends on it. It is a report ABOUT licensing, which is exactly the category this decision excludes. Because nothing licensing needs the transport, the transport is not opened at all rather than opened and filtered -- a connection that exists is one the next feature will subscribe to."
+  },
+  "enforcement": {
+    "where": "iam_v2.site_cloud_mode, read by internal/cloudmode, which is the single place the question is answered for scd, edged and the operator screen.",
+    "fail_safe": "Every uncertainty resolves to LICENSING_ONLY: no row, no tenant/site scope, an unreadable setting, an unrecognised value, no database. The requirement is that non-licensing communication must not silently reactivate through defaults, restart or reconciliation, and a default of FULL would do precisely that on the first failed read or restored database. The asymmetry is deliberate: being wrong towards licensing-only costs telemetry until somebody notices; being wrong the other way sends guest-adjacent data out of a building that decided it should not.",
+    "stopped_at_source": "scd does not open the transport and does not construct the outbox at all. Every producer -- telemetryLoop's usage and health, enqueueLicenseAck, edged's service_health -- is disabled by there being no outbox to write to, so no new operational record is created and no queued record resumes on restart, reconnect or deployment. edged builds its own Outbox and is gated separately on the same mode; without that it would have gone on accumulating rows for ever while the screen said nothing was being sent.",
+    "no_ui_switch": "No runtime role holds EXECUTE on iam_v2.cloud_mode_set. The mode is displayed, never offered. Changing it is a deliberate act with the owner role and is recorded in an append-only change log."
+  },
+  "historical_records": {
+    "principle": "Stopping a producer is not a retention policy. Nothing was purged, no table was dropped and no queued record was replayed under this authorisation.",
+    "on_the_appliance": "public.sync_outbox retains every record it held: 87,742 delivered, 0 pending, 0 exhausted at the time of this delivery. They are kept and not transmitted.",
+    "on_central": "fleet_telemetry retains the 87,742 rows this appliance delivered, plus the dedupe marks. Nothing was removed from Central, and this delivery makes no Central-side deletion.",
+    "existing_retention_behaviour": "The 30-day delivered-record retention approved in the previous delivery still runs, because it is local housekeeping that opens no connection. It is measured from DELIVERY, and every record was delivered on 2026-09-12, so under the existing policy they become eligible for removal from the appliance around 2026-10-12. Central has its own retention, which this delivery does not touch.",
+    "decision_needed": "YES, one: whether the appliance's copy should be kept beyond the existing 30-day window now that it will never be re-sent. No new deletion policy was introduced here and the existing one was not altered; the period is an administrator-editable setting (1-365 days) and needs no code change either way."
+  },
+  "limitations": {
+    "production_baseline_not_regenerated": "RESOLVED during the delivery, and the route is worth recording. The workstation's container runtime is down -- its system drive filled -- so the baseline could not be regenerated there. It was regenerated on the APPLIANCE's container runtime instead, in a throwaway container on a blank cluster: stayconnect_site, the live Postgres container and every service were untouched, and the container was removed afterwards. clean-install-reconstruction.sh applies the whole chain correctly there (8,900 catalog facts) and fails only one assertion that shells out to the Go toolchain, which is not installed on a production appliance and should not be; that assertion proves the guest-authority lock and is no part of producing the dump, so the generator's own dump steps were run against the kept container verbatim. The resulting baseline differs from its predecessor by exactly 0071's two tables and three functions, with nothing removed.",
+    "hotel_admin_unit_tests_not_run_locally": "vitest cannot run on this workstation: node_modules carries Linux-only rollup natives and the container that normally runs it is unavailable. The Hotel Admin unit tests, including the new licensing-only wording assertions, were validated by the remote gates only.",
+    "workstation_container_runtime": "The workstation's container runtime remained unavailable for the whole delivery (system drive exhausted; 1.7 GB of Go build cache was cleared to recover some space, but starting the Docker service needs elevation this session does not have). Consequences: the Hotel Admin unit tests could not be run locally -- node_modules carries Linux-only rollup natives -- so the new licensing-only wording assertions were validated by the remote gates only, and the phase-5 and prod-privilege harnesses were likewise left to the gates. Migration 0071 itself WAS validated against a real database, under iam_v2_owner, in an isolated scratch database on the appliance."
+  }
+}

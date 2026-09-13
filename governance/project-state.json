@@ -1093,7 +1093,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0121",
+  "latest_transition_id": "T0122",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1695,5 +1695,15 @@
   ],
   "observations": [
     "DATA-HYGIENE OBSERVATION, NON-BLOCKING, NOTHING MODIFIED (2026-09-09). The dataset carries additional IN_HOUSE Stay rows for room 4202 (an 11-night 2026-08-28 to 2026-09-08 and an earlier 11-night) and separate rows for room 14202, whose number merely contains '4202'. The room-4202 acceptance was unambiguous: only the current 4-night stay holds an Entitlement. No Stay was edited, deleted or reclassified, and none should be on the strength of this note; it is recorded so the rows are not mistaken later for a double grant."
-  ]
+  ],
+  "central_relationship": {
+    "_note": "STANDING PRODUCT-OWNER DECISION, 2026-09-13: Central serves this appliance for LICENSING ONLY. It supersedes the earlier authorisation to activate operational telemetry. The telemetry link was built, completed and verified (87,742 records delivered, both sides reconciled, zero orphaned) and was then DISABLED BY DECISION. It is not a defect, and reconnecting telemetry must never be proposed as a repair.",
+    "mode": "LICENSING_ONLY",
+    "enforced_by": "iam_v2.site_cloud_mode + internal/cloudmode; every uncertainty (no row, no scope, unreadable setting, unrecognised value) resolves to LICENSING_ONLY so the mode cannot silently reactivate through defaults, restart or reconciliation.",
+    "retained": "HTTPS to ctrlapi only: /v1/appliances/register, /enroll; /v1/appliance/csr, /certificate; /v1/appliance/license, /offline-reconcile; /v1/appliance/hello (licence enforcement -- how a deleted appliance stops serving on a stale cached licence); /v1/appliance/assignment, /assignment-registry, /assignment/ack.",
+    "stopped": "The whole NATS transport: telemetry publishes (usage, health, service_health, license_ack), remote guest-session revoke, remote PMS test/cache/health, the tenant PMS config broadcast, the signed command channel, the software-update agent.",
+    "license_ack_is_not_licensing": "Central stores it as a telemetry row; nothing consumes it and no licence operation depends on it. A report ABOUT licensing is not licensing.",
+    "historical_records": "Retained on both sides. Nothing purged, no table dropped, no queued record replayed. The existing 30-day delivered-record retention still runs locally.",
+    "receipt": "T0122"
+  }
 }

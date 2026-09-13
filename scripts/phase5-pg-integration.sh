@@ -63,7 +63,8 @@ for m in 0007_auth_throttle_buckets 0009_phase2_commerce 0010_phase3_stay_resolu
          0067_a_refused_sign_in_leaves_a_record_somebody_can_read \
          0068_the_hotel_decides_how_many_wrong_guesses_are_too_many \
          0069_a_queue_that_gave_up_and_a_departure_nobody_could_place \
-         0070_a_departure_that_went_to_review_is_answered_by_the_pms; do
+         0070_a_departure_that_went_to_review_is_answered_by_the_pms \
+         0071_central_serves_this_appliance_for_licensing_only; do
   # 0050 is out of numeric sequence with the rest of this list on purpose: this gate runs internal/authctx,
   # whose PMS arm now calls iam_v2.p3_feed_authorizes. Without it those tests fail with "function does not
   # exist" rather than on anything Phase 5 owns. It is applied last, after everything it redefines.
@@ -78,17 +79,17 @@ done
 
 base="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc \
   "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2' AND table_type='BASE TABLE';")"
-# 75, not 68: this gate runs ./cmd/edged with no -run filter, so the guest sign-in attempts API suite, the
+# 77, not 68: this gate runs ./cmd/edged with no -run filter, so the guest sign-in attempts API suite, the
 # sign-in protection suite and the cloud-sync/reconciliation suites all compile and RUN here. 0067 adds
 # iam_v2.sign_in_attempts; 0068 adds the protection policy, its append-only change log and the restriction
 # table; 0069 adds the cloud-sync settings, their change log and the stay-event re-offer log (its
 # public.sync_outbox_recovery_log and its three views are outside this count by construction — it counts
 # iam_v2 BASE TABLEs). Without them those tests fail on missing relations rather than on anything they are
 # testing, and this count is the check that would catch a chain which silently did not build them.
-if [ "${base:-0}" != "75" ]; then
-  echo "INFRA: the chain did not build (iam_v2 base tables=$base, expected 75)"; exit 2
+if [ "${base:-0}" != "77" ]; then
+  echo "INFRA: the chain did not build (iam_v2 base tables=$base, expected 77)"; exit 2
 fi
-echo "  chain built: 75 iam_v2 base tables through 0029 + 0067 + 0068 + 0069 + 0070"
+echo "  chain built: 77 iam_v2 base tables through 0029 + 0067 + 0068 + 0069 + 0070 + 0071"
 
 fail=0
 run_gate(){

@@ -152,7 +152,10 @@ export default function DashboardPage() {
       href: "/financial-review", tone: "warn",
     });
   }
-  if (outbox.tone === "err") {
+  // A licensing-only appliance never raises a cloud attention item. The state is correct, the queue is
+  // static by design, and an actionable warning here would be asking somebody to undo a decision — with the
+  // obvious "repair" being the one thing that must not happen.
+  if (outbox.tone === "err" && health?.sync_outbox?.mode !== "LICENSING_ONLY") {
     attention.push({ text: outbox.summary, href: "/network/cloud", tone: "warn" });
   }
 
