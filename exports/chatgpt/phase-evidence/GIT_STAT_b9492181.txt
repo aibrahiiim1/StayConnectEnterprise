@@ -1,4 +1,0 @@
-commit b9492181876b01dc031ab7e2b7395d249f206759
-Date:   Sun Sep 13 23:00:31 2026 +0300
-
-    Governance: T0125 records the room-identity contract, conflict refusal and the standing exception
