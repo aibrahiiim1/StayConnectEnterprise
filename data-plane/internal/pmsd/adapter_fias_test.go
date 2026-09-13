@@ -13,6 +13,10 @@ import (
 )
 
 // recordingSink captures axis calls + domain events for protocol assertions.
+// coverageReport is what a sweep told the sink it OBSERVED, so a test can assert that vacant rooms are
+// counted as part of the building even though they are never admitted as departures.
+type coverageReport struct{ Rooms, Roster, Vacant int }
+
 type recordingSink struct {
 	mu sync.Mutex
 	// pendingCmd is handed out ONCE, the way a real claim behaves: the durable row is cleared by the claim
@@ -20,6 +24,7 @@ type recordingSink struct {
 	// issued a DR on every frame.
 	pendingCmd        *ResyncCommand
 	skippedReports    []int64
+	coverage          []coverageReport
 	fullSyncRequested int
 	claims            int
 	skippedSeen       int64
@@ -526,6 +531,117 @@ func TestAdapter_RosterSnapshotDepartureIsNotAnEvent(t *testing.T) {
 	}
 }
 
+// TestAdapter_CoverageCountsTheBuildingNotTheAdmissions is the regression for the defect that the ingestion
+// fix created and live verification caught: completeness was measured by counting rooms in ADMITTED records,
+// and the fix stopped admitting the vacant-room records that made the sweep countable.
+//
+//	generation before the fix   439 occupied + 149 vacant = 587 rooms
+//	generation after the fix    424 occupied +   0 vacant = 423 rooms
+//
+// Reconciliation then refused REFUSED_ROSTER_INCOMPLETE for ever -- safe, and permanently useless. Coverage
+// is now taken at OBSERVATION, so the two rules stop interfering: the sweep below names four rooms, two of
+// them vacant, and must report four rooms while admitting exactly two events.
+func TestAdapter_CoverageCountsTheBuildingNotTheAdmissions(t *testing.T) {
+	adapter, server := newAdapterOverPipe(t)
+	sink := &recordingSink{q: NewBoundedQueue(16, time.Second)}
+
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		br := bufio.NewReader(server)
+		for i := 0; i < 5; i++ {
+			if _, err := pms.ReadFramedRecord(br); err != nil {
+				return
+			}
+		}
+		for _, rec := range []string{
+			"DS|",
+			"GI|RN101|G#1001|GNA|GFB|GA260101|GD260105|", // occupied
+			"GI|RN102|G#1002|GNC|GFD|GA260101|GD260105|", // occupied
+			"GO|RN103|", // vacant: observed, never admitted
+			"GO|RN104|", // vacant: observed, never admitted
+			"DE|",
+		} {
+			if err := pms.WriteFramedRecord(server, rec); err != nil {
+				return
+			}
+		}
+		time.Sleep(30 * time.Millisecond)
+		_ = server.Close()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = adapter.Serve(ctx, sink)
+	<-serverDone
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+
+	if len(sink.events) != 2 {
+		t.Fatalf("only the two occupied rooms may be admitted, got %d events", len(sink.events))
+	}
+	if len(sink.coverage) != 1 {
+		t.Fatalf("a completed sweep must report its observation exactly once, got %d", len(sink.coverage))
+	}
+	c := sink.coverage[0]
+	if c.Rooms != 4 {
+		t.Errorf("the sweep described 4 rooms; coverage says %d — the vacant rooms are part of the building", c.Rooms)
+	}
+	if c.Roster != 2 {
+		t.Errorf("occupied records = %d, want 2", c.Roster)
+	}
+	if c.Vacant != 2 {
+		t.Errorf("vacant rooms observed = %d, want 2", c.Vacant)
+	}
+}
+
+// TestAdapter_CoverageIsPerSweep proves the observation resets at DS. A counter that accumulated across
+// syncs would report a building larger than the property and refuse every roster as incomplete.
+func TestAdapter_CoverageIsPerSweep(t *testing.T) {
+	adapter, server := newAdapterOverPipe(t)
+	sink := &recordingSink{q: NewBoundedQueue(32, time.Second)}
+
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		br := bufio.NewReader(server)
+		for i := 0; i < 5; i++ {
+			if _, err := pms.ReadFramedRecord(br); err != nil {
+				return
+			}
+		}
+		for _, rec := range []string{
+			"DS|", "GI|RN201|G#2001|", "GO|RN202|", "DE|",
+			"DS|", "GI|RN201|G#2001|", "GO|RN203|", "GO|RN204|", "DE|",
+		} {
+			if err := pms.WriteFramedRecord(server, rec); err != nil {
+				return
+			}
+		}
+		time.Sleep(30 * time.Millisecond)
+		_ = server.Close()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = adapter.Serve(ctx, sink)
+	<-serverDone
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.coverage) != 2 {
+		t.Fatalf("two sweeps, two observations; got %d", len(sink.coverage))
+	}
+	if sink.coverage[0].Rooms != 2 {
+		t.Errorf("first sweep named 2 rooms, coverage says %d", sink.coverage[0].Rooms)
+	}
+	if sink.coverage[1].Rooms != 3 {
+		t.Errorf("second sweep named 3 rooms, coverage says %d — the count did not reset at DS",
+			sink.coverage[1].Rooms)
+	}
+}
+
 // TestAdapter_InitialResyncRequestsDR proves §G/§H: after the startup handshake the adapter raises the
 // barrier (RequireInitialResync) and sends the initial DR resync request through the single writer, before
 // any live admission.
@@ -639,4 +755,10 @@ func (s *recordingSink) RecordSkipped(n int64) {
 	// Every report is kept, not just the last, so a test can prove the counter RESTARTS at a new roster
 	// rather than merely ending on a plausible number.
 	s.skippedReports = append(s.skippedReports, n)
+}
+
+func (s *recordingSink) RecordCoverage(rooms, rosterRecords, vacantRooms int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.coverage = append(s.coverage, coverageReport{rooms, rosterRecords, vacantRooms})
 }

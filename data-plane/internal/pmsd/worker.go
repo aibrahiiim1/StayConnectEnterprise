@@ -213,6 +213,13 @@ type workerSink struct {
 	// the Serve goroutine touches it, and it is reset at DS rather than accumulated across syncs: the number
 	// an operator watches must describe THIS roster, not every roster since the process started.
 	received int64
+
+	// What the sweep now in flight OBSERVED. Held until the publish succeeds: coverage describes an
+	// authoritative roster, and a sweep that never published never produced one.
+	covSeen   bool
+	covRooms  int
+	covRoster int
+	covVacant int
 }
 
 // stage writes durable operator-visible progress. Progress reporting must never break a sync, so a failed
@@ -281,6 +288,14 @@ func (s *workerSink) OnResyncStart(at time.Time) error {
 	return s.w.repo.UpdateSync(s.ctx, SyncUpdate{axisBase: s.ax(), Status: SyncResyncInProgress, ResyncStartedAt: &at})
 }
 
+// RecordCoverage stores what the sweep observed on the sink, to be persisted with the publish. It is held
+// rather than written immediately so that an interrupted sweep -- one that never reaches DE's publish --
+// leaves no coverage row claiming a roster that never became authoritative.
+func (s *workerSink) RecordCoverage(rooms, rosterRecords, vacantRooms int) {
+	s.covRooms, s.covRoster, s.covVacant = rooms, rosterRecords, vacantRooms
+	s.covSeen = true
+}
+
 // OnResyncComplete (DE) ATOMICALLY publishes the complete resync generation (one runtime-row boundary update
 // + IN_SYNC/CONTINUOUS), then lowers the barrier. Nothing is published unless a resync window was open.
 func (s *workerSink) OnResyncComplete(at time.Time, _ string) error {
@@ -299,6 +314,29 @@ func (s *workerSink) OnResyncComplete(at time.Time, _ string) error {
 	}
 	s.resyncing = false
 	s.synced = true
+	// COVERAGE FIRST, THEN RECONCILE, and both after the publish. Coverage is the evidence that this roster
+	// described the building; reconciliation is what that evidence licenses. Neither can fail the sync: the
+	// roster is already published and guests are already authenticating against it, so a bookkeeping or
+	// reconciliation problem is logged and left for the NEXT complete sweep to retry. That retry is the whole
+	// deferral mechanism -- there is no queue, no flag and nothing for an operator to press, because a
+	// property that resyncs produces a fresh authoritative generation every time.
+	if s.covSeen {
+		if err := s.w.repo.RecordResyncCoverage(s.ctx, ResyncScope{s.ax()}, s.resyncGen,
+			s.covRooms, s.covRoster, s.covVacant); err != nil {
+			s.w.deps.log().Warn("pmsd: could not record what the sweep observed; reconciliation will defer",
+				"err", err, "generation", s.resyncGen)
+		}
+		s.covSeen = false
+	}
+	if out, err := s.w.repo.ReconcileRoster(s.ctx, ResyncScope{s.ax()}, s.resyncGen); err != nil {
+		s.w.deps.log().Warn("pmsd: automatic reconciliation could not run; the next complete sweep retries",
+			"err", err, "generation", s.resyncGen)
+	} else {
+		s.w.deps.log().Info("pmsd: automatic roster reconciliation",
+			"generation", s.resyncGen, "outcome", out.Outcome, "stays_closed", out.StaysClosed,
+			"absent_from_roster", out.AbsentFromRoster, "protected", out.Protected,
+			"rooms_enumerated", out.RoomsEnumerated, "rooms_expected", out.RoomsExpected)
+	}
 	// last_sync_in_house_count is NO LONGER STAMPED. It was written here, at the publish barrier, before the
 	// applier had written a single record of the new roster — so it reported the roster this sync REPLACED.
 	// On the live PRE-LIVE sync it read 461 beside a live 595 on the same screen. The column stays in the

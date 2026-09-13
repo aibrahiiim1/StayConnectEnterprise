@@ -279,6 +279,12 @@ type Repo interface {
 	// PublishResyncGeneration advances published_resync_generation to g in ONE atomic row update (never a mass
 	// Event-row update) under the exact runtime-generation CAS, and marks the interface IN_SYNC + CONTINUOUS.
 	// g must not exceed the allocated seq. ErrStaleGeneration if ownership moved.
+	// RecordResyncCoverage stores what one completed sweep observed: distinct rooms named, the occupied
+	// records among them, and the vacant rooms seen but deliberately not admitted as departures.
+	RecordResyncCoverage(ctx context.Context, req ResyncScope, generation int64, rooms, roster, vacant int) error
+	// ReconcileRoster closes the stays a COMPLETE published roster no longer lists. Called once per published
+	// generation; a refusal is a decision the run ledger records, not an error.
+	ReconcileRoster(ctx context.Context, req ResyncScope, generation int64) (ReconcileOutcome, error)
 	PublishResyncGeneration(ctx context.Context, req ResyncScope, g int64) error
 	// ClaimResyncCommand takes an operator's pending full-resync request if this worker may run it, clearing
 	// it in the same statement. Returns (nil, nil) when there is nothing pending, when the command belongs to
@@ -347,6 +353,11 @@ type AxisSink interface {
 	// RecordSkipped reports the running count of well-formed records that describe no keyable Stay, so the
 	// operator sees real rejected-record evidence rather than a number nobody can source.
 	RecordSkipped(n int64)
+	// RecordCoverage reports what the sweep now ending OBSERVED: distinct rooms named, the occupied records
+	// among them, and the vacant rooms it saw and deliberately did not admit. It is called once per DS..DE,
+	// before the generation publishes, because a published roster with no recorded observation is one
+	// reconciliation can never judge complete.
+	RecordCoverage(rooms, rosterRecords, vacantRooms int)
 	// OnFullSyncRequested marks the moment a DR has been accepted by the serialized writer and the connector
 	// is waiting for the PMS to begin. Called for the AUTOMATIC initial sync as well as for an operator's,
 	// because an operator watching a reconnect needs to see the same stages either way.
@@ -565,4 +576,16 @@ func Run(ctx context.Context, cfg iamv2.PMSConfig, deps Deps) error {
 		}
 		return serr
 	}
+}
+
+// ReconcileOutcome is what one automatic reconciliation decided, as the run ledger recorded it.
+type ReconcileOutcome struct {
+	Outcome          string
+	RosterSize       int
+	MirrorInHouse    int
+	AbsentFromRoster int
+	StaysClosed      int
+	RoomsEnumerated  int
+	RoomsExpected    int
+	Protected        int
 }

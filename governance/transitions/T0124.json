@@ -1,0 +1,40 @@
+{
+  "transition_id": "T0124",
+  "seq": 124,
+  "timestamp": "2026-09-13T18:05:00Z",
+  "timestamp_derivation": "After the historical snapshot-artifact cleanup executed on the appliance and after the coverage fix was proven on a disposable PG16; before the author timestamp of the commit that introduced this receipt (18:07:35Z). Per T0091, in the order T0108 requires.",
+  "record_type": "PRE_LIVE_ROSTER_RECONCILIATION_BECOMES_AUTOMATIC",
+  "defect_found_by_live_verification": {
+    "what": "Completeness was measured by counting rooms in ADMITTED stay_events. The connector fix stopped admitting vacant-room GO records, which are exactly the ones that made a sweep countable.",
+    "measured": "generation 247 (before the fix) 439 occupied + 149 vacant = 587 rooms; generation 248 (after) 424 occupied + 0 vacant = 423 rooms.",
+    "effect": "pms_roster_reconcile refused REFUSED_ROSTER_INCOMPLETE permanently. Fail-safe -- it closed nothing and no guest was affected -- but the feature could never enable.",
+    "cause": "Inferring the OBSERVATION from the ADMISSION. What the connector sees is the building; what it admits is only the part that keys a Stay.",
+    "fix": "pmsd records what each completed sweep observed (distinct rooms named, occupied records, vacant rooms seen and deliberately refused) via iam_v2.pms_record_resync_coverage, and reconciliation reads that instead of counting events.",
+    "rejected_alternative": "Re-admitting vacant-room GO records would restore the count and reopen the 14 125-record defect. Coverage is evidence about a sweep, stored as one row per generation with no stay, no event and no guest."
+  },
+  "automatic_operation": {
+    "trigger": "pmsd records coverage and runs reconciliation immediately after publishing a complete generation. There is no button, no queue and no flag.",
+    "deferral": "Neither step can fail the sync. A refusal or an error is logged and the NEXT complete sweep retries, which is the entire deferral mechanism: a property that resyncs produces a fresh authoritative generation every time.",
+    "new_outcome": "REFUSED_NO_COVERAGE_EVIDENCE names the one honest gap -- every generation from before this migration has no observation and never will, so reconciliation defers until the first sweep that does."
+  },
+  "historical_cleanup_executed": {
+    "disposed": 13716,
+    "disposition": "NOT_A_DEPARTURE_ROSTER_SNAPSHOT, evidence ADMISSION_KIND",
+    "history_preserved": "70 830 stay_events unchanged; 13 717 rows remain MANUAL_REVIEW exactly as written. Nothing was deleted and no stay changed state. The dispositions are APPENDED alongside.",
+    "genuinely_unresolved": "ONE case: a LIVE Guest-Out of 2026-08-23 11:46:15 that carried a reservation number the mirror holds no stay for (GO_UNKNOWN_STAY). It is answerable only by the PMS, and it is left on the list rather than hidden."
+  },
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-13: reconciliation must be an automatic operational flow rather than a button-driven maintenance task; execute the authorised historical cleanup; fix room-coverage tracking without generating departure events from vacant-room snapshots.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}

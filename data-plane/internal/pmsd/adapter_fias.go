@@ -138,6 +138,11 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 	sink.OnFullSyncRequested()
 
 	resyncing := true // a DR is outstanding; we are awaiting DS…DE (gates duplicate DR requests only)
+	// Per-sweep observation, reset at every DS. A map rather than a counter because a PMS may name the same
+	// room twice in one sweep and "the building" is a set, not a tally.
+	roomsSeen := map[string]struct{}{}
+	rosterRecords := 0
+	vacantRooms := 0
 	// skippedNoIdentity counts well-formed records this ownership cycle carried that describe no keyable Stay.
 	// It is a running total rather than a per-resync one on purpose: the number an operator wants is "how much
 	// of this roster is unusable", and a counter that reset on every DS would only ever show the tail.
@@ -231,6 +236,14 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			return coded(CodeProtocolLinkEnded, nil)
 		case RecDS:
 			resyncing = true
+			// WHAT THIS SWEEP SEES, which is not the same as what it admits. The vacant rooms below are
+			// deliberately never admitted as departures -- that defect is closed -- but they are still the
+			// PMS describing the building, and that description is the only thing that can prove a roster
+			// COMPLETE. Counting it here, at observation, is what stops the completeness test depending on
+			// the admission rule.
+			roomsSeen = map[string]struct{}{}
+			rosterRecords = 0
+			vacantRooms = 0
 			// PER-ROSTER, NOT PER-CONNECTION. skippedNoIdentity was a running total for the whole ownership
 			// cycle, so a second full sync inherited the first one's rejects and an operator reading "40
 			// skipped" on a clean roster had no way to know 40 of them belonged to an earlier sync. Reset
@@ -241,6 +254,12 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 				return err
 			}
 		case RecDE:
+			// BEFORE the publish, deliberately. A generation that becomes the authoritative roster without a
+			// recorded observation would be one reconciliation could never judge complete, and it would defer
+			// for ever waiting for evidence that was thrown away at exactly this moment.
+			if resyncing {
+				sink.RecordCoverage(len(roomsSeen), rosterRecords, vacantRooms)
+			}
 			// Flush the exact skipped total before the publish stamps COMPLETE, so the finished sync reports
 			// what it actually rejected rather than the last multiple of 25.
 			if skippedNoIdentity != lastReportedSkipped {
@@ -276,6 +295,12 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			// So this branch is kept as a safety net for a PMS that might one day announce a departure
 			// without a reservation, not because anything currently depends on it.
 			if pr.RecordType == RecGO && resyncing && reservationAbsent(pr) {
+				// OBSERVED, then refused. The room is part of the building this sweep described; the record
+				// is not a departure anybody announced.
+				if room := roomOf(pr); room != "" {
+					roomsSeen[room] = struct{}{}
+					vacantRooms++
+				}
 				skippedNoIdentity++
 				if a.log != nil {
 					a.log.Warn("pmsd: skipping roster-snapshot departure with no reservation",
@@ -343,6 +368,12 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			// The sink routes the Event through the §H barrier + durable inbox (stage while resyncing, hold
 			// while the barrier is up, admit durably when synced). The durable row is authoritative — there is
 			// no in-memory-queue-overflow gap here. Any DB/ownership failure closes the transport.
+			if resyncing && ev.RoomNumber != "" {
+				roomsSeen[pms.NormalizeRoom(ev.RoomNumber)] = struct{}{}
+				if pr.RecordType != RecGO {
+					rosterRecords++
+				}
+			}
 			if derr := sink.OnDomainEvent(ctx, ev); derr != nil {
 				return derr // ErrStaleGeneration or any persist error terminates the ownership cycle
 			}

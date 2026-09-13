@@ -3,6 +3,7 @@ package pmsd
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync"
 	"time"
 
@@ -472,4 +473,35 @@ func (r *pgRepo) UpdateSyncStage(ctx context.Context, u StageUpdate) error {
 		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND runtime_generation=$4`,
 		u.TenantID, u.SiteID, u.PMSInterfaceID, u.ExpectedGeneration,
 		string(u.Stage), u.At, u.RecordsReceived, u.RecordsSkipped, u.FailureCode, u.InHouseCount)
+}
+
+// RecordResyncCoverage stores what one completed sweep OBSERVED. It goes through the definer function
+// rather than an INSERT, so svc_pmsd holds no write on the table and a coverage row with no sweep behind it
+// is not expressible.
+func (r *pgRepo) RecordResyncCoverage(ctx context.Context, req ResyncScope, generation int64,
+	rooms, roster, vacant int) error {
+	_, err := r.pool.Exec(ctx,
+		`SELECT iam_v2.pms_record_resync_coverage($1,$2,$3,$4,$5,$6,$7)`,
+		req.TenantID, req.SiteID, req.PMSInterfaceID, generation, rooms, roster, vacant)
+	return err
+}
+
+// ReconcileRoster runs the authoritative reconciliation for a published generation, applying it.
+//
+// A REFUSAL IS NOT AN ERROR HERE. Incomplete coverage, a superseded generation, an unhealthy link -- each is
+// a decision the function records in its own run ledger and returns as an outcome. Returning them as errors
+// would make the caller log a failure every few minutes for a system that is behaving exactly as designed,
+// and would bury the one case that IS a fault: the call not completing at all.
+func (r *pgRepo) ReconcileRoster(ctx context.Context, req ResyncScope, generation int64) (ReconcileOutcome, error) {
+	var o ReconcileOutcome
+	err := r.pool.QueryRow(ctx,
+		`SELECT outcome, roster_size, mirror_in_house, absent_from_roster, stays_closed,
+		        rooms_enumerated, rooms_expected, protected
+		   FROM iam_v2.pms_roster_reconcile($1,$2,$3,$4,$5,true,$6)`,
+		req.TenantID, req.SiteID, req.PMSInterfaceID, generation,
+		"pmsd (automatic, on a complete published roster)",
+		"automatic reconciliation after resync generation "+strconv.FormatInt(generation, 10)).
+		Scan(&o.Outcome, &o.RosterSize, &o.MirrorInHouse, &o.AbsentFromRoster, &o.StaysClosed,
+			&o.RoomsEnumerated, &o.RoomsExpected, &o.Protected)
+	return o, err
 }

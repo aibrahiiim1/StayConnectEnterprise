@@ -1093,7 +1093,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0123",
+  "latest_transition_id": "T0124",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1586,13 +1586,13 @@
   },
   "current_delivery": {
     "kind": "POST_CLOSURE_CORRECTIONS",
-    "decision": "D41",
+    "decision": "D42",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "8b76113af0c747cf1bb8ba74dc6838a2292d044a",
-    "base_note": "The master merge commit of PR #119. This delivery begins exactly where that one ended.",
-    "head": "88372ebff654b11cc5b46fded8f6d2c8306c627b",
+    "base": "0582eb7847be23583c9fc6c03d6c6c16f5601b79",
+    "base_note": "The master merge commit of PR #120. This delivery begins exactly where that one ended.",
+    "head": "90b981b081aff31ea02bc12893e52e57e1b994c5",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
-    "note": "Central non-licensing functionality REMOVED product-wide (not disabled), and the PMS departure defect corrected: a resync roster snapshot is not a departure announcement. Includes T0123, which records that three artefacts were deployed before the required gates and the protected merge, and how that is remediated."
+    "note": "Roster reconciliation becomes an automatic operational flow: pmsd records what each sweep OBSERVED and reconciles on every complete published generation. Includes T0124 and the executed cleanup of 13 716 historical snapshot artifacts."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

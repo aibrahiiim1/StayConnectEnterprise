@@ -729,3 +729,13 @@ func (r *fakeRepo) InHouseCount(ctx context.Context, ax axisBase) *int64 {
 	n := r.inHouse
 	return &n
 }
+
+func (r *fakeRepo) RecordResyncCoverage(_ context.Context, _ ResyncScope, _ int64, _, _, _ int) error {
+	return nil
+}
+
+func (r *fakeRepo) ReconcileRoster(_ context.Context, _ ResyncScope, _ int64) (ReconcileOutcome, error) {
+	// A refusal, because that is the honest default for a fake with no roster behind it -- and because it
+	// proves the publish path treats a refusal as a normal outcome rather than a failure.
+	return ReconcileOutcome{Outcome: "REFUSED_NO_COVERAGE_EVIDENCE"}, nil
+}
