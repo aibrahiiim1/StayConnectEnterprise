@@ -1,0 +1,4 @@
+commit dff8cabeb877166163e13830997701b8c012fa3b
+Date:   Sun Sep 13 21:30:47 2026 +0300
+
+    Governance: T0124 must precede the commit that carries it

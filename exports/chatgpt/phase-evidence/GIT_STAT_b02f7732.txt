@@ -1,4 +1,0 @@
-commit b02f7732a7c0d4b4c1fdc92c5d8e6624f307a2ed
-Date:   Sun Sep 13 21:07:57 2026 +0300
-
-    Delivery: manifest resynchronized
