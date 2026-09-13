@@ -118,6 +118,27 @@ func (o *Outbox) Start(ctx context.Context) {
 			}
 		}
 	}()
+	o.startRetention(ctx)
+}
+
+// StartRetention runs ONLY the retention pass: no drain, no publish, no connection.
+//
+// It exists for licensing-only mode, where the cloud transport is not opened at all. Retention is local
+// housekeeping — it removes records this appliance already delivered, from its own disk — and stopping it
+// alongside the transport would leave an appliance quietly growing a queue for ever because it had been told
+// not to talk. Those are different concerns and they now have different switches.
+//
+// THE CALLER MUST NOT KEEP THIS OUTBOX WHERE PRODUCERS CAN REACH IT. In licensing-only mode the producers
+// are disabled precisely by there being no outbox to hand them; this one belongs to the retention goroutine
+// and nothing else.
+func (o *Outbox) StartRetention(ctx context.Context) {
+	if o.RetentionEvery == 0 {
+		o.RetentionEvery = 6 * time.Hour
+	}
+	o.startRetention(ctx)
+}
+
+func (o *Outbox) startRetention(ctx context.Context) {
 	go func() {
 		// Retention runs on its own slower clock. It is deliberately NOT part of the drain loop: a queue
 		// that cannot drain is exactly when somebody would most like the disk to stop filling, and tying

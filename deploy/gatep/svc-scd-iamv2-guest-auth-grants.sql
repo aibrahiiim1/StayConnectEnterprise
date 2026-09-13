@@ -243,3 +243,8 @@ GRANT EXECUTE ON FUNCTION iam_v2.guest_signin_note_success(uuid,uuid,macaddr)   
 GRANT EXECUTE ON FUNCTION iam_v2.cloud_sync_settings_get(uuid,uuid)        TO svc_scd;
 GRANT EXECUTE ON FUNCTION iam_v2.sync_outbox_prune_delivered(integer)      TO svc_scd;
 GRANT EXECUTE ON FUNCTION iam_v2.sync_outbox_accounting()                  TO svc_scd;
+
+-- CLOUD OPERATING MODE (migration 0071). scd reads the mode at boot to decide whether to open the telemetry
+-- transport at all. READ ONLY, and there is no write grant anywhere for scd: a daemon that could rewrite the
+-- rule it is subject to is not subject to it.
+GRANT EXECUTE ON FUNCTION iam_v2.cloud_mode_get(uuid,uuid) TO svc_scd;

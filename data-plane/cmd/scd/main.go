@@ -38,6 +38,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/appliancecert"
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/data-plane/internal/buildprofile"
+	"github.com/stayconnect/enterprise/data-plane/internal/cloudmode"
 	"github.com/stayconnect/enterprise/data-plane/internal/hwid"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/identity"
@@ -246,6 +247,9 @@ type server struct {
 
 	// certMgr owns the mTLS client-certificate lifecycle (nil if disabled).
 	certMgr *appliancecert.Manager
+	// cloudMode is resolved once at boot and reported on the admin surface, so the screen and the socket
+	// cannot disagree about whether this appliance is allowed to talk to Central.
+	cloudMode cloudmode.Mode
 	// noMTLSLogged counts consecutive assignment polls skipped because the mTLS certificate is not ready.
 	// Only the assignment agent touches it, and only from its own goroutine, so it needs no lock. It
 	// exists to make "waiting for the certificate" visible without writing a line every 30 seconds.
@@ -941,6 +945,27 @@ func main() {
 		go s.p3auth.attempts.RunPurge(rootCtx, time.Hour)
 	}
 
+	// LICENSING-ONLY IS DECIDED BEFORE ANY SOCKET IS OPENED.
+	//
+	// Product-Owner decision: Central serves this appliance for licensing only. Licence activation,
+	// retrieval, renewal and validation — and the appliance identity and certificate lifecycle they depend
+	// on — are HTTPS to ctrlapi, and are untouched below. Everything on the NATS transport is not licensing:
+	// the telemetry outbox, remote guest-session revocation, remote PMS test/cache/health, the tenant PMS
+	// config broadcast, the signed command channel and the software-update agent.
+	//
+	// The only licensing-SHAPED thing on that transport was license_ack, and it is a report ABOUT licensing
+	// rather than a licensing mechanism: Central accepts it as a telemetry kind and stores a row, nothing
+	// consumes it, and no licence operation depends on it. So the transport is not opened at all rather than
+	// opened and filtered — a connection that exists is a connection that can be subscribed to by the next
+	// person who adds a feature.
+	//
+	// STOPPING AT THE SOURCE IS THE REQUIREMENT. Not connecting means nothing is published, nothing is
+	// subscribed, no command or configuration arrives, and no queued record resumes on restart, because the
+	// drain worker that would send it never starts.
+	cloudMode := cloudmode.Resolve(rootCtx, pgxQuerier{pool}, c.TenantID, c.SiteID)
+	slog.Info("cloud mode resolved", "mode", string(cloudMode), "telemetry_allowed", cloudMode.TelemetryAllowed())
+	s.cloudMode = cloudMode
+
 	// Phase 5.2 — NATS RPC surface. When SCD_NATS_URL is set, subscribe to
 	// scd.{applianceID}.> so the control plane can drive admin calls without
 	// needing to share a filesystem with scd.
@@ -968,6 +993,14 @@ func main() {
 			s.certMgr = cm
 			slog.Info("nats transport: mTLS", "url", natsURL)
 		}
+	}
+	if !cloudMode.TelemetryAllowed() {
+		// Said once, plainly, so an operator reading the journal knows this is a decision and not a fault.
+		// The certificate manager below still runs: the certificate is licensing infrastructure, and it is
+		// what authenticates the licence calls whether or not any other transport exists.
+		slog.Info("licensing-only: not opening the cloud telemetry transport",
+			"suppressed", "telemetry publish, remote revoke, remote pms ops, tenant pms config broadcast, signed command channel, software-update agent")
+		natsURL = ""
 	}
 	if natsURL != "" && c.ApplianceID != "" {
 		nc, err := startNATSDispatcher(rootCtx, s, natsURL, c.ApplianceID, natsTLS)
@@ -1006,7 +1039,7 @@ func main() {
 	// without NATS (rows wait locally through outages); the drainer only
 	// publishes when connected. Aggregated summaries only — no guest PII.
 	scdStarted := time.Now()
-	if c.ApplianceID != "" {
+	if c.ApplianceID != "" && cloudMode.TelemetryAllowed() {
 		// Tenant and site come along so retention can read the property's own setting. They may still be
 		// empty here (an appliance awaiting assignment); RetentionDays falls back to the approved default
 		// rather than skipping retention, because an unassigned appliance still fills a disk.
@@ -1015,6 +1048,25 @@ func main() {
 		s.obx.Start(rootCtx)
 		go s.telemetryLoop(rootCtx, scdStarted)
 		s.enqueueLicenseAck(rootCtx)
+	} else if c.ApplianceID != "" {
+		// s.obx STAYS NIL, and that is the enforcement rather than a filter.
+		//
+		// Every producer goes through it — telemetryLoop's usage and health, edged's service_health,
+		// enqueueLicenseAck — and every one of them returns early on a nil outbox. So no new operational
+		// record is created, the drain worker that would send an existing one never starts, and neither
+		// survives a restart, a reconnect or a deployment. The records already in public.sync_outbox are
+		// left exactly where they are: stopping a producer is not a retention policy, and deleting a
+		// property's history was not what was asked for.
+		slog.Info("licensing-only: telemetry outbox and its producers are not started",
+			"existing_records", "retained, not transmitted")
+		// Retention still runs, and deliberately on an Outbox that is NOT assigned to s.obx. Retention is
+		// local housekeeping — it removes records this appliance already delivered, from its own disk — and
+		// it opens no connection. Keeping it means a licensing-only appliance does not grow a queue for ever
+		// because it was told not to talk; keeping it OFF s.obx means the producers stay disabled, because
+		// what disables them is having no outbox to write to.
+		retentionOnly := &outbox.Outbox{DB: pool, ApplianceID: c.ApplianceID,
+			TenantID: c.TenantID, SiteID: c.SiteID}
+		retentionOnly.StartRetention(rootCtx)
 	}
 
 	// Signed hello against ctrlapi — on boot AND periodically. Besides smoke-

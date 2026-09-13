@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stayconnect/enterprise/data-plane/internal/cloudmode"
 	"github.com/stayconnect/enterprise/data-plane/internal/outbox"
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
 )
@@ -593,6 +594,16 @@ func (s *server) enqueueServiceHealth(ctx context.Context) {
 		"worst_service":        worstService,
 		"worst_failure_reason": worstReason,
 		"reported_at":          time.Now().UTC(),
+	}
+	// THIS PRODUCER HAS ITS OWN OUTBOX, so it needs its own answer to the same question.
+	//
+	// scd stops producing by leaving s.obx nil, and every one of its producers returns early on that. This
+	// one does not go through scd: it constructs an Outbox of its own and writes straight into the queue. A
+	// licensing-only appliance with this left unguarded would go on accumulating service-health rows for
+	// ever, and the queue depth on the screen would climb while the property was told nothing is being sent
+	// -- both true, and together an invitation to "fix" it by turning the transport back on.
+	if !cloudmode.Resolve(ctx, edgedQuerier{s.db}, s.tenantID, s.siteID).TelemetryAllowed() {
+		return
 	}
 	ob := &outbox.Outbox{DB: s.db, ApplianceID: s.applianceID()}
 	_ = ob.Enqueue(ctx, "service_health", payload)

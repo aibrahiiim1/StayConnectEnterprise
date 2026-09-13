@@ -193,6 +193,46 @@ freshness rules, not every mirrored stay is eligible, and not all offline condit
 
 ---
 
+## 0E. CENTRAL SERVES THIS APPLIANCE FOR LICENSING ONLY
+
+**Standing Product-Owner decision, 2026-09-13. It supersedes the earlier authorisation to activate
+operational telemetry, and it is not a defect to repair.**
+
+The cloud telemetry link was built, completed and verified — 87,000 records delivered, both sides
+reconciled. It is switched off because the hotel's operations belong on the hotel's appliance. Anyone who
+later finds the outbox static, the transport closed or the dashboard silent is looking at a decision, not a
+fault. **Do not propose reconnecting telemetry as a repair.**
+
+**What the appliance may still say to Central — all of it HTTPS to `ctrlapi`, none of it NATS:**
+
+| Endpoint | Why it is licensing |
+|---|---|
+| `/v1/appliances/register`, `/enroll` | appliance identity |
+| `/v1/appliance/csr`, `/certificate` | the certificate that authenticates the rest |
+| `/v1/appliance/license`, `/offline-reconcile` | the licence itself |
+| `/v1/appliance/hello` | licence **enforcement**: how a deleted appliance discovers it is orphaned and stops serving on a stale cached licence |
+| `/v1/appliance/assignment`, `/assignment-registry`, `/assignment/ack` | the signed tenant/site binding the licence is scoped to |
+
+**What is off, and stays off:** the telemetry outbox and every producer (usage, health, service-health,
+`license_ack`), remote guest-session revocation, remote PMS test/cache/health, the tenant PMS config
+broadcast, the signed command channel, and the software-update agent. The NATS transport is **not opened at
+all** — a connection that exists is one the next feature will subscribe to.
+
+**`license_ack` is not licensing.** Central accepts it as a telemetry kind and stores a row; nothing consumes
+it and no licence operation depends on it. It is a report *about* licensing. Do not reclassify a message as
+licensing because it shares an endpoint, a service or a name with one.
+
+**The mode is `iam_v2.site_cloud_mode`, and absence of a row means `LICENSING_ONLY`.** Every uncertainty —
+no row, no tenant/site scope, an unreadable setting, an unrecognised value — resolves to licensing-only, on
+purpose: being wrong that way costs telemetry until somebody notices, being wrong the other way sends
+guest-adjacent data out of a building that decided it should not. **There is no UI switch**, and no runtime
+role holds `EXECUTE` on `cloud_mode_set`.
+
+**Retention still runs.** It is local housekeeping on records already delivered and opens no connection.
+Stopping a producer is not a retention policy, and no historical record was deleted by this decision.
+
+---
+
 ### 1. Execute, do not review
 
 When the user requests a code change, configuration change, database change, deployment action, production action, file edit, deletion, migration, commit, push, or other repository operation:

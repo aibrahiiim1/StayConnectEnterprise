@@ -89,7 +89,8 @@ for m in 0056_materialization_readiness 0057_lock_auth_context_offer \
          0061_the_entitlement_records_what_it_spent \
          0062_the_crossing_sample_still_belongs_to_the_entitlement_that_spent_it \
          0063_scoped_reader_for_current_package_conditions \
-         0064_the_allowance_a_stay_earned_is_frozen_when_it_is_granted; do
+         0064_the_allowance_a_stay_earned_is_frozen_when_it_is_granted \
+         0071_central_serves_this_appliance_for_licensing_only; do
   f="$ROOT/data-plane/migrations/$m.up.sql"
   [ -f "$f" ] || continue
   psql_run < "$f" >"$OUT/$m.log" 2>&1 || { echo "  FAIL $m:"; tail -3 "$OUT/$m.log"; exit 1; }
@@ -248,6 +249,17 @@ assert_priv "iam_v2_owner CAN return abandoned records (definer runs as the owne
 assert_priv "iam_v2_owner CAN remove delivered records under retention"   "SELECT has_table_privilege('iam_v2_owner','public.sync_outbox','DELETE')" t
 assert_priv "the queue's operator functions live in iam_v2"   "SELECT count(*)=4 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname IN ('sync_outbox_recover_exhausted','sync_outbox_prune_delivered','sync_outbox_accounting','sync_outbox_recovery_log_append_only')" t
 assert_priv "and none was left behind in public"   "SELECT count(*)=0 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname LIKE 'sync_outbox!_%' ESCAPE '!'" t
+
+# CLOUD OPERATING MODE (0071). The decision is "Central serves this appliance for licensing only", and the
+# requirement is that it cannot silently reactivate. Two halves are asserted: nobody with a runtime role can
+# change the mode, and the daemon the mode governs cannot rewrite it.
+assert_priv "scd may READ the mode it is subject to"   "SELECT has_function_privilege('svc_scd','iam_v2.cloud_mode_get(uuid,uuid)','EXECUTE')" t
+assert_priv "scd CANNOT change the mode it is subject to"   "SELECT has_function_privilege('svc_scd','iam_v2.cloud_mode_set(uuid,uuid,text,text,text)','EXECUTE')" f
+assert_priv "scd CANNOT write the mode table directly"   "SELECT has_table_privilege('svc_scd','iam_v2.site_cloud_mode','UPDATE')" f
+assert_priv "edged may READ the mode, to show it"   "SELECT has_function_privilege('svc_edged','iam_v2.cloud_mode_get(uuid,uuid)','EXECUTE')" t
+assert_priv "edged CANNOT change it: this decision has no UI switch"   "SELECT has_function_privilege('svc_edged','iam_v2.cloud_mode_set(uuid,uuid,text,text,text)','EXECUTE')" f
+assert_priv "edged CANNOT write the mode change log directly"   "SELECT has_table_privilege('svc_edged','iam_v2.cloud_mode_changes','INSERT')" f
+assert_priv "PUBLIC holds nothing on the mode"   "SELECT has_table_privilege('public','iam_v2.site_cloud_mode','SELECT')" f
 
 assert_priv "PUBLIC holds nothing on the retention setting"   "SELECT has_table_privilege('public','iam_v2.site_cloud_sync_settings','SELECT')" f
 assert_priv "PUBLIC cannot recover the queue"   "SELECT has_function_privilege('public','iam_v2.sync_outbox_recover_exhausted(text,text,integer)','EXECUTE')" f

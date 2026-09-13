@@ -562,6 +562,66 @@ The engine enforces the third one itself: a departure whose matching stay arrive
 
 ## 14c. Reporting to the StayConnect cloud
 
+**This appliance uses the StayConnect cloud for its licence only.**
+
+Operational reporting is switched off by a Product-Owner decision of 2026-09-13. It is not broken and does
+not need reconnecting. Hotel Admin shows the state as **Licensing only** on **Network → Cloud connection**.
+
+**What the appliance still sends,** and nothing else — all of it HTTPS, none of it over the messaging
+transport:
+
+* its **licence**: activation, retrieval, renewal, validation, and offline reconciliation;
+* its **identity**: registration and enrolment;
+* the **certificate** that authenticates those calls, and its renewal;
+* a periodic **licence-enforcement check** — this is how an appliance that has been deleted at the cloud
+  discovers it is orphaned and stops serving on a licence it has cached;
+* the **signed assignment** that says which customer and site this appliance belongs to, which is what the
+  licence is scoped to. It is re-verified on this appliance every time it starts.
+
+**What it no longer sends or accepts:** usage and health summaries, service-health reports, licence
+acknowledgements, remote disconnection of a guest, remote PMS tests, remote PMS configuration, remote
+commands, and software-update instructions. Every one of those was reporting or remote control; none was
+licensing.
+
+### The retained allowlist, in full
+
+Every exchange the appliance is still permitted, what it carries, and how often. Nothing else is sent, and
+nothing at all goes over the messaging transport.
+
+| Exchange | Purpose | What it carries | Cadence |
+|---|---|---|---|
+| `POST /v1/appliances/register`, `/enroll` | establish this appliance's identity | appliance id, hardware serial, public key | once, and on orphan recovery |
+| `POST /v1/appliance/csr` → `GET /certificate` | obtain and renew the client certificate | certificate signing request; the issued certificate | on issue and before expiry |
+| `GET /v1/appliance/license` | activation, retrieval, renewal, validation | appliance id; the signed licence document | ~hourly, plus on demand |
+| `POST /v1/appliance/offline-reconcile` | reconcile a licence used offline | licence reference and offline usage counters | on reconnect after offline use |
+| `GET /v1/appliance/hello` | **licence enforcement** — detects that this appliance was deleted at the cloud, so it stops serving on a cached licence | signed appliance id only | every 10 minutes |
+| `GET /v1/appliance/assignment`, `/assignment-registry`, `POST /assignment/ack` | **licence enforcement** — carries revocation, decommission and re-assignment; the appliance stops serving the guest plane when the assignment no longer grants | signed document: customer, site, state, version. Acknowledgement returns the version adopted | every 30 seconds |
+
+**No guest identity, stay, session, usage or log content appears in any of them.** The licence and assignment
+calls carry the appliance's own identity and signed documents about that appliance; nothing describes a
+guest, a room or a reservation.
+
+**All of it is mutually-authenticated HTTPS to the control API.** The assignment channel is certificate-only
+by design — there is no token fallback, so a document can only reach an appliance holding a valid client
+certificate.
+
+**Nothing local changed.** The PMS connection, mirrored stays, guest sign-in and its attempt records,
+packages, allowances, sessions, accounting, enforcement and every Hotel Admin screen run on this appliance
+and are unaffected. A guest does not need the cloud to get online, and the offline licence and grace rules
+are unchanged.
+
+**The records produced while reporting was enabled are kept, not deleted.** They stay on the appliance and
+are removed only by the ordinary retention period below, measured from the day each was delivered.
+
+---
+
+### The queue, retention and recovery (while reporting is enabled)
+
+The remainder of this section applies to an appliance running in full reporting mode. On a licensing-only
+appliance the queue is static: nothing is added to it and nothing is sent from it.
+
+
+
 **Hotel Admin → Network → Cloud connection.**
 
 The appliance keeps working when the cloud is unreachable. Everything it reports upward — usage totals,

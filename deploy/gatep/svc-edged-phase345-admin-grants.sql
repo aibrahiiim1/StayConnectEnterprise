@@ -218,3 +218,12 @@ GRANT EXECUTE ON FUNCTION iam_v2.cloud_sync_settings_get(uuid,uuid)             
 GRANT EXECUTE ON FUNCTION iam_v2.cloud_sync_settings_set(uuid,uuid,integer,text,text)                TO svc_edged;
 GRANT EXECUTE ON FUNCTION iam_v2.sync_outbox_recover_exhausted(text,text,integer)                    TO svc_edged;
 GRANT EXECUTE ON FUNCTION iam_v2.sync_outbox_accounting()                                            TO svc_edged;
+
+-- CLOUD OPERATING MODE (migration 0071). edged reads the mode to show it on the Cloud connection screen and
+-- to refuse to enqueue service-health when the appliance is licensing-only.
+--
+-- NO EXECUTE ON cloud_mode_set, DELIBERATELY. The Product-Owner decision says the operating model must not be
+-- contradicted by a casual UI switch, so the admin API has no path to change it. Changing the mode is a
+-- deliberate act performed with the owner role, and the append-only change log records who did it.
+GRANT EXECUTE ON FUNCTION iam_v2.cloud_mode_get(uuid,uuid) TO svc_edged;
+GRANT SELECT  ON iam_v2.cloud_mode_changes                 TO svc_edged;

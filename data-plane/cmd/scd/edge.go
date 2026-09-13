@@ -19,8 +19,10 @@ import (
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/buildprofile"
+	"github.com/stayconnect/enterprise/data-plane/internal/cloudmode"
 	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
 	"github.com/stayconnect/enterprise/data-plane/internal/nft"
+	"github.com/stayconnect/enterprise/data-plane/internal/outbox"
 	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
 	lic "github.com/stayconnect/enterprise/license"
 )
@@ -238,7 +240,25 @@ func (s *server) gardenReload(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) outboxStats(w http.ResponseWriter, r *http.Request) {
 	if s.obx == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"enabled": false})
+		// enabled:false has always meant "this appliance is not reporting upward". It now carries WHY,
+		// because "not in use" and "switched off by a decision" look identical to an operator and only one
+		// of them is something to investigate. The accounting still comes from the database: the records
+		// are retained, and a screen that hid them would be implying a deletion that did not happen.
+		out := map[string]any{"enabled": false, "mode": string(s.cloudMode)}
+		if s.cloudMode == cloudmode.LicensingOnly {
+			out["reason"] = "licensing_only"
+		}
+		if acct, err := (&outbox.Outbox{DB: s.db}).Account(r.Context()); err == nil {
+			out["delivered"] = acct.Delivered
+			out["pending"] = acct.Pending
+			out["dead"] = acct.Exhausted
+			out["total"] = acct.Total
+			out["bytes"] = acct.Bytes
+			out["balanced"] = acct.Balanced()
+			out["oldest_pending"] = acct.OldestPending
+			out["retention_days"] = (&outbox.Outbox{DB: s.db}).RetentionDays(r.Context(), s.tenID, s.siteID)
+		}
+		writeJSON(w, http.StatusOK, out)
 		return
 	}
 	acct, err := s.obx.Account(r.Context())
@@ -252,7 +272,7 @@ func (s *server) outboxStats(w http.ResponseWriter, r *http.Request) {
 	// had to be guessed from the pending count moving), how much disk the queue holds, whether the three
 	// buckets still account for every record, and what the last attempt actually learned.
 	writeJSON(w, http.StatusOK, map[string]any{
-		"enabled": true,
+		"enabled": true, "mode": string(s.cloudMode),
 		"pending": acct.Pending, "dead": acct.Exhausted, "oldest_pending": acct.OldestPending,
 		"delivered": acct.Delivered, "total": acct.Total, "bytes": acct.Bytes,
 		"oldest_exhausted": acct.OldestExhausted, "balanced": acct.Balanced(),
