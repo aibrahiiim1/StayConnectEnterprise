@@ -99,6 +99,7 @@ const SECTIONS: Section[] = [
       { href: "/pms-resolutions",      label: "Guest sign-in checks", icon: Send,   resource: "pms-resolutions",      enabled: CAP_PMS, keywords: "room verification failures evidence" },
     { href: "/guest-signin-attempts", label: "Guest sign-in attempts", icon: KeyRound, resource: "guest-signin-attempts", enabled: CAP_PMS, keywords: "attempt failed reason room typed credential mismatch why cannot connect" },
       { href: "/pms-reconciliation",   label: "Unresolved departures", icon: ClipboardCheck, resource: "pms-reconciliation", enabled: CAP_PMS, keywords: "checkout not applied departure unmatched room shared overstay past departure date manual review reconcile" },
+      { href: "/roster-reconciliation", label: "Roster reconciliation", icon: ClipboardCheck, resource: "pms-roster-reconciliation", enabled: CAP_PMS, keywords: "automatic close departures roster complete sweep building rooms blocker link down reconnect backoff retry recovery settings" },
       { href: "/pms-source-conflicts", label: "Duplicate sources",    icon: Shield, resource: "pms-source-conflicts", enabled: CAP_PMS, keywords: "conflict two interfaces same room" },
       { href: "/stay-transfers",       label: "Cross-PMS transfer",   icon: Send,   resource: "stay-transfers",       enabled: CAP_POST_STAY, keywords: "move stay between systems" },
     ],

@@ -52,6 +52,9 @@ const MATRIX: Matrix = {
     "guest-signin-protection": "write", "guest-signin-restrictions": "write",
     // Unresolved departures are READ-ONLY for every role. There is no local action: the PMS resolves them.
     "pms-reconciliation": "read",
+    // Roster reconciliation is a different power: it runs automatically, and this role owns the integration
+    // it belongs to -- the reconnect bounds and the blocker thresholds are its settings to change.
+    "pms-roster-reconciliation": "write",
     // Reporting to the cloud is appliance infrastructure. Two keys: a retention period is a policy,
     // releasing thousands of abandoned records onto the wire is an action with a far end.
     "cloud-sync-settings": "write", "cloud-sync-recovery": "write",
@@ -87,6 +90,9 @@ const MATRIX: Matrix = {
     "guest-signin-restrictions": "write", "guest-signin-protection": "read",
     // "Is this guest still checked in according to the PMS" is a reception question; this list answers it.
     "pms-reconciliation": "read",
+    // The desk READS the reconciliation state and its blockers -- "is the PMS link the reason" is a question
+    // it gets asked -- and changes none of the integration's settings.
+    "pms-roster-reconciliation": "read",
     // Phase 6 (DARK): the desk answers "why can't I remove my old phone" and changes no capability.
     "guest-device-self-service": "read",
     "pms-stays": "read", "pms-events": "read", "operational-alerts": "write", "checkout-grace": "read",

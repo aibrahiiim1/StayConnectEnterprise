@@ -43,6 +43,7 @@ func (s *server) rosterReconciliationRoutes() http.Handler {
 	r.Post("/apply", s.applyRosterReconcile)
 	r.Post("/dispose-snapshots", s.disposeSnapshotCases)
 	r.Put("/settings", s.updateReconciliationSettings)
+	r.Put("/connection-settings", s.updateConnectionSettings)
 	return r
 }
 
@@ -102,8 +103,22 @@ func (s *server) rosterReconciliationState(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	var cMinMs, cMaxMs, cStable, cLinkDown, cRefusals int
+	var cVersion int64
+	var cDefault bool
+	_ = s.db.QueryRow(ctx, `SELECT backoff_min_ms, backoff_max_ms, stable_reset_seconds,
+		link_down_alert_seconds, blocked_after_refusals, config_version, is_default
+		FROM iam_v2.pms_connection_settings_get($1::uuid,$2::uuid)`, s.tenantID, s.siteID).
+		Scan(&cMinMs, &cMaxMs, &cStable, &cLinkDown, &cRefusals, &cVersion, &cDefault)
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"blockers": blockers,
+		"connection_settings": map[string]any{
+			"backoff_min_ms": cMinMs, "backoff_max_ms": cMaxMs,
+			"stable_reset_seconds": cStable, "link_down_alert_seconds": cLinkDown,
+			"blocked_after_refusals": cRefusals,
+			"config_version":         cVersion, "is_default": cDefault,
+		},
 		"settings": map[string]any{
 			"roster_trust_min": floor, "inventory_tolerance": tol,
 			"inventory_lookback": look, "max_close_per_run": cap_,
@@ -307,4 +322,42 @@ func bodyReason(r *http.Request) string {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&in)
 	return strings.TrimSpace(in.Reason)
+}
+
+// updateConnectionSettings changes the reconnect and blocker-reporting bounds. Every field is optional so a
+// partial change touches nothing else, and the definer function records who and why -- the connector reads
+// these and can never write them.
+func (s *server) updateConnectionSettings(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	var in struct {
+		BackoffMinMs         *int   `json:"backoff_min_ms"`
+		BackoffMaxMs         *int   `json:"backoff_max_ms"`
+		StableResetSeconds   *int   `json:"stable_reset_seconds"`
+		LinkDownAlertSeconds *int   `json:"link_down_alert_seconds"`
+		BlockedAfterRefusals *int   `json:"blocked_after_refusals"`
+		Reason               string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+		return
+	}
+	sess := sessFrom(r.Context())
+	operator := "unknown"
+	if sess != nil && strings.TrimSpace(sess.Email) != "" {
+		operator = sess.Email
+	} else if sess != nil {
+		operator = sess.OperatorID
+	}
+	var version int64
+	if err := s.db.QueryRow(ctx,
+		`SELECT iam_v2.pms_connection_settings_set($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9)`,
+		s.tenantID, s.siteID, operator, in.Reason,
+		in.BackoffMinMs, in.BackoffMaxMs, in.StableResetSeconds,
+		in.LinkDownAlertSeconds, in.BlockedAfterRefusals).Scan(&version); err != nil {
+		jsonErr(w, http.StatusBadRequest, "settings_rejected", err.Error())
+		return
+	}
+	s.audit(r, "pms_connection_settings.update", "pms_connection_settings", "", nil)
+	writeJSON(w, http.StatusOK, map[string]any{"config_version": version})
 }

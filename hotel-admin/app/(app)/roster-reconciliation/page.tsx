@@ -20,8 +20,10 @@
 // protection, permanently, not hidden because it is usually small.
 
 import { useCallback, useEffect, useState } from "react";
-import { ShieldCheck, Building2, RefreshCw, ArchiveRestore } from "lucide-react";
-import { api, RosterReconciliationState, ReconcileRun, ReconcileRunRecord } from "@/lib/api";
+import { ShieldCheck, Building2, RefreshCw, ArchiveRestore, AlertTriangle, PlugZap } from "lucide-react";
+import {
+  api, RosterReconciliationState, ReconcileRun, ReconcileRunRecord, PmsConnectionSettings,
+} from "@/lib/api";
 import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
 import { Card, CardBody } from "@/components/ui/card";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
@@ -45,6 +47,14 @@ const REFUSAL_MEANING: Record<string, string> = {
     "More stays would close than one run is allowed to close. This is deliberate: a surprise stops for a person.",
 };
 
+const CONN_FIELDS: [keyof PmsConnectionSettings, string, string][] = [
+  ["backoff_min_ms", "Shortest retry wait", "ms"],
+  ["backoff_max_ms", "Longest retry wait", "ms"],
+  ["stable_reset_seconds", "Stable before reset", "s"],
+  ["link_down_alert_seconds", "Report link down after", "s"],
+  ["blocked_after_refusals", "Report blocked after", "runs"],
+];
+
 export default function RosterReconciliationPage() {
   const [state, setState] = useState<RosterReconciliationState | null>(null);
   const [runs, setRuns] = useState<ReconcileRunRecord[]>([]);
@@ -52,6 +62,9 @@ export default function RosterReconciliationPage() {
   const [busy, setBusy] = useState(false);
   const [reason, setReason] = useState("");
   const [lastApply, setLastApply] = useState<ReconcileRun | null>(null);
+  const [connForm, setConnForm] = useState<Record<string, number>>({});
+  const [connReason, setConnReason] = useState("");
+  const [connSaved, setConnSaved] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setErr(null);
@@ -84,6 +97,22 @@ export default function RosterReconciliationPage() {
     }
   }
 
+  async function saveConnection() {
+    setBusy(true);
+    try {
+      const out = await api.put<{ config_version: number }>(
+        "/pms-roster-reconciliation/connection-settings", { ...connForm, reason: connReason });
+      setConnSaved(out.config_version);
+      setConnForm({});
+      setConnReason("");
+      await load();
+    } catch (e: any) {
+      setErr(e?.message ?? "the settings were rejected");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function disposeSnapshots() {
     setBusy(true);
     try {
@@ -110,6 +139,40 @@ export default function RosterReconciliationPage() {
       />
 
       {err && <Card><CardBody><p className="text-sm text-err">{err}</p></CardBody></Card>}
+
+      {/* WHAT IS IN THE WAY, FIRST. A blocker is derived from recorded facts, so it appears while its
+          condition lasts and disappears on its own -- there is nothing to acknowledge or clear. Each states
+          whether guests are affected, because a PMS link alarm reads as an outage unless it says plainly
+          that the mirror is still authorising people. */}
+      {(state?.blockers?.length ?? 0) > 0 && (
+        <Card>
+          <CardBody className="space-y-3">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5" />
+              <h2 className="text-base font-semibold">Needs attention</h2>
+            </div>
+            {state!.blockers.map((b, i) => (
+              <div key={i} className="rounded-md border border-warning/30 bg-warning-subtle p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge tone="warn">{b.blocker.replace(/_/g, " ").toLowerCase()}</Badge>
+                  {b.since && (
+                    <span className="text-xs text-muted-foreground">
+                      since {new Date(b.since).toLocaleString()}
+                    </span>
+                  )}
+                  <Badge tone={b.guests_affected ? "err" : "ok"}>
+                    {b.guests_affected ? "guests affected" : "guests not affected"}
+                  </Badge>
+                </div>
+                <p className="mt-2 text-sm text-warning-subtle-foreground">{b.detail}</p>
+              </div>
+            ))}
+            <p className="text-xs text-muted-foreground">
+              These clear themselves when the condition ends. There is nothing to acknowledge.
+            </p>
+          </CardBody>
+        </Card>
+      )}
 
       <Toolbar>
         <Button variant="secondary" onClick={() => void load()} disabled={busy}>
@@ -193,6 +256,60 @@ export default function RosterReconciliationPage() {
           <Button variant="secondary" onClick={() => void disposeSnapshots()} disabled={busy}>
             <ArchiveRestore className="h-4 w-4" /> Answer the snapshot cases
           </Button>
+        </CardBody>
+      </Card>
+
+      {/* RECOVERY SETTINGS. The connector reconnects on its own and retries indefinitely -- a PMS returning
+          overnight must be picked up unattended -- so these bound the INTERVAL between attempts and when a
+          person is told, never the number of attempts. */}
+      <Card>
+        <CardBody className="space-y-3">
+          <div className="flex items-center gap-2">
+            <PlugZap className="h-5 w-5" />
+            <h2 className="text-base font-semibold">Connection recovery</h2>
+            {state?.connection_settings?.is_default && <Badge tone="neutral">defaults</Badge>}
+          </div>
+          <p className="text-sm text-muted-foreground">
+            The PMS link reconnects by itself, backing off between attempts and retrying for as long as it
+            takes. These bound how fast it retries, and how long a problem may last before it is reported
+            above.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {CONN_FIELDS.map(([key, label, unit]) => (
+              <label key={key} className="text-sm">
+                <span className="block text-muted-foreground">
+                  {label} ({unit})
+                </span>
+                <input
+                  type="number"
+                  className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
+                  value={connForm[key] ?? state?.connection_settings?.[key] ?? ""}
+                  onChange={(e) => setConnForm({ ...connForm, [key]: Number(e.target.value) })}
+                  disabled={busy}
+                />
+              </label>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              className="min-w-[20rem] flex-1 rounded-md border px-3 py-2 text-sm"
+              placeholder="Reason - recorded against this change"
+              value={connReason}
+              onChange={(e) => setConnReason(e.target.value)}
+              disabled={busy}
+            />
+            <Button
+              onClick={() => void saveConnection()}
+              disabled={busy || Object.keys(connForm).length === 0}
+            >
+              Save recovery settings
+            </Button>
+          </div>
+          {connSaved && (
+            <p className="text-sm text-ok">
+              Saved as version {connSaved}. It applies on the next reconnect.
+            </p>
+          )}
         </CardBody>
       </Card>
 
