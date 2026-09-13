@@ -14,24 +14,19 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/nats-io/nats.go"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/stayconnect/enterprise/control-plane/internal/api"
 	"github.com/stayconnect/enterprise/control-plane/internal/applianceauth"
+	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 	"github.com/stayconnect/enterprise/control-plane/internal/config"
-	"github.com/stayconnect/enterprise/control-plane/internal/configpush"
 	"github.com/stayconnect/enterprise/control-plane/internal/db"
-	"github.com/stayconnect/enterprise/control-plane/internal/fleet"
-	"github.com/stayconnect/enterprise/control-plane/internal/heartbeat"
 	apihttp "github.com/stayconnect/enterprise/control-plane/internal/http"
-	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
 	"github.com/stayconnect/enterprise/control-plane/internal/metrics"
 	"github.com/stayconnect/enterprise/control-plane/internal/oidc"
 	"github.com/stayconnect/enterprise/control-plane/internal/pki"
-	"github.com/stayconnect/enterprise/control-plane/internal/transport"
 	"github.com/stayconnect/enterprise/license"
 )
 
@@ -120,76 +115,11 @@ func main() {
 	defer rdb.Close()
 	slog.Info("redis connected")
 
-	// Transport selection:
-	//   CTRLAPI_NATS_URL set → NATSTransport (phase 5.2 production path)
-	//   otherwise            → LocalUnixTransport (dev/co-located fallback)
-	var (
-		tr       transport.ApplianceTransport
-		natsConn *nats.Conn
-	)
-	// Prefer the mTLS NATS endpoint (:4223) when configured — ctrlapi connects
-	// as a central SERVICE presenting a cert with URI SAN stayconnect://service/…
-	// (broad consumer/control perms via Auth Callout). Falls back to the legacy
-	// user/pass URL otherwise (rollback path).
-	natsMTLSURL := os.Getenv("CTRLAPI_NATS_MTLS_URL")
-	if natsMTLSURL != "" {
-		opts := []nats.Option{nats.Name("ctrlapi"), nats.MaxReconnects(-1), nats.ReconnectWait(2 * time.Second)}
-		if cc := os.Getenv("CTRLAPI_NATS_CLIENT_CERT"); cc != "" {
-			opts = append(opts, nats.ClientCert(cc, os.Getenv("CTRLAPI_NATS_CLIENT_KEY")))
-		}
-		if ca := os.Getenv("CTRLAPI_NATS_CA"); ca != "" {
-			opts = append(opts, nats.RootCAs(ca))
-		}
-		nc, err := nats.Connect(natsMTLSURL, opts...)
-		if err != nil {
-			// Non-fatal: fall back to the legacy NATS URL (or unix) so a NATS
-			// mTLS problem never takes down the Cloud API. Cutover-safe.
-			slog.Error("nats mTLS connect failed — falling back to legacy transport", "err", err)
-			natsMTLSURL = ""
-		} else {
-			natsConn = nc
-			tr = transport.NewNATS(nc, 10*time.Second)
-			slog.Info("transport=nats-mtls", "url", natsMTLSURL)
-		}
-	}
-	if natsMTLSURL == "" {
-		if u := os.Getenv("CTRLAPI_NATS_URL"); u != "" {
-			nc, err := nats.Connect(u,
-				nats.Name("ctrlapi"),
-				nats.MaxReconnects(-1),
-				nats.ReconnectWait(2*time.Second),
-			)
-			if err != nil {
-				slog.Error("nats connect failed", "err", err)
-				os.Exit(1)
-			}
-			natsConn = nc
-			tr = transport.NewNATS(nc, 10*time.Second)
-			slog.Info("transport=nats", "url", u)
-		} else {
-			scdSock := os.Getenv("CTRLAPI_SCD_SOCKET")
-			if scdSock == "" {
-				scdSock = "/run/stayconnect/scd.sock"
-			}
-			tr = transport.NewLocalUnix(scdSock)
-			slog.Info("transport=unix", "socket", scdSock)
-		}
-	}
-	defer func() {
-		if natsConn != nil {
-			_ = natsConn.Drain()
-		}
-	}()
-
-	// Phase 5.4 — heartbeat consumer + staleness sweeper. Only runs when
-	// NATS is the transport; dev/unix-socket deployments have a single
-	// appliance and don't need liveness tracking.
+	// NO APPLIANCE TRANSPORT. Central serves this product for LICENSING ONLY, so there is no NATS
+	// connection, no transport selection and no heartbeat consumer. What an appliance needs from Central --
+	// identity, its certificate, its licence, the signed assignment -- is all HTTPS on this same API. A
+	// connection that exists is one the next feature subscribes to, so none is opened.
 	met := metrics.New(version)
-	if natsConn != nil {
-		if err := heartbeat.StartConsumer(rootCtx, natsConn, pool, met); err != nil {
-			slog.Warn("heartbeat consumer failed to start", "err", err)
-		}
-	}
 
 	// Phase 5.7.C — bootstrap token expiry sweeper. Hourly DELETE of
 	// unconsumed tokens past expires_at; consumed rows stick around for
@@ -370,43 +300,21 @@ func main() {
 		slog.Warn("appliance CA unavailable — PKI/mTLS disabled", "path", intKeyPath, "err", err)
 	}
 
-	// Fleet telemetry ingest (aggregated, non-PII summaries from appliances).
-	if natsConn != nil {
-		fc := &fleet.Consumer{DB: pool}
-		if err := fc.Start(rootCtx, natsConn); err != nil {
-			slog.Warn("fleet telemetry consumer failed to start", "err", err)
-		} else {
-			slog.Info("fleet telemetry consumer started")
-		}
-	}
-
 	handler := apihttp.NewRouter(apihttp.Deps{
-		DB:           pool,
-		GuestDB:      guestPool,
-		Redis:        rdb,
-		Transport:    tr,
-		ConfigPush:   configpush.NewWithMetrics(natsConn, met),
-		Metrics:      met,
-		OIDC:         oidcReg,
-		Licensing:    licSvc,
+		DB:                 pool,
+		GuestDB:            guestPool,
+		Redis:              rdb,
+		Metrics:            met,
+		OIDC:               oidcReg,
+		Licensing:          licSvc,
 		AssignKey:          assignKey,
 		AssignRegistryRoot: regRoot,
-		CA:           appCA,
-		ReplayCache:  sharedReplay,
-		NATSConn:     natsConn,
-		CommandKey:   envOrDefault("CTRLAPI_COMMAND_KEY", "/etc/stayconnect/command-signing.key"),
-		Version:      version,
-		AllowOrigins: cfg.AllowOrigins,
-		CookieSecure: cfg.CookieSecure,
+		CA:                 appCA,
+		ReplayCache:        sharedReplay,
+		Version:            version,
+		AllowOrigins:       cfg.AllowOrigins,
+		CookieSecure:       cfg.CookieSecure,
 	})
-	if natsConn != nil {
-		if err := api.StartResultsConsumer(rootCtx, pool, natsConn); err != nil {
-			slog.Warn("command results consumer failed to start", "err", err)
-		}
-		if err := api.StartUpdateStatusConsumer(rootCtx, pool, natsConn); err != nil {
-			slog.Warn("update status consumer failed to start", "err", err)
-		}
-	}
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,

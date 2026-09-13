@@ -1093,7 +1093,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0122",
+  "latest_transition_id": "T0123",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1586,13 +1586,13 @@
   },
   "current_delivery": {
     "kind": "POST_CLOSURE_CORRECTIONS",
-    "decision": "D40",
+    "decision": "D41",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "7f0e928b96db9d118ff85d7804ee945607610bc7",
-    "base_note": "The master merge commit of PR #118. This delivery begins exactly where that one ended.",
-    "head": "f485944cc0b1896c83f6e7422f461cafe9eedb7d",
-    "head_note": "Set by the delivery-only commit that rebuilds the manifest, the export packs and this pointer.",
-    "note": "Central serves this appliance for licensing only (T0122). Supersedes the telemetry activation completed under T0121, which worked and was disabled by decision."
+    "base": "8b76113af0c747cf1bb8ba74dc6838a2292d044a",
+    "base_note": "The master merge commit of PR #119. This delivery begins exactly where that one ended.",
+    "head": "88372ebff654b11cc5b46fded8f6d2c8306c627b",
+    "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
+    "note": "Central non-licensing functionality REMOVED product-wide (not disabled), and the PMS departure defect corrected: a resync roster snapshot is not a departure announcement. Includes T0123, which records that three artefacts were deployed before the required gates and the protected merge, and how that is remediated."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
@@ -1704,6 +1704,9 @@
     "stopped": "The whole NATS transport: telemetry publishes (usage, health, service_health, license_ack), remote guest-session revoke, remote PMS test/cache/health, the tenant PMS config broadcast, the signed command channel, the software-update agent.",
     "license_ack_is_not_licensing": "Central stores it as a telemetry row; nothing consumes it and no licence operation depends on it. A report ABOUT licensing is not licensing.",
     "historical_records": "Retained on both sides. Nothing purged, no table dropped, no queued record replayed. The existing 30-day delivered-record retention still runs locally.",
-    "receipt": "T0122"
+    "receipt": "T0122",
+    "non_licensing_functionality": "PERMANENTLY REMOVED from the product, not disabled. internal/{fleet,commands,updates,configpush,heartbeat,transport}; the fleet, usage, sessions, pms_admin, commands and updates APIs; cmd/nats-authz and cmd/nats-acctest; the cloud-admin fleet page. github.com/nats-io/* is no longer a control-plane dependency. Central migration 0045 dropped fleet_telemetry (251166 rows), fleet_telemetry_dedupe (251286), usage_counters, appliance_commands and appliance_update_assignments.",
+    "nats_surface": "NONE. stayconnect-nats-authz stopped and disabled; sc-central-nats and sc-central-nats-mtls stopped.",
+    "deliberately_kept": "internal/metrics (payments, router, licensing paths) and internal/stripe (commercial billing for licences). A shared package is not removed because its name appears in a removal list."
   }
 }

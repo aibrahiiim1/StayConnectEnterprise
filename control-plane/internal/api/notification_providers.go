@@ -15,7 +15,6 @@ import (
 
 	"github.com/stayconnect/enterprise/control-plane/internal/audit"
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
-	"github.com/stayconnect/enterprise/control-plane/internal/configpush"
 )
 
 var notifyAllowedKinds = map[string]map[string]bool{
@@ -43,7 +42,6 @@ type NotificationProvider struct {
 
 type NotificationAdminBase struct {
 	*Base
-	ConfigPush *configpush.Pusher // reserved for future per-channel push events
 }
 
 type notifyWriteReq struct {

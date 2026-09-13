@@ -413,6 +413,10 @@ func main() {
 				// mirror disagree about" is a question the desk asks; write is the one action that hands a
 				// recorded event back to the ingestion engine, which is not a desk decision.
 				mountResource(r, s, "pms-reconciliation", s.pmsReconciliationRoutes)
+				// Closing the stays a complete roster no longer lists. A separate key from the case list
+				// above, because reading a disagreement and acting on three hundred of them at once are
+				// different powers.
+				mountResource(r, s, "pms-roster-reconciliation", s.rosterReconciliationRoutes)
 				// Reporting to the cloud. Two keys again: setting how long delivered records are kept, and
 				// releasing records the appliance gave up on, are different powers.
 				mountResource(r, s, "cloud-sync-settings", s.cloudSyncSettingsRoutes)

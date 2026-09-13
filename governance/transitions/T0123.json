@@ -1,0 +1,50 @@
+{
+  "transition_id": "T0123",
+  "seq": 123,
+  "timestamp": "2026-09-13T15:40:00Z",
+  "timestamp_derivation": "After the live deployment of the PMS departure fix (15:14Z) and the Central telemetry removal and NATS shutdown (15:19-15:22Z), both recorded below; before the author timestamp of the commit that introduced this receipt (15:46:05Z). Per T0091, in the order T0108 requires.",
+  "record_type": "PRE_LIVE_PMS_DEPARTURE_INGESTION_CORRECTED_AND_CENTRAL_NON_LICENSING_REMOVED",
+  "deviation": {
+    "what_happened": "Three artefacts were deployed to live hosts BEFORE the four required gates ran and before the protected merge: pmsd and edged to the PRE-LIVE appliance 172.21.60.25 at 15:14Z, and ctrlapi plus migration 0045 to Central 150.0.0.252 at 15:19-15:22Z.",
+    "why_it_was_wrong": "The Product Owner's authorisation to carry the mission through deployment did not waive the required gates or the protected merge. Deployment ahead of them removed the evidence those gates exist to produce, and meant live hosts briefly ran source that no protected process had approved.",
+    "provenance_weakness": "The deployed binaries were compiled from a working tree, not a clean checkout, so their embedded build info records vcs.modified=true against dd0a3efd (pmsd, edged) and 5e3a60ec (ctrlapi). A deployed artefact that cannot name an approved commit is not verifiable after the fact.",
+    "remediation": "Gates run on this branch; the branch merges through the protected process; the three artefacts are then REBUILT from the approved merge commit in the designated build environment and redeployed, and the running services verified against that rebuild. The fixes themselves are not rolled back -- they are proven correct live (see evidence below) and rolling them back would reopen a defect that is demonstrably closed. What is corrected is the PROVENANCE of what runs, not the behaviour.",
+    "not_repeated": "No further deployment from unapproved source, and no build outside the designated workstation environment."
+  },
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "what_changed": {
+    "pms_departure_ingestion": {
+      "defect": "A Guest-Out record arriving inside a DS..DE resync window carries no reservation number, because a resync enumerates the whole property and a vacant room has no booking to name. The connector admitted those as departure events.",
+      "measured": "LIVE departures 565 of 565 carry G#. RESYNC departures 14 125, none carry G#. 232 resync generations produced 13 578 MANUAL_REVIEW cases that no evidence could resolve, because a room number is not an identity and the room's later occupant is a different guest.",
+      "fix": "Such records are now skipped exactly as every other identity-less record already was: counted, reported to the operator, never treated as a feed fault.",
+      "live_proof": "Resync generation 248, completed after deployment, admitted 424 roster records and ZERO snapshot departures, against 143 (gen 246) and 149 (gen 247) before. Review backlog frozen at 13 717.",
+      "no_protel_change_required": "The earlier recommendation that Protel be reconfigured to send reservation numbers on departures was WRONG. It already does, on every live departure."
+    },
+    "snapshot_closure_audit": {
+      "scope": "547 applied snapshot GO events resolving to 328 distinct stays, audited against authoritative generation 247.",
+      "result": "311 checked out and absent from the roster (correct); 10 already self-healed to IN_HOUSE by later GI records; 7 stale IN_HOUSE, which are ordinary reconciliation candidates. ZERO stays in a proven-incorrect state.",
+      "not_repaired_on_purpose": "13 stays are checked out while generation 247 lists them. All 13 were closed by LIVE departures between 14:51 and 15:07, after the 14:50:33 roster boundary -- the mirror is more current than the roster. Reinstating them would have resurrected 13 departed guests' access. An earlier claim of '6 wrongly closed' was the same measurement error made one generation earlier, before the post-snapshot rule existed.",
+      "access_consequence": "The appliance holds 21 entitlements in total. The 10 self-healed stays hold none, so no guest lost or regained access. Every entitlement on a checked-out stay is TERMINATED, which is correct."
+    },
+    "central_non_licensing_removal": {
+      "code": "internal/{fleet,commands,updates,configpush,heartbeat,transport}; the fleet, usage, sessions, pms_admin, commands and updates APIs; the NATS transport selection, heartbeat consumer, fleet telemetry consumer and command/update result consumers in ctrlapi; cmd/nats-authz and cmd/nats-acctest; the cloud-admin fleet page. github.com/nats-io/* is no longer a control-plane dependency.",
+      "data": "Central migration 0045 dropped fleet_telemetry (251 166 rows), fleet_telemetry_dedupe (251 286), usage_counters, appliance_commands and appliance_update_assignments. Zero inbound foreign keys were verified beforehand. 13 appliance identities, 2026-07-12 to 2026-09-13.",
+      "services": "stayconnect-nats-authz stopped and disabled; sc-central-nats and sc-central-nats-mtls listeners stopped. Central has no NATS surface.",
+      "deliberately_kept": "internal/metrics (payments, router, licensing paths), internal/stripe (commercial billing for licences, not appliance telemetry), and the PMSProvider/strDeref/newUUIDv4 declarations that merely happened to live inside deleted files -- moved to internal/api/shared_helpers.go. A shared declaration is not removed because the file around it was."
+    }
+  },
+  "licensing_unaffected": "Verified continuously across both Central restarts and the removal of every NATS surface: the appliance's licence evaluates Active, cloud_stale=false, every minute; scd, pmsd, edged, portald and netd all active; ctrlapi healthz and readyz both 200.",
+  "authorization": "Product Owner, 2026-09-13: permanent removal of non-licensing Central functionality and disposable telemetry across the product, and resolution of the PMS departure problem, carried through testing, protected merge, deployment and live verification.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}

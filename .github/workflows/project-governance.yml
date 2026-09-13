@@ -98,6 +98,14 @@ jobs:
       # live configuration stops matching it — a dropped context, strict off, a bypass actor, evaluate-only
       # enforcement, widened merge methods. Unreachable means FAIL: unverifiable is not the same as fine.
       - name: Master protection matches the recorded model
+        # AUTHENTICATED, because unverifiable means FAIL and an unauthenticated read is rate-limited to 60
+        # requests an hour PER RUNNER IP -- shared infrastructure, so the budget is gone before this job
+        # starts. That is exactly how this gate failed: the ruleset was active and publicly readable the
+        # whole time, and the gate reported it could not be confirmed. A check whose failure mode is "too
+        # many other people used this IP" teaches everyone to re-run it until it passes, which is the
+        # opposite of what a protection check is for.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python tools/validate-branch-protection.py
 
       # The DELIVERY-SPEED half of the protection story, and it is checked from the tree, so it is tree-pure.

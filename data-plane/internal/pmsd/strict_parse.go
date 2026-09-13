@@ -141,6 +141,26 @@ func validFieldCode(code string) bool {
 // duplicates and present-but-empty preserved).
 func (pr ParsedRecord) pairs() []FieldPair { return pr.Fields }
 
+// reservationAbsent reports whether a parsed record carries no usable G#.
+//
+// It exists to separate two things this connector spent a long time confusing: a departure Protel ANNOUNCED,
+// and a room a roster SNAPSHOT happens to describe. Measured on the live link over three weeks:
+//
+//	LIVE   GO frames:    559, and 559 of them carry G# — 100%. 557 applied cleanly.
+//	RESYNC GO frames: 14 125, and NOT ONE carries G# — 0%. 13 578 of them landed in MANUAL_REVIEW.
+//
+// That is not a PMS that forgets reservation numbers on checkout. It is a PMS that reports real departures
+// properly, and a DR response that also mentions rooms — which cannot name a reservation, because in a
+// snapshot of who is in the building an empty room has no booking to name.
+func reservationAbsent(pr ParsedRecord) bool {
+	for _, p := range pr.Fields {
+		if p.Code == fcReservation && strings.TrimSpace(p.Value) != "" {
+			return false
+		}
+	}
+	return true
+}
+
 // domain typed field codes (authoritative Protel map). RN/G# are identity; the rest are at-most-once
 // evidence. Any code outside this set is unknown → fingerprint-only, never surfaced to the typed model.
 const (

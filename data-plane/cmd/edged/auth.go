@@ -224,11 +224,16 @@ var rolePerms = map[string]map[string]perm{
 		// device's restriction comes with it: whoever may set the threshold may certainly waive one instance
 		// of it.
 		"guest-signin-protection": permWrite, "guest-signin-restrictions": permWrite,
-		// Unresolved departures are READ-ONLY for every role, including this one. There is no local action:
-		// a departure the engine could not place is resolved by the PMS sending one it can, because
-		// stay_events is one-way and a checkout boundary must be an APPLIED GO event. A write permission
-		// here would promise a power the product does not have.
+		// The CASE LIST stays read-only for every role: an individual departure the engine could not place is
+		// still answered by the PMS, because stay_events is one-way and a checkout boundary must be an
+		// APPLIED GO event.
 		"pms-reconciliation": permRead,
+		// ROSTER RECONCILIATION is a different power and therefore a different key. A complete published
+		// roster IS authoritative evidence -- the PMS stating in full who is in the building -- so closing
+		// the stays it does not mention is supported. It belongs to the role that owns the PMS integration,
+		// because it is an integration action, and because closing several hundred stays at once is not
+		// something a desk under pressure should be able to reach for.
+		"pms-roster-reconciliation": permWrite,
 		// Reporting to the cloud is appliance infrastructure, which is this role's territory. The two keys
 		// stay separate: a retention period is a policy, and releasing nine thousand abandoned records onto
 		// the wire is an action with a far end that has to absorb it.
@@ -252,8 +257,9 @@ var rolePerms = map[string]map[string]perm{
 		// telling a guest to try again, but must not be able to publish or rotate anything.
 		"pms-interfaces": permRead, "pms-routing": permRead, "pms-source-conflicts": permRead,
 		// "Is this guest still checked in according to the PMS" is a question reception answers hourly, and
-		// this list is the honest form of it. Nobody acts on it here; the PMS answers it.
-		"pms-reconciliation": permRead,
+		// this list is the honest form of it. The desk reads the reconciliation state for the same reason,
+		// and runs it for none: closing stays in bulk is an integration action, not a desk one.
+		"pms-reconciliation": permRead, "pms-roster-reconciliation": permRead,
 		// Phase 5 (DARK): the front desk is where a guest who lost their post-stay PIN actually turns up,
 		// so this role can rotate and revoke -- under step-up, a mandatory reason and audit like everyone
 		// else. Reset is a rotation; revoke is terminal for the episode.
@@ -279,7 +285,7 @@ var rolePerms = map[string]map[string]perm{
 		// telling a guest to try again, but must not be able to publish or rotate anything.
 		"pms-interfaces": permRead, "pms-routing": permRead, "pms-source-conflicts": permRead,
 		// Same desk, same conversation, same read-only relationship with the engine.
-		"pms-reconciliation": permRead,
+		"pms-reconciliation": permRead, "pms-roster-reconciliation": permRead,
 		"post-stay-profiles": permWrite,
 		"stay-transfers":     permWrite,
 		"auth-methods":       permRead, "reports": permRead,

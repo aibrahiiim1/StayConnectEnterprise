@@ -252,6 +252,42 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 				return err
 			}
 		case RecGI, RecGC, RecGO:
+			// A ROSTER SNAPSHOT IS NOT A DEPARTURE ANNOUNCEMENT, and this is where the difference is made.
+			//
+			// A GO arriving INSIDE a DS…DE window with no reservation number cannot be a statement that
+			// somebody left: a resync describes who is in the building now, and a room with nobody in it has no
+			// booking to name. Admitting those as departure events is what built the review backlog — 14 125
+			// of them over 232 resync generations, 13 578 stuck in MANUAL_REVIEW, every fresh resync adding
+			// more, none of them ever resolvable because a room number is not an identity and the later
+			// occupant of that room is a different guest.
+			//
+			// So it is skipped exactly like any other record that carries no Stay identity: counted, reported
+			// to the operator, never faulted. Nothing real is lost. A departure Protel actually announces
+			// arrives LIVE and carries G# (559 of 559 observed), and a stay that genuinely ended while the
+			// link was down is closed by roster reconciliation against the COMPLETE published generation,
+			// which compares reservation to reservation instead of guessing from a room.
+			//
+			// THE LIVE ROOM-ONLY PATH IS LEFT ALONE, AND IT IS DORMANT, NOT LOAD-BEARING. Correcting an
+			// earlier misreading of this same data: there are no live room-only departures at all. Every one
+			// of the 565 LIVE GO frames carried G#. The 547 room-only departures that DID apply were all
+			// RESYNC frames resolved by room -- the very inference this system is forbidden to make, since a
+			// room's later occupant is a different guest. Six of them closed a stay the roster still lists.
+			//
+			// So this branch is kept as a safety net for a PMS that might one day announce a departure
+			// without a reservation, not because anything currently depends on it.
+			if pr.RecordType == RecGO && resyncing && reservationAbsent(pr) {
+				skippedNoIdentity++
+				if a.log != nil {
+					a.log.Warn("pmsd: skipping roster-snapshot departure with no reservation",
+						"record_type", string(pr.RecordType), "interface", a.iface.ID,
+						"missing", fcReservation, "skipped_this_cycle", skippedNoIdentity)
+				}
+				if skippedNoIdentity-lastReportedSkipped >= 25 {
+					lastReportedSkipped = skippedNoIdentity
+					sink.RecordSkipped(int64(skippedNoIdentity))
+				}
+				continue
+			}
 			ev, perr := a.toEvent(body)
 			if perr == nil {
 				perr = ev.Validate()

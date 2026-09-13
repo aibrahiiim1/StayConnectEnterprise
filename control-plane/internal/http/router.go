@@ -13,18 +13,15 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/nats-io/nats.go"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/stayconnect/enterprise/control-plane/internal/api"
 	"github.com/stayconnect/enterprise/control-plane/internal/applianceauth"
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
-	"github.com/stayconnect/enterprise/control-plane/internal/configpush"
 	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
 	"github.com/stayconnect/enterprise/control-plane/internal/metrics"
 	"github.com/stayconnect/enterprise/control-plane/internal/oidc"
 	"github.com/stayconnect/enterprise/control-plane/internal/pki"
-	"github.com/stayconnect/enterprise/control-plane/internal/transport"
 )
 
 type Deps struct {
@@ -37,15 +34,11 @@ type Deps struct {
 	// nil = single-DB mode (pre-cutover): falls back to DB.
 	// See docs/API_DEPRECATIONS.md; these mounts disappear after the pilot.
 	GuestDB            *pgxpool.Pool
-	Transport          transport.ApplianceTransport
-	ConfigPush         *configpush.Pusher
 	Metrics            *metrics.Registry
 	OIDC               *oidc.Registry
 	Licensing          *licensing.Service         // nil when no vendor key is configured
 	CA                 *pki.CA                    // appliance certificate authority; nil disables PKI routes
 	ReplayCache        *applianceauth.ReplayCache // shared jti replay cache (both transports)
-	NATSConn           *nats.Conn                 // live NATS (mTLS) for command publish; nil disables commands
-	CommandKey         string                     // path to command-signing key
 	AssignKey          ed25519.PrivateKey         // dedicated key for signing appliance assignments; nil disables signed assignments
 	AssignRegistryRoot ed25519.PrivateKey         // registry root key (re-signs the trust registry on key-state change)
 	Version            string
@@ -196,7 +189,7 @@ func NewRouter(d Deps) http.Handler {
 			r.Mount("/social-providers", gone410())
 			r.Mount("/walled-garden", gone410())
 			r.Mount("/payments", gone410())
-			nbase := &api.NotificationAdminBase{Base: gbase, ConfigPush: d.ConfigPush}
+			nbase := &api.NotificationAdminBase{Base: gbase}
 			r.Mount("/notification-providers", nbase.Routes())
 			strBase := &api.StripeAdminBase{Base: gbase}
 			r.Mount("/stripe-accounts", strBase.Routes())
@@ -241,12 +234,6 @@ func NewRouter(d Deps) http.Handler {
 			r.With(auth.RequirePermission("platform.appliances.view")).Get("/backup-health", base.BackupHealthHandler)
 			// Tenant-facing own-appliance support/replacement/reassignment requests.
 			r.Mount("/appliances-support", abase.TenantSupportRoutes())
-			// Signed, allow-listed command channel (platform.commands.issue + reauth).
-			if d.CommandKey != "" {
-				if cb := api.NewCommandsBase(base, d.NATSConn, d.CommandKey); cb != nil {
-					r.Mount("/commands", cb.Routes())
-				}
-			}
 			// Offline signed activation packages (vendor-signed, appliance-bound).
 			vendorKey := os.Getenv("CTRLAPI_VENDOR_KEY")
 			if vendorKey == "" {
@@ -276,21 +263,11 @@ func NewRouter(d Deps) http.Handler {
 				"/etc/stayconnect/pki/nats-ca-bundle.crt", applianceBase); oab != nil {
 				r.Mount("/offline-activation", oab.Routes())
 			}
-			// Signed software update lifecycle (platform.updates.manage + reauth).
-			updateKey := os.Getenv("CTRLAPI_UPDATE_KEY")
-			if updateKey == "" {
-				updateKey = "/etc/stayconnect/update-signing.key"
-			}
-			if ub := api.NewUpdatesBase(base, d.NATSConn, updateKey); ub != nil {
-				r.Mount("/updates", ub.Routes())
-			}
 			// Unambiguous name for subscription plans sold by StayConnect.
 			r.Mount("/commercial-plans", base.PlansRoutes())
 			r.Mount("/operators", base.OperatorsRoutes())
 			ebase := &api.EnrollmentBase{Base: base, ReplayCache: replayCache}
 			r.Mount("/appliance-bootstrap-tokens", ebase.TokenRoutes())
-			fleetBase := &api.FleetBase{Base: base}
-			r.Mount("/fleet", fleetBase.Routes())
 			if d.Licensing != nil {
 				licBase := &api.LicensesBase{Base: base, Svc: d.Licensing}
 				r.Mount("/licenses", licBase.Routes())
