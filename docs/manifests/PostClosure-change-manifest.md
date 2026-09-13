@@ -2,7 +2,7 @@
 
 - **Base commit:** `3eb124cef93bb24231e78d32fb08d0ffc6c655a3`
 - **HEAD commit:** `2108f66f17df226394a66aa6f551cd2ce99daa4e`
-- **Provenance (generation HEAD = inventory_head):** `2108f66f17df226394a66aa6f551cd2ce99daa4e`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `832b593a1988334ea8bc60cdfb9c8d4b7ccf1332`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/pms-automatic-flow-completion`
 - **Remote branch:** `origin/delivery/pms-automatic-flow-completion`
 - **Changed files:** 35
@@ -25,26 +25,26 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0127 records the completed automatic PMS flow |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0127 records the completed automatic PMS flow |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0127 records the completed automatic PMS flow |
-| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: manifest lists itself |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
-| `exports/chatgpt/phase-evidence/GIT_STAT_2108f66f.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: head, packs and manifest resynchronized |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: head, packs and manifest resynchronized |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: head, packs and manifest resynchronized |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: head, packs and manifest resynchronized |
+| `exports/chatgpt/phase-evidence/GIT_STAT_2108f66f.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: head, packs and manifest resynchronized |
 | `exports/chatgpt/phase-evidence/GIT_STAT_cdb85634.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Delivery: packs and manifest resynchronized |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: head, packs and manifest resynchronized |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: head, packs and manifest resynchronized |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: head, packs and manifest resynchronized |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: head, packs and manifest resynchronized |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: head, packs and manifest resynchronized |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0127 records the completed automatic PMS flow |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: head, packs and manifest resynchronized |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0127 records the completed automatic PMS flow |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0127 records the completed automatic PMS flow |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: head, packs and manifest resynchronized |
 | `governance/transitions/T0127.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Refuse a late receipt locally, after the gate caught it three times |
 | `tools/preflight.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Fix the receipt check's own escaping |
 
@@ -63,7 +63,7 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   2 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   2 +-
  docs/context/StayConnect-IAM-Handoff.md            |   2 +-
- docs/manifests/PostClosure-change-manifest.md      |  82 ++--
+ docs/manifests/PostClosure-change-manifest.md      | 102 +++--
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 338376 -> 338375 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 139888 -> 139868 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 43738 -> 43738 bytes
@@ -85,27 +85,17 @@
  governance/project-state.json                      |  12 +-
  governance/transitions/T0127.json                  |  34 ++
  tools/preflight.sh                                 |  30 ++
- 35 files changed, 1100 insertions(+), 99 deletions(-)
+ 35 files changed, 1118 insertions(+), 101 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_2108f66f.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_bbee1617.txt
-M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/MANIFEST.md
-M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
-M  governance/project-state.json
+(clean)
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 832b593a Delivery: head, packs and manifest resynchronized
 HISTORICAL: 2108f66f Fix the receipt check's own escaping
 HISTORICAL: 0abd25a5 Refuse a late receipt locally, after the gate caught it three times
 HISTORICAL: f645772e Delivery: manifest lists itself
