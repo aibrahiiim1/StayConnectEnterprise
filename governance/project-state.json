@@ -1586,13 +1586,13 @@
   },
   "current_delivery": {
     "kind": "POST_CLOSURE_CORRECTIONS",
-    "decision": "D40",
+    "decision": "D41",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "7f0e928b96db9d118ff85d7804ee945607610bc7",
-    "base_note": "The master merge commit of PR #118. This delivery begins exactly where that one ended.",
-    "head": "f485944cc0b1896c83f6e7422f461cafe9eedb7d",
-    "head_note": "Set by the delivery-only commit that rebuilds the manifest, the export packs and this pointer.",
-    "note": "Central serves this appliance for licensing only (T0122). Supersedes the telemetry activation completed under T0121, which worked and was disabled by decision."
+    "base": "8b76113af0c747cf1bb8ba74dc6838a2292d044a",
+    "base_note": "The master merge commit of PR #119. This delivery begins exactly where that one ended.",
+    "head": "88372ebff654b11cc5b46fded8f6d2c8306c627b",
+    "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
+    "note": "Central non-licensing functionality REMOVED product-wide (not disabled), and the PMS departure defect corrected: a resync roster snapshot is not a departure announcement. Includes T0123, which records that three artefacts were deployed before the required gates and the protected merge, and how that is remediated."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
