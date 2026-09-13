@@ -1463,7 +1463,27 @@ export type ReconcileRun = {
   run_id?: string;
 };
 
+export type IntegrationBlocker = {
+  blocker: "LINK_DOWN" | "RECONCILIATION_BLOCKED" | "DEPARTURE_FOR_UNKNOWN_STAY";
+  since?: string | null;
+  detail: string;
+  /** Almost always false: the mirror keeps authorising guests while the feed is down. */
+  guests_affected: boolean;
+};
+
+export type PmsConnectionSettings = {
+  backoff_min_ms: number;
+  backoff_max_ms: number;
+  stable_reset_seconds: number;
+  link_down_alert_seconds: number;
+  blocked_after_refusals: number;
+  config_version: number;
+  is_default: boolean;
+};
+
 export type RosterReconciliationState = {
+  blockers: IntegrationBlocker[];
+  connection_settings: PmsConnectionSettings;
   settings: {
     roster_trust_min: number;
     inventory_tolerance: number;

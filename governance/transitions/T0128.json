@@ -1,0 +1,33 @@
+{
+  "transition_id": "T0128",
+  "seq": 128,
+  "timestamp": "2026-09-13T22:41:00Z",
+  "timestamp_derivation": "After the appliance ledger was corrected through the supported runner and the UI surfaces were completed and built; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "PRE_LIVE_MIGRATION_LEDGER_CORRECTED_AND_OPERATOR_SURFACES_COMPLETED",
+  "ledger_defect": {
+    "found": "Migrations 0072-0076 were applied to the appliance with raw psql rather than scripts/edge-migrate.sh. Every object and grant was correct; public.schema_migrations recorded none of them.",
+    "why_it_matters": "A database that disagrees with its own ledger is one a future install walks into blind, and the runner exists precisely because a deployment pipeline can mask a SQL failure.",
+    "verified_before_acting": "0076's two tables, four functions and trigger were confirmed present, and all six intended grants matched (svc_pmsd may read settings and may NOT write them; svc_edged may read and write; svc_edged may read blockers).",
+    "corrected_how": "Through the supported runner, not by hand-writing ledger rows and not by blindly re-running. A semantic fingerprint of iam_v2 was captured first -- 798 facts covering every table, function, function grant and table grant -- then all five were applied under advisory lock with mandatory per-file checksums, as iam_v2_owner, target-kind=live-site. The fingerprint was then taken again.",
+    "result": "IDENTICAL fingerprint. The 587-room established building, 13 716 dispositions, in-house stays and coverage rows all survived. The only change is the five ledger rows that should have been there."
+  },
+  "ui_defect": {
+    "found": "/roster-reconciliation was built, deployed and never added to the navigation or the role matrix, so it was unreachable. edged had been returning integration blockers since they were written and the page ignored them. The connection settings had a definer function and a connector reading them, and no way for an operator to change them.",
+    "fixed": "The page is in the PMS section under 'Roster reconciliation', resource pms-roster-reconciliation: write for the role that owns the integration, read for the desk roles. Blockers render first, each stating whether guests are affected. The recovery bounds are editable with a mandatory reason through the audited definer function; the connector still cannot write them."
+  },
+  "no_repair_buttons": "Nothing added here repairs anything. Reconciliation remains automatic; blockers are derived and clear themselves; the only action on the screen is changing a setting, which is a configuration decision rather than a repair.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-14: verify migration 0076 directly on the appliance because the pipeline could mask a SQL failure; correct any discrepancy through the supported migration process; show and complete the Hotel Admin surfaces for the recovery settings and blockers.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}
