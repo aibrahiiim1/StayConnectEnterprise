@@ -1093,7 +1093,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0125",
+  "latest_transition_id": "T0126",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1586,13 +1586,13 @@
   },
   "current_delivery": {
     "kind": "POST_CLOSURE_CORRECTIONS",
-    "decision": "D43",
+    "decision": "D44",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "62355d49ad5ed7c15add48f8743fc7109eb917ca",
-    "base_note": "The master merge commit of PR #121. This delivery begins exactly where that one ended.",
-    "head": "5acffe9cf3027fbbac1546d483064d9c92b38c13",
+    "base": "48a74dc9e9b4ca1c124a2ca104f10ea1e887f650",
+    "base_note": "The master merge commit of PR #122. This delivery begins exactly where that one ended.",
+    "head": "b7e1c0c268676365c1c9518c962b58f5dd1f2a73",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
-    "note": "Reconciliation safety: one room-identity contract, coverage verified by identity rather than count, and explicit refusal on a self-contradicting sweep. Automatic operation preserved. Includes the standing GO_UNKNOWN_STAY exception record."
+    "note": "Closure review: repeated incomplete sweeps could age rooms out of the inventory and close in-house stays. The known room inventory is now a persisted fact that only an audited operator decision can shrink."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

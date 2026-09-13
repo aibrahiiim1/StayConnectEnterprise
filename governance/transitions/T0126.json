@@ -1,0 +1,42 @@
+{
+  "transition_id": "T0126",
+  "seq": 126,
+  "timestamp": "2026-09-13T20:30:00Z",
+  "timestamp_derivation": "After the closure review demonstrated the inventory-aging defect end to end and the fix was proven against the same replayed attack; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "PRE_LIVE_ROOM_INVENTORY_IS_A_PERSISTED_FACT",
+  "defect_demonstrated": {
+    "question": "Can repeated incomplete sweeps age rooms out of the inventory and wrongly permit stay closures?",
+    "answer": "YES, before this fix.",
+    "demonstration": "60-room property, 60 guests in house. Twelve consecutive sweeps naming only 40 rooms drove the rolling-window inventory 60 -> 40 as the complete sweeps aged out. The thirteenth partial sweep then named 40 of a 40-room building, passed completeness, and closed 20 stays whose guests were still in their rooms.",
+    "cause": "Completeness was measured against the rooms recent sweeps described, so the evidence being validated also defined the standard. A persistently degraded feed eventually agrees with itself.",
+    "impact_if_unfixed": "Guests still resident lose network access because their rooms stopped being mentioned."
+  },
+  "fix": {
+    "model": "The known room inventory is a PERSISTED FACT per interface, not a rolling observation.",
+    "established": "Once, from the first uncontradicted sweep.",
+    "grows": "Only from a sweep that already passed completeness, so a degraded feed cannot enlarge the building either.",
+    "shrinks": "Only by iam_v2.pms_rebaseline_room_inventory -- an audited operator action requiring an identity and a mandatory reason, recording the removed rooms by name.",
+    "cost_accepted": "A persistently degraded feed now refuses for ever rather than eventually agreeing with itself. A person has to look. That is the correct cost."
+  },
+  "proof": {
+    "before": "12 partial sweeps -> inventory 40 -> COMPLETED -> 20 in-house stays closed.",
+    "after": "Same 12 sweeps replayed -> inventory stays 60 -> REFUSED_ROSTER_INCOMPLETE -> 0 closed, all 60 guests keep access.",
+    "operator_path": "After an audited rebaseline naming the 20 removed rooms, the smaller building reconciles normally and closes the 20."
+  },
+  "also_closed": "EXECUTE defaults to PUBLIC on a new function, so svc_pmsd could have called the rebaseline and shrunk the building it is measured against. Caught by the migration's own assertion, not by review.",
+  "standing_exception": "GO_UNKNOWN_STAY remains the documented historical exception in docs/operations/STANDING_PMS_EXCEPTION_GO_UNKNOWN_STAY.md. No stay is fabricated and it is not hidden.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-13: final end-to-end closure review of the PMS flow, specifically testing whether repeated incomplete sweeps can age rooms out of the inventory; fix any demonstrated correctness defect within that scope and defer optional improvements.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}
