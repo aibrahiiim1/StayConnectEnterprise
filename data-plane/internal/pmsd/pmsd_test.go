@@ -739,3 +739,13 @@ func (r *fakeRepo) ReconcileRoster(_ context.Context, _ ResyncScope, _ int64) (R
 	// proves the publish path treats a refusal as a normal outcome rather than a failure.
 	return ReconcileOutcome{Outcome: "REFUSED_NO_COVERAGE_EVIDENCE"}, nil
 }
+
+// LoadConnectionSettings returns the approved defaults, which is what an unconfigured site gets in
+// production too.
+func (r *fakeRepo) LoadConnectionSettings(_ context.Context, _, _ string) (ConnectionSettings, error) {
+	return ConnectionSettings{
+		BackoffMin:       500 * time.Millisecond,
+		BackoffMax:       30 * time.Second,
+		StableResetAfter: 60 * time.Second,
+	}, nil
+}

@@ -279,6 +279,10 @@ type Repo interface {
 	// PublishResyncGeneration advances published_resync_generation to g in ONE atomic row update (never a mass
 	// Event-row update) under the exact runtime-generation CAS, and marks the interface IN_SYNC + CONTINUOUS.
 	// g must not exceed the allocated seq. ErrStaleGeneration if ownership moved.
+	// LoadConnectionSettings reads the operator-set reconnect bounds for this interface's site. The
+	// connector READS these and never writes them: a daemon that could widen its own backoff is a daemon
+	// whose configuration means nothing.
+	LoadConnectionSettings(ctx context.Context, tenantID, siteID string) (ConnectionSettings, error)
 	// RecordResyncCoverage stores what one completed sweep observed: distinct rooms named, the occupied
 	// records among them, and the vacant rooms seen but deliberately not admitted as departures.
 	RecordResyncCoverage(ctx context.Context, req ResyncScope, generation int64, rooms []string, roster, vacant, conflicts int) error
@@ -588,4 +592,13 @@ type ReconcileOutcome struct {
 	RoomsEnumerated  int
 	RoomsExpected    int
 	Protected        int
+}
+
+// ConnectionSettings are the operator-set reconnect bounds. The connector retries INDEFINITELY on purpose --
+// a hotel's PMS coming back at 3am must be picked up with nobody present -- so what these bound is the
+// interval between attempts, never the number of them.
+type ConnectionSettings struct {
+	BackoffMin       time.Duration
+	BackoffMax       time.Duration
+	StableResetAfter time.Duration
 }

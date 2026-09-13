@@ -1,0 +1,4 @@
+commit 2108f66f17df226394a66aa6f551cd2ce99daa4e
+Date:   Mon Sep 14 01:12:50 2026 +0300
+
+    Fix the receipt check's own escaping
