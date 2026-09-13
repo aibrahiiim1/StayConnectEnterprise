@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0075, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0076, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -5867,6 +5867,88 @@ $$;
 
 
 --
+-- Name: pms_connection_settings_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_connection_settings_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RAISE EXCEPTION 'iam_v2.pms_connection_settings_changes is append-only: % refused', TG_OP
+        USING ERRCODE = 'restrict_violation';
+END;
+$$;
+
+
+--
+-- Name: pms_connection_settings_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site uuid) RETURNS TABLE(backoff_min_ms integer, backoff_max_ms integer, stable_reset_seconds integer, link_down_alert_seconds integer, blocked_after_refusals integer, config_version bigint, is_default boolean)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+    SELECT COALESCE(s.backoff_min_ms, 500),
+           COALESCE(s.backoff_max_ms, 30000),
+           COALESCE(s.stable_reset_seconds, 60),
+           COALESCE(s.link_down_alert_seconds, 900),
+           COALESCE(s.blocked_after_refusals, 3),
+           COALESCE(s.config_version, 0),
+           (s.tenant_id IS NULL)
+      FROM (SELECT p_tenant AS t, p_site AS s) k
+      LEFT JOIN iam_v2.pms_connection_settings s ON s.tenant_id = k.t AND s.site_id = k.s;
+$$;
+
+
+--
+-- Name: pms_connection_settings_set(uuid, uuid, text, text, integer, integer, integer, integer, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_connection_settings_set(p_tenant uuid, p_site uuid, p_operator text, p_reason text DEFAULT NULL::text, p_backoff_min_ms integer DEFAULT NULL::integer, p_backoff_max_ms integer DEFAULT NULL::integer, p_stable_reset_seconds integer DEFAULT NULL::integer, p_link_down_alert_seconds integer DEFAULT NULL::integer, p_blocked_after_refusals integer DEFAULT NULL::integer) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_old jsonb; v_ver bigint; c record;
+BEGIN
+    IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
+        RAISE EXCEPTION 'connection settings: an operator identity is required'
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtext('pms_conn_settings'), hashtext(p_site::text));
+    SELECT to_jsonb(s) INTO v_old FROM iam_v2.pms_connection_settings s
+     WHERE s.tenant_id = p_tenant AND s.site_id = p_site FOR UPDATE;
+    SELECT * INTO c FROM iam_v2.pms_connection_settings_get(p_tenant, p_site);
+
+    INSERT INTO iam_v2.pms_connection_settings AS s
+           (tenant_id, site_id, backoff_min_ms, backoff_max_ms, stable_reset_seconds,
+            link_down_alert_seconds, blocked_after_refusals, config_version, updated_at)
+    VALUES (p_tenant, p_site,
+            COALESCE(p_backoff_min_ms, c.backoff_min_ms),
+            COALESCE(p_backoff_max_ms, c.backoff_max_ms),
+            COALESCE(p_stable_reset_seconds, c.stable_reset_seconds),
+            COALESCE(p_link_down_alert_seconds, c.link_down_alert_seconds),
+            COALESCE(p_blocked_after_refusals, c.blocked_after_refusals), 1, now())
+    ON CONFLICT (tenant_id, site_id) DO UPDATE
+       SET backoff_min_ms = EXCLUDED.backoff_min_ms,
+           backoff_max_ms = EXCLUDED.backoff_max_ms,
+           stable_reset_seconds = EXCLUDED.stable_reset_seconds,
+           link_down_alert_seconds = EXCLUDED.link_down_alert_seconds,
+           blocked_after_refusals = EXCLUDED.blocked_after_refusals,
+           config_version = s.config_version + 1, updated_at = now()
+    RETURNING s.config_version INTO v_ver;
+
+    INSERT INTO iam_v2.pms_connection_settings_changes
+           (tenant_id, site_id, changed_by, reason, old_values, new_values, new_config_version)
+    SELECT p_tenant, p_site, btrim(p_operator), NULLIF(btrim(COALESCE(p_reason,'')),''), v_old,
+           to_jsonb(n) - 'tenant_id' - 'site_id', v_ver
+      FROM iam_v2.pms_connection_settings n
+     WHERE n.tenant_id = p_tenant AND n.site_id = p_site;
+    RETURN v_ver;
+END;
+$$;
+
+
+--
 -- Name: pms_dispose_snapshot_cases(uuid, uuid, uuid, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -5897,6 +5979,65 @@ BEGIN
     GET DIAGNOSTICS v_n = ROW_COUNT;
     RETURN v_n;
 END;
+$$;
+
+
+--
+-- Name: pms_integration_blockers(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_integration_blockers(p_tenant uuid, p_site uuid) RETURNS TABLE(blocker text, since timestamp with time zone, detail text, guests_affected boolean)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+    -- The link has been down longer than this property tolerates before telling somebody.
+    SELECT 'LINK_DOWN'::text,
+           r.disconnected_since,
+           'The PMS link has been down since then. Guests continue to be authorised from the last good '
+             || 'roster; new arrivals and departures are not being seen.',
+           false
+      FROM iam_v2.pms_interface_runtime r,
+           LATERAL iam_v2.pms_connection_settings_get(p_tenant, p_site) s
+     WHERE r.tenant_id = p_tenant AND r.site_id = p_site
+       AND r.transport_status = 'DISCONNECTED'
+       AND r.disconnected_since IS NOT NULL
+       AND r.disconnected_since < now() - make_interval(secs => s.link_down_alert_seconds)
+
+    UNION ALL
+
+    -- Reconciliation has refused the same way repeatedly. This is the visible counterpart of the deliberate
+    -- decision that a degraded feed refuses rather than eventually agreeing with itself.
+    SELECT 'RECONCILIATION_BLOCKED'::text,
+           min(x.run_at),
+           'Roster reconciliation has refused ' || count(*)::text || ' times in a row ('
+             || max(x.outcome) || '). Departures are not being closed automatically until the PMS sends a '
+             || 'complete, uncontradicted roster.',
+           false
+      FROM (SELECT run_at, outcome
+              FROM iam_v2.pms_roster_reconciliation_runs
+             WHERE tenant_id = p_tenant AND site_id = p_site AND mode = 'APPLY'
+             ORDER BY run_at DESC
+             LIMIT (SELECT blocked_after_refusals FROM iam_v2.pms_connection_settings_get(p_tenant, p_site))
+           ) x
+     HAVING count(*) = (SELECT blocked_after_refusals FROM iam_v2.pms_connection_settings_get(p_tenant, p_site))
+        AND count(*) FILTER (WHERE x.outcome = 'COMPLETED') = 0
+
+    UNION ALL
+
+    -- A departure the PMS announced for a stay this appliance never saw. It cannot be resolved here without
+    -- inventing the arrival, so it is reported as what it is: an external question.
+    SELECT 'DEPARTURE_FOR_UNKNOWN_STAY'::text,
+           min(e.received_at),
+           count(*)::text || ' departure(s) name a reservation this appliance has no arrival for. Only the '
+             || 'PMS can say whether those stays existed; nothing local can place them.',
+           false
+      FROM iam_v2.stay_events e
+     WHERE e.tenant_id = p_tenant AND e.site_id = p_site
+       AND e.processing_status = 'MANUAL_REVIEW'
+       AND e.event_type = 'GO'
+       AND e.admission_kind = 'LIVE'
+       AND NOT EXISTS (SELECT 1 FROM iam_v2.pms_case_resolutions x WHERE x.stay_event_id = e.id)
+     HAVING count(*) > 0;
 $$;
 
 
@@ -6182,6 +6323,12 @@ BEGIN
           FROM (SELECT unnest(v_known) EXCEPT SELECT unnest(COALESCE(v_swept,'{}'))) m;
     END IF;
 
+    -- ON COMMIT DROP keeps the table alive until the TRANSACTION ends, not until the function returns, so a
+    -- second call in the same transaction failed with "relation _absent already exists". pmsd calls this once
+    -- per transaction and never hit it; a controlled failure-to-recovery test that drove three generations in
+    -- one DO block did, immediately. Dropping first makes the function re-entrant within a transaction, which
+    -- is what any caller would reasonably assume.
+    DROP TABLE IF EXISTS _absent;
     CREATE TEMP TABLE _absent ON COMMIT DROP AS
     SELECT s.id, s.external_reservation_id
       FROM iam_v2.stays s
@@ -8507,6 +8654,54 @@ CREATE TABLE iam_v2.pms_case_resolutions (
     CONSTRAINT pms_case_resolutions_evidence_ref_check CHECK (((evidence_ref IS NULL) OR (length(evidence_ref) <= 200))),
     CONSTRAINT pms_case_resolutions_note_check CHECK (((note IS NULL) OR (length(note) <= 500))),
     CONSTRAINT pms_case_resolutions_resolved_by_check CHECK ((length(btrim(resolved_by)) > 0))
+);
+
+
+--
+-- Name: pms_connection_settings; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.pms_connection_settings (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    backoff_min_ms integer DEFAULT 500 NOT NULL,
+    backoff_max_ms integer DEFAULT 30000 NOT NULL,
+    stable_reset_seconds integer DEFAULT 60 NOT NULL,
+    link_down_alert_seconds integer DEFAULT 900 NOT NULL,
+    blocked_after_refusals integer DEFAULT 3 NOT NULL,
+    config_version bigint DEFAULT 1 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pcs_backoff_sane CHECK ((((backoff_min_ms >= 100) AND (backoff_min_ms <= 600000)) AND ((backoff_max_ms >= 100) AND (backoff_max_ms <= 3600000)) AND (backoff_max_ms >= backoff_min_ms))),
+    CONSTRAINT pcs_linkdown_sane CHECK (((link_down_alert_seconds >= 30) AND (link_down_alert_seconds <= 604800))),
+    CONSTRAINT pcs_refusals_sane CHECK (((blocked_after_refusals >= 1) AND (blocked_after_refusals <= 1000))),
+    CONSTRAINT pcs_stable_sane CHECK (((stable_reset_seconds >= 1) AND (stable_reset_seconds <= 86400))),
+    CONSTRAINT pcs_version_positive CHECK ((config_version >= 1))
+);
+
+
+--
+-- Name: TABLE pms_connection_settings; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.pms_connection_settings IS 'Reconnect and blocker-reporting bounds for the PMS link. The connector retries indefinitely on purpose -- a PMS returning overnight must be picked up unattended -- so these bound the INTERVAL and the reporting, never the number of attempts.';
+
+
+--
+-- Name: pms_connection_settings_changes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.pms_connection_settings_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by text NOT NULL,
+    reason text,
+    old_values jsonb,
+    new_values jsonb NOT NULL,
+    new_config_version bigint NOT NULL,
+    CONSTRAINT pms_connection_settings_changes_changed_by_check CHECK ((length(btrim(changed_by)) > 0)),
+    CONSTRAINT pms_connection_settings_changes_reason_check CHECK (((reason IS NULL) OR (length(reason) <= 500)))
 );
 
 
@@ -11568,6 +11763,22 @@ ALTER TABLE ONLY iam_v2.pms_case_resolutions
 
 
 --
+-- Name: pms_connection_settings_changes pms_connection_settings_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.pms_connection_settings_changes
+    ADD CONSTRAINT pms_connection_settings_changes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: pms_connection_settings pms_connection_settings_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.pms_connection_settings
+    ADD CONSTRAINT pms_connection_settings_pkey PRIMARY KEY (tenant_id, site_id);
+
+
+--
 -- Name: pms_interface_pnumber_seq pms_interface_pnumber_seq_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -14005,6 +14216,13 @@ CREATE TRIGGER pms_case_resolutions_no_update BEFORE DELETE OR UPDATE ON iam_v2.
 
 
 --
+-- Name: pms_connection_settings_changes pms_connection_settings_changes_no_update; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER pms_connection_settings_changes_no_update BEFORE DELETE OR UPDATE ON iam_v2.pms_connection_settings_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.pms_connection_settings_append_only();
+
+
+--
 -- Name: pms_reconciliation_settings_changes pms_reconciliation_settings_changes_no_update; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
@@ -16089,6 +16307,27 @@ REVOKE ALL ON FUNCTION iam_v2.p6_termination_evidence_matches_transition() FROM 
 
 REVOKE ALL ON FUNCTION iam_v2.p6_tick_online_time(p_tenant uuid, p_site uuid, p_now timestamp with time zone, p_max_charge_seconds integer, p_capped_entitlements uuid[], p_caps timestamp with time zone[]) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.p6_tick_online_time(p_tenant uuid, p_site uuid, p_now timestamp with time zone, p_max_charge_seconds integer, p_capped_entitlements uuid[], p_caps timestamp with time zone[]) TO svc_acctd;
+
+
+--
+-- Name: FUNCTION pms_connection_settings_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION pms_connection_settings_set(p_tenant uuid, p_site uuid, p_operator text, p_reason text, p_backoff_min_ms integer, p_backoff_max_ms integer, p_stable_reset_seconds integer, p_link_down_alert_seconds integer, p_blocked_after_refusals integer); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.pms_connection_settings_set(p_tenant uuid, p_site uuid, p_operator text, p_reason text, p_backoff_min_ms integer, p_backoff_max_ms integer, p_stable_reset_seconds integer, p_link_down_alert_seconds integer, p_blocked_after_refusals integer) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION pms_integration_blockers(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.pms_integration_blockers(p_tenant uuid, p_site uuid) FROM PUBLIC;
 
 
 --
