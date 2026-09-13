@@ -461,6 +461,71 @@ func TestAdapter_StartupDomainAndResync(t *testing.T) {
 	}
 }
 
+// TestAdapter_RosterSnapshotDepartureIsNotAnEvent pins the distinction that the review backlog was built on
+// missing: a GO inside a resync window with no reservation number is a roster snapshot mentioning a room, not
+// a departure the PMS announced, and it must never become a Stay event.
+//
+// The three cases below are the three the live link actually produces. Only the middle one used to be
+// handled correctly.
+func TestAdapter_RosterSnapshotDepartureIsNotAnEvent(t *testing.T) {
+	adapter, server := newAdapterOverPipe(t)
+	sink := &recordingSink{q: NewBoundedQueue(16, time.Second)}
+
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		br := bufio.NewReader(server)
+		for i := 0; i < 5; i++ { // startup handshake: LS, LD, LR x3
+			if _, err := pms.ReadFramedRecord(br); err != nil {
+				return
+			}
+		}
+		for _, rec := range []string{
+			// (1) inside the resync window, room only — the 14 125-record case. NOT an event.
+			"GO|RN1408|",
+			// (2) inside the resync window, but it names a reservation — a real statement, admitted.
+			"GO|RN1409|G#777|",
+			"DS|",
+			"DE|",
+			// (3) LIVE and room only — the existing safety net, which has applied 547 real checkouts and is
+			// deliberately untouched.
+			"GO|RN1410|",
+		} {
+			if err := pms.WriteFramedRecord(server, rec); err != nil {
+				return
+			}
+		}
+		time.Sleep(30 * time.Millisecond)
+		_ = server.Close()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = adapter.Serve(ctx, sink)
+	<-serverDone
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.events) != 2 {
+		var got []string
+		for _, e := range sink.events {
+			got = append(got, string(e.RecordType)+"/"+e.RoomNumber+"/"+e.ReservationRef)
+		}
+		t.Fatalf("expected exactly 2 admitted events, got %d: %v", len(sink.events), got)
+	}
+	if sink.events[0].RoomNumber != "1409" || sink.events[0].ReservationRef != "777" {
+		t.Errorf("a resync departure naming a reservation must be admitted, got %+v", sink.events[0])
+	}
+	if sink.events[1].RoomNumber != "1410" || sink.events[1].ReservationRef != "" {
+		t.Errorf("a LIVE room-only departure must still be admitted, got %+v", sink.events[1])
+	}
+	for _, e := range sink.events {
+		if e.RoomNumber == "1408" {
+			t.Error("a roster-snapshot departure with no reservation reached the inbox")
+		}
+	}
+}
+
 // TestAdapter_InitialResyncRequestsDR proves §G/§H: after the startup handshake the adapter raises the
 // barrier (RequireInitialResync) and sends the initial DR resync request through the single writer, before
 // any live admission.
