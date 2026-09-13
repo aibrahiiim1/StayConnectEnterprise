@@ -1,4 +1,0 @@
-commit 58f708ce82f877d617e3a47e9fe1824b20dbc066
-Date:   Sun Sep 13 00:02:02 2026 +0300
-
-    "Not listed" and "somebody else is in that room now" are different facts
