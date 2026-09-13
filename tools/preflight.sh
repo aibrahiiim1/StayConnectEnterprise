@@ -99,8 +99,7 @@ for name in sorted(os.listdir("governance/transitions")):
     if recorded > introduced:
         late = int((recorded - introduced).total_seconds())
         bad.append(f"  FAIL: {name[:-5]} records {ts}, which is {late}s AFTER the commit that introduced it")
-print("
-".join(bad) if bad else "  ok: every transition receipt pre-dates the commit that introduced it")
+print(chr(10).join(bad) if bad else "  ok: every transition receipt pre-dates the commit that introduced it")
 sys.exit(1 if bad else 0)
 RECEIPT_PY
   local rc=0
