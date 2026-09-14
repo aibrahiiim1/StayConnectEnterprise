@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0076, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0077, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -5990,7 +5990,6 @@ CREATE FUNCTION iam_v2.pms_integration_blockers(p_tenant uuid, p_site uuid) RETU
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
-    -- The link has been down longer than this property tolerates before telling somebody.
     SELECT 'LINK_DOWN'::text,
            r.disconnected_since,
            'The PMS link has been down since then. Guests continue to be authorised from the last good '
@@ -6005,8 +6004,6 @@ CREATE FUNCTION iam_v2.pms_integration_blockers(p_tenant uuid, p_site uuid) RETU
 
     UNION ALL
 
-    -- Reconciliation has refused the same way repeatedly. This is the visible counterpart of the deliberate
-    -- decision that a degraded feed refuses rather than eventually agreeing with itself.
     SELECT 'RECONCILIATION_BLOCKED'::text,
            min(x.run_at),
            'Roster reconciliation has refused ' || count(*)::text || ' times in a row ('
@@ -6024,12 +6021,16 @@ CREATE FUNCTION iam_v2.pms_integration_blockers(p_tenant uuid, p_site uuid) RETU
 
     UNION ALL
 
-    -- A departure the PMS announced for a stay this appliance never saw. It cannot be resolved here without
-    -- inventing the arrival, so it is reported as what it is: an external question.
+    -- The historical exception. Unlike the two above it does NOT clear itself, and it is the only one an
+    -- operator may reasonably decide to leave exactly where it is.
     SELECT 'DEPARTURE_FOR_UNKNOWN_STAY'::text,
            min(e.received_at),
-           count(*)::text || ' departure(s) name a reservation this appliance has no arrival for. Only the '
-             || 'PMS can say whether those stays existed; nothing local can place them.',
+           'HISTORICAL EXCEPTION, not a fault and not something that will clear on its own. '
+             || count(*)::text || ' departure(s) from before this appliance had a complete picture of the '
+             || 'property name a reservation it never received an arrival for. Guests are unaffected. Only '
+             || 'the PMS can say whether those stays existed; nothing local can place them without inventing '
+             || 'the arrival, so this stays on the list until somebody asks Protel or records a decision to '
+             || 'leave it.',
            false
       FROM iam_v2.stay_events e
      WHERE e.tenant_id = p_tenant AND e.site_id = p_site
