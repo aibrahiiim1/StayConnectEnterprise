@@ -754,11 +754,11 @@ func (s *server) interfaceHealthRow(ctx context.Context, id string) (interfaceHe
 		       (SELECT max(ev.received_at) FROM iam_v2.stay_events ev WHERE ev.pms_interface_id=$3::uuid),
 		       (SELECT count(*) FROM iam_v2.stay_events ev
 		         WHERE ev.pms_interface_id=$3::uuid AND ev.processing_status='PENDING')::int,
-		       -- OUTSTANDING, not recorded. Reads the one shared definition so this row, the
-		       -- Property-management card, the dashboard and the reconciliation screen cannot disagree
-		       -- about how much there is to do. They did: two said 1 and two said 13 717.
-		       (SELECT count(*) FROM iam_v2.pms_unanswered_review_events ev
-		         WHERE ev.pms_interface_id=$3::uuid)::int,
+		       -- The RAW recorded count. It is refined below to "still outstanding" where the
+		       -- disposition ledger exists; this query must keep working on a Phase-3-era schema that
+		       -- has no such ledger, so the newer meaning is layered on rather than assumed here.
+		       (SELECT count(*) FROM iam_v2.stay_events ev
+		         WHERE ev.pms_interface_id=$3::uuid AND ev.processing_status='MANUAL_REVIEW')::int,
 		       (SELECT min(ev.received_at) FROM iam_v2.stay_events ev
 		         WHERE ev.pms_interface_id=$3::uuid AND ev.processing_status='PENDING'),
 		       COALESCE(rt.sync_stage,''), rt.sync_stage_at,
@@ -821,6 +821,25 @@ func (s *server) interfaceHealthRow(ctx context.Context, id string) (interfaceHe
 		&h.MaterializationReady, &h.ResyncRequestedBy, &h.ResyncCommandAt,
 		&h.RoomAuthReason)
 	h.RoomAuthReady = err == nil && h.RoomAuthReason == ""
+
+	// REFINE "review" FROM RECORDED TO OUTSTANDING, where the schema can answer that.
+	//
+	// The query above counts every MANUAL_REVIEW row, which is all a Phase-3-era schema can offer and is
+	// what this gate's disposable fixture builds. Once the disposition ledger exists the honest number is
+	// how many still need an ANSWER -- and getting that wrong is not cosmetic: this field feeds the PMS
+	// connection row and the Property-management card, both of which reported 13 717 decisions waiting when
+	// 13 716 of them had already been answered.
+	//
+	// A failure here leaves the raw count in place rather than reporting zero. A stale-but-honest number
+	// beats a reassuring wrong one, which is the same rule the dashboard follows.
+	if err == nil {
+		var outstanding int
+		if e2 := s.db.QueryRow(ctx,
+			`SELECT count(*) FROM iam_v2.pms_unanswered_review_events WHERE pms_interface_id=$1::uuid`,
+			id).Scan(&outstanding); e2 == nil {
+			h.ReviewEvents = outstanding
+		}
+	}
 	return h, err
 }
 
