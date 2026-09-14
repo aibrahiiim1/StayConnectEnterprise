@@ -754,8 +754,11 @@ func (s *server) interfaceHealthRow(ctx context.Context, id string) (interfaceHe
 		       (SELECT max(ev.received_at) FROM iam_v2.stay_events ev WHERE ev.pms_interface_id=$3::uuid),
 		       (SELECT count(*) FROM iam_v2.stay_events ev
 		         WHERE ev.pms_interface_id=$3::uuid AND ev.processing_status='PENDING')::int,
-		       (SELECT count(*) FROM iam_v2.stay_events ev
-		         WHERE ev.pms_interface_id=$3::uuid AND ev.processing_status='MANUAL_REVIEW')::int,
+		       -- OUTSTANDING, not recorded. Reads the one shared definition so this row, the
+		       -- Property-management card, the dashboard and the reconciliation screen cannot disagree
+		       -- about how much there is to do. They did: two said 1 and two said 13 717.
+		       (SELECT count(*) FROM iam_v2.pms_unanswered_review_events ev
+		         WHERE ev.pms_interface_id=$3::uuid)::int,
 		       (SELECT min(ev.received_at) FROM iam_v2.stay_events ev
 		         WHERE ev.pms_interface_id=$3::uuid AND ev.processing_status='PENDING'),
 		       COALESCE(rt.sync_stage,''), rt.sync_stage_at,
