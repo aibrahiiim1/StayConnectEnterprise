@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0130",
+  "seq": 130,
+  "timestamp": "2026-09-14T09:05:00Z",
+  "timestamp_derivation": "After the served UI was traced to its underlying record and the presentation faults were corrected and tested; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "PRE_LIVE_OPERATOR_PRESENTATION_CORRECTED",
+  "reported_by": "Product Owner, reading the served Roster reconciliation page: the historical exception said it would not clear on its own while the card footer three lines below said these clear themselves.",
+  "faults": {
+    "self_contradicting_card": "The blockers card carried one footer for two different kinds of thing. LINK_DOWN and RECONCILIATION_BLOCKED describe conditions that end; DEPARTURE_FOR_UNKNOWN_STAY does not. The footer was true of the first two and printed under all three.",
+    "dashboard_destination": "The dashboard warning linked to /stay-events, which opens unfiltered and returns the 200 most recent of 79 773 events. The record it referred to is from 2026-08-23 with 75 040 events newer -- about 375 pages down -- so the destination could not show its own subject and read as clear.",
+    "settings_unexplained": "Five numbers with units and no guidance on effect or when to change them."
+  },
+  "corrections": {
+    "separation": "Operational blockers and the historical exception are now separate cards. The self-clearing footer stays with the operational ones; the exception gets a plain-language explanation of what it is, that nobody is affected, that it cannot grow, and the only two ways it ends.",
+    "dashboard": "The exception is counted separately from operational review work and presented under 'For information' rather than 'Needs attention', linking to /roster-reconciliation instead of the message feed.",
+    "settings": "Each of the five states what it does, its unit, its current value, and the situation that justifies changing it, with an explicit statement that most properties never need to change any of them.",
+    "purpose": "The page now explains in operator language what reconciliation is for and that it happens automatically with nothing to press."
+  },
+  "scope": "Presentation, navigation and operator guidance only. No PMS behaviour changed, no record deleted, no stay touched, and the exception remains on the list rather than marked resolved.",
+  "tests": "Seven page regressions, including one that fails if the self-clearing footer ever appears under a historical exception again, and one asserting every setting carries its current value and change guidance.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-14: trace the dashboard warning and its Open link to the underlying record, present the non-impacting historical exception separately from operational warnings and link to its details, explain the page and every setting in plain operator language, limited to presentation and guidance.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}
