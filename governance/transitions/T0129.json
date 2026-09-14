@@ -1,0 +1,36 @@
+{
+  "transition_id": "T0129",
+  "seq": 129,
+  "timestamp": "2026-09-14T07:58:00Z",
+  "timestamp_derivation": "After both counting rules were corrected and proven on a fixture and the repair controls were removed; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "PRE_LIVE_COUNTERS_CORRECTED_AND_REPAIR_CONTROLS_REMOVED",
+  "reported_by": "Product Owner, from screenshots of the served UI: the Dashboard demanded decisions about 424 PMS messages while Roster reconciliation showed one, and two repair buttons were present that a prior report had said were absent.",
+  "diagnosis": {
+    "dashboard_rule": "Counted every case produced by iam_v2.pms_reconciliation_cases. The view is from 0069 and the disposition ledger from 0072, and nothing connected them, so 423 of the 424 cases were fully answered and still counted.",
+    "page_rule": "Counted every unanswered MANUAL_REVIEW event, so the one LIVE departure naming a reservation with no arrival -- a genuine external question -- was reported as though a bulk disposition could answer it.",
+    "records_classified": "13 716 events already answered, 1 open, 0 received since the connector fix at 15:14 on 2026-09-13. Newest review event 14:50:33, before the fix. Nothing new had arrived and nothing could.",
+    "buttons": "Both were real and the earlier report that only a settings control remained was wrong. 'Close 0 stays' duplicated what pmsd does automatically on every complete published generation; 'Answer the snapshot cases' was a one-time migration already executed which can never have new input."
+  },
+  "corrections": {
+    "dashboard": "Counts only cases that still hold an event in MANUAL_REVIEW with no disposition.",
+    "page": "Counts only ELIGIBLE snapshot artifacts -- resync-admitted departures carrying no reservation -- so the external exception is never offered to a bulk disposition.",
+    "controls": "Both repair buttons removed, with their edged endpoints. Automatic reconciliation and the editable audited settings are untouched.",
+    "exception": "DEPARTURE_FOR_UNKNOWN_STAY now states that it is a historical exception, not a fault, will not clear on its own, guests unaffected, and is answerable only by the PMS or by a recorded decision to leave it."
+  },
+  "proof": "On a fixture holding three answered snapshot artifacts and one open live departure: dashboard rule 4 -> 1, snapshot count 1 -> 0, the exception still visible with the new wording, and all four events still present. Four UI regressions assert no control closes stays, none answers cases, and the settings control remains.",
+  "nothing_destroyed": "No record was deleted and no stay changed state. Only the counting and the wording changed.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-14: count only cases containing unresolved events on the Dashboard, make the historical snapshot count include only eligible unresolved artifacts, remove both manual repair buttons while preserving automatic reconciliation and editable settings, and keep GO_UNKNOWN_STAY visible and labelled.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}

@@ -392,8 +392,21 @@ func (s *server) dashPMS(ctx context.Context) dashPms {
 	// The count is NOT reduced by hiding anything: pms_reconciliation_cases collapses the copies of one
 	// departure and drops none of them, and the copies are still shown, per case, on the reconciliation
 	// screen. What changed is that the number now says how many decisions are outstanding.
+	// ONLY CASES THAT STILL NEED A DECISION, and the qualifier is the whole point.
+	//
+	// This counted every case the view produced, which was right until dispositions existed and wrong the
+	// moment they did. On the live appliance it read 424 while 423 of those cases were fully answered --
+	// the dashboard demanding decisions about work already done, which is exactly the true-and-ignored
+	// warning the comment above was written against. A case counts here only if it still has an event in
+	// MANUAL_REVIEW that carries no disposition.
 	if err := s.db.QueryRow(ctx, `
-		SELECT count(*) FROM iam_v2.pms_reconciliation_cases WHERE tenant_id = $1 AND site_id = $2
+		SELECT count(*) FROM iam_v2.pms_reconciliation_cases c
+		 WHERE c.tenant_id = $1 AND c.site_id = $2
+		   AND EXISTS (SELECT 1 FROM iam_v2.stay_events e
+		                WHERE e.id = c.latest_event_id
+		                  AND e.processing_status = 'MANUAL_REVIEW'
+		                  AND NOT EXISTS (SELECT 1 FROM iam_v2.pms_case_resolutions x
+		                                   WHERE x.stay_event_id = e.id))
 	`, s.tenantID, s.siteID).Scan(&p.EventsReview); err != nil {
 		// Before 0069 the view does not exist. Fall back to the row count rather than reporting zero: a
 		// stale-but-honest number beats a reassuring wrong one.

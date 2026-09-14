@@ -20,9 +20,9 @@
 // protection, permanently, not hidden because it is usually small.
 
 import { useCallback, useEffect, useState } from "react";
-import { ShieldCheck, Building2, RefreshCw, ArchiveRestore, AlertTriangle, PlugZap } from "lucide-react";
+import { ShieldCheck, Building2, RefreshCw, AlertTriangle, PlugZap } from "lucide-react";
 import {
-  api, RosterReconciliationState, ReconcileRun, ReconcileRunRecord, PmsConnectionSettings,
+  api, RosterReconciliationState, ReconcileRunRecord, PmsConnectionSettings,
 } from "@/lib/api";
 import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
 import { Card, CardBody } from "@/components/ui/card";
@@ -60,8 +60,6 @@ export default function RosterReconciliationPage() {
   const [runs, setRuns] = useState<ReconcileRunRecord[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [reason, setReason] = useState("");
-  const [lastApply, setLastApply] = useState<ReconcileRun | null>(null);
   const [connForm, setConnForm] = useState<Record<string, number>>({});
   const [connReason, setConnReason] = useState("");
   const [connSaved, setConnSaved] = useState<number | null>(null);
@@ -82,20 +80,6 @@ export default function RosterReconciliationPage() {
 
   useEffect(() => { void load(); }, [load]);
 
-  async function apply() {
-    if (!reason.trim()) return;
-    setBusy(true);
-    try {
-      const out = await api.post<ReconcileRun>("/pms-roster-reconciliation/apply", { reason });
-      setLastApply(out);
-      setReason("");
-      await load();
-    } catch (e: any) {
-      setErr(e?.message ?? "the run failed");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function saveConnection() {
     setBusy(true);
@@ -113,19 +97,6 @@ export default function RosterReconciliationPage() {
     }
   }
 
-  async function disposeSnapshots() {
-    setBusy(true);
-    try {
-      await api.post<{ disposed: number }>("/pms-roster-reconciliation/dispose-snapshots", {
-        reason: "roster snapshots are not departure announcements",
-      });
-      await load();
-    } catch (e: any) {
-      setErr(e?.message ?? "could not dispose the snapshot cases");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   const p = state?.preview;
   const complete = p ? p.rooms_expected > 0 && p.rooms_enumerated >= p.rooms_expected - (state!.settings.inventory_tolerance) : false;
@@ -198,10 +169,14 @@ export default function RosterReconciliationPage() {
         />
       </div>
 
+      {/* WHAT THE NEXT AUTOMATIC RUN WOULD DO. There is no button: reconciliation runs itself on every
+          complete published generation, and a manual trigger for the same audited action would be a repair
+          control for work that is not outstanding. This card exists so an operator can SEE the decision
+          before it is taken, and see why it was refused when it is. */}
       <Card>
         <CardBody className="space-y-4">
           <div className="flex items-center gap-3">
-            <h2 className="text-base font-semibold">What a run would do now</h2>
+            <h2 className="text-base font-semibold">What the next automatic run will do</h2>
             {p && <Badge tone={refused ? "warn" : "ok"}>{p.outcome.replace(/_/g, " ").toLowerCase()}</Badge>}
           </div>
 
@@ -214,48 +189,38 @@ export default function RosterReconciliationPage() {
           {!refused && p && (
             <p className="text-sm">
               <strong>{p.absent_from_roster}</strong> stay{p.absent_from_roster === 1 ? "" : "s"} would be
-              closed — every one of them absent from a roster that named{" "}
-              {p.rooms_enumerated} of {p.rooms_expected} rooms. {p.protected_by_newer_events} further
-              stay{p.protected_by_newer_events === 1 ? " is" : "s are"} absent but held back, because the PMS
-              has said something about {p.protected_by_newer_events === 1 ? "it" : "them"} since the snapshot.
+              closed — every one of them absent from a roster that named {p.rooms_enumerated} of{" "}
+              {p.rooms_expected} rooms. {p.protected_by_newer_events} further stay
+              {p.protected_by_newer_events === 1 ? " is" : "s are"} absent but held back, because the PMS has
+              said something about {p.protected_by_newer_events === 1 ? "it" : "them"} since the snapshot.
             </p>
           )}
 
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              className="min-w-[22rem] flex-1 rounded-md border px-3 py-2 text-sm"
-              placeholder="Reason — recorded against every stay this closes"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              disabled={!!refused || busy}
-            />
-            <Button onClick={() => void apply()} disabled={!!refused || busy || !reason.trim()}>
-              Close {p?.absent_from_roster ?? 0} stay{p?.absent_from_roster === 1 ? "" : "s"}
-            </Button>
-          </div>
-
-          {lastApply && (
-            <p className="text-sm text-ok">
-              Closed {lastApply.stays_closed} stay{lastApply.stays_closed === 1 ? "" : "s"}; held back{" "}
-              {lastApply.protected_by_newer_events}.
-            </p>
-          )}
+          <p className="text-xs text-muted-foreground">
+            This happens on its own when the PMS publishes a complete roster. Nothing here needs pressing.
+          </p>
         </CardBody>
       </Card>
 
-      {/* THE HISTORICAL CASES. Not deleted, not re-applied — answered. */}
+      {/* THE HISTORICAL SNAPSHOT ARTIFACTS. Answered once, in bulk, from the fact that a resync mentions
+          every room and an empty one has no booking to name. There is no button because there is nothing
+          left to answer and nothing new can arrive: the connector no longer admits those records at all. */}
       <Card>
-        <CardBody className="space-y-3">
-          <h2 className="text-base font-semibold">Historical roster-snapshot cases</h2>
-          <p className="text-sm text-muted-foreground">
-            {state?.undisposed_cases ?? 0} recorded departure{state?.undisposed_cases === 1 ? "" : "s"} are
-            still waiting for an answer. Those admitted during a resync with no reservation number were never
-            departure announcements — a sweep mentions every room, and an empty one has no booking to name.
-            Disposing them records what they actually were. No stay changes state and no record is deleted.
-          </p>
-          <Button variant="secondary" onClick={() => void disposeSnapshots()} disabled={busy}>
-            <ArchiveRestore className="h-4 w-4" /> Answer the snapshot cases
-          </Button>
+        <CardBody className="space-y-2">
+          <h2 className="text-base font-semibold">Historical roster-snapshot artifacts</h2>
+          {(state?.undisposed_cases ?? 0) === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              None outstanding. The recorded roster snapshots were answered as what they actually were — a
+              sweep mentioning empty rooms, never a departure anybody announced — and no stay changed state
+              and no record was deleted. New ones cannot arrive: the connector no longer admits them.
+            </p>
+          ) : (
+            <p className="text-sm">
+              <strong>{state!.undisposed_cases}</strong> recorded roster snapshot
+              {state!.undisposed_cases === 1 ? "" : "s"} still to answer. They are answered automatically;
+              nothing needs doing here.
+            </p>
+          )}
         </CardBody>
       </Card>
 
