@@ -1,0 +1,4 @@
+commit b74d1b0a6a0da7c8dbb8f8cd6264b61c8b590b59
+Date:   Mon Sep 14 12:25:11 2026 +0300
+
+    Governance: T0130 records the operator presentation corrections
