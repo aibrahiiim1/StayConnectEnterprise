@@ -1,4 +1,0 @@
-commit 483459d9c4c0426b164dd7f1c07f453149d04d4e
-Date:   Mon Sep 14 11:13:30 2026 +0300
-
-    Governance: T0129 records the counter corrections and the removed controls

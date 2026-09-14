@@ -20,7 +20,7 @@
 // protection, permanently, not hidden because it is usually small.
 
 import { useCallback, useEffect, useState } from "react";
-import { ShieldCheck, Building2, RefreshCw, AlertTriangle, PlugZap } from "lucide-react";
+import { ShieldCheck, Building2, RefreshCw, AlertTriangle, PlugZap, BookMarked } from "lucide-react";
 import {
   api, RosterReconciliationState, ReconcileRunRecord, PmsConnectionSettings,
 } from "@/lib/api";
@@ -47,12 +47,75 @@ const REFUSAL_MEANING: Record<string, string> = {
     "More stays would close than one run is allowed to close. This is deliberate: a surprise stops for a person.",
 };
 
-const CONN_FIELDS: [keyof PmsConnectionSettings, string, string][] = [
-  ["backoff_min_ms", "Shortest retry wait", "ms"],
-  ["backoff_max_ms", "Longest retry wait", "ms"],
-  ["stable_reset_seconds", "Stable before reset", "s"],
-  ["link_down_alert_seconds", "Report link down after", "s"],
-  ["blocked_after_refusals", "Report blocked after", "runs"],
+// EVERY SETTING, EXPLAINED WHERE IT IS CHANGED.
+//
+// A number in a box with a unit beside it tells an administrator nothing about whether to touch it. Each of
+// these says what it does, what happens if it is raised or lowered, and the situation that would actually
+// justify changing it -- because the honest answer for nearly every property is "leave it alone", and that
+// is worth saying out loud rather than implying by omission.
+const CONN_FIELDS: {
+  key: keyof PmsConnectionSettings;
+  label: string;
+  unit: string;
+  what: string;
+  when: string;
+}[] = [
+  {
+    key: "backoff_min_ms",
+    label: "Shortest wait before retrying",
+    unit: "milliseconds",
+    what:
+      "After the PMS link drops, this is how soon the first reconnection attempt happens. Each further " +
+      "attempt waits a little longer, up to the maximum below.",
+    when:
+      "Raise it if the hotel's PMS logs complain about repeated connections during its nightly restart. " +
+      "Lowering it rarely helps: the first attempt is already under a second.",
+  },
+  {
+    key: "backoff_max_ms",
+    label: "Longest wait before retrying",
+    unit: "milliseconds",
+    what:
+      "The reconnection attempts never get further apart than this, so a PMS that comes back at 3am is " +
+      "picked up within this long, with nobody present. The appliance keeps retrying indefinitely — this " +
+      "caps the gap between tries, never the number of them.",
+    when:
+      "Lower it if the PMS is restarted often and you want the guest list current again sooner. Raise it " +
+      "if a fragile link is generating noise on the PMS side.",
+  },
+  {
+    key: "stable_reset_seconds",
+    label: "Connection must hold this long to count as recovered",
+    unit: "seconds",
+    what:
+      "After a reconnection survives this long, the waiting resets to the shortest value. Without it, a " +
+      "link that flaps all morning would still be waiting the maximum by lunchtime.",
+    when: "Raise it if the link reconnects and drops again within a minute or two.",
+  },
+  {
+    key: "link_down_alert_seconds",
+    label: "Report the link as down after",
+    unit: "seconds",
+    what:
+      "How long the PMS link may stay down before it appears under Needs attention. This governs when a " +
+      "person is TOLD — nothing stops when the link drops. Guests keep signing in from the last good list " +
+      "throughout.",
+    when:
+      "Lower it if you want to know sooner about a PMS outage. Raise it if a nightly maintenance window " +
+      "produces an alert every single night that nobody needs to act on.",
+  },
+  {
+    key: "blocked_after_refusals",
+    label: "Report reconciliation as blocked after",
+    unit: "consecutive runs",
+    what:
+      "Reconciliation declines to act when the PMS sends an incomplete or self-contradicting list, which " +
+      "is correct and protects guests. After this many refusals in a row it is reported, because a " +
+      "protection that stays silent forever is indistinguishable from a broken feature.",
+    when:
+      "Lower it to hear about a degrading feed sooner. Raise it if the PMS routinely sends one odd list " +
+      "between good ones.",
+  },
 ];
 
 export default function RosterReconciliationPage() {
@@ -98,6 +161,10 @@ export default function RosterReconciliationPage() {
   }
 
 
+  // A blocker either clears itself or it does not, and the screen must not imply the wrong one.
+  const operational = (state?.blockers ?? []).filter((b) => b.blocker !== "DEPARTURE_FOR_UNKNOWN_STAY");
+  const historical = (state?.blockers ?? []).filter((b) => b.blocker === "DEPARTURE_FOR_UNKNOWN_STAY");
+
   const p = state?.preview;
   const complete = p ? p.rooms_expected > 0 && p.rooms_enumerated >= p.rooms_expected - (state!.settings.inventory_tolerance) : false;
   const refused = p && p.outcome !== "COMPLETED";
@@ -106,23 +173,45 @@ export default function RosterReconciliationPage() {
     <PageShell>
       <PageHeader
         title="Roster reconciliation"
-        description="Close the stays a complete PMS roster no longer lists — by reservation, never by room."
+        description="Keeping this appliance's guest list identical to the hotel's — automatically."
       />
+
+      {/* WHAT THE PAGE IS FOR, in the words an operator would use. Written because the previous heading
+          described the MECHANISM to somebody who already understood it. */}
+      <Card>
+        <CardBody className="space-y-2 text-sm">
+          <p>
+            The hotel&rsquo;s PMS sends this appliance a full list of who is in the building, many times a
+            day. Reconciliation compares that list with the guest list this appliance is using and closes any
+            stay the hotel no longer has — which is how somebody who checked out stops being able to sign in.
+          </p>
+          <p>
+            <strong>This happens on its own.</strong> There is nothing on this page to press, no queue to work
+            through and no routine task. Everything below is here so you can see what it did and why, and
+            change the few numbers a hotel may reasonably want changed.
+          </p>
+          <p className="text-muted-foreground">
+            Guests are never affected while it waits: if the PMS list is incomplete or the link is down, the
+            appliance keeps using the last good list rather than guessing, and says so under Needs attention.
+          </p>
+        </CardBody>
+      </Card>
 
       {err && <Card><CardBody><p className="text-sm text-err">{err}</p></CardBody></Card>}
 
-      {/* WHAT IS IN THE WAY, FIRST. A blocker is derived from recorded facts, so it appears while its
-          condition lasts and disappears on its own -- there is nothing to acknowledge or clear. Each states
-          whether guests are affected, because a PMS link alarm reads as an outage unless it says plainly
-          that the mirror is still authorising people. */}
-      {(state?.blockers?.length ?? 0) > 0 && (
+      {/* TWO KINDS OF THING, AND THEY MUST NOT SHARE A FOOTER.
+          The operational blockers below describe conditions that end -- a link that comes back, a feed that
+          starts describing the building again -- and the line "these clear themselves" is true of them.
+          The historical exception does NOT clear, and printing that line under it said the opposite of the
+          exception's own text, three lines apart, on the same card. */}
+      {operational.length > 0 && (
         <Card>
           <CardBody className="space-y-3">
             <div className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5" />
               <h2 className="text-base font-semibold">Needs attention</h2>
             </div>
-            {state!.blockers.map((b, i) => (
+            {operational.map((b, i) => (
               <div key={i} className="rounded-md border border-warning/30 bg-warning-subtle p-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge tone="warn">{b.blocker.replace(/_/g, " ").toLowerCase()}</Badge>
@@ -141,6 +230,50 @@ export default function RosterReconciliationPage() {
             <p className="text-xs text-muted-foreground">
               These clear themselves when the condition ends. There is nothing to acknowledge.
             </p>
+          </CardBody>
+        </Card>
+      )}
+
+      {historical.length > 0 && (
+        <Card id="historical-exception">
+          <CardBody className="space-y-3">
+            <div className="flex items-center gap-2">
+              <BookMarked className="h-5 w-5" />
+              <h2 className="text-base font-semibold">Historical exception — for information</h2>
+            </div>
+            {historical.map((b, i) => (
+              <div key={i} className="rounded-md border p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge tone="neutral">{b.blocker.replace(/_/g, " ").toLowerCase()}</Badge>
+                  {b.since && (
+                    <span className="text-xs text-muted-foreground">
+                      recorded {new Date(b.since).toLocaleString()}
+                    </span>
+                  )}
+                  <Badge tone="ok">guests not affected</Badge>
+                </div>
+                <p className="mt-2 text-sm">{b.detail}</p>
+              </div>
+            ))}
+            <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+              <p className="font-medium text-foreground">What this is, and what to do about it</p>
+              <p className="mt-1">
+                When this appliance was first connected it joined a hotel that was already running, and its
+                first roster sweeps did not yet cover every room. A guest checked out during that window, so
+                the PMS announced a departure for a stay this appliance had never been told about.
+              </p>
+              <p className="mt-2">
+                Nobody is affected. No guest is online because of it, no stay is held open by it, and it will
+                not grow — the connector has covered the whole property on every sweep since.
+              </p>
+              <p className="mt-2">
+                It stays on this list because closing it locally would mean inventing the arrival that was
+                never received, and this system does not invent guest records. There are exactly two ways it
+                ends: ask the hotel&rsquo;s PMS whether that reservation existed, or decide to leave it as a
+                known gap from the appliance&rsquo;s first days. Either is a legitimate answer; doing nothing
+                is also safe.
+              </p>
+            </div>
           </CardBody>
         </Card>
       )}
@@ -236,23 +369,35 @@ export default function RosterReconciliationPage() {
           </div>
           <p className="text-sm text-muted-foreground">
             The PMS link reconnects by itself, backing off between attempts and retrying for as long as it
-            takes. These bound how fast it retries, and how long a problem may last before it is reported
-            above.
+            takes. These five numbers bound how fast it retries and how long a problem may last before it is
+            reported above. <strong>Most properties never need to change any of them</strong> — they are here
+            for the ones whose PMS behaves unusually, and every change is recorded with who made it and why.
           </p>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {CONN_FIELDS.map(([key, label, unit]) => (
-              <label key={key} className="text-sm">
-                <span className="block text-muted-foreground">
-                  {label} ({unit})
-                </span>
-                <input
-                  type="number"
-                  className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
-                  value={connForm[key] ?? state?.connection_settings?.[key] ?? ""}
-                  onChange={(e) => setConnForm({ ...connForm, [key]: Number(e.target.value) })}
-                  disabled={busy}
-                />
-              </label>
+          <div className="grid gap-3 lg:grid-cols-2">
+            {CONN_FIELDS.map((f) => (
+              <div key={f.key} className="rounded-md border p-3">
+                <label className="text-sm">
+                  <span className="block font-medium">{f.label}</span>
+                  <span className="mt-1 block text-xs text-muted-foreground">{f.what}</span>
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      type="number"
+                      className="w-40 rounded-md border px-3 py-2 text-sm"
+                      value={connForm[f.key] ?? state?.connection_settings?.[f.key] ?? ""}
+                      onChange={(e) => setConnForm({ ...connForm, [f.key]: Number(e.target.value) })}
+                      disabled={busy}
+                    />
+                    <span className="text-xs text-muted-foreground">{f.unit}</span>
+                  </div>
+                  <span className="mt-2 block text-xs text-muted-foreground">
+                    <strong>Currently:</strong> {state?.connection_settings?.[f.key] ?? "—"} {f.unit}
+                    {state?.connection_settings?.is_default ? " (the approved default)" : ""}
+                  </span>
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    <strong>Change it when:</strong> {f.when}
+                  </span>
+                </label>
+              </div>
             ))}
           </div>
           <div className="flex flex-wrap items-center gap-2">
