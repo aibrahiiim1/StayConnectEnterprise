@@ -49,7 +49,7 @@ and there is no stay here to close.
    missing and Protel can re-send or confirm it.
 2. **Accept it as a known gap** from the appliance's mid-stream start, and record that decision.
 
-Either is a Product-Owner decision. Until one is taken the case stays visible on the reconciliation screen,
+Either is a Product-Owner decision. Until one is taken the case stays visible under **PMS connection → Advanced diagnostics → Roster reconciliation**,
 unhidden and uncounted against any "resolved" total — a case with no answer stays on the list.
 
 ## What must not happen

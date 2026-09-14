@@ -1,4 +1,0 @@
-commit f739ebca24f0a006db85784dada0825d9d06489c
-Date:   Mon Sep 14 20:07:39 2026 +0300
-
-    Do not make a Phase-3 query depend on a Phase-7 view

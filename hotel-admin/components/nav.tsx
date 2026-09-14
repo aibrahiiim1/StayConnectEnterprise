@@ -98,8 +98,13 @@ const SECTIONS: Section[] = [
       { href: "/stay-events",          label: "PMS activity",         icon: Send,   resource: "pms-events",           enabled: CAP_PMS, keywords: "feed messages check in out log" },
       { href: "/pms-resolutions",      label: "Guest sign-in checks", icon: Send,   resource: "pms-resolutions",      enabled: CAP_PMS, keywords: "room verification failures evidence" },
     { href: "/guest-signin-attempts", label: "Guest sign-in attempts", icon: KeyRound, resource: "guest-signin-attempts", enabled: CAP_PMS, keywords: "attempt failed reason room typed credential mismatch why cannot connect" },
-      { href: "/pms-reconciliation",   label: "Unresolved departures", icon: ClipboardCheck, resource: "pms-reconciliation", enabled: CAP_PMS, keywords: "checkout not applied departure unmatched room shared overstay past departure date manual review reconcile" },
-      { href: "/roster-reconciliation", label: "Roster reconciliation", icon: ClipboardCheck, resource: "pms-roster-reconciliation", enabled: CAP_PMS, keywords: "automatic close departures roster complete sweep building rooms blocker link down reconnect backoff retry recovery settings" },
+      // RECONCILIATION IS NOT DAY-TO-DAY WORK, so it is not day-to-day navigation.
+      //
+      // Both reconciliation screens are diagnostics. Neither has an action on it, both describe machinery
+      // that runs by itself, and a reception desk that never opens them is a desk where everything is
+      // working. They stay routable and are reached from PMS connection under Advanced diagnostics, where
+      // somebody troubleshooting will look for them -- and the PMS connection page now says plainly when
+      // there is something in them worth looking at.
       { href: "/pms-source-conflicts", label: "Duplicate sources",    icon: Shield, resource: "pms-source-conflicts", enabled: CAP_PMS, keywords: "conflict two interfaces same room" },
       { href: "/stay-transfers",       label: "Cross-PMS transfer",   icon: Send,   resource: "stay-transfers",       enabled: CAP_POST_STAY, keywords: "move stay between systems" },
     ],

@@ -20,10 +20,9 @@
 // protection, permanently, not hidden because it is usually small.
 
 import { useCallback, useEffect, useState } from "react";
-import { ShieldCheck, Building2, RefreshCw, AlertTriangle, PlugZap, BookMarked } from "lucide-react";
-import {
-  api, RosterReconciliationState, ReconcileRunRecord, PmsConnectionSettings,
-} from "@/lib/api";
+import Link from "next/link";
+import { ShieldCheck, Building2, RefreshCw, AlertTriangle, BookMarked } from "lucide-react";
+import { api, RosterReconciliationState, ReconcileRunRecord } from "@/lib/api";
 import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
 import { Card, CardBody } from "@/components/ui/card";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
@@ -47,85 +46,11 @@ const REFUSAL_MEANING: Record<string, string> = {
     "More stays would close than one run is allowed to close. This is deliberate: a surprise stops for a person.",
 };
 
-// EVERY SETTING, EXPLAINED WHERE IT IS CHANGED.
-//
-// A number in a box with a unit beside it tells an administrator nothing about whether to touch it. Each of
-// these says what it does, what happens if it is raised or lowered, and the situation that would actually
-// justify changing it -- because the honest answer for nearly every property is "leave it alone", and that
-// is worth saying out loud rather than implying by omission.
-const CONN_FIELDS: {
-  key: keyof PmsConnectionSettings;
-  label: string;
-  unit: string;
-  what: string;
-  when: string;
-}[] = [
-  {
-    key: "backoff_min_ms",
-    label: "Shortest wait before retrying",
-    unit: "milliseconds",
-    what:
-      "After the PMS link drops, this is how soon the first reconnection attempt happens. Each further " +
-      "attempt waits a little longer, up to the maximum below.",
-    when:
-      "Raise it if the hotel's PMS logs complain about repeated connections during its nightly restart. " +
-      "Lowering it rarely helps: the first attempt is already under a second.",
-  },
-  {
-    key: "backoff_max_ms",
-    label: "Longest wait before retrying",
-    unit: "milliseconds",
-    what:
-      "The reconnection attempts never get further apart than this, so a PMS that comes back at 3am is " +
-      "picked up within this long, with nobody present. The appliance keeps retrying indefinitely — this " +
-      "caps the gap between tries, never the number of them.",
-    when:
-      "Lower it if the PMS is restarted often and you want the guest list current again sooner. Raise it " +
-      "if a fragile link is generating noise on the PMS side.",
-  },
-  {
-    key: "stable_reset_seconds",
-    label: "Connection must hold this long to count as recovered",
-    unit: "seconds",
-    what:
-      "After a reconnection survives this long, the waiting resets to the shortest value. Without it, a " +
-      "link that flaps all morning would still be waiting the maximum by lunchtime.",
-    when: "Raise it if the link reconnects and drops again within a minute or two.",
-  },
-  {
-    key: "link_down_alert_seconds",
-    label: "Report the link as down after",
-    unit: "seconds",
-    what:
-      "How long the PMS link may stay down before it appears under Needs attention. This governs when a " +
-      "person is TOLD — nothing stops when the link drops. Guests keep signing in from the last good list " +
-      "throughout.",
-    when:
-      "Lower it if you want to know sooner about a PMS outage. Raise it if a nightly maintenance window " +
-      "produces an alert every single night that nobody needs to act on.",
-  },
-  {
-    key: "blocked_after_refusals",
-    label: "Report reconciliation as blocked after",
-    unit: "consecutive runs",
-    what:
-      "Reconciliation declines to act when the PMS sends an incomplete or self-contradicting list, which " +
-      "is correct and protects guests. After this many refusals in a row it is reported, because a " +
-      "protection that stays silent forever is indistinguishable from a broken feature.",
-    when:
-      "Lower it to hear about a degrading feed sooner. Raise it if the PMS routinely sends one odd list " +
-      "between good ones.",
-  },
-];
-
 export default function RosterReconciliationPage() {
   const [state, setState] = useState<RosterReconciliationState | null>(null);
   const [runs, setRuns] = useState<ReconcileRunRecord[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [connForm, setConnForm] = useState<Record<string, number>>({});
-  const [connReason, setConnReason] = useState("");
-  const [connSaved, setConnSaved] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setErr(null);
@@ -144,21 +69,6 @@ export default function RosterReconciliationPage() {
   useEffect(() => { void load(); }, [load]);
 
 
-  async function saveConnection() {
-    setBusy(true);
-    try {
-      const out = await api.put<{ config_version: number }>(
-        "/pms-roster-reconciliation/connection-settings", { ...connForm, reason: connReason });
-      setConnSaved(out.config_version);
-      setConnForm({});
-      setConnReason("");
-      await load();
-    } catch (e: any) {
-      setErr(e?.message ?? "the settings were rejected");
-    } finally {
-      setBusy(false);
-    }
-  }
 
 
   // A blocker either clears itself or it does not, and the screen must not imply the wrong one.
@@ -357,69 +267,20 @@ export default function RosterReconciliationPage() {
         </CardBody>
       </Card>
 
-      {/* RECOVERY SETTINGS. The connector reconnects on its own and retries indefinitely -- a PMS returning
-          overnight must be picked up unattended -- so these bound the INTERVAL between attempts and when a
-          person is told, never the number of attempts. */}
+      {/* THE RECOVERY SETTINGS LIVE WITH THE CONNECTION THEY GOVERN.
+          They are reconnect bounds for the PMS link, which is configured on PMS connection, not here. An
+          administrator changing how the link retries was being asked to find a diagnostic page to do it. */}
       <Card>
-        <CardBody className="space-y-3">
-          <div className="flex items-center gap-2">
-            <PlugZap className="h-5 w-5" />
-            <h2 className="text-base font-semibold">Connection recovery</h2>
-            {state?.connection_settings?.is_default && <Badge tone="neutral">defaults</Badge>}
-          </div>
+        <CardBody className="space-y-1">
+          <h2 className="text-base font-semibold">Connection recovery</h2>
           <p className="text-sm text-muted-foreground">
-            The PMS link reconnects by itself, backing off between attempts and retrying for as long as it
-            takes. These five numbers bound how fast it retries and how long a problem may last before it is
-            reported above. <strong>Most properties never need to change any of them</strong> — they are here
-            for the ones whose PMS behaves unusually, and every change is recorded with who made it and why.
+            How the PMS link retries after a drop, and how long a problem may last before it is reported, are
+            configured with the connection itself on{" "}
+            <Link href="/pms-interfaces" className="font-medium underline underline-offset-2">
+              PMS connection
+            </Link>
+            , under Advanced configuration.
           </p>
-          <div className="grid gap-3 lg:grid-cols-2">
-            {CONN_FIELDS.map((f) => (
-              <div key={f.key} className="rounded-md border p-3">
-                <label className="text-sm">
-                  <span className="block font-medium">{f.label}</span>
-                  <span className="mt-1 block text-xs text-muted-foreground">{f.what}</span>
-                  <div className="mt-2 flex items-center gap-2">
-                    <input
-                      type="number"
-                      className="w-40 rounded-md border px-3 py-2 text-sm"
-                      value={connForm[f.key] ?? state?.connection_settings?.[f.key] ?? ""}
-                      onChange={(e) => setConnForm({ ...connForm, [f.key]: Number(e.target.value) })}
-                      disabled={busy}
-                    />
-                    <span className="text-xs text-muted-foreground">{f.unit}</span>
-                  </div>
-                  <span className="mt-2 block text-xs text-muted-foreground">
-                    <strong>Currently:</strong> {state?.connection_settings?.[f.key] ?? "—"} {f.unit}
-                    {state?.connection_settings?.is_default ? " (the approved default)" : ""}
-                  </span>
-                  <span className="mt-1 block text-xs text-muted-foreground">
-                    <strong>Change it when:</strong> {f.when}
-                  </span>
-                </label>
-              </div>
-            ))}
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              className="min-w-[20rem] flex-1 rounded-md border px-3 py-2 text-sm"
-              placeholder="Reason - recorded against this change"
-              value={connReason}
-              onChange={(e) => setConnReason(e.target.value)}
-              disabled={busy}
-            />
-            <Button
-              onClick={() => void saveConnection()}
-              disabled={busy || Object.keys(connForm).length === 0}
-            >
-              Save recovery settings
-            </Button>
-          </div>
-          {connSaved && (
-            <p className="text-sm text-ok">
-              Saved as version {connSaved}. It applies on the next reconnect.
-            </p>
-          )}
         </CardBody>
       </Card>
 
