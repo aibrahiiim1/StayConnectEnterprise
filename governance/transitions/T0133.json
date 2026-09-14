@@ -1,0 +1,49 @@
+{
+  "transition_id": "T0133",
+  "seq": 133,
+  "timestamp": "2026-09-14T20:34:00Z",
+  "timestamp_derivation": "After the configuration UX redesign, the scope verification and the full UI suite passed; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "PRE_LIVE_PMS_CONFIGURATION_UX_AND_WORDING_CORRECTED",
+  "configuration_ux": {
+    "before": "The connection screen always showed a table of every saved version, each labelled by the endpoint -- the one field that never changed -- so three different versions read as three identical rows.",
+    "after": "Current configuration is the whole normal view. Previous versions are behind a History action. Operator-facing language is Version, Current configuration, Previous and History; Revision remains the internal term in code, API and database.",
+    "difference_shown": "Each previous version states what changed from the one before it, computed from stored values only. Identical connection settings are reported as identical, with the internal difference named."
+  },
+  "provenance": {
+    "not_stored_in_revisions": "pms_interface_revisions holds no timestamp, author or reason -- only the configuration.",
+    "stored_in_audit_log": "public.audit_log records pms_interface_revision.authored and pms_interface.revision_published with ts, actor_id and a reason_code. History reads those and nothing else.",
+    "absent_is_stated": "A version with no audit entry is shown as origin-not-recorded. Nothing is inferred."
+  },
+  "versions_explained": {
+    "v1": "2026-08-22 00:04:53 authored, 00:05:25 published, reason INITIAL_COMMISSIONING. The first saved configuration.",
+    "v2": "2026-08-22 00:08:25 authored, 00:08:26 published, reason DERIVED_SOURCE_FINGERPRINT. Connection settings byte-identical to v1; the PMS message-format fingerprint was recorded for the first time.",
+    "v3": "2026-08-25 17:53:49 authored, 17:54:13 published, reason CONFIG_CORRECTION, by Site Admin. Financial base currency cleared. This is the version in use.",
+    "actors": "v1 and v2 were published by operator ab59eb57 who no longer exists on this appliance; the UI says so rather than naming anybody."
+  },
+  "connection_recovery_scope": {
+    "verified": "SITE-scoped. iam_v2.pms_connection_settings has primary key (tenant_id, site_id) and no pms_interface_id column.",
+    "ui_now": "Presented on the PMS connection page as applying to the whole property, with an explicit statement that a second connection would share the values.",
+    "not_changed": "Making these per-interface would require new schema, a migration and new product semantics. Not done, and offered as a Product-Owner decision instead."
+  },
+  "wording_corrected": [
+    "'No control at all' on the reconciliation diagnostics -> no state-changing or manual reconciliation action.",
+    "Blanket 'Guests are unaffected' on reconciliation health -> sign-in continues from the guest list already in use; what those messages would have changed has not been applied.",
+    "Connection recovery presented inside one interface -> stated as site-wide."
+  ],
+  "preserved": "Revision architecture, configuration immutability, publish and rollback semantics (moved into History, same endpoint and expected-revision guard), reconciliation runtime behaviour, permissions, routing, and every historical record. No migration.",
+  "deployment": "NONE. No appliance deployment, no PMS configuration change, no restart or resync, no contact with the retired 172.21.60.23, no migration, no guest-state change.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-14: finish the PMS operator-experience cleanup -- Current Configuration plus History modal, operator-friendly language, real provenance, accurate reconciliation wording and verified recovery-settings scope. No appliance deployment authorised.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}
