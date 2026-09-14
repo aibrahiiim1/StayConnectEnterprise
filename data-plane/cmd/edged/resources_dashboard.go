@@ -125,6 +125,12 @@ type dashPms struct {
 	EventsToday   int64 `json:"events_today"`
 	EventsApplied int64 `json:"events_applied_today"`
 	EventsReview  int64 `json:"events_needing_review"`
+	// HistoricalExceptions are outstanding cases that are NOT operational work: a departure the PMS
+	// announced for a stay this appliance never received an arrival for. They cannot be actioned here, they
+	// do not clear on their own, and they do not affect a guest. Counted apart from EventsReview so the
+	// dashboard can say which of the two it is looking at instead of adding them together and calling the
+	// total "waiting for a decision".
+	HistoricalExceptions int64 `json:"historical_exceptions"`
 }
 
 type dashPostings struct {
@@ -414,6 +420,22 @@ func (s *server) dashPMS(ctx context.Context) dashPms {
 			SELECT count(*) FROM iam_v2.stay_events
 			 WHERE tenant_id = $1 AND site_id = $2 AND processing_status = 'MANUAL_REVIEW'
 		`, s.tenantID, s.siteID).Scan(&p.EventsReview)
+	}
+
+	// The historical exceptions, counted separately and deliberately NOT subtracted from anything: they are
+	// a different kind of thing, not a smaller amount of the same thing.
+	_ = s.db.QueryRow(ctx, `
+		SELECT count(*) FROM iam_v2.stay_events e
+		 WHERE e.tenant_id = $1 AND e.site_id = $2
+		   AND e.processing_status = 'MANUAL_REVIEW'
+		   AND e.event_type = 'GO' AND e.admission_kind = 'LIVE'
+		   AND NOT EXISTS (SELECT 1 FROM iam_v2.pms_case_resolutions x WHERE x.stay_event_id = e.id)
+	`, s.tenantID, s.siteID).Scan(&p.HistoricalExceptions)
+
+	// And EventsReview must then mean OPERATIONAL work only, or the two numbers overlap and the dashboard
+	// reports the same record twice under two different meanings.
+	if p.EventsReview >= p.HistoricalExceptions {
+		p.EventsReview -= p.HistoricalExceptions
 	}
 
 	p.section = section{Available: true}

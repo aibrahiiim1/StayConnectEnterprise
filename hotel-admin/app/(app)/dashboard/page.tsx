@@ -124,6 +124,9 @@ export default function DashboardPage() {
   // THE ATTENTION STRIP. Only real, currently-true problems, each phrased as what it stops rather than as the
   // internal state that produced it. An always-present "system status" panel trains people to ignore it.
   const attention: { text: string; href?: string; tone: "warn" | "err" }[] = [];
+  // NOTES are things an operator should KNOW, not things they must DO. Keeping them out of "Needs attention"
+  // is the whole point: a list that mixes the two trains people to skim it.
+  const notes: { text: string; href?: string; tone: "info" }[] = [];
   if (health && !health.db) attention.push({ text: describeDatabase(false).summary, href: "/health", tone: "err" });
   if (health && !health.scd) attention.push({ text: describeSessionController(false).summary, href: "/health", tone: "err" });
   if (health && !health.license_installed) {
@@ -144,6 +147,21 @@ export default function DashboardPage() {
     attention.push({
       text: `${fmtInt(snap?.pms.events_needing_review)} PMS messages could not be applied automatically and are waiting for a decision.`,
       href: "/stay-events", tone: "warn",
+    });
+  }
+  // THE HISTORICAL EXCEPTION IS NOT A WARNING, and adding it to the one above made the dashboard ask for a
+  // decision nobody here can take. It is a fixed fact from before this appliance had a complete picture of
+  // the property: it affects no guest, it will not clear on its own, and the only answers are the PMS's or a
+  // recorded decision to leave it.
+  //
+  // It also gets a DIFFERENT destination. The warning above points at the message feed, which opens on the
+  // most recent 200 of 79 773 events -- the record in question is from August, seventy-five thousand rows
+  // down, so an operator who followed that link landed on a page of healthy traffic and reasonably concluded
+  // the alert was wrong. This one points at the screen that actually explains it.
+  if ((snap?.pms.historical_exceptions ?? 0) > 0) {
+    notes.push({
+      text: `${fmtInt(snap?.pms.historical_exceptions)} historical PMS exception${(snap?.pms.historical_exceptions ?? 0) === 1 ? "" : "s"} — a departure recorded before this appliance had the full guest list. Guests are unaffected and nothing here needs doing.`,
+      href: "/roster-reconciliation", tone: "info",
     });
   }
   if (snap?.postings.available && snap.postings.review_open > 0) {
@@ -199,6 +217,23 @@ export default function DashboardPage() {
                 {a.href && (
                   <Link href={a.href} className="font-medium underline underline-offset-2">
                     Open
+                  </Link>
+                )}
+              </li>
+            ))}
+          </ul>
+        </Callout>
+      )}
+
+      {notes.length > 0 && (
+        <Callout tone="info" title="For information">
+          <ul className="space-y-1">
+            {notes.map((n, i) => (
+              <li key={i}>
+                {n.text}{" "}
+                {n.href && (
+                  <Link href={n.href} className="font-medium underline underline-offset-2">
+                    See details
                   </Link>
                 )}
               </li>

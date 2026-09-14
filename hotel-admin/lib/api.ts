@@ -708,6 +708,8 @@ export type DashPms = DashSection & {
   events_today: number;
   events_applied_today: number;
   events_needing_review: number;
+  /** Outstanding cases that are NOT operational work and do not clear on their own. Counted apart. */
+  historical_exceptions?: number;
 };
 
 export type DashPostings = DashSection & {

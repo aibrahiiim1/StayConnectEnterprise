@@ -110,6 +110,34 @@ describe("roster reconciliation offers no repair", () => {
     await renderPage();
     await waitFor(() => expect(screen.getByText(/departure for unknown stay/i)).toBeTruthy());
     expect(screen.getByText(/guests not affected/i)).toBeTruthy();
-    expect(screen.getByText(/HISTORICAL EXCEPTION/i)).toBeTruthy();
+    expect(screen.getAllByText(/HISTORICAL EXCEPTION/i).length).toBeGreaterThan(0);
+  });
+
+  // THE CONTRADICTION THAT PROMPTED THIS. The exception's own text says it will not clear on its own, and
+  // three lines below it the card footer said "these clear themselves when the condition ends". Both were
+  // on screen together. The footer belongs to the operational blockers and must not appear under a
+  // historical one.
+  it("never tells the operator the historical exception will clear itself", async () => {
+    await renderPage();
+    await waitFor(() => expect(screen.getAllByText(/HISTORICAL EXCEPTION/i).length).toBeGreaterThan(0));
+    expect(screen.queryByText(/these clear themselves/i)).toBeNull();
+    expect(screen.getByText(/historical exception — for information/i)).toBeTruthy();
+  });
+
+  it("says the page needs no manual action, and what it is for", async () => {
+    await renderPage();
+    await waitFor(() => expect(screen.getAllByText(/happens on its own/i).length).toBeGreaterThan(0));
+    expect(screen.getByText(/nothing on this page to press/i)).toBeTruthy();
+  });
+
+  it("explains each recovery setting with its unit, current value and when to change it", async () => {
+    await renderPage();
+    await waitFor(() => expect(screen.getByText(/shortest wait before retrying/i)).toBeTruthy());
+    expect(screen.getByText(/report the link as down after/i)).toBeTruthy();
+    expect(screen.getByText(/report reconciliation as blocked after/i)).toBeTruthy();
+    // Each field states what it currently is, and when an administrator should touch it.
+    expect(screen.getAllByText(/currently:/i).length).toBe(5);
+    expect(screen.getAllByText(/change it when:/i).length).toBe(5);
+    expect(screen.getByText(/most properties never need to change any of them/i)).toBeTruthy();
   });
 });
