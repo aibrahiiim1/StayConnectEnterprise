@@ -1093,7 +1093,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0133",
+  "latest_transition_id": "T0134",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1586,13 +1586,13 @@
   },
   "current_delivery": {
     "kind": "POST_CLOSURE_CORRECTIONS",
-    "decision": "D51",
+    "decision": "D52",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "4ded8f86200f0a1df0a81564a951f4f8d63b45c2",
-    "base_note": "The master merge commit of PR #129. This delivery begins exactly where that one ended.",
-    "head": "1c78ea25bf7266050ed2dbc2c8f0aec967777576",
+    "base": "e0d7df745b0c624c2b27f9d4c4df3c7b666a4559",
+    "base_note": "The master merge commit of PR #130. This delivery begins exactly where that one ended.",
+    "head": "a759ab08",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
-    "note": "PMS configuration UX: Current configuration on the main screen, previous versions behind History with real audit-log provenance and computed differences. Recovery settings stated as site-wide. Over-broad reconciliation wording corrected. UI only, no deployment, no migration."
+    "note": "PRE-LIVE deployment of e0d7df74 to 172.21.60.25, and the correction of the History provenance join it exposed: operators.id (uuid) was compared to audit_log.actor_id (text), so a deliberately-discarded error left every saved version reading 'origin not recorded'. Query pinned in a named constant and executed verbatim by a regression test against production column types. No migration, no schema change, no PMS or guest-state change."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
