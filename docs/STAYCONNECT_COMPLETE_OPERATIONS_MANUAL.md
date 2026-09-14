@@ -517,7 +517,13 @@ operator, the previous values and the new values.
 
 ## 14b. Unresolved departures (PMS reconciliation)
 
-**Hotel Admin → Property management system → Unresolved departures.**
+**Hotel Admin → Property management system → PMS connection → Advanced diagnostics → Unresolved departures.**
+
+> **Not a routine screen, and deliberately not in the menu.** Reconciliation runs by itself after every
+> complete guest list and this page carries no action. A property where the integration is healthy never
+> needs to open it. When something genuinely needs investigating, the PMS connection page says so — under
+> *Needs investigation* — and links straight here. Roster reconciliation sits beside it, under the same
+> Advanced diagnostics heading.
 
 This PMS reports every checkout as a departure carrying a **room number and no reservation number**. When the
 room does not identify exactly one in-house stay, the departure cannot be applied and waits for a human. Two

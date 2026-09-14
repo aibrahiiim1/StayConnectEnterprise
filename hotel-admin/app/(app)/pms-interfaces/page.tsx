@@ -41,6 +41,7 @@ import Link from "next/link";
 import { SynchronizationCard } from "./synchronization-card";
 import {
   api, PmsInterface, PmsInterfaceHealth, PmsRevision, PmsGuestNetworkRoute,
+  PmsConnectionSettings, RosterReconciliationState,
 } from "@/lib/api";
 import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
 import { Card, CardBody, CardHeader, CardTitle, Section } from "@/components/ui/card";
@@ -552,6 +553,8 @@ function InterfaceDetail({
           misconfiguration on a correctly configured interface. The component and its endpoint are left in
           place for a future connector that genuinely authenticates. */}
       <RoutingCard routes={routes} />
+      <ConnectionRecoveryCard />
+      <AdvancedDiagnosticsCard />
     </div>
   );
 }
@@ -636,11 +639,218 @@ function HealthCard({ health }: { health?: PmsInterfaceHealth | null }) {
             sub={health.oldest_pending_at ? `Oldest ${formatRelative(health.oldest_pending_at)}` : undefined}
           />
           <Metric
-            label="Needing review"
+            label="Needs investigation"
             value={(health.review_events ?? 0).toLocaleString()}
             tone={health.review_events > 0 ? "warn" : "default"}
           />
         </div>
+
+        {/* THE ONE THING THAT WOULD OTHERWISE NEED A DIAGNOSTIC PAGE TO DISCOVER.
+            Reconciliation runs by itself and nearly always has nothing outstanding, which is why its screen
+            is not day-to-day navigation. But when it DOES have something, an operator must not have to go
+            looking: it is stated here, in the PMS area they already use, with a direct route to the detail. */}
+        {(health.review_events ?? 0) > 0 ? (
+          <Callout tone="warning" title="Reconciliation needs investigation">
+            {health.review_events.toLocaleString()} recorded PMS message
+            {health.review_events === 1 ? "" : "s"} could not be matched to a stay and still need an answer.
+            Guests are unaffected — the appliance keeps using its last good guest list.{" "}
+            <Link href="/pms-reconciliation" className="font-medium underline underline-offset-2">
+              Open the diagnostic
+            </Link>
+          </Callout>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Reconciliation is up to date: every PMS message has been matched or answered. It runs
+            automatically after each complete guest list — there is nothing to do here.
+          </p>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+// CONNECTION RECOVERY — advanced configuration for the link, where the link is configured.
+//
+// These five numbers governed how the PMS connection retries after a drop, and they lived on a diagnostic
+// page an administrator had no reason to open. They are configuration, not diagnosis, so they belong here.
+//
+// Each states what it does, what it currently is, and the situation that would justify changing it, because
+// a number and a unit tell an administrator nothing about whether to touch it -- and for nearly every
+// property the right answer is to leave all five alone.
+const CONN_FIELDS: {
+  key: Extract<keyof PmsConnectionSettings, string>;
+  label: string;
+  unit: string;
+  what: string;
+  when: string;
+}[] = [
+  {
+    key: "backoff_min_ms",
+    label: "Shortest wait before retrying",
+    unit: "milliseconds",
+    what: "After the PMS link drops, how soon the first reconnection attempt happens. Each further attempt waits a little longer, up to the maximum below.",
+    when: "Raise it if the hotel's PMS complains about repeated connections during its nightly restart.",
+  },
+  {
+    key: "backoff_max_ms",
+    label: "Longest wait before retrying",
+    unit: "milliseconds",
+    what: "Attempts never get further apart than this, so a PMS that comes back at 3am is picked up within this long with nobody present. The appliance retries indefinitely — this caps the gap, never the number of tries.",
+    when: "Lower it if the PMS restarts often and you want the guest list current again sooner.",
+  },
+  {
+    key: "stable_reset_seconds",
+    label: "Connection must hold this long to count as recovered",
+    unit: "seconds",
+    what: "Once a reconnection survives this long, the waiting resets to the shortest value.",
+    when: "Raise it if the link reconnects and drops again within a minute or two.",
+  },
+  {
+    key: "link_down_alert_seconds",
+    label: "Report the link as down after",
+    unit: "seconds",
+    what: "How long the link may stay down before it is reported. This governs when a person is TOLD — nothing stops when the link drops, and guests keep signing in from the last good guest list.",
+    when: "Lower it to hear about an outage sooner; raise it if nightly maintenance produces an alert nobody acts on.",
+  },
+  {
+    key: "blocked_after_refusals",
+    label: "Report reconciliation as blocked after",
+    unit: "consecutive runs",
+    what: "Reconciliation declines to act on an incomplete or contradictory guest list, which protects guests. After this many refusals in a row it is reported.",
+    when: "Lower it to hear about a degrading feed sooner.",
+  },
+];
+
+function ConnectionRecoveryCard() {
+  const [state, setState] = useState<RosterReconciliationState | null>(null);
+  const [form, setForm] = useState<Record<string, number>>({});
+  const [reason, setReason] = useState("");
+  const [saved, setSaved] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setState(await api.get<RosterReconciliationState>("/pms-roster-reconciliation"));
+    } catch {
+      /* advanced configuration: absent on a connector that does not expose it */
+    }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  async function save() {
+    setBusy(true);
+    try {
+      const out = await api.put<{ config_version: number }>(
+        "/pms-roster-reconciliation/connection-settings", { ...form, reason });
+      setSaved(out.config_version);
+      setForm({});
+      setReason("");
+      await load();
+    } catch (e: any) {
+      setErr(e?.message ?? "the settings were rejected");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!state?.connection_settings) return null;
+
+  return (
+    <Card>
+      <CardHeader><CardTitle>Advanced configuration — connection recovery</CardTitle></CardHeader>
+      <CardBody className="space-y-3">
+        {err && <p className="text-sm text-err">{err}</p>}
+        <p className="text-sm text-muted-foreground">
+          The PMS link reconnects by itself and retries for as long as it takes. These bound how fast it
+          retries and how long a problem may last before it is reported.{" "}
+          <strong>Most properties never need to change any of them</strong> — every change is recorded with
+          who made it and why.
+        </p>
+        <div className="grid gap-3 lg:grid-cols-2">
+          {CONN_FIELDS.map((f) => (
+            <div key={f.key} className="rounded-md border p-3">
+              <label className="text-sm">
+                <span className="block font-medium">{f.label}</span>
+                <span className="mt-1 block text-xs text-muted-foreground">{f.what}</span>
+                <div className="mt-2 flex items-center gap-2">
+                  <input
+                    type="number"
+                    className="w-40 rounded-md border px-3 py-2 text-sm"
+                    value={form[f.key] ?? state.connection_settings[f.key] ?? ""}
+                    onChange={(e) => setForm({ ...form, [f.key]: Number(e.target.value) })}
+                    disabled={busy}
+                  />
+                  <span className="text-xs text-muted-foreground">{f.unit}</span>
+                </div>
+                <span className="mt-2 block text-xs text-muted-foreground">
+                  <strong>Currently:</strong> {state.connection_settings[f.key]} {f.unit}
+                  {state.connection_settings.is_default ? " (the approved default)" : ""}
+                </span>
+                <span className="mt-1 block text-xs text-muted-foreground">
+                  <strong>Change it when:</strong> {f.when}
+                </span>
+              </label>
+            </div>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            className="min-w-[20rem] flex-1 rounded-md border px-3 py-2 text-sm"
+            placeholder="Reason - recorded against this change"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            disabled={busy}
+          />
+          <Button onClick={() => void save()} disabled={busy || Object.keys(form).length === 0}>
+            Save recovery settings
+          </Button>
+        </div>
+        {saved && (
+          <p className="text-sm text-ok">Saved as version {saved}. It applies on the next reconnect.</p>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+// ADVANCED DIAGNOSTICS, deliberately at the bottom and deliberately not in the menu.
+//
+// Both screens below describe machinery that runs without anyone. Neither has an action on it. A property
+// where everything works never needs either, so putting them in the main navigation taught operators to
+// check pages that are meant to be empty -- and an empty page checked daily is how a real warning gets
+// skimmed past. They are reached from here, where somebody troubleshooting the PMS already is.
+function AdvancedDiagnosticsCard() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Advanced diagnostics</CardTitle>
+      </CardHeader>
+      <CardBody className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          These are for investigating the PMS integration. Normal operation needs none of them — the status
+          above already says whether guests can sign in and whether anything needs attention.
+        </p>
+        <ul className="space-y-3">
+          <li>
+            <Link href="/roster-reconciliation" className="font-medium underline underline-offset-2">
+              Roster reconciliation
+            </Link>
+            <p className="text-sm text-muted-foreground">
+              How the guest list is kept identical to the hotel&rsquo;s: what the last comparison found, why a
+              comparison was refused, and every run that has happened.
+            </p>
+          </li>
+          <li>
+            <Link href="/pms-reconciliation" className="font-medium underline underline-offset-2">
+              Unresolved departures
+            </Link>
+            <p className="text-sm text-muted-foreground">
+              Individual PMS messages that could not be matched to a stay, with the evidence each one is
+              waiting for.
+            </p>
+          </li>
+        </ul>
       </CardBody>
     </Card>
   );

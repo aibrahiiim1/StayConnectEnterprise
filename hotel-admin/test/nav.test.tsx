@@ -74,3 +74,28 @@ describe("Nav — PMS capability visibility", () => {
     }
   });
 });
+
+// RECONCILIATION IS NOT DAY-TO-DAY NAVIGATION.
+//
+// Both reconciliation screens describe machinery that runs without anyone and neither carries an action. A
+// property where everything works never opens them, so listing them beside the pages reception uses every
+// shift taught operators to check screens that are meant to be empty -- and a page checked daily because it
+// is always empty is exactly the page a real warning gets skimmed past on.
+//
+// They remain ROUTABLE and are reached from PMS connection under Advanced diagnostics. This asserts the
+// demotion, not a deletion.
+describe("PMS diagnostics are not primary navigation", () => {
+  it("offers neither reconciliation screen as a day-to-day page", async () => {
+    const { NAV_ITEMS } = await import("@/components/nav");
+    const hrefs = NAV_ITEMS.map((i) => i.href);
+    expect(hrefs).not.toContain("/pms-reconciliation");
+    expect(hrefs).not.toContain("/roster-reconciliation");
+  });
+
+  it("still offers the PMS pages an operator uses in a shift", async () => {
+    const { NAV_ITEMS } = await import("@/components/nav");
+    const hrefs = NAV_ITEMS.map((i) => i.href);
+    expect(hrefs).toContain("/pms-interfaces");
+    expect(hrefs).toContain("/stay-events");
+  });
+});

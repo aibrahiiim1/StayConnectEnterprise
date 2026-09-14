@@ -88,8 +88,10 @@ describe("roster reconciliation offers no repair", () => {
     expect(buttons.some((t) => /close\s+\d*\s*stay/i.test(t))).toBe(false);
     expect(buttons.some((t) => /answer the snapshot/i.test(t))).toBe(false);
 
-    // And the one control that must remain, because a hotel may legitimately change it.
-    expect(buttons.some((t) => /save recovery settings/i.test(t))).toBe(true);
+    // The recovery settings moved to PMS connection, where the link they govern is configured. This page
+    // is a diagnostic and now offers NO control at all -- which is the point of it not being in the menu.
+    expect(buttons.some((t) => /save recovery settings/i.test(t))).toBe(false);
+    expect(screen.getByText(/configured with the connection itself/i)).toBeTruthy();
   });
 
   it("states that reconciliation happens on its own", async () => {
@@ -130,14 +132,4 @@ describe("roster reconciliation offers no repair", () => {
     expect(screen.getByText(/nothing on this page to press/i)).toBeTruthy();
   });
 
-  it("explains each recovery setting with its unit, current value and when to change it", async () => {
-    await renderPage();
-    await waitFor(() => expect(screen.getByText(/shortest wait before retrying/i)).toBeTruthy());
-    expect(screen.getByText(/report the link as down after/i)).toBeTruthy();
-    expect(screen.getByText(/report reconciliation as blocked after/i)).toBeTruthy();
-    // Each field states what it currently is, and when an administrator should touch it.
-    expect(screen.getAllByText(/currently:/i).length).toBe(5);
-    expect(screen.getAllByText(/change it when:/i).length).toBe(5);
-    expect(screen.getByText(/most properties never need to change any of them/i)).toBeTruthy();
-  });
 });
