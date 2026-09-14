@@ -1,4 +1,0 @@
-commit 9078467db1362548889c8b97cbffe726e106af86
-Date:   Mon Sep 14 22:45:17 2026 +0300
-
-    Governance: T0132 records the navigation simplification
