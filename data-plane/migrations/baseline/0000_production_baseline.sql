@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0077, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0078, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -5853,6 +5853,57 @@ COMMENT ON FUNCTION iam_v2.p6_tick_online_time(p_tenant uuid, p_site uuid, p_now
 
 
 --
+-- Name: pms_accept_startup_data_gap(uuid, uuid, uuid, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_accept_startup_data_gap(p_tenant uuid, p_site uuid, p_event uuid, p_operator text, p_reason text) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_iface uuid; v_kind text; v_type text; v_status text; v_res uuid;
+BEGIN
+    IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
+        RAISE EXCEPTION 'accepting a startup data gap requires an operator identity'
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF p_reason IS NULL OR length(btrim(p_reason)) = 0 THEN
+        RAISE EXCEPTION 'accepting a startup data gap requires a recorded reason'
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+
+    SELECT e.pms_interface_id, e.admission_kind, e.event_type, e.processing_status
+      INTO v_iface, v_kind, v_type, v_status
+      FROM iam_v2.stay_events e
+     WHERE e.id = p_event AND e.tenant_id = p_tenant AND e.site_id = p_site;
+
+    IF v_iface IS NULL THEN
+        RAISE EXCEPTION 'no such recorded event for this property' USING ERRCODE = 'no_data_found';
+    END IF;
+    -- Only an unanswered LIVE departure can be a startup gap. A roster snapshot is answered by what it is,
+    -- and an applied event was never outstanding.
+    IF v_status <> 'MANUAL_REVIEW' OR v_type <> 'GO' OR v_kind <> 'LIVE' THEN
+        RAISE EXCEPTION 'only an unanswered live departure can be accepted as a startup data gap '
+                        '(this one is % / % / %)', v_status, v_type, v_kind
+            USING ERRCODE = 'check_violation';
+    END IF;
+    IF EXISTS (SELECT 1 FROM iam_v2.pms_case_resolutions x WHERE x.stay_event_id = p_event) THEN
+        RAISE EXCEPTION 'this record already carries a disposition; it is not outstanding'
+            USING ERRCODE = 'unique_violation';
+    END IF;
+
+    INSERT INTO iam_v2.pms_case_resolutions
+           (tenant_id, site_id, pms_interface_id, stay_event_id, stay_id, disposition,
+            evidence_kind, evidence_ref, resolved_by, note)
+    VALUES (p_tenant, p_site, v_iface, p_event, NULL, 'ACCEPTED_STARTUP_DATA_GAP',
+            'OPERATOR_DECISION', NULL, btrim(p_operator), btrim(p_reason))
+    RETURNING id INTO v_res;
+
+    RETURN v_res;
+END;
+$$;
+
+
+--
 -- Name: pms_case_resolutions_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -8650,8 +8701,8 @@ CREATE TABLE iam_v2.pms_case_resolutions (
     resolved_at timestamp with time zone DEFAULT now() NOT NULL,
     resolved_by text NOT NULL,
     note text,
-    CONSTRAINT pms_case_resolutions_disposition_check CHECK ((disposition = ANY (ARRAY['DEPARTED_CONFIRMED_BY_ROSTER'::text, 'NOT_A_DEPARTURE_ROSTER_SNAPSHOT'::text, 'ALREADY_CLOSED'::text, 'NEEDS_PMS_EVIDENCE'::text]))),
-    CONSTRAINT pms_case_resolutions_evidence_kind_check CHECK ((evidence_kind = ANY (ARRAY['PUBLISHED_ROSTER_GENERATION'::text, 'ADMISSION_KIND'::text, 'STAY_STATE'::text, 'NONE'::text]))),
+    CONSTRAINT pms_case_resolutions_disposition_check CHECK ((disposition = ANY (ARRAY['DEPARTED_CONFIRMED_BY_ROSTER'::text, 'NOT_A_DEPARTURE_ROSTER_SNAPSHOT'::text, 'ALREADY_CLOSED'::text, 'NEEDS_PMS_EVIDENCE'::text, 'ACCEPTED_STARTUP_DATA_GAP'::text]))),
+    CONSTRAINT pms_case_resolutions_evidence_kind_check CHECK ((evidence_kind = ANY (ARRAY['PUBLISHED_ROSTER_GENERATION'::text, 'ADMISSION_KIND'::text, 'STAY_STATE'::text, 'NONE'::text, 'OPERATOR_DECISION'::text]))),
     CONSTRAINT pms_case_resolutions_evidence_ref_check CHECK (((evidence_ref IS NULL) OR (length(evidence_ref) <= 200))),
     CONSTRAINT pms_case_resolutions_note_check CHECK (((note IS NULL) OR (length(note) <= 500))),
     CONSTRAINT pms_case_resolutions_resolved_by_check CHECK ((length(btrim(resolved_by)) > 0))
@@ -9352,6 +9403,46 @@ CREATE VIEW iam_v2.pms_stays_past_departure AS
           WHERE ((ro.tenant_id = s.tenant_id) AND (ro.site_id = s.site_id) AND (ro.pms_interface_id = s.pms_interface_id) AND (ro.room = s.normalized_room_number) AND (ro.reservation IS DISTINCT FROM s.external_reservation_id)))) AS room_now_holds_another_stay
    FROM iam_v2.stays s
   WHERE ((status = 'IN_HOUSE'::text) AND (departure IS NOT NULL) AND (departure < CURRENT_DATE));
+
+
+--
+-- Name: pms_unanswered_review_events; Type: VIEW; Schema: iam_v2; Owner: -
+--
+
+CREATE VIEW iam_v2.pms_unanswered_review_events AS
+ SELECT id,
+    tenant_id,
+    site_id,
+    pms_interface_id,
+    stay_id,
+    external_event_identity,
+    event_type,
+    pms_timestamp_raw,
+    pms_timestamp_utc,
+    source_timezone,
+    received_at,
+    sequence_version,
+    normalization_version,
+    clock_suspect,
+    payload,
+    processing_status,
+    processed_at,
+    review_code,
+    admission_kind,
+    admission_runtime_generation,
+    resync_generation,
+    fingerprint_key_version
+   FROM iam_v2.stay_events e
+  WHERE ((processing_status = 'MANUAL_REVIEW'::text) AND (NOT (EXISTS ( SELECT 1
+           FROM iam_v2.pms_case_resolutions x
+          WHERE (x.stay_event_id = e.id)))));
+
+
+--
+-- Name: VIEW pms_unanswered_review_events; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON VIEW iam_v2.pms_unanswered_review_events IS 'Recorded events that still need an answer: MANUAL_REVIEW with no disposition. THE single definition of outstanding PMS work -- every operator-facing count reads this, so no two screens can disagree about how much there is to do.';
 
 
 --
@@ -16308,6 +16399,13 @@ REVOKE ALL ON FUNCTION iam_v2.p6_termination_evidence_matches_transition() FROM 
 
 REVOKE ALL ON FUNCTION iam_v2.p6_tick_online_time(p_tenant uuid, p_site uuid, p_now timestamp with time zone, p_max_charge_seconds integer, p_capped_entitlements uuid[], p_caps timestamp with time zone[]) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.p6_tick_online_time(p_tenant uuid, p_site uuid, p_now timestamp with time zone, p_max_charge_seconds integer, p_capped_entitlements uuid[], p_caps timestamp with time zone[]) TO svc_acctd;
+
+
+--
+-- Name: FUNCTION pms_accept_startup_data_gap(p_tenant uuid, p_site uuid, p_event uuid, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.pms_accept_startup_data_gap(p_tenant uuid, p_site uuid, p_event uuid, p_operator text, p_reason text) FROM PUBLIC;
 
 
 --
