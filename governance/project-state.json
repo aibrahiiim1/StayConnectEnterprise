@@ -1590,7 +1590,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "4ded8f86200f0a1df0a81564a951f4f8d63b45c2",
     "base_note": "The master merge commit of PR #129. This delivery begins exactly where that one ended.",
-    "head": "46b7c2141b7fc26eaa5c94d64e9122805bb46b2b",
+    "head": "1c78ea25bf7266050ed2dbc2c8f0aec967777576",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
     "note": "PMS configuration UX: Current configuration on the main screen, previous versions behind History with real audit-log provenance and computed differences. Recovery settings stated as site-wide. Over-broad reconciliation wording corrected. UI only, no deployment, no migration."
   },
