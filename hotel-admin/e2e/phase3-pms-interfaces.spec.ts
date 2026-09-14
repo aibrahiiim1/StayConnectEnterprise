@@ -151,12 +151,13 @@ test("the published revision is the one the interface points at, not the newest"
   await page.goto("/pms-interfaces");
   await page.getByRole("button", { name: "Manage" }).click();
 
-  // scoped to the badge, because the list's "Published revision" column header contains the word too
-  const badge = page.getByText("Live", { exact: true });
-  await expect(badge).toBeVisible();
-  await expect(badge.locator("xpath=ancestor::tr[1]")).toContainText("#1");
-  // and the newer one is the one offering a Publish action
-  await expect(page.getByRole("button", { name: "Put live", exact: true }).first()).toBeVisible();
+  // THE MAIN VIEW IS WHAT IS IN FORCE. Version 1 is in use even though version 2 is newer, and the newer
+  // one is not shown here at all -- previous versions live behind History.
+  await expect(page.getByText("Current configuration")).toBeVisible();
+  await expect(page.getByText("Version 1", { exact: true })).toBeVisible();
+  await expect(page.getByText("In use", { exact: true })).toBeVisible();
+  await expect(page.getByText("Version 2", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^History/ })).toBeVisible();
 });
 
 test("publishing sends the revision the operator believed was live", async ({ page }) => {
@@ -165,7 +166,9 @@ test("publishing sends the revision the operator believed was live", async ({ pa
   await page.goto("/pms-interfaces");
   await page.getByRole("button", { name: "Manage" }).click();
 
-  await page.getByRole("button", { name: "Put live", exact: true }).first().click();
+  // Rolling back is putting a previous version back, so it is reached through History.
+  await page.getByRole("button", { name: /^History/ }).click();
+  await page.getByRole("button", { name: /Put this version back in use/ }).first().click();
   await page.getByLabel("Reason").fill("CONFIG_UPDATE");
   await page.getByLabel("Confirm your password").fill("operator-pw");
   await page.getByRole("dialog").getByRole("button", { name: "Put live" }).click();
@@ -184,7 +187,9 @@ test("a concurrent publication is shown as a refusal, not as success", async ({ 
   await page.goto("/pms-interfaces");
   await page.getByRole("button", { name: "Manage" }).click();
 
-  await page.getByRole("button", { name: "Put live", exact: true }).first().click();
+  // Rolling back is putting a previous version back, so it is reached through History.
+  await page.getByRole("button", { name: /^History/ }).click();
+  await page.getByRole("button", { name: /Put this version back in use/ }).first().click();
   await page.getByLabel("Reason").fill("CONFIG_UPDATE");
   await page.getByLabel("Confirm your password").fill("operator-pw");
   await page.getByRole("dialog").getByRole("button", { name: "Put live" }).click();
@@ -316,7 +321,8 @@ test("the new phase-3 pages are accessible: one heading, named controls, labelle
   // the forms specifically: every input is reachable by its label, which is what a screen reader announces
   await page.goto("/pms-interfaces");
   await page.getByRole("button", { name: "Manage" }).click();
-  await page.getByRole("button", { name: "Put live", exact: true }).first().click();
+  await page.getByRole("button", { name: /^History/ }).click();
+  await page.getByRole("button", { name: /Put this version back in use/ }).first().click();
   await expect(page.getByLabel("Reason")).toBeVisible();
   await expect(page.getByLabel("Confirm your password")).toBeVisible();
 
@@ -328,7 +334,9 @@ test("the new phase-3 pages are accessible: one heading, named controls, labelle
   await installBackend(page, { mutations: mutations2, publishStatus: 409 });
   await page.goto("/pms-interfaces");
   await page.getByRole("button", { name: "Manage" }).click();
-  await page.getByRole("button", { name: "Put live", exact: true }).first().click();
+  // Rolling back is putting a previous version back, so it is reached through History.
+  await page.getByRole("button", { name: /^History/ }).click();
+  await page.getByRole("button", { name: /Put this version back in use/ }).first().click();
   await page.getByLabel("Reason").fill("CONFIG_UPDATE");
   await page.getByLabel("Confirm your password").fill("pw");
   await page.getByRole("dialog").getByRole("button", { name: "Put live" }).click();

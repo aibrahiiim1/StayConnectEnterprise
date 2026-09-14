@@ -1,0 +1,4 @@
+commit 1c78ea25bf7266050ed2dbc2c8f0aec967777576
+Date:   Tue Sep 15 00:29:06 2026 +0300
+
+    Keep the configuration read on the configuration tables

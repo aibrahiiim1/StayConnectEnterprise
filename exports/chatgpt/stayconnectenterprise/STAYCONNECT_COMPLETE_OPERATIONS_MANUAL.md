@@ -515,6 +515,25 @@ operator, the previous values and the new values.
 
 ---
 
+### PMS configuration: Current configuration and History
+
+**Hotel Admin → Property management system → PMS connection.**
+
+The connection screen shows the **current configuration** only — the version in force, what it is set to, and
+when and by whom it was saved. Previous versions are behind a **History** button, and putting an older one
+back in use ("roll back") is done from there.
+
+Every saved version is kept permanently and cannot be edited or removed. History states what changed from the
+version before it, derived from the stored values. Where two versions hold identical connection settings,
+History says so and names the internal difference instead of implying a change that did not happen. Where a
+version's origin was never recorded, History says that too rather than guessing.
+
+The word *Revision* is internal. Operators see **Version**, **Current configuration**, **Previous** and
+**History**; the database and the API are unchanged.
+
+**Connection recovery settings apply to the whole site**, not to one connection. They are stored once per
+property, keyed by tenant and site, and appear on this page because this is where the PMS link is configured.
+
 ## 14b. Unresolved departures (PMS reconciliation)
 
 **Hotel Admin → Property management system → PMS connection → Advanced diagnostics → Unresolved departures.**

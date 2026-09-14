@@ -51,7 +51,9 @@ import { Button } from "@/components/ui/button";
 import { Input, Field, Select } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
-import { DialogForm, ConfirmDialog } from "@/components/ui/dialog";
+import {
+  DialogForm, ConfirmDialog, Dialog, DialogContent, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { Explain } from "@/components/ui/tooltip";
 import { DList, MonoId, Separator, SkeletonRows, Metric } from "@/components/ui/misc";
 import { formatRelative, formatDate } from "@/lib/utils";
@@ -653,7 +655,8 @@ function HealthCard({ health }: { health?: PmsInterfaceHealth | null }) {
           <Callout tone="warning" title="Reconciliation needs investigation">
             {health.review_events.toLocaleString()} recorded PMS message
             {health.review_events === 1 ? "" : "s"} could not be matched to a stay and still need an answer.
-            Guests are unaffected — the appliance keeps using its last good guest list.{" "}
+            Sign-in continues from the guest list already in use; what these messages would have changed has
+            not been applied.{" "}
             <Link href="/pms-reconciliation" className="font-medium underline underline-offset-2">
               Open the diagnostic
             </Link>
@@ -758,7 +761,7 @@ function ConnectionRecoveryCard() {
 
   return (
     <Card>
-      <CardHeader><CardTitle>Advanced configuration — connection recovery</CardTitle></CardHeader>
+      <CardHeader><CardTitle>Advanced configuration — connection recovery (whole site)</CardTitle></CardHeader>
       <CardBody className="space-y-3">
         {err && <p className="text-sm text-err">{err}</p>}
         <p className="text-sm text-muted-foreground">
@@ -767,6 +770,15 @@ function ConnectionRecoveryCard() {
           <strong>Most properties never need to change any of them</strong> — every change is recorded with
           who made it and why.
         </p>
+        {/* SCOPE, STATED BECAUSE THE PLACEMENT IMPLIES OTHERWISE. These settings are stored per SITE --
+            the table's key is (tenant, site) and it has no interface column at all. They are shown on this
+            page because this is where the PMS link is configured, but they are not this interface's
+            settings, and a property with a second connection would find they apply to that one too. */}
+        <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+          <strong className="text-foreground">These apply to the whole site, not just this connection.</strong>{" "}
+          They are stored once per property. If this site ever has more than one PMS connection, changing a
+          value here changes it for all of them.
+        </div>
         <div className="grid gap-3 lg:grid-cols-2">
           {CONN_FIELDS.map((f) => (
             <div key={f.key} className="rounded-md border p-3">
@@ -829,7 +841,9 @@ function AdvancedDiagnosticsCard() {
       <CardBody className="space-y-3">
         <p className="text-sm text-muted-foreground">
           These are for investigating the PMS integration. Normal operation needs none of them — the status
-          above already says whether guests can sign in and whether anything needs attention.
+          above already says whether guests can sign in and whether anything needs attention. Neither screen
+          can change a stay, dispose of a case or run a reconciliation by hand; both only show what the
+          automatic process has done.
         </p>
         <ul className="space-y-3">
           <li>
@@ -856,6 +870,117 @@ function AdvancedDiagnosticsCard() {
   );
 }
 
+// WHAT REASON CODES MEAN, in operator language. These are the values the publish path actually records;
+// anything unrecognised is shown verbatim rather than guessed at.
+const REASON_WORDS: Record<string, string> = {
+  INITIAL_COMMISSIONING: "First set up when the connection was commissioned",
+  DERIVED_SOURCE_FINGERPRINT: "Saved automatically once the PMS message format had been observed",
+  CONFIG_CORRECTION: "A correction to the saved settings",
+  ENDPOINT_CHANGE: "The PMS address was changed",
+  TIMEOUT_TUNING: "Timeouts were adjusted",
+};
+
+// THE FIELDS AN OPERATOR WOULD CALL "THE CONNECTION SETTINGS".
+const SETTING_WORDS: [string, string][] = [
+  ["endpoint", "PMS address"],
+  ["dial_timeout_ms", "Connect timeout (ms)"],
+  ["read_timeout_ms", "Read timeout (ms)"],
+  ["write_timeout_ms", "Write timeout (ms)"],
+  ["heartbeat_interval_ms", "Heartbeat every (ms)"],
+  ["heartbeat_timeout_ms", "Heartbeat timeout (ms)"],
+  ["feed_freshness_ms", "Guest list considered stale after (ms)"],
+  ["complete_sync_ms", "Full guest list refresh every (ms)"],
+  ["resync_supported", "Can request a full guest list"],
+];
+
+// WHAT ACTUALLY CHANGED between one saved version and the one before it.
+//
+// Derived ONLY from stored values -- never narrated. Where two versions carry identical connection settings
+// this returns nothing, and the caller says so plainly instead of inventing a difference. That case is real:
+// on this property versions 1 and 2 are byte-identical as connection settings, and differ only in derived
+// internal state.
+function describeChange(cur: PmsRevision, prev?: PmsRevision): { field: string; from: string; to: string }[] {
+  if (!prev) return [];
+  const out: { field: string; from: string; to: string }[] = [];
+  for (const [key, label] of SETTING_WORDS) {
+    const a = prev.config?.[key];
+    const b = cur.config?.[key];
+    if (JSON.stringify(a) !== JSON.stringify(b)) {
+      out.push({ field: label, from: a === undefined ? "not set" : String(a), to: b === undefined ? "not set" : String(b) });
+    }
+  }
+  if (prev.source_timezone !== cur.source_timezone) {
+    out.push({ field: "Hotel time zone", from: prev.source_timezone, to: cur.source_timezone });
+  }
+  return out;
+}
+
+// Differences that are NOT connection settings: derived or internal state that still produced a new saved
+// version. Naming these is the difference between "nothing changed" (wrong, and it looks like a bug) and
+// "the settings are the same; this is what moved".
+function describeInternalChange(cur: PmsRevision, prev?: PmsRevision): string[] {
+  if (!prev) return [];
+  const out: string[] = [];
+  if ((prev.source_fingerprint ?? "") !== (cur.source_fingerprint ?? "")) {
+    out.push(
+      (prev.source_fingerprint ?? "") === ""
+        ? "The PMS message format was observed and recorded for the first time"
+        : "The recorded PMS message format changed",
+    );
+  }
+  if (prev.normalization_version !== cur.normalization_version) {
+    out.push("The message-handling version changed");
+  }
+  if (prev.folio_identity_strategy !== cur.folio_identity_strategy) {
+    out.push("The folio matching strategy changed");
+  }
+  return out;
+}
+
+function SettingsTable({ rev }: { rev: PmsRevision }) {
+  return (
+    <Table>
+      <THead><TR><TH>Setting</TH><TH>Value</TH></TR></THead>
+      <tbody>
+        {SETTING_WORDS.map(([key, label]) => (
+          <TR key={key}>
+            <TD>{label}</TD>
+            <TD>{rev.config?.[key] === undefined ? "—" : String(rev.config[key])}</TD>
+          </TR>
+        ))}
+        <TR><TD>Hotel time zone</TD><TD>{rev.source_timezone || "—"}</TD></TR>
+      </tbody>
+    </Table>
+  );
+}
+
+function VersionProvenance({ rev }: { rev: PmsRevision }) {
+  const when = rev.published_at ?? rev.authored_at;
+  // NEVER INVENTED. An unrecorded origin says so; it does not become a plausible sentence.
+  if (!when && !rev.actor_id && !rev.reason_code) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        How this version came to be saved was not recorded.
+      </p>
+    );
+  }
+  return (
+    <ul className="space-y-0.5 text-xs text-muted-foreground">
+      {when && <li>Saved {new Date(when).toLocaleString()}</li>}
+      {(rev.actor_label || rev.actor_id) && (
+        <li>
+          By {rev.actor_label || "an operator who is no longer on this appliance"}
+          {!rev.actor_label && rev.actor_id ? ` (${rev.actor_id.slice(0, 8)}…)` : ""}
+        </li>
+      )}
+      {rev.reason_code && <li>Reason: {REASON_WORDS[rev.reason_code] ?? rev.reason_code}</li>}
+    </ul>
+  );
+}
+
+// CURRENT CONFIGURATION is the whole of the normal view. The saved-version table used to sit here in full,
+// so the routine question -- "what is this connection set to?" -- was answered by a list of everything it
+// has ever been set to. Previous versions move behind History.
 function RevisionsCard({
   id, iface, revisions, onPublished,
 }: {
@@ -864,6 +989,10 @@ function RevisionsCard({
   revisions: PmsRevision[] | null;
   onPublished: () => void | Promise<void>;
 }) {
+  const [historyOpen, setHistoryOpen] = useState(false);
+  // PUBLISH/ROLLBACK IS PRESERVED, and lives with the previous versions it acts on. Putting an older
+  // version back is exactly "roll back", so History is where it belongs -- the main view is about what is in
+  // force, not about changing it.
   const [publishing, setPublishing] = useState<string | null>(null);
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
@@ -875,13 +1004,14 @@ function RevisionsCard({
     try {
       await api.post(`/pms-interfaces/${id}/publish`, {
         revision_id: publishing,
-        // The Revision this operator believed was live. If it changed while the form was open, edged refuses
-        // rather than reverting whoever published in between.
+        // The version this operator believed was in use. If it changed while the form was open, edged
+        // refuses rather than reverting whoever published in between.
         expected_revision_id: iface?.current_revision_id ?? "",
         reason_code: reason,
         password,
       });
       setPublishing(null);
+      setHistoryOpen(false);
       await onPublished();
     } catch (e) {
       setErr(e);
@@ -889,60 +1019,109 @@ function RevisionsCard({
       setBusy(false);
     }
   }
+  const ordered = (revisions ?? []).slice().sort((a, b) => b.revision_no - a.revision_no);
+  const current = ordered.find((r) => r.published) ?? ordered[0];
+  const previous = ordered.filter((r) => r.id !== current?.id);
 
   return (
     <Card>
-      <CardHeader>
-        <div>
-          <CardTitle>Configuration history</CardTitle>
-          <p className="mt-0.5 max-w-3xl text-xs text-muted-foreground">
-            Every saved configuration is kept permanently and is read-only. Changing settings records a new one,
-            so every stay records exactly what the connection was configured as when it was used.
-          </p>
-        </div>
+      <CardHeader className="flex flex-row items-center justify-between gap-3">
+        <CardTitle>Current configuration</CardTitle>
+        {previous.length > 0 && (
+          <Button variant="secondary" onClick={() => setHistoryOpen(true)}>
+            History ({previous.length})
+          </Button>
+        )}
       </CardHeader>
-      <CardBody className="p-0">
-        {revisions === null ? (
-          <SkeletonRows rows={2} cols={4} />
-        ) : revisions.length === 0 ? (
-          <EmptyState title="Nothing configured yet" hint="Use Settings to configure this connection." />
+      <CardBody className="space-y-3">
+        {!current ? (
+          <p className="text-sm text-muted-foreground">No configuration has been saved yet.</p>
         ) : (
-          <Table>
-            <THead>
-              <TR>
-                <TH>Version</TH>
-                <TH>Time zone</TH>
-                <TH>Settings</TH>
-                <TH />
-              </TR>
-            </THead>
-            <tbody>
-              {revisions.map((r) => (
-                <TR key={r.id}>
-                  <TD className="whitespace-nowrap">
-                    #{r.revision_no} {r.published && <Badge tone="ok">Live</Badge>}
-                  </TD>
-                  <TD className="text-sm">{r.source_timezone}</TD>
-                  <TD>
-                    {/* The raw config object used to be dumped here as JSON. It is redacted server-side, so
-                        nothing secret was exposed — but "readable" is not the same as "already safe", and a
-                        wall of snake_case keys and millisecond integers is not how an operator checks that a
-                        PMS is configured correctly. The same values, in words. */}
-                    <RevisionSummary config={r.config} />
-                  </TD>
-                  <TD className="text-right">
-                    {!r.published && (
-                      <Button size="sm" variant="secondary" onClick={() => { setErr(null); setPublishing(r.id); }}>
-                        Put live
-                      </Button>
-                    )}
-                  </TD>
-                </TR>
-              ))}
-            </tbody>
-          </Table>
+          <>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge tone="ok">Version {current.revision_no}</Badge>
+              <Badge tone="neutral">In use</Badge>
+            </div>
+            <VersionProvenance rev={current} />
+            <SettingsTable rev={current} />
+          </>
         )}
       </CardBody>
+
+      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Configuration history</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Previous saved versions of this connection, newest first. They are kept permanently and cannot
+              be edited or removed.
+            </p>
+            {previous.map((rev) => {
+              const older = ordered.find((o) => o.revision_no === rev.revision_no - 1);
+              const changes = describeChange(rev, older);
+              const internal = describeInternalChange(rev, older);
+              return (
+                <div key={rev.id} className="rounded-md border p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge tone="neutral">Version {rev.revision_no}</Badge>
+                    <span className="text-xs text-muted-foreground">Previous</span>
+                  </div>
+                  <div className="mt-2"><VersionProvenance rev={rev} /></div>
+
+                  <div className="mt-2 text-sm">
+                    {!older ? (
+                      <p className="text-muted-foreground">The first saved configuration.</p>
+                    ) : changes.length > 0 ? (
+                      <>
+                        <p className="font-medium">Changed from version {older.revision_no}:</p>
+                        <ul className="mt-1 space-y-0.5">
+                          {changes.map((c, i) => (
+                            <li key={i} className="text-muted-foreground">
+                              {c.field}: <span className="line-through">{c.from}</span> → {c.to}
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    ) : internal.length > 0 ? (
+                      <>
+                        <p className="font-medium">
+                          The connection settings are identical to version {older.revision_no}.
+                        </p>
+                        <ul className="mt-1 space-y-0.5">
+                          {internal.map((t, i) => (
+                            <li key={i} className="text-muted-foreground">{t}</li>
+                          ))}
+                        </ul>
+                      </>
+                    ) : (
+                      <p className="text-muted-foreground">
+                        No difference in the stored connection settings from version {older.revision_no}, and
+                        nothing else recorded that explains why it was saved.
+                      </p>
+                    )}
+                  </div>
+
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-xs text-muted-foreground">
+                      All settings in this version
+                    </summary>
+                    <div className="mt-2"><SettingsTable rev={rev} /></div>
+                  </details>
+
+                  <div className="mt-3">
+                    <Button size="sm" variant="secondary"
+                      onClick={() => { setErr(null); setPublishing(rev.id); }}>
+                      Put this version back in use
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDialog
         open={publishing !== null}

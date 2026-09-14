@@ -88,10 +88,15 @@ describe("PMS interfaces page", () => {
     await screen.findByText("Main PMS");
     await userEvent.click(screen.getByRole("button", { name: "Manage" }));
 
-    // revision 1 is live even though revision 2 exists and is newer
-    const published = await screen.findByText("Live");
-    const row = published.closest("tr")!;
-    expect(within(row).getByText(/#1/)).toBeTruthy();
+    // THE MAIN VIEW SHOWS WHAT IS IN FORCE, not the newest thing saved.
+    //
+    // Version 1 is in use even though version 2 exists and is newer, and the routine question -- "what is
+    // this connection set to?" -- is answered without opening anything. Previous versions are behind
+    // History, which is why the newest version must NOT be what this card shows.
+    await screen.findByText("Current configuration");
+    expect(await screen.findByText("Version 1")).toBeTruthy();
+    expect(screen.getByText("In use")).toBeTruthy();
+    expect(screen.queryByText("Version 2")).toBeNull();
   });
 
   it("states plainly when an interface has nothing published", async () => {
@@ -135,8 +140,11 @@ describe("PMS interfaces page", () => {
     await screen.findByText("Main PMS");
     await userEvent.click(screen.getByRole("button", { name: "Manage" }));
 
+    // Rolling back means putting a previous version back, so it is reached through History.
+    await screen.findByText("Current configuration");
+    await userEvent.click(screen.getByRole("button", { name: /^History/ }));
     await screen.findByText("Configuration history");
-    await userEvent.click(screen.getByRole("button", { name: "Put live" }));
+    await userEvent.click(screen.getByRole("button", { name: /Put this version back in use/ }));
     await userEvent.type(await screen.findByLabelText(/Reason/), "CONFIG_UPDATE");
     await userEvent.type(screen.getByLabelText(/Confirm your password/), "pw");
     // Scoped to the dialog rather than picked by index: the row button that OPENED it has the same name, it is
@@ -162,8 +170,11 @@ describe("PMS interfaces page", () => {
     render(<Page />);
     await screen.findByText("Main PMS");
     await userEvent.click(screen.getByRole("button", { name: "Manage" }));
+    // Rolling back means putting a previous version back, so it is reached through History.
+    await screen.findByText("Current configuration");
+    await userEvent.click(screen.getByRole("button", { name: /^History/ }));
     await screen.findByText("Configuration history");
-    await userEvent.click(screen.getByRole("button", { name: "Put live" }));
+    await userEvent.click(screen.getByRole("button", { name: /Put this version back in use/ }));
     await userEvent.type(await screen.findByLabelText(/Reason/), "CONFIG_UPDATE");
     await userEvent.type(screen.getByLabelText(/Confirm your password/), "pw");
     await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^Put live$/ }));
