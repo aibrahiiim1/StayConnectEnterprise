@@ -1,0 +1,66 @@
+{
+  "transition_id": "T0134",
+  "seq": 134,
+  "timestamp": "2026-09-14T22:30:00Z",
+  "timestamp_derivation": "After the PRE-LIVE deployment of e0d7df74 and the live verification that exposed the defect, and after the regression test was proven to fail against the pre-fix query; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "PRE_LIVE_DEPLOYMENT_AND_HISTORY_PROVENANCE_JOIN_CORRECTED",
+
+  "deployment_performed": {
+    "target": "172.21.60.25 (PRE-LIVE). The retired 172.21.60.23 was not contacted.",
+    "source_commit": "e0d7df745b0c624c2b27f9d4c4df3c7b666a4559 -- the master merge of PR #130, with all four required gates green on the merge commit itself.",
+    "built_in": "The designated workstation build environment. Nothing was built on the appliance or on Central.",
+    "artifacts": {
+      "edged": "sha256 bdd71b91d975478a9cad..., installed and restarted; service active and reporting that build.",
+      "hotel_admin_ui": "BUILD_ID 2qopcGChPAq9ZSzjyRly-, bundle sha256 841a5608298a38cc792f9100b6ce088103ddc948f1c5c15427b2753da60aa743; candidate verified before the release symlink was switched."
+    },
+    "rollback_points": "/opt/stayconnect/rollback/approved-e0d7df74/ holds edged.prev and ui-release.prev. Rollback remains one symlink switch and one service restart.",
+    "served_ux_confirmed": "The served bundle carries Current configuration, Configuration history, Put this version back in use, In use, Previous, the site-wide recovery statement, the not-recorded provenance fallback and Advanced diagnostics. No operator-facing use of the internal term Revision."
+  },
+
+  "defect_found_in_live_verification": {
+    "what": "The History view's provenance -- when each saved configuration was put in use, by whom and for what recorded reason -- was entirely dead. Every version rendered 'How this version came to be saved was not recorded'.",
+    "cause": "The provenance query joined public.operators.id (uuid) to public.audit_log.actor_id (text). PostgreSQL has no uuid = text operator and refused the whole statement.",
+    "why_it_was_silent": "That query's error is discarded on purpose, so losing the audit log can never cost an operator the configuration itself. The endpoint therefore answered 200 with empty provenance, which is indistinguishable from the legitimate no-audit-log case. Nothing was down and nothing complained.",
+    "why_no_test_caught_it": "The disposable fixture builds public.audit_log with a created_at column, while the appliance's own 0001 migration names it ts. On the fixture the query fails for that second, unrelated reason, so asserting empty provenance there would have asserted the bug.",
+    "scope_of_harm": "Presentation only. No guest state, stay state, PMS configuration, permission, audit record or reconciliation behaviour was affected -- the configuration itself always read from the configuration tables and was always correct."
+  },
+
+  "correction": {
+    "change": "The join compares op.id::text to the recorded actor. Widening uuid to text always succeeds; casting the other way (actor_id::uuid) would parse every actor string in the audit log and throw on the first that is not a uuid -- and actor_id is text precisely because appliance-originated actions are recorded under names, not ids.",
+    "single_source_of_truth": "The statement is now the named constant pmsRevisionProvenanceSQL, executed verbatim by its regression test. There is no second copy to drift.",
+    "regression_test": "TestPmsRevisionProvenanceSQLRunsAgainstProductionColumnTypes builds audit_log and operators with PRODUCTION column types in a schema of its own and runs the real statement against them. It asserts the query executes, that a known operator is named, that a non-uuid unknown actor still appears with its reason intact and is given no invented name, and that the recorded actor identity survives verbatim.",
+    "proven_to_fail_pre_fix": "Reverting the cast makes it fail with 'operator does not exist: uuid = text (SQLSTATE 42883)'. A regression test that cannot fail proves nothing, so this was demonstrated rather than assumed.",
+    "no_migration": "None. No schema change; the column types were already correct and the query was wrong about them."
+  },
+
+  "live_provenance_now_available": {
+    "verified_read_only_on_the_appliance": "The corrected statement returns all three versions with their recorded origin.",
+    "v1": "authored 2026-08-22 00:04:53, published 00:05:25, reason INITIAL_COMMISSIONING, by an operator no longer on this appliance.",
+    "v2": "authored 2026-08-22 00:08:25, published 00:08:26, reason DERIVED_SOURCE_FINGERPRINT, same operator.",
+    "v3": "authored 2026-08-25 17:53:49, published 17:54:13, reason CONFIG_CORRECTION, by Site Admin. The version in use."
+  },
+
+  "constraints_observed": {
+    "connection_recovery": "Semantics, scope and values unchanged. Still site-scoped: iam_v2.pms_connection_settings keyed (tenant_id, site_id), no interface column.",
+    "pms_configuration": "No change to configuration, endpoint, credentials, routing or financial settings.",
+    "manual_resync": "No Full Resync was issued.",
+    "financial": "No posting, payment, reversal, settlement or financial egress.",
+    "retired_host": "172.21.60.23 was neither contacted nor modified.",
+    "gates": "No test or gate was weakened. A test was added."
+  },
+
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-14: complete the PMS operator-experience cleanup already merged to master, deploy it to PRE-LIVE 172.21.60.25, and verify the new PMS configuration/history experience live -- including the directly necessary verification and any directly related correction.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}
