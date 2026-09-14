@@ -1,4 +1,0 @@
-commit 710f2f45cbf20c1c1780a1192db8d740b7d1d5bd
-Date:   Mon Sep 14 19:30:48 2026 +0300
-
-    Governance: T0131 records the accepted startup gap and the unified counters

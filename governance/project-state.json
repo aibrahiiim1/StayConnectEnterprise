@@ -1590,7 +1590,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "bce10828860444fea7515a5ac578ca49bf309429",
     "base_note": "The master merge commit of PR #127. This delivery begins exactly where that one ended.",
-    "head": "ddc3011f35934b1e2b3cc5bc19c651fb549c17b6",
+    "head": "f739ebca24f0a006db85784dada0825d9d06489c",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
     "note": "The single historical exception is accepted as a startup data gap with its record preserved, and all four operator-facing counters now read one shared definition of outstanding work."
   },
