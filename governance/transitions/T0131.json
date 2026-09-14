@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0131",
+  "seq": 131,
+  "timestamp": "2026-09-14T16:10:00Z",
+  "timestamp_derivation": "After the acceptance path was proven on a disposable PG16 and the four counters unified; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "PRE_LIVE_STARTUP_DATA_GAP_ACCEPTED_AND_COUNTERS_UNIFIED",
+  "reported_by": "Product Owner: four screens disagreed about outstanding PMS work (1 vs 13 717), and asked whether any of it required manual review.",
+  "counter_defect": {
+    "found": "The dashboard and reconciliation page were corrected in D47 to count outstanding work; the PMS connection row and the Property-management card were missed and went on counting every MANUAL_REVIEW row ever recorded.",
+    "effect": "The same appliance reported 1 outstanding on two screens and 13 717 on two others. 13 716 of those already carried a disposition.",
+    "fix": "iam_v2.pms_unanswered_review_events is now the single definition of outstanding PMS work, and all four counters read it."
+  },
+  "acceptance": {
+    "what": "The one remaining exception -- a live departure naming a reservation for which no arrival was ever received -- is administratively accepted as a startup data gap.",
+    "disposition": "ACCEPTED_STARTUP_DATA_GAP with evidence_kind OPERATOR_DECISION, deliberately distinct from every evidence-based disposition: it records what a person chose, not what the data showed.",
+    "preserved": "The stay_event is untouched -- MANUAL_REVIEW, GO_UNKNOWN_STAY, payload and timestamps as written. Nothing deleted, no stay changed state.",
+    "cannot_be_abused": "The function takes ONE event id and refuses: a missing operator, a missing reason, anything that is not an unanswered live departure, and any record that already carries a disposition. Proven that a NEW exception arriving after an acceptance is still counted and still raises its blocker."
+  },
+  "guest_state": "Unchanged. The guest concerned departed in August and holds no session, entitlement or device on this appliance.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-14: complete the administrative closure of the single historical exception as an accepted startup data gap, preserving its original record and audit trail, without affecting guest state or future exceptions.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}

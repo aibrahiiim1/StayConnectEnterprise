@@ -85,11 +85,10 @@ func (s *server) rosterReconciliationState(w http.ResponseWriter, r *http.Reques
 	// answer it. It cannot, and must never try. Only a resync-admitted departure carrying no reservation is
 	// a roster snapshot, and only those are counted here.
 	var pending int
-	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.stay_events e
-		 WHERE e.tenant_id=$1 AND e.site_id=$2 AND e.processing_status='MANUAL_REVIEW'
+	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.pms_unanswered_review_events e
+		 WHERE e.tenant_id=$1 AND e.site_id=$2
 		   AND e.event_type='GO' AND e.admission_kind='RESYNC'
-		   AND btrim(COALESCE(e.payload->>'reservation','')) = ''
-		   AND NOT EXISTS (SELECT 1 FROM iam_v2.pms_case_resolutions x WHERE x.stay_event_id=e.id)`,
+		   AND btrim(COALESCE(e.payload->>'reservation','')) = ''`,
 		s.tenantID, s.siteID).Scan(&pending)
 
 	// WHAT IS STANDING IN THE WAY, in the same response as the state itself. A blocker is derived from facts
