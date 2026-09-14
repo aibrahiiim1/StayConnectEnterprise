@@ -355,26 +355,17 @@ func (s *server) listPMSInterfaceRevisions(w http.ResponseWriter, r *http.Reques
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	id := chi.URLParam(r, "id")
-	// The LEFT JOINs are deliberate: a version with no audit entry still appears, with empty provenance.
-	// Dropping such a version would hide configuration that is genuinely in force.
+	// THE CONFIGURATION COMES FROM THE CONFIGURATION TABLES, AND NOTHING ELSE.
+	//
+	// Provenance lives in the audit log, which is a different concern and -- as a Phase-3 gate proved -- not
+	// present in every schema this endpoint must serve. Joining it here made the whole read fail where the
+	// audit tables are absent, taking the configuration down with it. It is fetched separately below.
 	rows, err := s.db.Query(ctx, `
 		SELECT rev.id::text, rev.revision_no, rev.source_timezone, rev.folio_identity_strategy,
 		       rev.normalization_version, COALESCE(rev.source_fingerprint,''), rev.config,
-		       (rev.id = i.current_revision_id) AS published,
-		       a.ts, p.ts,
-		       COALESCE(p.actor_id::text, a.actor_id::text, ''),
-		       COALESCE(op.display_name, op.email, ''),
-		       COALESCE(p.payload->>'reason_code','')
+		       (rev.id = i.current_revision_id) AS published
 		  FROM iam_v2.pms_interface_revisions rev
 		  JOIN iam_v2.pms_interfaces i ON i.id = rev.pms_interface_id
-		  LEFT JOIN public.audit_log a
-		         ON a.action='pms_interface_revision.authored'
-		        AND a.payload->>'revision_id' = rev.id::text
-		  LEFT JOIN public.audit_log p
-		         ON p.action='pms_interface.revision_published'
-		        AND p.payload->>'revision_id' = rev.id::text
-		  LEFT JOIN public.operators op
-		         ON op.id = COALESCE(p.actor_id, a.actor_id)
 		 WHERE rev.tenant_id=$1 AND rev.site_id=$2 AND rev.pms_interface_id=$3::uuid
 		 ORDER BY rev.revision_no DESC`, s.tenantID, s.siteID, id)
 	if err != nil {
@@ -388,8 +379,7 @@ func (s *server) listPMSInterfaceRevisions(w http.ResponseWriter, r *http.Reques
 		var cfg []byte
 		var published *bool
 		if err := rows.Scan(&e.ID, &e.RevisionNo, &e.SourceTimezone, &e.FolioIdentityStrategy,
-			&e.NormalizationVersion, &e.SourceFingerprint, &cfg, &published,
-			&e.AuthoredAt, &e.PublishedAt, &e.ActorID, &e.ActorLabel, &e.ReasonCode); err != nil {
+			&e.NormalizationVersion, &e.SourceFingerprint, &cfg, &published); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 			return
 		}
@@ -401,6 +391,45 @@ func (s *server) listPMSInterfaceRevisions(w http.ResponseWriter, r *http.Reques
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
 	}
+	// PROVENANCE, LAYERED ON AND ALLOWED TO BE MISSING.
+	//
+	// A failure here leaves every version listed with empty provenance, which the UI renders as "how this
+	// version came to be saved was not recorded" -- the truthful reading when the audit trail cannot be
+	// consulted. It must never cost an operator the configuration itself.
+	if len(out) > 0 {
+		prov, _ := s.db.Query(ctx, `
+			SELECT COALESCE(a.payload->>'revision_id', p.payload->>'revision_id') AS rev_id,
+			       min(a.ts) AS authored_at, min(p.ts) AS published_at,
+			       COALESCE(max(p.actor_id::text), max(a.actor_id::text), '') AS actor_id,
+			       COALESCE(max(op.display_name), max(op.email), '') AS actor_label,
+			       COALESCE(max(p.payload->>'reason_code'), '') AS reason_code
+			  FROM public.audit_log a
+			  FULL JOIN public.audit_log p
+			         ON p.action='pms_interface.revision_published'
+			        AND p.payload->>'revision_id' = a.payload->>'revision_id'
+			  LEFT JOIN public.operators op ON op.id = COALESCE(p.actor_id, a.actor_id)
+			 WHERE a.action='pms_interface_revision.authored' OR p.action='pms_interface.revision_published'
+			 GROUP BY 1`)
+		if prov != nil {
+			byID := map[string]pmsRevisionRow{}
+			for prov.Next() {
+				var revID string
+				var e pmsRevisionRow
+				if err := prov.Scan(&revID, &e.AuthoredAt, &e.PublishedAt,
+					&e.ActorID, &e.ActorLabel, &e.ReasonCode); err == nil && revID != "" {
+					byID[revID] = e
+				}
+			}
+			prov.Close()
+			for i := range out {
+				if m, ok := byID[out[i].ID]; ok {
+					out[i].AuthoredAt, out[i].PublishedAt = m.AuthoredAt, m.PublishedAt
+					out[i].ActorID, out[i].ActorLabel, out[i].ReasonCode = m.ActorID, m.ActorLabel, m.ReasonCode
+				}
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{"revisions": out})
 }
 
