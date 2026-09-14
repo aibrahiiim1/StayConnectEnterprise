@@ -351,6 +351,30 @@ func redactMap(m map[string]any) {
 	}
 }
 
+// WHERE A SAVED VERSION CAME FROM, read from the audit log because that is the only place it is written.
+//
+// Named rather than inlined so a test can execute this exact text -- see the note at its call site. The
+// `public.` qualifiers are load-bearing for that test, which retargets the statement at a schema built with
+// production column types; keep them.
+const pmsRevisionProvenanceSQL = `
+	SELECT COALESCE(a.payload->>'revision_id', p.payload->>'revision_id') AS rev_id,
+	       min(a.ts) AS authored_at, min(p.ts) AS published_at,
+	       COALESCE(max(p.actor_id::text), max(a.actor_id::text), '') AS actor_id,
+	       COALESCE(max(op.display_name), max(op.email), '') AS actor_label,
+	       COALESCE(max(p.payload->>'reason_code'), '') AS reason_code
+	  FROM public.audit_log a
+	  FULL JOIN public.audit_log p
+	         ON p.action='pms_interface.revision_published'
+	        AND p.payload->>'revision_id' = a.payload->>'revision_id'
+	  -- COMPARED AS TEXT, DELIBERATELY. audit_log.actor_id is text and operators.id is uuid, so the direct
+	  -- comparison is not a style question: PostgreSQL has no uuid = text operator and rejects the whole
+	  -- statement. Casting the other way (actor_id::uuid) would parse every actor string in the audit log
+	  -- and throw on the first that is not a uuid -- and actor_id is text precisely because it is not
+	  -- guaranteed to be one. Widening uuid to text always succeeds.
+	  LEFT JOIN public.operators op ON op.id::text = COALESCE(p.actor_id, a.actor_id)
+	 WHERE a.action='pms_interface_revision.authored' OR p.action='pms_interface.revision_published'
+	 GROUP BY 1`
+
 func (s *server) listPMSInterfaceRevisions(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -396,20 +420,15 @@ func (s *server) listPMSInterfaceRevisions(w http.ResponseWriter, r *http.Reques
 	// A failure here leaves every version listed with empty provenance, which the UI renders as "how this
 	// version came to be saved was not recorded" -- the truthful reading when the audit trail cannot be
 	// consulted. It must never cost an operator the configuration itself.
+	//
+	// THAT TOLERANCE IS ALSO THIS QUERY'S ONE HAZARD, and it has already been paid for once: the join
+	// originally compared operators.id (uuid) to audit_log.actor_id (text), PostgreSQL rejected the
+	// statement outright, and because the error is discarded here the endpoint answered 200 with every
+	// version reading "not recorded". Nothing was down, so nothing complained. The query therefore lives
+	// in a named constant that TestPmsRevisionProvenanceSQLRunsAgainstProductionColumnTypes executes
+	// verbatim against production column types -- a silent failure needs a test that looks for silence.
 	if len(out) > 0 {
-		prov, _ := s.db.Query(ctx, `
-			SELECT COALESCE(a.payload->>'revision_id', p.payload->>'revision_id') AS rev_id,
-			       min(a.ts) AS authored_at, min(p.ts) AS published_at,
-			       COALESCE(max(p.actor_id::text), max(a.actor_id::text), '') AS actor_id,
-			       COALESCE(max(op.display_name), max(op.email), '') AS actor_label,
-			       COALESCE(max(p.payload->>'reason_code'), '') AS reason_code
-			  FROM public.audit_log a
-			  FULL JOIN public.audit_log p
-			         ON p.action='pms_interface.revision_published'
-			        AND p.payload->>'revision_id' = a.payload->>'revision_id'
-			  LEFT JOIN public.operators op ON op.id = COALESCE(p.actor_id, a.actor_id)
-			 WHERE a.action='pms_interface_revision.authored' OR p.action='pms_interface.revision_published'
-			 GROUP BY 1`)
+		prov, _ := s.db.Query(ctx, pmsRevisionProvenanceSQL)
 		if prov != nil {
 			byID := map[string]pmsRevisionRow{}
 			for prov.Next() {

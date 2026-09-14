@@ -72,36 +72,16 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # ---------------------------------------------------------------------------------------------------------
 stage1() {
   begin "Stage 1 - governance, generated blocks, delivery protocol, working tree"
-  # A RECEIPT MUST PRE-DATE THE COMMIT THAT CARRIES IT, and the gate has now caught that three times in one
-  # delivery -- each time twenty minutes after the fact, for a one-character fix. A receipt written after its
-  # own commit cannot be what the commit was written from, so the ordering is not pedantry; but learning it
-  # remotely is pure waste, and this file exists to refuse locally what the gates refuse remotely.
-  python - <<'RECEIPT_PY' || FAILED=1
-import json, os, subprocess, sys, datetime
-bad = []
-for name in sorted(os.listdir("governance/transitions")):
-    if not name.endswith(".json"):
-        continue
-    path = "governance/transitions/" + name
-    # The commit that INTRODUCED the receipt is the last one in its history -- git log lists newest first.
-    out = subprocess.run(["git", "log", "--format=%aI", "--", path],
-                         capture_output=True, text=True).stdout.split()
-    if not out:
-        continue  # never committed yet: nothing to compare against
-    introduced = datetime.datetime.fromisoformat(out[-1])
-    try:
-        ts = json.load(open(path, encoding="utf-8")).get("timestamp")
-    except Exception:
-        continue
-    if not ts:
-        continue
-    recorded = datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    if recorded > introduced:
-        late = int((recorded - introduced).total_seconds())
-        bad.append(f"  FAIL: {name[:-5]} records {ts}, which is {late}s AFTER the commit that introduced it")
-print(chr(10).join(bad) if bad else "  ok: every transition receipt pre-dates the commit that introduced it")
-sys.exit(1 if bad else 0)
-RECEIPT_PY
+  # A RECEIPT MUST PRE-DATE THE COMMIT THAT CARRIES IT, and the gate caught that three times in one delivery
+  # -- each time twenty minutes after the fact, for a one-character fix. Running it here is the whole point of
+  # this file: refuse locally what the gates refuse remotely.
+  #
+  # RUN THE AUTHORITATIVE RULE, do not restate it. This stage first carried its own small re-implementation,
+  # which promptly disagreed with the real one: it re-derived "late" slightly differently and, worse, knew
+  # nothing of the grandfathered pre-rule receipts, so it failed the delivery over four receipts that are
+  # deliberately preserved as written and one that the real rule passes. A second copy of a rule is not a
+  # second check -- it is a place for the two to diverge, and the copy is the one that will be wrong.
+  bash tools/validate-transition-times.sh || FAILED=1
   local rc=0
   python tools/project-state.py validate            || rc=1
   python tools/project-state.py check-generated     || rc=1
