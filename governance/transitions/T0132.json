@@ -1,0 +1,30 @@
+{
+  "transition_id": "T0132",
+  "seq": 132,
+  "timestamp": "2026-09-14T19:30:00Z",
+  "timestamp_derivation": "After the navigation change, the settings relocation and the full UI suite passed; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "PRE_LIVE_PMS_DIAGNOSTICS_DEMOTED_FROM_PRIMARY_NAVIGATION",
+  "change": {
+    "navigation": "PMS Reconciliation and Roster Reconciliation are no longer primary navigation items. Both remain routable and are reached from PMS connection under Advanced diagnostics.",
+    "attention": "PMS connection now states whether reconciliation needs investigating, with a direct link when it does and an explicit nothing-to-do statement when it does not. This was the only thing an operator previously had to open a diagnostic page to learn.",
+    "settings_moved": "The five connection-recovery bounds moved from Roster reconciliation to PMS connection -> Advanced configuration. They are configuration for the link, not diagnosis of it. The diagnostic page points at their new home.",
+    "docs": "The operations manual and the standing-exception record now give the new location."
+  },
+  "explicitly_unchanged": "Reconciliation functionality, history, audit evidence, safeguards and backend behaviour; PMS semantics; the automatic reconciliation rules; guest and stay state handling; routing; security boundaries; permissions; and the distinction between operational outstanding work and historical or diagnostic records. Neither reconciliation process became a manual task.",
+  "deployment": "NONE. No appliance deployment was authorised and none was performed. No PMS configuration or runtime change was made.",
+  "tests": "288 UI tests pass, including new assertions that both routes still exist while absent from primary navigation, and that the diagnostic page now carries no control.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-14: simplify the Hotel Admin PMS experience so routine operators see only the surfaces they need; deliver through the protected PR/merge path; no appliance deployment authorised.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}

@@ -1093,7 +1093,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0131",
+  "latest_transition_id": "T0132",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1586,13 +1586,13 @@
   },
   "current_delivery": {
     "kind": "POST_CLOSURE_CORRECTIONS",
-    "decision": "D49",
+    "decision": "D50",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "bce10828860444fea7515a5ac578ca49bf309429",
-    "base_note": "The master merge commit of PR #127. This delivery begins exactly where that one ended.",
-    "head": "f739ebca24f0a006db85784dada0825d9d06489c",
+    "base": "bd967c2a011c5fdbde6859ebf53fb0b7df8d5867",
+    "base_note": "The master merge commit of PR #128. This delivery begins exactly where that one ended.",
+    "head": "cb3831ee1102a11d72de96e4e9cd8b7839134b42",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
-    "note": "The single historical exception is accepted as a startup data gap with its record preserved, and all four operator-facing counters now read one shared definition of outstanding work."
+    "note": "PMS diagnostics demoted from primary navigation to Advanced diagnostics under PMS connection; connection-recovery settings moved to PMS connection advanced configuration. UI only, no deployment."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
