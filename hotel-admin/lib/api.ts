@@ -1131,6 +1131,12 @@ export type PmsRevision = {
   // already redacted by edged; the client never un-redacts anything
   config: Record<string, unknown>;
   published: boolean;
+  /** Provenance comes from the audit log, which is the only place it is stored. Absent means unrecorded. */
+  authored_at?: string | null;
+  published_at?: string | null;
+  actor_id?: string;
+  actor_label?: string;
+  reason_code?: string;
 };
 
 export type PmsInterfaceHealth = {

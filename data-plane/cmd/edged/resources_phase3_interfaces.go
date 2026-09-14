@@ -291,6 +291,17 @@ type pmsRevisionRow struct {
 	// Config is the Revision's declarative configuration, REDACTED before it leaves the process — see
 	// redactRevisionConfig. A Revision's config is operator-authored and can acquire anything over time.
 	Config json.RawMessage `json:"config"`
+	// PROVENANCE, READ FROM THE AUDIT LOG AND NOWHERE ELSE.
+	//
+	// pms_interface_revisions stores no timestamp, no author and no reason -- it holds the configuration and
+	// nothing about how it came to exist. The audit log does hold all three, so the History view is built
+	// from it. Where the log has no entry these stay empty and the UI says so, because a version whose
+	// origin was never recorded must read as unknown rather than as something plausible.
+	AuthoredAt  *time.Time `json:"authored_at,omitempty"`
+	PublishedAt *time.Time `json:"published_at,omitempty"`
+	ActorID     string     `json:"actor_id,omitempty"`
+	ActorLabel  string     `json:"actor_label,omitempty"`
+	ReasonCode  string     `json:"reason_code,omitempty"`
 	// Published marks the ONE Revision this interface currently resolves against. It is derived from the
 	// interface's current_revision_id, never from "the highest revision number" — a property can publish an
 	// older Revision to roll back, and then the highest number is exactly the wrong answer.
@@ -344,12 +355,26 @@ func (s *server) listPMSInterfaceRevisions(w http.ResponseWriter, r *http.Reques
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	id := chi.URLParam(r, "id")
+	// The LEFT JOINs are deliberate: a version with no audit entry still appears, with empty provenance.
+	// Dropping such a version would hide configuration that is genuinely in force.
 	rows, err := s.db.Query(ctx, `
 		SELECT rev.id::text, rev.revision_no, rev.source_timezone, rev.folio_identity_strategy,
 		       rev.normalization_version, COALESCE(rev.source_fingerprint,''), rev.config,
-		       (rev.id = i.current_revision_id) AS published
+		       (rev.id = i.current_revision_id) AS published,
+		       a.ts, p.ts,
+		       COALESCE(p.actor_id::text, a.actor_id::text, ''),
+		       COALESCE(op.display_name, op.email, ''),
+		       COALESCE(p.payload->>'reason_code','')
 		  FROM iam_v2.pms_interface_revisions rev
 		  JOIN iam_v2.pms_interfaces i ON i.id = rev.pms_interface_id
+		  LEFT JOIN public.audit_log a
+		         ON a.action='pms_interface_revision.authored'
+		        AND a.payload->>'revision_id' = rev.id::text
+		  LEFT JOIN public.audit_log p
+		         ON p.action='pms_interface.revision_published'
+		        AND p.payload->>'revision_id' = rev.id::text
+		  LEFT JOIN public.operators op
+		         ON op.id = COALESCE(p.actor_id, a.actor_id)
 		 WHERE rev.tenant_id=$1 AND rev.site_id=$2 AND rev.pms_interface_id=$3::uuid
 		 ORDER BY rev.revision_no DESC`, s.tenantID, s.siteID, id)
 	if err != nil {
@@ -363,7 +388,8 @@ func (s *server) listPMSInterfaceRevisions(w http.ResponseWriter, r *http.Reques
 		var cfg []byte
 		var published *bool
 		if err := rows.Scan(&e.ID, &e.RevisionNo, &e.SourceTimezone, &e.FolioIdentityStrategy,
-			&e.NormalizationVersion, &e.SourceFingerprint, &cfg, &published); err != nil {
+			&e.NormalizationVersion, &e.SourceFingerprint, &cfg, &published,
+			&e.AuthoredAt, &e.PublishedAt, &e.ActorID, &e.ActorLabel, &e.ReasonCode); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 			return
 		}

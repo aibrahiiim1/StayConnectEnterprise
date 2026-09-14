@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 
-// ROSTER RECONCILIATION — that the screen offers no repair, and says the right thing about the exception.
+// ROSTER RECONCILIATION — that the screen offers no STATE-CHANGING action, and says the right thing about
+// the exception.
+//
+// The precise claim matters. This page is not inert: it refreshes, it navigates, and it links onward. What
+// it has none of is a control that closes a stay, disposes a case, or triggers a reconciliation by hand --
+// anything that would change guest or stay state, or turn an automatic process into a manual one. Saying it
+// "has no control at all" was over-broad and would have been falsified by the first link added to it.
 //
 // This page shipped with two action buttons and a count that contradicted the dashboard. An operator opened
 // it and saw "Close 0 stays", "Answer the snapshot cases", and "1 recorded departure are still waiting for
@@ -77,7 +83,7 @@ async function renderPage() {
   await waitFor(() => expect(get).toHaveBeenCalled());
 }
 
-describe("roster reconciliation offers no repair", () => {
+describe("roster reconciliation offers no state-changing action", () => {
   it("has no control that closes stays and none that answers snapshot cases", async () => {
     await renderPage();
     await waitFor(() => expect(screen.getByText(/what the next automatic run will do/i)).toBeTruthy());
@@ -88,8 +94,9 @@ describe("roster reconciliation offers no repair", () => {
     expect(buttons.some((t) => /close\s+\d*\s*stay/i.test(t))).toBe(false);
     expect(buttons.some((t) => /answer the snapshot/i.test(t))).toBe(false);
 
-    // The recovery settings moved to PMS connection, where the link they govern is configured. This page
-    // is a diagnostic and now offers NO control at all -- which is the point of it not being in the menu.
+    // The recovery settings moved to PMS connection, where the link they govern is configured. What must
+    // never come back here is a control that changes state -- closing stays, disposing cases, or running a
+    // reconciliation by hand.
     expect(buttons.some((t) => /save recovery settings/i.test(t))).toBe(false);
     expect(screen.getByText(/configured with the connection itself/i)).toBeTruthy();
   });
