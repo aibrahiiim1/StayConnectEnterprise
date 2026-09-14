@@ -2,7 +2,7 @@
 
 - **Base commit:** `4ded8f86200f0a1df0a81564a951f4f8d63b45c2`
 - **HEAD commit:** `1c78ea25bf7266050ed2dbc2c8f0aec967777576`
-- **Provenance (generation HEAD = inventory_head):** `1c78ea25bf7266050ed2dbc2c8f0aec967777576`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `afefad469cb6aca64c23b432e77da3fbb1b7d5ba`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/current-configuration-and-history`
 - **Remote branch:** `origin/delivery/current-configuration-and-history`
 - **Changed files:** 33
@@ -18,27 +18,27 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0133 records the configuration UX and the wording corrections |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0133 records the configuration UX and the wording corrections |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0133 records the configuration UX and the wording corrections |
-| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: manifest lists itself |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
-| `exports/chatgpt/phase-evidence/GIT_STAT_1c78ea25.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: head, packs and manifest resynchronized |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: head, packs and manifest resynchronized |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: head, packs and manifest resynchronized |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: head, packs and manifest resynchronized |
+| `exports/chatgpt/phase-evidence/GIT_STAT_1c78ea25.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: head, packs and manifest resynchronized |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9078467d.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Delivery: packs and manifest resynchronized |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: head, packs and manifest resynchronized |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: head, packs and manifest resynchronized |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: head, packs and manifest resynchronized |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: head, packs and manifest resynchronized |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: head, packs and manifest resynchronized |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0133 records the configuration UX and the wording corrections |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: head, packs and manifest resynchronized |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0133 records the configuration UX and the wording corrections |
 | `exports/chatgpt/stayconnectenterprise/STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs and manifest resynchronized |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0133 records the configuration UX and the wording corrections |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: head, packs and manifest resynchronized |
 | `governance/transitions/T0133.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0133 records the configuration UX and the wording corrections |
 | `hotel-admin/app/(app)/pms-interfaces/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Show what the connection is set to, and put its past behind History |
 | `hotel-admin/e2e/phase3-pms-interfaces.spec.ts` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Keep the configuration read on the configuration tables |
@@ -54,7 +54,7 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   2 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   2 +-
  docs/context/StayConnect-IAM-Handoff.md            |   2 +-
- docs/manifests/PostClosure-change-manifest.md      |  84 +++---
+ docs/manifests/PostClosure-change-manifest.md      | 103 ++++----
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 338562 -> 338982 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 139882 -> 139871 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 43739 -> 43739 bytes
@@ -81,27 +81,17 @@
  hotel-admin/lib/api.ts                             |   6 +
  hotel-admin/test/phase3-interface-pages.test.tsx   |  23 +-
  .../test/roster-reconciliation-page.test.tsx       |  15 +-
- 33 files changed, 528 insertions(+), 177 deletions(-)
+ 33 files changed, 545 insertions(+), 179 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_1c78ea25.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_7d4e7947.txt
-M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/MANIFEST.md
-M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
-M  governance/project-state.json
+(clean)
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: afefad46 Delivery: head, packs and manifest resynchronized
 HISTORICAL: 1c78ea25 Keep the configuration read on the configuration tables
 HISTORICAL: f3b786db Delivery: manifest lists itself
 HISTORICAL: 1c2dab7a Delivery: packs and manifest resynchronized
