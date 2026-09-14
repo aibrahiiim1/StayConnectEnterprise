@@ -40,8 +40,10 @@ func (s *server) rosterReconciliationRoutes() http.Handler {
 	r.Get("/", s.rosterReconciliationState)
 	r.Get("/runs", s.listReconciliationRuns)
 	r.Post("/preview", s.previewRosterReconcile)
-	r.Post("/apply", s.applyRosterReconcile)
-	r.Post("/dispose-snapshots", s.disposeSnapshotCases)
+	// NO APPLY AND NO DISPOSE ROUTE. Reconciliation runs automatically on every complete published
+	// generation, and the historical snapshot disposition was a one-time migration that has been executed
+	// and can never have new input -- the connector no longer admits the records that created it. A manual
+	// trigger for either would be a repair button for work that is not outstanding.
 	r.Put("/settings", s.updateReconciliationSettings)
 	r.Put("/connection-settings", s.updateConnectionSettings)
 	return r
@@ -76,9 +78,17 @@ func (s *server) rosterReconciliationState(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// ELIGIBLE SNAPSHOT ARTIFACTS ONLY, which is narrower than "unanswered" and deliberately so.
+	//
+	// This counted every unanswered review event, so it reported the one LIVE departure that names a
+	// reservation with no arrival -- a genuine external question -- as though a bulk disposition could
+	// answer it. It cannot, and must never try. Only a resync-admitted departure carrying no reservation is
+	// a roster snapshot, and only those are counted here.
 	var pending int
 	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.stay_events e
 		 WHERE e.tenant_id=$1 AND e.site_id=$2 AND e.processing_status='MANUAL_REVIEW'
+		   AND e.event_type='GO' AND e.admission_kind='RESYNC'
+		   AND btrim(COALESCE(e.payload->>'reservation','')) = ''
 		   AND NOT EXISTS (SELECT 1 FROM iam_v2.pms_case_resolutions x WHERE x.stay_event_id=e.id)`,
 		s.tenantID, s.siteID).Scan(&pending)
 
@@ -147,7 +157,9 @@ func (s *server) currentInterfaceAndGeneration(w http.ResponseWriter, r *http.Re
 	return iface, gen, true
 }
 
-// runReconcile is the single call site for the reconcile function, so preview and apply cannot drift apart.
+// runReconcile is the single call site for the reconcile function. Everything that reaches it from here is a
+// DRY RUN: the screen shows what a run would do, and the run that actually closes stays is pmsd's, on a
+// complete published generation.
 func (s *server) runReconcile(w http.ResponseWriter, r *http.Request, iface string, gen int64,
 	apply bool, reason string) (*reconcileRunOut, bool) {
 	ctx, cancel := dbCtx(r)
@@ -186,48 +198,6 @@ func (s *server) previewRosterReconcile(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
-}
-
-func (s *server) applyRosterReconcile(w http.ResponseWriter, r *http.Request) {
-	iface, gen, ok := s.currentInterfaceAndGeneration(w, r)
-	if !ok {
-		return
-	}
-	reason := bodyReason(r)
-	if strings.TrimSpace(reason) == "" {
-		jsonErr(w, http.StatusBadRequest, "reason_required",
-			"closing stays in bulk requires a recorded reason")
-		return
-	}
-	out, ok := s.runReconcile(w, r, iface, gen, true, reason)
-	if !ok {
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-// disposeSnapshotCases answers the historical roster-snapshot cases in bulk. It closes no stay and changes
-// no event: it appends a disposition saying what those records actually were.
-func (s *server) disposeSnapshotCases(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := dbCtx(r)
-	defer cancel()
-	iface, _, ok := s.currentInterfaceAndGeneration(w, r)
-	if !ok {
-		return
-	}
-	sess := sessFrom(r.Context())
-	operator := "unknown"
-	if sess != nil {
-		operator = sess.Email
-	}
-	var n int
-	if err := s.db.QueryRow(ctx,
-		`SELECT iam_v2.pms_dispose_snapshot_cases($1::uuid,$2::uuid,$3::uuid,$4,$5)`,
-		s.tenantID, s.siteID, iface, operator, bodyReason(r)).Scan(&n); err != nil {
-		jsonErr(w, http.StatusInternalServerError, "dispose_failed", err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"disposed": n})
 }
 
 func (s *server) listReconciliationRuns(w http.ResponseWriter, r *http.Request) {
