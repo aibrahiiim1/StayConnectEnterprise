@@ -1590,7 +1590,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "db9801f429c310795401c4863bc8d53a80e9b5e0",
     "base_note": "The master merge commit of PR #133. This delivery begins exactly where that one ended.",
-    "head": "332bcd0c",
+    "head": "055782a5",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
     "note": "Governance only. T0137 records migration 0079 applied under lock to PRE-LIVE with the live recovery values preserved exactly (config_version 2, is_default false), the new edged/pmsd/UI deployed from db9801f4, and the reconnect plus automatic read-only resync the pmsd restart caused -- settled to generation 282 with zero conflicts and 481 in-house stays unchanged."
   },
