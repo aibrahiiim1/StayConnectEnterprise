@@ -1,0 +1,4 @@
+commit 452e8a8c3aba5dcdaa706b7cf1e2e49dd8dc57e1
+Date:   Tue Sep 15 09:02:42 2026 +0300
+
+    Recovery belongs to the connection, not to the building

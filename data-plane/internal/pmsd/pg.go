@@ -506,13 +506,19 @@ func (r *pgRepo) ReconcileRoster(ctx context.Context, req ResyncScope, generatio
 	return o, err
 }
 
-// LoadConnectionSettings reads this site's reconnect bounds. Absence of a row yields the approved defaults
-// from the definer function, so a fresh appliance reconnects sensibly before anyone has configured anything.
-func (r *pgRepo) LoadConnectionSettings(ctx context.Context, tenantID, siteID string) (ConnectionSettings, error) {
+// LoadConnectionSettings reads THIS INTERFACE'S reconnect bounds. Absence of a row yields the approved
+// defaults from the definer function, so a freshly created interface reconnects sensibly before anyone has
+// configured it.
+//
+// Scoped to the interface, not the site: a property running two connections -- a second PMS, or an old and
+// a new one side by side during a migration -- is exactly where one flaky link needs patient backoff while
+// the healthy one must not be slowed to match. Keyed by site, tuning either tuned both.
+func (r *pgRepo) LoadConnectionSettings(ctx context.Context, tenantID, siteID, interfaceID string) (ConnectionSettings, error) {
 	var minMs, maxMs, stableS int
 	err := r.pool.QueryRow(ctx,
 		`SELECT backoff_min_ms, backoff_max_ms, stable_reset_seconds
-		   FROM iam_v2.pms_connection_settings_get($1::uuid,$2::uuid)`, tenantID, siteID).
+		   FROM iam_v2.pms_connection_settings_get($1::uuid,$2::uuid,$3::uuid)`,
+		tenantID, siteID, interfaceID).
 		Scan(&minMs, &maxMs, &stableS)
 	if err != nil {
 		return ConnectionSettings{}, err

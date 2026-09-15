@@ -740,9 +740,9 @@ func (r *fakeRepo) ReconcileRoster(_ context.Context, _ ResyncScope, _ int64) (R
 	return ReconcileOutcome{Outcome: "REFUSED_NO_COVERAGE_EVIDENCE"}, nil
 }
 
-// LoadConnectionSettings returns the approved defaults, which is what an unconfigured site gets in
+// LoadConnectionSettings returns the approved defaults, which is what an unconfigured interface gets in
 // production too.
-func (r *fakeRepo) LoadConnectionSettings(_ context.Context, _, _ string) (ConnectionSettings, error) {
+func (r *fakeRepo) LoadConnectionSettings(_ context.Context, _, _, _ string) (ConnectionSettings, error) {
 	return ConnectionSettings{
 		BackoffMin:       500 * time.Millisecond,
 		BackoffMax:       30 * time.Second,

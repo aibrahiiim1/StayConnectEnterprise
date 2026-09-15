@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0078, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0079, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -5932,13 +5932,15 @@ $$;
 
 
 --
--- Name: pms_connection_settings_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+-- Name: pms_connection_settings_get(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
-CREATE FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site uuid) RETURNS TABLE(backoff_min_ms integer, backoff_max_ms integer, stable_reset_seconds integer, link_down_alert_seconds integer, blocked_after_refusals integer, config_version bigint, is_default boolean)
+CREATE FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site uuid, p_interface uuid) RETURNS TABLE(backoff_min_ms integer, backoff_max_ms integer, stable_reset_seconds integer, link_down_alert_seconds integer, blocked_after_refusals integer, config_version bigint, is_default boolean)
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
+    -- Absence of a row still yields the approved defaults, so a NEWLY CREATED interface reconnects sensibly
+    -- before anyone has configured it -- and is_default says truthfully that nobody has.
     SELECT COALESCE(s.backoff_min_ms, 500),
            COALESCE(s.backoff_max_ms, 30000),
            COALESCE(s.stable_reset_seconds, 60),
@@ -5946,40 +5948,54 @@ CREATE FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site uuid) R
            COALESCE(s.blocked_after_refusals, 3),
            COALESCE(s.config_version, 0),
            (s.tenant_id IS NULL)
-      FROM (SELECT p_tenant AS t, p_site AS s) k
-      LEFT JOIN iam_v2.pms_connection_settings s ON s.tenant_id = k.t AND s.site_id = k.s;
+      FROM (SELECT p_tenant AS t, p_site AS s, p_interface AS i) k
+      LEFT JOIN iam_v2.pms_connection_settings s
+             ON s.tenant_id = k.t AND s.site_id = k.s AND s.pms_interface_id = k.i;
 $$;
 
 
 --
--- Name: pms_connection_settings_set(uuid, uuid, text, text, integer, integer, integer, integer, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
+-- Name: pms_connection_settings_set(uuid, uuid, uuid, text, text, integer, integer, integer, integer, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
-CREATE FUNCTION iam_v2.pms_connection_settings_set(p_tenant uuid, p_site uuid, p_operator text, p_reason text DEFAULT NULL::text, p_backoff_min_ms integer DEFAULT NULL::integer, p_backoff_max_ms integer DEFAULT NULL::integer, p_stable_reset_seconds integer DEFAULT NULL::integer, p_link_down_alert_seconds integer DEFAULT NULL::integer, p_blocked_after_refusals integer DEFAULT NULL::integer) RETURNS bigint
+CREATE FUNCTION iam_v2.pms_connection_settings_set(p_tenant uuid, p_site uuid, p_interface uuid, p_operator text, p_reason text DEFAULT NULL::text, p_backoff_min_ms integer DEFAULT NULL::integer, p_backoff_max_ms integer DEFAULT NULL::integer, p_stable_reset_seconds integer DEFAULT NULL::integer, p_link_down_alert_seconds integer DEFAULT NULL::integer, p_blocked_after_refusals integer DEFAULT NULL::integer) RETURNS bigint
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
-DECLARE v_old jsonb; v_ver bigint; c record;
+DECLARE v_old jsonb; v_ver bigint; c record; v_belongs boolean;
 BEGIN
     IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
         RAISE EXCEPTION 'connection settings: an operator identity is required'
             USING ERRCODE = 'invalid_parameter_value';
     END IF;
-    PERFORM pg_advisory_xact_lock(hashtext('pms_conn_settings'), hashtext(p_site::text));
+
+    -- THE INTERFACE MUST BE THIS SITE'S. Without this an operator scoped to one property could write bounds
+    -- onto another property's connection by passing its id, and the foreign key alone would permit it.
+    SELECT EXISTS (SELECT 1 FROM iam_v2.pms_interfaces i
+                    WHERE i.id = p_interface AND i.tenant_id = p_tenant AND i.site_id = p_site)
+      INTO v_belongs;
+    IF NOT v_belongs THEN
+        RAISE EXCEPTION 'connection settings: interface % does not belong to this site', p_interface
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+
+    -- Serialised PER INTERFACE, which is the point of the whole change: two operators tuning two different
+    -- connections no longer queue behind each other.
+    PERFORM pg_advisory_xact_lock(hashtext('pms_conn_settings'), hashtext(p_interface::text));
     SELECT to_jsonb(s) INTO v_old FROM iam_v2.pms_connection_settings s
-     WHERE s.tenant_id = p_tenant AND s.site_id = p_site FOR UPDATE;
-    SELECT * INTO c FROM iam_v2.pms_connection_settings_get(p_tenant, p_site);
+     WHERE s.tenant_id = p_tenant AND s.site_id = p_site AND s.pms_interface_id = p_interface FOR UPDATE;
+    SELECT * INTO c FROM iam_v2.pms_connection_settings_get(p_tenant, p_site, p_interface);
 
     INSERT INTO iam_v2.pms_connection_settings AS s
-           (tenant_id, site_id, backoff_min_ms, backoff_max_ms, stable_reset_seconds,
+           (tenant_id, site_id, pms_interface_id, backoff_min_ms, backoff_max_ms, stable_reset_seconds,
             link_down_alert_seconds, blocked_after_refusals, config_version, updated_at)
-    VALUES (p_tenant, p_site,
+    VALUES (p_tenant, p_site, p_interface,
             COALESCE(p_backoff_min_ms, c.backoff_min_ms),
             COALESCE(p_backoff_max_ms, c.backoff_max_ms),
             COALESCE(p_stable_reset_seconds, c.stable_reset_seconds),
             COALESCE(p_link_down_alert_seconds, c.link_down_alert_seconds),
             COALESCE(p_blocked_after_refusals, c.blocked_after_refusals), 1, now())
-    ON CONFLICT (tenant_id, site_id) DO UPDATE
+    ON CONFLICT (tenant_id, site_id, pms_interface_id) DO UPDATE
        SET backoff_min_ms = EXCLUDED.backoff_min_ms,
            backoff_max_ms = EXCLUDED.backoff_max_ms,
            stable_reset_seconds = EXCLUDED.stable_reset_seconds,
@@ -5989,11 +6005,13 @@ BEGIN
     RETURNING s.config_version INTO v_ver;
 
     INSERT INTO iam_v2.pms_connection_settings_changes
-           (tenant_id, site_id, changed_by, reason, old_values, new_values, new_config_version)
-    SELECT p_tenant, p_site, btrim(p_operator), NULLIF(btrim(COALESCE(p_reason,'')),''), v_old,
-           to_jsonb(n) - 'tenant_id' - 'site_id', v_ver
+           (tenant_id, site_id, pms_interface_id, changed_by, reason, old_values, new_values,
+            new_config_version)
+    SELECT p_tenant, p_site, p_interface, btrim(p_operator),
+           NULLIF(btrim(COALESCE(p_reason,'')),''), v_old,
+           to_jsonb(n) - 'tenant_id' - 'site_id' - 'pms_interface_id', v_ver
       FROM iam_v2.pms_connection_settings n
-     WHERE n.tenant_id = p_tenant AND n.site_id = p_site;
+     WHERE n.tenant_id = p_tenant AND n.site_id = p_site AND n.pms_interface_id = p_interface;
     RETURN v_ver;
 END;
 $$;
@@ -6041,13 +6059,17 @@ CREATE FUNCTION iam_v2.pms_integration_blockers(p_tenant uuid, p_site uuid) RETU
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
+    -- LINK_DOWN is now judged per interface. It already iterated the runtime rows, one per interface, and
+    -- then compared every one of them against a single site-wide threshold -- so a patient connection's
+    -- tolerance decided when an impatient one was called down. The lateral now takes the interface from the
+    -- runtime row it is judging, which is the only reading that survives a second connection.
     SELECT 'LINK_DOWN'::text,
            r.disconnected_since,
            'The PMS link has been down since then. Guests continue to be authorised from the last good '
              || 'roster; new arrivals and departures are not being seen.',
            false
       FROM iam_v2.pms_interface_runtime r,
-           LATERAL iam_v2.pms_connection_settings_get(p_tenant, p_site) s
+           LATERAL iam_v2.pms_connection_settings_get(r.tenant_id, r.site_id, r.pms_interface_id) s
      WHERE r.tenant_id = p_tenant AND r.site_id = p_site
        AND r.transport_status = 'DISCONNECTED'
        AND r.disconnected_since IS NOT NULL
@@ -6055,6 +6077,11 @@ CREATE FUNCTION iam_v2.pms_integration_blockers(p_tenant uuid, p_site uuid) RETU
 
     UNION ALL
 
+    -- RECONCILIATION_BLOCKED stays a SITE-level fact, deliberately. Reconciliation reconciles the property's
+    -- mirror against the roster; pms_roster_reconciliation_runs is keyed by site and has no interface column,
+    -- so there is no per-interface run to threshold. Where several interfaces disagree on how many refusals
+    -- are too many, the most patient one wins: reporting at the strictest threshold would raise a blocker
+    -- about the whole property on the say-so of its twitchiest connection.
     SELECT 'RECONCILIATION_BLOCKED'::text,
            min(x.run_at),
            'Roster reconciliation has refused ' || count(*)::text || ' times in a row ('
@@ -6065,9 +6092,9 @@ CREATE FUNCTION iam_v2.pms_integration_blockers(p_tenant uuid, p_site uuid) RETU
               FROM iam_v2.pms_roster_reconciliation_runs
              WHERE tenant_id = p_tenant AND site_id = p_site AND mode = 'APPLY'
              ORDER BY run_at DESC
-             LIMIT (SELECT blocked_after_refusals FROM iam_v2.pms_connection_settings_get(p_tenant, p_site))
+             LIMIT (SELECT iam_v2.pms_site_blocked_after_refusals(p_tenant, p_site))
            ) x
-     HAVING count(*) = (SELECT blocked_after_refusals FROM iam_v2.pms_connection_settings_get(p_tenant, p_site))
+     HAVING count(*) = (SELECT iam_v2.pms_site_blocked_after_refusals(p_tenant, p_site))
         AND count(*) FILTER (WHERE x.outcome = 'COMPLETED') = 0
 
     UNION ALL
@@ -6486,6 +6513,20 @@ BEGIN
     RETURN QUERY SELECT v_outcome, v_roster, v_mirror, v_absent, v_closed,
                         COALESCE(v_rooms,0), v_expected, v_protected, v_run;
 END;
+$$;
+
+
+--
+-- Name: pms_site_blocked_after_refusals(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_site_blocked_after_refusals(p_tenant uuid, p_site uuid) RETURNS integer
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+    SELECT COALESCE(max(blocked_after_refusals), 3)
+      FROM iam_v2.pms_connection_settings
+     WHERE tenant_id = p_tenant AND site_id = p_site;
 $$;
 
 
@@ -8723,6 +8764,7 @@ CREATE TABLE iam_v2.pms_connection_settings (
     blocked_after_refusals integer DEFAULT 3 NOT NULL,
     config_version bigint DEFAULT 1 NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    pms_interface_id uuid NOT NULL,
     CONSTRAINT pcs_backoff_sane CHECK ((((backoff_min_ms >= 100) AND (backoff_min_ms <= 600000)) AND ((backoff_max_ms >= 100) AND (backoff_max_ms <= 3600000)) AND (backoff_max_ms >= backoff_min_ms))),
     CONSTRAINT pcs_linkdown_sane CHECK (((link_down_alert_seconds >= 30) AND (link_down_alert_seconds <= 604800))),
     CONSTRAINT pcs_refusals_sane CHECK (((blocked_after_refusals >= 1) AND (blocked_after_refusals <= 1000))),
@@ -8739,6 +8781,13 @@ COMMENT ON TABLE iam_v2.pms_connection_settings IS 'Reconnect and blocker-report
 
 
 --
+-- Name: COLUMN pms_connection_settings.pms_interface_id; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.pms_connection_settings.pms_interface_id IS 'The ONE interface these bounds govern. Recovery is a property of a link, not of a building: changing one interface must leave every other interface at the same site exactly as it was.';
+
+
+--
 -- Name: pms_connection_settings_changes; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -8752,6 +8801,7 @@ CREATE TABLE iam_v2.pms_connection_settings_changes (
     old_values jsonb,
     new_values jsonb NOT NULL,
     new_config_version bigint NOT NULL,
+    pms_interface_id uuid,
     CONSTRAINT pms_connection_settings_changes_changed_by_check CHECK ((length(btrim(changed_by)) > 0)),
     CONSTRAINT pms_connection_settings_changes_reason_check CHECK (((reason IS NULL) OR (length(reason) <= 500)))
 );
@@ -11867,7 +11917,7 @@ ALTER TABLE ONLY iam_v2.pms_connection_settings_changes
 --
 
 ALTER TABLE ONLY iam_v2.pms_connection_settings
-    ADD CONSTRAINT pms_connection_settings_pkey PRIMARY KEY (tenant_id, site_id);
+    ADD CONSTRAINT pms_connection_settings_pkey PRIMARY KEY (tenant_id, site_id, pms_interface_id);
 
 
 --
@@ -13129,6 +13179,13 @@ CREATE INDEX package_revision_visibility ON iam_v2.internet_package_revisions US
 --
 
 CREATE INDEX pms_case_resolutions_scope_idx ON iam_v2.pms_case_resolutions USING btree (tenant_id, site_id, pms_interface_id, disposition);
+
+
+--
+-- Name: pms_connection_settings_changes_iface_idx; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX pms_connection_settings_changes_iface_idx ON iam_v2.pms_connection_settings_changes USING btree (tenant_id, site_id, pms_interface_id, changed_at DESC);
 
 
 --
@@ -14892,6 +14949,14 @@ ALTER TABLE ONLY iam_v2.pms_case_resolutions
 
 
 --
+-- Name: pms_connection_settings pms_connection_settings_iface_fk; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.pms_connection_settings
+    ADD CONSTRAINT pms_connection_settings_iface_fk FOREIGN KEY (pms_interface_id) REFERENCES iam_v2.pms_interfaces(id) ON DELETE CASCADE;
+
+
+--
 -- Name: pms_interface_pnumber_seq pms_interface_pnumber_seq_tenant_id_site_id_pms_interface__fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -16406,20 +16471,6 @@ GRANT ALL ON FUNCTION iam_v2.p6_tick_online_time(p_tenant uuid, p_site uuid, p_n
 --
 
 REVOKE ALL ON FUNCTION iam_v2.pms_accept_startup_data_gap(p_tenant uuid, p_site uuid, p_event uuid, p_operator text, p_reason text) FROM PUBLIC;
-
-
---
--- Name: FUNCTION pms_connection_settings_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
---
-
-REVOKE ALL ON FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site uuid) FROM PUBLIC;
-
-
---
--- Name: FUNCTION pms_connection_settings_set(p_tenant uuid, p_site uuid, p_operator text, p_reason text, p_backoff_min_ms integer, p_backoff_max_ms integer, p_stable_reset_seconds integer, p_link_down_alert_seconds integer, p_blocked_after_refusals integer); Type: ACL; Schema: iam_v2; Owner: -
---
-
-REVOKE ALL ON FUNCTION iam_v2.pms_connection_settings_set(p_tenant uuid, p_site uuid, p_operator text, p_reason text, p_backoff_min_ms integer, p_backoff_max_ms integer, p_stable_reset_seconds integer, p_link_down_alert_seconds integer, p_blocked_after_refusals integer) FROM PUBLIC;
 
 
 --

@@ -531,8 +531,14 @@ version's origin was never recorded, History says that too rather than guessing.
 The word *Revision* is internal. Operators see **Version**, **Current configuration**, **Previous** and
 **History**; the database and the API are unchanged.
 
-**Connection recovery settings apply to the whole site**, not to one connection. They are stored once per
-property, keyed by tenant and site, and appear on this page because this is where the PMS link is configured.
+**Connection recovery settings apply to this connection only.** They are stored per PMS interface, so a
+property running two connections tunes each on its own terms -- a link behind a flaky VPN can be given
+patient backoff without slowing down a healthy one. Changing one connection's values leaves every other
+connection at the property exactly as it was, and each keeps its own change history.
+
+Where a version's origin cannot be read at all -- as opposed to never having been recorded -- History says
+so explicitly and names it as a fault to report. The configuration itself is still shown: losing the audit
+trail never costs an operator the ability to see what the connection is set to.
 
 ## 14b. Unresolved departures (PMS reconciliation)
 

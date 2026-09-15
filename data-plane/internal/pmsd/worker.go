@@ -42,7 +42,7 @@ func (w *worker) run(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		if s, err := w.repo.LoadConnectionSettings(ctx, w.iface.TenantID, w.iface.SiteID); err == nil {
+		if s, err := w.repo.LoadConnectionSettings(ctx, w.iface.TenantID, w.iface.SiteID, w.iface.ID); err == nil {
 			if s != settings {
 				settings = s
 				bo = newBackoff(settings.BackoffMin, settings.BackoffMax, w.deps.rnd)

@@ -1,0 +1,82 @@
+{
+  "transition_id": "T0136",
+  "seq": 136,
+  "timestamp": "2026-09-15T06:05:00Z",
+  "timestamp_derivation": "After the per-interface re-keying, the live-data migration rehearsal, the extended Phase-3 chain and the full integration suite passed; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "PRE_LIVE_CONNECTION_RECOVERY_RE_KEYED_PER_INTERFACE_AND_PROVENANCE_FAILURE_MADE_VISIBLE",
+
+  "connection_recovery": {
+    "before": "Reconnect and blocker-reporting bounds were keyed (tenant_id, site_id). With one interface per property that read as correct, and the UI had to state the catch in a warning box: 'These apply to the whole site, not just this connection.' A setting displayed under one connection that silently governed another is a trap with a caption on it.",
+    "after": "Keyed (tenant_id, site_id, pms_interface_id), with a foreign key to the interface and ON DELETE CASCADE. Each connection carries its own bounds, its own config_version and its own change history. The advisory lock that serialises writes is now taken per interface, so two operators tuning two connections no longer queue behind each other.",
+    "surfaces": "Persistence (0079), runtime (pmsd reads its own interface's bounds), API (GET/PUT /pms-interfaces/{id}/connection-settings), UI (the card reads and writes this interface), audit (target is the interface, not a site-wide subject).",
+    "defaults_for_new_interfaces": "A newly created interface has no row and resolves to the approved defaults -- 500 ms / 30000 ms / 60 s / 900 s / 3 runs -- reporting is_default=true, which distinguishes 'nobody has configured this' from 'somebody set it to the same numbers'."
+  },
+
+  "values_preserved_through_migration": {
+    "method": "The existing site-wide row is carried onto every interface at that site, values AND config_version, before the old key is removed. The version carries because it is the operator's change count; restarting it at 1 would discard the fact that the values had been deliberately changed.",
+    "rehearsed_against_live_data": "0079 was applied to the PRE-LIVE appliance INSIDE A TRANSACTION and rolled back, twice, before any attempt to deploy it. The appliance was verified unchanged afterwards: still the two-column key, no new column, pmsd untouched.",
+    "result_of_the_rehearsal": "The single interface ('Protel') carried 500 / 30000 / 60 / 900 / 3 at config_version 2 -- byte-identical to the values in force. Zero site-wide leftovers, audit rows untouched, blockers still answer, primary key has three columns.",
+    "two_defects_the_rehearsal_caught": [
+      "The backfill inserted a second row for a (tenant, site) that already had one while the OLD two-column primary key was still in force -- a duplicate-key failure on the first property migrated. The old key is now dropped before the carry-over.",
+      "The migration tried to DELETE superseded rows from pms_connection_settings_changes, which is append-only by trigger and refused. It no longer touches the audit trail at all."
+    ],
+    "audit_trail_policy": "Pre-split change rows keep a NULL interface, because that is exactly what they were: changes made while the setting was site-wide. They are neither copied onto each interface (which would manufacture events nobody performed) nor deleted (which an append-only trail must never permit)."
+  },
+
+  "isolation_evidence": {
+    "test": "TestIntegration_API_ConnectionRecoverySettingsAreIsolatedPerInterface, against a real PostgreSQL through the HTTP surface rather than the table -- a definer function that separates two interfaces correctly, reached by a handler passing the wrong id, is still one property with one set of bounds.",
+    "asserts": "Two interfaces at one site both start on defaults; tuning all five fields on A leaves every one of B's fields, its is_default and its config_version untouched, and creates no row for B; tuning B afterwards leaves A's new values intact; a partial write leaves the writer's own untouched fields alone; each interface has exactly one audit row, carrying its own reason.",
+    "cross_site": "TestIntegration_API_ConnectionRecoverySettingsRefuseAnotherSitesInterface proves a second property's interface id is 404 on both read and write, and that the refused write leaves no row behind. The definer function enforces the same rule independently."
+  },
+
+  "provenance_failure_made_visible": {
+    "problem": "T0134 fixed a uuid-vs-text join that had left History reporting every version's origin as unrecorded. Fixing the cast did not fix the BLINDNESS: the next such failure would be equally silent, because 'the audit trail says nothing' and 'the audit trail could not be read' still rendered identically.",
+    "now": "The read outcome is reported. A query error, a scan error, or a rows.Err() after partial iteration all set provenance_status=UNAVAILABLE, log at ERROR with the underlying error and the interface id, and cause the screen to say the record could not be read and that this is a fault to report.",
+    "not_fatal": "Configuration still arrives. The read is still allowed to fail -- it is no longer allowed to fail quietly.",
+    "not_the_mirror_image_mistake": "A successful read that genuinely finds nothing still reports AVAILABLE and still says 'not recorded'. A property whose audit log truly holds no entry is an honest state, and calling it a fault would send an operator chasing a defect that is not there.",
+    "partial_reads": "rows.Err() is checked. A connection dropped mid-iteration ends the loop exactly like a clean finish, and without that check a PARTIAL provenance map would have been served as though it were the whole truth."
+  },
+
+  "the_gate_was_testing_a_schema_nobody_runs": {
+    "found": "scripts/pmsd-pg-integration.sh built its disposable database up to migration 0068 while eleven further migrations had landed. Every Phase-3 integration suite ran against a schema that has not existed since.",
+    "why_it_matters": "A suite that SELECTs a column the fixture lacks does not fail loudly: in Go it fails at rows.Scan, the row is dropped, and the caller receives an EMPTY RESULT that reads as a confident 'this site has none'. The same class of drift produced eight of the sixteen failed gate attempts in PRs #108/#109 and cost this delivery two more.",
+    "fixed": "0069 through 0079 are applied, as a list rather than eleven copied blocks -- the copied block is what let the chain fall behind. A post-condition asserts the three-column key, so a chain that applied but left the old key cannot let the isolation suite pass against a schema where it cannot hold."
+  },
+
+  "a_test_that_never_ran": {
+    "found": "The Phase-3 gate selects with `go test -run Integration`. TestPmsRevisionProvenanceSQLRunsAgainstProductionColumnTypes, added under T0134 and reported then as gate-covered, did not match that filter. It compiled, its package reported ok, and it never executed.",
+    "fixed": "Renamed to TestIntegration_API_PmsRevisionProvenanceSQLRunsAgainstProductionColumnTypes, and the new isolation tests follow the same convention. All three were then watched executing and passing against a real database, rather than inferred from a package-level ok.",
+    "correction_of_record": "T0134's statement that the regression test was covered by the gates was wrong when written. It is true now."
+  },
+
+  "committed_binaries_removed": {
+    "edged.new": "The compiled edged built from merged master 85bb8850, sha256 520f57f8f036..., byte-identical to the binary running on the appliance. It entered master in commit 3b9a5a42 because that delivery commit ran `git add -A` while the build output sat in the repository root. The later `rm -f` removed the working copy and left the blob. NOT an authoritative artifact: build output is not source.",
+    "data-plane/netd and data-plane/scd": "Found by the new guard, not by the mission brief. Both arrived in the original source-baseline import 84dae4bb, were never touched again, are referenced by nothing, and `go version -m` identifies them as builds of this repository's own cmd/netd and cmd/scd made with go1.26.2 -- not even the current toolchain. The same class of accident, 42 MB of it.",
+    "total_removed": "55,537,634 bytes across three files.",
+    "prevention": "Two layers. .gitignore covers the names the build recipes produce; and because a pattern list only catches names somebody thought of while `git add -A` is indiscriminate by design, preflight now refuses any TRACKED FILE whose magic bytes identify an ELF, PE or Mach-O image. Content, not names -- it cannot mistake a zip, a font or a screenshot for a binary, and it needs no allowlist to rot.",
+    "what_this_says_about_the_gates": "edged.new passed four green gates. The manifest listed it as a created file and every check agreed. Nothing in the delivery process was looking for a binary, which is why the guard is a check rather than a resolution to be careful."
+  },
+
+  "master_versus_deployed_reconciled": {
+    "question": "What differed between master and the runtime deployed on 172.21.60.25.",
+    "answer": "NOTHING IN SOURCE. `git diff 85bb8850..master -- data-plane hotel-admin scripts tools` was empty. The deployed edged was built from 85bb8850; master had since advanced only by governance records, documentation, regenerated export packs -- and the stray binary.",
+    "conclusion": "The deployed runtime was traceable to master's source exactly. The discrepancy was an artifact, not a drift."
+  },
+
+  "deployment": "NONE YET under this receipt. The migration was rehearsed in a rolled-back transaction only; the appliance was verified unchanged. Deployment of the merged master is authorised and recorded separately.",
+
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-15: make Connection Recovery independent per PMS interface including the required migration and per-interface audit, preserve the currently effective values, make provenance-query failures fail-soft but observable, investigate and correct the master/deployed difference and the edged.new artifact, and deploy the final verified master to PRE-LIVE 172.21.60.25.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}

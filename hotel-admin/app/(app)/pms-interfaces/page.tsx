@@ -517,16 +517,20 @@ function InterfaceDetail({
   onChanged: () => void | Promise<void>;
 }) {
   const [revisions, setRevisions] = useState<PmsRevision[] | null>(null);
+  // Whether the ORIGIN of each saved version could be read at all. "Nothing was recorded" and "the record
+  // could not be read" are different facts and the screen must not merge them.
+  const [provenance, setProvenance] = useState<string>("AVAILABLE");
   const [routes, setRoutes] = useState<PmsGuestNetworkRoute[]>([]);
   const [err, setErr] = useState<unknown>(null);
 
   const load = useCallback(async () => {
     try {
       const [r, d] = await Promise.all([
-        api.get<{ revisions: PmsRevision[] }>(`/pms-interfaces/${id}/revisions`),
+        api.get<{ revisions: PmsRevision[]; provenance_status?: string }>(`/pms-interfaces/${id}/revisions`),
         api.get<{ guest_networks: PmsGuestNetworkRoute[] }>(`/pms-interfaces/${id}`),
       ]);
       setRevisions(r.revisions ?? []);
+      setProvenance(r.provenance_status ?? "AVAILABLE");
       setRoutes(d.guest_networks ?? []);
       setErr(null);
     } catch (e) {
@@ -547,6 +551,7 @@ function InterfaceDetail({
         id={id}
         iface={iface}
         revisions={revisions}
+        provenanceStatus={provenance}
         onPublished={async () => { await load(); await onChanged(); }}
       />
       {/* The Credential card is not rendered. The supported connector's link carries no transport
@@ -555,7 +560,7 @@ function InterfaceDetail({
           misconfiguration on a correctly configured interface. The component and its endpoint are left in
           place for a future connector that genuinely authenticates. */}
       <RoutingCard routes={routes} />
-      <ConnectionRecoveryCard />
+      <ConnectionRecoveryCard id={id} />
       <AdvancedDiagnosticsCard />
     </div>
   );
@@ -724,8 +729,11 @@ const CONN_FIELDS: {
   },
 ];
 
-function ConnectionRecoveryCard() {
-  const [state, setState] = useState<RosterReconciliationState | null>(null);
+function ConnectionRecoveryCard({ id }: { id: string }) {
+  // SCOPED TO THIS CONNECTION. These used to be read from, and written to, a site-wide route -- so the card
+  // had to warn that editing it here also changed any other connection at the property. It no longer does,
+  // because it no longer can.
+  const [settings, setSettings] = useState<PmsConnectionSettings | null>(null);
   const [form, setForm] = useState<Record<string, number>>({});
   const [reason, setReason] = useState("");
   const [saved, setSaved] = useState<number | null>(null);
@@ -734,18 +742,18 @@ function ConnectionRecoveryCard() {
 
   const load = useCallback(async () => {
     try {
-      setState(await api.get<RosterReconciliationState>("/pms-roster-reconciliation"));
+      setSettings(await api.get<PmsConnectionSettings>(`/pms-interfaces/${id}/connection-settings`));
     } catch {
       /* advanced configuration: absent on a connector that does not expose it */
     }
-  }, []);
+  }, [id]);
   useEffect(() => { void load(); }, [load]);
 
   async function save() {
     setBusy(true);
     try {
       const out = await api.put<{ config_version: number }>(
-        "/pms-roster-reconciliation/connection-settings", { ...form, reason });
+        `/pms-interfaces/${id}/connection-settings`, { ...form, reason });
       setSaved(out.config_version);
       setForm({});
       setReason("");
@@ -757,11 +765,11 @@ function ConnectionRecoveryCard() {
     }
   }
 
-  if (!state?.connection_settings) return null;
+  if (!settings) return null;
 
   return (
     <Card>
-      <CardHeader><CardTitle>Advanced configuration — connection recovery (whole site)</CardTitle></CardHeader>
+      <CardHeader><CardTitle>Advanced configuration — connection recovery</CardTitle></CardHeader>
       <CardBody className="space-y-3">
         {err && <p className="text-sm text-err">{err}</p>}
         <p className="text-sm text-muted-foreground">
@@ -770,14 +778,14 @@ function ConnectionRecoveryCard() {
           <strong>Most properties never need to change any of them</strong> — every change is recorded with
           who made it and why.
         </p>
-        {/* SCOPE, STATED BECAUSE THE PLACEMENT IMPLIES OTHERWISE. These settings are stored per SITE --
-            the table's key is (tenant, site) and it has no interface column at all. They are shown on this
-            page because this is where the PMS link is configured, but they are not this interface's
-            settings, and a property with a second connection would find they apply to that one too. */}
+        {/* THE SCOPE WARNING IS GONE BECAUSE THE SCOPE CHANGED. It used to read "these apply to the whole
+            site, not just this connection", which was true and awful: a setting on a connection page that
+            silently governed a different connection. The key now carries the interface, so the honest
+            sentence is the short one. */}
         <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-          <strong className="text-foreground">These apply to the whole site, not just this connection.</strong>{" "}
-          They are stored once per property. If this site ever has more than one PMS connection, changing a
-          value here changes it for all of them.
+          <strong className="text-foreground">These apply to this connection only.</strong>{" "}
+          Another PMS connection at this property keeps its own values and is unaffected by anything changed
+          here.
         </div>
         <div className="grid gap-3 lg:grid-cols-2">
           {CONN_FIELDS.map((f) => (
@@ -789,15 +797,15 @@ function ConnectionRecoveryCard() {
                   <input
                     type="number"
                     className="w-40 rounded-md border px-3 py-2 text-sm"
-                    value={form[f.key] ?? state.connection_settings[f.key] ?? ""}
+                    value={form[f.key] ?? settings[f.key] ?? ""}
                     onChange={(e) => setForm({ ...form, [f.key]: Number(e.target.value) })}
                     disabled={busy}
                   />
                   <span className="text-xs text-muted-foreground">{f.unit}</span>
                 </div>
                 <span className="mt-2 block text-xs text-muted-foreground">
-                  <strong>Currently:</strong> {state.connection_settings[f.key]} {f.unit}
-                  {state.connection_settings.is_default ? " (the approved default)" : ""}
+                  <strong>Currently:</strong> {settings[f.key]} {f.unit}
+                  {settings.is_default ? " (nobody has changed this one)" : ""}
                 </span>
                 <span className="mt-1 block text-xs text-muted-foreground">
                   <strong>Change it when:</strong> {f.when}
@@ -954,9 +962,20 @@ function SettingsTable({ rev }: { rev: PmsRevision }) {
   );
 }
 
-function VersionProvenance({ rev }: { rev: PmsRevision }) {
+function VersionProvenance({ rev, unavailable }: { rev: PmsRevision; unavailable?: boolean }) {
   const when = rev.published_at ?? rev.authored_at;
-  // NEVER INVENTED. An unrecorded origin says so; it does not become a plausible sentence.
+  // NEVER INVENTED, and never conflated. Empty provenance has two causes that look identical in the data
+  // and are opposite in meaning: nothing was ever recorded, or the record could not be read. Saying "not
+  // recorded" when the truth is "could not be read" is how a completely dead provenance feature survived a
+  // deployment unnoticed -- every version claimed its own origin had never been written down.
+  if (unavailable) {
+    return (
+      <p className="text-xs text-warn">
+        The record of how this version was saved could not be read just now, so it is not shown. This is a
+        fault to report, not a sign that nothing was recorded — the configuration itself is unaffected.
+      </p>
+    );
+  }
   if (!when && !rev.actor_id && !rev.reason_code) {
     return (
       <p className="text-xs text-muted-foreground">
@@ -982,11 +1001,13 @@ function VersionProvenance({ rev }: { rev: PmsRevision }) {
 // so the routine question -- "what is this connection set to?" -- was answered by a list of everything it
 // has ever been set to. Previous versions move behind History.
 function RevisionsCard({
-  id, iface, revisions, onPublished,
+  id, iface, revisions, provenanceStatus, onPublished,
 }: {
   id: string;
   iface?: PmsInterface;
   revisions: PmsRevision[] | null;
+  /** AVAILABLE when the origin records were read; UNAVAILABLE when the read itself failed. */
+  provenanceStatus?: string;
   onPublished: () => void | Promise<void>;
 }) {
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -1042,7 +1063,7 @@ function RevisionsCard({
               <Badge tone="ok">Version {current.revision_no}</Badge>
               <Badge tone="neutral">In use</Badge>
             </div>
-            <VersionProvenance rev={current} />
+            <VersionProvenance rev={current} unavailable={provenanceStatus === "UNAVAILABLE"} />
             <SettingsTable rev={current} />
           </>
         )}
@@ -1068,7 +1089,7 @@ function RevisionsCard({
                     <Badge tone="neutral">Version {rev.revision_no}</Badge>
                     <span className="text-xs text-muted-foreground">Previous</span>
                   </div>
-                  <div className="mt-2"><VersionProvenance rev={rev} /></div>
+                  <div className="mt-2"><VersionProvenance rev={rev} unavailable={provenanceStatus === "UNAVAILABLE"} /></div>
 
                   <div className="mt-2 text-sm">
                     {!older ? (
