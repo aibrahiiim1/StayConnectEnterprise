@@ -1,0 +1,93 @@
+{
+  "transition_id": "T0135",
+  "seq": 135,
+  "timestamp": "2026-09-14T23:52:00Z",
+  "timestamp_derivation": "After the corrected edged was built from merged master 85bb8850, deployed to PRE-LIVE 172.21.60.25 and verified live; after the merge commit 85bb8850 it describes (2026-09-14T23:46:46Z), and before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "PRE_LIVE_PMS_CONFIGURATION_AND_HISTORY_EXPERIENCE_DEPLOYED_AND_VERIFIED",
+
+  "what_this_completes": "T0134 recorded the first deployment and the defect its live verification exposed. This records the corrected build going out and the experience working on the appliance. The mission is closed by this receipt.",
+
+  "merge": {
+    "pull_request": 131,
+    "merge_commit": "85bb88509a353a8c38b83a75dfb3b0315c27c398",
+    "gates": "All four required gates green on the exact head 5ad4f2822177 before the merge: governance, phase3-full-software-gate, phase4-financial-core-gate, phase5-post-stay-transfer-gate. Merged through the protected process; no gate was dispatched, bypassed or inherited.",
+    "preflight": "PASS on all seven default stages before the branch was pushed."
+  },
+
+  "deployment": {
+    "target": "172.21.60.25 (PRE-LIVE). 172.21.60.23 was neither contacted nor modified.",
+    "built_in": "The designated workstation build environment, in the golang:1.25.12 container. Nothing was built on the appliance or on Central.",
+    "edged": {
+      "sha256": "520f57f8f0361796240c11983b8efe507970904152634c4a70793c45f33edb14",
+      "verified_before_install": "The built binary was checked for the corrected join text before it was copied to the appliance, and the same digest was confirmed on the appliance after install.",
+      "restarted_at": "2026-09-14T23:48:23Z; service active, edged listening on 127.0.0.1:8090."
+    },
+    "hotel_admin_ui": {
+      "release": "20260914-222943",
+      "build_id": "2qopcGChPAq9ZSzjyRly-",
+      "source_commit": "e0d7df745b0c (clean)",
+      "note": "Unchanged by this correction -- the defect was entirely server-side, so the UI bundle deployed under T0134 remains the served release. /opt/stayconnect/hotel-admin resolves to it."
+    },
+    "rollback_points": {
+      "approved-e0d7df74": "edged.prev and ui-release.prev -- the state before the first deployment.",
+      "approved-85bb8850": "edged.prev (bdd71b91d975478a9cad...) -- the state before this correction.",
+      "readiness": "Rollback remains one file copy plus one service restart for edged, and one symlink switch plus one restart for the UI. Both verified present."
+    }
+  },
+
+  "live_verification": {
+    "history_provenance": "The exact deployed statement, run read-only against the appliance, returns all three saved versions with their recorded origin. This is the defect T0134 recorded, now demonstrably fixed on the appliance rather than only in the repository.",
+    "v1": "authored 2026-08-22 00:04:53, published 00:05:25, INITIAL_COMMISSIONING, by an operator no longer on this appliance -- and it says exactly that rather than inventing a name.",
+    "v2": "authored 2026-08-22 00:08:25, published 00:08:26, DERIVED_SOURCE_FINGERPRINT, same operator.",
+    "v3": "authored 2026-08-25 17:53:49, published 17:54:13, CONFIG_CORRECTION, by Site Admin. The version in use.",
+    "differences_are_real": "All three versions share the endpoint 150.0.0.18:5003, which is why the old always-visible table read as three duplicate connections. v1 and v2 differ ONLY in the source fingerprint being recorded for the first time; v2 and v3 differ in the financial base currency being cleared. History states each difference from stored values.",
+    "served_ux": "The served bundle carries Current configuration, Configuration history, Put this version back in use, In use, Previous, the site-wide recovery statement, the not-recorded provenance fallback and Advanced diagnostics. No operator-facing use of the internal term Revision."
+  },
+
+  "appliance_state_after": {
+    "services": "All seven active: scd, edged, pmsd, portald, netd, acctd, hotel-admin.",
+    "health": "edged /health reports status ok, db true, scd true, license_installed true, license_state Active.",
+    "cloud_mode": "LICENSING_ONLY, as decided. The telemetry outbox remains disabled; that is a decision, not a fault.",
+    "pms": "transport CONNECTED, continuity CONTINUOUS, sync IN_SYNC, stage COMPLETE, heartbeat current.",
+    "reconciliation": "Latest resync generation 275, 587 rooms named, 0 conflicting observations, 0 unresolved review events, 0 integration blockers.",
+    "guest_state": "488 in-house stays, every one carrying a normalized room number. Unchanged across both deployments.",
+    "migrations": "0072 through 0078 all present in public.schema_migrations. No migration was applied by this mission."
+  },
+
+  "no_pms_action_was_taken": {
+    "pmsd_not_restarted": "pmsd has been up continuously since 2026-09-13T22:34:35Z, across both deployments. Only edged and hotel-admin were restarted.",
+    "no_reconnect": "The PMS link was never dropped or re-established by this work, so no automatic reconnect occurred and none needed reporting.",
+    "no_new_sync_generation": "The last complete sync remains 2026-09-14T22:06:59Z, generation 275 -- unchanged by either restart. The configured complete-sync interval is 1440 minutes, so the absence of a new generation is the expected schedule, not a stalled feed.",
+    "no_manual_resync": "No Full Resync was issued."
+  },
+
+  "sign_in_readiness": {
+    "verified": "READINESS, not exercise. The mirror is IN_SYNC and 488 in-house stays each carry a room identity, which is what room sign-in resolves against.",
+    "not_claimed": "No guest sign-in occurred during the verification window -- the most recent attempt on this appliance is 2026-09-12T13:51:50Z. Sign-in was therefore NOT exercised end-to-end, and this receipt does not claim it was. Manufacturing an attempt would have meant creating guest traffic the mission did not authorise."
+  },
+
+  "constraints_observed": {
+    "connection_recovery": "Semantics, scope and values unchanged; still site-scoped on (tenant_id, site_id).",
+    "pms_configuration": "No change to configuration, endpoint, credentials, routing or financial settings.",
+    "financial": "No posting, payment, reversal, settlement or financial egress.",
+    "guest_and_audit": "No guest state, stay state, permission or audit record was altered.",
+    "schema": "No migration and no schema change.",
+    "gates": "No test or gate weakened; one regression test added.",
+    "retired_host": "172.21.60.23 untouched."
+  },
+
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-14: complete the PMS operator-experience cleanup already merged to master, deploy it to PRE-LIVE 172.21.60.25, and verify the new PMS configuration/history experience live.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}
