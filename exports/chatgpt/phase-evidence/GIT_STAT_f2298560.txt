@@ -1,0 +1,4 @@
+commit f229856064c618e3cf6c0051eb578f817218321f
+Date:   Wed Sep 16 02:30:30 2026 +0300
+
+    Governance: T0145 records the effective-policy surface deployed and verified
