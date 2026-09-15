@@ -397,10 +397,19 @@ production build (`-tags stayconnect_production`); the Hotel-Admin Next build an
    The reconcile is one transaction. It re-asserts least privilege and ends in fail-closed assertions; a
    failure rolls back the revoke along with everything else, so the effective privilege set is exactly what it
    was beforehand. A failure here is still a stop, not a warning — but it is no longer an outage.
-6. **Build the binaries with the production tag** — `go build -tags stayconnect_production ./...` in
-   `data-plane/`. This is not optional and it is not cosmetic: without the tag the guest IAM authority stays
-   configurable and the superseded path is one environment variable away (§4G). Confirm it after start-up —
-   the `edged` and `scd` logs must report `build=production` in the IAM-v2 flag summary. Install binaries and
+6. **Build the binaries with `scripts/build-appliance-binaries.sh`** — it is the recipe, and it is the recipe
+   precisely because typing `go build` by hand is what went wrong. An audit of the PRE-LIVE appliance found
+   five of its six binaries built WITHOUT the production tag, one carrying no VCS stamp at all and built with
+   a toolchain this project does not use, and one whose bytes could not be reproduced from the commit it
+   named. The script pins the toolchain in a container, passes `-tags stayconnect_production`, refuses a
+   dirty tree, and reads the provenance back out of every binary it produced so a build that quietly lost the
+   tag or the stamp fails there instead of on an appliance.
+   The tag is not optional and not cosmetic: without it the guest IAM authority stays configurable and the
+   superseded path is one environment variable away (§4G). Confirm it after start-up — the `edged` and `scd`
+   logs must report `build=production` in the IAM-v2 flag summary.
+   Do **not** add `-ldflags`: it is not recorded in Go's build metadata, so a stripped binary and an
+   unstripped one are indistinguishable from the artifact, and the ability to check a running binary against
+   its source later is worth more than the few megabytes. Install binaries and
    units from `deploy/systemd/`; install the Hotel-Admin bundle with `deploy/scripts/deploy-hotel-admin.sh
    install`.
 7. **Network baseline** from `deploy/netplan/`, `deploy/nftables/`, `deploy/kea/`, `deploy/caddy/`.

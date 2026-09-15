@@ -1,0 +1,83 @@
+{
+  "transition_id": "T0138",
+  "seq": 138,
+  "timestamp": "2026-09-15T10:05:00Z",
+  "timestamp_derivation": "After every running binary's embedded provenance was extracted and the reproduction attempts completed; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "PRE_LIVE_RUNTIME_PROVENANCE_AUDITED_AND_THE_BUILD_RECIPE_WRITTEN_DOWN",
+
+  "why_this_was_needed": "T0137 recorded that four service binaries on 172.21.60.25 carried digests matching nothing this project had written down, and deliberately declined to guess their source. This is the audit that settles them.",
+
+  "method": "Go embeds its own build metadata. Every running binary was copied off the appliance, its digest re-verified against the appliance, and `go version -m` read for toolchain, flags, build tags, module dependency hashes and the VCS stamp. A stamp is a SELF-REPORT, so each claim was then tested by rebuilding at the named commit and comparing bytes. Reproduction is the evidence; the stamp is only the hypothesis.",
+
+  "findings_per_service": {
+    "scd": {
+      "running": "f6da65a0f49d2749aa24e2fda9c5a34fa801f7a59fb3af3913055f5ed90a1916",
+      "claimed": "8b76113af0c747cf1bb8ba74dc6838a2292d044a (Merge PR #119), go1.25.12, clean",
+      "verdict": "PROVEN. Rebuilt at that commit and the bytes are IDENTICAL.",
+      "ancestor_of_master": true
+    },
+    "netd": {
+      "running": "134e7782823209c4819f8af54402cd4346911837fdeeef6f3c98bffd76110dc1",
+      "claimed": "3984ed41ab911796c4f3ff606ce56ce0900d7a66 (Merge PR #99), go1.25.0, clean, -tags=stayconnect_production",
+      "verdict": "PROVEN. Rebuilt at that commit with its recorded tag and toolchain and the bytes are IDENTICAL.",
+      "ancestor_of_master": true
+    },
+    "portald": {
+      "running": "6f135310fd39776ef2fe516f052eac8d5cf1891a81936e010db1d766686a85e8",
+      "claimed": "11c7ca9f361c919aa6fcf13cdf342be3621f2cfd (Merge PR #115), go1.25.12, clean",
+      "verdict": "NOT PROVEN. The commit is real and is an ancestor of master, and every recorded field -- toolchain, flags, GOAMD64, and all nine dependency hashes -- matches a rebuild exactly. The BYTES do not. Plain, stripped (-s -w) and cleared-build-id variants were all tried at the recorded toolchain from a real clone; the closest was 64 bytes larger. The build is deterministic (two consecutive builds agreed), so this is not flakiness. Something outside Go's recorded metadata differed, and -ldflags is precisely such a thing -- it is not recorded at all. A stamp that cannot be corroborated is a claim, so this binary was REPLACED rather than accepted.",
+      "ancestor_of_master": true
+    },
+    "acctd": {
+      "running": "56cb2b11c1efd4f241e03f2ea6d5dba128858ca2d61e7aaf79523ab26ee1ed21",
+      "claimed": "NOTHING. There is no vcs block in the binary at all -- no revision, no time, no modified flag.",
+      "verdict": "UNPROVABLE FROM THE ARTIFACT, and replaced. It was built with go1.26.2, a toolchain this project does not use anywhere (the recipe is 1.25.12), and outside a git checkout or with -buildvcs=false. No amount of searching commits could establish its source, because the artifact carries no claim to test. Guessing would have been the only alternative, and guessing is what this mission forbids.",
+      "ancestor_of_master": null
+    },
+    "edged": {
+      "running": "7509f6af5d0eada4530ce6a0b004fb0c03c0d10954b0613a9c00561294fb281e",
+      "claimed": "db9801f429c310795401c4863bc8d53a80e9b5e0, go1.25.12, clean",
+      "verdict": "PROVEN BY PROVENANCE: built under T0137 from the merge commit it names, digest verified on the build host and on the appliance before installation."
+    },
+    "pmsd": {
+      "running": "ff4dadcb3d80d053aefe7c1887da1d1df7af8b8341588269845176981d5cb47f",
+      "claimed": "db9801f429c310795401c4863bc8d53a80e9b5e0, go1.25.12, clean",
+      "verdict": "PROVEN BY PROVENANCE: same build and verification as edged."
+    }
+  },
+
+  "the_defect_found_on_the_way": {
+    "what": "FIVE OF THE SIX BINARIES WERE MISSING -tags stayconnect_production. Only netd had it.",
+    "why_it_matters": "docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md §6 step 6 names that tag as how a Production appliance is built, and §4G explains what it buys: iam_v2's guest-authority lock is keyed on the BUILD, not on configuration, so that a switch deciding which IAM authority is in force cannot be reached by the configuration it governs. All six services import internal/iamv2.",
+    "actual_exposure_today": "BOUNDED, and stated precisely rather than dramatised. The superseded guest-auth implementation has been removed from the tree, so the lock is now a defensive assertion rather than a selector: on a production build a configuration naming a superseded authority refuses startup and names the variable, instead of starting and silently refusing every guest. The appliance's env sets only STAYCONNECT_IAMV2_MASTER=true -- neither VOUCHER nor ACCOUNT is set -- so the assertion would not have fired either way. Nothing was mis-authorising guests.",
+    "not_to_be_confused_with": "scd logs 'build_profile: production' from internal/buildprofile, which is a SEPARATE mechanism whose production state is the DEFAULT build. That log line is correct and is not evidence about the stayconnect_production tag. Two different profile concepts share a word, and conflating them would have produced a confident wrong conclusion in either direction."
+  },
+
+  "root_cause": "The recipe lived in shell history, not in the repository. Six binaries were produced by six invocations typed at different times, so the toolchain drifted (1.25.0, 1.25.12, 1.26.2), the production tag was applied once out of six, -ldflags was used inconsistently, and at least one build ran somewhere Go could not see the repository. None of that is carelessness; it is the predictable result of an unwritten procedure.",
+
+  "the_fix": {
+    "script": "scripts/build-appliance-binaries.sh builds every service from a clean checkout with a pinned containerised toolchain, -trimpath, CGO disabled, GOOS/GOARCH pinned and -tags stayconnect_production, then READS THE PROVENANCE BACK out of each binary it produced and fails if the revision, the clean flag or the tag is not what it should be.",
+    "refuses_a_dirty_tree": "A binary built from a modified tree carries vcs.modified=true and names a commit that does not describe it. The script refuses rather than producing one -- verified by it refusing this very delivery until the script itself was committed.",
+    "no_ldflags_on_purpose": "-ldflags is NOT recorded in Go's build metadata, so a stripped binary and an unstripped one are indistinguishable from the artifact. Dropping it costs a few megabytes and buys the ability to check a running binary against its source, which is the entire point of this mission.",
+    "the_worktree_trap_written_down": "git worktree writes a .git FILE whose gitdir points outside a container mount, so Go silently omits the whole vcs block and produces different bytes from identical source. That single detail made two reproducible binaries look irreproducible until it was found, and it is now documented in the script rather than rediscovered."
+  },
+
+  "behaviour_preserved": "Rebuilding changes no code. The complete source closure of scd, netd, portald and acctd -- every project package each one imports, plus go.mod and go.sum -- is byte-identical between the commit each was built from and master: zero changed files for all four. The rebuild therefore changes only the embedded provenance stamp and adds the documented production tag.",
+
+  "deployment": "NONE under this receipt. This records the audit and the recipe; the rebuild and deployment are recorded separately.",
+
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-15: close the PRE-LIVE runtime provenance gap so every running service has a verified, reproducible source/build origin, replacing any binary whose source cannot be proved rather than guessing, and deploying the corrected binaries to PRE-LIVE 172.21.60.25.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}
