@@ -1,4 +1,0 @@
-commit a759ab08a4335a46f4b92ca42164079e770e7138
-Date:   Tue Sep 15 02:13:57 2026 +0300
-
-    Preflight ran its own copy of the receipt rule, and the copy was wrong

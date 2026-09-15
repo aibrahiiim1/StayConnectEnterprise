@@ -1590,7 +1590,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "85bb88509a353a8c38b83a75dfb3b0315c27c398",
     "base_note": "The master merge commit of PR #131. This delivery begins exactly where that one ended.",
-    "head": "8c651e97",
+    "head": "047b6f46",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
     "note": "Governance only. T0135 records the corrected edged built from merged master 85bb8850, deployed to PRE-LIVE 172.21.60.25 and verified live: History now returns the recorded origin of all three saved configurations. No code change, no migration, no PMS action."
   },
