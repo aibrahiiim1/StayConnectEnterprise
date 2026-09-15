@@ -1590,7 +1590,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "3802ece931a7132bf138692b96ac8075e4afbbb5",
     "base_note": "The master merge commit of PR #139. This delivery begins exactly where that one ended.",
-    "head": "98faf0f3",
+    "head": "cb8be71d",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
     "note": "Governance only. T0143 records the Checkout Grace delivery deployed to PRE-LIVE from 3802ece9 -- behaviour-neutral, rebuilt so the recorded head keeps describing the binaries -- with the checkout-grace state unchanged (1276 decisions, 6 grace entitlements, all windows still exactly 3600s) and the deployment-caused PMS resync settled on generation 287 with zero conflicts."
   },
