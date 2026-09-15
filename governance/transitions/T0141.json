@@ -1,0 +1,81 @@
+{
+  "transition_id": "T0141",
+  "seq": 141,
+  "timestamp": "2026-09-15T18:55:00Z",
+  "timestamp_derivation": "After all six binaries and the Hotel Admin bundle were built from the merged master, deployed to PRE-LIVE, restarted, verified live and the provenance manifest re-checked; before the author timestamp of the commit that introduces this receipt. After the merge commit cb7c37f2 (2026-09-15T18:45:42Z) it describes. Per T0091, in the order T0108 requires.",
+  "record_type": "PRE_LIVE_LICENCE_WORDING_AND_PROVISIONING_GATE_DEPLOYED_AND_VERIFIED",
+
+  "merge": {
+    "pull_request": 137,
+    "merge_commit": "cb7c37f2a40b6c7c059f0d3474815f274d09986a",
+    "gates": "All four required gates green on the exact head 4deb66092892 before the merge. Merged through the protected process.",
+    "two_governance_failures_fixed_at_the_root": "The gate failed twice and neither was worked around. First: the guest-PII scanner reported a leak that did not exist, because it matched its four PII tokens as bare substrings and this delivery's commit a7b440ebec12e14215cc... contains the room number 14215. Second, and worse: the first fix was written through a heredoc that collapses a doubled backslash, so the word-boundary escape reached the file as a literal 0x08 byte -- the regex compiled, the validator said PASS, and the PII alternation could no longer match anything at all. A false positive had become a silently dead guest-PII check. The governance gate's control-character step caught that, which is exactly what it exists for; its own comment records the same heredoc trap happening once before."
+  },
+
+  "deployed": {
+    "target": "172.21.60.25 (PRE-LIVE). 172.21.60.23 neither contacted nor modified.",
+    "source_commit": "cb7c37f2a40b6c7c059f0d3474815f274d09986a, built by scripts/build-appliance-binaries.sh with the pinned toolchain and -tags stayconnect_production. APPLIANCE_BUILD = PASS: every binary reports that revision, clean, tagged.",
+    "digests": {
+      "scd": "cbcddcebda61c0fc8607b6033ead8bb368edbb8379b4c58ebc093b4a3027df2b",
+      "edged": "36f67e243fb92570d8db316a5ee4112cf40808aaec299814fc2001b78737c1e8",
+      "pmsd": "7e5d8b8419440d7d6611256670dfa76005cd7bd87916b38cb5122314d4cd53c2",
+      "portald": "29273a2dafec6de8b171462805cdd53b679ab27be3de4a9ac4a3aefd86e13974",
+      "netd": "9f97734e3f87551408c8009393423d5309af353d90a363a07024a3d527875fab",
+      "acctd": "c67c39d32529b0eab064f98b5e849c07097f6e3ef82ec6ac55d902037705cba0"
+    },
+    "hotel_admin_ui": "BUILD_ID ZoZDrr2Iu3NSXiqQOxsEz, bundle sha256 96e7c1089e145b0549c1339a38a83ad0ec40598d7e33c814df5ddacdb4d4dba6, manifest reads source_commit cb7c37f2a40b (clean).",
+    "digest_chain": "Recorded on the build host, re-checked as received, re-checked after installation. All three agree for all six.",
+    "provenance_records": "DEPLOYED_SHA now names cb7c37f2; DEPLOYED_BINARIES.txt rewritten with the six new digests and re-verified in place with sha256sum -c: all six OK."
+  },
+
+  "what_the_deployment_actually_changes": {
+    "edged": "The provisioning gate now refuses the 'unlicensed' state. This is the only behavioural change in a running binary.",
+    "hotel_admin": "The Dashboard's grace and expired wording. Verified in the SERVED bundle: 'renewal grace period', 'Guests keep signing in exactly as before' and 'already online are not disconnected' are present; 'offline grace allowance' and 'not been confirmed with the cloud recently' are gone.",
+    "everything_else": "scd, pmsd, portald, netd and acctd carry no source change in this delivery. They were rebuilt so that every binary continues to name one head, which is the standard T0139 established after four binaries were found describing nothing."
+  },
+
+  "live_verification": {
+    "licence_after_deployment": "state Active, valid_until 2026-12-01T23:59:59Z, grace_period_days 30, grace_until 2026-12-31T23:59:59Z, cloud_stale false, clock_rollback false, build_profile production -- read from the running scd, unchanged by the deployment.",
+    "services": "All seven active.",
+    "enforcement_plane": "6 nft sets and 63 rules, identical to before the restarts.",
+    "guest_state": "475 in-house stays; zero open guest sessions before and after. The work was done in a window with no guest enforced, checked first.",
+    "pms": "The pmsd restart dropped and re-established the link; the connector requested its own resync, which settled IN_SYNC/COMPLETE at generation 286 with 587 rooms named, 475 roster records and ZERO conflicting observations. No manual resync was issued."
+  },
+
+  "a_live_proof_that_licensing_cannot_be_switched_off_by_configuration": {
+    "observed": "scd logs, at ERROR, 'LICENSE SECURITY: rejected attempt to enable permissive/dev licensing on a production appliance', reason 'SCD_LICENSE_REQUIRED=false ignored (production build)', action 'enforcement kept ON'.",
+    "why_it_appears": "/etc/stayconnect/*.env genuinely contains SCD_LICENSE_REQUIRED=false. On a production build that setting is compiled out of reach: the permissive branch does not exist in the binary, the attempt is refused and reported.",
+    "reading_it_correctly": "This line is the protection working, not a fault. It is logged at ERROR because it is a security event worth seeing. It appears on every scd start and did so before this delivery. It is recorded here because it is direct live evidence, from the appliance itself, that licence enforcement on .25 cannot be disabled by editing an environment file -- which is the property the build tag exists to guarantee."
+  },
+
+  "rollback": {
+    "location": "/opt/stayconnect/rollback/approved-cb7c37f2/ holds .prev for all six binaries plus ui-release.prev.",
+    "previous_digests": "scd cbcddceb-predecessor 483a2053, edged 5ae9d722, pmsd a1e613bd, portald bec1f097, netd 76b255b8, acctd 959936775 -- the f6a24e6c set recorded in T0139.",
+    "procedure": "Copy the .prev back and restart that unit; the UI is a symlink switch plus a restart.",
+    "note": "Rolling back edged restores the provisioning gate that permits an unlicensed appliance to create guest access plans, and rolling back the UI restores the Dashboard text that blames the cloud for a lapsed licence. Neither affects guest access; both are the defects this delivery fixed."
+  },
+
+  "constraints_observed": {
+    "no_clock_change": "The appliance clock was never altered. The licence boundaries are 77 and 107 days away and were proven in the licence package's tests, where time is an argument, then cross-checked against what the running appliance independently reports.",
+    "no_invented_state": "No licence was installed, replaced or forged on the appliance. The signed document on disk is untouched; its state.json still records the same accepted licence id, version and high-water mark.",
+    "no_schema_change": "No migration. No change to Grace Period product semantics.",
+    "financial_and_pms": "No posting, payment, settlement or financial egress; no PMS configuration change and no manual Full Resync.",
+    "sessions_and_config": "No guest or stay state altered; no env file modified.",
+    "gates": "No test or gate weakened. Two CI defects were fixed and one dead check was restored to life."
+  },
+
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-15: verify the Licence Grace Period end to end, fix what is wrong, and carry it through PR, merge, PRE-LIVE deployment to 172.21.60.25 and final verification.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}
