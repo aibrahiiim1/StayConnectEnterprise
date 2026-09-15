@@ -1,0 +1,4 @@
+commit e2f8ee21ed4c4e9417a2a702c5534a36558353a6
+Date:   Tue Sep 15 13:05:28 2026 +0300
+
+    The appliance build recipe lived in shell history, so it drifted

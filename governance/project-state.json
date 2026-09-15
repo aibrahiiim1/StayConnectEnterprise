@@ -1093,7 +1093,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0137",
+  "latest_transition_id": "T0138",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1586,13 +1586,13 @@
   },
   "current_delivery": {
     "kind": "POST_CLOSURE_CORRECTIONS",
-    "decision": "D55",
+    "decision": "D56",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "db9801f429c310795401c4863bc8d53a80e9b5e0",
-    "base_note": "The master merge commit of PR #133. This delivery begins exactly where that one ended.",
-    "head": "055782a5",
+    "base": "5705afacdd22635fad9da2f32dc40c501b171724",
+    "base_note": "The master merge commit of PR #134. This delivery begins exactly where that one ended.",
+    "head": "e2f8ee21",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
-    "note": "Governance only. T0137 records migration 0079 applied under lock to PRE-LIVE with the live recovery values preserved exactly (config_version 2, is_default false), the new edged/pmsd/UI deployed from db9801f4, and the reconnect plus automatic read-only resync the pmsd restart caused -- settled to generation 282 with zero conflicts and 481 in-house stays unchanged."
+    "note": "Runtime provenance audit of PRE-LIVE. scd and netd reproduced byte-identically from the commits they name; portald could not be reproduced and acctd carries no VCS stamp at all, so both are replaced rather than guessed at. Five of six binaries were missing the documented stayconnect_production tag. scripts/build-appliance-binaries.sh makes the recipe reproducible and self-verifying; no code changes, and all four source closures are identical to master."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
