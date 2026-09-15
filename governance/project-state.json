@@ -1093,7 +1093,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0139",
+  "latest_transition_id": "T0140",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1586,13 +1586,13 @@
   },
   "current_delivery": {
     "kind": "POST_CLOSURE_CORRECTIONS",
-    "decision": "D57",
+    "decision": "D58",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "f6a24e6cd5a8f0b5b75e86b43d69bd7b1b51f8aa",
-    "base_note": "The master merge commit of PR #135. This delivery begins exactly where that one ended.",
-    "head": "1d1909a6",
+    "base": "cdca4d30e2aebad3c4dfac2307c8d750c203199c",
+    "base_note": "The master merge commit of PR #136. This delivery begins exactly where that one ended.",
+    "head": "0ecb1911",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
-    "note": "Governance only. T0139 records all six appliance binaries rebuilt from f6a24e6c with the documented production tag and deployed to PRE-LIVE, the packaging defect closed with the appliance's own build=development -> build=production log as evidence, enforcement and guest state unchanged, and the deployed-head record replaced by a per-binary manifest that cannot drift silently."
+    "note": "Licence Grace Period verified end to end against the v3 model, with the exact boundary instants, renewal-during-grace, restart persistence, anti-rollback and clock-rollback proven by signed-licence tests at controlled times. Two defects fixed: the Dashboard blamed cloud staleness for a lapsed licence and promised a Restricted state that v3 does not have; and the provisioning gate omitted 'unlicensed', now pinned against the licence model itself. No migration and no change to Grace Period semantics."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

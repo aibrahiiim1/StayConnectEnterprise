@@ -135,10 +135,16 @@ type State string
 const (
 	// StateActive — document within validity. All entitled features work.
 	StateActive State = "Active"
-	// StateGracePeriod — validity expired but within offline_grace_days.
-	// All guest functionality continues unchanged; Hotel Admin surfaces a
-	// prominent renewal warning. Exists so a renewal issued while the
-	// appliance was offline never interrupts a hotel.
+	// StateGracePeriod — valid_until has passed but the appliance is within
+	// grace_period_days of it. All guest functionality continues unchanged;
+	// Hotel Admin surfaces a prominent renewal warning. Exists so a renewal
+	// issued while the appliance was offline never interrupts a hotel.
+	//
+	// NOT keyed to offline_grace_days, which this comment used to name. That
+	// field bounds how long the appliance may go without reaching the cloud
+	// before CloudStale is raised, and CloudStale is a warning flag that never
+	// changes the state: a hotel whose internet is down does not lose its
+	// licence. Only v1/v2 documents with no grace_period_days fall back to it.
 	StateGracePeriod State = "GracePeriod"
 	// StateRestricted — grace exhausted (valid_until + grace .. + 2×grace).
 	// Existing guest sessions continue and voucher/PMS guest logins still
@@ -146,8 +152,9 @@ const (
 	// disabled and creating new guest access plans / voucher batches is
 	// blocked. Admin is directed to the license page.
 	StateRestricted State = "Restricted"
-	// StateExpired — beyond valid_until + 2×offline_grace. New guest
-	// sessions are refused (portal shows a service notice); existing
+	// StateExpired — beyond valid_until + grace_period_days (v3). Legacy
+	// documents reach it beyond valid_until + 2×grace, via Restricted. New
+	// guest sessions are refused (portal shows a service notice); existing
 	// sessions are allowed to run to their natural end; local admin remains
 	// accessible read-only plus license upload.
 	StateExpired State = "Expired"

@@ -190,8 +190,34 @@ describe("describeLicense", () => {
 
   it("distinguishes grace from expiry, because the response differs", () => {
     expect(describeLicense("GracePeriod", true).tone).toBe("warn");
-    expect(describeLicense("GracePeriod", true).summary).toMatch(/keeps working/i);
+    expect(describeLicense("GracePeriod", true).summary).toMatch(/keep signing in/i);
     expect(describeLicense("Expired", true).tone).toBe("err");
+  });
+
+  // GRACE IS A LAPSED LICENCE, NOT A FLAKY INTERNET CONNECTION.
+  //
+  // The dashboard used to say the appliance was in grace because "the licence has not been confirmed with
+  // the cloud recently", running on its "offline grace allowance". That is a different mechanism entirely:
+  // losing the cloud raises a staleness flag and never changes the licence state. An operator who believed
+  // the old text would have gone looking at their internet connection while a renewal deadline ran down.
+  it("never blames the cloud for a grace period, and never promises a Restricted state", () => {
+    const grace = describeLicense("GracePeriod", true).summary;
+    expect(grace).toMatch(/licence end date has passed/i);
+    expect(grace).not.toMatch(/cloud/i);
+    expect(grace).not.toMatch(/offline/i);
+    // There is no Restricted state in the current licence model; after grace comes Expired.
+    expect(grace).not.toMatch(/restrict/i);
+  });
+
+  // The two states an operator must not confuse are the two where guest access differs.
+  it("says what happens to guests in grace and after it", () => {
+    // In grace: nothing changes for a guest. That is the entire purpose of the window.
+    expect(describeLicense("GracePeriod", true).summary).toMatch(/new sign-ins stop/i);
+    // After grace: new sign-ins refused, existing guests NOT disconnected -- the reassurance that stops a
+    // panicked operator from rebooting the appliance and making it worse.
+    const expired = describeLicense("Expired", true).summary;
+    expect(expired).toMatch(/new guest sign-ins are now refused/i);
+    expect(expired).toMatch(/already online are not disconnected/i);
   });
 
   it("passes an unrecognised state through instead of inventing one", () => {
