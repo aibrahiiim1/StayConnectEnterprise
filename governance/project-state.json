@@ -1590,7 +1590,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "5705afacdd22635fad9da2f32dc40c501b171724",
     "base_note": "The master merge commit of PR #134. This delivery begins exactly where that one ended.",
-    "head": "PENDING",
+    "head": "e2f8ee21",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
     "note": "Runtime provenance audit of PRE-LIVE. scd and netd reproduced byte-identically from the commits they name; portald could not be reproduced and acctd carries no VCS stamp at all, so both are replaced rather than guessed at. Five of six binaries were missing the documented stayconnect_production tag. scripts/build-appliance-binaries.sh makes the recipe reproducible and self-verifying; no code changes, and all four source closures are identical to master."
   },

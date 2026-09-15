@@ -1,4 +1,0 @@
-commit 055782a58b49b55bf10012cc754797a0599fd006
-Date:   Tue Sep 15 10:30:23 2026 +0300
-
-    Governance: T0137 records per-interface recovery migrated, deployed and verified
