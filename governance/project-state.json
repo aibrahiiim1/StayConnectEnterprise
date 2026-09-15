@@ -1590,7 +1590,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "3b1f425cc36fa89a675a722d2951025fb90483bb",
     "base_note": "The master merge commit of PR #132. This delivery begins exactly where that one ended.",
-    "head": "40702ffb",
+    "head": "452e8a8c",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
     "note": "Connection recovery re-keyed per PMS interface (migration 0079) with the live values carried across, rehearsed against the appliance in a rolled-back transaction. Provenance read failures now reported rather than indistinguishable from absence. The Phase-3 gate chain extended 0069-0079, a regression test that never matched the gate's -run filter renamed, and three committed binaries removed with a content-based guard against recurrence."
   },

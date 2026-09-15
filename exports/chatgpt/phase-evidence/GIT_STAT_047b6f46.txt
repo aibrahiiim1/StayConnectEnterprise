@@ -1,4 +1,0 @@
-commit 047b6f4658f45d8aceebf000b273379aba1fa6bc
-Date:   Tue Sep 15 03:12:30 2026 +0300
-
-    Governance: T0135 records the deployment verified on the appliance
