@@ -1,0 +1,4 @@
+commit 1d1909a647d62f5111009e0ad181d7abfe1e0dc6
+Date:   Tue Sep 15 13:48:47 2026 +0300
+
+    Governance: T0139 records one head, six binaries, and the tag the appliance was missing

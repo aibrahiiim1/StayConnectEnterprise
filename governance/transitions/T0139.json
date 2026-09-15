@@ -1,0 +1,94 @@
+{
+  "transition_id": "T0139",
+  "seq": 139,
+  "timestamp": "2026-09-15T10:47:30Z",
+  "timestamp_derivation": "After all six binaries were built from the merged master, deployed to PRE-LIVE, restarted and verified, and after the appliance's own provenance manifest was written and re-verified; before the author timestamp of the commit that introduces this receipt. After the merge commit f6a24e6c (2026-09-15T10:41:31Z) it describes. Per T0091, in the order T0108 requires.",
+  "record_type": "PRE_LIVE_EVERY_SERVICE_REBUILT_FROM_ONE_VERIFIED_HEAD_WITH_THE_PRODUCTION_TAG",
+
+  "merge": {
+    "pull_request": 135,
+    "merge_commit": "f6a24e6cd5a8f0b5b75e86b43d69bd7b1b51f8aa",
+    "gates": "All four required gates green on the exact head 8565e18099f0 before the merge. Merged through the protected process; nothing dispatched, bypassed or inherited.",
+    "preflight": "PASS on all seven default stages."
+  },
+
+  "what_was_deployed": {
+    "built_by": "scripts/build-appliance-binaries.sh, delivered in the same merge, from a CLEAN checkout of f6a24e6c with golang:1.25.12, -trimpath, CGO_ENABLED=0, GOOS=linux, GOARCH=amd64 and -tags stayconnect_production.",
+    "self_verified_at_build": "The script read the provenance back out of every binary it produced: all six report vcs.revision=f6a24e6c, vcs.modified=false and tags=stayconnect_production. APPLIANCE_BUILD = PASS.",
+    "digests": {
+      "scd": "483a2053454e7da4ed5e977ca851977066e880bc9c67c0e77730d73b41bf26d1",
+      "edged": "5ae9d72211bcaeffb7bd426de341dbf7635e2cdc4eada215affcf6720009d84d",
+      "pmsd": "a1e613bd5d4cf7ba622ab8d0a8f79b794c5e95026707e87b08c97913a77aa404",
+      "portald": "bec1f097d91a09712d2c6f2e8431b526f66c7391ae6e6f028c6e251af7ccf900",
+      "netd": "76b255b8a6b64813d781e87b5cc537a710da9cfa0b74eaaedad3be4403a966f4",
+      "acctd": "959936775bbbecb828915e9d9e57e09249ef5fa985fcaf72f5359896f166fdc8"
+    },
+    "digest_chain": "Each digest was recorded on the build host, re-checked on the appliance as received, and re-checked again after installation. All three agree for all six."
+  },
+
+  "the_packaging_defect_is_closed_and_the_appliance_proves_it": {
+    "before": "scd's IAM-v2 flag summary read `build=development` on every start in the retained journal: 2026-09-12T18:02:52Z, 19:46:15Z, 19:47:29Z, 2026-09-13T02:59:31Z and 03:15:00Z.",
+    "after": "2026-09-15T10:47:03Z it reads `build=production`.",
+    "why_that_is_the_right_evidence": "docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md §6 step 6 says to confirm the tag after start-up by checking exactly this line. The appliance's own log, not an assertion in a document, is what now establishes that a production appliance is running production binaries.",
+    "not_conflated": "This is the iam_v2 SafeFlagSummary line. scd separately logs `build_profile: production` from internal/buildprofile, which was already correct and is a different mechanism; reading that as evidence about the tag would have hidden this defect entirely."
+  },
+
+  "per_service_outcome": {
+    "scd": "REPLACED although its provenance was PROVEN (byte-identical rebuild at 8b76113a). Replaced only to carry the production tag and to bring every binary to one head. Source closure identical to master, so no code changed.",
+    "netd": "REPLACED although its provenance was PROVEN (byte-identical rebuild at 3984ed41, already production-tagged). Replaced only to bring it to the common head. Source closure identical to master.",
+    "portald": "REPLACED because its provenance could NOT be proven: its bytes were not reproducible from the commit it named, by any variant tried. Source closure identical to master, so the replacement changes no behaviour.",
+    "acctd": "REPLACED because it carried no VCS stamp at all and was built with go1.26.2, a toolchain this project uses nowhere. There was no claim to test. Source closure identical to master.",
+    "edged": "REPLACED. Provenance was already sound (db9801f4, T0137) but it lacked the production tag; rebuilt from the common head.",
+    "pmsd": "REPLACED on the same grounds as edged."
+  },
+
+  "behaviour_preserved_and_verified": {
+    "no_code_change": "The complete source closure of scd, netd, portald and acctd was identical between the commit each ran and master before the rebuild: zero changed files for all four. edged and pmsd were already at master's content.",
+    "enforcement_untouched": "The nftables state is IDENTICAL across the netd restart: 6 sets and 63 rules before and after, with the same elements -- walled_garden_ip 3, guest_interfaces 1, guest_subnets 1, auth_ipv4 and phase3_auth_ipv4 empty. netd's boot reconcile re-asserted the plane exactly.",
+    "guest_state": "475 in-house stays before and after. Zero open guest sessions before and after.",
+    "favourable_window": "The rebuild was performed while auth_ipv4 was empty and no tc class existed, i.e. with no guest currently enforced -- checked before starting, not assumed. Restarting scd, netd and portald therefore disturbed no live guest.",
+    "services": "All seven active after: scd, edged, pmsd, portald, netd, acctd, hotel-admin."
+  },
+
+  "pms_reconnect_caused_by_the_deployment": {
+    "what": "Restarting pmsd dropped and re-established the PMS link; the connector requested its own resync, as it does after any reconnect. No operator command was issued.",
+    "outcome": "Settled to IN_SYNC/COMPLETE on generation 284. Transport CONNECTED, continuity CONTINUOUS throughout.",
+    "no_manual_resync": "None was issued."
+  },
+
+  "on_appliance_provenance_records": {
+    "DEPLOYED_SHA": "Updated to f6a24e6cd5a8f0b5b75e86b43d69bd7b1b51f8aa. It had read 480fd213 since 2026-09-06 and was wrong for every binary by the time this mission began.",
+    "DEPLOYED_BINARIES.txt": "NEW. Records the sha256 of every service binary with the exact recipe that produced them and the two commands that re-verify any line. It was immediately checked with `sha256sum -c`: all six OK.",
+    "why_a_manifest_and_not_just_a_head": "A single head was the previous record, and it silently stopped describing four of six binaries. A per-binary manifest cannot drift quietly: it is either checkable or it fails."
+  },
+
+  "rollback": {
+    "location": "/opt/stayconnect/rollback/approved-f6a24e6c/ holds <svc>.prev for all six.",
+    "digests": "scd f6da65a0, edged 7509f6af, pmsd ff4dadcb, portald 6f135310, netd 134e7782, acctd 56cb2b11 -- the exact binaries that were running before this deployment.",
+    "procedure": "Copy the .prev back over /opt/stayconnect/bin/<svc> and restart that unit. Per service, independently.",
+    "caveat_stated_plainly": "Rolling back portald or acctd restores a binary whose provenance is unproven or absent. That is the state this mission existed to end, so a rollback of those two should be treated as a temporary measure with a known defect, not a return to a good state."
+  },
+
+  "constraints_observed": {
+    "no_configuration_change": "No PMS configuration, endpoint, credentials, routing or financial settings were touched. No env file was modified.",
+    "financial": "No posting, payment, reversal, settlement or financial egress.",
+    "guest_data": "No guest or stay state altered.",
+    "retired_host": "172.21.60.23 neither contacted nor modified.",
+    "gates": "No test or gate weakened. A self-verifying build check was added."
+  },
+
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-15: close the PRE-LIVE runtime provenance gap so every running service has a verified, reproducible source/build origin, rebuilding from verified master where provenance cannot be proved, deploying to PRE-LIVE 172.21.60.25, verifying live, and synchronising provenance records, hashes, rollback points and documentation.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}
