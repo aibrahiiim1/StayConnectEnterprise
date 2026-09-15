@@ -1093,7 +1093,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0135",
+  "latest_transition_id": "T0136",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1586,13 +1586,13 @@
   },
   "current_delivery": {
     "kind": "POST_CLOSURE_CORRECTIONS",
-    "decision": "D53",
+    "decision": "D54",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "85bb88509a353a8c38b83a75dfb3b0315c27c398",
-    "base_note": "The master merge commit of PR #131. This delivery begins exactly where that one ended.",
-    "head": "047b6f46",
+    "base": "3b1f425cc36fa89a675a722d2951025fb90483bb",
+    "base_note": "The master merge commit of PR #132. This delivery begins exactly where that one ended.",
+    "head": "40702ffb",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
-    "note": "Governance only. T0135 records the corrected edged built from merged master 85bb8850, deployed to PRE-LIVE 172.21.60.25 and verified live: History now returns the recorded origin of all three saved configurations. No code change, no migration, no PMS action."
+    "note": "Connection recovery re-keyed per PMS interface (migration 0079) with the live values carried across, rehearsed against the appliance in a rolled-back transaction. Provenance read failures now reported rather than indistinguishable from absence. The Phase-3 gate chain extended 0069-0079, a regression test that never matched the gate's -run filter renamed, and three committed binaries removed with a content-based guard against recurrence."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

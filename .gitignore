@@ -49,3 +49,20 @@ __pycache__/
 .phase4-evidence/
 .cleanroom/
 .cleanroom-baseline/
+
+# COMPILED BINARIES NEVER BELONG IN THE TREE.
+#
+# A 13 MB `edged.new` was committed by a `git add -A` in a delivery commit while a build output sat in the
+# repository root, and it reached master through four green gates: the manifest listed it, every check
+# passed, and nobody -- including the author -- noticed a binary had become part of the source. The working
+# copy was deleted afterwards, which removed the only visible trace while leaving the blob in history.
+#
+# These patterns cover the names the build recipes actually produce.
+/edged
+/edged.*
+/scd
+/pmsd
+/portald
+/netd
+/acctd
+*.exe

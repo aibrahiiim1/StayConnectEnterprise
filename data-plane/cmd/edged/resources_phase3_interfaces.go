@@ -32,6 +32,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -78,6 +79,11 @@ func (s *server) pmsInterfacesRoutes() http.Handler {
 	r.Get("/{id}", s.getPMSInterface)
 	r.Get("/{id}/revisions", s.listPMSInterfaceRevisions)
 	r.Get("/{id}/health", s.getPMSInterfaceHealth)
+	// RECOVERY BOUNDS BELONG TO THE CONNECTION THEY GOVERN, so they are addressed as part of it. They were
+	// reachable only at a site-level reconciliation route, which is both where an operator would never look
+	// and -- until the key gained the interface -- the honest shape of a setting that really was site-wide.
+	r.Get("/{id}/connection-settings", s.getInterfaceConnectionSettings)
+	r.Put("/{id}/connection-settings", s.updateInterfaceConnectionSettings)
 	// Creating an interface and authoring its configuration. Both were absent, which left the endpoint the
 	// connector dials -- and every timeout, bound and mode it reads -- unreachable from the product.
 	r.Post("/", s.createPMSInterface)
@@ -425,21 +431,53 @@ func (s *server) listPMSInterfaceRevisions(w http.ResponseWriter, r *http.Reques
 	// originally compared operators.id (uuid) to audit_log.actor_id (text), PostgreSQL rejected the
 	// statement outright, and because the error is discarded here the endpoint answered 200 with every
 	// version reading "not recorded". Nothing was down, so nothing complained. The query therefore lives
-	// in a named constant that TestPmsRevisionProvenanceSQLRunsAgainstProductionColumnTypes executes
-	// verbatim against production column types -- a silent failure needs a test that looks for silence.
+	// in a named constant that TestIntegration_API_PmsRevisionProvenanceSQLRunsAgainstProductionColumnTypes
+	// executes verbatim against production column types -- a silent failure needs a test that looks for
+	// silence. (The Integration_API_ prefix is load-bearing: the gate selects with `-run Integration`, so a
+	// test named anything else is compiled, reported as part of a passing package, and never executed.)
+	//
+	// FIXING THE CAST DID NOT FIX THE BLINDNESS. The next such failure would be just as silent, because
+	// "the audit trail says nothing" and "the audit trail could not be read" still rendered identically.
+	// So the outcome is now REPORTED rather than merely survived: the failure is logged with the error, and
+	// the response carries provenance_status so the screen, a diagnostic and an operator all see the
+	// difference. What does NOT change is that the configuration still arrives -- the read is still allowed
+	// to fail, it is just no longer allowed to fail quietly.
+	provenanceStatus := "AVAILABLE"
 	if len(out) > 0 {
-		prov, _ := s.db.Query(ctx, pmsRevisionProvenanceSQL)
-		if prov != nil {
+		prov, err := s.db.Query(ctx, pmsRevisionProvenanceSQL)
+		switch {
+		case err != nil:
+			provenanceStatus = "UNAVAILABLE"
+			slog.Error("pms revisions: provenance unreadable; configuration served without it",
+				"err", err, "interface", id)
+		default:
 			byID := map[string]pmsRevisionRow{}
+			var scanErr error
 			for prov.Next() {
 				var revID string
 				var e pmsRevisionRow
 				if err := prov.Scan(&revID, &e.AuthoredAt, &e.PublishedAt,
-					&e.ActorID, &e.ActorLabel, &e.ReasonCode); err == nil && revID != "" {
+					&e.ActorID, &e.ActorLabel, &e.ReasonCode); err != nil {
+					scanErr = err
+					continue
+				}
+				if revID != "" {
 					byID[revID] = e
 				}
 			}
+			// rows.Err() is the half that a `for rows.Next()` loop silently swallows: a connection dropped
+			// mid-iteration ends the loop exactly like a clean finish, leaving a PARTIAL map that would be
+			// served as though it were the whole truth.
+			if e := prov.Err(); e != nil {
+				scanErr = e
+			}
 			prov.Close()
+			if scanErr != nil {
+				provenanceStatus = "UNAVAILABLE"
+				slog.Error("pms revisions: provenance read failed mid-iteration; serving configuration only",
+					"err", scanErr, "interface", id)
+				break
+			}
 			for i := range out {
 				if m, ok := byID[out[i].ID]; ok {
 					out[i].AuthoredAt, out[i].PublishedAt = m.AuthoredAt, m.PublishedAt
@@ -449,7 +487,14 @@ func (s *server) listPMSInterfaceRevisions(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"revisions": out})
+	// A PARTIAL read is not served as a whole one. If the query succeeded but produced nothing for any
+	// version, that is still reported as available-and-empty rather than as a failure: a property whose
+	// audit log genuinely holds no entry for these versions is a real, honest state, and calling it broken
+	// would be the mirror-image mistake of the one being fixed.
+	writeJSON(w, http.StatusOK, map[string]any{
+		"revisions":         out,
+		"provenance_status": provenanceStatus,
+	})
 }
 
 type publishRevisionReq struct {
@@ -1230,4 +1275,112 @@ func (s *server) pmsSecretKeyring() (string, pmsd.Keyring) {
 		return "", nil
 	}
 	return keyID, pmsd.MapKeyring{keyID: kb}
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// CONNECTION RECOVERY, PER INTERFACE.
+//
+// These bounds say how ONE link retries after a drop and how long a problem may last before somebody is
+// told. They used to be keyed by site, which was true enough with one connection and became a trap the
+// moment there could be two: the page had to warn the operator, in as many words, that a setting shown on
+// this connection also governed the other one.
+//
+// The connector READS these and never writes them. An operator changes them here; pmsd picks the new values
+// up on its next reconnect cycle without a restart.
+// ---------------------------------------------------------------------------------------------------------
+
+type interfaceConnectionSettings struct {
+	BackoffMinMs         int   `json:"backoff_min_ms"`
+	BackoffMaxMs         int   `json:"backoff_max_ms"`
+	StableResetSeconds   int   `json:"stable_reset_seconds"`
+	LinkDownAlertSeconds int   `json:"link_down_alert_seconds"`
+	BlockedAfterRefusals int   `json:"blocked_after_refusals"`
+	ConfigVersion        int64 `json:"config_version"`
+	// IsDefault distinguishes "nobody has configured this connection" from "somebody configured it to the
+	// same numbers the defaults happen to use". The screen says so, because an operator deciding whether to
+	// touch a value is entitled to know whether anyone already did.
+	IsDefault bool `json:"is_default"`
+}
+
+// interfaceBelongsToSite refuses an id that is not this site's before it reaches the settings functions.
+// The definer function enforces this too -- that is the authority -- but answering here turns a 400 with a
+// database error string into a clean 404, and keeps one site from discovering another's interface ids by
+// watching which ones produce a different error.
+func (s *server) interfaceBelongsToSite(ctx context.Context, id string) bool {
+	var ok bool
+	if err := s.db.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM iam_v2.pms_interfaces
+		                 WHERE id = $3::uuid AND tenant_id = $1 AND site_id = $2)`,
+		s.tenantID, s.siteID, id).Scan(&ok); err != nil {
+		return false
+	}
+	return ok
+}
+
+func (s *server) getInterfaceConnectionSettings(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	id := chi.URLParam(r, "id")
+	if !s.interfaceBelongsToSite(ctx, id) {
+		jsonErr(w, http.StatusNotFound, "not_found", "no such PMS interface")
+		return
+	}
+	var c interfaceConnectionSettings
+	if err := s.db.QueryRow(ctx, `SELECT backoff_min_ms, backoff_max_ms, stable_reset_seconds,
+		       link_down_alert_seconds, blocked_after_refusals, config_version, is_default
+		  FROM iam_v2.pms_connection_settings_get($1::uuid,$2::uuid,$3::uuid)`,
+		s.tenantID, s.siteID, id).
+		Scan(&c.BackoffMinMs, &c.BackoffMaxMs, &c.StableResetSeconds,
+			&c.LinkDownAlertSeconds, &c.BlockedAfterRefusals, &c.ConfigVersion, &c.IsDefault); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
+// updateInterfaceConnectionSettings changes the bounds of ONE interface. Every field is optional so a
+// partial change touches nothing else, and the definer function records who, why, and what the values were
+// before -- against this interface, so a property with two connections gets two separate histories.
+func (s *server) updateInterfaceConnectionSettings(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	id := chi.URLParam(r, "id")
+	var in struct {
+		BackoffMinMs         *int   `json:"backoff_min_ms"`
+		BackoffMaxMs         *int   `json:"backoff_max_ms"`
+		StableResetSeconds   *int   `json:"stable_reset_seconds"`
+		LinkDownAlertSeconds *int   `json:"link_down_alert_seconds"`
+		BlockedAfterRefusals *int   `json:"blocked_after_refusals"`
+		Reason               string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+		return
+	}
+	if !s.interfaceBelongsToSite(ctx, id) {
+		jsonErr(w, http.StatusNotFound, "not_found", "no such PMS interface")
+		return
+	}
+	sess := sessFrom(r.Context())
+	operator := "unknown"
+	if sess != nil && strings.TrimSpace(sess.Email) != "" {
+		operator = sess.Email
+	} else if sess != nil {
+		operator = sess.OperatorID
+	}
+	var version int64
+	if err := s.db.QueryRow(ctx,
+		`SELECT iam_v2.pms_connection_settings_set($1::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7,$8,$9,$10)`,
+		s.tenantID, s.siteID, id, operator, in.Reason,
+		in.BackoffMinMs, in.BackoffMaxMs, in.StableResetSeconds,
+		in.LinkDownAlertSeconds, in.BlockedAfterRefusals).Scan(&version); err != nil {
+		jsonErr(w, http.StatusBadRequest, "settings_rejected", err.Error())
+		return
+	}
+	// The audit target is the INTERFACE. Recording these against a site-wide subject would make two
+	// connections' changes indistinguishable in the log, which is the same confusion the key just fixed.
+	s.audit(r, "pms_connection_settings.update", "pms_interface", id, map[string]any{
+		"config_version": version,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"config_version": version})
 }

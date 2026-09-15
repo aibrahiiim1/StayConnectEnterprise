@@ -1491,7 +1491,11 @@ export type PmsConnectionSettings = {
 
 export type RosterReconciliationState = {
   blockers: IntegrationBlocker[];
-  connection_settings: PmsConnectionSettings;
+  /**
+   * NO connection_settings HERE ANY MORE. The recovery bounds belong to one interface, so they are read
+   * from GET /pms-interfaces/{id}/connection-settings. Leaving a site-wide copy on this payload would let a
+   * screen show one connection's values while another connection ran on different ones.
+   */
   settings: {
     roster_trust_min: number;
     inventory_tolerance: number;

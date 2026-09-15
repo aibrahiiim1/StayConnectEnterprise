@@ -29,7 +29,7 @@ import (
 // This test therefore builds the PRODUCTION column types in a schema of its own and runs the real statement
 // text against them. It is about the shape of the data, not the plumbing: what it proves is that the query
 // composes with the types it will actually meet.
-func TestPmsRevisionProvenanceSQLRunsAgainstProductionColumnTypes(t *testing.T) {
+func TestIntegration_API_PmsRevisionProvenanceSQLRunsAgainstProductionColumnTypes(t *testing.T) {
 	p := testPool(t)
 	ctx := context.Background()
 

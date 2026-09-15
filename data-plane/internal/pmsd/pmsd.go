@@ -279,10 +279,13 @@ type Repo interface {
 	// PublishResyncGeneration advances published_resync_generation to g in ONE atomic row update (never a mass
 	// Event-row update) under the exact runtime-generation CAS, and marks the interface IN_SYNC + CONTINUOUS.
 	// g must not exceed the allocated seq. ErrStaleGeneration if ownership moved.
-	// LoadConnectionSettings reads the operator-set reconnect bounds for this interface's site. The
-	// connector READS these and never writes them: a daemon that could widen its own backoff is a daemon
-	// whose configuration means nothing.
-	LoadConnectionSettings(ctx context.Context, tenantID, siteID string) (ConnectionSettings, error)
+	// LoadConnectionSettings reads the operator-set reconnect bounds for THIS INTERFACE. The connector
+	// READS these and never writes them: a daemon that could widen its own backoff is a daemon whose
+	// configuration means nothing.
+	//
+	// The interface id is part of the key, not decoration. Two connections at one property are precisely
+	// where one link needs patient backoff and the other must not be slowed to match.
+	LoadConnectionSettings(ctx context.Context, tenantID, siteID, interfaceID string) (ConnectionSettings, error)
 	// RecordResyncCoverage stores what one completed sweep observed: distinct rooms named, the occupied
 	// records among them, and the vacant rooms seen but deliberately not admitted as departures.
 	RecordResyncCoverage(ctx context.Context, req ResyncScope, generation int64, rooms []string, roster, vacant, conflicts int) error

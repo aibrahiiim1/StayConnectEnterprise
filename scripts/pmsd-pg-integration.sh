@@ -225,6 +225,47 @@ fi
 docker exec "$C" psql -U postgres -d "$DB" -tAqc \
   "INSERT INTO public.schema_migrations(version) VALUES ('0068_the_hotel_decides_how_many_wrong_guesses_are_too_many') ON CONFLICT DO NOTHING;" >/dev/null
 
+# 0069 THROUGH 0079 -- THE RECONCILIATION AND RECOVERY CHAIN.
+#
+# This harness stopped at 0068 while eleven further migrations landed, so the gate's database was a schema
+# nobody runs. That is not a cosmetic gap: a suite that SELECTs a column the fixture lacks does not fail
+# loudly -- in Go it fails at rows.Scan, the row is dropped, and the caller gets an EMPTY RESULT that reads
+# as a confident "this site has none". The same class of drift produced eight of the sixteen failed gate
+# attempts in PRs #108/#109, and it cost this delivery two more: an endpoint coupled to newer objects
+# returned 500 in the gate and 200 everywhere else.
+#
+# Applied as a LIST rather than eleven copied blocks, because the copied block is what let the chain fall
+# behind -- each new migration needed sixteen lines of ceremony, so eventually one did not get them.
+for m in 0069_a_queue_that_gave_up_and_a_departure_nobody_could_place \
+         0070_a_departure_that_went_to_review_is_answered_by_the_pms \
+         0071_central_serves_this_appliance_for_licensing_only \
+         0072_reconcile_the_roster_against_the_mirror_by_reservation \
+         0073_a_sweep_records_what_it_saw_not_what_it_admitted \
+         0074_coverage_by_room_identity_and_a_sweep_that_contradicts_itself \
+         0075_a_building_does_not_shrink_because_the_feed_stopped_mentioning_it \
+         0076_retry_bounds_are_settings_and_a_blocker_is_visible \
+         0077_name_the_historical_exception_for_what_it_is \
+         0078_an_accepted_startup_data_gap_is_a_decision_not_a_repair \
+         0079_recovery_belongs_to_the_connection_not_the_building; do
+  if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+       < "$ROOT/data-plane/migrations/$m.up.sql" >/dev/null 2>&1; then
+    echo "$m FAILED TO APPLY -- deterministic, not a flake"
+    docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+      < "$ROOT/data-plane/migrations/$m.up.sql" 2>&1 | tail -15
+    exit 1
+  fi
+  docker exec "$C" psql -U postgres -d "$DB" -tAqc \
+    "INSERT INTO public.schema_migrations(version) VALUES ('$m') ON CONFLICT DO NOTHING;" >/dev/null
+done
+
+# THE KEY IS THE ASSERTION. 0079 re-keys the recovery bounds onto the interface; a chain that applied but
+# left the old two-column key would let the isolation suite pass against a schema where it cannot hold.
+key_cols="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.key_column_usage WHERE table_schema='iam_v2' AND constraint_name='pms_connection_settings_pkey';")"
+if [ "${key_cols:-0}" != "3" ]; then
+  echo "0079 NOT APPLIED (pms_connection_settings primary key has ${key_cols:-0} columns, expected 3)"
+  exit 1
+fi
+
 built="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"
 if [ "${built:-0}" -lt 40 ]; then echo "INFRA: SCHEMA BUILD FAILED (iam_v2 tables=$built)"; exit 2; fi
 runtime_cols="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.columns WHERE table_schema='iam_v2' AND table_name='pms_interface_runtime' AND column_name='pinned_secret_generation_id';")"

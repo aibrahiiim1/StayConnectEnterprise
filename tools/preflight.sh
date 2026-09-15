@@ -82,6 +82,35 @@ stage1() {
   # deliberately preserved as written and one that the real rule passes. A second copy of a rule is not a
   # second check -- it is a place for the two to diverge, and the copy is the one that will be wrong.
   bash tools/validate-transition-times.sh || FAILED=1
+
+  # NO COMPILED BINARY IS PART OF THE SOURCE.
+  #
+  # A 13 MB `edged.new` reached master through four green gates. A delivery commit ran `git add -A` while a
+  # build output sat in the repository root; the manifest dutifully listed it as a created file, every check
+  # passed, and the working copy was deleted afterwards -- which removed the only visible trace while the
+  # blob stayed in history. .gitignore now covers the names the build recipes produce, but a pattern list
+  # only catches the names somebody thought of, and `git add -A` is indiscriminate by design.
+  #
+  # So the rule is about CONTENT, not names: an executable image is recognised by its magic bytes. That is
+  # exact -- it cannot mistake a zip, a font or a screenshot for a binary -- and it needs no allowlist to
+  # maintain, which is the part that would otherwise rot.
+  python - <<'BINARY_PY' || FAILED=1
+import subprocess, sys
+MAGIC = {b"\x7fELF": "an ELF executable", b"MZ": "a Windows executable", b"\xca\xfe\xba\xbe": "a Mach-O binary"}
+bad = []
+files = subprocess.run(["git", "ls-files", "-z"], capture_output=True).stdout.split(b"\0")
+for raw in files:
+    if not raw:
+        continue
+    path = raw.decode("utf-8", "surrogateescape")
+    head = subprocess.run(["git", "show", f":{path}"], capture_output=True).stdout[:4]
+    for magic, what in MAGIC.items():
+        if head.startswith(magic):
+            bad.append(f"  FAIL: {path} is {what}; compiled output is not source")
+            break
+print(chr(10).join(bad) if bad else "  ok: no compiled executable is tracked in the repository")
+sys.exit(1 if bad else 0)
+BINARY_PY
   local rc=0
   python tools/project-state.py validate            || rc=1
   python tools/project-state.py check-generated     || rc=1
