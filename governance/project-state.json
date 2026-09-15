@@ -1590,7 +1590,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "f6a24e6cd5a8f0b5b75e86b43d69bd7b1b51f8aa",
     "base_note": "The master merge commit of PR #135. This delivery begins exactly where that one ended.",
-    "head": "aa120821",
+    "head": "1d1909a6",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
     "note": "Governance only. T0139 records all six appliance binaries rebuilt from f6a24e6c with the documented production tag and deployed to PRE-LIVE, the packaging defect closed with the appliance's own build=development -> build=production log as evidence, enforcement and guest state unchanged, and the deployed-head record replaced by a per-binary manifest that cannot drift silently."
   },
