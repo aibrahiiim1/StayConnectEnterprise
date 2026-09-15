@@ -1093,7 +1093,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0141",
+  "latest_transition_id": "T0142",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1586,13 +1586,13 @@
   },
   "current_delivery": {
     "kind": "POST_CLOSURE_CORRECTIONS",
-    "decision": "D59",
+    "decision": "D60",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "cb7c37f2a40b6c7c059f0d3474815f274d09986a",
-    "base_note": "The master merge commit of PR #137. This delivery begins exactly where that one ended.",
-    "head": "04f34cf9",
+    "base": "265e5c87cf9bd8eb3daec34b0917cc7e25c21c7c",
+    "base_note": "The master merge commit of PR #138. This delivery begins exactly where that one ended.",
+    "head": "6a4a9671",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
-    "note": "Governance only. T0141 records the licence wording and provisioning-gate fixes deployed to PRE-LIVE from cb7c37f2, the licence state unchanged and verified live (Active, grace_until 2026-12-31T23:59:59Z), the enforcement plane and guest state unchanged, and the appliance's own refusal of SCD_LICENSE_REQUIRED=false as live proof that licence enforcement cannot be disabled by configuration."
+    "note": "Checkout Grace verified end to end against live PRE-LIVE data: six real PMS checkouts each superseded exactly one entitlement, ran 3600s and terminated on TIME at window_ends_at exactly; one stay took eight checkout events and got one grace with no extension. No policy is published on this site, so the effective window is the built-in EMERGENCY_GRACE_V1 hour with a critical alert each time -- the contract's designed behaviour, and a Product-Owner decision to publish one. Two test gaps closed: restart persistence and no-extension-on-activity. No production code changed."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
