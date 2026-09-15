@@ -1590,7 +1590,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "265e5c87cf9bd8eb3daec34b0917cc7e25c21c7c",
     "base_note": "The master merge commit of PR #138. This delivery begins exactly where that one ended.",
-    "head": "b126c91d",
+    "head": "6a4a9671",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
     "note": "Checkout Grace verified end to end against live PRE-LIVE data: six real PMS checkouts each superseded exactly one entitlement, ran 3600s and terminated on TIME at window_ends_at exactly; one stay took eight checkout events and got one grace with no extension. No policy is published on this site, so the effective window is the built-in EMERGENCY_GRACE_V1 hour with a critical alert each time -- the contract's designed behaviour, and a Product-Owner decision to publish one. Two test gaps closed: restart persistence and no-extension-on-activity. No production code changed."
   },

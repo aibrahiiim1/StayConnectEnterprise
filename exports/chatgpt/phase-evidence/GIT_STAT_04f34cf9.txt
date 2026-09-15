@@ -1,4 +1,0 @@
-commit 04f34cf9983314f5f4f1262a399210e57c910194
-Date:   Tue Sep 15 21:55:31 2026 +0300
-
-    Governance: T0141 records the licence fixes deployed and verified on the appliance
