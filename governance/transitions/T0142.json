@@ -1,0 +1,65 @@
+{
+  "transition_id": "T0142",
+  "seq": 142,
+  "timestamp": "2026-09-15T20:33:00Z",
+  "timestamp_derivation": "After the Checkout Grace audit against live PRE-LIVE data, the full checkout integration suite run against a real PostgreSQL, and the two durability tests written and passing; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "CHECKOUT_GRACE_VERIFIED_END_TO_END_ON_LIVE_DATA_AND_TWO_TEST_GAPS_CLOSED",
+
+  "what_checkout_grace_is": "When the PMS checks a guest out, a guest who was still using the internet is not cut off mid-sentence. Their entitlement is superseded onto a hidden grace entitlement for a bounded window; their devices and sessions carry across without a logout; and when that window ends, access ends. It exists so that a departure recorded at the front desk does not drop somebody's video call in the lobby.",
+
+  "the_configured_duration_on_this_appliance": {
+    "published_policy": "NONE. iam_v2.site_checkout_grace_config holds ZERO rows and checkout_grace_policy_publications holds ZERO publications. No Checkout Grace policy has ever been published for this site.",
+    "effective_runtime_value": "The built-in emergency fallback, EMERGENCY_GRACE_V1: 3600 seconds (60 minutes), 5 Mbps down, 2 Mbps up, 500 MB, REJECT_NEW_DEVICE. Defined in data-plane/internal/grace/grace.go BuiltinEmergencyPolicy().",
+    "does_it_match_the_approved_configuration": "The emergency CONSTANTS match the approved contract exactly. docs/architecture/StayConnect-IAM-Phase0-Contract.md §7.1 specifies the fallback as '60 min, 5/2 Mbps, 500 MB, reject-new + grandfather', recorded as trigger='EMERGENCY_GRACE', is_emergency_grace=true, with a CHECKOUT_GRACE_CONFIG_INVALID critical alert -- 'never a skip, never an outage'. That is precisely what the appliance did, six times. What does NOT match is that the same contract calls Checkout Grace 'mandatory and site-level' with a configured hidden CHECKOUT_GRACE package: this site has no such policy, so every eligible checkout takes the emergency path and raises a critical alert.",
+    "this_is_a_product_owner_decision_not_a_code_defect": "Choosing how long THIS hotel's guests keep working after checkout is a commercial decision about the property, not an engineering one. Publishing a policy would mean inventing that number, which is exactly what this mission forbids. It is therefore reported, not chosen."
+  },
+
+  "live_evidence_from_real_pms_checkouts": {
+    "scope": "iam_v2.checkout_grace_audit over 2026-08-22 to 2026-09-15: 1276 decisions across real Protel departures. Nothing was fabricated; no PMS state was written and no checkout event was manufactured.",
+    "no_grace_1270": "1270 decisions were NO_GRACE / NO_ACTIVE_ENTITLEMENT_AT_CHECKOUT -- a guest who never used the internet, or whose entitlement had already ended. The contract requires that a checkout for such a guest creates nothing, and it created nothing.",
+    "emergency_grace_6": "6 decisions were EMERGENCY_GRACE / CONFIG_INVALID_EMERGENCY_FALLBACK, each raising the CHECKOUT_GRACE_CONFIG_INVALID alert. These are the only real cases where a guest held an active entitlement at the moment of checkout.",
+    "the_transition_each_time": "Each produced exactly one grace entitlement with is_emergency_grace=true; each superseded exactly one prior entitlement; each prior entitlement went to TERMINATED/CONVERTED at the same instant the grace activated; and a query for any stay with more than one grace entitlement returns nothing.",
+    "the_duration_each_time": "window_ends_at minus activated_at is 3600 seconds in all six, matching EMERGENCY_GRACE_V1 exactly.",
+    "the_ending_each_time": "All six are TERMINATED with terminal_reason TIME, and terminated_at equals window_ends_at EXACTLY -- to the second, in all six. Access ended when the window ended, not later.",
+    "idempotency_observed_in_production": "Stay 3ff98580 received EIGHT checkout decisions across lifecycle versions 1 through 8. The first granted grace at 05:31:40; the other seven returned NO_GRACE. The grace window was never extended: activated 05:31:40, window_ends 06:31:40, terminated 06:31:40, renewal_number 1.",
+    "financial": "Zero pms_postings, zero posting_attempts, zero posting_outbox rows and zero settlements on the whole appliance. Every purchase associated with those six stays carries amount_minor = 0. All six stays carry posting_allowed = false."
+  },
+
+  "what_the_live_data_could_not_prove_and_why": {
+    "session_rebinding": "In all six real cases the guest's session had already ENDED -- days earlier in most of them -- before the checkout arrived. They held an active entitlement but no live device, so zero sessions are bound to any of the six grace entitlements. The live data therefore proves the entitlement transition, the timing, the idempotency and the ending; it cannot prove that a LIVE session rebinds without a logout, because no live session existed at any of these checkouts.",
+    "how_that_was_proven_instead": "In the checkout package's integration suite against a real PostgreSQL, where the assertion is exact: after conversion the session row is still state='active' with ended IS NULL and its entitlement_id is the NEW grace entitlement, while session_entitlement_bindings closes the old binding (bound_until NOT NULL) and opens a new one (bound_until NULL). All 22 pre-existing tests were RUN, not merely read: every one passes.",
+    "not_manufactured": "A live session plus a real PMS checkout in the same window cannot be summoned without fabricating a checkout event, which the mission forbids. Waiting for the coincidence was not possible within the mission. This limitation is recorded rather than papered over."
+  },
+
+  "the_two_test_gaps_closed": {
+    "why_they_mattered": "The suite proved the conversion, the idempotency, the grandfathering and the boundary arithmetic, but never that the deadline SURVIVES. The two ways the promise breaks quietly are a restart handing the guest a fresh hour, and ordinary activity -- a reconnect, a second device, a new session -- nudging the deadline along. Neither shows up in a log; the guest simply stays online longer than the hotel agreed to.",
+    "restart": "TestIntegration_GraceWindowSurvivesRestartUnchanged creates a grace, records window_ends_at, then opens a genuinely NEW connection pool and Converter -- what a service restart produces -- and asserts the window is identical, that it is still measured from the original activation, and that a checkout replayed after the restart neither creates a second grace nor extends the first.",
+    "activity": "TestIntegration_ActivityDuringGraceDoesNotExtendIt opens a new device and session against the live grace entitlement and asserts the deadline is unmoved and that exactly one entitlement remains ACTIVE for the stay -- because a reconnect that quietly minted a second entitlement would extend access just as effectively as moving the clock, and be harder to see.",
+    "why_the_architecture_makes_this_hold": "The authorization predicate is `window_ends_at IS NULL OR window_ends_at > now()`, evaluated against the stored column on every check. The deadline lives in the row, not in a process. That is durable by construction -- and 'by construction' is exactly the claim that stops being true the first time somebody caches it for performance, which is why it is now asserted."
+  },
+
+  "no_defect_found_in_the_checkout_grace_behaviour_itself": "The transition, supersession, one-live-entitlement-per-subject, idempotency, timing and ending are all correct in live production data and in integration. The changes in this delivery are two new tests and this record. No production code was changed.",
+
+  "hotel_admin_visibility": "The six CHECKOUT_GRACE_CONFIG_INVALID alerts are OPEN in iam_v2.active_operational_alerts and reachable at Hotel Admin -> Alerts (route /operational-alerts, present and permission-gated). The Checkout grace page states plainly that a policy without a package 'would fall back to emergency grace on every checkout' and shows '(nothing published yet)'. Visibility is adequate; nothing was changed.",
+
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-15: verify Checkout Grace end to end -- what happens to an already-authorized guest at PMS checkout, how long access continues, and exactly what happens when the grace period ends -- fix any defect found, and complete delivery through PRE-LIVE verification.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE.",
+
+  "open_product_owner_decision": {
+    "decision_required": "Whether to publish a Checkout Grace policy for this site, and with what duration, bandwidth, data allowance and device limit.",
+    "why_it_is_yours": "It is a commercial choice about how long departing guests keep working, not an engineering default. Picking a number here would be inventing hotel policy.",
+    "what_happens_until_then": "Nothing breaks. Every eligible checkout gets the built-in 60-minute emergency grace and raises a critical alert, which is the contract's designed behaviour -- never a skip, never an outage. The cost of leaving it is six (and counting) OPEN alerts and a grace window nobody chose."
+  }
+}
