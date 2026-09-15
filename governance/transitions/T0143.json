@@ -1,0 +1,66 @@
+{
+  "transition_id": "T0143",
+  "seq": 143,
+  "timestamp": "2026-09-15T21:23:00Z",
+  "timestamp_derivation": "After the merged master was built, deployed to PRE-LIVE, restarted, verified against the provenance manifest and the deployment-caused resync settled; before the author timestamp of the commit that introduces this receipt. After the merge commit 3802ece9 (2026-09-15T21:18:25Z) it describes. Per T0091, in the order T0108 requires.",
+  "record_type": "PRE_LIVE_CHECKOUT_GRACE_DELIVERY_DEPLOYED_AND_VERIFIED",
+
+  "merge": {
+    "pull_request": 139,
+    "merge_commit": "3802ece931a7132bf138692b96ac8075e4afbbb5",
+    "gates": "All four required gates green on the exact head c0e67a78dcd8 before the merge, first attempt. Merged through the protected process.",
+    "preflight": "PASS on all seven default stages."
+  },
+
+  "what_was_deployed_and_why_it_is_behaviour_neutral": {
+    "content": "One file: data-plane/internal/checkout/grace_window_durability_integration_test.go, plus the T0142 record. NO production code changed in this delivery.",
+    "why_deploy_at_all": "So the recorded deployed head keeps describing the binaries. T0139 established that standard after four binaries were found describing nothing, and leaving DEPLOYED_SHA at cb7c37f2 while master moved would reintroduce exactly that drift. The rebuild is deliberate and its only effect is the embedded provenance stamp.",
+    "digests": {
+      "scd": "df04b576ed7c7cc2...",
+      "edged": "0db5fb10e7d8d15d...",
+      "pmsd": "e8c8dedcaa176f8e...",
+      "portald": "32cda8080395f398...",
+      "netd": "23f6fb967abc527b...",
+      "acctd": "b9f4f2fd268f82c0..."
+    },
+    "provenance": "APPLIANCE_BUILD = PASS: every binary reports vcs.revision=3802ece9, modified=false, tags=stayconnect_production. DEPLOYED_SHA updated and DEPLOYED_BINARIES.txt rewritten and re-verified in place with sha256sum -c: all six OK.",
+    "rollback": "/opt/stayconnect/rollback/approved-3802ece9/ holds .prev for all six -- the cb7c37f2 set recorded in T0141."
+  },
+
+  "checkout_grace_state_unchanged_by_the_deployment": {
+    "before_and_after": "1276 checkout-grace decisions, 6 grace entitlements, 6 OPEN CHECKOUT_GRACE_CONFIG_INVALID alerts -- identical before and after.",
+    "windows_intact": "All 6 grace entitlements still show window_ends_at minus activated_at of exactly 3600 seconds after the restart. A deployment that had re-based or extended a historical grace window would show here.",
+    "services": "All seven active. Zero errors across the six daemons since the deployment, excluding the two expected lines: scd's standing refusal of SCD_LICENSE_REQUIRED=false on a production build, and pmsd's CONTEXT_CANCELED on the restart itself."
+  },
+
+  "pms_reconnect_caused_by_the_deployment": {
+    "what": "Restarting pmsd dropped and re-established the PMS link; the connector requested its own resync, as it does after any reconnect. No operator command was issued and no manual Full Resync occurred.",
+    "outcome": "Settled IN_SYNC/COMPLETE on generation 287: 587 rooms named, 479 roster records, ZERO conflicting observations."
+  },
+
+  "the_finding_this_delivery_records_stands": "Checkout Grace itself needed no fix. What remains open is a Product-Owner decision, carried in T0142: this site has no published Checkout Grace policy, so every eligible checkout takes the built-in 60-minute emergency fallback and raises a critical alert -- the contract's designed behaviour for an invalid configuration, and not something an agent may choose a number for.",
+
+  "constraints_observed": {
+    "no_pms_writes": "Nothing was written to the PMS. No checkout event was manufactured and no stay was fabricated. Every live figure in T0142 and here was read from what the appliance recorded on its own.",
+    "financial": "No posting, payment, reversal, settlement or financial egress. The appliance still shows zero postings, attempts, outbox rows and settlements.",
+    "guest_state": "No guest, stay, entitlement or session row was altered. The work ran with zero open guest sessions, checked before starting.",
+    "schema": "No migration.",
+    "retired_host": "172.21.60.23 neither contacted nor modified.",
+    "gates": "No test or gate weakened; two integration tests added."
+  },
+
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-15: verify Checkout Grace end to end, fix any defect found, and complete delivery through PRE-LIVE verification.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}
