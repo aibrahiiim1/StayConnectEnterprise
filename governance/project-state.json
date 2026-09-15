@@ -458,8 +458,8 @@
     "reboot_occurred": true,
     "rollback_rehearsal_occurred": true,
     "corrected_software_deployed": true,
-    "deployed_head_on_appliance": "f6a24e6cd5a8f0b5b75e86b43d69bd7b1b51f8aa",
-    "deployed_head_note": "PRE-LIVE 172.21.60.25. EVERY service binary is built from this one commit by scripts/build-appliance-binaries.sh -- golang:1.25.12, -trimpath, CGO_ENABLED=0, GOOS=linux, GOARCH=amd64, -tags stayconnect_production, no -ldflags. Each digest was recorded on the build host, re-checked as received on the appliance and re-checked after installation; all three agree for all six, and /opt/stayconnect/DEPLOYED_BINARIES.txt on the appliance records them for re-verification with sha256sum -c. This field no longer needs a caveat about which binaries it covers: it covers all of them, and the appliance carries a per-binary manifest so it cannot silently stop doing so again.",
+    "deployed_head_on_appliance": "cb7c37f2a40b6c7c059f0d3474815f274d09986a",
+    "deployed_head_note": "PRE-LIVE 172.21.60.25. Every service binary and the Hotel Admin bundle are built from this one commit by scripts/build-appliance-binaries.sh with the pinned toolchain and -tags stayconnect_production. Each digest was recorded on the build host, re-checked as received and re-checked after installation; /opt/stayconnect/DEPLOYED_BINARIES.txt records them and was re-verified in place with sha256sum -c.",
     "live_increment9_revalidated": true,
     "live_increment9_revalidated_on": "2026-08-11",
     "live_increment9_revalidation_verdicts": {
@@ -918,15 +918,15 @@
     "migration_runner_factory_clean": "CLOSED (T0118). scripts/edge-migrate.sh refused every factory-clean appliance: its baseline precondition read the ledger for 0009_phase2_commerce, a row that on a baseline install correctly never exists because 0001..0049 are never applied individually. It now accepts that install shape on positive evidence - no 0009 row, no ledger row below 0010, and 0009's own writers present in the schema - while still refusing an upgrade-path install with a 0009 gap. scripts/edge-migrate-selftest.sh proves both directions and re-proves that checksum, target identity, acknowledgement, superuser refusal, destructive-ledger-rights refusal, ledger structure, re-apply idempotence and the advisory lock remain fail-closed.",
     "pms_published_generation": 282,
     "pms_published_generation_note": "THREE DIFFERENT COUNTERS HAVE ALL BEEN ABBREVIATED 'gen' AND MUST NOT BE CONFLATED. pms_interface_runtime.resync_generation_seq / published_resync_generation is the RESYNC generation, bumped once per resync cycle: 282, published 2026-09-15T07:29:54Z by the resync the pmsd restart caused. pms_interface_runtime.runtime_generation is a monotonic runtime-row counter bumped on every state write, which is why it is orders of magnitude larger: 74434. pms_interface_revisions.revision_no is the pinned Interface REVISION: 3, unchanged. The move to 282 followed the pmsd restart of 2026-09-15T07:29:16Z: the connector reconnected and requested its own resync, with no operator command and no configuration change; resync_command_id is NULL. HISTORICAL (do not read as current): 209 was the value recorded at the migration-0065 closure, and the superseded generations 206, 207 and 208 belong to the 2026-09-08T11:45Z restart sequence.",
-    "deployed_runtime_head": "f6a24e6cd5a8f0b5b75e86b43d69bd7b1b51f8aa",
+    "deployed_runtime_head": "cb7c37f2a40b6c7c059f0d3474815f274d09986a",
     "deployed_runtime_services": {
-      "_note": "Measured on the appliance 2026-09-15 after deployment and verified with sha256sum -c against /opt/stayconnect/DEPLOYED_BINARIES.txt. Every binary reports vcs.revision=f6a24e6c, vcs.modified=false and -tags=stayconnect_production when read with `go version -m`.",
-      "scd": "483a2053454e7da4ed5e977ca851977066e880bc9c67c0e77730d73b41bf26d1  (f6a24e6c, tags=stayconnect_production)",
-      "edged": "5ae9d72211bcaeffb7bd426de341dbf7635e2cdc4eada215affcf6720009d84d  (f6a24e6c, tags=stayconnect_production)",
-      "pmsd": "a1e613bd5d4cf7ba622ab8d0a8f79b794c5e95026707e87b08c97913a77aa404  (f6a24e6c, tags=stayconnect_production)",
-      "portald": "bec1f097d91a09712d2c6f2e8431b526f66c7391ae6e6f028c6e251af7ccf900  (f6a24e6c, tags=stayconnect_production)",
-      "netd": "76b255b8a6b64813d781e87b5cc537a710da9cfa0b74eaaedad3be4403a966f4  (f6a24e6c, tags=stayconnect_production)",
-      "acctd": "959936775bbbecb828915e9d9e57e09249ef5fa985fcaf72f5359896f166fdc8  (f6a24e6c, tags=stayconnect_production)"
+      "_note": "Measured on the appliance after the deployment of 2026-09-15 and verified with sha256sum -c. Every binary reports vcs.revision=cb7c37f2, vcs.modified=false and -tags=stayconnect_production.",
+      "scd": "cbcddcebda61c0fc8607b6033ead8bb368edbb8379b4c58ebc093b4a3027df2b  (cb7c37f2, tags=stayconnect_production)",
+      "edged": "36f67e243fb92570d8db316a5ee4112cf40808aaec299814fc2001b78737c1e8  (cb7c37f2, tags=stayconnect_production)",
+      "pmsd": "7e5d8b8419440d7d6611256670dfa76005cd7bd87916b38cb5122314d4cd53c2  (cb7c37f2, tags=stayconnect_production)",
+      "portald": "29273a2dafec6de8b171462805cdd53b679ab27be3de4a9ac4a3aefd86e13974  (cb7c37f2, tags=stayconnect_production)",
+      "netd": "9f97734e3f87551408c8009393423d5309af353d90a363a07024a3d527875fab  (cb7c37f2, tags=stayconnect_production)",
+      "acctd": "c67c39d32529b0eab064f98b5e849c07097f6e3ef82ec6ac55d902037705cba0  (cb7c37f2, tags=stayconnect_production)"
     },
     "entitlement_usage_invariant": "HOLDS FOR EVERY ENTITLEMENT, including terminated ones (migration 0062). Attribution follows the half-open binding interval PLUS the closing instant itself when no other binding for that session covers it. That extra arm is reachable only at a terminal boundary, where the crossing sample would otherwise belong to nothing; at a Phase-5 rebinding the successor binding always covers the instant, so the arm cannot fire and no sample is counted twice. The half-open bound is unchanged and iam_v2.p6_data_crossing - the enforcement authority - was not touched.",
     "schema_head": "0079_recovery_belongs_to_the_connection_not_the_building",
@@ -1093,7 +1093,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0140",
+  "latest_transition_id": "T0141",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1586,13 +1586,13 @@
   },
   "current_delivery": {
     "kind": "POST_CLOSURE_CORRECTIONS",
-    "decision": "D58",
+    "decision": "D59",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "cdca4d30e2aebad3c4dfac2307c8d750c203199c",
-    "base_note": "The master merge commit of PR #136. This delivery begins exactly where that one ended.",
-    "head": "0ecb1911",
+    "base": "cb7c37f2a40b6c7c059f0d3474815f274d09986a",
+    "base_note": "The master merge commit of PR #137. This delivery begins exactly where that one ended.",
+    "head": "04f34cf9",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
-    "note": "Licence Grace Period verified end to end against the v3 model, with the exact boundary instants, renewal-during-grace, restart persistence, anti-rollback and clock-rollback proven by signed-licence tests at controlled times. Two defects fixed: the Dashboard blamed cloud staleness for a lapsed licence and promised a Restricted state that v3 does not have; and the provisioning gate omitted 'unlicensed', now pinned against the licence model itself. No migration and no change to Grace Period semantics."
+    "note": "Governance only. T0141 records the licence wording and provisioning-gate fixes deployed to PRE-LIVE from cb7c37f2, the licence state unchanged and verified live (Active, grace_until 2026-12-31T23:59:59Z), the enforcement plane and guest state unchanged, and the appliance's own refusal of SCD_LICENSE_REQUIRED=false as live proof that licence enforcement cannot be disabled by configuration."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
