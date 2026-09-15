@@ -1590,7 +1590,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "af65e18ae7aa1fe885b9e6e6ed38456745682621",
     "base_note": "The master merge commit of PR #140. This delivery begins exactly where that one ended.",
-    "head": "PENDING",
+    "head": "d98da735",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
     "note": "Hotel Admin now states which Checkout Grace policy is actually in force -- published or the emergency fallback nobody chose -- with its real terms, how often the fallback has fired, and that publishing affects future checkouts only. The room-reuse product decision is proven by a deterministic matrix against a real PostgreSQL: an arriving guest cannot move, shorten, end or inherit a departing guest's grace, both are live at once in the same room, a cross-stay checkout event is refused as a boundary, and a GI can never date a grace. No migration."
   },
