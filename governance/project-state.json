@@ -1590,7 +1590,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "cb7c37f2a40b6c7c059f0d3474815f274d09986a",
     "base_note": "The master merge commit of PR #137. This delivery begins exactly where that one ended.",
-    "head": "PENDING",
+    "head": "04f34cf9",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
     "note": "Governance only. T0141 records the licence wording and provisioning-gate fixes deployed to PRE-LIVE from cb7c37f2, the licence state unchanged and verified live (Active, grace_until 2026-12-31T23:59:59Z), the enforcement plane and guest state unchanged, and the appliance's own refusal of SCD_LICENSE_REQUIRED=false as live proof that licence enforcement cannot be disabled by configuration."
   },
