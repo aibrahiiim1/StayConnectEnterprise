@@ -1,0 +1,87 @@
+{
+  "transition_id": "T0137",
+  "seq": 137,
+  "timestamp": "2026-09-15T07:31:00Z",
+  "timestamp_derivation": "After migration 0079 was applied under lock to PRE-LIVE, the new edged/pmsd/UI were installed, the deployment-caused resync settled and every verification below was read back; before the author timestamp of the commit that introduces this receipt. After the merge commit db9801f4 (2026-09-15T07:14Z) it describes. Per T0091, in the order T0108 requires.",
+  "record_type": "PRE_LIVE_PER_INTERFACE_RECOVERY_MIGRATED_DEPLOYED_AND_VERIFIED",
+
+  "merge": {
+    "pull_request": 133,
+    "merge_commit": "db9801f429c310795401c4863bc8d53a80e9b5e0",
+    "gates": "All four required gates green on the exact head a1eafe947848 before the merge. Merged through the protected process; nothing dispatched, bypassed or inherited.",
+    "two_gate_failures_fixed_not_worked_around": "The first attempt failed phase3-full-software-gate and phase5-post-stay-transfer-gate. Phase 3: 0079 changes the schema, so the factory-clean production baseline no longer agreed with the upgrade path's end state -- regenerated, and re-verified at 9500 catalog facts IDENTICAL to the upgrade path. Phase 5: that gate runs ./cmd/edged with NO -run filter, so the new isolation suite executed against a chain that stopped at 0071 and failed on a missing relation. Chain extended to 0079 and its base-table count corrected from 77 to 86. Both were reproduced and fixed locally with the same harnesses CI runs."
+  },
+
+  "migration": {
+    "version": "0079_recovery_belongs_to_the_connection_not_the_building",
+    "sha256": "14589e00f8da2e587543140f341cc16ff03b499c791385b0c0a7123adca2d7c1",
+    "applied_via": "scripts/edge-migrate.sh with the complete positive identity: --only, --expect-db stayconnect_site, --target-kind live-site, --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION, --apply-role iam_v2_owner, --expect-sha256. Result EDGE_MIGRATE_OK applied=1 skipped=0, under advisory lock -3046184577138748259.",
+    "ledger": "public.schema_migrations carries exactly one 0079 row.",
+    "rehearsed_first": "0079 had already been applied to this same database inside a rolled-back transaction, twice, before the deployment. That rehearsal is what found the duplicate-key ordering defect and the append-only violation; both were fixed before anything was committed."
+  },
+
+  "values_preserved": {
+    "before": "One site-wide row: 500 / 30000 / 60 / 900 / 3 at config_version 2.",
+    "after": "One row keyed to the 'Protel' interface: 500 / 30000 / 60 / 900 / 3 at config_version 2. Identical.",
+    "is_default_false": "The accessor reports is_default=false -- the operator's configured row survived AS CONFIGURED. Had the migration reset it, the row would have vanished and the accessor would have answered with defaults and is_default=true. Those two states carry the same five numbers and opposite meanings, which is why this is checked rather than the numbers alone.",
+    "invariants": "Primary key has three columns; zero site-wide leftovers; the two pre-existing audit rows are untouched and keep their NULL interface, because a NULL interface is exactly what they were.",
+    "old_accessor_removed": "Zero two-argument pms_connection_settings_get definitions remain. A caller anybody forgot to update now fails loudly instead of silently reading some other connection's bounds."
+  },
+
+  "deployment": {
+    "target": "172.21.60.25 (PRE-LIVE). 172.21.60.23 was neither contacted nor modified.",
+    "built_in": "The designated workstation build environment, golang:1.25.12 and node:20 containers. Nothing was built on the appliance or on Central.",
+    "edged": "sha256 7509f6af5d0eada4530ce6a0b004fb0c03c0d10954b0613a9c00561294fb281e",
+    "pmsd": "sha256 ff4dadcb3d80d053aefe7c1887da1d1df7af8b8341588269845176981d5cb47f",
+    "hotel_admin_ui": "release 20260915-072927, BUILD_ID uWh2rOqFKqr0e3k95vUD3, bundle sha256 ad04cc7002032d76e2c0cfda8e4f37fa7fbcfaffbc6913943f388cfb84690f5d, installed by the supported deploy-hotel-admin.sh two-phase script; /opt/stayconnect/hotel-admin resolves to it and its manifest reads source_commit db9801f429c3 (clean).",
+    "order": "Migration first, then binaries, then UI. The window between them was verified safe beforehand: the old pmsd fail-softs on an unreadable settings read, warns once and keeps its compiled defaults -- which are exactly the values in force, so nothing changed operationally during it.",
+    "rollback_points": "/opt/stayconnect/rollback/approved-db9801f4/ holds edged.prev (520f57f8...), pmsd.prev (d380288a...) and ui-release.prev (the 20260914-222943 release). Rollback is a file copy plus a restart for the daemons and a symlink switch for the UI. The migration's own down file exists and states honestly that its direction loses information, collapsing N interfaces to one by taking the most patient value of each field.",
+    "disk": "5.3 GB free on /opt before the deployment."
+  },
+
+  "reconnect_and_resync_caused_by_the_deployment": {
+    "what_happened": "Restarting pmsd to install the new binary necessarily dropped and re-established the PMS link. It reconnected at 07:29:16Z (WORKER_CONNECTED) and the connector immediately requested its own resync (WORKER_RESYNC_REQUESTED) -- its normal recovery behaviour after any reconnect, not an operator action.",
+    "outcome": "RESYNC_IN_PROGRESS/RECEIVING settled to IN_SYNC/COMPLETE at 07:29:54Z, publishing generation 282: 587 rooms named, 481 roster records, 108 vacant, ZERO conflicting observations -- identical room coverage to generation 281 before the restart.",
+    "guest_state": "481 in-house stays before and after. Zero unresolved review events before and after.",
+    "no_manual_action": "No Full Resync was issued by an operator or by me. This was read-only synchronisation the connector performed for itself, and it is reported here because the mission required any deployment-caused reconnect to be verified and reported rather than hidden.",
+    "pmsd_reads_its_own_bounds": "Zero 'reconnect bounds unreadable' warnings since the restart -- the new binary resolves the per-interface accessor successfully."
+  },
+
+  "service_health": {
+    "before": "All seven active. PMS CONNECTED / CONTINUOUS / IN_SYNC / COMPLETE, generation 281, 481 in-house.",
+    "after": "All seven active: scd, edged, pmsd, portald, netd, acctd, hotel-admin. PMS CONNECTED / CONTINUOUS / IN_SYNC / COMPLETE, generation 282, 481 in-house. Hotel Admin answers on :3100. Zero integration blockers."
+  },
+
+  "served_ui_verified": {
+    "present": "'These apply to this connection only', 'keeps its own values and is unaffected', 'could not be read just now', 'fault to report', 'nobody has changed this one'.",
+    "removed": "'apply to the whole site' and 'changing a value here changes it for all of them' are gone from the served bundle. That sentence was accurate about a storage model that no longer exists; left behind it would have been worse than the original defect -- a false warning discouraging an operator from tuning a link they own."
+  },
+
+  "what_the_live_probe_could_not_prove": {
+    "claim_not_made": "The removal of the old site-wide PUT /pms-roster-reconciliation/connection-settings route is NOT evidenced by live probing. Authentication runs before routing on this service, so a deliberately nonexistent path returns 401 exactly as the removed one does -- the probe is uninformative and is recorded as such rather than presented as proof.",
+    "what_does_evidence_it": "The merged source, and the Phase-5 gate which compiles and runs every cmd/edged suite against a real database."
+  },
+
+  "constraints_observed": {
+    "pms_configuration": "No change to endpoint, credentials, routing or financial settings. The configuration revisions are untouched.",
+    "financial": "No posting, payment, reversal, settlement or financial egress.",
+    "guest_data": "No guest or stay state was altered. No fake PMS state was generated.",
+    "permissions_and_audit": "Unchanged; the recovery-settings audit target became the interface, which is a refinement of what is recorded, not a relaxation of who may record it.",
+    "gates": "No test or gate weakened. Two gate chains were extended to cover the current schema, three tests were renamed so the gate's -run filter actually selects them, and one new suite was added."
+  },
+
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-15: make Connection Recovery independent per PMS interface including the required migration, preserve the currently effective values, make provenance-query failures observable, correct the master/deployed difference and the edged.new artifact, and deploy the final verified master to PRE-LIVE 172.21.60.25 including the directly necessary restart, verification, retry and rollback actions.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}
