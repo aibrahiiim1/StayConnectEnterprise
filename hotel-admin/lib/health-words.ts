@@ -241,11 +241,24 @@ export function describeLicense(state: string | null | undefined, installed: boo
     case "Active":
       return { headline: "Active", summary: "This appliance is licensed and fully enabled.", tone: "ok" };
     case "GracePeriod":
+      // THIS DESCRIBED THE WRONG THING ENTIRELY, and it is the dashboard -- the first screen anyone opens.
+      //
+      // It said the licence "has not been confirmed with the cloud recently" and that the appliance was
+      // "running on its offline grace allowance". Neither is what this state means. Grace is entered because
+      // the licence's own end date passed; losing the cloud does not change the licence state at all (it
+      // raises a separate staleness flag, shown on the Cloud connection page). An operator reading the old
+      // text would have concluded their internet was flaky and done nothing, while the thing that had
+      // actually happened was their licence expiring with a fixed number of days left to renew it.
+      //
+      // It also promised the appliance "will restrict itself", which describes a Restricted state that the
+      // current licence model does not have: after grace the appliance goes to Expired and stops
+      // authorizing NEW guests.
       return {
         headline: "Grace period",
         summary:
-          "The licence has not been confirmed with the cloud recently, so the appliance is running on its " +
-          "offline grace allowance. It keeps working; it will restrict itself if the grace runs out.",
+          "The licence end date has passed and the appliance is running on its renewal grace period. " +
+          "Guests keep signing in exactly as before. When the grace period ends, new sign-ins stop; " +
+          "sessions already in progress are not cut off. See the Licence page for the exact end date.",
         tone: "warn",
       };
     case "Suspended":
@@ -257,9 +270,14 @@ export function describeLicense(state: string | null | undefined, installed: boo
         tone: "warn",
       };
     case "Expired":
+      // "The licence end date has passed" was true of the GRACE state too, so on its own it did not
+      // distinguish the state where guests still sign in from the one where they no longer can. It also left
+      // the most reassuring fact unsaid: guests already online are not thrown off.
       return {
         headline: "Expired",
-        summary: "The licence end date has passed. Renew it to restore full operation.",
+        summary:
+          "The licence end date and its grace period have both passed. New guest sign-ins are now refused; " +
+          "guests already online are not disconnected. Renew to restore service.",
         tone: "err",
       };
     case "Revoked":

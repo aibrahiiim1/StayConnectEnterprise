@@ -1,0 +1,78 @@
+{
+  "transition_id": "T0140",
+  "seq": 140,
+  "timestamp": "2026-09-15T16:01:00Z",
+  "timestamp_derivation": "After the licence lifecycle was audited end to end, the boundary/renewal/rollback tests written and passing, the two defects fixed, and the live appliance state read back; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "LICENCE_GRACE_PERIOD_VERIFIED_AND_TWO_DEFECTS_CORRECTED",
+  "what_grace_period_is": "The window after a licence's end date during which the hotel keeps operating exactly as before, so that a renewal issued late -- or issued while the appliance was offline -- never interrupts guests. It is a property of the signed licence, not of connectivity.",
+  "the_licence_actually_installed_on_172_21_60_25": {
+    "license_id": "2ffdb6ff-07f7-49d7-b6be-72d2566c8856",
+    "schema_version": 3,
+    "license_version": 1,
+    "valid_from": "2026-08-21T15:21:45Z",
+    "valid_until": "2026-12-01T23:59:59Z",
+    "grace_period_days": 30,
+    "grace_ends_at": "2026-12-31T23:59:59Z",
+    "offline_grace_days": 30,
+    "state_today": "Active, read live from the running appliance; 77 days before expiry.",
+    "read_how": "The signed payload was decoded from /etc/stayconnect/license/current.json, and the same values were read back from the RUNNING scd over its unix socket at /v1/license/status. Both agree, and grace_until matches valid_until + 30 days exactly."
+  },
+  "how_the_lifecycle_was_proven": {
+    "why_not_on_the_appliance": "The boundaries are 77 and 107 days away. Reaching them on .25 would have meant moving the appliance clock, which manufactures a result rather than observing one and is explicitly forbidden. The timeline is therefore proven where time is an argument rather than a fact: signed documents evaluated at chosen instants, in the licence package's own tests.",
+    "what_the_new_tests_pin": [
+      "The exact instants, which the previous timeline test never asked about: AT valid_until is still Active, one second later is GracePeriod, AT grace_ends_at is still GracePeriod, one second later is Expired. An off-by-one here is a hotel going dark a second early or authorising a day late.",
+      "The same boundaries expressed as what a hotel may DO -- new sessions, provisioning, entitled features -- evaluated from the real document rather than from the state enum, so a correct switch over a wrong state cannot pass.",
+      "Renewal arriving DURING grace through the real Store: back to Active, and still Active after a fresh Store over the same directory, which is what a reboot produces. The superseded document is then refused.",
+      "A clock wound back from Expired into the grace window stays Expired and reports ClockRollback; an hour of ordinary NTP correction does not raise that flag."
+    ],
+    "live_cross_check": "The running appliance independently reports state=Active, grace_period_days=30, grace_until=2026-12-31T23:59:59Z and restricted_until equal to grace_until -- the last of which is the v3 model's signature, since v3 has no Restricted window."
+  },
+  "defect_1_the_dashboard_blamed_the_network_for_a_lapsed_licence": {
+    "where": "hotel-admin/lib/health-words.ts, describeLicense(\"GracePeriod\"), rendered on the Dashboard -- the first screen an operator opens.",
+    "it_said": "\"The licence has not been confirmed with the cloud recently, so the appliance is running on its offline grace allowance. It keeps working; it will restrict itself if the grace runs out.\"",
+    "why_that_is_wrong": "Three ways. Grace is entered because valid_until passed, not because the cloud was unreachable -- cloud silence raises CloudStale, a warning flag that never changes state. It named offline_grace_days, which governs that flag, not the renewal window. And it promised a Restricted state that the v3 model does not have; after grace the appliance goes to Expired.",
+    "why_it_mattered": "An operator reading it would have gone looking at their internet connection while a renewal deadline ran down. The Licence page said the opposite and correct thing on the same appliance, so the two surfaces contradicted each other.",
+    "fixed_to": "\"The licence end date has passed and the appliance is running on its renewal grace period. Guests keep signing in exactly as before. When the grace period ends, new sign-ins stop; sessions already in progress are not cut off.\"",
+    "expired_wording_also_corrected": "It read \"The licence end date has passed\" -- equally true of Grace, so it did not distinguish the state where guests still get online from the one where they do not. It now says new sign-ins are refused and that guests already online are NOT disconnected, which is the fact that stops a worried operator rebooting the appliance and making things worse.",
+    "cloud_staleness_not_lost": "It has its own row on the Cloud connection page (\"Cloud validation stale\"), so removing the claim from the licence-state wording removes a falsehood, not a signal."
+  },
+  "defect_2_an_unlicensed_appliance_could_still_provision": {
+    "where": "data-plane/cmd/edged/resources_helpers.go, licenseAllowsProvisioning.",
+    "what": "The switch blocked Restricted, Expired, Suspended and Revoked but NOT \"unlicensed\" -- the state meaning no valid signed licence is installed at all. It fell through to the permissive default.",
+    "why_it_was_quiet": "The switch was a second copy of State.AllowsProvisioning(), written out by hand instead of consulting the model. \"unlicensed\" is the only state string in lower case, so the omission did not look out of place beside the others.",
+    "actual_exposure_stated_precisely": "NO GUEST WAS EVER AUTHORISED BY THIS. scd's own gate fails closed on every guest auth path and reads the licence model directly. What the gap allowed was an operator preparing guest access plans and voucher batches on an appliance with no licence -- work that could not then be used.",
+    "fixed_how": "The decision is extracted into stateAllowsProvisioning(state string), and a test now compares it against State.AllowsProvisioning() for EVERY state the model defines, iterating the model's own values rather than a re-typed list. Re-typing the list is how the first copy drifted.",
+    "fail_open_preserved_and_pinned": "An unreachable scd or an unparseable state still ALLOWS, and that is now asserted deliberately. It guards admin writes, not guest access; making it fail closed would take an appliance's admin surface down every time scd restarts, while changing nothing about guest safety."
+  },
+  "what_was_verified_and_found_correct": {
+    "enforcement_covers_every_guest_path": "scd's licenseGate is called by voucher/credential sign-in, the IAM-v2 session activation, room sign-in, email and SMS OTP, and social login. It fails CLOSED on a missing licence manager.",
+    "existing_sessions_are_never_cut_off_by_a_licence_state": "There is no licence-driven session reaper. The legacy one was removed with the schema it swept; session end is entitlement exhaustion, owned by internal/enforce. A state change refuses NEW authorization and touches nothing already running.",
+    "state_survives_restart": "The on-disk state.json carries the accepted licence id, fingerprint, highest version and high-water mark, and a fresh Store over the same directory reproduces the state. Proven in test and consistent with the live file.",
+    "anti_rollback": "A lower version, a different document at the same version, an older issued_at and a revoked id are all refused even with a valid signature and unexpired dates.",
+    "hotel_admin_dates": "The Licence page shows valid_until, grace period in days and grace_ends_at from the same fields scd reports."
+  },
+  "no_schema_change": "No migration. No change to the approved Grace Period product semantics: the timeline, the durations and what each state permits are unchanged. The corrections are to what the product SAYS about that model and to one gate that had drifted from it.",
+  "deployment": "Recorded separately. The edged fix and the UI wording both need to reach the appliance.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-15: verify the Licence Grace Period end to end against the approved product model, prove the full v3 lifecycle and its boundaries with safe controlled-time signed-licence testing, fix anything found, and carry it through PR, merge, PRE-LIVE deployment and live verification.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE.",
+  "defect_3_the_pii_scanner_matched_inside_commit_hashes": {
+    "where": "tools/validate-project-state.sh section 10, the secrets/guest-PII scan over the export packs. It runs inside the governance gate.",
+    "what_happened": "This delivery failed the gate with '1 secret/PII hit(s) in packs'. Nothing had leaked. The scan looks for four complete PII values -- a room number, a reservation number and two identifier fragments -- as bare substrings, and this delivery's commit a7b440ebec12e14215cc60d0159c69e866a8dbcd contains the digits 14215. A per-delivery GIT_STAT file named after that commit was reported as a guest-PII leak.",
+    "why_it_is_worth_fixing_rather_than_re_rolling": "Re-rolling the commit would have cleared it in one minute and left a check that fails at random, whenever a 40-character hash happens to contain five particular digits -- presenting as the most alarming class of finding this gate reports. A reviewer who has seen it fire falsely once is measurably less likely to believe it the time it is right.",
+    "fixed_how": "The four PII tokens are now anchored with word boundaries; the secret PREFIXES (sk_live, whsec_, BEGIN ... PRIVATE, ssh-ed25519) are deliberately left unanchored because they are the start of a longer secret and must match anywhere.",
+    "detection_preserved_and_proven": "Checked against a probe rather than assumed: 'Guest in room 14215' and 'reservation=262224' both still match, because a boundary exists at a space or an equals sign, while the same digits inside a commit hash have word characters on both sides and correctly do not. The old pattern matched all four probe lines; the anchored one matches exactly the two real leaks.",
+    "and_the_first_fix_was_worse_before_it_was_better": "Worth recording because it is the more instructive half. The first attempt at this fix was written through a heredoc that collapses a doubled backslash, so the regex reached the file as a literal 0x08 backspace byte instead of the word-boundary escape. The file looked right, the regex still compiled, and the check reported PASS -- because the PII alternation could no longer match ANYTHING. A false positive had been turned into a silently dead guest-PII check, which is the strictly worse failure. The governance gate's control-character step caught it, which is precisely what that step exists for: its own comment records the same heredoc trap happening once before. The bytes were then written numerically, with no escape sequence involved, and detection was re-proven by extracting the pattern FROM THE FILE and running it against a probe -- not by re-typing the pattern into a shell, which is what made the first attempt look verified when it was not."
+  }
+}

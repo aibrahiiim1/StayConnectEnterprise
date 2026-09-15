@@ -14,6 +14,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	liclib "github.com/stayconnect/enterprise/license"
 )
 
 // parseLimit reads ?limit= with a default and a hard cap.
@@ -99,6 +101,11 @@ func (s *server) enforceLimit(ctx context.Context, w http.ResponseWriter, key st
 // restrictive state blocks provisioning; scd being unreachable or a missing
 // state field is treated as ALLOW (the appliance must stay operable during
 // local hiccups — enforcement of a truly bad license happens in scd itself).
+//
+// THE FAIL-OPEN IS DELIBERATE AND BOUNDED, and worth being precise about because it looks alarming: this
+// gate guards ADMIN writes (creating access plans, voucher batches), not guest access. The authoritative
+// refusal lives in scd's licenseGate, which fails CLOSED and reads the licence model directly. So an
+// unreachable scd means an operator can still prepare configuration; it never means a guest gets online.
 func (s *server) licenseAllowsProvisioning(ctx context.Context) bool {
 	st, raw, err := s.scd.call(ctx, http.MethodGet, "/v1/license/status", nil)
 	if err != nil || st != http.StatusOK {
@@ -110,8 +117,27 @@ func (s *server) licenseAllowsProvisioning(ctx context.Context) bool {
 	if json.Unmarshal(raw, &lic) != nil || lic.State == "" {
 		return true
 	}
-	switch lic.State {
-	case "Restricted", "Expired", "Suspended", "Revoked":
+	return stateAllowsProvisioning(lic.State)
+}
+
+// stateAllowsProvisioning is the decision, separated from the transport so it can be tested against the
+// licence model directly. That separation is the point: the previous inline switch was a second copy of
+// State.AllowsProvisioning() that no test could reach without standing up an scd, so nothing ever compared
+// the two and the copy drifted.
+func stateAllowsProvisioning(state string) bool {
+	switch state {
+	// "unlicensed" was MISSING here, and it is the state where provisioning is least defensible: no valid
+	// signed licence is installed at all. The licence model is explicit that StateUnlicensed.AllowsProvisioning()
+	// is false -- asserted in TestStateBehavior as a production safety property -- but this switch never
+	// consulted the model, it restated it. The string is the only lower-case one, so the omission did not
+	// look wrong; it just fell through to the permissive default.
+	//
+	// Bounded, stated so nobody reads it as worse than it was: no guest was ever authorized by this gap.
+	// scd refuses every guest auth path when the state forbids new sessions, reading the model directly.
+	// What this allowed was an operator preparing access plans and voucher batches on an unlicensed
+	// appliance -- work that could not then be used.
+	case string(liclib.StateUnlicensed), string(liclib.StateRestricted), string(liclib.StateExpired),
+		string(liclib.StateSuspended), string(liclib.StateRevoked):
 		return false
 	}
 	return true

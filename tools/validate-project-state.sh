@@ -419,8 +419,21 @@ done
 [ "$brk" = "0" ] && ok "core pack links resolve" || fail "$brk broken core pack link(s)"
 
 echo "== 10. no secrets / guest PII / credential DSNs in the packs =="
-sec=$(grep -rnE "BEGIN (RSA|OPENSSH) PRIVATE|ssh-ed25519 AAAA|sk_live|whsec_|POSTGRES_PASSWORD=[^ ]|postgres://[a-z_]+:[A-Za-z0-9]{6,}@|14215|262224|3c2ffe67|81a3edc5" "$PACK" "$EVID" --exclude=validate-project-state.sh 2>/dev/null | grep -viE "POSTGRES_PASSWORD assignments committed|redacted|«" | wc -l)
-[ "$sec" = "0" ] && ok "no secrets/PII/credential-DSNs in the packs" || { grep -rnE "sk_live|whsec_|14215|262224" "$PACK" "$EVID" --exclude=validate-project-state.sh | head; fail "$sec secret/PII hit(s) in packs"; }
+# THE PII TOKENS ARE ANCHORED; THE SECRET PREFIXES ARE NOT. That difference is the whole point.
+#
+# sk_live / whsec_ / BEGIN ... PRIVATE are PREFIXES of a longer secret, so they must match wherever they
+# appear. The four PII tokens are complete values -- a room number, a reservation number and two short
+# identifier fragments -- and matching those as substrings made the check fire on any longer string that
+# happened to contain the digits. It did: the delivery commit a7b440ebec12e14215cc60d0159c69e866a8dbcd
+# contains "14215", so a per-delivery GIT_STAT file named after that commit was reported as a guest-PII
+# leak. Nothing had leaked; a 40-character hash had collided with a five-digit room number.
+#
+# Left alone this fails a delivery at random, whenever a commit hash happens to contain those digits, and
+# the failure looks like the most alarming class of problem this gate reports. A word boundary keeps every real form --
+# "room 14215", "14215," "=14215" all still match, because a boundary exists at a space, comma or equals --
+# while a token buried inside a hash has word characters on both sides and correctly does not.
+sec=$(grep -rnE "BEGIN (RSA|OPENSSH) PRIVATE|ssh-ed25519 AAAA|sk_live|whsec_|POSTGRES_PASSWORD=[^ ]|postgres://[a-z_]+:[A-Za-z0-9]{6,}@|\b(14215|262224|3c2ffe67|81a3edc5)\b" "$PACK" "$EVID" --exclude=validate-project-state.sh 2>/dev/null | grep -viE "POSTGRES_PASSWORD assignments committed|redacted|«" | wc -l)
+[ "$sec" = "0" ] && ok "no secrets/PII/credential-DSNs in the packs" || { grep -rnE "sk_live|whsec_|\b(14215|262224)\b" "$PACK" "$EVID" --exclude=validate-project-state.sh | head; fail "$sec secret/PII hit(s) in packs"; }
 
 # ---------------------------------------------------------------------------------------------------
 # 11. CLAIM-VERSUS-CODE PARITY (repository mode only -- it measures the tree, which a pack does not carry).
