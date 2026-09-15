@@ -1,0 +1,61 @@
+{
+  "transition_id": "T0144",
+  "seq": 144,
+  "timestamp": "2026-09-15T22:45:00Z",
+  "timestamp_derivation": "After the Hotel Admin effective-policy surface was built and tested, the room-reuse and lifecycle matrix written and run against a real PostgreSQL, and both the checkout and edged integration suites passed; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "CHECKOUT_GRACE_EFFECTIVE_POLICY_SURFACED_AND_ROOM_REUSE_IDENTITY_PROVEN",
+
+  "the_ui_defect_that_mattered_most": {
+    "what_the_screen_said": "'Currently version 0 (nothing published yet).' Nothing else. No numbers, no mention of the emergency fallback, no indication that anything had happened.",
+    "why_that_is_wrong": "'Nothing published' is not 'nothing happening'. A guest who checks out of an unconfigured site still receives a grace period -- the built-in emergency terms -- and that departure raises a critical alert. On this appliance it had already run six times. An operator could open the page, see no numbers, and reasonably conclude the feature was dormant.",
+    "fixed_to": "An 'In force right now' panel, first thing on the page, which always answers what a departing guest actually receives: either 'Published policy, version N' or 'Emergency fallback -- not a policy this hotel chose', with the real duration, bandwidth, data allowance and device rule in both cases. When the fallback has already been used it says how many times and when, and points at the Alerts page.",
+    "the_numbers_are_not_retyped": "The API reads them from grace.BuiltinEmergencyPolicy() rather than restating them. The licence provisioning gate in this same binary drifted precisely because a hand-written second copy of a rule fell out of step with it, and a screen quoting stale grace terms would be that defect wearing a different hat.",
+    "and_the_question_an_operator_asks_next": "The panel states plainly that publishing applies to future checkouts only and that a guest already in grace keeps the terms they were given. Someone publishing a shorter policy must not believe they have just cut off a guest who is mid-grace; someone publishing a longer one must not believe they have extended them.",
+    "history_read_is_fail_soft": "The emergency-usage count is layered on and allowed to be missing -- the audit table is not present in every schema this endpoint serves, and a configuration screen that 500s because a history table is absent would be a worse failure than the one it reports."
+  },
+
+  "what_can_now_be_done_from_hotel_admin": "Select the Checkout Grace package revision from the approved immutable catalog; see that revision's full pinned policy -- duration, down/up, data allowance, device limit and policy, settlement, plan revision, time accounting, end mode, policy version, current-or-superseded; set the eligibility window; publish under step-up with an expected-version check; and, new in this delivery, see which policy is actually in force and whether anyone chose it. Duration and bandwidth remain properties of the immutable package revision rather than free-text fields, which is what makes the published policy and the package agree by construction.",
+
+  "room_reuse_is_the_product_decision_this_delivery_proves": {
+    "the_rule": "Checkout Grace belongs to the departing guest's Stay subject, never to the room. Room 412 has a different occupant tonight than this morning, and for a stretch in between both have a claim on it: the departing guest is inside their grace while the arriving guest is checking in.",
+    "why_it_needed_tests_even_though_the_code_was_right": "The conversion path never reads a room -- there is no such column in the query. But 'the code does not currently do that' is a weaker guarantee than 'the code cannot do that without turning a test red', and room reuse is where the temptation to key on a room number is strongest. The failures would all be silent: a guest whose grace was cut short by a stranger's arrival just sees the wifi stop; one who inherits the previous occupant's allowance gets somebody else's data; a timer reset by a check-in hands out access nobody agreed to.",
+    "proven": [
+      "An arriving guest in the same room does not move the departing guest's grace deadline, change their allowance, end their grace or take ownership of it.",
+      "The arriving guest's entitlement is their own row on their own stay, supersedes nothing, and is not a grace entitlement -- they start the normal package lifecycle as any fresh stay would.",
+      "Both are live simultaneously: the room legitimately carries two live entitlements belonging to two subjects, each holding exactly one. That is what one-live-entitlement-per-SUBJECT permits and what a room-keyed implementation could not express.",
+      "The second guest's own checkout later converts THEIR entitlement and leaves the first guest's grace deadline and status untouched; each stay ends with exactly one grace.",
+      "A checkout event belonging to the other guest in the same room is REFUSED as a boundary and creates nothing."
+    ]
+  },
+
+  "lifecycle_and_event_ordering": {
+    "non_checkout_events": "A GI for the same stay -- applied, valid as an arrival -- is refused as a conversion boundary, creates no grace entitlement and writes no audit row; and the genuine checkout still works afterwards, so the refusal does not poison the episode. This is the protection against a delayed, duplicated or out-of-order arrival dating a grace from the wrong moment or resurrecting a closed episode.",
+    "boundary_verification_already_in_place": "The converter derives its boundary only from a typed GO for this exact stay and interface with processing_status APPLIED, refuses RESYNC evidence whose generation is not yet published, and checks exact event lineage. Duplicate GO, repeated checkout, concurrent conversion, episode idempotency, transfer races and boundary-vs-quota arithmetic were already covered and were RUN, not read: the full suite is 29 tests and all pass.",
+    "same_subject_recheck_in": "After conversion the subject holds exactly one live entitlement -- the grace -- and the superseded original was superseded exactly once. A second live entitlement for one subject is the corruption guarded against, whatever created it.",
+    "durability": "The grace deadline lives in the row, not in a process: restart persistence and no-extension-on-activity were closed under T0142 and still pass."
+  },
+
+  "no_migration": "None. No schema change was needed: the entitlement is already keyed to the stay subject and the stays table already carries the room as an attribute rather than an identity.",
+
+  "what_is_deterministic_versus_live": {
+    "deterministic": "Every scenario in the matrix runs against a real PostgreSQL with the real conversion SQL. Two guests sharing a room, a cross-stay boundary, a GI offered as a checkout and a same-subject re-check-in cannot be produced on the appliance without fabricating PMS events, which the mission forbids.",
+    "live": "The previous mission (T0142) established from 1276 real Protel departures that conversion, supersession, timing, idempotency and ending all behave correctly in production, and that one stay took eight checkout events and received exactly one grace whose window was never extended."
+  },
+
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-15: make Checkout Grace operationally complete and predictable end to end -- manageable from Hotel Admin, safely versioned and audited, and proven correct across real PMS event ordering, room reuse, checkout/re-check-in and reinstatement scenarios.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE.",
+
+  "standing_product_owner_decision": "Unchanged from T0142 and NOT resolved here, deliberately: no Checkout Grace policy is published for this site, so the emergency fallback remains in force. This delivery makes that state unmistakable in Hotel Admin rather than choosing a number, because how long a hotel's departing guests keep working is a commercial decision about the property."
+}

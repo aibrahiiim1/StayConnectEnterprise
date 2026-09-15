@@ -13,12 +13,15 @@ package main
 //     surface where the operator is legitimately looking at one guest's stay.
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/grace"
 )
 
 // ---------- Stays ----------
@@ -518,10 +521,18 @@ func (s *server) getCheckoutGraceConfig(w http.ResponseWriter, r *http.Request) 
 	if isNoRows(err) {
 		// A site with nothing published yet is a starting point, not a failure: version 0 says exactly that,
 		// and the operator can send it back as their expected version.
+		//
+		// BUT "nothing published" IS NOT "nothing happening", and that is what this endpoint used to imply.
+		// Guests who check out of an unconfigured site still get a grace -- the built-in Emergency fallback --
+		// and the screen said only "(nothing published yet)", so an operator could not learn what their
+		// departing guests were actually being given, or that it had already happened. The effective policy is
+		// therefore always reported, whichever it is.
 		writeJSON(w, http.StatusOK, map[string]any{
 			"published":                 false,
 			"config_version":            0,
 			"supported_device_policies": supportedDeviceLimitPolicies,
+			"effective":                 emergencyEffective(),
+			"emergency_history":         s.emergencyGraceHistory(ctx),
 		})
 		return
 	}
@@ -534,7 +545,66 @@ func (s *server) getCheckoutGraceConfig(w http.ResponseWriter, r *http.Request) 
 		"config_version":            c.ConfigVersion,
 		"supported_device_policies": supportedDeviceLimitPolicies,
 		"policy":                    c,
+		"effective": map[string]any{
+			"source":                     "PUBLISHED",
+			"duration_seconds":           c.DurationSeconds,
+			"down_kbps":                  c.DownKbps,
+			"up_kbps":                    c.UpKbps,
+			"data_quota_bytes":           c.DataQuotaBytes,
+			"device_limit":               c.DeviceLimit,
+			"device_limit_policy":        c.DeviceLimitPolicy,
+			"eligibility_window_seconds": c.EligibilityWindowSec,
+			"config_version":             c.ConfigVersion,
+		},
+		// Reported even when a policy IS published: a site that published one last week may still have
+		// conversions from before it, and hiding them would make the alert history unexplainable.
+		"emergency_history": s.emergencyGraceHistory(ctx),
 	})
+}
+
+// emergencyEffective describes what a departing guest ACTUALLY receives at a site with no published policy.
+//
+// The numbers are read from grace.BuiltinEmergencyPolicy() rather than restated here. That is not fussiness:
+// the licence provisioning gate in this same binary drifted precisely because a second hand-written copy of a
+// rule fell out of step with the rule, and a screen quoting stale grace terms to an operator would be the
+// same defect wearing a different hat.
+func emergencyEffective() map[string]any {
+	p := grace.BuiltinEmergencyPolicy()
+	return map[string]any{
+		"source":              "EMERGENCY_FALLBACK",
+		"duration_seconds":    p.DurationSeconds,
+		"down_kbps":           p.DownKbps,
+		"up_kbps":             p.UpKbps,
+		"data_quota_bytes":    p.DataQuotaBytes,
+		"device_limit":        p.DeviceLimit,
+		"device_limit_policy": p.DeviceLimitPolicy,
+		"policy_version":      "EMERGENCY_GRACE_V1",
+	}
+}
+
+// emergencyGraceHistory counts the conversions that have ALREADY fallen back, so the screen can say "this has
+// happened N times, most recently X" instead of leaving an operator to discover it on the alerts page.
+//
+// LAYERED AND ALLOWED TO BE MISSING, for the same reason the PMS revision provenance is: the audit table is
+// not present in every schema this endpoint must serve, and a configuration screen that 500s because a
+// history table is absent would be a worse failure than the one it reports. A read error yields a zero
+// count, never an error page.
+func (s *server) emergencyGraceHistory(ctx context.Context) map[string]any {
+	out := map[string]any{"count": 0}
+	var n int
+	var last *time.Time
+	if err := s.db.QueryRow(ctx, `
+		SELECT count(*), max(created_at)
+		  FROM iam_v2.checkout_grace_audit
+		 WHERE tenant_id=$1 AND site_id=$2 AND trigger='EMERGENCY_GRACE'`,
+		s.tenantID, s.siteID).Scan(&n, &last); err != nil {
+		return out
+	}
+	out["count"] = n
+	if last != nil {
+		out["last_at"] = last
+	}
+	return out
 }
 
 func (s *server) putCheckoutGraceConfig(w http.ResponseWriter, r *http.Request) {

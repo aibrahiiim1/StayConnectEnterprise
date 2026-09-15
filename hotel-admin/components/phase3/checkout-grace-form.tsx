@@ -18,11 +18,28 @@ import { Card, CardBody } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
+type EffectivePolicy = {
+  /** PUBLISHED when the hotel chose this policy; EMERGENCY_FALLBACK when nothing is published. */
+  source: "PUBLISHED" | "EMERGENCY_FALLBACK";
+  duration_seconds: number;
+  down_kbps: number;
+  up_kbps: number;
+  data_quota_bytes: number;
+  device_limit: number;
+  device_limit_policy: string;
+  eligibility_window_seconds?: number;
+  config_version?: number;
+  policy_version?: string;
+};
+
 type GraceState = {
   published: boolean;
   config_version: number;
   supported_device_policies: string[];
   policy?: CheckoutGraceConfig;
+  /** What a guest checking out RIGHT NOW actually receives, whichever policy is in force. */
+  effective?: EffectivePolicy;
+  emergency_history?: { count: number; last_at?: string };
 };
 
 const fmtBytes = (n: number) =>
@@ -40,6 +57,8 @@ export function CheckoutGraceForm({ canWrite = true }: { canWrite?: boolean }) {
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [effective, setEffective] = useState<EffectivePolicy | null>(null);
+  const [emergencyHistory, setEmergencyHistory] = useState<{ count: number; last_at?: string } | null>(null);
 
   async function load() {
     try {
@@ -48,6 +67,8 @@ export function CheckoutGraceForm({ canWrite = true }: { canWrite?: boolean }) {
         api.get<ListResp<GracePackageOption>>("/checkout-grace/packages"),
       ]);
       setVersion(state.config_version);
+      setEffective(state.effective ?? null);
+      setEmergencyHistory(state.emergency_history ?? null);
       setPublished(state.published);
       if (state.policy) setEligibility(state.policy.eligibility_window_seconds);
       setPackages(pkgs.data);
@@ -123,6 +144,71 @@ export function CheckoutGraceForm({ canWrite = true }: { canWrite?: boolean }) {
         here. Currently version {version}
         {published ? "" : " (nothing published yet)"}.
       </p>
+
+      {/* WHAT GUESTS ACTUALLY GET, FIRST AND UNMISSABLE.
+          The screen used to say only "(nothing published yet)", which reads as "nothing is happening". It is
+          not: a guest who checks out of an unconfigured site still receives a grace -- the built-in Emergency
+          fallback -- and an operator had no way to learn what that was or that it had already been used. This
+          panel always answers the question the page exists to answer. */}
+      {effective && (
+        <Card>
+          <CardBody className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-base font-semibold">In force right now</h2>
+              {effective.source === "PUBLISHED" ? (
+                <span className="rounded bg-success-subtle px-2 py-0.5 text-xs text-success-subtle-foreground">
+                  Published policy · version {effective.config_version}
+                </span>
+              ) : (
+                <span role="status" className="rounded bg-warn-subtle px-2 py-0.5 text-xs text-warn-subtle-foreground">
+                  Emergency fallback · not a policy this hotel chose
+                </span>
+              )}
+            </div>
+
+            {effective.source === "EMERGENCY_FALLBACK" && (
+              <p className="text-sm">
+                No checkout-grace policy has been published for this site, so departing guests who still had
+                access receive the built-in emergency terms below. Nothing is broken and no guest is cut off —
+                but these numbers are a safe default, not a decision anyone made for this hotel. Publish a
+                policy below to replace them.
+              </p>
+            )}
+
+            <dl aria-label="Effective checkout grace" className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+              <dt>Grace duration</dt>
+              <dd>{fmtDuration(effective.duration_seconds)}</dd>
+              <dt>Download</dt>
+              <dd>{effective.down_kbps} kbps</dd>
+              <dt>Upload</dt>
+              <dd>{effective.up_kbps} kbps</dd>
+              <dt>Data allowance</dt>
+              <dd>{fmtBytes(effective.data_quota_bytes)}</dd>
+              <dt>Device limit</dt>
+              <dd>
+                {effective.device_limit === 0 ? "no extra devices" : effective.device_limit}{" "}
+                ({effective.device_limit_policy.replace(/_/g, " ").toLowerCase()})
+              </dd>
+            </dl>
+
+            {emergencyHistory && emergencyHistory.count > 0 && (
+              <p role="status" className="text-sm">
+                The emergency fallback has already been used <b>{emergencyHistory.count}</b>{" "}
+                {emergencyHistory.count === 1 ? "time" : "times"}
+                {emergencyHistory.last_at ? <>, most recently {new Date(emergencyHistory.last_at).toLocaleString()}</> : null}.
+                Each one raised a critical alert on the Alerts page.
+              </p>
+            )}
+
+            {/* SAID EXPLICITLY, because it is the question an operator asks next and the wrong answer would be
+                expensive: publishing does not reach back. */}
+            <p className="text-xs text-muted-foreground">
+              Publishing a policy applies to future checkouts only. A guest already inside their grace period
+              keeps the exact terms they were given at checkout.
+            </p>
+          </CardBody>
+        </Card>
+      )}
 
       {err && (
         <p role="alert" className="text-sm text-destructive">
