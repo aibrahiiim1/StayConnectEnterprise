@@ -1093,7 +1093,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0143",
+  "latest_transition_id": "T0144",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1586,13 +1586,13 @@
   },
   "current_delivery": {
     "kind": "POST_CLOSURE_CORRECTIONS",
-    "decision": "D61",
+    "decision": "D62",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "3802ece931a7132bf138692b96ac8075e4afbbb5",
-    "base_note": "The master merge commit of PR #139. This delivery begins exactly where that one ended.",
-    "head": "cb8be71d",
+    "base": "af65e18ae7aa1fe885b9e6e6ed38456745682621",
+    "base_note": "The master merge commit of PR #140. This delivery begins exactly where that one ended.",
+    "head": "d98da735",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
-    "note": "Governance only. T0143 records the Checkout Grace delivery deployed to PRE-LIVE from 3802ece9 -- behaviour-neutral, rebuilt so the recorded head keeps describing the binaries -- with the checkout-grace state unchanged (1276 decisions, 6 grace entitlements, all windows still exactly 3600s) and the deployment-caused PMS resync settled on generation 287 with zero conflicts."
+    "note": "Hotel Admin now states which Checkout Grace policy is actually in force -- published or the emergency fallback nobody chose -- with its real terms, how often the fallback has fired, and that publishing affects future checkouts only. The room-reuse product decision is proven by a deterministic matrix against a real PostgreSQL: an arriving guest cannot move, shorten, end or inherit a departing guest's grace, both are live at once in the same room, a cross-stay checkout event is refused as a boundary, and a GI can never date a grace. No migration."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
