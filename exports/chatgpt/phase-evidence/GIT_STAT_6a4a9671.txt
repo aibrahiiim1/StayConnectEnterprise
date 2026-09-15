@@ -1,4 +1,0 @@
-commit 6a4a96718669f3d663594c74181cb9699afc9e56
-Date:   Tue Sep 15 23:34:20 2026 +0300
-
-    The grace clock belongs to the row, and now a test says so
