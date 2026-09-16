@@ -29,49 +29,20 @@ import (
 // at all: it asserted post-checkout state and took its own name as the claim. That is the exact failure mode
 // of trusting a test name, and it is corrected here by tests that construct every transition they assert.
 
-// reinstate performs what the Stay engine's OpReinstate performs when a GI lands on a CHECKED_OUT stay:
-// status back to IN_HOUSE, exactly one lifecycle_version bump, the previous episode's boundary cleared --
-// AND the arrival event applied, which re-pins the stay's application lineage to that GI.
+// THE HELPER-DRIVEN REINSTATEMENT TESTS THAT LIVED HERE HAVE MOVED, AND THE HELPER IS GONE.
 //
-// THE LINEAGE PIN IS NOT A DETAIL, and leaving it out is how the first draft of this file produced a false
-// alarm. The converter refuses any boundary event that is not exactly stays.last_applied_event_id. A
-// reinstatement driven by a real GI moves that pin to the GI, which is precisely what makes a replayed
-// pre-reinstatement GO unusable afterwards. A helper that skipped the pin left the old GO still pinned, so
-// the replay was accepted and the test reported a lifecycle corruption that cannot occur in production.
-// Modelling the reinstatement faithfully is the difference between testing the system and testing the
-// helper.
-func reinstate(t *testing.T, p *pgxpool.Pool, f fixture, stay string) int {
-	t.Helper()
-	var episode int
-	if err := p.QueryRow(context.Background(), `
-		UPDATE iam_v2.stays
-		   SET status='IN_HOUSE', lifecycle_version = lifecycle_version + 1, effective_checkout_at = NULL
-		 WHERE id=$1
-		RETURNING lifecycle_version`, stay).Scan(&episode); err != nil {
-		t.Fatalf("reinstate the stay: %v", err)
-	}
-	// The arrival that caused it, applied and pinned -- the engine does this for every event it applies.
-	seedEventTyped(t, p, f, "GI")
-	return episode
-}
-
-// reauthenticate models the guest signing in again after their checkout was reversed: the stale grace is
-// superseded and a NORMAL entitlement takes its place.
+// They performed the reinstatement with a direct UPDATE to iam_v2.stays. That imitates the production path
+// instead of exercising it, and it can only be as correct as my model of the engine -- which it was not: the
+// helper omitted the lineage re-pin the engine performs, and that omission manufactured a false defect
+// report about a replayed checkout corrupting a reinstated stay.
 //
-// It has to supersede rather than simply insert, because ent_live_stay permits exactly one live entitlement
-// per stay -- which is the invariant under test elsewhere in this file. Returning to the portal is what a
-// reinstated guest actually does, and it is the step that gives their next departure something to convert.
-func reauthenticate(t *testing.T, p *pgxpool.Pool, f fixture, stay, staleEnt string) string {
-	t.Helper()
-	ctx := context.Background()
-	if _, err := p.Exec(ctx,
-		`SELECT iam_v2.apply_entitlement_transition($1,'TERMINATED',now(),'SUPERSEDED')`, staleEnt); err != nil {
-		t.Fatalf("supersede the stale grace: %v", err)
-	}
-	g := f
-	g.stay = stay
-	return activeEnt(t, p, g)
-}
+// The whole lifecycle now runs through Processor.ProcessNext with the real converter in
+// internal/stayengine/reinstatement_lifecycle_integration_test.go: arrival, sign-in, departure, grace,
+// genuine reinstatement, re-authentication, second departure, second grace -- every transition applied by
+// the code that applies it in production.
+//
+// What remains in this file are the two claims that are about the DATABASE rather than the event path, and
+// are better asserted directly.
 
 func stayState(t *testing.T, p *pgxpool.Pool, stay string) (status string, episode int, checkoutAt *time.Time) {
 	t.Helper()
@@ -81,137 +52,6 @@ func stayState(t *testing.T, p *pgxpool.Pool, stay string) (status string, episo
 		t.Fatalf("read the stay: %v", err)
 	}
 	return
-}
-
-// A REINSTATED GUEST WHO LEAVES AGAIN GETS A SECOND GRACE -- AND EXACTLY ONE.
-//
-// The whole sequence is performed here: depart, be reinstated, depart again. Each assertion is about state
-// that this test itself created.
-func TestIntegration_ReinstatementStartsANewEpisodeAndAllowsExactlyOneNewGrace(t *testing.T) {
-	p := pool(t)
-	defer p.Close()
-	ctx := context.Background()
-	c := NewConverter(p)
-	f := seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true, systemGracePackage: true, bootstrapEmergency: true})
-	activeEnt(t, p, f)
-
-	// FIRST DEPARTURE.
-	first, err := c.ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, f.stay, checkoutEventFor(t, p, f, f.stay, 5))
-	if err != nil || !first.GraceCreated {
-		t.Fatalf("first checkout: %+v err=%v", first, err)
-	}
-	var firstEnds time.Time
-	if err := p.QueryRow(ctx, `SELECT window_ends_at FROM iam_v2.entitlements WHERE id=$1`, first.NewEntitlementID).Scan(&firstEnds); err != nil {
-		t.Fatal(err)
-	}
-	_, episodeBefore, _ := stayState(t, p, f.stay)
-
-	// THE PMS REVERSES THE CHECKOUT. This is the transition the whole test turns on, so its effects are
-	// asserted rather than assumed: the stay is back in house, the episode advanced by exactly one, and the
-	// previous episode's boundary is gone.
-	episodeAfter := reinstate(t, p, f, f.stay)
-	status, episodeRead, checkoutAt := stayState(t, p, f.stay)
-	if status != "IN_HOUSE" {
-		t.Fatalf("after reinstatement the stay is %s, want IN_HOUSE", status)
-	}
-	if episodeAfter != episodeBefore+1 || episodeRead != episodeAfter {
-		t.Fatalf("episode went %d -> %d, want exactly one bump", episodeBefore, episodeAfter)
-	}
-	if checkoutAt != nil {
-		t.Fatalf("reinstatement left the old episode's checkout boundary at %s", checkoutAt)
-	}
-
-	// THE GUEST SIGNS IN AGAIN. A reinstated guest is an in-house guest with no valid package -- their old
-	// grace belongs to a closed episode -- so they return to the portal and are issued a normal entitlement,
-	// which supersedes the stale grace. Without this step the only live entitlement at the next boundary
-	// would be that stale grace, and converting a grace into another grace is not something the product
-	// should do: it would let repeated reinstatement chain grace periods indefinitely.
-	reauthenticate(t, p, f, f.stay, first.NewEntitlementID)
-
-	// SECOND DEPARTURE, in the new episode.
-	second, err := c.ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, f.stay, checkoutEventFor(t, p, f, f.stay, 6))
-	if err != nil {
-		t.Fatalf("post-reinstatement checkout: %v", err)
-	}
-	if !second.GraceCreated {
-		t.Fatalf("a reinstated guest who departed again received NO grace (reason %q) -- the episode did not advance for the converter", second.Reason)
-	}
-	if second.NewEntitlementID == first.NewEntitlementID {
-		t.Fatal("the second departure reused the first episode's grace entitlement")
-	}
-
-	// EXACTLY ONE GRACE PER EPISODE, TWO EPISODES, TWO GRACES. The unique index is on
-	// (stay_id, checkout_episode), so this is the property that would break if the episode were misread.
-	if n := count(t, p, `SELECT count(*) FROM iam_v2.entitlements WHERE stay_id=$1 AND end_mode='GRACE_AFTER_CHECKOUT'`, f.stay); n != 2 {
-		t.Fatalf("the stay has %d grace entitlements across two episodes, want exactly 2", n)
-	}
-	if n := count(t, p, `
-		SELECT count(DISTINCT checkout_episode) FROM iam_v2.purchases
-		 WHERE stay_id=$1 AND trigger IN ('CHECKOUT_GRACE','EMERGENCY_GRACE')`, f.stay); n != 2 {
-		t.Fatalf("the two conversions carry %d distinct episodes, want 2", n)
-	}
-
-	// ONE LIVE ENTITLEMENT THROUGHOUT. The second conversion superseded the first grace rather than running
-	// beside it; ent_live_stay would have refused the write otherwise, so this also proves the supersession
-	// actually happened rather than the insert quietly failing.
-	if n := count(t, p, `SELECT count(*) FROM iam_v2.entitlements WHERE stay_id=$1 AND status='ACTIVE'`, f.stay); n != 1 {
-		t.Fatalf("the stay holds %d live entitlements, want exactly 1", n)
-	}
-	var firstStatus string
-	var firstEndsAfter time.Time
-	if err := p.QueryRow(ctx,
-		`SELECT status, window_ends_at FROM iam_v2.entitlements WHERE id=$1`, first.NewEntitlementID).
-		Scan(&firstStatus, &firstEndsAfter); err != nil {
-		t.Fatal(err)
-	}
-	if firstStatus == "ACTIVE" {
-		t.Fatal("the first episode's grace is still live alongside the second")
-	}
-	// AND ITS DEADLINE WAS NEVER REWRITTEN. A superseded grace keeps the window it was given; moving it
-	// would falsify the record of what that guest was actually entitled to.
-	if !firstEndsAfter.Equal(firstEnds) {
-		t.Fatalf("the first grace's deadline was rewritten: %s -> %s", firstEnds, firstEndsAfter)
-	}
-}
-
-// REPLAYING THE OLD DEPARTURE AFTER A REINSTATEMENT MUST NOT MINT A THIRD GRACE.
-//
-// The realistic shape: the appliance reconnects, the PMS resends a batch, and the ORIGINAL checkout event --
-// the one already consumed by the first episode -- arrives again after the guest has been reinstated. It is
-// a real, applied, correctly-scoped GO. The only thing wrong with it is that it is old.
-func TestIntegration_ReplayingThePreReinstatementCheckoutCreatesNothing(t *testing.T) {
-	p := pool(t)
-	defer p.Close()
-	ctx := context.Background()
-	c := NewConverter(p)
-	f := seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true, systemGracePackage: true, bootstrapEmergency: true})
-	activeEnt(t, p, f)
-
-	original := checkoutEventFor(t, p, f, f.stay, 5)
-	first, err := c.ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, f.stay, original)
-	if err != nil || !first.GraceCreated {
-		t.Fatalf("first checkout: %+v err=%v", first, err)
-	}
-	reinstate(t, p, f, f.stay)
-
-	// THE OLD EVENT COMES BACK. Whatever the converter does with it, it must not be a new grace for the new
-	// episode: that event describes a departure the guest has already been reinstated from.
-	replay, err := c.ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, f.stay, original)
-	if err == nil && replay.GraceCreated {
-		t.Fatal("a replayed pre-reinstatement checkout created a grace in the new episode")
-	}
-
-	if n := count(t, p, `SELECT count(*) FROM iam_v2.entitlements WHERE stay_id=$1 AND end_mode='GRACE_AFTER_CHECKOUT'`, f.stay); n != 1 {
-		t.Fatalf("after the replay the stay has %d grace entitlements, want the original 1", n)
-	}
-	// The stay is still in house: a stale message must not drag it back to CHECKED_OUT.
-	if status, _, _ := stayState(t, p, f.stay); status != "IN_HOUSE" {
-		t.Fatalf("a replayed old checkout moved the reinstated stay to %s", status)
-	}
-	// And exactly one live entitlement, still.
-	if n := count(t, p, `SELECT count(*) FROM iam_v2.entitlements WHERE stay_id=$1 AND status='ACTIVE'`, f.stay); n != 1 {
-		t.Fatalf("the stay holds %d live entitlements after the replay, want 1", n)
-	}
 }
 
 // THE INVARIANT IS ENFORCED BY THE DATABASE, NOT BY HOPE.

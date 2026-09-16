@@ -1,0 +1,4 @@
+commit 699819579def2330a0d37343f31ef1bfe3e4a01a
+Date:   Wed Sep 16 15:24:04 2026 +0300
+
+    Prove reinstatement through the engine that performs it, and make the gate run it
