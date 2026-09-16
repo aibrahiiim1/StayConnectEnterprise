@@ -1093,7 +1093,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0148",
+  "latest_transition_id": "T0149",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1585,14 +1585,14 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "REINSTATEMENT_PROVEN_THROUGH_THE_PRODUCTION_EVENT_PATH",
-    "decision": "D66",
+    "kind": "PRE_LIVE_REAL_PATH_REINSTATEMENT_PROOFS_DEPLOYED_AND_VERIFIED",
+    "decision": "D67",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "5ffa5471",
-    "base_note": "The master merge commit of PR #144. This delivery begins exactly where that one ended.",
-    "head": "69981957",
-    "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
-    "note": "T0148. Reinstatement is now proven by Processor.ProcessNext with the real converter rather than by a helper that performed the transition itself. Two corrections of record: the T0146 replay finding was a helper artefact, and replay protection lives at ingestion (se_live_identity), not at resolution. The Phase-5 gate was silently skipping ./internal/stayengine/ and now runs it."
+    "base": "0e8b4f7bea1d7aa158ba6b23d4e18ccd5e448f56",
+    "base_note": "The master merge commit of PR #145. This delivery begins exactly where that one ended.",
+    "head": "",
+    "head_note": "Governance only: this delivery has no content commit. The manifest, generated blocks and this pointer are its entire content.",
+    "note": "T0149 records the real-path reinstatement delivery deployed to PRE-LIVE from 0e8b4f7b -- behaviour-neutral, rebuilt so the recorded head keeps describing the binaries. Grace unchanged (6 entitlements, all 3600s); the single new audit row is an organic pre-restart checkout with no active entitlement; PMS resync settled on generation 299 over 464 records; the only two errors are the standing scd and pmsd ones."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
