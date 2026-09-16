@@ -1,0 +1,61 @@
+{
+  "transition_id": "T0148",
+  "seq": 148,
+  "timestamp": "2026-09-16T12:42:47Z",
+  "timestamp_derivation": "After the lifecycle was rewritten onto Processor.ProcessNext, the helper-driven tests were removed, the Phase-5 gate was corrected to run the stayengine package, and the full gate script passed locally end to end; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "REINSTATEMENT_PROVEN_THROUGH_THE_PRODUCTION_EVENT_PATH",
+
+  "why_this_mission_existed": {
+    "the_objection": "T0146 reported reinstatement as proven end to end. It was not. The reinstatement itself was performed by a test helper that issued a direct UPDATE to iam_v2.stays -- setting status, bumping lifecycle_version, clearing the boundary -- and the assertions then described the rows that helper had written.",
+    "why_that_is_not_proof": "A helper that imitates the production path can only ever be as correct as my model of that path, and it will be wrong precisely where the real path is subtle. This one was: it omitted the lineage re-pin the engine performs, and that omission produced a false defect report recorded in T0146 -- a replayed checkout looked able to drag a reinstated stay back to CHECKED_OUT. The finding was an artefact of the helper testing itself.",
+    "what_changed": "Every transition now enters through the inbox and is applied by Processor.ProcessNext with the real checkout Converter wired in -- the same two objects pmsd constructs in operation. The new file writes nothing to iam_v2.stays at all; that restriction is what makes the assertions mean something."
+  },
+
+  "what_the_real_path_corrected_about_my_understanding": {
+    "claim_in_T0146": "That a redelivered departure is applied by the engine and refused at resolution, leaving the grace count unchanged.",
+    "what_actually_happens": "Redelivery never reaches the resolver. se_live_identity is a unique index on (tenant_id, site_id, pms_interface_id, external_event_identity) WHERE admission_kind='LIVE', so a reconnect or resync that resends a departure cannot create a second row for the processor to apply. The insert is refused outright.",
+    "why_it_matters": "Replay protection lives at ingestion, not in the resolver. A test that inserted a duplicate and then processed it was describing a sequence production cannot reach, and would have gone on passing if the resolver's own guard were later weakened. The tests now assert the refusal where it happens, and deliberately do not call the processor afterwards -- there is nothing pending to process, and asserting against an empty queue is not asserting against a replay."
+  },
+
+  "what_is_now_proven_by_the_engine_rather_than_by_a_helper": {
+    "full_lifecycle": "GI creates the Stay; the guest signs in; GO flips the stay to CHECKED_OUT with the event's trusted timestamp as the boundary and the converter runs in the SAME transaction, converting the original entitlement and creating the grace; the old departure cannot be ingested twice; a genuine GI reinstates the stay to IN_HOUSE with exactly one lifecycle_version advance, clears the previous episode's boundary and moves last_applied_event_id to the arrival; the guest re-authenticates into a real new normal entitlement; a second GO produces a second, distinct grace on the new episode.",
+    "redelivered_arrival": "The same arrival identity, resent, is refused at ingestion and can therefore never become a second reinstatement -- status, lifecycle_version and grace count are all unchanged.",
+    "room_reuse": "A second stay in the same room, created by the engine from its own arrival event, is an independent subject with its own entitlement while the departed stay keeps its own live grace."
+  },
+
+  "what_was_removed_and_why": "The two helper-driven reinstatement tests and the reinstate() helper are deleted, with a comment in their place explaining what replaced them and why. What remains in that file are the two claims that are about the DATABASE rather than the event path -- that ent_live_stay refuses a second live entitlement for one stay, and that a new stay is a new subject -- which are better asserted directly.",
+
+  "a_gate_defect_found_and_fixed": {
+    "what": "scripts/phase5-pg-integration.sh did not run ./internal/stayengine/ at all.",
+    "consequence": "These proofs would have been green on a workstation and absent from CI -- the same failure mode as a misnamed test, one layer down. Any future regression in the engine's reinstatement handling would have passed the gate.",
+    "fixed": "The package is added to the Phase-5 integration matrix. The complete gate script was then run locally, not vetted: 23/23 least-privilege checks, all three database gates and all six integration packages pass, stayengine among them."
+  },
+
+  "no_product_defect_found": "The engine behaved correctly at every transition once the test stopped substituting for it. As with T0146, what this delivery fixes is the EVIDENCE -- and this time it also corrects a claim the previous receipt made about where replay protection lives.",
+  "no_migration": "None. No schema change was needed or made.",
+  "no_production_code_changed": "Two test files and one CI script. The appliance binaries are unaffected in behaviour.",
+
+  "constraints_observed": {
+    "no_fabricated_pms_traffic": "Nothing was written to the PMS and no stay or checkout event was fabricated on the appliance. Every scenario is a deterministic integration test against a real PostgreSQL.",
+    "financial": "No posting, payment, reversal, settlement or financial egress.",
+    "guest_state": "No guest, stay, entitlement or session row altered on the appliance.",
+    "retired_host": "172.21.60.23 neither contacted nor modified.",
+    "gates": "No test or gate weakened. A gate was widened to run a package it was silently skipping."
+  },
+
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-16: close Checkout Grace / Reinstatement engineering completely with end-to-end proof through the actual production event-processing path, not DB helpers that imitate it, including PRE-LIVE deployment to 172.21.60.25 and verification.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE.",
+  "standing_product_owner_decision": "Unchanged and explicitly not a blocker to this mission: no Checkout Grace policy is published for this site, so the built-in emergency fallback remains the operational default until a separate commercial decision is made."
+}
