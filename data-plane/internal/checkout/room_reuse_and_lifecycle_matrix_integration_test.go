@@ -245,46 +245,15 @@ func TestIntegration_RoomReuse_SecondGuestsCheckoutDoesNotTouchTheFirstsGrace(t 
 	}
 }
 
-// THE SAME PERSON CHECKING BACK IN IS A DIFFERENT QUESTION ENTIRELY.
+// THE SAME-SUBJECT RE-CHECK-IN TEST THAT USED TO SIT HERE HAS BEEN REMOVED, DELIBERATELY.
 //
-// Room reuse is two subjects; this is one subject twice. The invariant that must hold here is the opposite
-// of the one above: a guest may not hold two live entitlements at once, so a genuine new stay for the same
-// subject has to supersede the old grace rather than run beside it.
+// It was called TestIntegration_SameSubjectRecheckIn_DoesNotProduceTwoLiveEntitlements and it never
+// performed a re-check-in: it ran a checkout and then asserted the post-checkout state, which proves a
+// precondition and takes the test's own name as the claim. A reader scanning names would have believed the
+// scenario was covered when nothing had constructed it.
 //
-// The distinction matters because the two look superficially similar in the data -- a new stay, an existing
-// grace -- and getting them the same way round would either split one guest across two entitlements or
-// collapse two guests into one.
-func TestIntegration_SameSubjectRecheckIn_DoesNotProduceTwoLiveEntitlements(t *testing.T) {
-	p := pool(t)
-	defer p.Close()
-	ctx := context.Background()
-	f := seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true, systemGracePackage: true, bootstrapEmergency: true})
-	activeEnt(t, p, f)
-
-	res, err := NewConverter(p).ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, f.stay, checkoutEvent(t, p, f))
-	if err != nil || !res.GraceCreated {
-		t.Fatalf("checkout: %+v err=%v", res, err)
-	}
-
-	// The SAME stay subject is still the owner, and it holds exactly one live entitlement: the grace. A second
-	// live one for the same subject is the corruption this guards, whatever created it.
-	if n := count(t, p, `SELECT count(*) FROM iam_v2.entitlements WHERE stay_id=$1 AND status='ACTIVE'`, f.stay); n != 1 {
-		t.Fatalf("the subject holds %d live entitlements after checkout, want exactly 1", n)
-	}
-
-	// The superseded original is terminal and superseded exactly once -- the lineage a re-check-in has to
-	// extend rather than fork.
-	var supersededBy int
-	if err := p.QueryRow(ctx, `
-		SELECT count(*) FROM iam_v2.entitlements
-		 WHERE supersedes_entitlement_id = (SELECT supersedes_entitlement_id FROM iam_v2.entitlements WHERE id=$1)`,
-		res.NewEntitlementID).Scan(&supersededBy); err != nil {
-		t.Fatal(err)
-	}
-	if supersededBy != 1 {
-		t.Fatalf("the original entitlement was superseded %d times, want exactly 1", supersededBy)
-	}
-}
+// The real transitions now live in reinstatement_episode_integration_test.go, where a new Stay and a new
+// entitlement are actually created, and where reinstatement is actually performed before a second checkout.
 
 // A CHECK-IN IS NOT A CHECKOUT, AND THE CONVERTER MUST REFUSE TO TREAT ONE AS THE OTHER.
 //
