@@ -1,0 +1,60 @@
+{
+  "transition_id": "T0149",
+  "seq": 149,
+  "timestamp": "2026-09-16T14:04:16Z",
+  "timestamp_derivation": "After the merged master was built, the six binaries were verified to name the merge commit, deployed to PRE-LIVE, restarted, re-verified in place by SHA-256 and the deployment-caused PMS resync settled; before the author timestamp of the commit that introduces this receipt. After the merge commit 0e8b4f7b (2026-09-16T13:58:20Z) it describes. Per T0091, in the order T0108 requires.",
+  "record_type": "PRE_LIVE_REAL_PATH_REINSTATEMENT_PROOFS_DEPLOYED_AND_VERIFIED",
+
+  "merge": {
+    "pull_request": 145,
+    "merge_commit": "0e8b4f7bea1d7aa158ba6b23d4e18ccd5e448f56",
+    "gates": "All four required gates green on the exact head 529d7489. The governance gate failed once on its first attempt, for a real reason recorded below, and passed after the correction; only that failed job was re-run.",
+    "preflight": "PASS on all seven default stages."
+  },
+
+  "the_gate_caught_something_preflight_did_not": {
+    "what": "PR_METADATA_ZERO_STALE failed: the PR body did not state the recorded status for phase 7 (ACCEPTED_AND_CLOSED) and did not cite D40, the decision that granted it.",
+    "why_it_is_worth_recording": "The PR body is the one authoritative delivery surface that is not committed, so it is the one the Zero-Stale rule cannot check locally against a file. The body was corrected to carry both, and the failed job alone was re-run -- no workflow_dispatch, per the standing rule that a dispatched run reports the same required context and can be inherited as evidence."
+  },
+
+  "behaviour_neutral_by_construction": {
+    "content": "Two test files and one CI script. NO production code changed.",
+    "why_deploy": "So the recorded deployed head keeps describing the binaries -- the standard T0139 established after four binaries were found describing nothing. The rebuild's only effect is the embedded provenance stamp.",
+    "provenance": "APPLIANCE_BUILD = PASS: all six binaries report vcs.revision=0e8b4f7bea1d, modified=false, tags=stayconnect_production, read back out of the artefacts that were written. The appliance carries no Go toolchain, so provenance is carried across by SHA-256: the six staged hashes were compared against the locally verified build before installation, DEPLOYED_SHA and DEPLOYED_BINARIES.txt were rewritten, and the installed set was re-verified in place with sha256sum -c -- all six OK.",
+    "rollback": "/opt/stayconnect/rollback/approved-0e8b4f7b/ holds .prev for all six -- the ec5c7b42 set."
+  },
+
+  "live_state_after": {
+    "services": "All seven active. Two errors in the window, both standing and expected: scd's refusal of SCD_LICENSE_REQUIRED=false on a production build, and pmsd's CONTEXT_CANCELED on its own restart.",
+    "checkout_grace": "6 grace entitlements, every one still exactly 3600 seconds, unchanged across the restarts. A deployment that had re-based or extended a historical grace window would show there.",
+    "one_new_audit_row_explained": "The audit table went 1309 -> 1310 and in-house stays 465 -> 464. That is organic PMS activity, not an effect of the deployment: the new row is a real checkout at 14:03:26Z -- thirty seconds BEFORE the restart -- whose reason_code is NO_ACTIVE_ENTITLEMENT_AT_CHECKOUT, so no grace was granted and the grace count correctly stayed at 6. Quantifying it was the point; an unexplained +1 on a grace audit table is exactly the kind of number that should not be waved past.",
+    "pms": "The pmsd restart caused its usual reconnect and self-requested resync, which published generation 299 covering 464 records. No operator command, no manual Full Resync."
+  },
+
+  "what_this_delivery_actually_changed": "Nothing an operator or guest can observe. It corrected the EVIDENCE for reinstatement -- the transitions are now performed by Processor.ProcessNext rather than by a helper that wrote the expected rows itself -- and it corrected two claims T0146 made: the replay finding there was an artefact of the helper, and replay protection lives at ingestion rather than at resolution. It also closed a gate defect: ./internal/stayengine/ was not in the Phase-5 integration matrix, and the CI log for this delivery now shows it running.",
+
+  "constraints_observed": {
+    "no_pms_writes": "Nothing written to the PMS; no stay or checkout event fabricated. Every rare sequence is a deterministic integration test against a real PostgreSQL.",
+    "financial": "No posting, payment, reversal, settlement or financial egress.",
+    "guest_state": "No guest, stay, entitlement or session row altered on the appliance by this delivery.",
+    "schema": "No migration.",
+    "retired_host": "172.21.60.23 neither contacted nor modified.",
+    "gates": "No test or gate weakened. A gate was widened to run a package it was silently skipping."
+  },
+
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-16: close Checkout Grace / Reinstatement engineering completely with end-to-end proof through the actual production event-processing path, including PRE-LIVE deployment to 172.21.60.25 and verification.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE.",
+  "standing_product_owner_decision": "Unchanged: no Checkout Grace policy is published for this site, so the built-in emergency fallback remains the operational default until a separate commercial decision is made. That decision was explicitly not a blocker to this engineering mission."
+}

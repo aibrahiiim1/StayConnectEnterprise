@@ -1,0 +1,4 @@
+commit ab5ca23860b813512af5a5028f3387496f2e9b23
+Date:   Wed Sep 16 20:26:11 2026 +0300
+
+    Governance: the historical generations stay in one sentence with their marker
