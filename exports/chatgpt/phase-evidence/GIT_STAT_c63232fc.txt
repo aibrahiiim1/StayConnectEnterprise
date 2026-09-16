@@ -1,0 +1,4 @@
+commit c63232fcfcb48ee6f98ebd6d78855d38923967c6
+Date:   Wed Sep 16 10:07:02 2026 +0300
+
+    Reinstatement, actually performed this time

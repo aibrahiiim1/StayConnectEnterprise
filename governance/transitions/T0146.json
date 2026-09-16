@@ -1,0 +1,59 @@
+{
+  "transition_id": "T0146",
+  "seq": 146,
+  "timestamp": "2026-09-16T07:05:00Z",
+  "timestamp_derivation": "After the reinstatement and subject-identity transitions were built, two self-inflicted false alarms were diagnosed and corrected, and the full checkout and edged integration suites passed; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "CHECKOUT_GRACE_REINSTATEMENT_AND_SUBJECT_IDENTITY_PROVEN_END_TO_END",
+
+  "a_correction_to_my_own_previous_work": {
+    "what_was_wrong": "T0144 recorded a test named TestIntegration_SameSubjectRecheckIn_DoesNotProduceTwoLiveEntitlements. It never performed a re-check-in. It ran a checkout and asserted the resulting state, then took its own name as the claim -- exactly the failure mode of trusting a test name over what the test constructs.",
+    "what_was_also_wrong": "The same file's prose mentioned reinstatement while nothing in it bumped an episode. A reader scanning the file would have believed reinstatement was covered.",
+    "done": "That test is deleted, with a comment in its place saying why, and the scenarios are now performed end to end in reinstatement_episode_integration_test.go."
+  },
+
+  "the_gap_that_mattered": {
+    "contract": "Phase-0 §7.2 and acceptance item F7 require that reinstatement is a NEW EPISODE and that 'a post-reinstatement checkout is a new episode with exactly one new grace conversion'.",
+    "coverage_before": "Only the safety half was tested -- that one episode cannot convert twice. Nothing proved a legitimately reinstated guest CAN convert again.",
+    "why_it_matters": "Grace conversions are uniquely keyed on (stay_id, checkout_episode). Had the episode not advanced for the converter, a guest whose checkout was reversed and who then genuinely departed again would have been refused as a duplicate, received no grace at all, and been cut off -- with a NO_GRACE audit row that looks completely normal.",
+    "result": "The design is correct: the converter reads the episode from stays.lifecycle_version, which reinstatement bumps. It is now proven by a test that departs, reinstates, re-authenticates and departs again, asserting two graces across two distinct episodes, exactly one live entitlement throughout, and that the first grace's deadline was never rewritten."
+  },
+
+  "two_false_alarms_my_own_harness_produced": {
+    "why_they_are_recorded": "Both looked like product defects and were not. Writing them down is the difference between a test suite that is trusted and one that cries wolf.",
+    "first": "The post-reinstatement checkout returned NO_ACTIVE_ENTITLEMENT_AT_CHECKOUT. The test had skipped the step where a reinstated guest signs in again, so the only live entitlement at the second boundary was the stale grace from the closed episode. Converting a grace into another grace is not something the product should do -- it would let repeated reinstatement chain grace periods indefinitely -- so the refusal was correct. The test now performs the re-authentication, which is also what the mission asked for: a real new normal entitlement, superseding the stale grace.",
+    "second": "A replayed pre-reinstatement checkout appeared to drag the stay back to CHECKED_OUT. The helper had changed status, episode and boundary but had NOT applied the arrival event, so the stay's last_applied_event_id still pointed at the old GO. The converter refuses any boundary that is not exactly that pin; a real reinstatement is driven by a GI and moves the pin to it. With the helper made faithful, the replay is refused and the stay stays IN_HOUSE. The lineage pin is the mechanism that stops stale replays, and the false alarm was the helper testing itself."
+  },
+
+  "what_is_now_proven_end_to_end": {
+    "genuine_reinstatement": "Depart, reinstate, re-authenticate, depart again. Asserted: stay returns to IN_HOUSE, exactly one lifecycle_version bump, the previous episode's boundary cleared, a second grace created and distinct from the first, two distinct checkout_episode values on the purchases, exactly one live entitlement for the stay at the end, the first grace no longer live, and its deadline unchanged.",
+    "stale_replay_after_reinstatement": "The original GO, replayed after the guest is reinstated, creates no second grace, does not move the stay out of IN_HOUSE, and leaves exactly one live entitlement.",
+    "one_live_entitlement_per_subject_is_enforced_not_intended": "A direct INSERT of a second live entitlement for one stay is REFUSED by the ent_live_stay partial unique index. The invariant every other test leans on is proven to fire rather than assumed.",
+    "a_new_stay_is_a_new_subject": "A genuinely new Stay -- the same human returning, or a different guest in the same room -- actually creates a new stay row AND a new entitlement, which belongs to the new stay, is not a grace, and supersedes nothing, while the departed stay keeps its own live grace. Both live at once, one per subject.",
+    "subject_identity_established_from_the_data": "Grace entitlements on the live appliance carry stay_id and NO guest_principal_id or guest_account_id. For a PMS room-auth guest the subject IS the stay, which is why two live entitlements in one room are correct and two on one stay are impossible."
+  },
+
+  "live_evidence_retained": {
+    "same_second_ordering": "Observed in production on a real stay: a GO and a GI arrived in the SAME second (2026-09-14T07:47:27Z). The result was correct -- one grace created, the stay reinstated to IN_HOUSE at lifecycle_version 2, no duplicate grace, no corrupted lineage.",
+    "and_what_that_stay_shows_afterwards": "Its grace ran the full hour and terminated on TIME, leaving the stay IN_HOUSE with no live entitlement. That is NOT a defect: Phase-0 §7.2 says reinstatement restores IN_HOUSE and re-evaluates posting; it never promises a restored entitlement. A reinstated guest re-authenticates exactly as any in-house guest without a package does. This was checked against the contract before being reported, rather than filed as a bug on the strength of looking surprising.",
+    "prior_missions": "T0142 established from 1276 real Protel departures that conversion, supersession, timing, idempotency and ending behave correctly in production, including one stay that took eight checkout events and received exactly one grace whose window was never extended."
+  },
+
+  "no_product_defect_found_in_this_pass": "The lifecycle behaved correctly at every point once the tests modelled it faithfully. What this delivery fixes is the EVIDENCE: a test that claimed a scenario it never performed, and two scenarios the contract requires that nothing had exercised.",
+  "no_migration": "None. No schema change was needed or made.",
+
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-16: close the remaining Checkout Grace lifecycle gaps completely so production behaviour is deterministic across normal operation, rare PMS sequencing, reinstatement, room reuse and same-guest return scenarios.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE.",
+  "standing_product_owner_decision": "Unchanged: no Checkout Grace policy is published for this site, so the emergency fallback remains in force. Stated unmistakably in Hotel Admin since T0145."
+}
