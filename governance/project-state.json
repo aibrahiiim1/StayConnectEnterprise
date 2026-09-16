@@ -1590,7 +1590,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "ec5c7b42140e957dd35ced437d637e4acd9ff20f",
     "base_note": "The master merge commit of PR #143. This delivery begins exactly where that one ended.",
-    "head": "26700689",
+    "head": "b0052a1e",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
     "note": "Governance only. T0147 records the reinstatement-proofs delivery deployed to PRE-LIVE from ec5c7b42 -- behaviour-neutral, rebuilt so the recorded head keeps describing the binaries. Grace state unchanged (6 entitlements, all still 3600s, 1290 decisions); PMS resync settled on generation 298; zero unexpected errors."
   },

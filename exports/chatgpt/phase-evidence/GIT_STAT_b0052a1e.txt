@@ -1,4 +1,4 @@
-commit 267006892edff052cc74fa3c4b2b6877b2a201ee
+commit b0052a1e44ac199428a1739599512020e9f18bb1
 Date:   Wed Sep 16 11:00:43 2026 +0300
 
     Governance: T0147 records the reinstatement proofs deployed and verified
