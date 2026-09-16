@@ -1,0 +1,4 @@
+commit 009ff28e3edfe79fe8511075a6977b1177931f96
+Date:   Wed Sep 16 18:49:24 2026 +0300
+
+    Delivery: manifest lists itself

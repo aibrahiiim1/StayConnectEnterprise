@@ -2,7 +2,7 @@
 
 - **Base commit:** `0e8b4f7bea1d7aa158ba6b23d4e18ccd5e448f56`
 - **HEAD commit:** `0e8b4f7b`
-- **Provenance (generation HEAD = inventory_head):** `d671d9a2a750c8dc3a84d1aa410ac2e77a81db49`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `009ff28e3edfe79fe8511075a6977b1177931f96`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/t0149-real-path-deployed`
 - **Remote branch:** `origin/delivery/t0149-real-path-deployed`
 - **Changed files:** 25
@@ -16,12 +16,12 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: generation 299 is the superseded cycle, not the current one |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: generation 299 is the superseded cycle, not the current one |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: generation 299 is the superseded cycle, not the current one |
-| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: generation 299 is the superseded cycle, not the current one |
+| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: manifest lists itself |
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: generation 299 is the superseded cycle, not the current one |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: generation 299 is the superseded cycle, not the current one |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: generation 299 is the superseded cycle, not the current one |
+| `exports/chatgpt/phase-evidence/GIT_STAT_009ff28e.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_69981957.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Governance: T0149 records the real-path reinstatement delivery deployed and verified |
-| `exports/chatgpt/phase-evidence/GIT_STAT_ce95a164.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Governance: generation 299 is the superseded cycle, not the current one |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: generation 299 is the superseded cycle, not the current one |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: generation 299 is the superseded cycle, not the current one |
 | `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: generation 299 is the superseded cycle, not the current one |
@@ -44,12 +44,12 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   4 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   4 +-
  docs/context/StayConnect-IAM-Handoff.md            |   4 +-
- docs/manifests/PostClosure-change-manifest.md      | 123 ++++++++++-----------
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 340191 -> 340766 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 140439 -> 140408 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 43888 -> 43973 bytes
+ docs/manifests/PostClosure-change-manifest.md      | 144 +++++++++------------
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 340191 -> 340748 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 140439 -> 140409 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 43888 -> 43965 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_009ff28e.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_69981957.txt   |   4 -
- .../chatgpt/phase-evidence/GIT_STAT_ce95a164.txt   |   4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   4 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
  exports/chatgpt/phase1b-planning/MANIFEST.md       |   2 +-
@@ -57,24 +57,47 @@
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |   4 +-
  .../chatgpt/stayconnectenterprise/00-START-HERE.md |   4 +-
- exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  62 +++++------
+ exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  62 ++++-----
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   4 +-
  .../StayConnect-IAM-Handoff.md                     |   4 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   4 +-
  .../StayConnect-IAM-Phase1A-Plan.md                |   4 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |   4 +-
- governance/project-state.json                      |  48 ++++----
- governance/transitions/T0149.json                  |  60 ++++++++++
- 25 files changed, 210 insertions(+), 155 deletions(-)
+ governance/project-state.json                      |  48 +++----
+ governance/transitions/T0149.json                  |  60 +++++++++
+ 25 files changed, 210 insertions(+), 176 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-(clean)
+M  docs/architecture/StayConnect-IAM-Phase0-Contract.md
+M  docs/architecture/StayConnect-IAM-Phase1A-Plan.md
+M  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
+M  docs/context/StayConnect-IAM-Handoff.md
+M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
+M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
+M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
+A  exports/chatgpt/phase-evidence/GIT_STAT_009ff28e.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_ce95a164.txt
+M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
+M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/MANIFEST.md
+M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md
+M  exports/chatgpt/stayconnectenterprise/00-START-HERE.md
+M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
+M  exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md
+M  governance/project-state.json
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 009ff28e Delivery: manifest lists itself
 HISTORICAL: d671d9a2 Governance: generation 299 is the superseded cycle, not the current one
 HISTORICAL: ce95a164 Delivery: manifest lists itself
 HISTORICAL: 70915ae8 Governance: the recorded deployed head and PMS counters describe what is running
