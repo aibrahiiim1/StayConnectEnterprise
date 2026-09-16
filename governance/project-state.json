@@ -1590,7 +1590,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "b8ebad84fdb15a648a08c58d421401eaa7938418",
     "base_note": "The master merge commit of PR #142. This delivery begins exactly where that one ended.",
-    "head": "PENDING",
+    "head": "c63232fc",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
     "note": "Reinstatement and subject identity proven end to end: depart, reinstate, re-authenticate, depart again yields two graces across two episodes with one live entitlement throughout; a replayed pre-reinstatement checkout is refused by the lineage pin; ent_live_stay is proven to fire; a new Stay really is a new subject. A previously misnamed test that never performed a re-check-in was deleted. Two false alarms produced by the test harness itself are recorded. No product defect, no migration."
   },
