@@ -1,4 +1,0 @@
-commit 0e8b4f7bea1d7aa158ba6b23d4e18ccd5e448f56
-Date:   Wed Sep 16 16:58:20 2026 +0300
-
-    Merge PR #145: Prove reinstatement through the production event path

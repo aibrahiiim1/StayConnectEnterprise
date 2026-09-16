@@ -2,7 +2,7 @@
 
 - **Base commit:** `0e8b4f7bea1d7aa158ba6b23d4e18ccd5e448f56`
 - **HEAD commit:** `0e8b4f7b`
-- **Provenance (generation HEAD = inventory_head):** `70915ae869b8c27563a8e0c53583b48d4d369263`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `ce95a164aa64598df2f38bb197c541c0d86e86aa`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/t0149-real-path-deployed`
 - **Remote branch:** `origin/delivery/t0149-real-path-deployed`
 - **Changed files:** 25
@@ -16,12 +16,12 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: the recorded deployed head and PMS counters describe what is running |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: the recorded deployed head and PMS counters describe what is running |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: the recorded deployed head and PMS counters describe what is running |
-| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: the recorded deployed head and PMS counters describe what is running |
+| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: manifest lists itself |
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0149 records the real-path reinstatement delivery deployed and verified |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0149 records the real-path reinstatement delivery deployed and verified |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0149 records the real-path reinstatement delivery deployed and verified |
-| `exports/chatgpt/phase-evidence/GIT_STAT_0e8b4f7b.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Governance: T0149 records the real-path reinstatement delivery deployed and verified |
 | `exports/chatgpt/phase-evidence/GIT_STAT_69981957.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Governance: T0149 records the real-path reinstatement delivery deployed and verified |
+| `exports/chatgpt/phase-evidence/GIT_STAT_ce95a164.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0149 records the real-path reinstatement delivery deployed and verified |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0149 records the real-path reinstatement delivery deployed and verified |
 | `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0149 records the real-path reinstatement delivery deployed and verified |
@@ -44,37 +44,60 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   4 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   4 +-
  docs/context/StayConnect-IAM-Handoff.md            |   4 +-
- docs/manifests/PostClosure-change-manifest.md      | 123 +++++++++------------
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 340191 -> 340189 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 140439 -> 140435 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 43888 -> 43885 bytes
- .../chatgpt/phase-evidence/GIT_STAT_0e8b4f7b.txt   |   4 +
+ docs/manifests/PostClosure-change-manifest.md      | 132 ++++++++-------------
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 340191 -> 340766 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 140439 -> 140408 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 43888 -> 43973 bytes
  .../chatgpt/phase-evidence/GIT_STAT_69981957.txt   |   4 -
+ .../chatgpt/phase-evidence/GIT_STAT_ce95a164.txt   |   4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   4 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
  exports/chatgpt/phase1b-planning/MANIFEST.md       |   2 +-
  .../chatgpt/phase1b-planning/PACK_SHA256SUMS.txt   |   6 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
- .../StayConnect-IAM-Phase1B-Plan.md                |   2 +-
+ .../StayConnect-IAM-Phase1B-Plan.md                |   4 +-
  .../chatgpt/stayconnectenterprise/00-START-HERE.md |   4 +-
- exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  60 +++++-----
+ exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  62 +++++-----
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   4 +-
- .../StayConnect-IAM-Handoff.md                     |   2 +-
- .../StayConnect-IAM-Phase0-Contract.md             |   2 +-
- .../StayConnect-IAM-Phase1A-Plan.md                |   2 +-
- .../StayConnect-IAM-Phase1B-Plan.md                |   2 +-
+ .../StayConnect-IAM-Handoff.md                     |   4 +-
+ .../StayConnect-IAM-Phase0-Contract.md             |   4 +-
+ .../StayConnect-IAM-Phase1A-Plan.md                |   4 +-
+ .../StayConnect-IAM-Phase1B-Plan.md                |   4 +-
  governance/project-state.json                      |  48 ++++----
  governance/transitions/T0149.json                  |  60 ++++++++++
- 25 files changed, 195 insertions(+), 158 deletions(-)
+ 25 files changed, 203 insertions(+), 171 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-(clean)
+M  docs/architecture/StayConnect-IAM-Phase0-Contract.md
+M  docs/architecture/StayConnect-IAM-Phase1A-Plan.md
+M  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
+M  docs/context/StayConnect-IAM-Handoff.md
+M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
+M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
+M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
+D  exports/chatgpt/phase-evidence/GIT_STAT_0e8b4f7b.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_ce95a164.txt
+M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
+M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/MANIFEST.md
+M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md
+M  exports/chatgpt/stayconnectenterprise/00-START-HERE.md
+M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
+M  exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md
+M  governance/project-state.json
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: ce95a164 Delivery: manifest lists itself
 HISTORICAL: 70915ae8 Governance: the recorded deployed head and PMS counters describe what is running
 HISTORICAL: 8b3d678d Delivery: manifest lists itself
 HISTORICAL: 97aec315 Governance: T0149 records the real-path reinstatement delivery deployed and verified
