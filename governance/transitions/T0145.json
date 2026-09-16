@@ -1,0 +1,53 @@
+{
+  "transition_id": "T0145",
+  "seq": 145,
+  "timestamp": "2026-09-15T23:30:00Z",
+  "timestamp_derivation": "After all six binaries and the Hotel Admin bundle were built from the merged master, deployed to PRE-LIVE, restarted, verified against the provenance manifest and the deployment-caused resync settled; before the author timestamp of the commit that introduces this receipt. After the merge commit 37652b65 (2026-09-15T23:22:30Z) it describes. Per T0091, in the order T0108 requires.",
+  "record_type": "PRE_LIVE_CHECKOUT_GRACE_EFFECTIVE_POLICY_SURFACE_DEPLOYED_AND_VERIFIED",
+  "merge": {
+    "pull_request": 141,
+    "merge_commit": "37652b65ffba80b8ec4fb4c75adb9aa175ac5be1",
+    "gates": "All four required gates green on the exact head 2e227da69e97 before the merge, first attempt. Merged through the protected process.",
+    "preflight": "PASS on all seven default stages."
+  },
+  "deployed": {
+    "target": "172.21.60.25 (PRE-LIVE). 172.21.60.23 neither contacted nor modified.",
+    "source_commit": "37652b65ffba80b8ec4fb4c75adb9aa175ac5be1, built by scripts/build-appliance-binaries.sh. APPLIANCE_BUILD = PASS: every binary names that revision, clean, tags=stayconnect_production.",
+    "hotel_admin_ui": "BUILD_ID 912jAgEwD9g2s53fmbX7h, bundle sha256 9bfad14255ddc4e0cce0c74ce2cbcf816534dfa884cf6512334232abf01d8cdb; the served manifest reads source_commit 37652b65ffba (clean).",
+    "provenance": "DEPLOYED_SHA updated and DEPLOYED_BINARIES.txt rewritten, then re-verified in place with sha256sum -c: all six OK.",
+    "rollback": "/opt/stayconnect/rollback/approved-37652b65/ holds .prev for all six binaries plus ui-release.prev -- the af65e18a set."
+  },
+  "live_verification": {
+    "the_binary_carries_the_new_reporting": "The deployed edged contains EMERGENCY_FALLBACK and emergency_history. ('In force right now' is UI text and correctly appears only in the bundle, not the binary -- checked so the absence is not mistaken for a failed deploy.)",
+    "the_served_bundle_carries_the_panel": "'In force right now', 'not a policy this hotel chose', 'applies to future checkouts only' and 'keeps the exact terms they were given' are all present in the served JavaScript.",
+    "what_the_panel_will_show_on_this_appliance": "0 published policies, so source=EMERGENCY_FALLBACK with the built-in terms, and an emergency history of 6 conversions, most recently 2026-09-14T07:47:27Z. That is the state this surface was built to stop hiding.",
+    "grace_state_unchanged": "6 grace entitlements, all still exactly 3600 seconds after the restarts. A deployment that had re-based a historical grace window would show here.",
+    "services": "All seven active."
+  },
+  "pms_reconnect_caused_by_the_deployment": {
+    "what": "Restarting pmsd dropped and re-established the PMS link; the connector requested its own resync, as after any reconnect. No operator command and no manual Full Resync.",
+    "outcome": "Settled IN_SYNC/COMPLETE on generation 292."
+  },
+  "constraints_observed": {
+    "no_pms_writes": "Nothing written to the PMS; no stay or checkout event fabricated. The room-reuse and lifecycle scenarios are deterministic integration tests against a real PostgreSQL, clearly distinguished from the live evidence in T0142.",
+    "financial": "No posting, payment, reversal, settlement or financial egress.",
+    "guest_state": "No guest, stay, entitlement or session row altered on the appliance. Zero open guest sessions throughout.",
+    "schema": "No migration. The entitlement was already keyed to the stay subject.",
+    "gates": "No test or gate weakened; six tests added across Go integration and the UI."
+  },
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-15: make Checkout Grace operationally complete and predictable end to end, including PRE-LIVE deployment to 172.21.60.25 and verification.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE.",
+  "standing_product_owner_decision": "Unchanged: no Checkout Grace policy is published for this site. The emergency fallback remains in force and is now stated unmistakably in Hotel Admin instead of being inferable only from the alerts page."
+}

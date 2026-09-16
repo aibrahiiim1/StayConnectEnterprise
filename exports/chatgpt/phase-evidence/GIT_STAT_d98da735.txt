@@ -1,4 +1,0 @@
-commit d98da73551466d4bf56040406a5e4b4544b50262
-Date:   Wed Sep 16 01:45:57 2026 +0300
-
-    A room is not a guest, and the screen now says which grace is actually in force
