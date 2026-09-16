@@ -458,7 +458,7 @@
     "reboot_occurred": true,
     "rollback_rehearsal_occurred": true,
     "corrected_software_deployed": true,
-    "deployed_head_on_appliance": "37652b65ffba80b8ec4fb4c75adb9aa175ac5be1",
+    "deployed_head_on_appliance": "ec5c7b42140e957dd35ced437d637e4acd9ff20f",
     "deployed_head_note": "PRE-LIVE 172.21.60.25. Every service binary and the Hotel Admin bundle are built from this commit by scripts/build-appliance-binaries.sh with the pinned toolchain and -tags stayconnect_production; /opt/stayconnect/DEPLOYED_BINARIES.txt carries a digest per binary and was re-verified in place with sha256sum -c.",
     "live_increment9_revalidated": true,
     "live_increment9_revalidated_on": "2026-08-11",
@@ -918,7 +918,7 @@
     "migration_runner_factory_clean": "CLOSED (T0118). scripts/edge-migrate.sh refused every factory-clean appliance: its baseline precondition read the ledger for 0009_phase2_commerce, a row that on a baseline install correctly never exists because 0001..0049 are never applied individually. It now accepts that install shape on positive evidence - no 0009 row, no ledger row below 0010, and 0009's own writers present in the schema - while still refusing an upgrade-path install with a 0009 gap. scripts/edge-migrate-selftest.sh proves both directions and re-proves that checksum, target identity, acknowledgement, superuser refusal, destructive-ledger-rights refusal, ledger structure, re-apply idempotence and the advisory lock remain fail-closed.",
     "pms_published_generation": 282,
     "pms_published_generation_note": "THREE DIFFERENT COUNTERS HAVE ALL BEEN ABBREVIATED 'gen' AND MUST NOT BE CONFLATED. pms_interface_runtime.resync_generation_seq / published_resync_generation is the RESYNC generation, bumped once per resync cycle: 282, published 2026-09-15T07:29:54Z by the resync the pmsd restart caused. pms_interface_runtime.runtime_generation is a monotonic runtime-row counter bumped on every state write, which is why it is orders of magnitude larger: 74434. pms_interface_revisions.revision_no is the pinned Interface REVISION: 3, unchanged. The move to 282 followed the pmsd restart of 2026-09-15T07:29:16Z: the connector reconnected and requested its own resync, with no operator command and no configuration change; resync_command_id is NULL. HISTORICAL (do not read as current): 209 was the value recorded at the migration-0065 closure, and the superseded generations 206, 207 and 208 belong to the 2026-09-08T11:45Z restart sequence.",
-    "deployed_runtime_head": "37652b65ffba80b8ec4fb4c75adb9aa175ac5be1",
+    "deployed_runtime_head": "ec5c7b42140e957dd35ced437d637e4acd9ff20f",
     "deployed_runtime_services": {
       "_note": "Measured on the appliance after the deployment of 2026-09-15 and verified with sha256sum -c. Every binary reports vcs.revision=3802ece9, modified=false, tags=stayconnect_production. Digests abbreviated; the appliance manifest is authoritative.",
       "scd": "df04b576ed7c7cc2...  (3802ece9, tags=stayconnect_production)",
@@ -1093,7 +1093,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0146",
+  "latest_transition_id": "T0147",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1586,13 +1586,13 @@
   },
   "current_delivery": {
     "kind": "POST_CLOSURE_CORRECTIONS",
-    "decision": "D64",
+    "decision": "D65",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "b8ebad84fdb15a648a08c58d421401eaa7938418",
-    "base_note": "The master merge commit of PR #142. This delivery begins exactly where that one ended.",
-    "head": "c63232fc",
+    "base": "ec5c7b42140e957dd35ced437d637e4acd9ff20f",
+    "base_note": "The master merge commit of PR #143. This delivery begins exactly where that one ended.",
+    "head": "b0052a1e",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
-    "note": "Reinstatement and subject identity proven end to end: depart, reinstate, re-authenticate, depart again yields two graces across two episodes with one live entitlement throughout; a replayed pre-reinstatement checkout is refused by the lineage pin; ent_live_stay is proven to fire; a new Stay really is a new subject. A previously misnamed test that never performed a re-check-in was deleted. Two false alarms produced by the test harness itself are recorded. No product defect, no migration."
+    "note": "Governance only. T0147 records the reinstatement-proofs delivery deployed to PRE-LIVE from ec5c7b42 -- behaviour-neutral, rebuilt so the recorded head keeps describing the binaries. Grace state unchanged (6 entitlements, all still 3600s, 1290 decisions); PMS resync settled on generation 298; zero unexpected errors."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
