@@ -119,7 +119,8 @@ run_gate "Phase-5 least privilege (derived)"  "$ROOT/iam_v2_scratch/phase5_least
 echo "== Phase-5 integration matrix (integration && phase5) =="
 if ! (cd "$ROOT/data-plane" && PHASE3_TEST_DSN="postgres://postgres:postgres@127.0.0.1:$PORT/$DB?sslmode=disable" \
       go test -tags "integration phase5" -count=1 -timeout 900s \
-      ./internal/transfer/ ./internal/poststay/ ./internal/authctx/ ./internal/checkout/ ./cmd/edged/); then
+      ./internal/transfer/ ./internal/poststay/ ./internal/authctx/ ./internal/checkout/ \
+      ./internal/stayengine/ ./cmd/edged/); then
   fail=1
 fi
 
