@@ -72,7 +72,8 @@ for m in 0007_auth_throttle_buckets 0009_phase2_commerce 0010_phase3_stay_resolu
          0076_retry_bounds_are_settings_and_a_blocker_is_visible \
          0077_name_the_historical_exception_for_what_it_is \
          0078_an_accepted_startup_data_gap_is_a_decision_not_a_repair \
-         0079_recovery_belongs_to_the_connection_not_the_building; do
+         0079_recovery_belongs_to_the_connection_not_the_building \
+         0080_the_service_may_read_the_ledger_it_writes; do
   # 0050 is out of numeric sequence with the rest of this list on purpose: this gate runs internal/authctx,
   # whose PMS arm now calls iam_v2.p3_feed_authorizes. Without it those tests fail with "function does not
   # exist" rather than on anything Phase 5 owns. It is applied last, after everything it redefines.
@@ -102,10 +103,14 @@ base="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc \
 #
 # The count is the check that would catch a chain which silently did not build them. It counts iam_v2 BASE
 # TABLEs, so views (and public.sync_outbox_recovery_log) are outside it by construction.
+#
+# 0080 DOES NOT MOVE THIS NUMBER, and that is not an oversight. It grants one SELECT and creates nothing, so
+# the expected count stays 86; the privilege it adds is proven by the least-privilege step below, which is
+# where a grant belongs rather than in a table census.
 if [ "${base:-0}" != "86" ]; then
   echo "INFRA: the chain did not build (iam_v2 base tables=$base, expected 86)"; exit 2
 fi
-echo "  chain built: 86 iam_v2 base tables through 0029 + 0067-0079"
+echo "  chain built: 86 iam_v2 base tables through 0029 + 0067-0080"
 
 fail=0
 run_gate(){
@@ -135,6 +140,54 @@ fi
 # THIS database is the right home rather than Phase-4's: the grace tests read plan columns (speed_allocation
 # among them) that arrive later than 0026, so on the Phase-4 chain they fail on the schema instead of on the
 # product.
+# LEAST PRIVILEGE, PROVEN AS A RESTRICTED ROLE RATHER THAN AS THE OWNER.
+#
+# This step exists because of a defect it would have caught. Hotel Admin's Policy History reads
+# iam_v2.checkout_grace_policy_publications; svc_edged held no SELECT on it, and every Go test passed because
+# the harness connects as the schema OWNER, which can read everything. A test running as owner is
+# structurally incapable of finding a least-privilege defect. The appliance found it on the first page load.
+#
+# So the grant added by 0080 is verified here as a role that has ONLY that grant: it must be able to read the
+# ledger, and must still be refused every way of writing it. The table is append-only and its only legitimate
+# writer is the controlled operation; a service role that could write here could forge the provenance of a
+# policy change, which is the one thing this table exists to make impossible.
+echo "== checkout-grace ledger: least privilege under a real restricted role =="
+lp_fail=0
+LPQ(){ docker exec "$C" psql -U postgres -d "$DB" -tAqc "$1" 2>&1; }
+LPR(){ docker exec "$C" psql -U grace_lp_probe -d "$DB" -tAqc "$1" 2>&1; }
+LPQ "DROP ROLE IF EXISTS grace_lp_probe;" >/dev/null
+LPQ "CREATE ROLE grace_lp_probe LOGIN PASSWORD 'x' NOSUPERUSER NOCREATEDB NOCREATEROLE;" >/dev/null
+LPQ "GRANT CONNECT ON DATABASE $DB TO grace_lp_probe; GRANT USAGE ON SCHEMA iam_v2 TO grace_lp_probe;" >/dev/null
+# EXACTLY the privilege 0080 grants svc_edged, and nothing else.
+LPQ "GRANT SELECT ON iam_v2.checkout_grace_policy_publications TO grace_lp_probe;" >/dev/null
+
+out="$(LPR 'SELECT count(*) FROM iam_v2.checkout_grace_policy_publications;')"
+case "$out" in
+  ''|*[!0-9]*) echo "  [FAIL] the granted role cannot READ the ledger: $out"; lp_fail=1 ;;
+  *)           echo "  [PASS] the granted role can read the ledger ($out rows)" ;;
+esac
+for w in   "INSERT INTO iam_v2.checkout_grace_policy_publications (tenant_id,site_id,config_version,actor,policy_snapshot) VALUES (gen_random_uuid(),gen_random_uuid(),9999,gen_random_uuid(),'{}'::jsonb);"   "UPDATE iam_v2.checkout_grace_policy_publications SET reason_code='FORGED';"   "DELETE FROM iam_v2.checkout_grace_policy_publications;"; do
+  verb="${w%% *}"
+  # Captured, NOT piped. This script runs under `set -o pipefail`, and psql exits 1 on the very refusal being
+  # looked for -- so `psql ... | grep -q` returns 1 even when grep matched, and every refusal reads as a
+  # failure to refuse. The first version of this step reported all three writes as NOT refused while the
+  # database was refusing all three correctly.
+  wout="$(LPR "$w")"
+  case "$wout" in
+    *"permission denied"*) echo "  [PASS] $verb is refused: ${wout#*ERROR:  }" ;;
+    *) echo "  [FAIL] $verb was NOT refused by permissions: $wout"; lp_fail=1 ;;
+  esac
+done
+# And the grant is narrow: no other iam_v2 table came with it.
+others="$(LPQ "SELECT count(*) FROM information_schema.role_table_grants WHERE grantee='grace_lp_probe' AND table_schema='iam_v2' AND table_name <> 'checkout_grace_policy_publications';")"
+if [ "${others:-1}" = "0" ]; then
+  echo "  [PASS] the grant reaches exactly one table"
+else
+  echo "  [FAIL] the role also holds privileges on $others other iam_v2 table(s)"; lp_fail=1
+fi
+LPQ "DROP ROLE IF EXISTS grace_lp_probe;" >/dev/null
+if [ "$lp_fail" != 0 ]; then echo "  -> FAIL"; fail=1; else echo "  -> PASS"; fi
+
 echo "== checkout-grace provisioning and publication =="
 # A SKIP MUST FAIL THIS STEP. These tests skip silently when PHASE2_TEST_DSN is unset or unusable, and a
 # skipped suite reports `ok` -- which is exactly how this suite came to be green in two gates while executing
