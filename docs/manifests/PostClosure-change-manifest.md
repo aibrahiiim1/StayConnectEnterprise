@@ -2,7 +2,7 @@
 
 - **Base commit:** `fab87fc6490f742d8d75367643d8cb76771bc813`
 - **HEAD commit:** `0a6a125d`
-- **Provenance (generation HEAD = inventory_head):** `0a6a125d63ad1b1a387ecef3a8f5a5ec04775059`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `52a19706d9eb77230948cb8230dce1842e07ad4a`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `fix/setup-hang-grace-history-contrast`
 - **Remote branch:** `origin/fix/setup-hang-grace-history-contrast`
 - **Changed files:** 51
@@ -26,26 +26,26 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0155 records the consolidated Hotel Admin and Guest Portal cleanup |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0155 records the consolidated Hotel Admin and Guest Portal cleanup |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0155 records the consolidated Hotel Admin and Guest Portal cleanup |
-| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: manifest lists itself |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0155 records the consolidated Hotel Admin and Guest Portal cleanup |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0155 records the consolidated Hotel Admin and Guest Portal cleanup |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0155 records the consolidated Hotel Admin and Guest Portal cleanup |
-| `exports/chatgpt/phase-evidence/GIT_STAT_0a6a125d.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: manifest and packs resynchronized |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs resynchronized |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs resynchronized |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs resynchronized |
+| `exports/chatgpt/phase-evidence/GIT_STAT_0a6a125d.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: manifest and packs resynchronized |
 | `exports/chatgpt/phase-evidence/GIT_STAT_94c25c20.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Governance: T0155 records the consolidated Hotel Admin and Guest Portal cleanup |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0155 records the consolidated Hotel Admin and Guest Portal cleanup |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0155 records the consolidated Hotel Admin and Guest Portal cleanup |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0155 records the consolidated Hotel Admin and Guest Portal cleanup |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0155 records the consolidated Hotel Admin and Guest Portal cleanup |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0155 records the consolidated Hotel Admin and Guest Portal cleanup |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs resynchronized |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs resynchronized |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs resynchronized |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs resynchronized |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs resynchronized |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0155 records the consolidated Hotel Admin and Guest Portal cleanup |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0155 records the consolidated Hotel Admin and Guest Portal cleanup |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0155 records the consolidated Hotel Admin and Guest Portal cleanup |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs resynchronized |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0155 records the consolidated Hotel Admin and Guest Portal cleanup |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0155 records the consolidated Hotel Admin and Guest Portal cleanup |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0155 records the consolidated Hotel Admin and Guest Portal cleanup |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0155 records the consolidated Hotel Admin and Guest Portal cleanup |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0155 records the consolidated Hotel Admin and Guest Portal cleanup |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0155 records the consolidated Hotel Admin and Guest Portal cleanup |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: manifest and packs resynchronized |
 | `governance/transitions/T0155.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0155 records the consolidated Hotel Admin and Guest Portal cleanup |
 | `hotel-admin/app/(app)/backups/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Cloud/System consolidation, a real Backup feature, the portal redesign and a branding designer |
 | `hotel-admin/app/(app)/license/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Cloud/System consolidation, a real Backup feature, the portal redesign and a branding designer |
@@ -80,7 +80,7 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   2 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   2 +-
  docs/context/StayConnect-IAM-Handoff.md            |   2 +-
- docs/manifests/PostClosure-change-manifest.md      | 166 +++++---
+ docs/manifests/PostClosure-change-manifest.md      | 180 ++++++---
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 340758 -> 340763 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 140436 -> 140432 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 43971 -> 43968 bytes
@@ -117,28 +117,17 @@
  hotel-admin/test/design-system-invariants.test.ts  |  11 +
  hotel-admin/test/muted-text-contrast.test.ts       |  65 +++
  hotel-admin/test/setup-completion.test.tsx         |  90 +++++
- 51 files changed, 2901 insertions(+), 548 deletions(-)
+ 51 files changed, 2914 insertions(+), 549 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-M  docs/manifests/PostClosure-change-manifest.md
-M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_0a6a125d.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_735c7b6f.txt
-M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/MANIFEST.md
-M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
-M  governance/project-state.json
+(clean)
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 52a19706 Delivery: manifest and packs resynchronized
 HISTORICAL: 0a6a125d The portal redesign, held to the suite that exercises the real template
 HISTORICAL: 06e453be Delivery: manifest lists itself
 HISTORICAL: 7844868c Governance: T0155 records the consolidated Hotel Admin and Guest Portal cleanup
