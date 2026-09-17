@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -84,8 +85,15 @@ func (s *server) backupRun(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusInternalServerError, "the dump was empty and has been discarded")
 		return
 	}
-	// Readable by the operator surface, which runs as the service user and must be able to list and stream it.
+	// READABLE BY THE OPERATOR SURFACE. scd writes as root; edged serves the download as the unprivileged
+	// service user. Mode 0640 alone left the file root:root, so the download answered 500 -- the group has to
+	// be the service group as well as the mode being group-readable.
 	_ = os.Chmod(dest, 0o640)
+	if gid, ok := serviceGroupID(); ok {
+		if err := os.Chown(dest, 0, gid); err != nil {
+			slog.Warn("backup written but not group-readable by the operator surface", "err", err)
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name": name, "size_bytes": fi.Size(), "started_at": started,
 	})
@@ -126,7 +134,18 @@ func (s *server) backupVerify(w http.ResponseWriter, r *http.Request) {
 			"a scratch database could not be created: "+tailLine(string(out)))
 		return
 	}
-	defer func() { _, _ = admin("DROP DATABASE IF EXISTS " + scratch + " WITH (FORCE)") }()
+	// THE CLEANUP MUST NOT RIDE ON THE REQUEST CONTEXT. The deferred drop runs after the response is written,
+	// by which time r.Context() is cancelled -- so the DROP was killed before it ran and PRE-LIVE was left
+	// with a verify_* database after the first verification. Its own background context and deadline.
+	defer func() {
+		dctx, dcancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer dcancel()
+		if out, err := exec.CommandContext(dctx, "docker", "exec", pgContainer,
+			"psql", "-U", pgUser, "-d", "postgres", "-tAc",
+			"DROP DATABASE IF EXISTS "+scratch+" WITH (FORCE)").CombinedOutput(); err != nil {
+			slog.Error("scratch verification database not dropped", "db", scratch, "detail", tailLine(string(out)))
+		}
+	}()
 
 	load := exec.CommandContext(ctx, "/bin/sh", "-c",
 		"gzip -dc "+shq(path)+" | docker exec -i "+pgContainer+" psql -U "+pgUser+" -d "+scratch+
@@ -153,6 +172,20 @@ func (s *server) backupVerify(w http.ResponseWriter, r *http.Request) {
 		res["detail"] = "the dump loaded but produced no tables"
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+// serviceGroupID resolves the unprivileged group edged runs under, so a root-written artefact can be handed
+// to it without widening the mode to world-readable. A backup is a complete copy of the site's data.
+func serviceGroupID() (int, bool) {
+	g, err := user.LookupGroup("stayconnect")
+	if err != nil {
+		return 0, false
+	}
+	var gid int
+	if _, err := fmt.Sscanf(g.Gid, "%d", &gid); err != nil {
+		return 0, false
+	}
+	return gid, true
 }
 
 func shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }

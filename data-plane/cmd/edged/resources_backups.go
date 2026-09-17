@@ -25,7 +25,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -57,7 +56,6 @@ var safeArtifact = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
 func (s *server) backupsRoutes() http.Handler {
 	r := chi.NewRouter()
-	r.Get("/", s.listBackupRecords)
 	r.Get("/health", s.backupHealth)
 	r.Get("/artifacts", s.listBackupArtifacts)
 	r.Post("/run", s.runDatabaseBackup)
@@ -281,12 +279,19 @@ func (s *server) runDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 	//
 	// Everything that decides WHETHER this may happen stays on this side: the RBAC mount, the password
 	// step-up above, the audit record and the backup ledger below.
-	started := time.Now().UTC()
-	id, recErr := s.recordBackupStart(r.Context(), "database", dbBackupDir)
+	// NO LEDGER ROW IS WRITTEN, and that is a finding rather than an omission.
+	//
+	// public.backup_records exists and the operator surface used to list it, but NEITHER service role can
+	// write to it: svc_edged holds SELECT only and svc_scd holds nothing at all. Nothing has ever inserted a
+	// row, which is why the screen read "No backups yet" forever. Granting INSERT is a migration, and this
+	// mission does not authorise one.
+	//
+	// So the history is the ARTEFACTS -- which are real, enumerable, and the thing an operator actually
+	// restores from. Adding a second permanently-empty viewer beside the first would have repeated the defect
+	// rather than fixed it.
 	code, body, err := s.scd.call(r.Context(), http.MethodPost, "/v1/backup/run", nil)
 	if err != nil || code != http.StatusOK {
 		detail := scdDetail(body, err)
-		s.finishBackupRecord(r.Context(), id, "failed", 0, detail)
 		s.audit(r, "backup.failed", "backup", "", map[string]any{"error": detail})
 		jsonErr(w, http.StatusInternalServerError, "backup_failed",
 			"the database backup did not complete: "+detail)
@@ -297,18 +302,15 @@ func (s *server) runDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 		SizeBytes int64  `json:"size_bytes"`
 	}
 	if jerr := json.Unmarshal(body, &res); jerr != nil || res.Name == "" {
-		s.finishBackupRecord(r.Context(), id, "failed", 0, "the appliance did not report a backup name")
 		jsonErr(w, http.StatusInternalServerError, "backup_failed",
 			"the backup completed but the appliance did not report its name")
 		return
 	}
 	name, size := res.Name, res.SizeBytes
-	s.finishBackupRecord(r.Context(), id, "ok", size, "")
+	// The audit log IS the record of who took it and when -- written through the same path as every other
+	// privileged operator action, and readable on the Audit screen.
 	s.audit(r, "backup.created", "backup", name, map[string]any{"size_bytes": size, "kind": "database"})
-	if recErr != nil {
-		slog.Warn("backup taken but not recorded in backup_records", "name", name, "err", recErr)
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"name": name, "size_bytes": size, "started_at": started})
+	writeJSON(w, http.StatusOK, map[string]any{"name": name, "size_bytes": size})
 }
 
 // ------------------------------------------------------------------------------------------ verifying
@@ -368,29 +370,6 @@ func scdDetail(body []byte, err error) string {
 }
 
 // ------------------------------------------------------------------------------------------- plumbing
-
-func (s *server) recordBackupStart(ctx context.Context, kind, path string) (int64, error) {
-	var id int64
-	err := s.db.QueryRow(ctx,
-		`INSERT INTO backup_records (started_at, status, kind, path) VALUES (now(),'running',$1,$2) RETURNING id`,
-		kind, path).Scan(&id)
-	return id, err
-}
-
-func (s *server) finishBackupRecord(ctx context.Context, id int64, status string, size int64, errText string) {
-	if id == 0 {
-		return
-	}
-	var e *string
-	if errText != "" {
-		e = &errText
-	}
-	if _, err := s.db.Exec(ctx,
-		`UPDATE backup_records SET finished_at=now(), status=$2, size_bytes=$3, error=$4 WHERE id=$1`,
-		id, status, size, e); err != nil {
-		slog.Warn("backup record not finished", "id", id, "err", err)
-	}
-}
 
 // shellQuote makes a path safe to embed in the one place this file uses a shell -- the dump pipeline, which
 // needs a pipe. Paths here are constructed, never caller-supplied, but a quoting helper that exists is one
