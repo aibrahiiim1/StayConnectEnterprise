@@ -38,7 +38,9 @@ const emergency = {
   down_kbps: 5000,
   up_kbps: 2000,
   data_quota_bytes: 500 * 1024 * 1024,
-  device_limit: 1,
+  // 0 is what the appliance actually reports, and it means "no extra devices". The fixture said 1, which is
+  // why the bare-zero rendering was never exercised.
+  device_limit: 0,
   device_limit_policy: "REJECT_NEW_DEVICE",
   policy_version: "EMERGENCY_GRACE_V1",
 };
@@ -272,6 +274,37 @@ describe("an operator can author the hotel's checkout grace policy without leavi
     // numbers from the current config would agree with itself and describe nothing.
     expect(within(rows[2]).getByText(/1 h/)).toBeTruthy();
     expect(within(rows[2]).getByText(/500 MB/)).toBeTruthy();
+  });
+
+  it("says it CANNOT SEE the history rather than claiming there is none", async () => {
+    // FOUND ON PRE-LIVE, NOT BY A TEST. The publication ledger is written by a SECURITY DEFINER function, so
+    // svc_edged holds no SELECT on it and the endpoint answered 500 on every page load. A fixture connecting
+    // as the schema owner can read everything and could never have caught it.
+    //
+    // The distinction being asserted is the one that matters: "no policy has ever been published" and "I
+    // cannot read the record" are different claims, and showing the first while the second is true would
+    // misinform an operator auditing who changed the hotel's grace terms.
+    get.mockImplementation((path: string) => {
+      if (path === "/checkout-grace/history")
+        return Promise.resolve({ data: [], meta: { has_more: false }, available: false });
+      if (path === "/checkout-grace") return Promise.resolve({ ...unconfigured, published: true, config_version: 2 });
+      return Promise.resolve({});
+    });
+    await renderForm();
+
+    const note = await screen.findByText(/cannot be read on this appliance/i);
+    expect(note.textContent).toMatch(/does not mean no policy has been published/i);
+    // and it must not render an empty table that reads as "nothing was ever published"
+    expect(screen.queryByLabelText("Checkout grace policy history")).toBeNull();
+  });
+
+  it("calls the fallback's zero device limit 'no extra devices', not '0'", async () => {
+    // The built-in fallback carries device_limit 0. A bare "0" reads as "no limit" -- the opposite of what it
+    // means. The previous screen said so and the rewrite lost it; PRE-LIVE showed the bare 0.
+    mockGrace([unconfigured]);
+    await renderForm();
+    const dl = screen.getByLabelText("Effective checkout grace");
+    expect(within(dl).getByText(/no extra devices/i)).toBeTruthy();
   });
 
   it("a read-only role sees the terms but cannot open the editor", async () => {
