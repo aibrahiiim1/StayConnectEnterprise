@@ -166,6 +166,10 @@ type setGraceReq struct {
 	// The decoder rejects unknown fields, so without this line an old client's request fails as "bad body" --
 	// a caller reading that would look for a malformed JSON problem that does not exist. It is never used.
 	RetiredPackageRevisionID string `json:"grace_package_revision_id"`
+	// Password is the step-up. It is required here for the same reason it is required on /checkout-grace:
+	// BOTH routes write the same site policy, so a step-up on only one of them is not a control, it is a
+	// detour. This route had none.
+	Password string `json:"password"`
 }
 
 // graceReasonCode bounds the reason code to ^[A-Z][A-Z0-9_]{0,63}$ -- the same shape the audited boundary
@@ -192,6 +196,11 @@ func (s *server) setGraceConfig(w http.ResponseWriter, r *http.Request) {
 	if in.ExpectedVersion == nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request",
 			"expected_version is required: publish against the config_version you last read")
+		return
+	}
+	// Step-up: publishing changes what every departing guest receives.
+	if !s.reauth(r, in.Password) {
+		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
 		return
 	}
 	// The actor is taken from the authenticated SESSION, never from the body. The audited boundary records

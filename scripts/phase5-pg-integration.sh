@@ -124,6 +124,38 @@ if ! (cd "$ROOT/data-plane" && PHASE3_TEST_DSN="postgres://postgres:postgres@127
   fail=1
 fi
 
+# CHECKOUT-GRACE PROVISIONING AND POLICY PUBLICATION, which no gate ran until now.
+#
+# These tests are database-backed, live in ./internal/iamv2/, and read PHASE2_TEST_DSN. The unit matrix below
+# runs that package with NO DSN, so every one of them SKIPS; the Phase-4 gate runs it under a -run filter
+# naming three unrelated tests, so they were filtered out there. The whole D32 surface -- system provisioning,
+# the reserved-code guards, and the derivation that turns an operator's typed policy into a package the
+# checkout validator accepts -- was green everywhere and executed nowhere.
+#
+# THIS database is the right home rather than Phase-4's: the grace tests read plan columns (speed_allocation
+# among them) that arrive later than 0026, so on the Phase-4 chain they fail on the schema instead of on the
+# product.
+echo "== checkout-grace provisioning and publication =="
+# A SKIP MUST FAIL THIS STEP. These tests skip silently when PHASE2_TEST_DSN is unset or unusable, and a
+# skipped suite reports `ok` -- which is exactly how this suite came to be green in two gates while executing
+# in neither. Requiring a minimum number of PASSes and refusing any SKIP makes the step prove it ran, rather
+# than leaving that to be inferred from how long it took.
+grace_out="$(cd "$ROOT/data-plane" && PHASE2_TEST_DSN="postgres://postgres:postgres@127.0.0.1:$PORT/$DB?sslmode=disable" \
+  go test -count=1 -timeout 300s -v -run "SystemGrace|Provisioning|GracePolicy|GraceCodes" ./internal/iamv2/ 2>&1)"
+grace_rc=$?
+grace_pass="$(printf '%s\n' "$grace_out" | grep -c -- '--- PASS')"
+grace_skip="$(printf '%s\n' "$grace_out" | grep -c -- '--- SKIP')"
+printf '%s\n' "$grace_out" | grep -E -- '--- (PASS|FAIL|SKIP)|^(ok|FAIL)' || true
+if [ "$grace_rc" != 0 ]; then
+  echo "  -> FAIL (go test rc=$grace_rc)"; fail=1
+elif [ "${grace_skip:-0}" != 0 ]; then
+  echo "  -> FAIL: $grace_skip test(s) SKIPPED; the grace suite must RUN, not report ok while doing nothing"; fail=1
+elif [ "${grace_pass:-0}" -lt 5 ]; then
+  echo "  -> FAIL: only ${grace_pass:-0} grace test(s) passed; expected at least 5"; fail=1
+else
+  echo "  -> PASS ($grace_pass grace tests executed, 0 skipped)"
+fi
+
 echo "== Phase-5 unit matrix (no database) =="
 if ! (cd "$ROOT/data-plane" && go test -count=1 ./cmd/portald/ ./internal/iamv2/ ./internal/codegen/); then
   fail=1

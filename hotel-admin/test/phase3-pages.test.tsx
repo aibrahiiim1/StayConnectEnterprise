@@ -157,77 +157,20 @@ describe("Operational alerts page", () => {
   });
 });
 
-describe("Checkout grace page", () => {
-  const pkg = {
-    package_revision_id: "rev-1", package_code: "site-grace-pkg", revision_no: 1,
-    service_plan_revision_id: "plan-1", service_plan_code: "site-grace-plan",
-    down_kbps: 4000, up_kbps: 1500, data_quota_bytes: 524288000, device_limit: 2,
-    device_limit_policy: "REJECT_NEW_DEVICE", grace_duration_seconds: 3600,
-    settlement_mode: "NOT_REQUIRED", is_current: true, is_active: true, selected: true,
-    service_plan_revision_no: 1, time_accounting_mode: "VALIDITY_WINDOW",
-    end_mode: "GRACE_AFTER_CHECKOUT", policy_version: "CHECKOUT_GRACE_V1",
-  };
-  const state = (v: number) => ({ published: v > 0, config_version: v, supported_device_policies: ["REJECT_NEW_DEVICE"] });
+// THE CHECKOUT GRACE TESTS THAT LIVED HERE DESCRIBED A WORKFLOW THAT NO LONGER EXISTS.
+//
+// They asserted that the operator SELECTS a package revision, that publishing without one is refused, and
+// that the publish control stays disabled until a package is chosen. That workflow was a dead end: the
+// checkout validator only ever accepts a package derived from the policy, and the operator publisher refuses
+// to create the reserved system package those tests assumed somebody had prepared. On a site with none --
+// PRE-LIVE among them -- the page offered nothing to select and told the operator to visit a catalog that
+// could not help.
+//
+// The operator now authors the POLICY and the system derives the package. The equivalent claims, and the
+// whole journey from an unconfigured site to a published second version, are performed in
+// test/checkout-grace-self-service.test.tsx: what is actually SENT on publish, the read-only role, and the
+//409-reloads-rather-than-overwrites contract.
 
-  function mockGrace(v: number, packages = [pkg]) {
-    get.mockImplementation((path: string) => {
-      if (path === "/checkout-grace/packages") return Promise.resolve({ data: packages, meta: { has_more: false } });
-      return Promise.resolve(state(v));
-    });
-  }
-
-  it("publishes the SELECTED package's own pinned values, with the version, reason and step-up", async () => {
-    mockGrace(7);
-    put.mockResolvedValue({ config_version: 8 });
-    const { CheckoutGraceForm: GracePage } = await import("@/components/phase3/checkout-grace-form");
-    render(<GracePage />);
-    // the pinned attributes are displayed, not typed
-    expect(await screen.findByText("4000 kbps")).toBeTruthy();
-    expect(screen.getByText("1 h")).toBeTruthy();
-    await userEvent.type(screen.getByLabelText("Confirm your password"), "pw");
-    await userEvent.click(screen.getByRole("button", { name: /Publish policy/ }));
-
-    await waitFor(() => expect(put).toHaveBeenCalled());
-    const [path, body] = put.mock.calls[0];
-    expect(path).toBe("/checkout-grace");
-    // every scalar came from the package, so the policy cannot contradict what the package delivers
-    expect(body.grace_package_revision_id).toBe("rev-1");
-    expect(body.grace_down_kbps).toBe(4000);
-    expect(body.grace_duration_seconds).toBe(3600);
-    expect(body.expected_config_version).toBe(7);
-    expect(body.reason_code).toBeTruthy();
-    expect(body.password).toBe("pw");
-    expect(await screen.findByRole("status")).toBeTruthy();
-  });
-
-  it("cannot publish without a package, and says why", async () => {
-    mockGrace(0, []);
-    const { CheckoutGraceForm: GracePage } = await import("@/components/phase3/checkout-grace-form");
-    render(<GracePage />);
-    // no package to choose: publishing is not offered at all, and the reason is explained
-    expect(await screen.findByRole("alert")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Publish policy/ })).toBeNull();
-    expect(put).not.toHaveBeenCalled();
-  });
-
-  it("does not offer publishing until a package is chosen", async () => {
-    mockGrace(0, [{ ...pkg, selected: false }]);
-    const { CheckoutGraceForm: GracePage } = await import("@/components/phase3/checkout-grace-form");
-    render(<GracePage />);
-    const btn = (await screen.findByRole("button", { name: /Publish policy/ })) as HTMLButtonElement;
-    expect(btn.disabled).toBe(true);
-    await userEvent.selectOptions(screen.getByLabelText("Grace package"), "rev-1");
-    expect((screen.getByRole("button", { name: /Publish policy/ }) as HTMLButtonElement).disabled).toBe(false);
-  });
-
-  it("disables publishing for a role that may only read the policy", async () => {
-    mockGrace(7);
-    const { CheckoutGraceForm: GracePage } = await import("@/components/phase3/checkout-grace-form");
-    render(<GracePage canWrite={false} />);
-    const btn = (await screen.findByRole("button", { name: /Publish policy/ })) as HTMLButtonElement;
-    expect(btn.disabled).toBe(true);
-  });
-});
 
 describe("Concurrency contracts in the UI", () => {
   it("an alert changed by someone else reloads the queue instead of overwriting it", async () => {
@@ -248,32 +191,8 @@ describe("Concurrency contracts in the UI", () => {
     await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
   });
 
-  it("a policy published by someone else reloads instead of overwriting", async () => {
-    get.mockImplementation((path: string) => {
-      if (path === "/checkout-grace/packages") {
-        return Promise.resolve({
-          data: [{
-            package_revision_id: "rev-1", package_code: "site-grace-pkg", revision_no: 1,
-            service_plan_revision_id: "plan-1", service_plan_code: "site-grace-plan",
-            down_kbps: 4000, up_kbps: 1500, data_quota_bytes: 524288000, device_limit: 2,
-            device_limit_policy: "REJECT_NEW_DEVICE", grace_duration_seconds: 3600,
-            settlement_mode: "NOT_REQUIRED", is_current: true, is_active: true, selected: true,
-            service_plan_revision_no: 1, time_accounting_mode: "VALIDITY_WINDOW",
-            end_mode: "GRACE_AFTER_CHECKOUT", policy_version: "CHECKOUT_GRACE_V1",
-          }],
-          meta: { has_more: false },
-        });
-      }
-      return Promise.resolve({ published: true, config_version: 7, supported_device_policies: ["REJECT_NEW_DEVICE"] });
-    });
-    put.mockRejectedValue(Object.assign(new Error("version conflict"), { status: 409 }));
-    const { CheckoutGraceForm: GracePage } = await import("@/components/phase3/checkout-grace-form");
-    render(<GracePage />);
-    await screen.findByText("4000 kbps");
-    await userEvent.click(screen.getByRole("button", { name: /Publish policy/ }));
-    expect(await screen.findByRole("alert")).toBeTruthy();
-    // the page RELOADS the current policy instead of overwriting it (state + packages are re-read)
-    await waitFor(() => expect(get.mock.calls.length).toBeGreaterThanOrEqual(4));
-  });
+  // The grace 409 contract moved with the workflow it belongs to: it is asserted against the real publish
+  // journey (author -> review -> confirm) in test/checkout-grace-self-service.test.tsx. The version that was
+  // here drove a package selector that no longer exists.
 
 });

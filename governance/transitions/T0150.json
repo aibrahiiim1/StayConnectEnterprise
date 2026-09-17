@@ -1,0 +1,74 @@
+{
+  "transition_id": "T0150",
+  "seq": 150,
+  "timestamp": "2026-09-17T01:06:33Z",
+  "timestamp_derivation": "After the operator workflow was implemented, the two directly-related defects fixed, the obsolete package-selection tests retired and replaced, the full Phase-4 and Phase-5 gate scripts, the complete vitest suite and the nine Checkout-Grace E2E specs run locally; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "CHECKOUT_GRACE_IS_SELF_SERVICE_FROM_HOTEL_ADMIN",
+
+  "the_defect_this_closes": {
+    "what_an_operator_saw": "Property management -> Checkout grace offered a 'Grace package' selector and, on a site with no selectable package, the sentence 'No checkout-grace package is available for this site yet. Publish one through the commercial catalog first.'",
+    "why_that_instruction_could_not_be_followed": "The grace package is a RESERVED system package; the operator publisher refuses the reserved codes outright. And the checkout validator requires exact equality between the typed policy and the pinned revision, so the only package that can ever be selectable is one built FROM the policy. There was nothing an operator could do in the catalog that would produce one.",
+    "the_live_evidence": "On PRE-LIVE, iam_v2.selectable_grace_packages returned two candidates and excluded BOTH: __sys_emergency_grace_pkg__ as PACKAGE_IS_EMERGENCY_CATALOG and __system_checkout_grace as PLAN_IS_EMERGENCY_CATALOG. site_checkout_grace_config and checkout_grace_policy_publications were empty. The site had no route to a policy that did not involve SQL.",
+    "what_it_cost": "The hotel ran on the built-in emergency fallback -- six conversions and counting -- not because anyone chose those terms but because choosing was impossible."
+  },
+
+  "what_the_operator_can_now_do": "Open Checkout grace; read what is in force right now and whether anyone chose it; press Create hotel policy (or Change policy); set grace duration, download and upload speed, data allowance, device limit, device policy and eligibility window in the units a hotel thinks in -- minutes, Mbps, MB; press Review before publishing and read the exact terms a departing guest will receive; confirm with a bounded reason and a password step-up; see the new version immediately shown as the effective published policy; publish further versions later; and read the full policy history with who published each version, when and why. No SQL, no CLI, no catalog step, and no UUID or revision number anywhere in the flow.",
+
+  "how_the_immutable_model_is_kept_without_exposing_it": {
+    "unchanged": "Service plan revisions and package revisions remain immutable, and the checkout validator still demands exact equality. Nothing was relaxed to make the UI simpler.",
+    "who_builds_them": "The server. iamv2.PublishSystemGracePolicy derives the reserved system plan revision and package revision that express the operator's policy exactly, then publishes through iam_v2.publish_checkout_grace_policy -- the audited boundary that already required an active operator actor, a bounded reason code, optimistic concurrency and the same matcher the conversion uses.",
+    "the_part_worth_naming": "That function already existed and was already correct. It had NO operator-facing caller: Hotel Admin talked to a package-first endpoint instead. The fix was mostly connecting the surface to the machinery that was built for it.",
+    "atomicity": "Plan revision, package revision and publication happen in one transaction. A refused policy leaves no config row, no audit row and no stranded derived plan -- asserted, not assumed.",
+    "identical_policy_does_not_fork_history": "Republishing the same scalars reuses the existing revision; the current-revision pointer moves only when the values actually differ."
+  },
+
+  "what_happens_when": {
+    "no_policy_exists": "The page names the built-in emergency terms in full, labels them 'Emergency fallback - not a policy this hotel chose', says how many times they have already been used and when, and offers Create hotel policy. The first draft is pre-filled with the emergency terms, so publishing without thinking changes nothing a guest would notice.",
+    "a_new_version_is_published": "config_version advances, the ledger gains an append-only row carrying the actor, reason and full policy snapshot, and the derived package revision becomes the site's pinned one. Publication is against the version the operator last read, so a concurrent publication is a 409 that RELOADS rather than overwrites.",
+    "a_guest_is_already_inside_grace": "Nothing. Their entitlement carries the terms pinned at their checkout, and the new policy applies to future checkouts only. The page states this in both states, because the wrong assumption is expensive in both directions -- someone publishing a shorter policy must not believe they have cut a guest off, and someone publishing a longer one must not believe they have extended them."
+  },
+
+  "defects_found_and_fixed_beyond_the_requested_workflow": {
+    "provisioner_pinned_the_emergency_catalog_plan": "DefaultPlanRevisionForGrace selected with ORDER BY p.code LIMIT 1 over enabled plans. On any site whose only plans are the system ones -- every freshly onboarded appliance -- '__sys_emergency_grace_plan__' sorts first, so startup provisioning deterministically built the normal grace package on top of the reserved EMERGENCY plan, producing a revision the matcher refuses with PLAN_IS_EMERGENCY_CATALOG. It now excludes the reserved codes from the SAME list the publish guard uses, and returns to the documented intermediate state: a package with no revision yet, waiting for the operator's first policy. Proven by a test that fails when the fix is reverted.",
+    "a_step_up_on_only_one_of_two_doors": "PUT /commerce/grace writes the same site grace policy as PUT /checkout-grace and required no password confirmation. A step-up that can be walked around is not a control; it now requires one.",
+    "a_gate_that_ran_nothing": "The entire D32 grace suite in ./internal/iamv2/ had never executed in CI. It is database-backed and reads PHASE2_TEST_DSN; the Phase-5 unit matrix runs that package with NO DSN so every test skipped, and the Phase-4 gate runs it under a -run filter naming three unrelated tests. System provisioning, the reserved-code guards and the policy-to-package derivation were green everywhere and executed nowhere. Now run in the Phase-5 gate, whose database carries the full migration chain -- Phase-4's stops at 0026 and lacks plan columns these tests read, so running them there would have failed on the schema rather than on the product. This is the same class of gap as the stayengine package in T0148, found the same way: by checking that a new test actually runs rather than that the suite is green.",
+    "a_fixture_that_described_a_response_the_appliance_stopped_sending": "The Checkout-Grace E2E mock omitted the `effective` field entirely, although the real endpoint has returned it on both branches since T0144. Corrected. Two unit fixtures also used an `{items: ...}` list envelope where the API returns `{data, meta}`."
+  },
+
+  "tests_retired_and_what_replaced_them": {
+    "why_any_were_retired": "Several tests asserted the package-selection workflow itself -- that the operator picks a revision, that publishing without one is refused, that publish stays disabled until a package is chosen. Those claims describe a dead end and cannot be kept once it is removed. Each was replaced by the assertion that still matters, at the place it now lives, rather than deleted.",
+    "selector_contract": "The poisoned-candidate cases are UNCHANGED -- the matcher must still refuse every wrong policy_version, end mode, malformed duration, wrong time accounting and reserved-catalog plan. Only the 'and publication accepts the chosen one' arm was replaced, by asserting that the DERIVED package declares CHECKOUT_GRACE_V1 and that a catalog full of poisoned candidates does not tempt derivation into adopting one.",
+    "exact_scalar_poison_test": "Replaced by its mirror image: four different policies, including both contract ceilings, are published and each one's stored config is read back and judged by iam_v2.grace_package_mismatch_reason. If derivation ever rounded, truncated or defaulted a field, the conversion would fall back to Emergency Grace while the screen showed a published policy.",
+    "emergency_catalog": "Strengthened rather than retired. It now also publishes the emergency catalog's OWN terms -- the case most likely to make a shortcut look correct, because the numbers match exactly -- and asserts the site policy still lands on the system package rather than the reserved one.",
+    "new_operator_journey_tests": "Eight, driving the real controls from the state PRE-LIVE is actually in: the catalog dead end is asserted ABSENT; publishing sends the typed policy with correct unit conversion and no package; the review step shows the exact terms and publishes nothing until confirmed; an out-of-range policy is refused in the page by a bound the input's own min/max cannot express; a second version starts pre-filled from what is in force and changing one number leaves the rest intact; a 409 reloads; history shows each version's OWN terms; and a read-only role cannot open the editor."
+  },
+
+  "what_was_tested_versus_verified_live": {
+    "deterministic": "Full Phase-5 gate script including the newly-added grace suite; full Phase-4 gate script; the complete 303-test vitest suite; the nine Checkout-Grace E2E specs against a real browser and a mocked backend.",
+    "live": "Recorded in the deployment receipt that follows this one. The starting condition -- zero selectable packages, both candidates excluded, no config row and no publication ledger row -- was read from PRE-LIVE before any change was made."
+  },
+
+  "no_migration": "None. No schema change was needed: the publication boundary, the matcher, the append-only ledger and the reserved-code guards all already existed.",
+  "constraints_observed": {
+    "immutability": "Preserved. Revisions are still immutable and still validated by the same function the checkout conversion uses.",
+    "validation": "Nothing weakened. The database remains the authority; the page's own bounds mirror it and never widen it.",
+    "no_pms_or_financial": "No PMS configuration change, no PMS write, no financial traffic.",
+    "retired_host": "172.21.60.23 neither contacted nor modified."
+  },
+
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-17: make Checkout Grace fully self-service from Hotel Admin, including all directly related UI, API, domain, tests, CI, protected PR/merge, PRE-LIVE deployment to 172.21.60.25, verification and documentation/governance synchronization.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE.",
+  "standing_product_owner_decision": "The emergency fallback remains the operational default until an operator publishes a policy. This delivery does NOT choose one: which terms a hotel gives its departing guests is a commercial decision about the property, and the mission's purpose was to make that decision possible rather than to make it."
+}

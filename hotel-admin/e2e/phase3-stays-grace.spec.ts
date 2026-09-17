@@ -17,6 +17,7 @@ async function installBackend(
     alertActionStatus?: number;
     packages?: unknown[];
     grace?: unknown;
+    history?: unknown[];
     gracePutStatus?: number;
     mutations: Mutations;
   }
@@ -62,17 +63,46 @@ async function installBackend(
       if (st !== 200) return route.fulfill(json(st, { error: "bad_request", message: "the checkout-grace policy was refused" }));
       return route.fulfill(json(200, { config_version: 8 }));
     }
+    if (path === "/checkout-grace/history") {
+      return route.fulfill(json(200, JSON.stringify({ data: opts.history ?? [], meta: { has_more: false } })));
+    }
     if (path === "/checkout-grace/packages") {
       return route.fulfill(json(200, JSON.stringify({ data: opts.packages ?? [gracePackage], meta: { has_more: false } })));
     }
     if (path === "/checkout-grace") {
+      // `effective` is not optional decoration: the real endpoint has returned it on BOTH branches since the
+      // page started answering "what does a departing guest actually get". This fixture omitted it, which
+      // made the mock describe a response the appliance stopped sending.
       if (opts.unpublished) {
-        return route.fulfill(json(200, { published: false, config_version: 0, supported_device_policies: ["REJECT_NEW_DEVICE"] }));
+        return route.fulfill(json(200, {
+          published: false, config_version: 0,
+          supported_device_policies: ["REJECT_NEW_DEVICE"],
+          effective: {
+            source: "EMERGENCY_FALLBACK",
+            duration_seconds: 3600, down_kbps: 5000, up_kbps: 2000,
+            data_quota_bytes: 524288000, device_limit: 1, device_limit_policy: "REJECT_NEW_DEVICE",
+            policy_version: "EMERGENCY_GRACE_V1",
+          },
+          emergency_history: { count: 0 },
+        }));
       }
+      const cfg = (opts.grace ?? {}) as Record<string, number | string>;
       return route.fulfill(json(200, {
         published: true, config_version: 7,
         supported_device_policies: ["REJECT_NEW_DEVICE"],
         policy: opts.grace ?? {},
+        effective: {
+          source: "PUBLISHED",
+          duration_seconds: cfg.grace_duration_seconds ?? 3600,
+          down_kbps: cfg.grace_down_kbps ?? 4000,
+          up_kbps: cfg.grace_up_kbps ?? 1500,
+          data_quota_bytes: cfg.grace_data_quota_bytes ?? 524288000,
+          device_limit: cfg.grace_device_limit ?? 2,
+          device_limit_policy: cfg.grace_device_limit_policy ?? "REJECT_NEW_DEVICE",
+          eligibility_window_seconds: cfg.eligibility_window_seconds ?? 86400,
+          config_version: 7,
+        },
+        emergency_history: { count: 0 },
       }));
     }
     return route.fulfill(json(200, list([])));
@@ -193,30 +223,41 @@ test("publishing the checkout-grace policy sends the COMPLETE policy and reports
   const mutations: Mutations = [];
   await installBackend(page, { grace: graceCfg, mutations });
   await page.goto("/checkout-grace");
-  // the operator chooses a package; the numbers are the package's own pinned values, shown read-only
-  await expect(page.getByText("4000 kbps")).toBeVisible();
+  // The operator AUTHORS the policy. They no longer choose a package -- the system derives it -- so the
+  // journey is: open the editor, set terms, review the exact terms, confirm.
+  await page.getByRole("button", { name: /Change policy|Create hotel policy/ }).click();
+  await page.getByLabel("Grace duration (minutes)", { exact: true }).fill("60");
+  await page.getByLabel("Download speed (Mbps)", { exact: true }).fill("4");
+  await page.getByRole("button", { name: /Review before publishing/ }).click();
+  await expect(page.getByLabel("Policy to publish")).toBeVisible();
   await page.getByLabel("Confirm your password", { exact: true }).fill("operator-pw");
-  await page.getByRole("button", { name: /Publish policy/ }).click();
+  await page.getByRole("button", { name: /^Publish policy$/ }).click();
 
   await expect.poll(() => mutations.find((m) => m.path === "/checkout-grace" && m.method === "PUT")).toBeTruthy();
   const req = mutations.find((m) => m.path === "/checkout-grace" && m.method === "PUT")!;
   const sent = req.body as Record<string, unknown>;
-  for (const k of Object.keys(graceCfg)) expect(sent).toHaveProperty(k);
-  expect(sent.grace_package_revision_id).toBe("rev-1");
+  for (const k of Object.keys(graceCfg)) {
+    if (k === "grace_package_revision_id" || k === "config_version") continue;
+    expect(sent).toHaveProperty(k);
+  }
+  // NO PACKAGE IS SENT. The server derives the revision that expresses these terms exactly.
+  expect(sent.grace_package_revision_id).toBeUndefined();
   expect(sent.grace_duration_seconds).toBe(3600);
   expect(sent.grace_down_kbps).toBe(4000);
   // governed publication: the version the operator read, a bounded reason and a password confirmation
   expect(sent.expected_config_version).toBe(7);
   expect(sent.reason_code).toBeTruthy();
   expect(sent.password).toBe("operator-pw");
-  await expect(page.getByRole("status")).toHaveText(/version 8/);
+  await expect(page.getByRole("status")).toHaveText(/version 8/i);
 });
 
 test("a refused policy is surfaced, not silently swallowed", async ({ page }) => {
   const mutations: Mutations = [];
   await installBackend(page, { grace: graceCfg, gracePutStatus: 400, mutations });
   await page.goto("/checkout-grace");
-  await page.getByRole("button", { name: /Publish policy/ }).click();
+  await page.getByRole("button", { name: /Change policy|Create hotel policy/ }).click();
+  await page.getByRole("button", { name: /Review before publishing/ }).click();
+  await page.getByRole("button", { name: /^Publish policy$/ }).click();
   // the refusal reaches the operator verbatim rather than being swallowed into a success state
   await expect(page.getByText(/refused/i)).toBeVisible();
   await expect(page.getByRole("status")).toHaveCount(0);
@@ -226,8 +267,12 @@ test("a site with no published policy starts from defaults rather than an error"
   const mutations: Mutations = [];
   await installBackend(page, { unpublished: true, mutations });
   await page.goto("/checkout-grace");
-  // "no policy published yet" is a starting point, not a failure the operator has to interpret
-  await expect(page.getByText(/nothing published yet/)).toBeVisible();
+  // A STARTING POINT WITH A WAY OUT OF IT. The page used to say "nothing published yet" and then send the
+  // operator to the commercial catalog, which could not create a grace package -- a dead end. It now names
+  // what is actually in force and offers the action that leaves it.
+  await expect(page.getByText(/Emergency fallback/)).toBeVisible();
+  await expect(page.getByRole("button", { name: /Create hotel policy/ })).toBeVisible();
+  await expect(page.getByText(/commercial catalog/i)).toHaveCount(0);
   await expect(page.getByText(/Failed to load the checkout-grace policy/)).toHaveCount(0);
 });
 
@@ -247,12 +292,20 @@ test("phase-3 pages are accessible: named controls, one heading, labelled filter
 
   await page.goto("/checkout-grace");
   await expect(page.getByRole("heading", { level: 1, name: "Checkout grace" })).toBeVisible();
+  await page.getByRole("button", { name: /Change policy|Create hotel policy/ }).click();
   for (const label of [
-    "Grace package",
-    "Eligibility window (seconds)",
-    "Reason",
-    "Confirm your password",
+    "Grace duration (minutes)",
+    "Eligibility window (minutes)",
+    "Download speed (Mbps)",
+    "Upload speed (Mbps)",
+    "Data allowance (MB)",
+    "Device limit",
+    "Device policy",
   ]) {
+    await expect(page.getByLabel(label, { exact: true })).toBeVisible();
+  }
+  await page.getByRole("button", { name: /Review before publishing/ }).click();
+  for (const label of ["Reason", "Confirm your password"]) {
     await expect(page.getByLabel(label, { exact: true })).toBeVisible();
   }
 
@@ -273,8 +326,10 @@ test("a policy published by someone else is a conflict the operator can see, not
   const mutations: Mutations = [];
   await installBackend(page, { grace: graceCfg, gracePutStatus: 409, mutations });
   await page.goto("/checkout-grace");
+  await page.getByRole("button", { name: /Change policy|Create hotel policy/ }).click();
+  await page.getByRole("button", { name: /Review before publishing/ }).click();
   await page.getByLabel("Confirm your password", { exact: true }).fill("operator-pw");
-  await page.getByRole("button", { name: /Publish policy/ }).click();
+  await page.getByRole("button", { name: /^Publish policy$/ }).click();
   await expect(page.getByText(/newer policy/i)).toBeVisible();
 });
 

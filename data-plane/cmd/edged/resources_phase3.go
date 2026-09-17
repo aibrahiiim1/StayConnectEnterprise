@@ -14,12 +14,16 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/grace"
 )
@@ -429,6 +433,7 @@ func (s *server) checkoutGraceConfigRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", s.getCheckoutGraceConfig)
 	r.Get("/packages", s.listGracePackages)
+	r.Get("/history", s.listGraceHistory)
 	r.Put("/", s.putCheckoutGraceConfig)
 	return r
 }
@@ -622,12 +627,21 @@ func (s *server) putCheckoutGraceConfig(w http.ResponseWriter, r *http.Request) 
 		jsonErr(w, http.StatusBadRequest, "reason_required", "a bounded reason code is required to publish")
 		return
 	}
-	// A policy with no Package Revision is not an ordinary policy: the Checkout conversion judges it invalid
-	// configuration and falls back to Emergency Grace, so publishing it would show "saved" while guaranteeing
-	// an emergency fallback and an operational alert on the very next departure.
-	if in.PackageRevisionID == nil || strings.TrimSpace(*in.PackageRevisionID) == "" {
-		jsonErr(w, http.StatusBadRequest, "package_required",
-			"select a checkout-grace package revision; a policy with no package would fall back to emergency grace")
+	// THE PACKAGE IS DERIVED, NOT CHOSEN. The operator publishes POLICY; the system materialises the service
+	// plan revision and package revision that express it exactly, in the same transaction as the publication.
+	//
+	// It used to be the other way round, and that was a dead end rather than a preference. The checkout
+	// validator demands EXACT equality between the typed policy and the pinned revision, so the only package
+	// that can ever be selected is one built from the policy -- and on a site with no such package the page
+	// told the operator to "publish one through the commercial catalog first", which is not something the
+	// catalog can do: the grace package is a reserved system package the operator publisher refuses to create.
+	// An operator following that instruction could not succeed, and PRE-LIVE sat on the emergency fallback
+	// with zero selectable packages as a result.
+	if in.PackageRevisionID != nil && strings.TrimSpace(*in.PackageRevisionID) != "" {
+		jsonErr(w, http.StatusBadRequest, "package_not_accepted",
+			"grace_package_revision_id is not accepted: publish the policy and the system derives the package "+
+				"that matches it exactly, because a hand-picked package can only accidentally satisfy the "+
+				"checkout validator")
 		return
 	}
 	// Step-up: publishing changes what every departing guest receives.
@@ -657,22 +671,105 @@ func (s *server) putCheckoutGraceConfig(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if !graceReasonCode.MatchString(in.ReasonCode) {
+		jsonErr(w, http.StatusBadRequest, "reason_invalid",
+			"reason_code must be a bounded machine code matching ^[A-Z][A-Z0-9_]{0,63}$, not free text")
+		return
+	}
+	repo, ok := s.commerceRepo.(iamv2.GracePublishRepository)
+	if !ok || repo == nil {
+		jsonErr(w, http.StatusServiceUnavailable, "phase2_disabled",
+			"the commercial catalog is not available, so the grace package cannot be derived")
+		return
+	}
+
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	var version int
-	err := s.db.QueryRow(ctx, `SELECT iam_v2.publish_checkout_grace_policy(
-			$1,$2,$3::uuid,$4,$5,$6,$7,$8,$9,$10,$11,$12::uuid,$13)`,
-		s.tenantID, s.siteID, in.PackageRevisionID, in.DurationSeconds, in.DownKbps, in.UpKbps,
-		in.DataQuotaBytes, in.DeviceLimit, in.DeviceLimitPolicy, in.EligibilityWindowSec,
-		*in.ExpectedConfigVersion, sess.OperatorID, in.ReasonCode).Scan(&version)
+	// One transaction end to end: plan revision, package revision and the audited publication. A refusal
+	// leaves no half-built grace catalog behind claiming to be something nobody validated.
+	version, pkgRev, err := iamv2.PublishSystemGracePolicy(ctx, repo, iamv2.GracePublishRequest{
+		TenantID: s.tenantID, SiteID: s.siteID,
+		Policy: iamv2.SystemGracePolicy{
+			DurationSeconds:          in.DurationSeconds,
+			DownKbps:                 in.DownKbps,
+			UpKbps:                   in.UpKbps,
+			DataQuotaBytes:           in.DataQuotaBytes,
+			DeviceLimit:              in.DeviceLimit,
+			DeviceLimitPolicy:        in.DeviceLimitPolicy,
+			EligibilityWindowSeconds: in.EligibilityWindowSec,
+		},
+		ActorOperatorID: sess.OperatorID, ReasonCode: in.ReasonCode,
+		ExpectedVersion: *in.ExpectedConfigVersion,
+	})
 	if err != nil {
+		// A bad policy is the operator's to fix and is reported as such; a stale version is a 409 so the UI
+		// reloads what actually changed instead of overwriting somebody else's publication.
+		var de *iamv2.Error
+		if errors.As(err, &de) && de.Code == iamv2.ErrInvalidInput {
+			jsonErr(w, http.StatusBadRequest, "validation", de.Msg)
+			return
+		}
 		status, code := graceFailureStatus(err.Error())
 		jsonErr(w, status, code, "the checkout-grace policy was refused")
 		return
 	}
+	// The derived revision is recorded because it is the provenance of what guests will receive; it is not
+	// returned as something the operator is expected to handle.
 	s.audit(r, "checkout_grace.published", "site_checkout_grace_config", s.siteID,
-		map[string]any{"config_version": version, "reason_code": in.ReasonCode})
+		map[string]any{"config_version": version, "reason_code": in.ReasonCode,
+			"derived_package_revision_id": pkgRev})
 	writeJSON(w, http.StatusOK, map[string]any{"config_version": version})
+}
+
+// graceHistoryEntry is one published version, as an operator reads provenance: who, when, why, and the exact
+// terms that version put in force. The package revision is the system's own derivation and is reported as
+// provenance rather than as anything the operator chose or can act on.
+type graceHistoryEntry struct {
+	ConfigVersion     int            `json:"config_version"`
+	PublishedAt       time.Time      `json:"published_at"`
+	ActorDisplay      string         `json:"actor"`
+	ReasonCode        string         `json:"reason_code"`
+	Policy            map[string]any `json:"policy"`
+	DerivedRevisionID string         `json:"derived_package_revision_id,omitempty"`
+}
+
+// listGraceHistory returns the append-only publication ledger, newest first.
+//
+// The snapshot is what that version actually put in force, read from the row rather than recomputed: a
+// history that re-derived its own numbers from today's config would agree with itself and describe nothing.
+func (s *server) listGraceHistory(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	rows, err := s.db.Query(ctx, `
+		SELECT p.config_version, p.published_at, COALESCE(p.reason_code,''),
+		       COALESCE(NULLIF(op.display_name,''), op.email, 'operator ' || left(p.actor::text,8)),
+		       p.policy_snapshot, COALESCE(p.grace_package_revision_id::text,'')
+		  FROM iam_v2.checkout_grace_policy_publications p
+		  LEFT JOIN public.operators op ON op.id = p.actor
+		 WHERE p.tenant_id=$1 AND p.site_id=$2
+		 ORDER BY p.config_version DESC LIMIT 100`, s.tenantID, s.siteID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "history query failed")
+		return
+	}
+	defer rows.Close()
+	out := []graceHistoryEntry{}
+	for rows.Next() {
+		var e graceHistoryEntry
+		var snap []byte
+		if err := rows.Scan(&e.ConfigVersion, &e.PublishedAt, &e.ReasonCode, &e.ActorDisplay,
+			&snap, &e.DerivedRevisionID); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "internal", "history scan failed")
+			return
+		}
+		_ = json.Unmarshal(snap, &e.Policy)
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "history read failed")
+		return
+	}
+	writeList(w, out)
 }
 
 // graceFailureStatus maps the controlled operation's bounded failure prefixes to HTTP. A version conflict is

@@ -92,15 +92,27 @@ func TestIntegration_API_PolicyVersionMustBeExactlyApproved(t *testing.T) {
 		if listed != (tc.wantReason == "") {
 			t.Fatalf("%s: listed=%v but mismatch=%q — the selector disagrees with the validator", tc.name, listed, tc.wantReason)
 		}
-		status, resp := f.do(t, "PUT", "/checkout-grace",
-			policyFor(rev, 0, 3600, 4000, 1500, 2, 524288000, "REJECT_NEW_DEVICE"))
-		if tc.wantReason == "" {
-			if status != 200 {
-				t.Fatalf("%s: the approved version was refused: %d %v", tc.name, status, resp)
-			}
-		} else if status != 400 || resp["error"] != "package_invalid" {
-			t.Fatalf("%s: publication got %d %v, want 400/package_invalid", tc.name, status, resp)
-		}
+	}
+
+	// AND THE DERIVED PACKAGE CARRIES THE APPROVED VERSION. The cases above prove the matcher refuses every
+	// wrong declaration; this proves the system's own derivation is not among them. Publication no longer
+	// takes a package -- it builds one -- so the risk moved from "the operator picked a bad package" to
+	// "the derivation writes a bad one", and that is what is checked here.
+	status, body := f.do(t, "PUT", "/checkout-grace",
+		policyOnly(0, 3600, 4000, 1500, 2, 524288000, "REJECT_NEW_DEVICE"))
+	if status != 200 {
+		t.Fatalf("publishing a policy was refused: %d %v", status, body)
+	}
+	var declared string
+	if err := f.pool.QueryRow(context.Background(), `
+		SELECT r.duration_policy->>'policy_version'
+		  FROM iam_v2.site_checkout_grace_config c
+		  JOIN iam_v2.internet_package_revisions r ON r.id = c.grace_package_revision_id
+		 WHERE c.tenant_id=$1 AND c.site_id=$2`, f.tenant, f.site).Scan(&declared); err != nil {
+		t.Fatalf("read the derived revision: %v", err)
+	}
+	if declared != "CHECKOUT_GRACE_V1" {
+		t.Fatalf("the derived package declares policy_version %q, want CHECKOUT_GRACE_V1", declared)
 	}
 }
 
@@ -175,11 +187,25 @@ func TestIntegration_API_SelectorExcludesEveryUnpublishableCandidate(t *testing.
 			t.Fatalf("%s was offered but publication would refuse it", p.code)
 		}
 	}
-	// and the one that IS offered publishes cleanly with its own values
+	// AND A POISONED CATALOG DOES NOT POISON PUBLICATION. The operator publishes policy; the system derives
+	// its own package and must not adopt one of these candidates on the way past. The derived revision is
+	// therefore asserted to be none of them.
 	if status, resp := f.do(t, "PUT", "/checkout-grace",
-		policyFor(good, 0, 3600, 4000, 1500, 2, 524288000, "REJECT_NEW_DEVICE")); status != 200 {
-		t.Fatalf("the offered package was refused by publication: %d %v", status, resp)
+		policyOnly(0, 3600, 4000, 1500, 2, 524288000, "REJECT_NEW_DEVICE")); status != 200 {
+		t.Fatalf("publication was refused while unpublishable candidates existed: %d %v", status, resp)
 	}
+	var derivedCode string
+	if err := f.pool.QueryRow(context.Background(), `
+		SELECT p.code FROM iam_v2.site_checkout_grace_config c
+		  JOIN iam_v2.internet_package_revisions r ON r.id = c.grace_package_revision_id
+		  JOIN iam_v2.internet_packages p ON p.id = r.package_id
+		 WHERE c.tenant_id=$1 AND c.site_id=$2`, f.tenant, f.site).Scan(&derivedCode); err != nil {
+		t.Fatalf("read the derived package: %v", err)
+	}
+	if derivedCode != "__system_checkout_grace" {
+		t.Fatalf("publication adopted package %q instead of deriving the system one", derivedCode)
+	}
+	_ = good
 }
 
 // The selector carries the whole immutable description an operator needs to choose — and nothing a guest

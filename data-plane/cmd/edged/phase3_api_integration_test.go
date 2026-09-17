@@ -17,6 +17,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
 // Real HTTP + real PostgreSQL 16 contract tests for the Phase-3 Hotel-Admin mutations. These exist because a
@@ -128,6 +130,11 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 	}
 
 	s := &server{db: p, sessions: newSessionStore(2 * time.Hour), tenantID: f.tenant, siteID: f.site}
+	// The commerce repository, wired exactly as main.go wires it. Publishing a checkout-grace policy derives
+	// the service plan and package revisions that express it, so this is not optional plumbing: without it the
+	// route these tests exercise would answer 503 and every assertion below would be about a fixture gap
+	// rather than about the product.
+	s.commerceRepo = iamv2.NewPgCommerceAdminRepository(p)
 	// the Phase-3 admin surface is mounted explicitly below; this fixture exercises the routes themselves.
 	f.sessTok = s.sessions.create(&session{OperatorID: f.operator, Email: "op@test.local", Roles: roles})
 

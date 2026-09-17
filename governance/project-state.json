@@ -1093,7 +1093,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0149",
+  "latest_transition_id": "T0150",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1293,7 +1293,9 @@
       "D32 NORMAL GRACE IS PRODUCED FROM POLICY AND PASSES THE REAL CHECKOUT VALIDATOR: publishing a policy derives the system plan and package revisions that express it, and iam_v2.grace_package_mismatch_reason -- the same function ConvertAtCheckout uses -- returns NULL for the result. A changed policy re-derives and still matches.",
       "D32 PUBLICATION USES THE CANONICAL AUDITED, VERSIONED BOUNDARY: publish_checkout_grace_policy, with an active-operator actor, a bounded machine reason code and optimistic concurrency. A stale expected_version is REFUSED, which the raw config writer (no version parameter) could not produce.",
       "D32 RESERVED CODES ARE UNREACHABLE FROM THE GENERIC OPERATOR PUBLISHER, including by code collision: publishing onto __system_checkout_grace or __system_checkout_grace_plan is refused while ordinary codes remain publishable.",
-      "Full internal/iamv2 DSN-gated suite green, including two further fixtures repaired for the auth_context and commerce_intent controlled-operation guards."
+      "Full internal/iamv2 DSN-gated suite green, including two further fixtures repaired for the auth_context and commerce_intent controlled-operation guards.",
+      "D32 CHECKOUT GRACE IS SELF-SERVICE FROM HOTEL ADMIN (T0150): the operator publishes a TYPED POLICY -- duration, down/up, data allowance, device limit and policy, eligibility window -- and the server derives the reserved system plan revision and package revision that express it exactly, in the publication's own transaction and through the audited boundary. No package is accepted from a caller; supplying grace_package_revision_id is refused. The previous package-first surface was a dead end on any site without a derived package, which is every site before its first policy. GET /checkout-grace/history exposes the append-only publication ledger with actor, reason and the policy snapshot each version put in force.",
+      "GRACE PROVISIONING NO LONGER PINS THE RESERVED EMERGENCY PLAN (T0150): the startup plan picker excluded nothing, so on a site whose only plans are the system ones it built the normal grace package on __sys_emergency_grace_plan__ and produced a revision the matcher refuses with PLAN_IS_EMERGENCY_CATALOG. It now excludes the reserved codes from the same list the publish guard reads, and converges on the documented intermediate state -- a package awaiting the operator's first policy."
     ],
     "NOT_EXERCISED": [
       "Voucher reveal/export: the contract requires operator re-authentication and audit for recovering a code. OpenVoucherCode exists in the codec and NO admin route exposes it -- deliberately unimplemented rather than shipped without the re-auth gate.",
@@ -1585,14 +1587,14 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "PRE_LIVE_REAL_PATH_REINSTATEMENT_PROOFS_DEPLOYED_AND_VERIFIED",
-    "decision": "D67",
+    "kind": "CHECKOUT_GRACE_IS_SELF_SERVICE_FROM_HOTEL_ADMIN",
+    "decision": "D68",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "0e8b4f7bea1d7aa158ba6b23d4e18ccd5e448f56",
-    "base_note": "The master merge commit of PR #145. This delivery begins exactly where that one ended.",
-    "head": "",
-    "head_note": "Governance only: this delivery has no content commit. The manifest, generated blocks and this pointer are its entire content.",
-    "note": "T0149 records the real-path reinstatement delivery deployed to PRE-LIVE from 0e8b4f7b -- behaviour-neutral, rebuilt so the recorded head keeps describing the binaries. Grace unchanged (6 entitlements, all 3600s); the single new audit row is an organic pre-restart checkout with no active entitlement; PMS resync settled on generation 299 over 464 records; the only two errors are the standing scd and pmsd ones."
+    "base": "7017bc3bd9d403c9b3ac062411fdd078ca40a90d",
+    "base_note": "The master merge commit of PR #146. This delivery begins exactly where that one ended.",
+    "head": "7a9ba699",
+    "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
+    "note": "T0150. The operator authors the Checkout Grace policy and the system derives the immutable plan/package revisions that express it. Also fixes a provisioner that pinned the reserved Emergency plan on every fresh appliance, a step-up missing from the second route that writes the same policy, and a gate that had never executed the grace suite at all."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
