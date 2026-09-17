@@ -113,6 +113,9 @@ export function CheckoutGraceForm({ canWrite = true }: { canWrite?: boolean }) {
   const [effective, setEffective] = useState<EffectivePolicy | null>(null);
   const [emergencyHistory, setEmergencyHistory] = useState<{ count: number; last_at?: string } | null>(null);
   const [history, setHistory] = useState<GraceHistoryEntry[]>([]);
+  /** false when the appliance cannot read the publication ledger. "No history" and "I cannot see the
+   *  history" are different claims, and showing the first when the second is true would be a lie. */
+  const [historyAvailable, setHistoryAvailable] = useState(true);
   const [devicePolicies, setDevicePolicies] = useState<string[]>(["REJECT_NEW_DEVICE"]);
 
   /** null = not editing. The editor is opened deliberately, so an operator cannot half-type a policy into a
@@ -136,10 +139,14 @@ export function CheckoutGraceForm({ canWrite = true }: { canWrite?: boolean }) {
       // History is layered on and allowed to be missing: a configuration screen that fails because a ledger
       // read failed would be a worse outage than the one it reports.
       try {
-        const h = await api.get<ListResp<GraceHistoryEntry>>("/checkout-grace/history");
+        const h = await api.get<ListResp<GraceHistoryEntry> & { available?: boolean }>(
+          "/checkout-grace/history",
+        );
         setHistory(h.data ?? []);
+        setHistoryAvailable(h.available !== false);
       } catch {
         setHistory([]);
+        setHistoryAvailable(false);
       }
     } catch (e: any) {
       setErr(e?.message ?? "Failed to load the checkout grace policy");
@@ -290,7 +297,10 @@ export function CheckoutGraceForm({ canWrite = true }: { canWrite?: boolean }) {
               <dd>{fmtBytes(effective.data_quota_bytes)}</dd>
               <dt>Device limit</dt>
               <dd>
-                {effective.device_limit} ({effective.device_limit_policy.replace(/_/g, " ").toLowerCase()})
+                {/* The built-in fallback carries 0, which means "no extra devices" rather than "no limit".
+                    Printing a bare 0 reads like the second. A published policy always carries at least 1. */}
+                {effective.device_limit === 0 ? "no extra devices" : effective.device_limit}{" "}
+                ({effective.device_limit_policy.replace(/_/g, " ").toLowerCase()})
               </dd>
               {effective.eligibility_window_seconds ? (
                 <>
@@ -512,7 +522,20 @@ export function CheckoutGraceForm({ canWrite = true }: { canWrite?: boolean }) {
         </Card>
       )}
 
-      {history.length > 0 && (
+      {!historyAvailable && (
+        <Card>
+          <CardBody>
+            <h2 className="text-base font-semibold">Policy history</h2>
+            <p role="status" className="text-sm">
+              The published-policy record cannot be read on this appliance, so it is not shown. This does not
+              mean no policy has been published — the record exists and is append-only; this screen simply
+              cannot see it. Nothing about the policy in force above is affected.
+            </p>
+          </CardBody>
+        </Card>
+      )}
+
+      {historyAvailable && history.length > 0 && (
         <Card>
           <CardBody className="space-y-2">
             <h2 className="text-base font-semibold">Policy history</h2>

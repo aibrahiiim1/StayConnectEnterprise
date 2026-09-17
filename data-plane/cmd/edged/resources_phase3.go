@@ -740,6 +740,21 @@ type graceHistoryEntry struct {
 func (s *server) listGraceHistory(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
+	// FAIL SOFT, AND SAY SO. The ledger is written by a SECURITY DEFINER function, so the service role has
+	// never needed to READ it -- svc_edged holds no SELECT on it, and the appliance answered 500 on every load
+	// of this page. A test fixture cannot catch that: it connects as the owner, which can read everything.
+	//
+	// Until the grant exists this reports availability honestly rather than either 500ing the page or, worse,
+	// returning an empty list -- "no policy has ever been published" is a different claim from "I cannot see
+	// the record", and only one of them is true here.
+	unavailable := func(err error) {
+		slog.Error("checkout-grace: publication history unreadable; the page is served without it",
+			"site_id", s.siteID, "err", err)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"data": []graceHistoryEntry{}, "meta": listMeta{}, "available": false,
+			"reason": "the service account cannot read the publication ledger on this appliance",
+		})
+	}
 	rows, err := s.db.Query(ctx, `
 		SELECT p.config_version, p.published_at, COALESCE(p.reason_code,''),
 		       COALESCE(NULLIF(op.display_name,''), op.email, 'operator ' || left(p.actor::text,8)),
@@ -749,7 +764,7 @@ func (s *server) listGraceHistory(w http.ResponseWriter, r *http.Request) {
 		 WHERE p.tenant_id=$1 AND p.site_id=$2
 		 ORDER BY p.config_version DESC LIMIT 100`, s.tenantID, s.siteID)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "internal", "history query failed")
+		unavailable(err)
 		return
 	}
 	defer rows.Close()
@@ -759,17 +774,19 @@ func (s *server) listGraceHistory(w http.ResponseWriter, r *http.Request) {
 		var snap []byte
 		if err := rows.Scan(&e.ConfigVersion, &e.PublishedAt, &e.ReasonCode, &e.ActorDisplay,
 			&snap, &e.DerivedRevisionID); err != nil {
-			jsonErr(w, http.StatusInternalServerError, "internal", "history scan failed")
+			unavailable(err)
 			return
 		}
 		_ = json.Unmarshal(snap, &e.Policy)
 		out = append(out, e)
 	}
+	// pgx defers most query errors to here, which is why the original 500 said only "history read failed"
+	// and named neither the table nor the privilege. The error is now logged.
 	if err := rows.Err(); err != nil {
-		jsonErr(w, http.StatusInternalServerError, "internal", "history read failed")
+		unavailable(err)
 		return
 	}
-	writeList(w, out)
+	writeJSON(w, http.StatusOK, map[string]any{"data": out, "meta": listMeta{}, "available": true})
 }
 
 // graceFailureStatus maps the controlled operation's bounded failure prefixes to HTTP. A version conflict is

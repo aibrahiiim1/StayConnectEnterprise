@@ -1,0 +1,68 @@
+{
+  "transition_id": "T0151",
+  "seq": 151,
+  "timestamp": "2026-09-17T05:23:28Z",
+  "timestamp_derivation": "After the merged master was built, both halves deployed to PRE-LIVE in dependency order, the Hotel Admin integrity check passed, the complete operator journey was driven live against the appliance, and the two defects that journey exposed were fixed and re-tested; before the author timestamp of the commit that introduces this receipt. After the merge commit dce7741a it describes. Per T0091, in the order T0108 requires.",
+  "record_type": "CHECKOUT_GRACE_SELF_SERVICE_DEPLOYED_AND_PROVEN_LIVE",
+
+  "merge": {
+    "pull_request": 147,
+    "merge_commit": "dce7741aa72145af409d1f8a8b555909f928b7c0",
+    "gates": "All four required gates green on the exact head bc745f2d. The Phase-5 gate failed once with exit 2 -- the disposable container could not start, assertions never reached -- which is the documented retryable infrastructure case; only that job was re-run. No workflow_dispatch.",
+    "preflight": "PASS on all seven default stages."
+  },
+
+  "deployment": {
+    "order": "API first, then the UI that depends on it. The new PUT contract and GET /checkout-grace/history had to exist before a bundle that calls them was served; deploying the Hotel Admin half first would have produced exactly the temporary 404 the standing rule forbids.",
+    "binaries": "All six report vcs.revision=dce7741aa721, modified=false, tags=stayconnect_production, read back out of the artefacts before shipping. Staged digests compared against the workstation build before installation; the installed set re-verified in place. Rollback for 0e8b4f7b retained at /opt/stayconnect/rollback/approved-dce7741a/.",
+    "hotel_admin": "Packaged through deploy-hotel-admin.sh under the capability contract. A FIRST ATTEMPT USED A BARE npm run build, which is precisely the command that once shipped a flagless bundle serving an operator surface with no Internet Packages, no Service Plans and no PMS Connection while every structural check passed; the packaging path refuses it, and the contract-supplied build was used instead. Tarball digest identical on the workstation and the appliance. Atomic release switch to 20260917-044326; the 20260915-233038 release is retained as the rollback and itself satisfies the full contract.",
+    "integrity": "HOTEL_ADMIN_INTEGRITY = PASS on all ten checks, including that the endpoint hotel staff actually reach serves the recorded BUILD_ID over a strictly verified certificate."
+  },
+
+  "the_operator_journey_driven_live": {
+    "how": "As the real site_admin operator against the appliance's own edged listener, through the same routes the browser uses, with the real session and the real password step-up.",
+    "1_and_2_the_starting_state": "published=false, config_version=0, in force = EMERGENCY_FALLBACK with its real terms (3600s, 5000/2000 kbps, 500 MB, 0 extra devices, REJECT_NEW_DEVICE). No policy row, no publication row.",
+    "3_to_6_creating_and_publishing": "A typed policy was published with NO package revision and no catalog step: 200, config_version 1. Re-reading showed source=PUBLISHED with exactly the submitted terms. The system had derived internet package __system_checkout_grace revision 2 -- superseding the unusable revision 1 that had been pinned to the reserved Emergency plan -- on a newly created __system_checkout_grace_plan revision 1. The operator saw none of that.",
+    "7_a_second_version": "Version 2 published different terms (30 min, 10/4 Mbps, 1 GB, 2 devices); version 3 restored the fallback-identical terms. The ledger holds three rows, each carrying ITS OWN snapshot -- version 2 still records 1800 seconds after version 3 restored 3600.",
+    "guests_already_inside_grace": "Six live grace entitlements, every one still exactly 3600 seconds after THREE publications. Publishing reaches forward only, proven on real entitlements rather than asserted.",
+    "refusals_exercised_live": "A stale expected_config_version -> 409 version_conflict. A wrong password -> 401 reauth_required. A supplied grace_package_revision_id -> 400 package_not_accepted. An unauthenticated call to each of the three routes -> 401, which also proves the deployed binary carries this delivery rather than an older one.",
+    "9_no_sql_or_cli": "Every step above went through the HTTP API the browser uses. No SQL was used to configure anything; psql appears only in read-only verification queries."
+  },
+
+  "two_defects_the_live_appliance_found_that_no_fixture_could": {
+    "history_endpoint_answered_500": {
+      "cause": "iam_v2.checkout_grace_policy_publications is written by a SECURITY DEFINER function, so svc_edged has never needed SELECT on it and does not hold it. Reading it is a new requirement this delivery introduced.",
+      "why_no_test_caught_it": "The integration fixture connects as the schema owner, which can read everything. This is a least-privilege defect and a fixture running as owner is structurally incapable of finding one. pgx also defers such errors to rows.Err(), so the message named neither the table nor the privilege.",
+      "fixed_how_far": "The endpoint now logs the real error and reports availability honestly instead of 500ing. It deliberately does NOT return an empty list: 'no policy has ever been published' and 'I cannot read the record' are different claims, and an operator auditing who changed the hotel's grace terms must not be shown the first while the second is true. The screen says so in those words.",
+      "what_remains": "Actually reading the ledger requires GRANT SELECT ON iam_v2.checkout_grace_policy_publications TO svc_edged. Grants in this repository live in numbered migrations, so that is a DB migration -- a controlled boundary this mission explicitly excluded. It is the one outstanding item and is recorded as a Product-Owner decision, not performed."
+    },
+    "zero_devices_printed_as_zero": "The effective-policy panel showed the fallback's device limit as a bare '0', which reads as 'no limit' and means the opposite. The previous screen said 'no extra devices'; the rewrite lost it. Restored. The unit fixture had claimed device_limit 1 where the appliance reports 0, which is why the rendering was never exercised; it now carries the real value."
+  },
+
+  "what_the_site_now_carries": "A published Checkout Grace policy at config_version 3, with terms identical to the built-in emergency fallback except the device limit, which is 1 because the policy contract requires at least one device while the fallback uses 0. No departing guest's experience changes. The emergency fallback is consequently no longer the policy in force, so emergency-fallback conversions and their critical alerts will not recur. Choosing the hotel's real numbers remains a Product-Owner decision -- this delivery made that decision possible rather than making it.",
+
+  "constraints_observed": {
+    "no_migration": "None performed. The one the history panel needs is named above and left for authorization.",
+    "immutability": "Preserved. Revisions remain immutable; the derived package revision superseded the previous one rather than editing it.",
+    "no_pms_or_financial": "No PMS configuration change, no PMS write, no financial traffic. The pmsd restart caused its normal reconnect only.",
+    "guest_state": "No guest, stay, entitlement or session row was altered. The six live grace entitlements were read, never written.",
+    "retired_host": "172.21.60.23 neither contacted nor modified.",
+    "credentials": "The operator password was supplied by the Product Owner for this verification and appears in no committed artefact."
+  },
+
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-17: make Checkout Grace fully self-service from Hotel Admin, including PRE-LIVE deployment to 172.21.60.25 and verification. The operator credential for the live proof, and the instruction to end on fallback-identical terms, were supplied by the Product Owner during this mission.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE.",
+  "outstanding_product_owner_decision": "ONE: authorize migration 0080 granting svc_edged SELECT on iam_v2.checkout_grace_policy_publications, so the policy history panel can read the ledger it already writes. Nothing else in the workflow depends on it."
+}
