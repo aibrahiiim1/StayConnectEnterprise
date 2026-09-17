@@ -121,7 +121,26 @@ func clientIP(r *http.Request) net.IP {
 func (h *handler) landing(w http.ResponseWriter, r *http.Request, errMsg string) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = h.tmplLand.Execute(w, map[string]any{"Error": errMsg})
+	// THE DEVICE'S OWN ADDRESSES, from the connection and the ARP table -- never from a header a guest can
+	// set. Both are legitimately available to a captive portal (the portal must already know them to
+	// authorise the device at all) and both are shown only in the information panel the guest opens
+	// themselves. A guest who cannot tell reception their MAC address cannot be helped by reception.
+	var ipStr, macStr string
+	if ip := clientIP(r); ip != nil {
+		ipStr = ip.String()
+		// Guarded: the ARP lookup is injected, and a portal that panics on the landing page because a
+		// lookup was not wired is a worse failure than one that simply cannot name the MAC.
+		if h.arpCache != nil {
+			if mac, ok := h.arpCache(ip); ok {
+				macStr = mac.String()
+			}
+		}
+	}
+	_ = h.tmplLand.Execute(w, map[string]any{
+		"Error":     errMsg,
+		"ClientIP":  ipStr,
+		"ClientMAC": macStr,
+	})
 }
 
 func (h *handler) index(w http.ResponseWriter, r *http.Request) {
@@ -375,6 +394,7 @@ func (h *handler) routes() http.Handler {
 	r.Post("/devices/list", h.deviceList)
 	r.Post("/devices/release", h.deviceRelease)
 	r.Get("/api/auth-methods", h.authMethods)
+	r.Get("/api/branding", h.branding)
 
 	// Phase 2 (DARK): guest commerce bridge routes are mounted ONLY when the portal surface is ON. While
 	// dark they are absent (404) and no scd commerce call is ever made.

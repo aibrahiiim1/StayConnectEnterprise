@@ -331,3 +331,50 @@ func looksLikeEmail(s string) bool {
 	}
 	return strings.Contains(s[at+1:], ".")
 }
+
+// tenantBranding serves the hotel's published portal design to the captive portal.
+//
+// READ-ONLY AND GUEST-SAFE. It returns the PUBLISHED design only -- never the draft an operator is editing,
+// and never the revision history stored beside it. A guest sees what the hotel decided to show, not what it
+// is in the middle of deciding.
+//
+// Failure is an empty object, not an error. The portal has complete defaults of its own, and a guest must
+// never be unable to sign in because branding could not be loaded.
+func (s *server) tenantBranding(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	empty := func() { _, _ = w.Write([]byte(`{}`)) }
+	if s.tenID == "" {
+		empty()
+		return
+	}
+	var raw []byte
+	if err := s.db.QueryRow(r.Context(),
+		`SELECT COALESCE(branding, '{}'::jsonb) FROM tenants WHERE id = $1`, s.tenID).Scan(&raw); err != nil {
+		slog.Warn("portal branding unavailable; serving defaults", "err", err)
+		empty()
+		return
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil || doc == nil {
+		empty()
+		return
+	}
+	// The document holds the published design, the operator's working draft and the revision history. Only
+	// the first is any of the guest's business.
+	out := map[string]any{}
+	if d, ok := doc["design"]; ok {
+		out["design"] = d
+	} else {
+		// A document written before designs were versioned IS the design.
+		delete(doc, "draft")
+		delete(doc, "revisions")
+		out["design"] = doc
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		empty()
+		return
+	}
+	_, _ = w.Write(b)
+}

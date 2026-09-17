@@ -1056,6 +1056,34 @@ export type CloudStatus = {
 // ------- Appliance setup / enrollment (GET /setup/status, POST /setup/enroll) -------
 // The local enrollment wizard's live state, straight from edged. No secrets are
 // ever included (the bootstrap/enrollment token is write-only, never returned).
+/** What the appliance reports about its own backup posture. Every field is measured, never assumed. */
+export type BackupHealth = {
+  retention?: Record<string, any>;
+  retention_readable: boolean;
+  retention_error?: string;
+  timer_active: boolean;
+  timer_next_run?: string;
+  timer_last_run?: string;
+  timer_readable: boolean;
+  database_backups: number;
+  newest_database_backup?: string;
+};
+
+export type BackupArtifact = {
+  name: string;
+  kind: string;
+  size_bytes: number;
+  modified_at: string;
+  downloadable: boolean;
+};
+
+export type BackupVerifyResult = {
+  ok: boolean;
+  tables: number;
+  detail?: string;
+  duration: string;
+};
+
 export type SetupStatus = {
   serial?: string;
   hardware?: {

@@ -72,8 +72,19 @@ describe("colour only ever comes from a theme token", () => {
   });
 
   it("no component hard-codes a hex colour", () => {
+    // ONE EXEMPTION, AND IT IS NOT A LOOPHOLE.
+    //
+    // This rule is about the ADMIN's chrome: a hex here bypasses the token system and breaks one of the two
+    // themes. The portal branding designer is the one screen whose subject matter IS colour — it edits the
+    // GUEST portal's palette and previews it. Those hexes are the hotel's chosen brand colours and the
+    // portal's own shipped defaults; expressing them as admin theme tokens would make the preview show the
+    // admin's colours instead of the hotel's, which is the opposite of what the screen is for.
+    //
+    // Scoped to the single file rather than to a pattern, so a hex added anywhere else still fails.
+    const EXEMPT = "app/(app)/portal-branding/page.tsx";
     const offenders: string[] = [];
     for (const f of SOURCES) {
+      if (rel(f) === EXEMPT) continue;
       for (const m of read(f).matchAll(/#[0-9a-fA-F]{6}\b/g)) offenders.push(`${rel(f)} :: ${m[0]}`);
     }
     expect(offenders, `hard-coded hex colours bypass the token system:\n${offenders.join("\n")}`).toEqual([]);
