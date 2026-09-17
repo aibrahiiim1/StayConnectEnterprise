@@ -126,7 +126,20 @@ func newSCDClient(socket string) *scdClient {
 }
 
 // call proxies a request to scd and returns (status, body).
+// longSCDPaths are the privileged operations that legitimately take MINUTES rather than milliseconds: a
+// database dump and its verification. The shared 15s client deadline is right for every other call and was
+// killing these mid-flight -- the appliance reported "signal: killed" as though the dump were corrupt.
+var longSCDPaths = map[string]time.Duration{
+	"/v1/backup/run":    20 * time.Minute,
+	"/v1/backup/verify": 25 * time.Minute,
+}
+
 func (c *scdClient) call(ctx context.Context, method, path string, body any) (int, []byte, error) {
+	if d, ok := longSCDPaths[path]; ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), d)
+		defer cancel()
+	}
 	var rd io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)

@@ -55,7 +55,10 @@ func (s *server) backupRun(w http.ResponseWriter, r *http.Request) {
 	dest := filepath.Join(scdBackupDir, name)
 	partial := dest + ".partial"
 
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Minute)
+	// NOT r.Context(). A backup writes a file; if the caller's connection times out mid-dump the command is
+	// killed and a half-written archive is left to be cleaned up. It also cannot be retried usefully, because
+	// the caller has already given up. Its own deadline, independent of whoever asked.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Minute)
 	defer cancel()
 
 	// Written to .partial and renamed only on success, so an interrupted dump is never left behind looking
@@ -121,7 +124,10 @@ func (s *server) backupVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	started := time.Now()
-	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Minute)
+	// NOT r.Context(), for the reason the live appliance demonstrated: edged's client gives up after 15s, so
+	// a verification that takes longer had its psql killed and reported "signal: killed" as a load failure.
+	// Verification of a 23 MB dump takes minutes; it runs on its own deadline.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 20*time.Minute)
 	defer cancel()
 
 	scratch := "verify_" + time.Now().UTC().Format("20060102150405")
