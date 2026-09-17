@@ -1,0 +1,53 @@
+{
+  "transition_id": "T0152",
+  "seq": 152,
+  "timestamp": "2026-09-17T06:43:50Z",
+  "timestamp_derivation": "After the merged master was built, both halves deployed to PRE-LIVE in dependency order, the Hotel Admin integrity check passed and the two fixes were verified against the running appliance; before the author timestamp of the commit that introduces this receipt. After the merge commit 94a4bb3d it describes. Per T0091, in the order T0108 requires.",
+  "record_type": "LIVE_FOUND_GRACE_DEFECTS_DEPLOYED_AND_VERIFIED",
+  "merge": {
+    "pull_request": 148,
+    "merge_commit": "94a4bb3d29e5fabcf021d4cd8333e8923c9a9d2e",
+    "gates": "All four required gates green on the exact head 61fd47a8, first attempt.",
+    "preflight": "PASS on all seven default stages."
+  },
+  "provenance": {
+    "binaries": "All six report vcs.revision=94a4bb3d29e5, modified=false, tags=stayconnect_production. Staged digests compared against the workstation build before installation; rollback for dce7741a retained at /opt/stayconnect/rollback/approved-94a4bb3d/.",
+    "a_false_green_i_caught": "The first digest comparison printed MATCH (6/6) while comparing two EMPTY strings: the shell's working directory had moved, the cd failed, scp never ran and both sha256sum invocations produced nothing. An equality test between two absent things passes. It was re-run with absolute paths and an explicit non-empty check before the comparison is believed.",
+    "hotel_admin": "Packaged under the capability contract; tarball digest identical on workstation and appliance; atomic release switch. HOTEL_ADMIN_INTEGRITY = PASS."
+  },
+  "the_two_fixes_verified_live": {
+    "history_endpoint": "Now answers 200 with available=false and a plain-language reason instead of 500. The log names the exact cause for the first time: 'permission denied for table checkout_grace_policy_publications (SQLSTATE 42501)'. That sentence is what the original 500 could not say.",
+    "device_limit_wording": "The fallback's 0 renders as 'no extra devices' again."
+  },
+  "the_strongest_live_evidence_in_this_mission": {
+    "what": "Two REAL departing guests received Checkout Grace from the hotel's published policy while this was being verified: iam_v2.checkout_grace_audit records trigger=CHECKOUT_GRACE, is_emergency=false, policy_version=CHECKOUT_GRACE_V1 for both.",
+    "why_it_matters": "Every earlier proof showed that publication SUCCEEDED. This shows the conversion path actually ADOPTED the published policy for real guests -- the thing that was impossible before this mission, because no publishable package could exist. The emergency fallback was not used.",
+    "windows": "Eight live grace entitlements, every one still exactly 3600 seconds, including the two new ones. The published policy and the fallback carry the same duration by design, so no guest experienced a change."
+  },
+  "live_state_after": {
+    "services": "All seven active. Three errors in the window, all explained: scd's standing refusal of SCD_LICENSE_REQUIRED=false on a production build, pmsd's CONTEXT_CANCELED on its own restart, and edged's new diagnostic naming the missing SELECT privilege.",
+    "pms": "The pmsd restart caused its normal reconnect and self-requested resync; published generation 315. No operator command, no manual Full Resync.",
+    "policy": "config_version 3 in force, three versions in the append-only ledger."
+  },
+  "constraints_observed": {
+    "no_migration": "None performed.",
+    "no_pms_or_financial": "No PMS configuration change, no PMS write, no financial traffic.",
+    "guest_state": "No guest, stay, entitlement or session row was written by this delivery. The two new grace entitlements were created by the appliance's own conversion path from real PMS checkouts, not by anything performed here.",
+    "retired_host": "172.21.60.23 neither contacted nor modified."
+  },
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-17: make Checkout Grace fully self-service from Hotel Admin, including PRE-LIVE deployment and verification.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE.",
+  "outstanding_product_owner_decision": "ONE, unchanged from T0151: authorize migration 0080 granting svc_edged SELECT on iam_v2.checkout_grace_policy_publications, so the policy history panel can read the ledger the appliance already writes. Nothing else in the workflow depends on it."
+}
