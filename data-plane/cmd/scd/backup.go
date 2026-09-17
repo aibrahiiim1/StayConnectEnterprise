@@ -151,9 +151,15 @@ func (s *server) backupVerify(w http.ResponseWriter, r *http.Request) {
 		"gzip -dc "+shq(path)+" | docker exec -i "+pgContainer+" psql -U "+pgUser+" -d "+scratch+
 			" -v ON_ERROR_STOP=1 -q")
 	if out, err := load.CombinedOutput(); err != nil {
+		// NAME THE FAILURE, NOT THE LAST LINE. tailLine returns the final non-empty line, and psql keeps
+		// printing normal output after an error -- so a genuine load failure was reported as "(1 row)", which
+		// tells an operator nothing and sent me looking in the wrong place. The first ERROR/FATAL line is the
+		// cause; the raw error is logged either way.
+		detail := firstProblem(string(out))
+		slog.Error("backup verification load failed", "err", err, "detail", detail)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok": false, "tables": 0, "duration": time.Since(started).Round(time.Second).String(),
-			"detail": "the dump did not load: " + tailLine(string(out)),
+			"detail": "the dump did not load: " + detail,
 		})
 		return
 	}
@@ -186,6 +192,22 @@ func serviceGroupID() (int, bool) {
 		return 0, false
 	}
 	return gid, true
+}
+
+// firstProblem returns the first ERROR/FATAL line in command output, which is the cause, rather than the
+// last line, which is usually whatever the tool printed afterwards.
+func firstProblem(s string) string {
+	for _, l := range strings.Split(s, "\n") {
+		t := strings.TrimSpace(l)
+		up := strings.ToUpper(t)
+		if strings.HasPrefix(up, "ERROR") || strings.HasPrefix(up, "FATAL") || strings.Contains(up, "PSQL: ERROR") {
+			if len(t) > 300 {
+				return t[:300] + "…"
+			}
+			return t
+		}
+	}
+	return tailLine(s)
 }
 
 func shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
