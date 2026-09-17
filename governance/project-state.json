@@ -1093,7 +1093,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0156",
+  "latest_transition_id": "T0157",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1587,14 +1587,14 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "BACKUP_WORKFLOW_PROVEN_LIVE_AND_THE_DEFECTS_ONLY_THE_APPLIANCE_COULD_FIND",
-    "decision": "D74",
+    "kind": "THE_FOUR_SURFACES_THAT_WERE_DISPLAYED_BUT_NOT_DOABLE",
+    "decision": "D75",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "cd8aaccede8ebffcec1b52691f6bab572a5293aa",
-    "base_note": "The master merge commit of PR #152. This delivery begins exactly where that one ended.",
-    "head": "7ef91b94",
+    "base": "99d18dcab2c6fe20dd206fa27631930389ad6aa2",
+    "base_note": "The master merge commit of PR #153. This delivery begins exactly where that one ended.",
+    "head": "93292ad6",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
-    "note": "T0156. The backup workflow was driven end to end against the real appliance for the first time and exposed six defects of privilege, ownership and timing that no test could produce -- the service user's directory, the Docker socket it correctly cannot reach, a root-owned dump it could not read, a scratch database that outlived its own cancelled cleanup, a 15-second deadline killing a minutes-long verification, and an error message quoting the last line of a successful-looking transcript. All fixed and re-verified live: a real 23 MB dump taken, verified across 141 tables, downloaded intact, scratch dropped, live site untouched."
+    "note": "T0157. Retention and the nightly schedule are editable through the sweep's own config and a systemd drop-in, with bounds that name where recovery would be lost. Portal images are uploaded to the appliance and served from the sign-in page's own origin, with the type decided by the bytes and SVG refused as stored XSS. The language selector is backed by published translations with English fallback, and the contract is pinned on both sides. The System section was reviewed, found free of duplication, and ordered by the job rather than by the order things were added."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
