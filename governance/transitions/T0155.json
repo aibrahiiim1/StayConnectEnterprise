@@ -36,7 +36,8 @@
     "and_the_gap_underneath": "There were no database backups at all. keep_db=7 was a retention policy for a category nothing produced.",
     "now": "Health from the sweep's own status document and the systemd timer; the retention policy as it is actually applied, including what is protected and never deleted; the artefact inventory with kind, size and age; a manual database backup under password step-up; download of any artefact; and verification.",
     "no_live_restore": "Deliberate. A live restore replaces running guest and configuration data and cannot be undone by clicking again. VERIFY loads a dump into a throwaway database, counts its tables and drops it -- answering the question an operator actually has about a backup without betting the site on it. The restore path is described on the page instead of being a button beside a download link.",
-    "honest_failure": "A dump is written to .partial and renamed only on success, and a dump under 1 KB is discarded rather than recorded -- gzip of nothing still exits 0."
+    "honest_failure": "A dump is written to .partial and renamed only on success, and a dump under 1 KB is discarded rather than recorded -- gzip of nothing still exits 0.",
+    "live_verification": "Recorded separately in T0156: the workflow was first exercised against the real appliance after this delivery merged, and six defects of privilege, ownership and timing were found and fixed there."
   },
   "guest_portal_redesigned": {
     "to": "The Product Owner's reference: full-bleed hotel photograph, one centred white card, branded header, Guest Login and Account Login tabs, room-number and voucher/personal-account flows, a language selector upper right and an information affordance lower right.",

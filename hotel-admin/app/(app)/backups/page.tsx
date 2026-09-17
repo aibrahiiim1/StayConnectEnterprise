@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  api, ListResp, BackupRecord, BackupHealth, BackupArtifact, BackupVerifyResult, Whoami,
+  api, ListResp, BackupHealth, BackupArtifact, BackupVerifyResult, Whoami,
 } from "@/lib/api";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
@@ -44,7 +44,6 @@ function fromSystemd(v?: string): string | null {
 }
 
 export default function BackupsPage() {
-  const [rows, setRows] = useState<BackupRecord[] | null>(null);
   const [health, setHealth] = useState<BackupHealth | null>(null);
   const [artifacts, setArtifacts] = useState<BackupArtifact[]>([]);
   const [roles, setRoles] = useState<string[]>([]);
@@ -60,17 +59,14 @@ export default function BackupsPage() {
 
   const load = useCallback(async () => {
     try {
-      const [recs, h, arts] = await Promise.all([
-        api.get<ListResp<BackupRecord>>("/backups"),
+      const [h, arts] = await Promise.all([
         api.get<BackupHealth>("/backups/health"),
         api.get<ListResp<BackupArtifact>>("/backups/artifacts"),
       ]);
-      setRows(recs.data ?? []);
       setHealth(h);
       setArtifacts(arts.data ?? []);
     } catch (e) {
       setErr(errMsg(e));
-      setRows([]);
     }
   }, []);
 
@@ -316,33 +312,11 @@ export default function BackupsPage() {
         </CardBody>
       </Card>
 
-      {/* ---- LEDGER ---- */}
-      <Card>
-        <CardHeader><CardTitle>Backup history</CardTitle></CardHeader>
-        <CardBody className="p-0">
-          {rows === null ? <EmptyState title="Loading…" /> : rows.length === 0 ? (
-            <EmptyState title="No backup runs recorded" hint="Backups taken from this page are recorded here." />
-          ) : (
-            <Table>
-              <THead>
-                <TR><TH>Started</TH><TH>Finished</TH><TH>Status</TH><TH>Kind</TH><TH className="text-right">Size</TH><TH>Error</TH></TR>
-              </THead>
-              <tbody>
-                {rows.map((b) => (
-                  <TR key={b.id}>
-                    <TD className="text-muted">{formatDate(b.started_at)}</TD>
-                    <TD className="text-muted">{b.finished_at ? formatDate(b.finished_at) : "—"}</TD>
-                    <TD><Badge tone={statusTone(b.status)}>{b.status}</Badge></TD>
-                    <TD>{b.kind}</TD>
-                    <TD className="text-right">{b.size_bytes ? formatBytes(b.size_bytes) : "—"}</TD>
-                    <TD className="max-w-xs truncate text-xs text-destructive" title={b.error ?? ""}>{b.error || "—"}</TD>
-                  </TR>
-                ))}
-              </tbody>
-            </Table>
-          )}
-        </CardBody>
-      </Card>
+      {/* THE LEDGER CARD THAT WAS HERE IS GONE, and that is the fix rather than a regression.
+          public.backup_records exists and this screen used to list it, but neither service role can write to
+          it -- svc_edged holds SELECT only and svc_scd holds nothing -- so nothing has ever inserted a row and
+          the card read "No backups yet" forever. Granting INSERT is a migration this mission does not
+          authorise. The artefacts above are the real history, and who took each one is in the audit log. */}
     </div>
   );
 }

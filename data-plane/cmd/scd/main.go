@@ -772,6 +772,8 @@ func main() {
 	r.Get("/v1/admin/pms/{name}/health", s.pmsAdminHealth)
 	r.Get("/v1/tenant/auth-methods", s.tenantAuthMethods)
 	r.Get("/v1/tenant/branding", s.tenantBranding)
+	r.Post("/v1/backup/run", s.backupRun)
+	r.Post("/v1/backup/verify", s.backupVerify)
 	// Edge-first refactor: license + local-admin plumbing for edged.
 	r.Get("/v1/license/status", s.licenseStatus)
 	r.Post("/v1/license/install", s.licenseInstall)

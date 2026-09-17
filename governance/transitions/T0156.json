@@ -1,0 +1,47 @@
+{
+  "transition_id": "T0156",
+  "seq": 156,
+  "timestamp": "2026-09-17T19:34:21Z",
+  "timestamp_derivation": "After the merged cleanup was deployed to PRE-LIVE and the backup workflow was driven end to end against the running appliance, exposing six defects that were fixed and re-verified there; before the author timestamp of the commit that introduces this receipt. After the merge commit cd8aacce it follows. Per T0091, in the order T0108 requires.",
+  "record_type": "BACKUP_WORKFLOW_PROVEN_LIVE_AND_THE_DEFECTS_ONLY_THE_APPLIANCE_COULD_FIND",
+  "why_this_is_a_second_cycle": "PR #152 merged as cd8aacce when its four gates went green, and the backup workflow was then exercised against the real appliance for the first time. Everything below was found there. Protected master cannot carry post-deployment fixes in the commit that produced the artefact being deployed, so this is the smallest possible follow-on rather than a new mission.",
+  "six_defects_only_the_appliance_could_find": {
+    "_note": "Six defects, none of which a test could have produced, because every one of them is about the appliance's own privilege, ownership or timing rather than about logic.",
+    "1_directory": "edged runs as the unprivileged service user and /opt/stayconnect/backups is root-owned, so it could not create its subdirectory. Provisioned; the error now names the path and the cause instead of sending an operator to check disk space.",
+    "2_docker_socket": "There is no pg_dump on the host and PostgreSQL runs in a container, so a dump means reaching the Docker socket -- which edged cannot, correctly. Docker group membership is effectively root; granting it to the process serving the operator HTTP surface would hand root to anything that got a foothold there. The dump moved to scd, which already runs as root and is already this appliance's privileged helper for certificates, licensing and PMS administration. Authorisation stays in edged: RBAC, step-up and audit.",
+    "3_file_group": "scd writes the dump as root; edged serves the download as the service user. Mode 0640 alone left the file root:root, so 'group readable' meant readable by nobody who needed it. The download answered 500 until the group became the service group.",
+    "4_scratch_database": "The deferred DROP of the verification database ran after the response was written, on a request context that was already cancelled, so it was killed before it executed and PRE-LIVE was left carrying a verify_* database. The cleanup now has its own background context and deadline, and logs if it still fails.",
+    "5_the_deadline": "A good 23 MB dump was reported as failing to load. The scd log said 'signal: killed': edged's shared scd client gives up after 15 seconds, which is right for every other privileged call and fatal for a verification that takes minutes. Both sides now carry deadlines that match the work, and neither rides on the caller's context -- a client that gives up cannot leave a half-written archive or a killed load behind.",
+    "6_the_message_that_hid_it": "That failure was reported as 'the dump did not load: (1 row)'. tailLine returns the final non-empty line and psql keeps printing normal output after an error, so the detail described the tail of a successful-looking transcript and cost a round of looking in the wrong place. The first ERROR/FATAL line is the cause now, and the raw error is logged either way."
+  },
+  "the_ledger_was_removed_rather_than_reshipped": "public.backup_records exists and the old screen listed it, but NEITHER service role can write to it -- svc_edged holds SELECT only and svc_scd holds nothing. That is why nothing has ever inserted a row and why the screen read 'No backups yet' on an appliance holding 444 MB of artefacts. Granting INSERT is a migration this mission does not authorise, so the card is gone: the artefacts ARE the history, and who took each one is in the audit log, written through the same path as every other privileged action. Adding a second permanently-empty viewer beside the one I was sent to fix would have been the same defect with a new heading.",
+  "proven_live": "A real 23,619,911-byte dump taken through the operator API under step-up; verified as ok=true across 141 tables; downloaded in full and checked as a valid gzip; the scratch database dropped; and the live site untouched throughout -- stays went 1810 to 1813 from ordinary PMS traffic, never from anything performed here.",
+  "guest_portal_defects_the_suite_caught": {
+    "_note": "Found by the E2E suite that exercises the REAL portal template, not by review.",
+    "script_died_on_a_missing_element": "The information button's listener ran at script-parse time while its element appeared LATER in the document, so getElementById returned null, the listener threw, and the whole script block died with it -- including the auth-methods fetch that activates a sign-in panel. The page rendered and no form was usable. Everything the script touches now precedes it.",
+    "an_accessible_name_that_collided": "The button was named 'Connection information', which contains 'Connect' and therefore matched the portal's own Connect button under a non-exact name query. It is 'Device information' now, which is also what it shows.",
+    "the_alternatives_carried_no_marker": "The alternatives list selects a sign-in method but said nothing about which, so anything looking for a specific method could not find it once there was no longer a tab per method. Those buttons carry data-tab, because that is what they do."
+  },
+  "no_migration": "None. The one that would let backup_records be written is named above and deliberately not performed.",
+  "constraints_observed": {
+    "no_destructive_restore": "None performed or offered. Verification runs against a throwaway database dropped on every path, and the live site was read-only throughout.",
+    "no_privilege_widening": "edged was NOT added to the docker group. The dump moved to the existing root helper instead.",
+    "no_audit_deletion": "No authoritative history hidden, archived or deleted.",
+    "no_pms_or_financial": "No PMS configuration change, no PMS write, no financial traffic.",
+    "retired_host": "172.21.60.23 neither contacted nor modified."
+  },
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-17: one consolidated Hotel Admin / Guest Portal cleanup, carried to DONE including PRE-LIVE deployment, live verification and governance synchronization.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}
