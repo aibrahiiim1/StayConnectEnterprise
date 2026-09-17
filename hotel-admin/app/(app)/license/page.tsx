@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { errMsg, formatDate } from "@/lib/utils";
 import { canWrite } from "@/lib/roles";
 import {
-  BadgeCheck, Copy, Check, Cpu, Upload, ChevronRight, ShieldCheck, Building2,
+  BadgeCheck, Copy, Check, Cpu, Upload, ChevronRight, ShieldCheck, Building2, Cloud,
 } from "lucide-react";
 
 function fp(s?: string): string {
@@ -288,6 +288,37 @@ export default function LicensePage() {
         </button>
       </div>
 
+      {/* CONNECTION TO CENTRAL — what the separate "Cloud connection" page used to show.
+          It is on THIS page because licensing is the only thing the link serves. The appliance talks to
+          Central for registration, certificates, the licence itself, licence enforcement and the signed
+          tenant/site binding; the NATS transport is not opened and the telemetry outbox is stopped, both by
+          decision (T0071). A separate page implied a second subsystem to administer, and there is not one. */}
+      <Card>
+        <CardHeader><CardTitle className="flex items-center gap-2"><Cloud className="h-4 w-4" /> Connection to Central</CardTitle></CardHeader>
+        <CardBody>
+          <p className="mb-3 text-sm text-muted">
+            Central issues and renews this appliance&apos;s licence and certificate. Guests are authorised by
+            this appliance from its own data, so a Central outage does not interrupt service — it only delays
+            licence renewal.
+          </p>
+          <div className="grid gap-x-8 md:grid-cols-2">
+            <div>
+              <Row k="Reachable now" v={
+                st?.network?.central_https_443 === false
+                  ? <Badge tone="warn">not reachable</Badge>
+                  : <Badge tone="ok">yes</Badge>} />
+              <Row k="Secure channel (mTLS)" v={<Badge tone={st?.api_mtls?.mtls_ready ? "ok" : "warn"}>{st?.api_mtls?.mtls_ready ? "established" : "not ready"}</Badge>} />
+              <Row k="Certificate expires" v={st?.api_mtls?.not_after || "—"} />
+            </div>
+            <div>
+              <Row k="Enrollment" v={<Badge tone={st?.enrolled ? "ok" : "err"}>{st?.enrolled ? "enrolled" : "not enrolled"}</Badge>} />
+              <Row k="Site binding" v={<Badge tone={asg?.assigned ? "ok" : "warn"}>{asg?.assigned ? "signed and adopted" : "not assigned"}</Badge>} />
+              <Row k="Used for" v={<span className="text-sm">Licensing only</span>} />
+            </div>
+          </div>
+        </CardBody>
+      </Card>
+
       {showAdvanced && (
         <div className="space-y-4">
           <Card>
@@ -301,7 +332,9 @@ export default function LicensePage() {
               </div>
               <div>
                 <Row k="API mTLS" v={<Badge tone={st?.api_mtls?.mtls_ready ? "ok" : "warn"}>{st?.api_mtls?.mtls_ready ? "ready" : "not ready"}</Badge>} />
-                <Row k="NATS mTLS" v={<Badge tone={st?.nats_mtls?.connected ? "ok" : "err"}>{st?.nats_mtls?.connected ? "connected" : "down"}</Badge>} />
+                {/* NOT "down". The real-time channel is deliberately closed at a licensing-only site; a red
+                    badge here described a decision as a fault. */}
+                <Row k="Real-time channel" v={<Badge tone={st?.nats_mtls?.connected ? "ok" : "default"}>{st?.nats_mtls?.connected ? "connected" : "not used at this site"}</Badge>} />
                 <Row k="Assignment version" v={asg?.version ?? "—"} />
                 <Row k="Tenant / Site id" v={<code className="text-xs">{(st?.tenant_id || "—") + " / " + (st?.site_id || "—")}</code>} />
               </div>

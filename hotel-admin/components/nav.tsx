@@ -137,9 +137,16 @@ const SECTIONS: Section[] = [
       { href: "/network/dhcp",        label: "DHCP & leases",      icon: Wifi,      resource: "network", keywords: "ip address pool lease kea reservation" },
       { href: "/network/system",      label: "WAN / LAN settings", icon: Router,    resource: "network", keywords: "uplink gateway dns static management" },
       { href: "/network/revisions",   label: "Config history",     icon: History,   resource: "network", keywords: "rollback revision applied" },
-      { href: "/network/cloud",       label: "Cloud connection",   icon: Cloud,     resource: "network", keywords: "central outbox sync enrolment nats" },
+      // "Cloud connection" is gone, and its keywords live on Activation so the search that found it still
+      // does. The link to Central exists ONLY to serve licensing (T0071): the NATS transport is never opened
+      // and the telemetry outbox is stopped, both by decision. Everything the page actually showed -- licence
+      // state, certificate health, reachability, appliance identity -- is licensing or identity, and both now
+      // have exactly one home. A page per backend component is how an operator ends up with three screens
+      // answering one question.
+      //
+      // The Hotel Admin TLS certificate stays, and stays HERE: it secures the local HTTPS an operator reaches
+      // this admin over, which has nothing to do with whether Central is reachable.
       { href: "/network/certificate", label: "TLS certificate",    icon: Lock,      resource: "network", keywords: "https ssl rotate expiry" },
-      { href: "/setup/enrollment",    label: "Setup / Activation", icon: ServerCog, resource: "network", keywords: "enrol claim licence serial activate" },
     ],
   },
   {
@@ -148,7 +155,8 @@ const SECTIONS: Section[] = [
       { href: "/health",             label: "Diagnostics", icon: Activity,   resource: "diagnostics", keywords: "services health checks scd netd kea" },
       { href: "/operational-alerts", label: "Alerts",      icon: Shield,     resource: "operational-alerts", enabled: CAP_PMS, keywords: "warnings acknowledge" },
       { href: "/operators",          label: "Operators",   icon: Users,      resource: "operators", keywords: "staff users roles password" },
-      { href: "/license",            label: "License",     icon: BadgeCheck, resource: "license", keywords: "activation capacity expiry plan" },
+      { href: "/setup/enrollment",   label: "Activation",  icon: ServerCog,  resource: "network", keywords: "enrol claim serial activate setup cloud connection central nats outbox first-time" },
+      { href: "/license",            label: "License",     icon: BadgeCheck, resource: "license", keywords: "capacity expiry plan offline activation central connection" },
       { href: "/backups",            label: "Backups",     icon: Archive,    resource: "backups", keywords: "restore snapshot database" },
       { href: "/audit",              label: "Audit log",   icon: ScrollText, resource: "audit", keywords: "who did what history trail" },
     ],

@@ -260,51 +260,8 @@ func (s *server) walledGardenRoutes() http.Handler {
 
 // ----- portal branding (tenants.branding jsonb) -------------------------------------
 
-func (s *server) brandingRoutes() http.Handler {
-	r := chi.NewRouter()
-	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
-		ctx, cancel := dbCtx(req)
-		defer cancel()
-		// AN UNASSIGNED APPLIANCE HAS NO TENANT, AND THAT IS NOT AN INTERNAL ERROR.
-		//
-		// Before enrollment/claim/signed assignment, s.tenantID is empty. This query then asks Postgres to
-		// compare a uuid column against '', which fails, and the operator was told "branding load failed" --
-		// a message that describes a broken system rather than an unconfigured one, on a factory-clean
-		// appliance where being unconfigured is the expected state.
-		if s.tenantID == "" {
-			writeAwaitingAssignment(w, "portal branding")
-			return
-		}
-		var raw []byte
-		if err := s.db.QueryRow(ctx,
-			`SELECT branding FROM tenants WHERE id = $1`, s.tenantID).Scan(&raw); err != nil {
-			jsonErr(w, http.StatusInternalServerError, "internal", "branding load failed")
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(raw)
-	})
-	r.Put("/", func(w http.ResponseWriter, req *http.Request) {
-		var body map[string]json.RawMessage
-		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-			jsonErr(w, http.StatusBadRequest, "bad_request", "body must be a JSON object")
-			return
-		}
-		raw, _ := json.Marshal(body)
-		ctx, cancel := dbCtx(req)
-		defer cancel()
-		if _, err := s.db.Exec(ctx,
-			`UPDATE tenants SET branding = $1::jsonb, updated_at = now() WHERE id = $2`,
-			string(raw), s.tenantID); err != nil {
-			jsonErr(w, http.StatusInternalServerError, "internal", "branding update failed")
-			return
-		}
-		s.audit(req, "branding.updated", "tenant", s.tenantID, nil)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(raw)
-	})
-	return r
-}
+// brandingRoutes moved to resources_branding.go, where the design gained a schema, validation, versioned
+// revisions and a rollback -- and where the reason the old pair of handlers was not enough is written down.
 
 // PAYMENTS ARE NOT SERVED FROM HERE ANY MORE.
 //
@@ -470,33 +427,31 @@ type backupRow struct {
 	Error      *string    `json:"error,omitempty"`
 }
 
-func (s *server) backupsRoutes() http.Handler {
-	r := chi.NewRouter()
-	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
-		ctx, cancel := dbCtx(req)
-		defer cancel()
-		rows, err := s.db.Query(ctx, `
+// listBackupRecords is the ledger of backups this appliance has TAKEN -- distinct from the artefacts on
+// disk, which include deploy and rollback sets nobody recorded. Routed from resources_backups.go.
+func (s *server) listBackupRecords(w http.ResponseWriter, req *http.Request) {
+	ctx, cancel := dbCtx(req)
+	defer cancel()
+	rows, err := s.db.Query(ctx, `
             SELECT id, started_at, finished_at, status, kind, path, size_bytes, error
               FROM backup_records ORDER BY started_at DESC LIMIT 50
         `)
-		if err != nil {
-			jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	defer rows.Close()
+	var out []backupRow
+	for rows.Next() {
+		var b backupRow
+		if err := rows.Scan(&b.ID, &b.StartedAt, &b.FinishedAt, &b.Status, &b.Kind,
+			&b.Path, &b.SizeBytes, &b.Error); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
 			return
 		}
-		defer rows.Close()
-		var out []backupRow
-		for rows.Next() {
-			var b backupRow
-			if err := rows.Scan(&b.ID, &b.StartedAt, &b.FinishedAt, &b.Status, &b.Kind,
-				&b.Path, &b.SizeBytes, &b.Error); err != nil {
-				jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
-				return
-			}
-			out = append(out, b)
-		}
-		writeList(w, out)
-	})
-	return r
+		out = append(out, b)
+	}
+	writeList(w, out)
 }
 
 // pokeSCD fires a best-effort admin action on scd (reload pokes). Failures

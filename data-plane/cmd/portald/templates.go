@@ -6,62 +6,161 @@ const landingHTML = `<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Wi-Fi Access</title>
 <style>
-  :root { color-scheme: light dark; font-family: -apple-system, system-ui, sans-serif; }
-  /* 8vh top margin is pleasant on a laptop and wasteful on a phone in landscape, where it pushed the first
-     field below the fold. Clamped so it stays generous on a large screen and modest on a short one. */
-  body { max-width: 440px; margin: clamp(16px, 8vh, 96px) auto; padding: 24px; }
-  h1 { font-size: 1.4rem; margin: 0 0 8px; }
-  p  { color: #666; margin: 0 0 20px; }
-  /* WITH PMS ENABLED THERE CAN BE SIX TABS on a 360px phone. flex:1 divided the row evenly and the labels
-     ran into each other; the sign-in method a guest needs was unreadable on the device almost every guest
-     uses. They now size to their content and scroll horizontally when they do not fit, which keeps every
-     label legible instead of shrinking all of them until none are. */
-  .tabs { display:flex; gap:0; border-bottom:1px solid #ddd; margin-bottom:18px;
-          overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
-  .tabs::-webkit-scrollbar { display:none; }
-  .tab { flex:0 0 auto; padding:10px 14px; text-align:center; cursor:pointer; white-space:nowrap;
-         color:#666; font-size:.92rem; border-bottom:2px solid transparent; user-select:none; }
-  .tab.active { color:inherit; border-bottom-color:#0a6cff; font-weight:600; }
-  .panel { display:none; }
-  .panel.active { display:block; }
-  label { display:block; font-size:.9rem; margin-bottom:6px; }
-  input[type=text], input[type=email], input[type=tel] {
-    width:100%; padding:12px 14px; font-size:1.1rem;
-    box-sizing:border-box; border:1px solid #ccc; border-radius:8px;
+  /* THE GUEST PORTAL, to the Product Owner's reference design.
+     Full-bleed hotel photograph, one centred white card, branded header, two tab groups, and a quiet
+     information affordance in the corner. Everything below is driven by CSS custom properties so the
+     Branding screen can restyle it without touching this file. */
+  :root {
+    --sc-brand:      #0f6b63;   /* the teal of the reference buttons and active tab */
+    --sc-brand-dark: #0b544e;
+    --sc-ink:        #1c2b2a;
+    --sc-muted:      #6b7b7a;
+    --sc-card:       #ffffff;
+    --sc-line:       #e3e8e8;
+    --sc-radius:     18px;
+    --sc-bg: url("/assets/portal-background.jpg");
+    font-family: "Inter", -apple-system, system-ui, "Segoe UI", sans-serif;
   }
-  input[name=code] { letter-spacing:8px; text-align:center; font-variant-numeric: tabular-nums; }
-  input[name=voucher] { letter-spacing:2px; text-transform:uppercase; }
-  button { width:100%; margin-top:16px; padding:12px; font-size:1rem; font-weight:600;
-           border:0; border-radius:8px; background:#0a6cff; color:#fff; cursor:pointer; }
-  button:hover:not(:disabled) { background:#0858d6; }
-  button:disabled { opacity:.5; cursor:wait; }
-  button.link { background:none; color:#0a6cff; font-weight:400; padding:6px; margin-top:8px; }
-  .err { color:#b00020; margin-top:12px; min-height:1.2em; font-size:.9rem; }
-  /* These hardcoded background:#fff while the page declares color-scheme: light dark, so on a phone in
-     dark mode the label inherited light text onto a white button and the guest's package choices were
-     invisible. Canvas/CanvasText follow the active scheme, so the choice is readable either way. */
-  #pms-choices button.choice { display:block; width:100%; text-align:left; margin:8px 0; padding:12px 14px;
-    border:1px solid #ccc; border-radius:10px; background:Canvas; color:CanvasText; cursor:pointer;
-    font-size:1rem; }
-  #pms-choices button.choice[disabled] { opacity:.5; cursor:default; }
-  .small { font-size:.8rem; color:#777; }
-  /* A site-level advisory, not an error the guest caused. Amber rather than red, and it sits above the
-     sign-in choices because it changes what the guest should expect from all of them. */
-  .notice { display:none; margin:0 0 14px; padding:12px 14px; border-radius:8px; font-size:.9rem;
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; color: var(--sc-ink);
+    /* The photograph fills the viewport and stays put while the card scrolls on a short screen. */
+    background: var(--sc-bg) center/cover no-repeat fixed, linear-gradient(160deg,#cfe3e6,#eef3f2);
+    min-height: 100%;
+    display: flex; align-items: flex-start; justify-content: center;
+    padding: clamp(12px, 4vh, 64px) clamp(12px, 4vw, 48px) 48px;
+  }
+
+  /* Language selector, upper right of the PAGE rather than the card, as in the reference. */
+  .langbar { position: fixed; top: 12px; right: 12px; z-index: 5; }
+  .lang {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: #fff; border: 1px solid var(--sc-line); border-radius: 999px;
+    padding: 8px 14px; font-size: .95rem; color: var(--sc-ink); cursor: pointer;
+    box-shadow: 0 2px 10px rgb(0 0 0 / .08);
+  }
+  .lang select { border: 0; background: none; font: inherit; color: inherit; cursor: pointer; outline: none; }
+
+  .card {
+    position: relative;
+    width: min(1100px, 100%);
+    background: var(--sc-card);
+    border-radius: var(--sc-radius);
+    box-shadow: 0 24px 60px rgb(0 0 0 / .18);
+    padding: clamp(20px, 3.5vw, 44px);
+    margin-top: clamp(8px, 6vh, 72px);
+  }
+  .brand { display: flex; align-items: center; gap: 14px; min-height: 56px; }
+  .brand img { max-height: 56px; max-width: 260px; object-fit: contain; }
+  .brand .name { font-size: 1.05rem; letter-spacing: .04em; color: var(--sc-muted); }
+  .rule { border: 0; border-top: 1px solid var(--sc-line); margin: clamp(16px, 2.5vw, 28px) 0 0; }
+
+  /* TWO GROUPS, NOT SIX. The reference presents a Guest door and an Account keypad; every enabled
+     method lands in one of them, so a guest chooses between "I am staying here" and "I have a code". */
+  .tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+  .tab {
+    appearance: none; background: none; border: 0; border-bottom: 2px solid transparent;
+    padding: clamp(14px, 2vw, 22px) 8px; font: inherit; font-size: clamp(1rem, 1.4vw, 1.25rem);
+    color: var(--sc-muted); cursor: pointer; display: inline-flex; align-items: center;
+    justify-content: center; gap: 10px;
+  }
+  .tab[aria-selected="true"] { color: var(--sc-brand); border-bottom-color: var(--sc-brand); font-weight: 600; }
+  .tab svg { width: 1.1em; height: 1.1em; flex: 0 0 auto; }
+
+  .panels { border-top: 1px solid var(--sc-line); padding-top: clamp(18px, 3vw, 34px); }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .field { margin-bottom: clamp(14px, 2vw, 22px); max-width: 560px; }
+  .panel--wide .field { max-width: none; }
+  label { display: block; font-size: clamp(.95rem, 1.1vw, 1.05rem); margin-bottom: 8px; }
+  input[type=text], input[type=password], input[type=email], input[type=tel] {
+    width: 100%; padding: 14px 16px; font-size: 1rem; color: var(--sc-ink);
+    border: 1px solid var(--sc-line); border-radius: 12px; background: #fff;
+  }
+  input:focus-visible, .tab:focus-visible, button:focus-visible, .lang:focus-within {
+    outline: 2px solid var(--sc-brand); outline-offset: 2px;
+  }
+  .hint { color: var(--sc-muted); font-size: .92rem; margin: 8px 0 0; }
+  button.primary {
+    background: linear-gradient(180deg, var(--sc-brand), var(--sc-brand-dark));
+    color: #fff; border: 0; border-radius: 12px; padding: 14px 34px;
+    font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button.primary:disabled { opacity: .55; cursor: wait; }
+
+  /* "Use Personal Account" — a pill-shaped checkbox, as in the reference. */
+  .pill {
+    display: inline-flex; align-items: center; gap: 10px;
+    border: 1px solid var(--sc-line); border-radius: 999px; padding: 12px 20px;
+    color: var(--sc-muted); cursor: pointer; user-select: none; margin-bottom: clamp(16px, 2.5vw, 26px);
+  }
+  .pill input { width: 18px; height: 18px; accent-color: var(--sc-brand); }
+  .pill:has(input:checked) { color: var(--sc-brand); border-color: var(--sc-brand); }
+
+  /* Information affordance, lower right of the card. */
+  .info-btn {
+    position: absolute; right: clamp(14px, 2vw, 26px); bottom: clamp(14px, 2vw, 26px);
+    width: 30px; height: 30px; border-radius: 999px; border: 1px solid var(--sc-line);
+    background: #f4f7f7; color: var(--sc-muted); cursor: pointer; font-weight: 700; line-height: 1;
+  }
+  .info-panel {
+    margin-top: 20px; border: 1px solid var(--sc-line); border-radius: 12px;
+    padding: 14px 16px; font-size: .92rem; color: var(--sc-muted); background: #f8fafa;
+  }
+  .info-panel dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin: 8px 0 0; }
+  .info-panel dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--sc-ink); }
+
+  .err { color: #b00020; margin-top: 12px; min-height: 1.2em; font-size: .92rem; }
+  .notice { display:none; margin:0 0 16px; padding:12px 16px; border-radius:10px; font-size:.92rem;
             background:#fff8e1; border:1px solid #f0d38a; color:#6b4e00; }
   .notice.show { display:block; }
+  .small { font-size:.85rem; color: var(--sc-muted); }
+  .alt { margin-top: 22px; padding-top: 18px; border-top: 1px dashed var(--sc-line); }
+  .alt h3 { font-size: .9rem; font-weight: 600; color: var(--sc-muted); margin: 0 0 12px; }
+  #pms-choices button.choice { display:block; width:100%; text-align:left; margin:8px 0; padding:14px 16px;
+    border:1px solid var(--sc-line); border-radius:12px; background:#fff; color:var(--sc-ink); cursor:pointer;
+    font-size:1rem; }
+  #pms-choices button.choice[disabled] { opacity:.5; cursor:default; }
+  button.link { background:none; border:0; color:var(--sc-brand); font:inherit; padding:6px; cursor:pointer; }
+
+  /* PHONE. The card becomes the page: full width, flat corners, tighter rhythm. Same design language,
+     not a second design. */
+  @media (max-width: 640px) {
+    body { padding: 0; align-items: stretch; background-attachment: scroll; }
+    .card { margin-top: 0; border-radius: 0; min-height: 100vh; box-shadow: none; }
+    .tabs { grid-template-columns: 1fr 1fr; }
+    .langbar { position: static; display: flex; justify-content: flex-end; padding: 10px 12px 0; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .panel.active { animation: fade .18s ease-out; }
+    @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  }
 </style>
 </head><body>
-  <h1>Welcome</h1>
-  <p>Choose how you'd like to connect.</p>
+  <div class="langbar">
+    <label class="lang" for="lang">
+      <span id="lang-flag" aria-hidden="true">🌐</span>
+      <select id="lang" aria-label="Language"><option value="en" selected>English</option></select>
+    </label>
+  </div>
 
-  <!-- WHY THE INTERNET STOPPED. Shown only when this device's most recent access ended because it ran out
-       of data or time; the sign-in below is unchanged and the guest carries straight on into it. -->
-  <div class="notice" id="access-ended" role="status" aria-live="polite"></div>
+  <main class="card">
+    <!-- BRANDING. Filled from /api/branding when the hotel has published a design; the defaults below are
+         what an unbranded appliance shows, which must still look deliberate rather than broken. -->
+    <div class="brand">
+      <img id="brand-logo" alt="" style="display:none">
+      <span class="name" id="brand-name"></span>
+    </div>
+    <hr class="rule">
 
-  <div class="notice" id="site-notice" role="status" aria-live="polite"></div>
+    <!-- WHY THE INTERNET STOPPED. Shown only when this device's most recent access ended because it ran out
+         of data or time; the sign-in below is unchanged and the guest carries straight on into it. -->
+    <div class="notice" id="access-ended" role="status" aria-live="polite"></div>
+    <div class="notice" id="site-notice" role="status" aria-live="polite"></div>
 
-  <div class="tabs" id="tabs"></div>
+    <div class="tabs" id="tabs" role="tablist"></div>
+    <div class="panels">
 
   <!-- Voucher panel -->
   <div class="panel" id="panel-voucher">
@@ -158,7 +257,37 @@ const landingHTML = `<!doctype html>
     </form>
   </div>
 
+      <div class="alt" id="alt-methods" style="display:none"></div>
+    </div>
+
+    <button class="info-btn" id="info-btn" type="button" aria-expanded="false" aria-controls="info-panel"
+            aria-label="Device information" title="Device information">i</button>
+    <div class="info-panel" id="info-panel" hidden>
+      <strong>Your device</strong>
+      <dl>
+        <dt>IP address</dt><dd>{{if .ClientIP}}{{.ClientIP}}{{else}}not detected{{end}}</dd>
+        <dt>MAC address</dt><dd>{{if .ClientMAC}}{{.ClientMAC}}{{else}}not detected{{end}}</dd>
+      </dl>
+      <p class="small" style="margin-top:10px">Reception may ask for these if you need help connecting.</p>
+    </div>
+  </main>
+
   <script>
+    // THE REFERENCE DESIGN PRESENTS TWO DOORS, NOT SIX.
+    //
+    // With PMS, voucher, accounts, email, SMS, social and post-stay all enabled the old row carried seven
+    // tabs; on a 360px phone the labels were unreadable, which is the device almost every guest uses. The
+    // question a guest can actually answer is not "which authentication method" -- it is "am I staying here,
+    // or do I have a code?". So every enabled method lands in one of two groups, and the group is only shown
+    // when it has something in it. No method is removed: this is presentation, and each panel below is the
+    // same form it always was.
+    const ICON_DOOR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 21h18M6 21V4a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v17"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/></svg>';
+    const ICON_KEYS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg>';
+
+    const Groups = {
+      guest:   { id:'guest',   label:'Guest Login',   icon: ICON_DOOR, members:['pms','poststay'] },
+      account: { id:'account', label:'Account Login', icon: ICON_KEYS, members:['voucher','account','email','sms','social'] },
+    };
     const Tabs = {
       voucher: { id:'voucher', label:'Voucher', panel:'panel-voucher' },
       account: { id:'account', label:'Username', panel:'panel-account' },
@@ -180,11 +309,81 @@ const landingHTML = `<!doctype html>
     };
     const challenges = {}; // channel -> challenge_id
 
+    // Which METHOD is showing, within whichever group is selected.
     function setTab(id) {
-      document.querySelectorAll('.tab').forEach(el => el.classList.toggle('active', el.dataset.tab === id));
       document.querySelectorAll('.panel').forEach(el => el.classList.remove('active'));
       const t = Tabs[id]; if (t) document.getElementById(t.panel).classList.add('active');
     }
+    // Which GROUP is selected. Shows that group's first available method, and any others as alternatives
+    // beneath it, so a hotel running both vouchers and accounts still offers both.
+    function setGroup(gid, groupMembers) {
+      document.querySelectorAll('.tab').forEach(el => {
+        const on = el.dataset.group === gid;
+        el.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      const members = groupMembers[gid] || [];
+      setTab(members[0]);
+      const alt = document.getElementById('alt-methods');
+      alt.innerHTML = '';
+      if (members.length > 1) {
+        const h = document.createElement('h3');
+        h.textContent = 'Or sign in with';
+        alt.appendChild(h);
+        members.slice(1).forEach(m => {
+          const b = document.createElement('button');
+          b.type = 'button'; b.className = 'link'; b.textContent = Tabs[m].label;
+          // The alternatives ARE method selectors, so they carry the method they select. Anything looking for
+          // a particular sign-in method finds it here now that there is no longer a tab per method.
+          b.dataset.tab = m;
+          b.onclick = () => setTab(m);
+          alt.appendChild(b);
+        });
+        alt.style.display = '';
+      } else {
+        alt.style.display = 'none';
+      }
+    }
+
+    // BRANDING. Applied before anything else paints so the guest never sees the default teal flash to the
+    // hotel's colour. Every value is optional and every default is a deliberate, finished-looking fallback.
+    fetch('/api/branding').then(r => r.ok ? r.json() : {}).then(b => {
+      const d = (b && b.design) || b || {};
+      const root = document.documentElement.style;
+      if (d.brand_color)      root.setProperty('--sc-brand', d.brand_color);
+      if (d.brand_color_dark) root.setProperty('--sc-brand-dark', d.brand_color_dark);
+      if (d.text_color)       root.setProperty('--sc-ink', d.text_color);
+      if (d.font_family)      root.setProperty('font-family', d.font_family);
+      if (d.corner_radius)    root.setProperty('--sc-radius', d.corner_radius);
+      if (d.background_url)   root.setProperty('--sc-bg', 'url("' + encodeURI(d.background_url) + '")');
+      if (d.hotel_name) {
+        document.getElementById('brand-name').textContent = d.hotel_name;
+        document.title = d.hotel_name + ' — Wi-Fi';
+      }
+      if (d.logo_url) {
+        const img = document.getElementById('brand-logo');
+        img.src = d.logo_url; img.alt = d.hotel_name || 'Hotel'; img.style.display = '';
+      }
+      if (Array.isArray(d.languages) && d.languages.length) {
+        const sel = document.getElementById('lang');
+        sel.innerHTML = '';
+        d.languages.forEach(l => {
+          const o = document.createElement('option');
+          o.value = l.code || l; o.textContent = l.label || l;
+          sel.appendChild(o);
+        });
+      }
+    }).catch(() => {});
+
+    // The information affordance. Purely local: the addresses are already rendered into the panel.
+    (function () {
+      const btn = document.getElementById('info-btn');
+      const panel = document.getElementById('info-panel');
+      btn.addEventListener('click', () => {
+        const open = panel.hasAttribute('hidden');
+        if (open) { panel.removeAttribute('hidden'); } else { panel.setAttribute('hidden', ''); }
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+    })();
 
     fetch('/api/auth-methods').then(r => r.json()).then(cfg => {
       const tabsEl = document.getElementById('tabs');
@@ -264,13 +463,30 @@ const landingHTML = `<!doctype html>
         tabsEl.innerHTML = '<div class="small">There is no way to sign in on this network yet. Please contact reception.</div>';
         return;
       }
-      enabled.forEach(id => {
-        const el = document.createElement('div');
-        el.className = 'tab'; el.dataset.tab = id; el.textContent = Tabs[id].label;
-        el.addEventListener('click', () => setTab(id));
-        tabsEl.appendChild(el);
+      // Sort the enabled methods into the two groups, preserving the order that enabled[] already established --
+      // that order is deliberate elsewhere in this file and must not be re-litigated here.
+      const groupMembers = {};
+      Object.values(Groups).forEach(g => {
+        const members = enabled.filter(id => g.members.includes(id));
+        if (members.length) groupMembers[g.id] = members;
       });
-      setTab(enabled[0]);
+      const shown = Object.keys(groupMembers);
+
+      // A single group is not a choice, so it is not rendered as one: the guest sees the form, not a lone
+      // tab asking them to pick the only option.
+      if (shown.length > 1) {
+        shown.forEach(gid => {
+          const el = document.createElement('button');
+          el.type = 'button'; el.className = 'tab'; el.dataset.group = gid;
+          el.setAttribute('role', 'tab');
+          el.innerHTML = Groups[gid].icon + '<span>' + Groups[gid].label + '</span>';
+          el.addEventListener('click', () => setGroup(gid, groupMembers));
+          tabsEl.appendChild(el);
+        });
+      } else {
+        tabsEl.style.display = 'none';
+      }
+      setGroup(shown[0], groupMembers);
     }).catch(() => { setTab('voucher'); });
 
     function panel(channel) { return document.getElementById('panel-' + channel); }
@@ -654,6 +870,8 @@ const landingHTML = `<!doctype html>
       }
     });
   </script>
+  </main>
+
 </body></html>`
 
 const successHTML = `<!doctype html>

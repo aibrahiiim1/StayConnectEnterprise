@@ -210,9 +210,15 @@ test("enabling PMS does not expose the Post-Stay tab", async ({ page }) => {
     }));
   await page.goto("/portal");
   await expect(page.locator("#panel-pms")).toBeAttached();
-  await expect(page.locator('.tab[data-tab="pms"]')).toHaveCount(1);
-  await expect(page.locator('.tab[data-tab="poststay"]')).toHaveCount(0);
-  await expect(page.locator('.tab[data-tab="voucher"]')).toHaveCount(1);
+  // The portal now presents two GROUPS rather than one tab per method: "am I staying here" and "I have a
+  // code". Post-stay lives inside the guest group and must still not be reachable when Phase 5 is off, so the
+  // claim is unchanged -- it is asserted on the PANEL that would serve it rather than on a tab that no longer
+  // exists per method.
+  await expect(page.locator('.tab[data-group="guest"]')).toHaveCount(1);
+  await expect(page.locator('.tab[data-group="account"]')).toHaveCount(1);
+  await expect(page.locator('#panel-pms.active')).toHaveCount(1);
+  // Nothing offers post-stay: it is not the group's first member and no alternative links to it.
+  await expect(page.locator('#alt-methods')).not.toContainText("Post-stay");
 });
 
 test("with Phase 3 off the page keeps using the legacy endpoint", async ({ page }) => {

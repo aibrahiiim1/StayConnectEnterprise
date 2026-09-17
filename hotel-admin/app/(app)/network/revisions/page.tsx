@@ -30,8 +30,17 @@ export default function RevisionsPage() {
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [detail, setDetail] = useState<Record<string, NetRevisionDetail>>({});
+  /** Clutter control. Nothing here removes a revision -- see the note in the header for why it must not. */
+  const [filter, setFilter] = useState<"needs-attention" | "all">("all");
+  const [showAll, setShowAll] = useState(false);
 
   const writable = canWrite("network", roles);
+
+  /** What the table actually renders: the chosen filter, then a preview cap. Both are presentation only. */
+  const NEEDS = new Set(["pending_confirmation", "rolled_back", "failed"]);
+  const filtered = (rows ?? []).filter((r) => filter === "all" || NEEDS.has(r.state));
+  const PREVIEW = 15;
+  const visible = showAll ? filtered : filtered.slice(0, PREVIEW);
 
   async function load() {
     try { setRows((await api.get<ListResp<NetRevision>>("/network/revisions")).data ?? []); }
@@ -76,6 +85,37 @@ export default function RevisionsPage() {
 
       {err && <div className="text-err text-sm mb-4">{err}</div>}
 
+      {/* WHY THERE IS NO DELETE HERE.
+          A revision is what rollback rolls back TO, and what the current configuration's provenance points
+          at. Removing one does not tidy the list, it makes the remaining history misleading: a gap reads as
+          "nothing happened" and a rollback target that no longer exists fails at the worst possible moment.
+          So the clutter is handled by filtering and folding, and every revision stays. */}
+      {rows !== null && rows.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <div className="inline-flex rounded border" role="group" aria-label="Filter revisions">
+            {(["needs-attention", "all"] as const).map((f) => (
+              <button
+                key={f}
+                type="button"
+                aria-pressed={filter === f}
+                onClick={() => { setFilter(f); setShowAll(false); }}
+                className={
+                  "px-3 py-1 " +
+                  (filter === f ? "bg-brand text-white" : "text-muted hover:text-text")
+                }
+              >
+                {f === "needs-attention" ? "Needs attention" : `All (${rows.length})`}
+              </button>
+            ))}
+          </div>
+          <span className="text-muted">
+            {filter === "needs-attention"
+              ? "Revisions awaiting confirmation, rolled back or failed."
+              : "Every recorded validate/apply. Nothing is ever deleted — rollback and provenance depend on it."}
+          </span>
+        </div>
+      )}
+
       <Card>
         <CardBody className="p-0">
           {rows === null ? <EmptyState title="Loading…" /> : rows.length === 0 ? (
@@ -86,7 +126,7 @@ export default function RevisionsPage() {
                 <TR><TH>Seq</TH><TH>State</TH><TH>Summary</TH><TH>Applied</TH><TH>Confirmed</TH><TH>Failure</TH><TH></TH></TR>
               </THead>
               <tbody>
-                {rows.map((r) => (
+                {visible.map((r) => (
                   <Fragment key={r.id}>
                     <TR className="cursor-pointer" onClick={() => toggle(r.id)}>
                       <TD className="font-mono">#{r.seq}</TD>
@@ -116,6 +156,19 @@ export default function RevisionsPage() {
                 ))}
               </tbody>
             </Table>
+          )}
+          {filtered.length > visible.length && (
+            <div className="border-t p-3">
+              <Button size="sm" variant="secondary" onClick={() => setShowAll(true)}>
+                Show {filtered.length - visible.length} older revision{filtered.length - visible.length === 1 ? "" : "s"}
+              </Button>
+            </div>
+          )}
+          {rows !== null && rows.length > 0 && filtered.length === 0 && (
+            <EmptyState
+              title="Nothing needs attention"
+              hint="No revision is awaiting confirmation, rolled back or failed. Switch to All to see the full history."
+            />
           )}
         </CardBody>
       </Card>

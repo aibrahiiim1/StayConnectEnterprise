@@ -58,10 +58,25 @@ function licenseTone(state?: string): "ok" | "warn" | "err" | "default" {
 }
 
 // The detailed 15-stage lifecycle stays available behind "Show technical details".
+//
+// STAGE 12 IS NOT A STEP TOWARD COMPLETION, and treating it as one is what made this page hang forever.
+//
+// The appliance serves Central for LICENSING ONLY (T0071). The NATS transport is deliberately NOT OPENED --
+// not broken, not pending, not waiting: a Product-Owner decision that the hotel's operations belong on the
+// hotel's appliance. `nats_mtls.connected` is therefore false on a correctly activated appliance and will
+// stay false forever.
+//
+// currentStage() used to require `licOk && mtls && nats` to reach 15, so PRE-LIVE -- enrolled, assigned,
+// adopted, certificate issued, API mTLS ready, licence Active -- sat permanently on stage 14, telling the
+// operator "License active - finishing up..." about a setup that had finished. The appliance was right and
+// the page was wrong.
+//
+// Completion now follows the SAME rule the backend already uses for activation_status: enrolled + licensed +
+// API mTLS. scd has always computed it that way; only this page disagreed.
 const STAGES = [
   "Awaiting enrollment", "Enrollment submitted", "Identity generated", "Enrollment accepted",
   "Pending approval", "Claimed", "Assignment issued", "Assignment adopted",
-  "Certificate requested", "Certificate issued", "API mTLS connected", "NATS mTLS connected",
+  "Certificate requested", "Certificate issued", "API mTLS connected", "Real-time channel",
   "Awaiting license", "License active", "Setup complete",
 ];
 
@@ -73,7 +88,10 @@ function currentStage(st: SetupStatus | null, tokenSubmitted: boolean): number {
   const hasCert = !!st.api_mtls?.cert_fingerprint;
   const assigned = !!st.assignment?.assigned;
   const adopted = assigned && !!st.assignment?.adopted_at;
-  if (licOk && mtls && nats) return 15;
+  // The backend's own verdict wins when it is present: scd sets activation_status="activated" on
+  // enrolled + licensed + API mTLS, with no NATS term, and it is the authority on whether this appliance is
+  // set up. The licOk && mtls fallback keeps the page working against an older scd that predates the field.
+  if (st.activation_status === "activated" || (licOk && mtls)) return 15;
   if (licOk) return 14;
   if (assigned && mtls) return 13;
   if (nats) return 12;
@@ -283,7 +301,10 @@ export default function SetupEnrollmentPage() {
   const lic = st?.license;
   const net = st?.network;
   const licOk = ["active", "licensed", "grace", "graceperiod"].includes((lic?.state ?? "").toLowerCase());
-  const complete = enrolled && api_mtls?.mtls_ready === true && nats?.connected === true && licOk;
+  // Same rule as currentStage(), and for the same reason: requiring nats?.connected here held the whole page
+  // in its "in progress" branch on a fully activated appliance, because the real-time channel is deliberately
+  // never opened at a licensing-only site.
+  const complete = st?.activation_status === "activated" || (enrolled && api_mtls?.mtls_ready === true && licOk);
 
   const stage = currentStage(st, tokenSubmitted);
   const inProgress = stage >= 2 && !complete;
@@ -580,10 +601,31 @@ export default function SetupEnrollmentPage() {
           </Card>
 
           <Card>
-            <StepHeader title="NATS transport" icon={<Radio className="h-4 w-4" />} />
+            <StepHeader title="Real-time channel" icon={<Radio className="h-4 w-4" />} />
             <CardBody>
-              <Row k="Status" v={nats?.connected ? <Badge tone="ok">NATS mTLS connected</Badge> : <Badge tone="err">Disconnected</Badge>} />
-              <Row k="Mode" v={<Badge tone={nats?.mtls ? "ok" : "warn"}>{nats?.mtls ? "mTLS" : "legacy"}</Badge>} />
+              {/* NOT AN ERROR, AND IT MUST NOT LOOK LIKE ONE. This appliance serves Central for licensing
+                  only; the NATS transport is deliberately not opened. A red "Disconnected" badge here sent
+                  operators looking for a network fault that does not exist. */}
+              <Row
+                k="Status"
+                v={
+                  nats?.connected ? (
+                    <Badge tone="ok">Connected</Badge>
+                  ) : (
+                    <Badge tone="default">Not used at this site</Badge>
+                  )
+                }
+              />
+              <Row
+                k="Why"
+                v={
+                  <span className="text-sm">
+                    {nats?.connected
+                      ? "The real-time channel is open."
+                      : "This hotel's operations run on this appliance. Central is used for licensing only, so the real-time channel is intentionally closed — nothing is wrong and nothing is pending."}
+                  </span>
+                }
+              />
             </CardBody>
           </Card>
 
