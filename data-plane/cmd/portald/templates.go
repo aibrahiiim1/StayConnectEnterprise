@@ -257,6 +257,21 @@ const landingHTML = `<!doctype html>
     </form>
   </div>
 
+      <div class="alt" id="alt-methods" style="display:none"></div>
+    </div>
+
+    <button class="info-btn" id="info-btn" type="button" aria-expanded="false" aria-controls="info-panel"
+            aria-label="Device information" title="Device information">i</button>
+    <div class="info-panel" id="info-panel" hidden>
+      <strong>Your device</strong>
+      <dl>
+        <dt>IP address</dt><dd>{{if .ClientIP}}{{.ClientIP}}{{else}}not detected{{end}}</dd>
+        <dt>MAC address</dt><dd>{{if .ClientMAC}}{{.ClientMAC}}{{else}}not detected{{end}}</dd>
+      </dl>
+      <p class="small" style="margin-top:10px">Reception may ask for these if you need help connecting.</p>
+    </div>
+  </main>
+
   <script>
     // THE REFERENCE DESIGN PRESENTS TWO DOORS, NOT SIX.
     //
@@ -317,6 +332,9 @@ const landingHTML = `<!doctype html>
         members.slice(1).forEach(m => {
           const b = document.createElement('button');
           b.type = 'button'; b.className = 'link'; b.textContent = Tabs[m].label;
+          // The alternatives ARE method selectors, so they carry the method they select. Anything looking for
+          // a particular sign-in method finds it here now that there is no longer a tab per method.
+          b.dataset.tab = m;
           b.onclick = () => setTab(m);
           alt.appendChild(b);
         });
@@ -852,21 +870,8 @@ const landingHTML = `<!doctype html>
       }
     });
   </script>
-
-      <div class="alt" id="alt-methods" style="display:none"></div>
-    </div>
-
-    <button class="info-btn" id="info-btn" type="button" aria-expanded="false" aria-controls="info-panel"
-            aria-label="Connection information" title="Connection information">i</button>
-    <div class="info-panel" id="info-panel" hidden>
-      <strong>Your device</strong>
-      <dl>
-        <dt>IP address</dt><dd>{{if .ClientIP}}{{.ClientIP}}{{else}}not detected{{end}}</dd>
-        <dt>MAC address</dt><dd>{{if .ClientMAC}}{{.ClientMAC}}{{else}}not detected{{end}}</dd>
-      </dl>
-      <p class="small" style="margin-top:10px">Reception may ask for these if you need help connecting.</p>
-    </div>
   </main>
+
 </body></html>`
 
 const successHTML = `<!doctype html>
