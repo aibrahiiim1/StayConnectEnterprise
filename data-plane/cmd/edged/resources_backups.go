@@ -57,11 +57,64 @@ var safeArtifact = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 func (s *server) backupsRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/health", s.backupHealth)
+	r.Get("/settings", s.backupSettingsGet)
+	r.Put("/settings", s.backupSettingsSet)
 	r.Get("/artifacts", s.listBackupArtifacts)
 	r.Post("/run", s.runDatabaseBackup)
 	r.Get("/artifacts/{name}/download", s.downloadBackupArtifact)
 	r.Post("/artifacts/{name}/verify", s.verifyBackupArtifact)
 	return r
+}
+
+// ------------------------------------------------------------------------------- retention and schedule
+
+// Retention and the nightly schedule are SETTINGS (§0C). scd owns the files -- /etc/stayconnect and the
+// systemd drop-in are root's -- so these proxy, and everything that decides whether the change may happen
+// stays here: the RBAC mount, the step-up below, and the audit record.
+func (s *server) backupSettingsGet(w http.ResponseWriter, r *http.Request) {
+	code, body, err := s.scd.call(r.Context(), http.MethodGet, "/v1/backup/settings", nil)
+	if err != nil || code != http.StatusOK {
+		jsonErr(w, http.StatusInternalServerError, "internal", scdDetail(body, err))
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(body)
+}
+
+type backupSettingsPut struct {
+	Retention map[string]int `json:"retention"`
+	Schedule  string         `json:"schedule"`
+	Password  string         `json:"password"`
+}
+
+func (s *server) backupSettingsSet(w http.ResponseWriter, r *http.Request) {
+	var in backupSettingsPut
+	if err := decodeJSON(r, &in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")
+		return
+	}
+	// Step-up: retention decides how far back this appliance can recover, and a schedule that never fires is
+	// indistinguishable from a backup policy that works right up until it is needed.
+	if !s.reauth(r, in.Password) {
+		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		return
+	}
+	code, body, err := s.scd.call(r.Context(), http.MethodPost, "/v1/backup/settings",
+		map[string]any{"retention": in.Retention, "schedule": in.Schedule})
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", scdDetail(body, err))
+		return
+	}
+	if code != http.StatusOK {
+		// The appliance refuses with a reason an operator can act on -- a bound, or the warning/critical
+		// ordering -- so it is passed through rather than flattened into "invalid".
+		jsonErr(w, http.StatusBadRequest, "validation", scdDetail(body, nil))
+		return
+	}
+	s.audit(r, "backup.settings_changed", "backup", "retention",
+		map[string]any{"retention": in.Retention, "schedule": in.Schedule})
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(body)
 }
 
 // ---------------------------------------------------------------------------------------------- health

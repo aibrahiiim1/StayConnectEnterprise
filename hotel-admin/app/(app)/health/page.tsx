@@ -129,7 +129,7 @@ export default function HealthPage() {
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight sm:text-2xl"><Activity className="h-5 w-5" /> Diagnostics &amp; Service Health</h1>
+        <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight sm:text-2xl"><Activity className="h-5 w-5" /> Diagnostics</h1>
         <div className="flex items-center gap-3">
           {sum && <Badge tone={overallTone(sum.overall) as any}>Appliance: {sum.overall}</Badge>}
           <Button variant="ghost" onClick={load}><RefreshCw className="h-4 w-4" /> Refresh</Button>

@@ -122,3 +122,54 @@ func TestLandingRendersEveryPanelItStillSupports(t *testing.T) {
 		}
 	}
 }
+
+// THE TRANSLATION CONTRACT, PINNED ON BOTH SIDES.
+//
+// The language selector is driven by keys: the portal tags each guest-facing string with data-i18n, and Hotel
+// Admin offers the operator a field per key. If the two lists drift, an operator types words that never
+// appear on the page and has no way to discover why. This asserts the portal's half.
+func TestLandingTagsEveryStringTheDesignerOffersToTranslate(t *testing.T) {
+	html := renderLanding(t, "10.77.0.42", "aa:bb:cc:dd:ee:ff")
+
+	// Kept in step with PORTAL_STRINGS in hotel-admin/app/(app)/portal-branding/page.tsx.
+	for _, key := range []string{
+		"pms.room", "account.pass", "account.user", "voucher.label",
+		"email.dest", "sms.dest", "otp.code",
+		"btn.connect", "btn.verify",
+		"info.device", "info.ip", "info.mac", "info.help",
+	} {
+		if !strings.Contains(html, `data-i18n="`+key+`"`) {
+			t.Errorf("the portal never tags %q, so translating it changes nothing a guest sees", key)
+		}
+	}
+	// The two group tabs are translated by re-rendering rather than by a data attribute, so their keys are
+	// asserted in the script instead.
+	for _, key := range []string{"tab.guest", "tab.account"} {
+		if !strings.Contains(html, "'tab.' + gid") && !strings.Contains(html, key) {
+			t.Errorf("group tab key %q is not reachable by a translation", key)
+		}
+	}
+}
+
+func TestLandingFallsBackToEnglishRatherThanShowingKeys(t *testing.T) {
+	// A hotel that translates six strings and forgets the seventh must get a portal that still reads. Showing
+	// a raw key is worse than showing English: it is not a language anybody speaks.
+	html := renderLanding(t, "10.77.0.42", "")
+	if !strings.Contains(html, "data-i18n-en=") {
+		t.Fatal("no English fallback is carried, so a partial translation would render keys")
+	}
+	if !strings.Contains(html, "else if (el.dataset.i18nEn)") {
+		t.Error("the translation pass does not fall back to the English it carries")
+	}
+}
+
+func TestPortalServesItsOwnAssets(t *testing.T) {
+	// A captive portal is reached by a device with NO internet. An image hosted anywhere else is an image
+	// that fails exactly when it matters, which is why uploads are served from the appliance.
+	if portalAssetDir == "" {
+		t.Fatal("no asset directory is configured")
+	}
+	if !strings.HasPrefix(portalAssetDir, "/opt/stayconnect/") {
+		t.Errorf("assets are served from %q, outside the appliance's own tree", portalAssetDir)
+	}
+}
