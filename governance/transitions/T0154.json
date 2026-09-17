@@ -1,0 +1,61 @@
+{
+  "transition_id": "T0154",
+  "seq": 154,
+  "timestamp": "2026-09-17T11:01:32Z",
+  "timestamp_derivation": "After migration 0080 was applied to stayconnect_site through the fail-closed runner, the grant verified as exactly SELECT, Policy History loaded live under the real svc_edged runtime role, and the binaries rebuilt and redeployed so the recorded head keeps describing them; before the author timestamp of the commit that introduces this receipt. After the merge commit 94c25c20 it describes. Per T0091, in the order T0108 requires.",
+  "record_type": "MIGRATION_0080_APPLIED_AND_POLICY_HISTORY_PROVEN_LIVE",
+  "merge": {
+    "pull_request": 150,
+    "merge_commit": "94c25c20abc80b7d91b5e3086ba7e867b9ecba35",
+    "gates": "All four required gates green on the exact head afbec858, first attempt. The Phase-5 log shows the restricted-role proof executing remotely: the granted role reads the ledger and is refused INSERT, UPDATE and DELETE.",
+    "preflight": "PASS on all seven default stages."
+  },
+  "migration_applied": {
+    "how": "scripts/edge-migrate.sh on the appliance, --only 0080_the_service_may_read_the_ledger_it_writes --expect-db stayconnect_site --target-kind live-site --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION --expect-sha256 c9ac7886... --apply-role iam_v2_owner. Result: EDGE_MIGRATE_OK applied=1 skipped=0, under the bounded advisory lock.",
+    "file_identity": "The shipped file's SHA-256 was compared on the appliance against the repository byte for byte before the runner was invoked, and the runner independently required the same digest as its binding pre-apply control.",
+    "role": "iam_v2_owner is NOLOGIN by design, so the runner connects as a login role and SET ROLEs to it. SET ROLE grants nothing it did not already have, and every least-privilege check evaluates current_user after the switch.",
+    "result": "has_table_privilege(svc_edged, iam_v2.checkout_grace_policy_publications, SELECT) = true, and information_schema.role_table_grants shows exactly one privilege_type for that role on that table: SELECT. No INSERT, UPDATE or DELETE. Ledger head is now 0080."
+  },
+  "policy_history_proven_live": {
+    "before": "HTTP 500, then (after T0152) 200 with available=false and 'the service account cannot read the publication ledger on this appliance'.",
+    "after": "HTTP 200, available=true, four versions, each with its actor, its bounded reason code and ITS OWN policy snapshot -- version 2 still reports 1800 seconds although version 3 restored 3600. Read through the same endpoint the browser uses, by the running edged process, under the real svc_edged role.",
+    "edged_error_count": "Zero since the restart. The permission-denied diagnostic added in T0152 no longer fires, which is the runtime confirmation that the grant is what was missing."
+  },
+  "a_real_operator_used_the_feature": {
+    "what": "The history shows a version 4 this delivery did not publish: 8 hours, 5 devices, reason HOTEL_ADMIN_UPDATE, published 2026-09-17T08:48:10Z by Site Admin through Hotel Admin.",
+    "why_it_is_recorded": "It is the first policy the hotel chose for itself rather than one published to prove the mechanism, and it is the strongest evidence the mission succeeded: the workflow was used by an operator, unaided, to change what departing guests receive. It is left exactly as published -- reverting a Product-Owner decision to restore a test value would be the opposite of the point.",
+    "supersedes": "The instruction earlier in this mission to end on fallback-identical terms. That was a constraint on evidence-publishing by the agent; the Product Owner has since made the commercial choice directly."
+  },
+  "guest_impact": {
+    "entitlements": "Eight live grace entitlements, all still exactly 3600 seconds -- issued under earlier versions and untouched by three subsequent publications. Publishing reaches forward only, proven again on real rows.",
+    "conversions": "Two real departing guests have been served by the published policy (trigger=CHECKOUT_GRACE, is_emergency=false, CHECKOUT_GRACE_V1). Zero emergency fallbacks."
+  },
+  "binaries": {
+    "head": "94c25c20abc80b7d91b5e3086ba7e867b9ecba35",
+    "why_rebuilt": "0080 changes no production code, but the recorded deployed head must keep describing the binaries -- the standard T0139 established. The rebuild's only effect is the embedded provenance stamp.",
+    "verification": "All six report vcs.revision=94c25c20abc8, modified=false, tags=stayconnect_production. Staged digests compared against the workstation build, with an explicit non-empty check first -- an earlier comparison in this mission printed MATCH while comparing two empty strings. Rollback for 94a4bb3d retained.",
+    "hotel_admin": "NOT rebuilt, deliberately. No UI source changed since its release at 94a4bb3d, and the bundle manifest exists precisely so the UI carries its own identity rather than inheriting the binaries'."
+  },
+  "services": "All seven active. Two errors in the window, both standing: scd's refusal of SCD_LICENSE_REQUIRED=false on a production build, and pmsd's CONTEXT_CANCELED on its own restart. edged: zero.",
+  "constraints_observed": {
+    "authorization_boundary": "The migration is exactly the one authorized: SELECT, one table, one role. No other privilege was granted, no schema or data changed, no unrelated work opened.",
+    "no_pms_or_financial": "No PMS configuration change, no PMS write, no financial traffic.",
+    "guest_state": "No guest, stay, entitlement or session row written by this delivery.",
+    "retired_host": "172.21.60.23 neither contacted nor modified."
+  },
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-17: close the Checkout Grace work completely, including the controlled migration, its application to PRE-LIVE and live verification.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE.",
+  "checkout_grace_is_closed": "The operator can create, review, change, publish and audit the hotel's Checkout Grace policy entirely from Hotel Admin, and has done so. No outstanding item remains."
+}
