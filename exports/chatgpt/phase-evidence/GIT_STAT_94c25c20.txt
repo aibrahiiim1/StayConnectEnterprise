@@ -1,4 +1,0 @@
-commit 94c25c20abc80b7d91b5e3086ba7e867b9ecba35
-Date:   Thu Sep 17 13:53:37 2026 +0300
-
-    Merge PR #150: migration 0080, the service may read the ledger it writes

@@ -1093,7 +1093,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0154",
+  "latest_transition_id": "T0155",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1587,14 +1587,14 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "MIGRATION_0080_APPLIED_AND_POLICY_HISTORY_PROVEN_LIVE",
-    "decision": "D72",
+    "kind": "HOTEL_ADMIN_AND_GUEST_PORTAL_CONSOLIDATED_CLEANUP",
+    "decision": "D73",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "94c25c20abc80b7d91b5e3086ba7e867b9ecba35",
-    "base_note": "The master merge commit of PR #150. This delivery begins exactly where that one ended.",
-    "head": "",
-    "head_note": "Governance only: this delivery has no content commit.",
-    "note": "T0154. Migration 0080 applied to stayconnect_site (EDGE_MIGRATE_OK applied=1 skipped=0); svc_edged holds exactly SELECT on the ledger and nothing more. Policy History loads live under the real runtime role: 200, available=true, four versions with actor, reason and each version's own snapshot. edged logs zero errors. Version 4 was published by a real operator through Hotel Admin, unaided -- the first policy this hotel chose for itself."
+    "base": "fab87fc6490f742d8d75367643d8cb76771bc813",
+    "base_note": "The master merge commit of PR #151. This delivery begins exactly where that one ended.",
+    "head": "735c7b6f",
+    "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
+    "note": "T0155. Setup no longer waits for a transport LICENSING_ONLY deliberately never opens. Cloud connection retired into License; Activation moved beside it. text-muted pointed at the quiet SURFACE instead of the quiet LABEL, rendering 517 labels at 1.12:1; now 5.28:1 and 6.37:1. Backups became a real feature over the retention data that already existed, plus database backup, download and non-destructive verification. The guest portal follows the reference design and finally consumes branding, which became a designer with preview, versioned revisions, rollback and an advanced mode that refuses executable content rather than sanitising it."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

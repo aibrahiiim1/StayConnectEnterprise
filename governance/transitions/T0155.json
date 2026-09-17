@@ -1,0 +1,78 @@
+{
+  "transition_id": "T0155",
+  "seq": 155,
+  "timestamp": "2026-09-17T14:35:12Z",
+  "timestamp_derivation": "After the whole authorized cleanup was implemented across Hotel Admin, edged, scd and the guest portal, and the full Go and UI suites plus the production build were run locally; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "HOTEL_ADMIN_AND_GUEST_PORTAL_CONSOLIDATED_CLEANUP",
+  "setup_activation_hung_and_the_cause_was_architectural": {
+    "symptom": "Setup / Activation showed 'License active - finishing up...' indefinitely on PRE-LIVE.",
+    "what_the_appliance_reported": "enrolled=true, assignment assigned and adopted, api_mtls.mtls_ready=true, licence Active, activation_status='activated' -- and nats_mtls.connected=false.",
+    "cause": "The page required licOk && mtls && nats to reach the final stage. This appliance serves Central for LICENSING ONLY (T0071): the NATS transport is deliberately not opened. iam_v2.site_cloud_mode reads LICENSING_ONLY and Central's 4223 listener is not established, so the completion condition was unreachable by design. The appliance was correct; the page was wrong.",
+    "fix": "Completion follows the rule scd already used for activation_status -- enrolled + licensed + API mTLS, no NATS term. The defect existed twice, in currentStage() and in the complete flag. The real-time channel is no longer painted as a red 'Disconnected' fault; it reads 'Not used at this site' with the reason.",
+    "not_masked": "No loading state was hidden and no timeout added. The condition itself was wrong."
+  },
+  "license_activation_and_cloud_duplication_resolved": {
+    "before": "Three screens answered one question. License, Setup/Activation and Cloud connection each showed appliance identity; two showed licence state; three showed mTLS or NATS.",
+    "after": "Cloud connection is retired as a page and redirects. Under the licensing-only model the link to Central exists to register the appliance, issue its certificate, carry the licence and enforce it -- so everything the page showed is licence state, certificate health or identity, and it is now a 'Connection to Central' card on License. Activation moved from Networking to System, beside License: first-time enrollment and ongoing licence administration are the same job at two points in its life.",
+    "tls_kept_separate": "The Hotel Admin TLS certificate page stays where it was and is untouched. It secures the local HTTPS an operator reaches this admin over, which has nothing to do with whether Central is reachable -- exactly the distinction the mission asked to preserve.",
+    "nothing_removed_from_the_runtime": "No Cloud, NATS or mTLS behaviour was changed. This is operator surface only."
+  },
+  "the_contrast_defect_was_one_mapping": {
+    "what": "globals.css defines --muted as a quiet SURFACE and --muted-foreground as a quiet LABEL, with a comment saying they exist to be styled independently. Tailwind resolves text-muted to muted.DEFAULT, which was the SURFACE.",
+    "consequence": "517 secondary labels across the admin rendered at 1.12:1 on a white card and 1.08:1 in dark. That is not low contrast; 1:1 is invisible. It is the grey text on every System screen.",
+    "after": "5.28:1 light and 6.37:1 dark, both clearing WCAG AA. The three places that wanted the quiet panel now say muted-surface.",
+    "pinned": "A test resolves the Tailwind config, fails if DEFAULT is pointed back at the surface, computes both ratios, and asserts the OLD value would have failed -- so it cannot pass for an unrelated reason."
+  },
+  "checkout_grace_history": {
+    "after": "One line per version -- version, terms summary, date, actor -- opening on demand for the full pinned terms, older versions behind a control, the in-force version marked.",
+    "what_was_deliberately_not_done": "No archive, hide or delete control. This is the append-only publication ledger: the provenance of what every departing guest was promised and the record a rollback is judged against. Hiding a row would make the version sequence lie by omission. The clutter was in the rendering, so that is where it was fixed."
+  },
+  "config_history": {
+    "after": "A needs-attention filter (awaiting confirmation, rolled back, failed) and a fold for older entries, over the existing compact row-and-detail model.",
+    "no_deletion": "A revision is what rollback rolls back TO and what the current configuration's provenance points at. Removing one does not tidy the list, it makes the remaining history misleading."
+  },
+  "backups_became_a_feature": {
+    "what_was_wrong": "The screen listed public.backup_records, which nothing has ever written a row to on this appliance -- so it read 'No backups yet' forever, while the appliance retained 444 MB of deploy and rollback artefacts and ran a daily retention sweep that already knew its disk pressure, protected paths, pinned items and reclaimed space. All of it was real and none of it was reachable from Hotel Admin.",
+    "and_the_gap_underneath": "There were no database backups at all. keep_db=7 was a retention policy for a category nothing produced.",
+    "now": "Health from the sweep's own status document and the systemd timer; the retention policy as it is actually applied, including what is protected and never deleted; the artefact inventory with kind, size and age; a manual database backup under password step-up; download of any artefact; and verification.",
+    "no_live_restore": "Deliberate. A live restore replaces running guest and configuration data and cannot be undone by clicking again. VERIFY loads a dump into a throwaway database, counts its tables and drops it -- answering the question an operator actually has about a backup without betting the site on it. The restore path is described on the page instead of being a button beside a download link.",
+    "honest_failure": "A dump is written to .partial and renamed only on success, and a dump under 1 KB is discarded rather than recorded -- gzip of nothing still exits 0."
+  },
+  "guest_portal_redesigned": {
+    "to": "The Product Owner's reference: full-bleed hotel photograph, one centred white card, branded header, Guest Login and Account Login tabs, room-number and voucher/personal-account flows, a language selector upper right and an information affordance lower right.",
+    "two_groups_not_seven_tabs": "With every method enabled the old row carried seven tabs, unreadable on the 360px phone almost every guest uses. The question a guest can answer is 'am I staying here, or do I have a code?', so methods are grouped behind two doors. This is PRESENTATION: every panel is the same form it always was, and a test asserts each one is still rendered.",
+    "device_addresses": "The information panel shows the device's own IP and MAC. Both come from the connection and the ARP table -- never a header -- and a test forges X-Forwarded-For and X-Real-IP to prove a guest cannot make the page display an address that is not theirs. A guest who cannot tell reception their MAC cannot be helped by reception.",
+    "responsive": "One design language across desktop, tablet and phone; on a phone the card becomes the page rather than becoming a second design."
+  },
+  "branding_became_a_designer": {
+    "what_was_wrong": "A textarea containing raw JSON, with no schema, no validation, no history and no rollback -- and nothing read it. The captive portal never fetched branding at all, so whatever an operator typed changed nothing a guest saw. It was write-only configuration behind a syntax check.",
+    "now": "A designer for hotel name, logo, background, colours, typography, corner radius, wording and terms, with a live preview, publish under step-up, versioned revisions and rollback. The portal fetches the published design through a new guest-safe endpoint, so branding finally has an effect.",
+    "versioning_without_a_migration": "The revisions live inside the existing tenants.branding document -- published design, working draft and bounded history. The internal representation is an implementation detail and the operator never meets it; no schema change was needed.",
+    "rollback_does_not_rewind": "Rolling back re-publishes an earlier design as a NEW revision. Deleting the newer one would leave a record implying it never existed, which is the same class of lie as deleting an audit row.",
+    "advanced_mode_refuses_rather_than_sanitises": "Custom CSS and HTML are accepted; script, inline event handlers, javascript: URLs, frames, objects, EXTRA FORMS, CSS expression(), behavior: and @import are refused, and the refusal explains why. This page collects room numbers, surnames and voucher codes -- silently stripping a tag would teach an operator their template worked. Twelve adversarial spellings are asserted, not one canonical <script>.",
+    "a_bypass_found_while_writing_those_tests": "A protocol-relative logo_url of the form //host/logo.png passed the leading-slash 'appliance path' check and resolved to an external host over the page's own scheme. Refused now, with its own test."
+  },
+  "tests": "311 UI tests and the full Go suite, including five new portal-structure tests, five branding-validation tests covering twelve injection spellings, and three setup-completion tests pinned to the exact shape PRE-LIVE returns.",
+  "no_migration": "None. No schema change was needed or made anywhere in this delivery.",
+  "constraints_observed": {
+    "no_architecture_change": "The licensing-only model was read and described, never altered. No Cloud, NATS or mTLS runtime behaviour was removed -- only duplicated operator surface.",
+    "no_destructive_restore": "No live restore was performed or offered. Verification runs against a throwaway database.",
+    "no_audit_deletion": "No authoritative history was hidden, archived or deleted -- not the grace publication ledger, not network revisions, not branding revisions.",
+    "no_pms_or_financial": "No PMS configuration change, no PMS write, no financial traffic.",
+    "retired_host": "172.21.60.23 neither contacted nor modified."
+  },
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-17: one consolidated Hotel Admin / Guest Portal cleanup covering Checkout Grace history, Setup/Activation and licensing, Cloud Connection and TLS, System navigation, Backups, Config history, the Guest Portal redesign and the portal branding designer -- including directly related UI/API/business-logic changes, tests, CI, protected merge, PRE-LIVE deployment, verification and governance synchronization.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}
