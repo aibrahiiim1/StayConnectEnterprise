@@ -267,3 +267,70 @@ func TestOperatorCannotPublishOntoTheSystemGraceCodes(t *testing.T) {
 		t.Fatalf("an ordinary package must remain publishable: %+v %v", res, err)
 	}
 }
+
+// PROVISIONING MUST NOT PIN THE RESERVED EMERGENCY PLAN, and this is not a hypothetical.
+//
+// The plan picker was `ORDER BY p.code LIMIT 1` over every enabled plan. On a site whose only plans are the
+// system ones -- which is every freshly onboarded appliance -- '__sys_emergency_grace_plan__' sorts first, so
+// provisioning deterministically built the normal grace package on top of the EMERGENCY catalog plan. The
+// checkout matcher refuses that revision outright with PLAN_IS_EMERGENCY_CATALOG, so the package existed,
+// could never be selected, and the Checkout Grace screen reported that no package was available.
+//
+// PRE-LIVE was in exactly that state, with selectable_grace_packages returning two candidates and both
+// excluded. The correct outcome is the documented intermediate one: no revision yet, waiting for the
+// operator's first policy.
+func TestProvisioningSkipsRatherThanPinningAReservedEmergencyPlan(t *testing.T) {
+	db := p2DB(t)
+	ctx := context.Background()
+	// The ONLY plans on this site are the reserved emergency ones, as on a fresh appliance.
+	if _, err := db.Exec(ctx, `SELECT iam_v2.bootstrap_emergency_grace($1,$2)`, p2Tenant, p2Site); err != nil {
+		t.Fatalf("bootstrap emergency: %v", err)
+	}
+	repo := NewPgCommerceAdminRepository(db)
+	res, err := NewGraceProvisioner(repo).EnsureSiteGracePackage(ctx, repo, p2Tenant, p2Site)
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	if res.RevisionNew || res.RevisionID != "" {
+		t.Fatalf("provisioning published a revision with only reserved plans available: %+v", res)
+	}
+	if res.Skipped == "" {
+		t.Fatal("provisioning neither published nor said why it did not")
+	}
+
+	// And nothing in the system grace package points at the emergency plan.
+	var n int
+	if err := db.QueryRow(ctx, `
+	    SELECT count(*)
+	      FROM iam_v2.internet_package_revisions r
+	      JOIN iam_v2.internet_packages p ON p.id = r.package_id
+	      JOIN iam_v2.service_plan_revisions spr ON spr.id = r.service_plan_revision_id
+	      JOIN iam_v2.service_plans sp ON sp.id = spr.service_plan_id
+	     WHERE p.tenant_id=$1 AND p.site_id=$2 AND p.code=$3
+	       AND sp.code = '__sys_emergency_grace_plan__'`,
+		p2Tenant, p2Site, systemGraceCode).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("%d system grace revision(s) pin the reserved Emergency plan", n)
+	}
+
+	// THE OPERATOR IS STILL NOT STUCK. Publishing a policy derives its own plan and package, which is the
+	// whole route out of this state -- so the skip above is a waiting room, not a dead end.
+	ver, rev, err := PublishSystemGracePolicy(ctx, repo, GracePublishRequest{
+		TenantID: p2Tenant, SiteID: p2Site,
+		Policy: SystemGracePolicy{DurationSeconds: 3600, DownKbps: 5000, UpKbps: 2000,
+			DataQuotaBytes: 524288000, DeviceLimit: 1, DeviceLimitPolicy: "REJECT_NEW_DEVICE",
+			EligibilityWindowSeconds: 86400},
+		ActorOperatorID: scan1(t, db, `INSERT INTO public.operators (id,email,password_hash,status,tenant_id)
+			VALUES (gen_random_uuid(),'grace-'||substr(md5(random()::text),1,8)||'@dev.local','x','active',NULL)
+			RETURNING id::text`),
+		ReasonCode: "INITIAL_POLICY", ExpectedVersion: 0,
+	})
+	if err != nil {
+		t.Fatalf("publishing a policy from the skipped state: %v", err)
+	}
+	if ver != 1 || rev == "" {
+		t.Fatalf("publication produced version %d revision %q", ver, rev)
+	}
+}

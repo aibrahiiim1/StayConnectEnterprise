@@ -57,10 +57,11 @@ const publishedPolicy = {
   config_version: 4,
 };
 
-function mockGrace(state: Record<string, any>, packages: any[] = []) {
+function mockGrace(state: Record<string, any>, packages: any[] = [], history: any[] = []) {
   get.mockImplementation((path: string) => {
     if (path === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
-    if (path === "/checkout-grace/packages") return Promise.resolve({ items: packages });
+    if (path === "/checkout-grace/packages") return Promise.resolve({ data: packages, meta: { has_more: false } });
+    if (path === "/checkout-grace/history") return Promise.resolve({ data: history, meta: { has_more: false } });
     if (path === "/checkout-grace") return Promise.resolve(state);
     return Promise.resolve({});
   });
@@ -93,8 +94,8 @@ describe("checkout grace states what is actually in force", () => {
     // without being told it is 60 minutes.
     const dl = screen.getByLabelText("Effective checkout grace");
     expect(within(dl).getByText("1 h")).toBeTruthy();
-    expect(within(dl).getByText("5000 kbps")).toBeTruthy();
-    expect(within(dl).getByText("2000 kbps")).toBeTruthy();
+    expect(within(dl).getByText("5 Mbps")).toBeTruthy();
+    expect(within(dl).getByText("2 Mbps")).toBeTruthy();
     expect(within(dl).getByText("500 MB")).toBeTruthy();
 
     // And that it has ALREADY happened -- the fact that turns an abstract warning into a thing to act on.
@@ -114,7 +115,7 @@ describe("checkout grace states what is actually in force", () => {
     await renderForm();
 
     await screen.findByText("In force right now");
-    expect(screen.getByText(/Published policy · version 4/i)).toBeTruthy();
+    expect(screen.getByText(/Hotel policy · version 4/i)).toBeTruthy();
     expect(screen.queryByText(/Emergency fallback · not a policy this hotel chose/i)).toBeNull();
     expect(screen.queryByText(/built-in emergency terms/i)).toBeNull();
 

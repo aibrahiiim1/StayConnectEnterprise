@@ -723,13 +723,24 @@ func (t *pgGraceProvisionTx) SetCurrentRevision(ctx context.Context, packageID, 
 // Deterministic (oldest enabled plan by code) rather than "whatever is newest", so provisioning two
 // appliances from the same state produces the same pin instead of depending on publication order.
 func (t *pgGraceProvisionTx) DefaultPlanRevisionForGrace(ctx context.Context, tenantID, siteID string) (string, error) {
+	// RESERVED PLANS ARE NOT CANDIDATES, and this is not tidiness.
+	//
+	// The old query was ORDER BY p.code LIMIT 1 over every enabled plan. On a site whose only plans are the
+	// system ones, '__sys_emergency_grace_plan__' sorts first, so provisioning deterministically pinned the
+	// EMERGENCY catalog plan into the normal grace package -- a revision the checkout matcher refuses outright
+	// with PLAN_IS_EMERGENCY_CATALOG. PRE-LIVE was in exactly that state: the package existed, its only
+	// revision could never be selected, and the Checkout Grace page reported no package was available.
+	//
+	// Excluding them restores the documented intermediate state -- a package with no revision yet, waiting for
+	// the operator's first policy -- instead of one carrying a revision that cannot ever be used.
 	var rev *string
 	err := t.tx.QueryRow(ctx, `
 	    SELECT p.current_revision_id::text
 	      FROM iam_v2.service_plans p
 	     WHERE p.tenant_id=$1 AND p.site_id=$2 AND p.enabled = true AND p.current_revision_id IS NOT NULL
+	       AND NOT (p.code = ANY($3::text[]))
 	     ORDER BY p.code
-	     LIMIT 1`, tenantID, siteID).Scan(&rev)
+	     LIMIT 1`, tenantID, siteID, reservedCommerceCodes).Scan(&rev)
 	if err == pgx.ErrNoRows || rev == nil {
 		return "", nil
 	}

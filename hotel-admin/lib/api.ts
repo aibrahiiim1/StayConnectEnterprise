@@ -373,9 +373,28 @@ export type CheckoutGraceConfig = {
   config_version: number;
 };
 
+// GraceHistoryEntry is one published version of the hotel's policy, as provenance reads: who, when, why, and
+// the exact terms that version put in force. The snapshot comes from the append-only publication ledger, not
+// from recomputing today's config -- a history that re-derived its own numbers would describe nothing.
+export type GraceHistoryEntry = {
+  config_version: number;
+  published_at: string;
+  actor: string;
+  reason_code: string;
+  policy: {
+    grace_duration_seconds?: number;
+    grace_down_kbps?: number;
+    grace_up_kbps?: number;
+    grace_data_quota_bytes?: number;
+    grace_device_limit?: number;
+    grace_device_limit_policy?: string;
+    eligibility_window_seconds?: number;
+  } | null;
+};
+
 // GracePackageOption is one selectable Checkout-Grace package revision, described by its own IMMUTABLE
-// attributes. The operator picks one; the numbers are never typed, so the published policy and the package
-// agree by construction.
+// attributes. RETAINED FOR DIAGNOSTICS ONLY: the operator no longer picks a package, because the system
+// derives the one that expresses their policy exactly. See the form for why picking could never work.
 export type GracePackageOption = {
   package_revision_id: string;
   package_code: string;
