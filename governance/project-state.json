@@ -458,7 +458,7 @@
     "reboot_occurred": true,
     "rollback_rehearsal_occurred": true,
     "corrected_software_deployed": true,
-    "deployed_head_on_appliance": "0e8b4f7bea1d7aa158ba6b23d4e18ccd5e448f56",
+    "deployed_head_on_appliance": "dce7741aa72145af409d1f8a8b555909f928b7c0",
     "deployed_head_note": "PRE-LIVE 172.21.60.25. Every service binary and the Hotel Admin bundle are built from this commit by scripts/build-appliance-binaries.sh with the pinned toolchain and -tags stayconnect_production; /opt/stayconnect/DEPLOYED_BINARIES.txt carries a digest per binary and was re-verified in place with sha256sum -c.",
     "live_increment9_revalidated": true,
     "live_increment9_revalidated_on": "2026-08-11",
@@ -918,15 +918,15 @@
     "migration_runner_factory_clean": "CLOSED (T0118). scripts/edge-migrate.sh refused every factory-clean appliance: its baseline precondition read the ledger for 0009_phase2_commerce, a row that on a baseline install correctly never exists because 0001..0049 are never applied individually. It now accepts that install shape on positive evidence - no 0009 row, no ledger row below 0010, and 0009's own writers present in the schema - while still refusing an upgrade-path install with a 0009 gap. scripts/edge-migrate-selftest.sh proves both directions and re-proves that checksum, target identity, acknowledgement, superuser refusal, destructive-ledger-rights refusal, ledger structure, re-apply idempotence and the advisory lock remain fail-closed.",
     "pms_published_generation": 300,
     "pms_published_generation_note": "THREE DIFFERENT COUNTERS HAVE ALL BEEN ABBREVIATED 'gen' AND MUST NOT BE CONFLATED. pms_interface_runtime.published_resync_generation is the RESYNC generation, bumped once per resync cycle: 300, read passively 2026-09-16 after the T0149 deployment. pms_interface_runtime.runtime_generation is a monotonic runtime-row counter bumped on every state write, which is why it is orders of magnitude larger: 74452. pms_interface_revisions.revision_no is the pinned Interface REVISION: 3, unchanged. The move followed the pmsd restart the T0149 deployment caused: the connector reconnected and requested its own resync, publishing generation 299 over 464 records at 2026-09-16T14:04:36Z and reaching 300 on the next cycle. No operator command and no configuration change; resync_command_id is NULL. HISTORICAL (do not read as current): 282 belongs to the 2026-09-15 restart, 209 to the migration-0065 closure, and 206-208 to the 2026-09-08T11:45Z restart sequence.",
-    "deployed_runtime_head": "0e8b4f7bea1d7aa158ba6b23d4e18ccd5e448f56",
+    "deployed_runtime_head": "dce7741aa72145af409d1f8a8b555909f928b7c0",
     "deployed_runtime_services": {
-      "_note": "Measured on the appliance after the deployment of 2026-09-16 (T0149) and re-verified in place with sha256sum -c. Every binary was built from 0e8b4f7b by scripts/build-appliance-binaries.sh and reports vcs.revision=0e8b4f7bea1d, modified=false, tags=stayconnect_production, read back out of the artefacts before they were shipped. The appliance carries no Go toolchain, so the digest is what carries that proof across; the appliance manifest /opt/stayconnect/DEPLOYED_BINARIES.txt is authoritative. A CORRECTION OF RECORD: this note previously said 3802ece9 while deployed_runtime_head said ec5c7b42 -- the revision string had not been updated with the head beside it.",
-      "scd": "228cbc185cfd0b48...  (0e8b4f7b, tags=stayconnect_production)",
-      "edged": "9b08889df112042d...  (0e8b4f7b, tags=stayconnect_production)",
-      "pmsd": "80ab2ebdfa2cbc8b...  (0e8b4f7b, tags=stayconnect_production)",
-      "portald": "b661d3dd6565c171...  (0e8b4f7b, tags=stayconnect_production)",
-      "netd": "eed106c42ba9210f...  (0e8b4f7b, tags=stayconnect_production)",
-      "acctd": "d6da0cd062d48700...  (0e8b4f7b, tags=stayconnect_production)"
+      "_note": "Measured on the appliance after the deployment of 2026-09-17 (T0151) and re-verified in place with sha256sum -c. Every binary was built from dce7741a by scripts/build-appliance-binaries.sh and reports vcs.revision=dce7741aa721, modified=false, tags=stayconnect_production, read back out of the artefacts before they were shipped. The appliance carries no Go toolchain, so the digest is what carries that proof across; the appliance manifest /opt/stayconnect/DEPLOYED_BINARIES.txt is authoritative. A CORRECTION OF RECORD: this note previously said 3802ece9 while deployed_runtime_head said ec5c7b42 -- the revision string had not been updated with the head beside it.",
+      "scd": "f72b6f3c07456046...  (dce7741a, tags=stayconnect_production)",
+      "edged": "f6475499d9376158...  (dce7741a, tags=stayconnect_production)",
+      "pmsd": "92833a6558a7dab9...  (dce7741a, tags=stayconnect_production)",
+      "portald": "35e969f74ca8a0cb...  (dce7741a, tags=stayconnect_production)",
+      "netd": "adbe608a8324389b...  (dce7741a, tags=stayconnect_production)",
+      "acctd": "5d6bac628f725b4d...  (dce7741a, tags=stayconnect_production)"
     },
     "entitlement_usage_invariant": "HOLDS FOR EVERY ENTITLEMENT, including terminated ones (migration 0062). Attribution follows the half-open binding interval PLUS the closing instant itself when no other binding for that session covers it. That extra arm is reachable only at a terminal boundary, where the crossing sample would otherwise belong to nothing; at a Phase-5 rebinding the successor binding always covers the instant, so the arm cannot fire and no sample is counted twice. The half-open bound is unchanged and iam_v2.p6_data_crossing - the enforcement authority - was not touched.",
     "schema_head": "0079_recovery_belongs_to_the_connection_not_the_building",
@@ -1093,7 +1093,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0150",
+  "latest_transition_id": "T0151",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1587,14 +1587,14 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "CHECKOUT_GRACE_IS_SELF_SERVICE_FROM_HOTEL_ADMIN",
-    "decision": "D68",
+    "kind": "CHECKOUT_GRACE_SELF_SERVICE_DEPLOYED_AND_PROVEN_LIVE",
+    "decision": "D69",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "7017bc3bd9d403c9b3ac062411fdd078ca40a90d",
-    "base_note": "The master merge commit of PR #146. This delivery begins exactly where that one ended.",
-    "head": "7a9ba699",
+    "base": "dce7741aa72145af409d1f8a8b555909f928b7c0",
+    "base_note": "The master merge commit of PR #147. This delivery begins exactly where that one ended.",
+    "head": "b2127657",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
-    "note": "T0150. The operator authors the Checkout Grace policy and the system derives the immutable plan/package revisions that express it. Also fixes a provisioner that pinned the reserved Emergency plan on every fresh appliance, a step-up missing from the second route that writes the same policy, and a gate that had never executed the grace suite at all."
+    "note": "T0151. Both halves deployed in dependency order and the operator journey driven live: three policy versions published through the API the browser uses, with no package, no catalog step and no SQL. Six live grace entitlements unchanged at 3600s throughout. Two defects the appliance found that no owner-privileged fixture could: the history endpoint 500ed because svc_edged holds no SELECT on the ledger it writes, and the fallback's 0 device limit printed as a bare zero. One outstanding decision: migration 0080 for that grant."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
