@@ -1,0 +1,41 @@
+{
+  "transition_id": "T0153",
+  "seq": 153,
+  "timestamp": "2026-09-17T09:37:47Z",
+  "timestamp_derivation": "After migration 0080 and its down file were written, the Phase-5 chain extended to apply it, the restricted-role least-privilege proof added and its own pipefail defect corrected, and the complete Phase-5 gate script run locally end to end; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "CONTROLLED_MIGRATION_0080_THE_SERVICE_MAY_READ_THE_LEDGER_IT_WRITES",
+  "controlled_boundary": {
+    "what": "A database migration granting a privilege to a runtime service role.",
+    "authorization": "Product Owner, 2026-09-17, explicit and bounded: the minimum read privilege svc_edged needs to read the Checkout Grace publication ledger, limited to that requirement, with no broadening of privileges and no unrelated schema or data change.",
+    "why_it_was_needed": "T0151 and T0152 recorded the endpoint answering 500 on PRE-LIVE. iam_v2.checkout_grace_policy_publications is WRITTEN by iam_v2.publish_checkout_grace_policy, a SECURITY DEFINER function, so svc_edged has never needed a privilege on the table itself. Reading it is a new requirement Policy History introduced."
+  },
+  "what_the_grant_is_exactly": {
+    "scope": "SELECT, on ONE table, to ONE role.",
+    "not_write": "Not INSERT, UPDATE or DELETE. The table is append-only, enforced by p3_grace_publication_appendonly, and its only legitimate writer is the controlled operation, which already carries what it needs. A service role able to write here could forge the provenance of a policy change -- the one thing this table exists to make impossible.",
+    "not_broad": "Not a schema-wide or ALL TABLES grant, which would have fixed today's symptom and silently handed svc_edged every table added afterwards. Not to PUBLIC, and not to any other service role: scd, pmsd, portald, netd and acctd have no reason to read an operator's policy history, and a privilege granted without a reason is one nobody later dares to remove.",
+    "precedent": "Consistent with the established pattern -- 0067, 0068, 0069, 0070, 0071 and 0076 each grant svc_edged SELECT on the specific tables its operator surfaces read.",
+    "guest_data": "None. A publication row carries an operator id, a bounded reason code and the policy scalars. No guest, stay, room or credential appears in it.",
+    "rollback": "0080's down file REVOKEs the SELECT and touches nothing else. The cost is stated in it: Policy History stops being able to read the ledger and says so honestly; the policy in force, publishing a new version and the conversion that grants departing guests their grace are all unaffected, because none of them reads this table."
+  },
+  "proven_as_a_restricted_role_not_as_the_owner": {
+    "why_this_matters_more_than_the_grant": "Every Go test passed while this defect was live on the appliance. The integration harness connects as the schema OWNER, which can read everything, so it is structurally incapable of finding a least-privilege defect. Adding the grant without adding a proof that runs under a restricted role would leave the same blind spot in place for the next one.",
+    "what_the_gate_now_does": "Creates a role holding EXACTLY the privilege 0080 grants and nothing else, then proves it can read the ledger, is refused INSERT, UPDATE and DELETE by permissions, and reaches no other iam_v2 table.",
+    "a_defect_in_that_proof_itself": "On its first run the step reported all three writes as NOT refused while the database was refusing all three correctly. The script runs under `set -o pipefail`, and psql exits 1 on the very refusal being looked for, so `psql ... | grep -q` returned 1 even when grep matched. Captured to a variable instead of piped. Recorded because a security check that reports the wrong answer is worse than no check: this one would have failed loudly, but the same construction elsewhere could pass vacuously."
+  },
+  "chain": "0080 is applied by the Phase-5 gate chain. It creates no table, so the chain's base-table count stays 86 -- stated in the script so the next reader does not 'correct' it. The privilege is verified by the least-privilege step, which is where a grant belongs rather than in a table census.",
+  "not_yet_applied": "This receipt records the migration and its verification in CI. Application to PRE-LIVE and the live proof that Policy History loads under the real svc_edged role are recorded separately, because a protected master cannot carry post-deployment evidence in the same commit that produces the artefact being deployed.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-17: close the Checkout Grace work completely, including the controlled DB migration giving svc_edged the minimum read privilege for the publication ledger, its application to PRE-LIVE and live verification.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}

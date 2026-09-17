@@ -1093,7 +1093,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0152",
+  "latest_transition_id": "T0153",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1587,14 +1587,14 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "LIVE_FOUND_GRACE_DEFECTS_DEPLOYED_AND_VERIFIED",
-    "decision": "D70",
+    "kind": "CONTROLLED_MIGRATION_0080_LEDGER_READ_FOR_POLICY_HISTORY",
+    "decision": "D71",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "94a4bb3d29e5fabcf021d4cd8333e8923c9a9d2e",
-    "base_note": "The master merge commit of PR #148. This delivery begins exactly where that one ended.",
-    "head": "",
-    "head_note": "Governance only: this delivery has no content commit.",
-    "note": "T0152. Both fixes deployed and verified. TWO REAL DEPARTING GUESTS received grace from the hotel's published policy (trigger=CHECKOUT_GRACE, is_emergency=false, CHECKOUT_GRACE_V1) -- the conversion path adopted it, which was impossible before this mission. Eight live graces, all still 3600s. One outstanding decision: migration 0080 for the ledger grant."
+    "base": "d2f605354712a764e54b0d6f007832d14a93ff0d",
+    "base_note": "The master merge commit of PR #149. This delivery begins exactly where that one ended.",
+    "head": "598efa3e",
+    "head_note": "Set to the last content commit before the manifest and this pointer are committed.",
+    "note": "T0153. Migration 0080 grants svc_edged SELECT on iam_v2.checkout_grace_policy_publications -- one table, one role, read only. Proven under a restricted role rather than the owner, because an owner-privileged harness is structurally incapable of finding a least-privilege defect and that is exactly how this one reached the appliance."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
