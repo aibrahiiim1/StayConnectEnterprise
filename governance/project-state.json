@@ -1592,7 +1592,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "fab87fc6490f742d8d75367643d8cb76771bc813",
     "base_note": "The master merge commit of PR #151. This delivery begins exactly where that one ended.",
-    "head": "0a6a125d",
+    "head": "414f9c82",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
     "note": "T0155. Setup no longer waits for a transport LICENSING_ONLY deliberately never opens. Cloud connection retired into License; Activation moved beside it. text-muted pointed at the quiet SURFACE instead of the quiet LABEL, rendering 517 labels at 1.12:1; now 5.28:1 and 6.37:1. Backups became a real feature over the retention data that already existed, plus database backup, download and non-destructive verification. The guest portal follows the reference design and finally consumes branding, which became a designer with preview, versioned revisions, rollback and an advanced mode that refuses executable content rather than sanitising it."
   },
