@@ -25,7 +25,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -266,53 +265,45 @@ func (s *server) runDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
 		return
 	}
-	if err := os.MkdirAll(dbBackupDir, 0o750); err != nil {
-		jsonErr(w, http.StatusInternalServerError, "internal", "the backup directory could not be created")
-		return
-	}
-
+	// NAME THE PATH AND THE REASON. edged runs as the unprivileged `stayconnect` user while
+	// /opt/stayconnect/backups is root-owned, so on an appliance where the database directory has not been
+	// provisioned this fails -- and "the backup directory could not be created" sent the first operator who
+	// hit it looking at disk space. The directory is created by deployment, owned by the service user; if it
+	// is missing, say exactly that.
+	// THE DUMP ITSELF IS PRIVILEGED AND HAPPENS IN scd.
+	//
+	// PostgreSQL runs in a container and there is no pg_dump on the host, so taking a dump means reaching the
+	// Docker socket -- and edged runs as the unprivileged service user precisely so that it cannot. Docker
+	// group membership is effectively root; granting it to the process serving the operator HTTP surface
+	// would hand root to anything that got a foothold here. scd already runs as root and is already the
+	// appliance's privileged helper for certificates, licensing and PMS administration, so a backup takes the
+	// same established route instead of opening a second one.
+	//
+	// Everything that decides WHETHER this may happen stays on this side: the RBAC mount, the password
+	// step-up above, the audit record and the backup ledger below.
 	started := time.Now().UTC()
-	name := "db-" + started.Format("20060102T150405Z") + ".sql.gz"
-	dest := filepath.Join(dbBackupDir, name)
-
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Minute)
-	defer cancel()
-
-	// Written to a .partial first and renamed only on success, so a failed or interrupted dump can never be
-	// left behind looking like a backup somebody could restore from.
-	partial := dest + ".partial"
-	id, recErr := s.recordBackupStart(ctx, "database", dest)
-	out, err := exec.CommandContext(ctx, "/bin/sh", "-c",
-		"docker exec stayconnect-pg pg_dump -U stayconnect -d stayconnect_site --no-owner --no-privileges"+
-			" | gzip -c > "+shellQuote(partial)).CombinedOutput()
-	if err != nil {
-		_ = os.Remove(partial)
-		detail := lastLine(string(out))
-		s.finishBackupRecord(ctx, id, "failed", 0, detail)
-		s.audit(r, "backup.failed", "backup", name, map[string]any{"error": detail})
+	id, recErr := s.recordBackupStart(r.Context(), "database", dbBackupDir)
+	code, body, err := s.scd.call(r.Context(), http.MethodPost, "/v1/backup/run", nil)
+	if err != nil || code != http.StatusOK {
+		detail := scdDetail(body, err)
+		s.finishBackupRecord(r.Context(), id, "failed", 0, detail)
+		s.audit(r, "backup.failed", "backup", "", map[string]any{"error": detail})
 		jsonErr(w, http.StatusInternalServerError, "backup_failed",
 			"the database backup did not complete: "+detail)
 		return
 	}
-	if err := os.Rename(partial, dest); err != nil {
-		_ = os.Remove(partial)
-		s.finishBackupRecord(ctx, id, "failed", 0, "the completed dump could not be moved into place")
-		jsonErr(w, http.StatusInternalServerError, "internal", "the completed dump could not be moved into place")
+	var res struct {
+		Name      string `json:"name"`
+		SizeBytes int64  `json:"size_bytes"`
+	}
+	if jerr := json.Unmarshal(body, &res); jerr != nil || res.Name == "" {
+		s.finishBackupRecord(r.Context(), id, "failed", 0, "the appliance did not report a backup name")
+		jsonErr(w, http.StatusInternalServerError, "backup_failed",
+			"the backup completed but the appliance did not report its name")
 		return
 	}
-	var size int64
-	if fi, err := os.Stat(dest); err == nil {
-		size = fi.Size()
-	}
-	// A zero-length or trivially small dump is a failure wearing a success's clothes -- gzip of nothing still
-	// exits 0. Refused rather than recorded as a backup.
-	if size < 1024 {
-		_ = os.Remove(dest)
-		s.finishBackupRecord(ctx, id, "failed", size, "the dump was empty")
-		jsonErr(w, http.StatusInternalServerError, "backup_failed", "the dump was empty and has been discarded")
-		return
-	}
-	s.finishBackupRecord(ctx, id, "ok", size, "")
+	name, size := res.Name, res.SizeBytes
+	s.finishBackupRecord(r.Context(), id, "ok", size, "")
 	s.audit(r, "backup.created", "backup", name, map[string]any{"size_bytes": size, "kind": "database"})
 	if recErr != nil {
 		slog.Warn("backup taken but not recorded in backup_records", "name", name, "err", recErr)
@@ -337,57 +328,43 @@ type verifyResult struct {
 // whereas a live restore cannot be undone by clicking again.
 func (s *server) verifyBackupArtifact(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	path, ok := resolveArtifact(name)
-	if !ok || !strings.HasPrefix(name, "db-") {
+	if _, ok := resolveArtifact(name); !ok || !strings.HasPrefix(name, "db-") {
 		jsonErr(w, http.StatusNotFound, "not_found", "no such database backup")
 		return
 	}
-	started := time.Now()
-	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Minute)
-	defer cancel()
-
-	scratch := "verify_" + time.Now().UTC().Format("20060102150405")
-	run := func(sql string) ([]byte, error) {
-		return exec.CommandContext(ctx, "docker", "exec", "stayconnect-pg",
-			"psql", "-U", "stayconnect", "-d", "postgres", "-tAc", sql).CombinedOutput()
-	}
-	if out, err := run("CREATE DATABASE " + scratch); err != nil {
-		jsonErr(w, http.StatusInternalServerError, "verify_failed",
-			"a scratch database could not be created: "+lastLine(string(out)))
+	code, body, err := s.scd.call(r.Context(), http.MethodPost, "/v1/backup/verify",
+		map[string]any{"name": name})
+	if err != nil || code != http.StatusOK {
+		jsonErr(w, http.StatusInternalServerError, "verify_failed", scdDetail(body, err))
 		return
 	}
-	// Dropped on every path, including the failure paths below.
-	defer func() { _, _ = run("DROP DATABASE IF EXISTS " + scratch + " WITH (FORCE)") }()
-
-	load := exec.CommandContext(ctx, "/bin/sh", "-c",
-		"gzip -dc "+shellQuote(path)+" | docker exec -i stayconnect-pg psql -U stayconnect -d "+scratch+" -v ON_ERROR_STOP=1 -q")
-	if out, err := load.CombinedOutput(); err != nil {
-		s.audit(r, "backup.verify_failed", "backup", name, map[string]any{"detail": lastLine(string(out))})
-		writeJSON(w, http.StatusOK, verifyResult{
-			OK: false, Detail: "the dump did not load: " + lastLine(string(out)),
-			Duration: time.Since(started).Round(time.Second).String(),
-		})
+	var res verifyResult
+	if jerr := json.Unmarshal(body, &res); jerr != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "the verification result could not be read")
 		return
 	}
-	// A dump that loads but contains nothing is not a usable backup. Counting tables is the cheapest
-	// assertion that distinguishes "restored" from "restored something".
-	cnt, err := exec.CommandContext(ctx, "docker", "exec", "stayconnect-pg",
-		"psql", "-U", "stayconnect", "-d", scratch, "-tAc",
-		"SELECT count(*) FROM information_schema.tables WHERE table_schema IN ('public','iam_v2')").Output()
-	tables := 0
-	if err == nil {
-		fmt.Sscanf(strings.TrimSpace(string(cnt)), "%d", &tables)
-	}
-	res := verifyResult{
-		OK:       tables > 0,
-		Tables:   tables,
-		Duration: time.Since(started).Round(time.Second).String(),
-	}
-	if !res.OK {
-		res.Detail = "the dump loaded but produced no tables"
-	}
-	s.audit(r, "backup.verified", "backup", name, map[string]any{"ok": res.OK, "tables": tables})
+	s.audit(r, "backup.verified", "backup", name, map[string]any{"ok": res.OK, "tables": res.Tables})
 	writeJSON(w, http.StatusOK, res)
+}
+
+// scdDetail turns a privileged-helper failure into one actionable sentence rather than a transport error.
+func scdDetail(body []byte, err error) string {
+	if err != nil {
+		return "the appliance service did not respond: " + err.Error()
+	}
+	var e struct {
+		Message string `json:"message"`
+		Error   string `json:"error"`
+	}
+	if json.Unmarshal(body, &e) == nil {
+		if e.Message != "" {
+			return e.Message
+		}
+		if e.Error != "" {
+			return e.Error
+		}
+	}
+	return lastLine(string(body))
 }
 
 // ------------------------------------------------------------------------------------------- plumbing
