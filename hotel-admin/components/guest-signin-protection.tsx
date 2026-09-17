@@ -136,7 +136,7 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
         {/* SAID PLAINLY, BECAUSE IT IS THE ONE THING AN OPERATOR WILL EXPECT TO WORK THE OTHER WAY. Somebody
             shortening the wait to help a guest who is waiting right now would otherwise watch nothing happen
             and assume the setting is broken. */}
-        <div className="rounded-md border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
+        <div className="rounded-md border border-border bg-muted-surface/30 p-3 text-sm text-muted-foreground">
           <p>
             New settings apply to <strong>what happens next</strong>. A device already waiting keeps the time it
             was given — shortening the wait here does not end a wait already running.

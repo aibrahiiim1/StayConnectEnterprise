@@ -33,10 +33,21 @@ const config: Config = {
           DEFAULT: token("--surface"),
           foreground: token("--surface-foreground"),
         },
+        // `text-muted` IS THE MOST-USED UTILITY ON THIS ADMIN, and it pointed at the wrong token.
+        //
+        // --muted is a quiet SURFACE (212 22% 95% -- very nearly white) and --muted-foreground is a quiet
+        // LABEL (218 13% 44%). globals.css defines both precisely so "a quiet label and a quiet panel" can be
+        // styled independently. But Tailwind resolves `text-muted` to muted.DEFAULT, which was the surface --
+        // so 517 secondary labels across these screens were rendering near-white text on a white card. That
+        // is the illegible grey the operator has been reading around, and it was one mapping, not 517 pages.
+        //
+        // DEFAULT is therefore the quiet label. The three places that genuinely wanted the quiet panel use
+        // `muted-surface` below and say so by name.
         muted: {
-          DEFAULT: token("--muted"),
+          DEFAULT: token("--muted-foreground"),
           foreground: token("--muted-foreground"),
         },
+        "muted-surface": token("--muted"),
         accent: {
           DEFAULT: token("--accent"),
           foreground: token("--accent-foreground"),

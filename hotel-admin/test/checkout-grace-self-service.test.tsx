@@ -264,16 +264,26 @@ describe("an operator can author the hotel's checkout grace policy without leavi
     );
     await renderForm();
 
-    const table = await screen.findByLabelText("Checkout grace policy history");
-    const rows = within(table).getAllByRole("row");
-    // Header plus two versions, newest first.
-    expect(rows).toHaveLength(3);
-    expect(within(rows[1]).getByText("2")).toBeTruthy();
-    expect(within(rows[1]).getByText("SHORTER_GRACE")).toBeTruthy();
-    // The EARLIER version still shows its own terms, not today's. An append-only ledger that re-derived its
-    // numbers from the current config would agree with itself and describe nothing.
-    expect(within(rows[2]).getByText(/1 h/)).toBeTruthy();
-    expect(within(rows[2]).getByText(/500 MB/)).toBeTruthy();
+    const list = await screen.findByLabelText("Checkout grace policy history");
+    const rows = within(list).getAllByRole("button");
+    // Two versions, newest first, one compact line each -- not two full snapshots rendered at once.
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toMatch(/v2/);
+    expect(rows[1].textContent).toMatch(/v1/);
+
+    // COLLAPSED MEANS COLLAPSED. The reason code and the full pinned terms belong to the detail view; if they
+    // rendered in the row, the list would be exactly the wall of text this replaced.
+    expect(within(list).queryByLabelText("Version 2 details")).toBeNull();
+    expect(screen.queryByText("SHORTER_GRACE")).toBeNull();
+
+    // Opening one version shows ITS OWN terms, read from that version's snapshot.
+    rows[1].click();
+    const detail = await screen.findByLabelText("Version 1 details");
+    expect(within(detail).getByText("HOTEL_ADMIN_UPDATE")).toBeTruthy();
+    expect(within(detail).getByText("1 h")).toBeTruthy();
+    expect(within(detail).getByText("500 MB")).toBeTruthy();
+    // and not the newer version's
+    expect(within(detail).queryByText("30 min")).toBeNull();
   });
 
   it("says it CANNOT SEE the history rather than claiming there is none", async () => {

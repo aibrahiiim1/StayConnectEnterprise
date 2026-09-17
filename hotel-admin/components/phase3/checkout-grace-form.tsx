@@ -62,6 +62,8 @@ type Draft = {
 };
 
 const MB = 1024 * 1024;
+/** How many versions stay visible before the list collapses. Nothing is removed -- only not rendered yet. */
+const HISTORY_PREVIEW = 5;
 const fmtBytes = (n: number) =>
   n >= 1 << 30 ? (n / (1 << 30)).toFixed(1) + " GB" : Math.round(n / MB) + " MB";
 const fmtDuration = (s: number) => (s % 3600 === 0 ? s / 3600 + " h" : Math.round(s / 60) + " min");
@@ -116,6 +118,9 @@ export function CheckoutGraceForm({ canWrite = true }: { canWrite?: boolean }) {
   /** false when the appliance cannot read the publication ledger. "No history" and "I cannot see the
    *  history" are different claims, and showing the first when the second is true would be a lie. */
   const [historyAvailable, setHistoryAvailable] = useState(true);
+  /** Which version's full pinned terms are open. One at a time: this is a reference list, not a diff view. */
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const [showAllHistory, setShowAllHistory] = useState(false);
   const [devicePolicies, setDevicePolicies] = useState<string[]>(["REJECT_NEW_DEVICE"]);
 
   /** null = not editing. The editor is opened deliberately, so an operator cannot half-type a policy into a
@@ -537,44 +542,98 @@ export function CheckoutGraceForm({ canWrite = true }: { canWrite?: boolean }) {
 
       {historyAvailable && history.length > 0 && (
         <Card>
-          <CardBody className="space-y-2">
-            <h2 className="text-base font-semibold">Policy history</h2>
-            <p className="text-sm text-muted-foreground">
-              Every published version, newest first. The record is append-only: superseding a policy never
-              rewrites what an earlier one put in force.
-            </p>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm" aria-label="Checkout grace policy history">
-                <thead>
-                  <tr className="text-left">
-                    <th className="pr-3 font-medium">Version</th>
-                    <th className="pr-3 font-medium">Published</th>
-                    <th className="pr-3 font-medium">By</th>
-                    <th className="pr-3 font-medium">Reason</th>
-                    <th className="pr-3 font-medium">Terms</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.map((h) => (
-                    <tr key={h.config_version} className="align-top">
-                      <td className="pr-3 py-1">{h.config_version}</td>
-                      <td className="pr-3 py-1">{new Date(h.published_at).toLocaleString()}</td>
-                      <td className="pr-3 py-1">{h.actor}</td>
-                      <td className="pr-3 py-1">{h.reason_code || "—"}</td>
-                      <td className="pr-3 py-1">
-                        {h.policy?.grace_duration_seconds
-                          ? `${fmtDuration(h.policy.grace_duration_seconds)} · ${fmtKbps(
-                              h.policy.grace_down_kbps ?? 0,
-                            )}/${fmtKbps(h.policy.grace_up_kbps ?? 0)} · ${fmtBytes(
-                              h.policy.grace_data_quota_bytes ?? 0,
-                            )} · ${h.policy.grace_device_limit ?? "?"} device(s)`
-                          : "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          <CardBody className="space-y-3">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h2 className="text-base font-semibold">Policy history</h2>
+              <span className="text-xs text-muted-foreground">
+                {history.length} version{history.length === 1 ? "" : "s"}
+              </span>
             </div>
+
+            {/* WHY NOTHING HERE DELETES ANYTHING.
+                This is the append-only publication ledger: it is the provenance of what every departing guest
+                was promised, and the record a rollback is judged against. Hiding a row would make the version
+                sequence lie by omission, and deleting one would destroy audit evidence. So the clutter is
+                solved where the clutter actually is -- in the rendering. Rows are one line each and open for
+                the full pinned terms on demand, and older versions stay collapsed behind a control rather
+                than being removed from the record. */}
+            <p className="text-sm text-muted-foreground">
+              Newest first. Open a version to see the exact terms it put in force. The record is append-only:
+              superseding a policy never rewrites, hides or removes what an earlier one promised.
+            </p>
+
+            <ul aria-label="Checkout grace policy history" className="divide-y rounded border">
+              {(showAllHistory ? history : history.slice(0, HISTORY_PREVIEW)).map((h) => {
+                const p = h.policy ?? {};
+                const open = expanded === h.config_version;
+                return (
+                  <li key={h.config_version}>
+                    <button
+                      type="button"
+                      aria-expanded={open}
+                      onClick={() => setExpanded(open ? null : h.config_version)}
+                      className="flex w-full flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2 text-left text-sm hover:bg-muted-surface/40"
+                    >
+                      <span className="font-medium tabular-nums">v{h.config_version}</span>
+                      {h.config_version === version && (
+                        <span className="rounded bg-success-subtle px-1.5 py-0.5 text-xs text-success-subtle-foreground">
+                          in force
+                        </span>
+                      )}
+                      <span className="text-muted-foreground">
+                        {p.grace_duration_seconds ? fmtDuration(p.grace_duration_seconds) : "—"}
+                        {p.grace_down_kbps ? ` · ${fmtKbps(p.grace_down_kbps)}` : ""}
+                        {p.grace_data_quota_bytes ? ` · ${fmtBytes(p.grace_data_quota_bytes)}` : ""}
+                      </span>
+                      <span className="ml-auto text-xs text-muted-foreground">
+                        {new Date(h.published_at).toLocaleDateString()} · {h.actor}
+                      </span>
+                    </button>
+
+                    {open && (
+                      <dl
+                        aria-label={`Version ${h.config_version} details`}
+                        className="grid grid-cols-2 gap-x-4 gap-y-1 border-t bg-muted-surface/20 px-3 py-2 text-sm"
+                      >
+                        <dt>Published</dt>
+                        <dd>{new Date(h.published_at).toLocaleString()}</dd>
+                        <dt>Published by</dt>
+                        <dd>{h.actor}</dd>
+                        <dt>Reason</dt>
+                        <dd>{h.reason_code || "—"}</dd>
+                        <dt>Grace duration</dt>
+                        <dd>{p.grace_duration_seconds ? fmtDuration(p.grace_duration_seconds) : "—"}</dd>
+                        <dt>Download</dt>
+                        <dd>{p.grace_down_kbps ? fmtKbps(p.grace_down_kbps) : "—"}</dd>
+                        <dt>Upload</dt>
+                        <dd>{p.grace_up_kbps ? fmtKbps(p.grace_up_kbps) : "—"}</dd>
+                        <dt>Data allowance</dt>
+                        <dd>{p.grace_data_quota_bytes ? fmtBytes(p.grace_data_quota_bytes) : "—"}</dd>
+                        <dt>Device limit</dt>
+                        <dd>
+                          {p.grace_device_limit ?? "—"}
+                          {p.grace_device_limit_policy
+                            ? ` (${p.grace_device_limit_policy.replace(/_/g, " ").toLowerCase()})`
+                            : ""}
+                        </dd>
+                        <dt>Eligibility window</dt>
+                        <dd>
+                          {p.eligibility_window_seconds ? fmtDuration(p.eligibility_window_seconds) : "—"}
+                        </dd>
+                      </dl>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+
+            {history.length > HISTORY_PREVIEW && (
+              <Button type="button" variant="secondary" onClick={() => setShowAllHistory((v) => !v)}>
+                {showAllHistory
+                  ? `Show recent ${HISTORY_PREVIEW} only`
+                  : `Show all ${history.length} versions`}
+              </Button>
+            )}
           </CardBody>
         </Card>
       )}
