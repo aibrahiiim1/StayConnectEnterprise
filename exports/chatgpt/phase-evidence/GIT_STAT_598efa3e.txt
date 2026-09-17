@@ -1,4 +1,0 @@
-commit 598efa3e5b3497e41e224828a560b2319743589e
-Date:   Thu Sep 17 12:18:06 2026 +0300
-
-    0080: the service may read the ledger it writes
