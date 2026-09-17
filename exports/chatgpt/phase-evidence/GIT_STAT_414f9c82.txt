@@ -1,4 +1,0 @@
-commit 414f9c828b34533f4c1c6b696c3673811cae6436
-Date:   Thu Sep 17 22:04:48 2026 +0300
-
-    A backup that takes minutes cannot run on a 15-second deadline
