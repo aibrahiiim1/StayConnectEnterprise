@@ -34,6 +34,12 @@ ProtectSystem=strict
 # /run/stayconnect/health holds the health supervisor's adaptive-backoff
 # trackers (pre-created by tmpfiles.d); edged writes its own tracker + reads all.
 ReadWritePaths=/var/log/stayconnect /run/stayconnect/health
+# The hotel's own portal images, uploaded through Hotel Admin and served by portald to guest devices. One
+# directory that exists for nothing else: NOT /opt/stayconnect, which holds the service binaries, the
+# rollback sets and the database backups sitting beside it. The directory is created by
+# /etc/tmpfiles.d/stayconnect-operator-surfaces.conf, because ProtectSystem=strict resolves this allowlist at
+# unit start and a path that does not exist then is not writable afterwards.
+ReadWritePaths=/opt/stayconnect/portal-assets
 ReadOnlyPaths=/etc/stayconnect
 PrivateTmp=yes
 
