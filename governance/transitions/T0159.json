@@ -1,0 +1,38 @@
+{
+  "transition_id": "T0159",
+  "seq": 159,
+  "timestamp": "2026-09-18T05:47:56Z",
+  "timestamp_derivation": "After the merged delivery was built, deployed to PRE-LIVE with its units and tmpfiles, verified across every changed surface, and the integrity defect that verification exposed was fixed and re-checked there; before the author timestamp of the commit that introduces this receipt. After the merge commit 7e7af573 it follows. Per T0091, in the order T0108 requires.",
+  "record_type": "MISSION_DEPLOYED_VERIFIED_AND_ONE_LATENT_IDENTITY_DEFECT_CLOSED",
+  "why_this_is_a_follow_on": "PR #155 merged when its four gates went green and was then deployed. The defect below was found by the post-deployment verification itself. Protected master cannot carry a post-deployment fix in the commit that produced the artefact being deployed.",
+  "final_consolidated_verification": "Deployed head and UI bundle both 7e7af573. Retention set to KEEP_DB=21 @ 02:45 through the operator API, confirmed in the config file, in systemd's OnCalendar, and in the sweep's own dry run, then restored to 7 @ 03:30. A PNG uploaded, served as image/png from the appliance's origin; an SVG refused; the asset directory answers 404 rather than an index. The portal serves a design carrying two languages and six Arabic keys, with eighteen tagged strings and the translation pass present. The login page carries Room Number, Use Personal Account, Voucher Code, Submit, Login, the pill and both account forms, and ZERO occurrences of the superseded wording. All seven services active; the only errors are the two standing ones.",
+  "a_latent_defect_the_deployment_surfaced": {
+    "what": "HOTEL_ADMIN_INTEGRITY failed with 'the RUNNING service serves BUILD_ID h_32... but the recorded live release is h-32...'. The bundle was correct.",
+    "cause": ".next/BUILD_ID holds Next's id verbatim while the id Next stamps into the rendered document has '-' rewritten to '_'. Every release until now generated an id containing no hyphen, so the difference had never appeared.",
+    "the_drift_underneath": "deploy-hotel-admin.sh already normalised for this, in-line at one call site. check-hotel-admin-integrity.sh -- which asks the identical question a moment later -- did not. Two implementations of one question, and only one of them knew.",
+    "fixed": "Both now call a single helper in the shared contract library. It normalises rather than relaxes: every other character must still match exactly. An identity check that cries wolf is worse than none, because the next real mismatch is the one nobody looks at."
+  },
+  "guest_grace_observation": "A 28,800-second grace entitlement appeared during this window, alongside eight at 3,600. That is not a defect: it is the eight-hour policy the Product Owner published through the new Checkout Grace screen being applied to a real departure. The feature working is what a second duration looks like.",
+  "what_closes_with_this": "The consolidated Hotel Admin / Guest Portal mission. Checkout Grace history, Setup/Activation, the License and Cloud consolidation, System contrast and navigation, Backups as a real operator workflow with editable retention and schedule, config history, the guest portal redesigned to the reference screenshots with working translations and appliance-hosted images, and the branding designer with preview, versioning, rollback and a refusing advanced mode.",
+  "no_migration": "None in this delivery.",
+  "constraints_observed": {
+    "no_privilege_escalation": "No service gained a user, group or capability. The only widenings in this mission were four individually named filesystem paths.",
+    "no_destructive_action": "Retention values changed during verification were restored. Nothing was deleted.",
+    "no_pms_or_financial": "No PMS configuration change, no PMS write, no financial traffic.",
+    "retired_host": "172.21.60.23 neither contacted nor modified."
+  },
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-18: complete the remaining authorized scope and the guest login redesign, carried to DONE including PRE-LIVE deployment, live verification and governance synchronization.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}
