@@ -78,9 +78,9 @@ async function serve(
 }
 
 async function submitStay(page: Page, room: string, secondary: string) {
-  await page.getByLabel("Room number").fill(room);
+  await page.getByLabel("Room Number").fill(room);
   await page.locator("#pms-secondary").fill(secondary);
-  await page.getByRole("button", { name: "Connect" }).click();
+  await page.getByRole("button", { name: "Submit" }).click();
 }
 
 test("one offer connects the guest without asking a second question", async ({ page }) => {
@@ -161,7 +161,7 @@ test("every failure looks identical to the guest", async ({ page }) => {
     const err = page.locator("#pms-err");
     await expect(err).toHaveText(UNIFORM_MESSAGE);
     // still on the form: nothing was granted
-    await expect(page.getByRole("button", { name: "Connect" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Submit" })).toBeVisible();
     // and nothing leaked
     // The forbidden list is the set of words that can only appear if server detail leaked. "stay" and
     // "reservation" are deliberately NOT on it: they are part of the legitimate copy the guest is meant to

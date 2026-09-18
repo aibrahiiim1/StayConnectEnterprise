@@ -162,29 +162,39 @@ const landingHTML = `<!doctype html>
     <div class="tabs" id="tabs" role="tablist"></div>
     <div class="panels">
 
-  <!-- Voucher panel -->
-  <div class="panel" id="panel-voucher">
-    <form method="POST" action="/auth/voucher">
-      <label for="voucher"><span data-i18n="voucher.label" data-i18n-en="Voucher code">Voucher code</span></label>
-      <input id="voucher" name="code" type="text" autocomplete="off" required maxlength="32" placeholder="XXXX-XXXX-XXXX">
-      <button type="submit"><span data-i18n="btn.connect" data-i18n-en="Connect">Connect</span></button>
-      <div class="err">{{.Error}}</div>
+  <!-- ACCOUNT LOGIN — one panel, two ways in.
+       The reference presents Voucher and Personal Account as a single choice behind a checkbox rather than as
+       two separate sign-in methods, because from a guest's side they are the same question: "I have something
+       that lets me on". Both forms below are unchanged; only which one is visible moves. -->
+  <div class="panel panel--wide" id="panel-accountlogin">
+    <label class="pill" for="use-personal">
+      <input type="checkbox" id="use-personal">
+      <span data-i18n="account.personal" data-i18n-en="Use Personal Account">Use Personal Account</span>
+    </label>
+
+    <form method="POST" action="/auth/voucher" id="form-voucher">
+      <div class="field">
+        <label for="voucher"><span data-i18n="voucher.label" data-i18n-en="Voucher Code">Voucher Code</span></label>
+        <input id="voucher" name="code" type="text" autocomplete="off" required maxlength="32">
+      </div>
+      <button class="primary" type="submit"><span data-i18n="btn.login" data-i18n-en="Login">Login</span></button>
+      <div class="err"></div>
+    </form>
+
+    <form method="POST" action="/auth/credentials" id="form-credentials" autocomplete="off" style="display:none">
+      <div class="field">
+        <label for="ga-username"><span data-i18n="account.user" data-i18n-en="Username">Username</span></label>
+        <input id="ga-username" name="username" type="text" autocomplete="username" required maxlength="64">
+      </div>
+      <div class="field">
+        <label for="ga-password"><span data-i18n="account.pass" data-i18n-en="Password">Password</span></label>
+        <input id="ga-password" name="password" type="password" autocomplete="current-password" required maxlength="128">
+      </div>
+      <button class="primary" type="submit"><span data-i18n="btn.login" data-i18n-en="Login">Login</span></button>
+      <div class="err"></div>
     </form>
   </div>
 
-  <!-- Guest account (username + password) panel -->
-  <div class="panel" id="panel-account">
-    <form method="POST" action="/auth/credentials" autocomplete="off">
-      <label for="ga-username"><span data-i18n="account.user" data-i18n-en="Username">Username</span></label>
-      <input id="ga-username" name="username" type="text" autocomplete="username" required maxlength="64" placeholder="username">
-      <label for="ga-password" style="margin-top:10px"><span data-i18n="account.pass" data-i18n-en="Password">Password</span></label>
-      <input id="ga-password" name="password" type="password" autocomplete="current-password" required maxlength="128" placeholder="password">
-      <button type="submit" style="margin-top:10px">Connect</button>
-      <div class="err">{{.Error}}</div>
-    </form>
-  </div>
-
-  <!-- Email panel -->
   <div class="panel" id="panel-email">
     <form data-otp="email" data-stage="dest" autocomplete="off">
       <label for="email"><span data-i18n="email.dest" data-i18n-en="Email address">Email address</span></label>
@@ -205,11 +215,19 @@ const landingHTML = `<!doctype html>
   <!-- PMS / Room panel — guest enters room number plus one verification field -->
   <div class="panel" id="panel-pms">
     <form id="form-pms" autocomplete="off">
-      <label for="pms-room"><span data-i18n="pms.room" data-i18n-en="Room number">Room number</span></label>
-      <input id="pms-room" name="room" type="text" inputmode="numeric" required placeholder="e.g. 101">
-      <p class="small" id="pms-prompt" style="margin-top:10px"></p>
-      <input id="pms-secondary" name="secondary" type="text" required placeholder="Last name or reservation number">
-      <button type="submit">Connect</button>
+      <div class="field">
+        <label for="pms-room"><span data-i18n="pms.room" data-i18n-en="Room Number">Room Number</span></label>
+        <input id="pms-room" name="room" type="text" inputmode="numeric" required>
+      </div>
+      <div class="field">
+        <label for="pms-secondary"><span data-i18n="pms.secondary" data-i18n-en="Password">Password</span></label>
+        <input id="pms-secondary" name="secondary" type="text" required>
+        <!-- The hint sits UNDER the field, as in the reference. Its text is set from the site's configured
+             room-sign-in mode, so a hotel that asks for a surname and one that asks for a reservation number
+             each say so -- it is a real prompt, not decoration. -->
+        <p class="hint" id="pms-prompt"></p>
+      </div>
+      <button class="primary" type="submit"><span data-i18n="btn.submit" data-i18n-en="Submit">Submit</span></button>
     </form>
     <!-- the error lives OUTSIDE the form: during package selection the form is hidden, and a failure message
          inside it would be invisible exactly when the guest most needs to see it. -->
@@ -289,8 +307,9 @@ const landingHTML = `<!doctype html>
       account: { id:'account', label:'Account Login', icon: ICON_KEYS, members:['voucher','account','email','sms','social'] },
     };
     const Tabs = {
-      voucher: { id:'voucher', label:'Voucher', panel:'panel-voucher' },
-      account: { id:'account', label:'Username', panel:'panel-account' },
+      // Both point at the merged panel: which FORM shows is the pill's business, not the tab's.
+      voucher: { id:'voucher', label:'Voucher', panel:'panel-accountlogin' },
+      account: { id:'account', label:'Personal account', panel:'panel-accountlogin' },
       email:   { id:'email',   label:'Email',   panel:'panel-email' },
       sms:     { id:'sms',     label:'Phone',   panel:'panel-sms' },
       pms:     { id:'pms',     label:'Room',    panel:'panel-pms' },
@@ -429,6 +448,26 @@ const landingHTML = `<!doctype html>
       applyLanguage(want);
     }).catch(() => {});
 
+    // The "Use Personal Account" toggle. Both forms exist in the DOM at all times so neither loses what the
+    // guest typed if they flip back and forth; only visibility moves.
+    (function () {
+      const cb = document.getElementById('use-personal');
+      const voucher = document.getElementById('form-voucher');
+      const creds = document.getElementById('form-credentials');
+      if (!cb || !voucher || !creds) return;
+      function sync() {
+        const personal = cb.checked;
+        voucher.style.display = personal ? 'none' : '';
+        creds.style.display = personal ? '' : 'none';
+        // The required attributes follow visibility, or the browser refuses to submit the visible form
+        // because a hidden field in the other one is empty and required.
+        voucher.querySelectorAll('[required]').forEach(el => { el.disabled = personal; });
+        creds.querySelectorAll('[required]').forEach(el => { el.disabled = !personal; });
+      }
+      cb.addEventListener('change', sync);
+      sync();
+    })();
+
     // The information affordance. Purely local: the addresses are already rendered into the panel.
     (function () {
       const btn = document.getElementById('info-btn');
@@ -541,6 +580,19 @@ const landingHTML = `<!doctype html>
       } else {
         tabsEl.style.display = 'none';
       }
+      // The pill only makes sense when the site actually offers BOTH ways in. With one of them enabled it is
+      // a choice with a single option, so it is hidden and its form shown directly.
+      (function () {
+        const hasVoucher = enabled.includes('voucher');
+        const hasAccount = enabled.includes('account');
+        const pill = document.querySelector('.pill');
+        const cb = document.getElementById('use-personal');
+        if (pill && cb && !(hasVoucher && hasAccount)) {
+          pill.style.display = 'none';
+          cb.checked = hasAccount;
+          cb.dispatchEvent(new Event('change'));
+        }
+      })();
       setGroup(shown[0], groupMembers);
     }).catch(() => { setTab('voucher'); });
 

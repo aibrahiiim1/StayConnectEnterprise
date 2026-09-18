@@ -153,8 +153,11 @@ describe("the language selector is backed by real words", () => {
 
     // The keys an operator fills in are the guest-facing strings, named in English rather than as keys.
     expect(await screen.findByText(/\(ar\)/)).toBeTruthy();
-    expect(screen.getAllByText("Room number").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Voucher code").length).toBeGreaterThan(0);
+    // Title case, matching the reference design the portal now renders. The designer's labels and the
+    // portal's English must agree, or an operator translates a string that is not the one on the page.
+    expect(screen.getAllByText("Room Number").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Voucher Code").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Use Personal Account").length).toBeGreaterThan(0);
   });
 
   it("publishes the translations with the design, so the selector has something to switch to", async () => {

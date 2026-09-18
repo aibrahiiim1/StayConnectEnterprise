@@ -72,9 +72,9 @@ async function serve(page: Page, calls: Call[], answer: AnswerFn, phase3 = true)
 }
 
 async function submitStay(page: Page, room: string, secondary: string) {
-  await page.getByLabel("Room number").fill(room);
+  await page.getByLabel("Room Number").fill(room);
   await page.locator("#pms-secondary").fill(secondary);
-  await page.getByRole("button", { name: "Connect" }).click();
+  await page.getByRole("button", { name: "Submit" }).click();
 }
 
 const FAIL = { ok: false, message: UNIFORM_MESSAGE };
@@ -97,7 +97,7 @@ test("tapping Connect again after a refusal is a new attempt with a new request 
   await submitStay(page, "412", "Okonkwo");
   await expect(page.locator("#pms-err")).toHaveText(UNIFORM_MESSAGE);
 
-  await page.getByRole("button", { name: "Connect" }).click();
+  await page.getByRole("button", { name: "Submit" }).click();
   await expect(page.getByRole("heading", { name: "You are online" })).toBeVisible();
 
   expect(calls).toHaveLength(2);
@@ -121,7 +121,7 @@ test("a dropped connection leaves the page able to try again", async ({ page }) 
   await submitStay(page, "412", "Okonkwo");
   await expect(page.locator("#pms-err")).toHaveText(UNIFORM_MESSAGE);
 
-  await page.getByRole("button", { name: "Connect" }).click();
+  await page.getByRole("button", { name: "Submit" }).click();
   await expect(page.getByRole("heading", { name: "You are online" })).toBeVisible();
 
   expect(calls).toHaveLength(2);
@@ -174,9 +174,9 @@ test("a double tap sends one request, not two", async ({ page }) => {
   });
 
   await page.goto("http://localhost/portal");
-  await page.getByLabel("Room number").fill("412");
+  await page.getByLabel("Room Number").fill("412");
   await page.locator("#pms-secondary").fill("Okonkwo");
-  const btn = page.getByRole("button", { name: "Connect" });
+  const btn = page.getByRole("button", { name: "Submit" });
   await btn.click();
 
   await expect(btn).toBeDisabled();
@@ -221,7 +221,7 @@ test("a server that takes its whole budget to refuse still says only the one thi
   await submitStay(page, "412", "Okonkwo");
 
   await expect(page.locator("#pms-err")).toHaveText(UNIFORM_MESSAGE);
-  await expect(page.getByRole("button", { name: "Connect" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Submit" })).toBeEnabled();
   const shown = (await page.locator("#panel-pms").innerText()).toLowerCase();
   for (const forbidden of ["timeout", "timed out", "slow", "unavailable", "try later", "server"]) {
     expect(shown).not.toContain(forbidden);
@@ -234,7 +234,7 @@ test("the button is re-enabled after a failure so the guest can try again", asyn
   await page.goto("http://localhost/portal");
   await submitStay(page, "412", "Okonkwo");
   await expect(page.locator("#pms-err")).toHaveText(UNIFORM_MESSAGE);
-  await expect(page.getByRole("button", { name: "Connect" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Submit" })).toBeEnabled();
 });
 
 // ---------------------------------------------------------------- the choice step, for everyone
@@ -406,7 +406,7 @@ test("an empty choice list is the uniform message, not an empty screen", async (
   await page.goto("http://localhost/portal");
   await submitStay(page, "412", "Okonkwo");
   await expect(page.locator("#pms-err")).toHaveText(UNIFORM_MESSAGE);
-  await expect(page.getByRole("button", { name: "Connect" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Submit" })).toBeVisible();
 });
 
 // ---------------------------------------------------------------- the guest's actual device
@@ -451,7 +451,7 @@ test("going back after connecting does not silently re-submit the attempt", asyn
   expect(calls).toHaveLength(1);
 
   await page.goBack();
-  await expect(page.getByRole("button", { name: "Connect" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Submit" })).toBeVisible();
   expect(calls).toHaveLength(1); // nothing was re-sent
 });
 

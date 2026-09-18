@@ -114,12 +114,19 @@ func TestLandingRendersEveryPanelItStillSupports(t *testing.T) {
 	// drop any of them -- each panel is the same form it always was, and a hotel running vouchers, accounts,
 	// email, SMS, social, room sign-in or post-stay must still find its form in the page.
 	html := renderLanding(t, "10.77.0.42", "aa:bb:cc:dd:ee:ff")
+	// Voucher and personal account now share one panel behind the "Use Personal Account" pill, as the
+	// reference design presents them -- so the claim is asserted on the FORMS, which is what actually carries
+	// a sign-in method, rather than on a panel id that the design legitimately changed.
 	for _, id := range []string{
-		"panel-voucher", "panel-account", "panel-email", "panel-sms", "panel-pms", "panel-social",
+		"form-voucher", "form-credentials", "panel-email", "panel-sms", "panel-pms", "panel-social",
 	} {
 		if !strings.Contains(html, id) {
-			t.Errorf("the %s form is no longer rendered; regrouping the tabs must not remove a sign-in method", id)
+			t.Errorf("%s is no longer rendered; restyling the portal must not remove a sign-in method", id)
 		}
+	}
+	// And the pill that chooses between the two must exist, or one of them is unreachable.
+	if !strings.Contains(html, `id="use-personal"`) {
+		t.Error("the Use Personal Account toggle is missing, so one of the two account forms cannot be reached")
 	}
 }
 
@@ -135,7 +142,7 @@ func TestLandingTagsEveryStringTheDesignerOffersToTranslate(t *testing.T) {
 	for _, key := range []string{
 		"pms.room", "account.pass", "account.user", "voucher.label",
 		"email.dest", "sms.dest", "otp.code",
-		"btn.connect", "btn.verify",
+		"btn.submit", "btn.login", "btn.verify",
 		"info.device", "info.ip", "info.mac", "info.help",
 	} {
 		if !strings.Contains(html, `data-i18n="`+key+`"`) {
@@ -171,5 +178,62 @@ func TestPortalServesItsOwnAssets(t *testing.T) {
 	}
 	if !strings.HasPrefix(portalAssetDir, "/opt/stayconnect/") {
 		t.Errorf("assets are served from %q, outside the appliance's own tree", portalAssetDir)
+	}
+}
+
+// THE REFERENCE DESIGN, ASSERTED AS THE PRODUCT OWNER DREW IT.
+//
+// The first attempt at this page was styled like the screenshots but structured like the old portal: Voucher
+// and Personal Account were two separate sign-in methods, the buttons said "Connect", and the labels were
+// sentence case. It looked close and behaved differently, which is the failure mode a screenshot is supposed
+// to prevent. These assert the specifics rather than the impression.
+func TestLandingMatchesTheReferenceDesign(t *testing.T) {
+	html := renderLanding(t, "10.77.0.42", "aa:bb:cc:dd:ee:ff")
+
+	// Guest Login: Room Number, Password, a hint beneath it, and Submit.
+	for _, want := range []struct{ frag, why string }{
+		{`data-i18n-en="Room Number"`, "Room Number is title case in the reference"},
+		{`id="pms-secondary"`, "the guest's second field"},
+		{`data-i18n-en="Password"`, "the second field is labelled Password, not 'last name or reservation'"},
+		{`id="pms-prompt"`, "the hint line beneath the password field"},
+		{`data-i18n-en="Submit"`, "the guest button says Submit"},
+		// Account Login: the pill, Voucher Code, and Login.
+		{`data-i18n-en="Use Personal Account"`, "the pill that toggles voucher and personal account"},
+		{`data-i18n-en="Voucher Code"`, "Voucher Code is title case in the reference"},
+		{`data-i18n-en="Login"`, "the account button says Login"},
+		{`class="pill"`, "the pill is a pill, not a bare checkbox"},
+	} {
+		if !strings.Contains(html, want.frag) {
+			t.Errorf("the page does not match the reference: missing %s (%q)", want.why, want.frag)
+		}
+	}
+
+	// The wording the reference REPLACED must be gone, or the page carries both vocabularies.
+	for _, gone := range []string{
+		`data-i18n-en="Room number"`, `data-i18n-en="Voucher code"`, `>Connect</`,
+	} {
+		if strings.Contains(html, gone) {
+			t.Errorf("superseded wording is still rendered: %q", gone)
+		}
+	}
+}
+
+func TestAccountLoginKeepsBothFormsReachable(t *testing.T) {
+	// Merging two sign-in methods into one panel is exactly where one of them quietly stops being reachable.
+	// Both forms must be present, each with its own action, and the toggle that selects between them.
+	html := renderLanding(t, "10.77.0.42", "")
+	for _, frag := range []string{
+		`action="/auth/voucher"`,
+		`action="/auth/credentials"`,
+		`id="use-personal"`,
+	} {
+		if !strings.Contains(html, frag) {
+			t.Errorf("account login lost %q, so one of its two ways in is unreachable", frag)
+		}
+	}
+	// The hidden form's required fields are disabled when it is hidden — otherwise the browser blocks
+	// submission of the VISIBLE form because an invisible field elsewhere is empty and required.
+	if !strings.Contains(html, "el.disabled = personal") {
+		t.Error("the hidden form's required fields are not disabled; the visible form will refuse to submit")
 	}
 }
