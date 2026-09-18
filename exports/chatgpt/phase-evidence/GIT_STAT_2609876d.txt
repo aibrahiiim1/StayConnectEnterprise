@@ -1,0 +1,4 @@
+commit 2609876df512df83b134164af2bcb627d20df37a
+Date:   Fri Sep 18 06:07:25 2026 +0300
+
+    The login page now matches the reference, structurally and not just visually

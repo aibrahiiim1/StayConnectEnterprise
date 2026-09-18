@@ -1587,14 +1587,14 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "THE_SANDBOXES_AND_THE_ROUTER_CAUGHT_WHAT_THE_GATES_COULD_NOT",
+    "kind": "THE_SANDBOXES_THE_ROUTER_AND_THE_REFERENCE_DESIGN",
     "decision": "D76",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "1fee3a57477573ec1093f836ea14baca1031f442",
     "base_note": "The master merge commit of PR #154. This delivery begins exactly where that one ended.",
-    "head": "d2a78ad6",
+    "head": "2609876d",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
-    "note": "T0158. The backup settings handlers were merged through four green gates while mounted on nothing; scd and edged then refused to write four paths that were not on their ProtectSystem allowlists. All four correct refusals, widened by exactly what the features need and nothing adjacent, with the paths provisioned by a repo tmpfiles config because systemd resolves the allowlist at unit start. Proven live: retention reaches the sweep itself, an SVG is refused while a PNG is served from the appliance's own origin, and a published Arabic design rolls back without rewinding history."
+    "note": "T0158. The backup settings handlers were merged through four green gates while mounted on nothing; scd and edged then refused to write four paths that were not on their ProtectSystem allowlists. All four correct refusals, widened by exactly what the features need and nothing adjacent, with the paths provisioned by a repo tmpfiles config because systemd resolves the allowlist at unit start. Proven live: retention reaches the sweep itself, an SVG is refused while a PNG is served from the appliance's own origin, and a published Arabic design rolls back without rewinding history. Also rebuilds the guest login page to the Product Owner's reference screenshots: Voucher and Personal Account merge into one panel behind a 'Use Personal Account' pill that did not previously exist, with Submit/Login and title-case labels."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
