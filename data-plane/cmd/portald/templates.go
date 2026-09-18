@@ -7,105 +7,124 @@ const landingHTML = `<!doctype html>
 <title>Wi-Fi Access</title>
 <style>
   /* THE GUEST PORTAL, to the Product Owner's reference design.
-     Full-bleed hotel photograph, one centred white card, branded header, two tab groups, and a quiet
-     information affordance in the corner. Everything below is driven by CSS custom properties so the
-     Branding screen can restyle it without touching this file. */
+     One design across desktop, tablet and phone -- the same card, hierarchy and controls, laid out for the
+     space available. Every colour and radius is a custom property so Branding restyles it without touching
+     this file. */
   :root {
-    --sc-brand:      #0f6b63;   /* the teal of the reference buttons and active tab */
+    --sc-brand:      #0f6b63;
     --sc-brand-dark: #0b544e;
-    --sc-ink:        #1c2b2a;
+    --sc-ink:        #14302e;
     --sc-muted:      #6b7b7a;
     --sc-card:       #ffffff;
     --sc-line:       #e3e8e8;
-    --sc-radius:     18px;
+    --sc-radius:     20px;
     --sc-bg: url("/assets/portal-background.jpg");
-    font-family: "Inter", -apple-system, system-ui, "Segoe UI", sans-serif;
+    font-family: "Inter", -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
   }
   * { box-sizing: border-box; }
-  html, body { height: 100%; }
+  html { height: 100%; }
   body {
-    margin: 0; color: var(--sc-ink);
-    /* The photograph fills the viewport and stays put while the card scrolls on a short screen. */
-    background: var(--sc-bg) center/cover no-repeat fixed, linear-gradient(160deg,#cfe3e6,#eef3f2);
+    margin: 0;
     min-height: 100%;
-    display: flex; align-items: flex-start; justify-content: center;
-    padding: clamp(12px, 4vh, 64px) clamp(12px, 4vw, 48px) 48px;
+    color: var(--sc-ink);
+    /* The photograph fills the viewport. A gradient sits under it so an appliance with no image uploaded
+       still looks deliberate rather than broken. */
+    background: var(--sc-bg) center/cover no-repeat fixed, linear-gradient(160deg, #cfe3e6, #eef3f2);
   }
 
-  /* Language selector, upper right of the PAGE rather than the card, as in the reference. */
-  .langbar { position: fixed; top: 12px; right: 12px; z-index: 5; }
+  /* THE PAGE IS A COLUMN, NOT A ROW.
+     This was a flex ROW on the body, with the language bar as a sibling of the card. On a phone the bar
+     became a flex ITEM beside the card and align-items:stretch gave it the full viewport height -- a tall
+     white column down the left with the form squeezed into what was left. A column layout cannot put
+     anything beside the card. */
+  .page {
+    min-height: 100vh;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: clamp(12px, 5vh, 56px) clamp(12px, 4vw, 48px) clamp(24px, 6vh, 56px);
+  }
+
+  .langbar { position: fixed; top: 14px; right: 16px; z-index: 5; }
   .lang {
     display: inline-flex; align-items: center; gap: 8px;
     background: #fff; border: 1px solid var(--sc-line); border-radius: 999px;
-    padding: 8px 14px; font-size: .95rem; color: var(--sc-ink); cursor: pointer;
-    box-shadow: 0 2px 10px rgb(0 0 0 / .08);
+    padding: 9px 16px; font-size: .95rem; color: var(--sc-ink); cursor: pointer;
+    box-shadow: 0 2px 12px rgb(0 0 0 / .10);
   }
   .lang select { border: 0; background: none; font: inherit; color: inherit; cursor: pointer; outline: none; }
 
   .card {
     position: relative;
-    width: min(1100px, 100%);
+    width: 100%;
+    max-width: 960px;
+    /* Centred vertically, so the photograph is present ABOVE and BELOW the card rather than only beneath it.
+       AUTO MARGINS, not justify-content: a centred flex item taller than the viewport is clipped at the top
+       with no way to scroll to it, and the card grows every time a guest opens the information panel or a
+       site notice appears. Auto margins simply stop absorbing space once there is none. */
+    margin-block: auto;
     background: var(--sc-card);
     border-radius: var(--sc-radius);
-    box-shadow: 0 24px 60px rgb(0 0 0 / .18);
-    padding: clamp(20px, 3.5vw, 44px);
-    margin-top: clamp(8px, 6vh, 72px);
+    box-shadow: 0 24px 64px rgb(0 0 0 / .18);
+    padding: clamp(22px, 3vw, 48px) clamp(20px, 3.5vw, 56px) clamp(56px, 6vw, 72px);
   }
-  .brand { display: flex; align-items: center; gap: 14px; min-height: 56px; }
-  .brand img { max-height: 56px; max-width: 260px; object-fit: contain; }
-  .brand .name { font-size: 1.05rem; letter-spacing: .04em; color: var(--sc-muted); }
-  .rule { border: 0; border-top: 1px solid var(--sc-line); margin: clamp(16px, 2.5vw, 28px) 0 0; }
 
-  /* TWO GROUPS, NOT SIX. The reference presents a Guest door and an Account keypad; every enabled
-     method lands in one of them, so a guest chooses between "I am staying here" and "I have a code". */
-  .tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+  /* A real logo when the hotel has uploaded one, its name when it has not. The row holds its height either
+     way so the card does not jump as branding loads. */
+  .brand { display: flex; align-items: center; gap: 16px; min-height: 60px; }
+  .brand img { max-height: 60px; max-width: 280px; object-fit: contain; }
+  .brand .name { font-size: clamp(1.05rem, 1.6vw, 1.35rem); font-weight: 600; letter-spacing: .01em; }
+  .rule { border: 0; border-top: 1px solid var(--sc-line); margin: clamp(14px, 2vw, 22px) 0 0; }
+
+  .tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
   .tab {
     appearance: none; background: none; border: 0; border-bottom: 2px solid transparent;
-    padding: clamp(14px, 2vw, 22px) 8px; font: inherit; font-size: clamp(1rem, 1.4vw, 1.25rem);
-    color: var(--sc-muted); cursor: pointer; display: inline-flex; align-items: center;
-    justify-content: center; gap: 10px;
+    padding: clamp(14px, 1.8vw, 22px) 8px; font: inherit; font-size: clamp(1rem, 1.25vw, 1.2rem);
+    color: var(--sc-muted); cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; gap: 10px;
   }
   .tab[aria-selected="true"] { color: var(--sc-brand); border-bottom-color: var(--sc-brand); font-weight: 600; }
-  .tab svg { width: 1.1em; height: 1.1em; flex: 0 0 auto; }
+  .tab svg { width: 1.15em; height: 1.15em; flex: 0 0 auto; }
 
-  .panels { border-top: 1px solid var(--sc-line); padding-top: clamp(18px, 3vw, 34px); }
+  .panels { border-top: 1px solid var(--sc-line); padding-top: clamp(20px, 3vw, 34px); }
   .panel { display: none; }
   .panel.active { display: block; }
-  .field { margin-bottom: clamp(14px, 2vw, 22px); max-width: 560px; }
-  .panel--wide .field { max-width: none; }
-  label { display: block; font-size: clamp(.95rem, 1.1vw, 1.05rem); margin-bottom: 8px; }
+
+  /* One field width across every panel. The account panel used to opt out of it, so a guest who moved from
+     Room Number to Voucher Code watched the input jump from half the card to all of it. */
+  .field { margin-bottom: clamp(16px, 2vw, 22px); max-width: 560px; }
+  label { display: block; font-size: clamp(.95rem, 1.05vw, 1.05rem); margin-bottom: 8px; }
   input[type=text], input[type=password], input[type=email], input[type=tel] {
     width: 100%; padding: 14px 16px; font-size: 1rem; color: var(--sc-ink);
     border: 1px solid var(--sc-line); border-radius: 12px; background: #fff;
   }
-  input:focus-visible, .tab:focus-visible, button:focus-visible, .lang:focus-within {
+  input:focus-visible, .tab:focus-visible, button:focus-visible, select:focus-visible {
     outline: 2px solid var(--sc-brand); outline-offset: 2px;
   }
   .hint { color: var(--sc-muted); font-size: .92rem; margin: 8px 0 0; }
   button.primary {
     background: linear-gradient(180deg, var(--sc-brand), var(--sc-brand-dark));
-    color: #fff; border: 0; border-radius: 12px; padding: 14px 34px;
+    color: #fff; border: 0; border-radius: 12px; padding: 14px 36px;
     font: inherit; font-weight: 600; cursor: pointer;
   }
   button.primary:disabled { opacity: .55; cursor: wait; }
 
-  /* "Use Personal Account" — a pill-shaped checkbox, as in the reference. */
   .pill {
     display: inline-flex; align-items: center; gap: 10px;
-    border: 1px solid var(--sc-line); border-radius: 999px; padding: 12px 20px;
-    color: var(--sc-muted); cursor: pointer; user-select: none; margin-bottom: clamp(16px, 2.5vw, 26px);
+    border: 1px solid var(--sc-line); border-radius: 999px; padding: 12px 22px;
+    color: var(--sc-muted); cursor: pointer; user-select: none; margin-bottom: clamp(18px, 2.5vw, 26px);
   }
   .pill input { width: 18px; height: 18px; accent-color: var(--sc-brand); }
   .pill:has(input:checked) { color: var(--sc-brand); border-color: var(--sc-brand); }
 
-  /* Information affordance, lower right of the card. */
   .info-btn {
-    position: absolute; right: clamp(14px, 2vw, 26px); bottom: clamp(14px, 2vw, 26px);
+    position: absolute; right: clamp(16px, 2vw, 28px); bottom: clamp(16px, 2vw, 28px);
     width: 30px; height: 30px; border-radius: 999px; border: 1px solid var(--sc-line);
     background: #f4f7f7; color: var(--sc-muted); cursor: pointer; font-weight: 700; line-height: 1;
   }
   .info-panel {
-    margin-top: 20px; border: 1px solid var(--sc-line); border-radius: 12px;
+    margin-top: 22px; border: 1px solid var(--sc-line); border-radius: 12px;
     padding: 14px 16px; font-size: .92rem; color: var(--sc-muted); background: #f8fafa;
   }
   .info-panel dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin: 8px 0 0; }
@@ -124,13 +143,35 @@ const landingHTML = `<!doctype html>
   #pms-choices button.choice[disabled] { opacity:.5; cursor:default; }
   button.link { background:none; border:0; color:var(--sc-brand); font:inherit; padding:6px; cursor:pointer; }
 
-  /* PHONE. The card becomes the page: full width, flat corners, tighter rhythm. Same design language,
-     not a second design. */
-  @media (max-width: 640px) {
-    body { padding: 0; align-items: stretch; background-attachment: scroll; }
-    .card { margin-top: 0; border-radius: 0; min-height: 100vh; box-shadow: none; }
+  /* ARABIC READS RIGHT TO LEFT. A portal that renders it left-aligned is transliterated, not translated.
+     dir follows the chosen language; only what would look wrong flips. */
+  [dir="rtl"] .langbar { right: auto; left: 16px; }
+  [dir="rtl"] .info-btn { right: auto; left: clamp(16px, 2vw, 28px); }
+
+  /* PHONE. The SAME design, not a second one: the same card, the same hierarchy, the same controls, given
+     nearly the whole width of the screen.
+     What is deliberately NOT here: a full-bleed card. It was tried, and a card with min-height:100dvh holding
+     four fields is a sheet of white with the bottom half empty and the information button pushed off the
+     fold -- the "large blank decorative area" this design is not allowed to have. The card is as tall as its
+     contents, a 12px gutter keeps the photograph visible around it, and the page ends where the card does. */
+  @media (max-width: 680px) {
+    body { background-attachment: scroll; }
+    .page { padding: 0 12px 20px; }
+    .langbar { position: static; width: 100%; display: flex; justify-content: flex-end; padding: 10px 0 8px; }
+    .card {
+      max-width: none;
+      padding: 18px 16px 52px;
+      box-shadow: 0 12px 32px rgb(0 0 0 / .16);
+    }
+    .brand { min-height: 48px; }
+    .brand img { max-height: 48px; }
     .tabs { grid-template-columns: 1fr 1fr; }
-    .langbar { position: static; display: flex; justify-content: flex-end; padding: 10px 12px 0; }
+    .tab { font-size: 1rem; padding: 14px 6px; gap: 8px; }
+    .field { max-width: none; }
+    button.primary { width: 100%; }
+  }
+  @media (min-width: 681px) and (max-width: 1024px) {
+    .card { max-width: 680px; }
   }
   @media (prefers-reduced-motion: no-preference) {
     .panel.active { animation: fade .18s ease-out; }
@@ -138,6 +179,7 @@ const landingHTML = `<!doctype html>
   }
 </style>
 </head><body>
+  <div class="page">
   <div class="langbar">
     <label class="lang" for="lang">
       <span id="lang-flag" aria-hidden="true">🌐</span>
@@ -197,17 +239,21 @@ const landingHTML = `<!doctype html>
 
   <div class="panel" id="panel-email">
     <form data-otp="email" data-stage="dest" autocomplete="off">
-      <label for="email"><span data-i18n="email.dest" data-i18n-en="Email address">Email address</span></label>
-      <input id="email" name="dest" type="email" required placeholder="you@example.com" autocomplete="email">
-      <button type="submit"><span data-i18n="btn.sendcode" data-i18n-en="Send code">Send code</span></button>
+      <div class="field">
+        <label for="email"><span data-i18n="email.dest" data-i18n-en="Email address">Email address</span></label>
+        <input id="email" name="dest" type="email" required placeholder="you@example.com" autocomplete="email">
+      </div>
+      <button class="primary" type="submit"><span data-i18n="btn.sendcode" data-i18n-en="Send code">Send code</span></button>
       <div class="err"></div>
     </form>
     <form data-otp="email" data-stage="code" autocomplete="off" style="display:none">
-      <p class="small">We sent a 6-digit code to <span class="dest"></span>.</p>
-      <label><span data-i18n="otp.code" data-i18n-en="Verification code">Verification code</span></label>
-      <input name="code" type="text" inputmode="numeric" pattern="[0-9]*" required maxlength="6" placeholder="------">
-      <button type="submit"><span data-i18n="btn.verify" data-i18n-en="Verify">Verify</span></button>
-      <button type="button" class="link" data-resend>Try a different email</button>
+      <p class="small"><span data-i18n="otp.sent.email" data-i18n-en="We sent a 6-digit code to">We sent a 6-digit code to</span> <span class="dest"></span>.</p>
+      <div class="field">
+        <label><span data-i18n="otp.code" data-i18n-en="Verification code">Verification code</span></label>
+        <input name="code" type="text" inputmode="numeric" pattern="[0-9]*" required maxlength="6" placeholder="------">
+      </div>
+      <button class="primary" type="submit"><span data-i18n="btn.verify" data-i18n-en="Verify">Verify</span></button>
+      <button type="button" class="link" data-resend data-i18n="otp.retry.email" data-i18n-en="Try a different email">Try a different email</button>
       <div class="err"></div>
     </form>
   </div>
@@ -242,10 +288,13 @@ const landingHTML = `<!doctype html>
        attacker could put someone else's answer in. -->
   <div class="panel" id="panel-poststay">
     <form id="form-poststay" autocomplete="off">
-      <label for="ps-pin">Post-stay PIN</label>
-      <input id="ps-pin" name="pin" type="text" inputmode="text" autocapitalize="characters"
-             required placeholder="The PIN you were given at checkout">
-      <button type="submit">Reconnect</button>
+      <div class="field">
+        <label for="ps-pin"><span data-i18n="poststay.pin" data-i18n-en="Post-stay PIN">Post-stay PIN</span></label>
+        <input id="ps-pin" name="pin" type="text" inputmode="text" autocapitalize="characters" required
+               data-i18n-ph="poststay.hint" data-i18n-ph-en="The PIN you were given at checkout"
+               placeholder="The PIN you were given at checkout">
+      </div>
+      <button class="primary" type="submit"><span data-i18n="btn.reconnect" data-i18n-en="Reconnect">Reconnect</span></button>
     </form>
     <div class="err" id="ps-err" role="alert" aria-live="polite"></div>
   </div>
@@ -253,24 +302,29 @@ const landingHTML = `<!doctype html>
   <!-- Social panel -->
   <div class="panel" id="panel-social">
     <div id="social-providers"></div>
-    <p class="small" style="margin-top:12px">You'll be redirected to the provider, then back here.</p>
+    <p class="small" style="margin-top:12px" data-i18n="social.note"
+       data-i18n-en="You'll be redirected to the provider, then back here.">You'll be redirected to the provider, then back here.</p>
   </div>
 
   <!-- SMS panel -->
   <div class="panel" id="panel-sms">
     <form data-otp="sms" data-stage="dest" autocomplete="off">
-      <label for="phone"><span data-i18n="sms.dest" data-i18n-en="Phone number">Phone number</span></label>
-      <input id="phone" name="dest" type="tel" required placeholder="+1 555 123 4567" autocomplete="tel">
-      <p class="small">Include country code, e.g. <span class="small">+44 20 7946 0958</span></p>
-      <button type="submit">Send code</button>
+      <div class="field">
+        <label for="phone"><span data-i18n="sms.dest" data-i18n-en="Phone number">Phone number</span></label>
+        <input id="phone" name="dest" type="tel" required placeholder="+1 555 123 4567" autocomplete="tel">
+        <p class="hint" data-i18n="sms.hint" data-i18n-en="Include the country code, for example +44 20 7946 0958">Include the country code, for example +44 20 7946 0958</p>
+      </div>
+      <button class="primary" type="submit"><span data-i18n="btn.sendcode" data-i18n-en="Send code">Send code</span></button>
       <div class="err"></div>
     </form>
     <form data-otp="sms" data-stage="code" autocomplete="off" style="display:none">
-      <p class="small">We texted a 6-digit code to <span class="dest"></span>.</p>
-      <label>Verification code</label>
-      <input name="code" type="text" inputmode="numeric" pattern="[0-9]*" required maxlength="6" placeholder="------">
-      <button type="submit">Verify</button>
-      <button type="button" class="link" data-resend>Use a different number</button>
+      <p class="small"><span data-i18n="otp.sent.sms" data-i18n-en="We texted a 6-digit code to">We texted a 6-digit code to</span> <span class="dest"></span>.</p>
+      <div class="field">
+        <label><span data-i18n="otp.code" data-i18n-en="Verification code">Verification code</span></label>
+        <input name="code" type="text" inputmode="numeric" pattern="[0-9]*" required maxlength="6" placeholder="------">
+      </div>
+      <button class="primary" type="submit"><span data-i18n="btn.verify" data-i18n-en="Verify">Verify</span></button>
+      <button type="button" class="link" data-resend data-i18n="otp.retry.sms" data-i18n-en="Use a different number">Use a different number</button>
       <div class="err"></div>
     </form>
   </div>
@@ -289,6 +343,7 @@ const landingHTML = `<!doctype html>
       <p class="small" style="margin-top:10px" data-i18n="info.help" data-i18n-en="Reception may ask for these if you need help connecting.">Reception may ask for these if you need help connecting.</p>
     </div>
   </main>
+  </div>
 
   <script>
     // THE REFERENCE DESIGN PRESENTS TWO DOORS, NOT SIX.
@@ -326,6 +381,15 @@ const landingHTML = `<!doctype html>
       room_any:         "First name, last name, or reservation number",
       either:           "Last name OR reservation number",
     };
+    // The same five prompts as translation keys. The English above stays as the fallback the element carries,
+    // so a mode nobody has translated still says something.
+    const PMSPromptKeys = {
+      room_lastname:    'pms.prompt.lastname',
+      room_firstname:   'pms.prompt.firstname',
+      room_reservation: 'pms.prompt.reservation',
+      room_any:         'pms.prompt.any',
+      either:           'pms.prompt.either',
+    };
     const challenges = {}; // channel -> challenge_id
 
     // Which METHOD is showing, within whichever group is selected.
@@ -344,13 +408,29 @@ const landingHTML = `<!doctype html>
       setTab(members[0]);
       const alt = document.getElementById('alt-methods');
       alt.innerHTML = '';
-      if (members.length > 1) {
+      // ALTERNATIVES MUST LEAD SOMEWHERE ELSE.
+      //
+      // Voucher and personal account share ONE panel, chosen between by the pill at the top of it. Listing
+      // them here as well gave a guest looking at the voucher form an "Or sign in with: Personal account"
+      // link that selected the panel they were already on -- two controls for one choice, and the one that
+      // looks like navigation does nothing visible. An alternative is offered only when it opens a DIFFERENT
+      // panel from the one already showing.
+      const shownPanel = Tabs[members[0]] ? Tabs[members[0]].panel : '';
+      const others = members.slice(1).filter(m => Tabs[m] && Tabs[m].panel !== shownPanel);
+      if (others.length) {
         const h = document.createElement('h3');
-        h.textContent = 'Or sign in with';
+        // Generated text carries its key so the language pass reaches it too. Setting textContent here and
+        // translating there would leave whichever ran last on the screen.
+        h.dataset.i18n = 'alt.title';
+        h.dataset.i18nEn = BUILTIN.en['alt.title'];
+        h.textContent = t('alt.title');
         alt.appendChild(h);
-        members.slice(1).forEach(m => {
+        others.forEach(m => {
           const b = document.createElement('button');
-          b.type = 'button'; b.className = 'link'; b.textContent = Tabs[m].label;
+          b.type = 'button'; b.className = 'link';
+          b.dataset.i18n = 'method.' + m;
+          b.dataset.i18nEn = Tabs[m].label;
+          b.textContent = t('method.' + m);
           // The alternatives ARE method selectors, so they carry the method they select. Anything looking for
           // a particular sign-in method finds it here now that there is no longer a tab per method.
           b.dataset.tab = m;
@@ -366,33 +446,270 @@ const landingHTML = `<!doctype html>
     // TRANSLATIONS. The language selector used to change nothing, which is worse than not offering one: it
     // tells a guest their language is supported and then does not support it.
     //
-    // Every guest-facing string carries a data-i18n key. The hotel publishes translations as part of its
-    // design, so a property can say "Room number" in the words its guests actually use without anyone
-    // shipping a build. English is the fallback for any key a translation omits -- a half-translated portal
-    // still reads, where a portal showing raw keys does not.
-    var I18N = {};        // code -> { key: text }
+    // SIX LANGUAGES SHIP WITH THE PORTAL. An operator does not have to type a single word to offer a guest
+    // Arabic, Italian, French, Russian or German -- the words below are part of the build. The hotel's own
+    // translations, published with its design, are merged OVER these, so a property that calls the field
+    // something else says so without losing the other forty strings it never wanted to think about.
+    //
+    // Resolution order for every string, most specific first:
+    //   1. the hotel's published translation for the chosen language
+    //   2. the built-in translation for the chosen language
+    //   3. the built-in English, which is also the text already in the markup
+    // A half-translated portal therefore still reads. A portal that shows raw keys is not a language anybody
+    // speaks, and this cannot produce one.
+    var LANGS = [
+      { code: 'en', label: 'English'  },
+      { code: 'ar', label: 'العربية', rtl: true },
+      { code: 'de', label: 'Deutsch'  },
+      { code: 'fr', label: 'Français' },
+      { code: 'it', label: 'Italiano' },
+      { code: 'ru', label: 'Русский'  }
+    ];
+
+    var BUILTIN = {
+      en: {
+        "tab.guest": "Guest Login", "tab.account": "Account Login",
+        "method.pms": "Room", "method.poststay": "Post-stay", "method.voucher": "Voucher",
+        "method.account": "Personal account", "method.email": "Email", "method.sms": "Phone",
+        "method.social": "Social", "alt.title": "Or sign in with",
+        "account.personal": "Use Personal Account", "voucher.label": "Voucher Code",
+        "account.user": "Username", "account.pass": "Password",
+        "pms.room": "Room Number", "pms.secondary": "Password",
+        "pms.prompt.lastname": "Last name on the reservation",
+        "pms.prompt.firstname": "First name on the reservation",
+        "pms.prompt.reservation": "Reservation / confirmation number",
+        "pms.prompt.any": "First name, last name, or reservation number",
+        "pms.prompt.either": "Last name OR reservation number",
+        "pms.choose": "Choose your internet package",
+        "email.dest": "Email address", "sms.dest": "Phone number",
+        "sms.hint": "Include the country code, for example +44 20 7946 0958",
+        "otp.code": "Verification code",
+        "otp.sent.email": "We sent a 6-digit code to", "otp.sent.sms": "We texted a 6-digit code to",
+        "otp.retry.email": "Try a different email", "otp.retry.sms": "Use a different number",
+        "poststay.pin": "Post-stay PIN", "poststay.hint": "The PIN you were given at checkout",
+        "btn.login": "Login", "btn.submit": "Submit", "btn.sendcode": "Send code",
+        "btn.verify": "Verify", "btn.reconnect": "Reconnect",
+        "social.note": "You will be redirected to the provider, then back here.",
+        "social.google": "Continue with Google", "social.apple": "Continue with Apple",
+        "social.facebook": "Continue with Facebook",
+        "info.device": "Your device", "info.ip": "IP address", "info.mac": "MAC address",
+        "info.help": "Reception may ask for these if you need help connecting.",
+        "notice.nomethods": "There is no way to sign in on this network yet. Please contact reception.",
+        "notice.nopackages": "Internet access is not available here at the moment. You can still sign in, but there is nothing to connect you to yet — please let reception know.",
+        "err.generic": "We could not verify your stay. Please check your details or contact reception.",
+        "err.retry": "You can try again now.", "lang.label": "Language"
+      },
+      ar: {
+        "tab.guest": "تسجيل دخول النزلاء", "tab.account": "الدخول بحساب",
+        "method.pms": "الغرفة", "method.poststay": "ما بعد المغادرة", "method.voucher": "قسيمة",
+        "method.account": "حساب شخصي", "method.email": "البريد الإلكتروني", "method.sms": "الهاتف",
+        "method.social": "حسابات التواصل", "alt.title": "أو سجّل الدخول عبر",
+        "account.personal": "استخدام حساب شخصي", "voucher.label": "رمز القسيمة",
+        "account.user": "اسم المستخدم", "account.pass": "كلمة المرور",
+        "pms.room": "رقم الغرفة", "pms.secondary": "كلمة المرور",
+        "pms.prompt.lastname": "اسم العائلة كما في الحجز",
+        "pms.prompt.firstname": "الاسم الأول كما في الحجز",
+        "pms.prompt.reservation": "رقم الحجز أو التأكيد",
+        "pms.prompt.any": "الاسم الأول أو اسم العائلة أو رقم الحجز",
+        "pms.prompt.either": "اسم العائلة أو رقم الحجز",
+        "pms.choose": "اختر باقة الإنترنت",
+        "email.dest": "البريد الإلكتروني", "sms.dest": "رقم الهاتف",
+        "sms.hint": "أدرج رمز الدولة، مثل +44 20 7946 0958",
+        "otp.code": "رمز التحقق",
+        "otp.sent.email": "أرسلنا رمزاً من ٦ أرقام إلى", "otp.sent.sms": "أرسلنا رمزاً من ٦ أرقام برسالة نصية إلى",
+        "otp.retry.email": "جرّب بريداً إلكترونياً آخر", "otp.retry.sms": "استخدم رقماً آخر",
+        "poststay.pin": "رمز ما بعد المغادرة", "poststay.hint": "الرمز الذي تسلمته عند المغادرة",
+        "btn.login": "تسجيل الدخول", "btn.submit": "إرسال", "btn.sendcode": "إرسال الرمز",
+        "btn.verify": "تحقق", "btn.reconnect": "إعادة الاتصال",
+        "social.note": "سيتم تحويلك إلى مزوّد الخدمة ثم تعود إلى هنا.",
+        "social.google": "المتابعة باستخدام Google", "social.apple": "المتابعة باستخدام Apple",
+        "social.facebook": "المتابعة باستخدام Facebook",
+        "info.device": "جهازك", "info.ip": "عنوان IP", "info.mac": "عنوان MAC",
+        "info.help": "قد يطلب منك مكتب الاستقبال هذه البيانات إذا احتجت مساعدة في الاتصال.",
+        "notice.nomethods": "لا توجد طريقة لتسجيل الدخول على هذه الشبكة بعد. يرجى التواصل مع مكتب الاستقبال.",
+        "notice.nopackages": "خدمة الإنترنت غير متاحة هنا في الوقت الحالي. يمكنك تسجيل الدخول، لكن لا توجد باقة لتوصيلك بها بعد — يرجى إبلاغ مكتب الاستقبال.",
+        "err.generic": "تعذّر التحقق من إقامتك. يرجى مراجعة بياناتك أو التواصل مع مكتب الاستقبال.",
+        "err.retry": "يمكنك المحاولة مرة أخرى الآن.", "lang.label": "اللغة"
+      },
+      de: {
+        "tab.guest": "Gäste-Anmeldung", "tab.account": "Konto-Anmeldung",
+        "method.pms": "Zimmer", "method.poststay": "Nach dem Aufenthalt", "method.voucher": "Gutschein",
+        "method.account": "Persönliches Konto", "method.email": "E-Mail", "method.sms": "Telefon",
+        "method.social": "Social Media", "alt.title": "Oder anmelden mit",
+        "account.personal": "Persönliches Konto verwenden", "voucher.label": "Gutscheincode",
+        "account.user": "Benutzername", "account.pass": "Passwort",
+        "pms.room": "Zimmernummer", "pms.secondary": "Passwort",
+        "pms.prompt.lastname": "Nachname auf der Reservierung",
+        "pms.prompt.firstname": "Vorname auf der Reservierung",
+        "pms.prompt.reservation": "Reservierungs- oder Bestätigungsnummer",
+        "pms.prompt.any": "Vorname, Nachname oder Reservierungsnummer",
+        "pms.prompt.either": "Nachname ODER Reservierungsnummer",
+        "pms.choose": "Wählen Sie Ihr Internetpaket",
+        "email.dest": "E-Mail-Adresse", "sms.dest": "Telefonnummer",
+        "sms.hint": "Bitte mit Ländervorwahl, zum Beispiel +44 20 7946 0958",
+        "otp.code": "Bestätigungscode",
+        "otp.sent.email": "Wir haben einen 6-stelligen Code gesendet an",
+        "otp.sent.sms": "Wir haben einen 6-stelligen Code per SMS gesendet an",
+        "otp.retry.email": "Andere E-Mail-Adresse verwenden", "otp.retry.sms": "Andere Nummer verwenden",
+        "poststay.pin": "PIN nach dem Aufenthalt", "poststay.hint": "Die PIN, die Sie beim Check-out erhalten haben",
+        "btn.login": "Anmelden", "btn.submit": "Senden", "btn.sendcode": "Code senden",
+        "btn.verify": "Bestätigen", "btn.reconnect": "Erneut verbinden",
+        "social.note": "Sie werden zum Anbieter weitergeleitet und danach hierher zurückgebracht.",
+        "social.google": "Weiter mit Google", "social.apple": "Weiter mit Apple",
+        "social.facebook": "Weiter mit Facebook",
+        "info.device": "Ihr Gerät", "info.ip": "IP-Adresse", "info.mac": "MAC-Adresse",
+        "info.help": "Die Rezeption fragt möglicherweise nach diesen Angaben, wenn Sie Hilfe beim Verbinden brauchen.",
+        "notice.nomethods": "In diesem Netzwerk gibt es noch keine Anmeldemöglichkeit. Bitte wenden Sie sich an die Rezeption.",
+        "notice.nopackages": "Internetzugang ist hier derzeit nicht verfügbar. Sie können sich anmelden, aber es gibt noch nichts, womit wir Sie verbinden können — bitte informieren Sie die Rezeption.",
+        "err.generic": "Wir konnten Ihren Aufenthalt nicht bestätigen. Bitte prüfen Sie Ihre Angaben oder wenden Sie sich an die Rezeption.",
+        "err.retry": "Sie können es jetzt erneut versuchen.", "lang.label": "Sprache"
+      },
+      fr: {
+        "tab.guest": "Connexion client", "tab.account": "Connexion au compte",
+        "method.pms": "Chambre", "method.poststay": "Après le séjour", "method.voucher": "Bon d'accès",
+        "method.account": "Compte personnel", "method.email": "E-mail", "method.sms": "Téléphone",
+        "method.social": "Réseaux sociaux", "alt.title": "Ou connectez-vous avec",
+        "account.personal": "Utiliser un compte personnel", "voucher.label": "Code d'accès",
+        "account.user": "Nom d'utilisateur", "account.pass": "Mot de passe",
+        "pms.room": "Numéro de chambre", "pms.secondary": "Mot de passe",
+        "pms.prompt.lastname": "Nom de famille figurant sur la réservation",
+        "pms.prompt.firstname": "Prénom figurant sur la réservation",
+        "pms.prompt.reservation": "Numéro de réservation ou de confirmation",
+        "pms.prompt.any": "Prénom, nom ou numéro de réservation",
+        "pms.prompt.either": "Nom de famille OU numéro de réservation",
+        "pms.choose": "Choisissez votre forfait Internet",
+        "email.dest": "Adresse e-mail", "sms.dest": "Numéro de téléphone",
+        "sms.hint": "Indiquez l'indicatif du pays, par exemple +44 20 7946 0958",
+        "otp.code": "Code de vérification",
+        "otp.sent.email": "Nous avons envoyé un code à 6 chiffres à",
+        "otp.sent.sms": "Nous avons envoyé un code à 6 chiffres par SMS au",
+        "otp.retry.email": "Essayer une autre adresse e-mail", "otp.retry.sms": "Utiliser un autre numéro",
+        "poststay.pin": "Code après séjour", "poststay.hint": "Le code qui vous a été remis au départ",
+        "btn.login": "Se connecter", "btn.submit": "Envoyer", "btn.sendcode": "Envoyer le code",
+        "btn.verify": "Vérifier", "btn.reconnect": "Se reconnecter",
+        "social.note": "Vous serez redirigé vers le fournisseur, puis ramené ici.",
+        "social.google": "Continuer avec Google", "social.apple": "Continuer avec Apple",
+        "social.facebook": "Continuer avec Facebook",
+        "info.device": "Votre appareil", "info.ip": "Adresse IP", "info.mac": "Adresse MAC",
+        "info.help": "La réception peut vous demander ces informations si vous avez besoin d'aide pour vous connecter.",
+        "notice.nomethods": "Aucun moyen de connexion n'est encore disponible sur ce réseau. Veuillez contacter la réception.",
+        "notice.nopackages": "L'accès à Internet n'est pas disponible ici pour le moment. Vous pouvez vous connecter, mais il n'y a encore rien à quoi vous relier — merci de prévenir la réception.",
+        "err.generic": "Nous n'avons pas pu vérifier votre séjour. Veuillez vérifier vos informations ou contacter la réception.",
+        "err.retry": "Vous pouvez réessayer maintenant.", "lang.label": "Langue"
+      },
+      it: {
+        "tab.guest": "Accesso ospiti", "tab.account": "Accesso account",
+        "method.pms": "Camera", "method.poststay": "Dopo il soggiorno", "method.voucher": "Voucher",
+        "method.account": "Account personale", "method.email": "E-mail", "method.sms": "Telefono",
+        "method.social": "Social", "alt.title": "Oppure accedi con",
+        "account.personal": "Usa un account personale", "voucher.label": "Codice voucher",
+        "account.user": "Nome utente", "account.pass": "Password",
+        "pms.room": "Numero di camera", "pms.secondary": "Password",
+        "pms.prompt.lastname": "Cognome indicato nella prenotazione",
+        "pms.prompt.firstname": "Nome indicato nella prenotazione",
+        "pms.prompt.reservation": "Numero di prenotazione o di conferma",
+        "pms.prompt.any": "Nome, cognome o numero di prenotazione",
+        "pms.prompt.either": "Cognome OPPURE numero di prenotazione",
+        "pms.choose": "Scegli il tuo pacchetto Internet",
+        "email.dest": "Indirizzo e-mail", "sms.dest": "Numero di telefono",
+        "sms.hint": "Includi il prefisso internazionale, ad esempio +44 20 7946 0958",
+        "otp.code": "Codice di verifica",
+        "otp.sent.email": "Abbiamo inviato un codice di 6 cifre a",
+        "otp.sent.sms": "Abbiamo inviato via SMS un codice di 6 cifre a",
+        "otp.retry.email": "Usa un altro indirizzo e-mail", "otp.retry.sms": "Usa un altro numero",
+        "poststay.pin": "PIN dopo il soggiorno", "poststay.hint": "Il PIN che hai ricevuto al check-out",
+        "btn.login": "Accedi", "btn.submit": "Invia", "btn.sendcode": "Invia il codice",
+        "btn.verify": "Verifica", "btn.reconnect": "Riconnetti",
+        "social.note": "Verrai reindirizzato al provider e poi di nuovo qui.",
+        "social.google": "Continua con Google", "social.apple": "Continua con Apple",
+        "social.facebook": "Continua con Facebook",
+        "info.device": "Il tuo dispositivo", "info.ip": "Indirizzo IP", "info.mac": "Indirizzo MAC",
+        "info.help": "La reception potrebbe chiederti questi dati se hai bisogno di aiuto per connetterti.",
+        "notice.nomethods": "Su questa rete non è ancora disponibile alcun modo per accedere. Contatta la reception.",
+        "notice.nopackages": "Al momento l'accesso a Internet non è disponibile qui. Puoi comunque accedere, ma non c'è ancora nulla a cui collegarti — avvisa la reception.",
+        "err.generic": "Non è stato possibile verificare il tuo soggiorno. Controlla i dati inseriti o contatta la reception.",
+        "err.retry": "Puoi riprovare adesso.", "lang.label": "Lingua"
+      },
+      ru: {
+        "tab.guest": "Вход для гостей", "tab.account": "Вход в аккаунт",
+        "method.pms": "Номер", "method.poststay": "После выезда", "method.voucher": "Ваучер",
+        "method.account": "Личный аккаунт", "method.email": "Эл. почта", "method.sms": "Телефон",
+        "method.social": "Соцсети", "alt.title": "Или войдите через",
+        "account.personal": "Использовать личный аккаунт", "voucher.label": "Код ваучера",
+        "account.user": "Имя пользователя", "account.pass": "Пароль",
+        "pms.room": "Номер комнаты", "pms.secondary": "Пароль",
+        "pms.prompt.lastname": "Фамилия, указанная в брони",
+        "pms.prompt.firstname": "Имя, указанное в брони",
+        "pms.prompt.reservation": "Номер брони или подтверждения",
+        "pms.prompt.any": "Имя, фамилия или номер брони",
+        "pms.prompt.either": "Фамилия ИЛИ номер брони",
+        "pms.choose": "Выберите интернет-пакет",
+        "email.dest": "Адрес эл. почты", "sms.dest": "Номер телефона",
+        "sms.hint": "Укажите код страны, например +44 20 7946 0958",
+        "otp.code": "Код подтверждения",
+        "otp.sent.email": "Мы отправили 6-значный код на",
+        "otp.sent.sms": "Мы отправили 6-значный код в SMS на номер",
+        "otp.retry.email": "Указать другой адрес", "otp.retry.sms": "Указать другой номер",
+        "poststay.pin": "PIN после выезда", "poststay.hint": "PIN, который вам выдали при выезде",
+        "btn.login": "Войти", "btn.submit": "Отправить", "btn.sendcode": "Отправить код",
+        "btn.verify": "Подтвердить", "btn.reconnect": "Подключиться снова",
+        "social.note": "Вы перейдёте на сайт провайдера, а затем вернётесь сюда.",
+        "social.google": "Продолжить с Google", "social.apple": "Продолжить с Apple",
+        "social.facebook": "Продолжить с Facebook",
+        "info.device": "Ваше устройство", "info.ip": "IP-адрес", "info.mac": "MAC-адрес",
+        "info.help": "На стойке регистрации могут попросить эти данные, если вам нужна помощь с подключением.",
+        "notice.nomethods": "В этой сети пока нет способа войти. Пожалуйста, обратитесь на стойку регистрации.",
+        "notice.nopackages": "Доступ в интернет здесь сейчас недоступен. Вы можете войти, но подключать пока не к чему — сообщите об этом на стойку регистрации.",
+        "err.generic": "Не удалось подтвердить ваше проживание. Проверьте данные или обратитесь на стойку регистрации.",
+        "err.retry": "Теперь можно попробовать снова.", "lang.label": "Язык"
+      }
+    };
+
+    var I18N = {};        // the HOTEL's published overrides: code -> { key: text }
     var LANG = 'en';
+    var DICT = BUILTIN.en;
+
+    function langMeta(code) {
+      for (var i = 0; i < LANGS.length; i++) { if (LANGS[i].code === code) return LANGS[i]; }
+      return null;
+    }
+
+    // words merges the hotel's overrides over the built-in dictionary for one language. An override that is
+    // blank is not an override -- an operator who clears a field is asking for the shipped wording back, not
+    // for an empty label.
+    function words(code) {
+      var out = {};
+      var base = BUILTIN[code] || {};
+      var over = I18N[code] || {};
+      Object.keys(base).forEach(function (k) { out[k] = base[k]; });
+      Object.keys(over).forEach(function (k) { if (over[k]) out[k] = over[k]; });
+      return out;
+    }
+
+    // t is for text this script GENERATES. Text that is already in the markup carries data-i18n instead and is
+    // translated by the pass below.
+    function t(key) { return DICT[key] || BUILTIN.en[key] || key; }
 
     function applyLanguage(code) {
       LANG = code;
-      var dict = I18N[code] || {};
+      DICT = words(code);
+      var meta = langMeta(code);
       document.documentElement.lang = code;
+      // Arabic reads right to left. A portal that renders it left-aligned has transliterated the words and
+      // left the page in the wrong language.
+      document.documentElement.dir = (meta && meta.rtl) ? 'rtl' : 'ltr';
       document.querySelectorAll('[data-i18n]').forEach(function (el) {
         var k = el.dataset.i18n;
-        if (dict[k]) el.textContent = dict[k];
+        if (DICT[k]) el.textContent = DICT[k];
         else if (el.dataset.i18nEn) el.textContent = el.dataset.i18nEn;
       });
       document.querySelectorAll('[data-i18n-ph]').forEach(function (el) {
         var k = el.dataset.i18nPh;
-        if (dict[k]) el.placeholder = dict[k];
+        if (DICT[k]) el.placeholder = DICT[k];
         else if (el.dataset.i18nPhEn) el.placeholder = el.dataset.i18nPhEn;
       });
-      // Tab labels are generated, so they are re-rendered rather than translated in place.
-      document.querySelectorAll('.tab[data-group]').forEach(function (el) {
-        var g = el.dataset.group;
-        var span = el.querySelector('span');
-        if (span) span.textContent = dict['tab.' + g] || Groups[g].label;
-      });
+      var sel = document.getElementById('lang');
+      if (sel) sel.setAttribute('aria-label', t('lang.label'));
       try { localStorage.setItem('sc-lang', code); } catch (e) {}
     }
 
@@ -422,31 +739,52 @@ const landingHTML = `<!doctype html>
         img.src = d.logo_url; img.alt = d.hotel_name || 'Hotel'; img.style.display = '';
       }
       I18N = (d.translations && typeof d.translations === 'object') ? d.translations : {};
-      const sel = document.getElementById('lang');
-      // The offered languages are the ones the hotel actually published words for, plus English. Offering a
-      // language with no translation behind it is the defect this replaces.
-      const codes = Array.isArray(d.languages) && d.languages.length
-        ? d.languages
-        : ['en'].concat(Object.keys(I18N).filter(c => c !== 'en')).map(c => ({ code: c }));
+      // ONLY THE CONFIGURED LANGUAGES ARE OFFERED. A hotel that has chosen which languages its guests see gets
+      // exactly that list; one that has never been near the screen gets the six the portal ships words for.
+      // What is never offered is a language with nothing behind it.
+      renderLanguages(Array.isArray(d.languages) && d.languages.length ? d.languages : null);
+    }).catch(() => {});
+
+    // renderLanguages fills the selector and selects the language this guest should see.
+    //
+    // It runs ONCE before branding is fetched and again with the hotel's answer. That is deliberate: a
+    // captive portal is reached by a device with no internet, the branding call can fail, and a selector that
+    // is only populated on success is a selector that is empty exactly when the network is worst.
+    function renderLanguages(configured) {
+      var sel = document.getElementById('lang');
+      var offered = [];
+      if (configured) {
+        configured.forEach(function (l) {
+          var code = (l && l.code) || l;
+          var meta = langMeta(code);
+          // A code the portal has no words for is still offered IF the hotel published a translation for it --
+          // that is a hotel adding a seventh language, not an empty promise.
+          if (!meta && !(I18N[code] && Object.keys(I18N[code]).length)) return;
+          offered.push({ code: code, label: (l && l.label) || (meta && meta.label) || code.toUpperCase() });
+        });
+      }
+      if (!offered.length) offered = LANGS.map(function (l) { return { code: l.code, label: l.label }; });
+
       sel.innerHTML = '';
-      codes.forEach(l => {
-        const code = l.code || l;
-        const o = document.createElement('option');
-        o.value = code;
-        o.textContent = l.label || (I18N[code] && I18N[code]['lang.name']) || code.toUpperCase();
+      offered.forEach(function (l) {
+        var o = document.createElement('option');
+        o.value = l.code;
+        o.textContent = l.label;
         sel.appendChild(o);
       });
-      let want = 'en';
-      try { want = localStorage.getItem('sc-lang') || 'en'; } catch (e) {}
+
+      var want = '';
+      try { want = localStorage.getItem('sc-lang') || ''; } catch (e) {}
       // The browser's own preference is a better first guess than English for a guest who has never chosen.
-      if (want === 'en' && navigator.language) {
-        const short = navigator.language.slice(0, 2).toLowerCase();
-        if (I18N[short]) want = short;
+      if (!want && navigator.language) want = navigator.language.slice(0, 2).toLowerCase();
+      if (!Array.prototype.some.call(sel.options, function (o) { return o.value === want; })) {
+        want = Array.prototype.some.call(sel.options, function (o) { return o.value === 'en'; })
+          ? 'en' : (sel.options[0] ? sel.options[0].value : 'en');
       }
-      if (!Array.prototype.some.call(sel.options, o => o.value === want)) want = sel.options[0] ? sel.options[0].value : 'en';
       sel.value = want;
       applyLanguage(want);
-    }).catch(() => {});
+    }
+    renderLanguages(null);
 
     // The "Use Personal Account" toggle. Both forms exist in the DOM at all times so neither loses what the
     // guest typed if they flip back and forth; only visibility moves.
@@ -489,11 +827,14 @@ const landingHTML = `<!doctype html>
       PHASE3_PMS = !!cfg.phase3_pms;
       if (cfg.pms     && cfg.pms.enabled) {
         enabled.push('pms');
-        document.getElementById('pms-prompt').textContent = PMSPrompts[cfg.pms.mode] || PMSPrompts.either;
-        // Pre-set the secondary field's autocomplete hint based on mode.
-        const sec = document.getElementById('pms-secondary');
-        sec.placeholder = PMSPrompts[cfg.pms.mode] || sec.placeholder;
-        sec.dataset.mode = cfg.pms.mode || 'either';
+        // ONE PROMPT, UNDER THE FIELD. It used to be set as the hint AND as the field's placeholder, so the
+        // guest read the same sentence twice with the second copy sitting where their answer goes.
+        const prompt = document.getElementById('pms-prompt');
+        const key = PMSPromptKeys[cfg.pms.mode] || PMSPromptKeys.either;
+        prompt.dataset.i18n = key;
+        prompt.dataset.i18nEn = PMSPrompts[cfg.pms.mode] || PMSPrompts.either;
+        prompt.textContent = t(key);
+        document.getElementById('pms-secondary').dataset.mode = cfg.pms.mode || 'either';
       }
       // POST-STAY HAS ITS OWN GATE, and it is not the PMS one.
       //
@@ -518,7 +859,9 @@ const landingHTML = `<!doctype html>
             const a = document.createElement('a');
             a.href = '/auth/social/start?provider=' + encodeURIComponent(p);
             a.style.cssText = 'display:block;text-align:center;padding:12px;margin-top:10px;border:1px solid #ccc;border-radius:8px;color:inherit;text-decoration:none;font-weight:600';
-            a.textContent = ProviderLabels[p] || ('Continue with ' + p);
+            a.dataset.i18n = 'social.' + p;
+            a.dataset.i18nEn = ProviderLabels[p] || ('Continue with ' + p);
+            a.textContent = t('social.' + p) === ('social.' + p) ? a.dataset.i18nEn : t('social.' + p);
             host.appendChild(a);
           });
         }
@@ -550,11 +893,19 @@ const landingHTML = `<!doctype html>
 
       if (cfg.internet_packages_available === false) {
         const n = document.getElementById('site-notice');
-        n.textContent = 'Internet access is not available here at the moment. You can still sign in, but there is nothing to connect you to yet — please let reception know.';
+        n.dataset.i18n = 'notice.nopackages';
+        n.dataset.i18nEn = BUILTIN.en['notice.nopackages'];
+        n.textContent = t('notice.nopackages');
         n.classList.add('show');
       }
       if (enabled.length === 0) {
-        tabsEl.innerHTML = '<div class="small">There is no way to sign in on this network yet. Please contact reception.</div>';
+        const none = document.createElement('div');
+        none.className = 'small';
+        none.dataset.i18n = 'notice.nomethods';
+        none.dataset.i18nEn = BUILTIN.en['notice.nomethods'];
+        none.textContent = t('notice.nomethods');
+        tabsEl.innerHTML = '';
+        tabsEl.appendChild(none);
         return;
       }
       // Sort the enabled methods into the two groups, preserving the order that enabled[] already established --
@@ -573,7 +924,10 @@ const landingHTML = `<!doctype html>
           const el = document.createElement('button');
           el.type = 'button'; el.className = 'tab'; el.dataset.group = gid;
           el.setAttribute('role', 'tab');
-          el.innerHTML = Groups[gid].icon + '<span>' + ((I18N[LANG] || {})['tab.' + gid] || Groups[gid].label) + '</span>';
+          el.innerHTML = Groups[gid].icon + '<span data-i18n="tab.' + gid + '"></span>';
+          const span = el.querySelector('span');
+          span.dataset.i18nEn = Groups[gid].label;
+          span.textContent = t('tab.' + gid);
           el.addEventListener('click', () => setGroup(gid, groupMembers));
           tabsEl.appendChild(el);
         });
@@ -669,7 +1023,9 @@ const landingHTML = `<!doctype html>
     // envelope exists to close. The site-level notice above the sign-in tabs carries that information
     // instead — it is read from configuration before any identity is submitted, is identical for every guest
     // on the site, and never varies with what was typed.
-    const PHASE3_FAIL = 'We could not verify your stay. Please check your details or contact reception.';
+    // It is a FUNCTION rather than a constant because the guest chooses their language after this script
+    // loads, and a string captured at load time is a string in whatever language the page started in.
+    function PHASE3_FAIL() { return t('err.generic'); }
 
     // THE SERVER'S SENTENCE IS THE ONE THE GUEST READS.
     //
@@ -683,7 +1039,7 @@ const landingHTML = `<!doctype html>
     // PHASE3_FAIL remains the fallback for a transport failure or an empty body — cases where no server
     // sentence exists and the page must still say something that discloses nothing.
     function phase3Message(j) {
-      return (j && typeof j.message === 'string' && j.message) ? j.message : PHASE3_FAIL;
+      return (j && typeof j.message === 'string' && j.message) ? j.message : PHASE3_FAIL();
     }
 
     // PHASE3_WAIT_UNTIL is the moment the SERVER said it would consider another submission. It is a local
@@ -719,7 +1075,7 @@ const landingHTML = `<!doctype html>
           PHASE3_WAIT_UNTIL = 0;
           // The wait is over as far as this page knows. It does NOT announce that the guest is now allowed
           // in — only that they may ask again, which the server will answer for itself.
-          errEl.textContent = 'You can try again now.';
+          errEl.textContent = t('err.retry');
           if (btn) btn.disabled = false;
           return;
         }
@@ -826,7 +1182,7 @@ const landingHTML = `<!doctype html>
       }
       // Every other answer is the same message -- wrong PIN, expired, revoked, locked out, the room re-let,
       // or post-stay not being offered here at all.
-      errEl.textContent = PHASE3_FAIL;
+      errEl.textContent = PHASE3_FAIL();
     }
 
     async function submitPhase3(body, errEl) {
@@ -892,7 +1248,7 @@ const landingHTML = `<!doctype html>
       form.style.display = '';
       // The uniform message. A failed GRANT is not a failed identity check, so there is no server sentence
       // to prefer here and nothing about which stage failed.
-      errEl.textContent = PHASE3_FAIL;
+      errEl.textContent = PHASE3_FAIL();
       const btn = form.querySelector('button[type=submit]');
       if (btn) btn.disabled = false;
     }
@@ -901,10 +1257,12 @@ const landingHTML = `<!doctype html>
       const box = document.getElementById('pms-choices');
       const form = document.getElementById('form-pms');
       box.innerHTML = '';
-      if (!choices.length) { errEl.textContent = PHASE3_FAIL; return; }
+      if (!choices.length) { errEl.textContent = PHASE3_FAIL(); return; }
       const h = document.createElement('p');
       h.className = 'small';
-      h.textContent = 'Choose your internet package';
+      h.dataset.i18n = 'pms.choose';
+      h.dataset.i18nEn = BUILTIN.en['pms.choose'];
+      h.textContent = t('pms.choose');
       box.appendChild(h);
       choices.forEach(function(c) {
         const b = document.createElement('button');
@@ -977,7 +1335,6 @@ const landingHTML = `<!doctype html>
       }
     });
   </script>
-  </main>
 
 </body></html>`
 

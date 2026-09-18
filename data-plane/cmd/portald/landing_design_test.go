@@ -14,6 +14,10 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -55,7 +59,8 @@ func TestLandingCarriesTheReferenceStructure(t *testing.T) {
 		{`id="info-btn"`, "the information affordance"},
 		{`--sc-brand`, "the brand colour custom property branding drives"},
 		{`/api/branding`, "the portal must ASK for the hotel's design, or branding is write-only config"},
-		{`max-width: 640px`, "the phone layout"},
+		{`max-width: 680px`, "the phone layout"},
+		{`class="page"`, "the column wrapper; a flex ROW put the language bar BESIDE the card on a phone"},
 	} {
 		if !strings.Contains(html, want.frag) {
 			t.Errorf("the landing page is missing %s (%q)", want.why, want.frag)
@@ -155,6 +160,188 @@ func TestLandingTagsEveryStringTheDesignerOffersToTranslate(t *testing.T) {
 		if !strings.Contains(html, "'tab.' + gid") && !strings.Contains(html, key) {
 			t.Errorf("group tab key %q is not reachable by a translation", key)
 		}
+	}
+}
+
+// THE SIX LANGUAGES ARE PART OF THE BUILD, NOT A DATA-ENTRY TASK.
+//
+// A language selector whose other five entries are empty until somebody types four dozen strings is the same
+// broken promise as a selector that changes nothing. These assert the words are actually in the binary.
+func TestPortalShipsWordsForEveryLanguageItOffers(t *testing.T) {
+	html := renderLanding(t, "10.77.0.42", "")
+	for _, l := range []struct{ code, native string }{
+		{"en", "English"}, {"ar", "العربية"}, {"de", "Deutsch"},
+		{"fr", "Français"}, {"it", "Italiano"}, {"ru", "Русский"},
+	} {
+		if !strings.Contains(html, `code: '`+l.code+`'`) {
+			t.Errorf("%s is not among the offered languages", l.code)
+		}
+		// Offered under its own name. "RU" is not a word a Russian speaker is looking for.
+		if !strings.Contains(html, l.native) {
+			t.Errorf("%s is not offered under its native name %q", l.code, l.native)
+		}
+	}
+}
+
+// builtinDicts pulls the shipped dictionaries out of the template so the test reads the SAME text the guest
+// gets, rather than a second copy that can drift from it.
+func builtinDicts(t *testing.T, html string) map[string]map[string]bool {
+	t.Helper()
+	start := strings.Index(html, "var BUILTIN = {")
+	if start < 0 {
+		t.Fatal("the portal ships no built-in dictionaries at all")
+	}
+	body := html[start:]
+	if end := strings.Index(body, "\n    };"); end > 0 {
+		body = body[:end]
+	}
+	head := regexp.MustCompile(`(?m)^      ([a-z]{2}): \{`)
+	key := regexp.MustCompile(`"([a-z][a-z0-9.]+)":`)
+
+	locs := head.FindAllStringSubmatchIndex(body, -1)
+	out := map[string]map[string]bool{}
+	for i, loc := range locs {
+		code := body[loc[2]:loc[3]]
+		stop := len(body)
+		if i+1 < len(locs) {
+			stop = locs[i+1][0]
+		}
+		keys := map[string]bool{}
+		for _, m := range key.FindAllStringSubmatch(body[loc[1]:stop], -1) {
+			keys[m[1]] = true
+		}
+		out[code] = keys
+	}
+	return out
+}
+
+func TestEveryShippedLanguageIsComplete(t *testing.T) {
+	// A language missing a key silently renders English in the middle of a Russian sentence. English is the
+	// reference because it is also the text sitting in the markup.
+	dicts := builtinDicts(t, renderLanding(t, "10.77.0.42", ""))
+	en, ok := dicts["en"]
+	if !ok || len(en) < 40 {
+		t.Fatalf("the English dictionary is missing or implausibly small (%d keys)", len(en))
+	}
+	for code, keys := range dicts {
+		if code == "en" {
+			continue
+		}
+		var missing []string
+		for k := range en {
+			if !keys[k] {
+				missing = append(missing, k)
+			}
+		}
+		if len(missing) > 0 {
+			sort.Strings(missing)
+			t.Errorf("%s is missing %d of the %d guest-facing strings: %v", code, len(missing), len(en), missing)
+		}
+		for k := range keys {
+			if !en[k] {
+				t.Errorf("%s translates %q, which no longer exists in English", code, k)
+			}
+		}
+	}
+}
+
+// THE TRANSLATION CONTRACT, PINNED ON BOTH SIDES — FOR REAL THIS TIME.
+//
+// The old version of this asserted a hand-copied list of fourteen keys and a comment asking whoever edited
+// Hotel Admin to remember. That is not a contract, it is a note. This reads the operator's list out of the
+// branding screen and compares it with the dictionary the portal actually renders, so a key added on either
+// side without the other is a failing test rather than a field an operator fills in for nothing.
+func TestTheDesignerOffersExactlyTheStringsThePortalRenders(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "..", "hotel-admin", "app", "(app)", "portal-branding", "page.tsx"))
+	if err != nil {
+		t.Skipf("the branding screen is not in this checkout (%v); the two lists cannot be compared", err)
+	}
+	offered := map[string]bool{}
+	for _, m := range regexp.MustCompile(`key: "([a-z][a-z0-9.]+)"`).FindAllStringSubmatch(string(src), -1) {
+		offered[m[1]] = true
+	}
+	if len(offered) == 0 {
+		t.Fatal("no translatable strings were found in the branding screen; this test is not reading what it thinks it is")
+	}
+
+	rendered := builtinDicts(t, renderLanding(t, "10.77.0.42", ""))["en"]
+	var onlyPortal, onlyDesigner []string
+	for k := range rendered {
+		if !offered[k] {
+			onlyPortal = append(onlyPortal, k)
+		}
+	}
+	for k := range offered {
+		if !rendered[k] {
+			onlyDesigner = append(onlyDesigner, k)
+		}
+	}
+	sort.Strings(onlyPortal)
+	sort.Strings(onlyDesigner)
+	if len(onlyPortal) > 0 {
+		t.Errorf("the portal renders %v, which the branding screen never offers to translate", onlyPortal)
+	}
+	if len(onlyDesigner) > 0 {
+		t.Errorf("the branding screen offers %v, which no longer appears on the portal — an operator would translate nothing", onlyDesigner)
+	}
+}
+
+func TestArabicIsLaidOutRightToLeft(t *testing.T) {
+	// Translating the words and leaving the page left-aligned is half a translation. The direction follows the
+	// chosen language, and the two corner-anchored controls flip with it.
+	html := renderLanding(t, "10.77.0.42", "")
+	if !strings.Contains(html, "rtl: true") {
+		t.Error("no language is marked right-to-left, so Arabic renders left-aligned")
+	}
+	if !strings.Contains(html, `document.documentElement.dir = (meta && meta.rtl) ? 'rtl' : 'ltr'`) {
+		t.Error("the page direction does not follow the chosen language")
+	}
+	for _, sel := range []string{`[dir="rtl"] .langbar`, `[dir="rtl"] .info-btn`} {
+		if !strings.Contains(html, sel) {
+			t.Errorf("%s is not mirrored, so it sits over the wrong corner in Arabic", sel)
+		}
+	}
+}
+
+func TestTheSelectorOffersOnlyWhatTheHotelConfigured(t *testing.T) {
+	// The rule that stops the selector promising a language nothing stands behind: a configured code is offered
+	// only if the portal ships words for it OR the hotel published its own.
+	html := renderLanding(t, "10.77.0.42", "")
+	if !strings.Contains(html, "renderLanguages(Array.isArray(d.languages) && d.languages.length ? d.languages : null)") {
+		t.Error("the published language list does not drive the selector")
+	}
+	if !strings.Contains(html, "if (!meta && !(I18N[code] && Object.keys(I18N[code]).length)) return;") {
+		t.Error("a configured language with no words behind it would still be offered")
+	}
+}
+
+func TestGeneratedTextIsTranslatedToo(t *testing.T) {
+	// Half the portal's words are created by script -- tabs, alternative methods, the package chooser, the
+	// site notices. Text set once at render time and never re-read is text that stays in the language the page
+	// started in. Each generated element carries its key so the language pass reaches it.
+	html := renderLanding(t, "10.77.0.42", "")
+	for _, frag := range []struct{ code, why string }{
+		{`h.dataset.i18n = 'alt.title'`, "the alternative-methods heading"},
+		{`b.dataset.i18n = 'method.' + m`, "the alternative method buttons"},
+		{`data-i18n="tab.' + gid + '"`, "the two group tabs"},
+		{`prompt.dataset.i18n = key`, "the room sign-in prompt"},
+		{`a.dataset.i18n = 'social.' + p`, "the social provider buttons"},
+		{`n.dataset.i18n = 'notice.nopackages'`, "the no-packages notice"},
+		{`none.dataset.i18n = 'notice.nomethods'`, "the no-sign-in-methods notice"},
+		{`h.dataset.i18n = 'pms.choose'`, "the package chooser"},
+	} {
+		if !strings.Contains(html, frag.code) {
+			t.Errorf("%s is generated without a translation key, so it stays in English", frag.why)
+		}
+	}
+}
+
+func TestTheRoomPromptIsNotPrintedTwice(t *testing.T) {
+	// It was set as the hint under the field AND as the field's own placeholder, so the guest read the same
+	// sentence twice, the second copy sitting exactly where their answer goes.
+	html := renderLanding(t, "10.77.0.42", "")
+	if strings.Contains(html, "sec.placeholder = PMSPrompts") {
+		t.Error("the room prompt is still duplicated into the field's placeholder")
 	}
 }
 

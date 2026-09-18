@@ -142,22 +142,58 @@ describe("the language selector is backed by real words", () => {
     });
   }
 
-  it("adding a language opens the strings a guest actually reads", async () => {
+  it("offers the six shipped languages without anyone typing a word", async () => {
+    // The old screen started empty and made offering Arabic a data-entry project. The portal ships the words,
+    // so this screen only has to let an operator choose.
     mockBranding({});
     const Page = (await import("@/app/(app)/portal-branding/page")).default;
     render(<Page />);
 
-    fireEvent.change(await screen.findByLabelText(/Language code/i), { target: { value: "ar" } });
-    fireEvent.change(screen.getByLabelText(/Shown as/i), { target: { value: "العربية" } });
+    for (const native of ["English", "العربية", "Deutsch", "Français", "Italiano", "Русский"]) {
+      expect((await screen.findAllByText(native)).length).toBeGreaterThan(0);
+    }
+    // English cannot be switched off: it is what everything else falls back to.
+    expect((screen.getByLabelText(/Offer English to guests/i) as HTMLInputElement).disabled).toBe(true);
+  });
+
+  it("edits one language at a time rather than stacking six", async () => {
+    // Six languages rendered as six blocks was ~300 inputs down one column. A tab strip picks one.
+    mockBranding({});
+    const Page = (await import("@/app/(app)/portal-branding/page")).default;
+    render(<Page />);
+
+    const tabs = await screen.findAllByRole("tab");
+    expect(tabs.length).toBe(6);
+
+    fireEvent.click(screen.getByRole("tab", { name: /العربية/ }));
+    // The fields an operator fills in are the guest-facing strings, named in English rather than as keys, and
+    // labelled with the language so two languages can never be confused for one another.
+    expect(await screen.findByLabelText(/Room Number in العربية/)).toBeTruthy();
+    expect(screen.getByLabelText(/Voucher Code in العربية/)).toBeTruthy();
+    expect(screen.getByLabelText(/Use Personal Account in العربية/)).toBeTruthy();
+    // And only that one language's fields are on screen.
+    expect(screen.queryByLabelText(/Room Number in Deutsch/)).toBeNull();
+  });
+
+  it("says how much of an added language will show in English", async () => {
+    // A shipped language is never missing a string. One the hotel adds starts with nothing, and an operator
+    // needs to see that before guests do.
+    mockBranding({});
+    const Page = (await import("@/app/(app)/portal-branding/page")).default;
+    render(<Page />);
+
+    fireEvent.change(await screen.findByLabelText(/Language code/i), { target: { value: "es" } });
+    fireEvent.change(screen.getByLabelText(/Shown as/i), { target: { value: "Español" } });
     fireEvent.click(screen.getByRole("button", { name: /Add language/i }));
 
-    // The keys an operator fills in are the guest-facing strings, named in English rather than as keys.
-    expect(await screen.findByText(/\(ar\)/)).toBeTruthy();
-    // Title case, matching the reference design the portal now renders. The designer's labels and the
-    // portal's English must agree, or an operator translates a string that is not the one on the page.
-    expect(screen.getAllByText("Room Number").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Voucher Code").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Use Personal Account").length).toBeGreaterThan(0);
+    const tab = await screen.findByRole("tab", { name: /Español/ });
+    expect(within(tab).getByText(/\d+ in English/)).toBeTruthy();
+    // Filling one string in reduces the count rather than leaving the badge stale.
+    const before = Number(within(tab).getByText(/(\d+) in English/).textContent!.match(/\d+/)![0]);
+    fireEvent.change(screen.getByLabelText(/Room Number in Español/), { target: { value: "Número de habitación" } });
+    await waitFor(() =>
+      expect(Number(within(tab).getByText(/(\d+) in English/).textContent!.match(/\d+/)![0])).toBe(before - 1),
+    );
   });
 
   it("publishes the translations with the design, so the selector has something to switch to", async () => {
