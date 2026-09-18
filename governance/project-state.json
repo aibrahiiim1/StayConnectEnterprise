@@ -1093,7 +1093,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0161",
+  "latest_transition_id": "T0162",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1587,14 +1587,14 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "PORTAL_SETTINGS_REDESIGNED_AND_ASSET_UPLOAD_DEFECT_CLOSED",
-    "decision": "D79",
+    "kind": "PORTAL_SETTINGS_ACCEPTED_STEP_UP_POLICY_APPROVED_AND_LANGUAGE_UX_COMPLETED",
+    "decision": "D80",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "1990c83ef912f6791226c1997a53599fde005a46",
-    "base_note": "The master merge commit of PR #157. This delivery begins exactly where that one ended.",
-    "head": "2d62e1c737ada50c1ea1cc7ab1e76a1efdc770b4",
-    "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
-    "note": "T0161. The Product Owner tested the real Hotel Admin and found Logo and Background upload both returning an error. Reproduced on PRE-LIVE before anything was changed: the asset upload was the one call in the admin that hand-wrote its own URL and dropped the /api prefix the Next rewrite matches on, so Next redirected the POST to the login page and the browser re-submitted the image there. Neither upload had ever reached the appliance; the appliance half was never broken. Fixed on the shared API client, with a second defect it had hidden -- the admin could not display its own images either, because /assets/<name> is a guest-network path -- closed by serving the same bytes back through the authenticated operator API. Portal Settings is now four sections, one Save changes and a live preview of the real portal; the draft/published/version/rollback vocabulary is gone from the operator surface while the immutable revision history is written on every save exactly as before. Five settings that were editable and rendered by nothing (welcome, help, terms, custom CSS, custom HTML) now reach the page. The publish step-up was narrowed to the custom CSS/HTML boundary it was written for, stated openly rather than changed silently. No migration, no privilege widening, no destructive action, no Go-Live."
+    "base": "5dea6e14f5fd0b06c275b4edbd43a8deeb5e128b",
+    "base_note": "The master merge commit of PR #158. This delivery begins exactly where that one ended.",
+    "head": "144af15da94a595017c3cc5261c117a92484639d",
+    "head_note": "The last content commit of this delivery. The governance receipt and the generated blocks were committed before it -- the WebKit install it adds was found while the gates were already running on the earlier head, and fixing it there was cheaper than a second gate cycle. The manifest is committed after it, as always.",
+    "note": "T0162. The Product Owner ACCEPTED the Portal Settings delivery and explicitly APPROVED the step-up policy as D80: ordinary constrained branding and settings changes save without password re-authentication; custom_css and custom_html require it in both directions, including clearing them. That is now recorded policy rather than an agent judgement, and is documented in the operations manual at \u00a713a. The Languages work then closed the remaining UX defect: the shipped wording lived only as a JavaScript literal inside the portal template, so Hotel Admin could not show an operator what the portal says in Italian and drew empty boxes with English placeholders. The wording is Go data now, rendered into the page and served at /api/languages, with edged proxying it to the admin \u2014 one source, no copy to drift. The editor shows the real wording per language, stores an override only when the text actually differs, and removes it when the shipped text is restored. Automatic guest-language selection now reads the device\u2019s ORDERED list rather than one entry, resolves locale variants, falls back to English, never overrides a guest\u2019s own choice, and keeps that choice in a cookie as well as localStorage because the iOS captive-portal WebView does not reliably keep either. Verified in Chromium and under WebKit with the iPhone profile, then against the live PRE-LIVE portal. No migration, no privilege widening, no destructive action, no Go-Live."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

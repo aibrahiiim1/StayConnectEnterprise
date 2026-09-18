@@ -10,6 +10,7 @@ package main
 // the design depends on exist, are reachable, and carry the values they claim to.
 
 import (
+	"encoding/json"
 	"html/template"
 	"net"
 	"net/http"
@@ -166,133 +167,148 @@ func TestLandingTagsEveryStringTheDesignerOffersToTranslate(t *testing.T) {
 // THE SIX LANGUAGES ARE PART OF THE BUILD, NOT A DATA-ENTRY TASK.
 //
 // A language selector whose other five entries are empty until somebody types four dozen strings is the same
-// broken promise as a selector that changes nothing. These assert the words are actually in the binary.
+// broken promise as a selector that changes nothing. These read the shipped wording as DATA -- the same map
+// the page renders and /api/languages serves -- rather than scraping it back out of the HTML, which is what
+// they had to do while it existed only as a JavaScript literal inside the template.
 func TestPortalShipsWordsForEveryLanguageItOffers(t *testing.T) {
-	html := renderLanding(t, "10.77.0.42", "")
-	for _, l := range []struct{ code, native string }{
+	want := []struct{ code, native string }{
 		{"en", "English"}, {"ar", "العربية"}, {"de", "Deutsch"},
 		{"fr", "Français"}, {"it", "Italiano"}, {"ru", "Русский"},
-	} {
-		if !strings.Contains(html, `code: '`+l.code+`'`) {
-			t.Errorf("%s is not among the offered languages", l.code)
+	}
+	if len(portalLanguages) != len(want) {
+		t.Fatalf("the portal offers %d languages, want %d", len(portalLanguages), len(want))
+	}
+	byCode := map[string]portalLanguage{}
+	for _, l := range portalLanguages {
+		byCode[l.Code] = l
+	}
+	for _, w := range want {
+		l, ok := byCode[w.code]
+		if !ok {
+			t.Errorf("%s is not among the offered languages", w.code)
+			continue
 		}
 		// Offered under its own name. "RU" is not a word a Russian speaker is looking for.
-		if !strings.Contains(html, l.native) {
-			t.Errorf("%s is not offered under its native name %q", l.code, l.native)
+		if l.Label != w.native {
+			t.Errorf("%s is offered as %q, want its native name %q", w.code, l.Label, w.native)
+		}
+		if len(builtinStrings[w.code]) == 0 {
+			t.Errorf("%s is offered with no wording behind it", w.code)
 		}
 	}
-}
-
-// builtinDicts pulls the shipped dictionaries out of the template so the test reads the SAME text the guest
-// gets, rather than a second copy that can drift from it.
-func builtinDicts(t *testing.T, html string) map[string]map[string]bool {
-	t.Helper()
-	start := strings.Index(html, "var BUILTIN = {")
-	if start < 0 {
-		t.Fatal("the portal ships no built-in dictionaries at all")
-	}
-	body := html[start:]
-	if end := strings.Index(body, "\n    };"); end > 0 {
-		body = body[:end]
-	}
-	head := regexp.MustCompile(`(?m)^      ([a-z]{2}): \{`)
-	key := regexp.MustCompile(`"([a-z][a-z0-9.]+)":`)
-
-	locs := head.FindAllStringSubmatchIndex(body, -1)
-	out := map[string]map[string]bool{}
-	for i, loc := range locs {
-		code := body[loc[2]:loc[3]]
-		stop := len(body)
-		if i+1 < len(locs) {
-			stop = locs[i+1][0]
-		}
-		keys := map[string]bool{}
-		for _, m := range key.FindAllStringSubmatch(body[loc[1]:stop], -1) {
-			keys[m[1]] = true
-		}
-		out[code] = keys
-	}
-	return out
 }
 
 func TestEveryShippedLanguageIsComplete(t *testing.T) {
 	// A language missing a key silently renders English in the middle of a Russian sentence. English is the
 	// reference because it is also the text sitting in the markup.
-	dicts := builtinDicts(t, renderLanding(t, "10.77.0.42", ""))
-	en, ok := dicts["en"]
-	if !ok || len(en) < 40 {
-		t.Fatalf("the English dictionary is missing or implausibly small (%d keys)", len(en))
+	en := builtinStrings["en"]
+	if len(en) < 40 {
+		t.Fatalf("the English dictionary is implausibly small (%d keys)", len(en))
 	}
-	for code, keys := range dicts {
+	for code, keys := range builtinStrings {
 		if code == "en" {
 			continue
 		}
-		var missing []string
+		var missing, extra []string
 		for k := range en {
-			if !keys[k] {
+			if _, ok := keys[k]; !ok {
 				missing = append(missing, k)
 			}
 		}
+		for k := range keys {
+			if _, ok := en[k]; !ok {
+				extra = append(extra, k)
+			}
+		}
+		sort.Strings(missing)
+		sort.Strings(extra)
 		if len(missing) > 0 {
-			sort.Strings(missing)
 			t.Errorf("%s is missing %d of the %d guest-facing strings: %v", code, len(missing), len(en), missing)
 		}
-		for k := range keys {
-			if !en[k] {
-				t.Errorf("%s translates %q, which no longer exists in English", code, k)
+		if len(extra) > 0 {
+			t.Errorf("%s translates %v, which no longer exists in English", code, extra)
+		}
+		// AND THE WORDS MUST ACTUALLY BE IN THAT LANGUAGE. An entry copied verbatim from English is a gap
+		// wearing a translation's clothes -- it passes a key-count check and reads as untranslated on the
+		// page. Proper nouns and the like are excluded because they are legitimately identical.
+		same := 0
+		for k, v := range keys {
+			if v == en[k] {
+				same++
 			}
+		}
+		if same > len(en)/4 {
+			t.Errorf("%s repeats the English wording for %d of %d strings; that is a gap, not a translation",
+				code, same, len(en))
 		}
 	}
 }
 
-// THE TRANSLATION CONTRACT, PINNED ON BOTH SIDES — FOR REAL THIS TIME.
+// THE PAGE AND THE ENDPOINT MUST SERVE THE SAME WORDS.
 //
-// The old version of this asserted a hand-copied list of fourteen keys and a comment asking whoever edited
-// Hotel Admin to remember. That is not a contract, it is a note. This reads the operator's list out of the
-// branding screen and compares it with the dictionary the portal actually renders, so a key added on either
-// side without the other is a failing test rather than a field an operator fills in for nothing.
-func TestTheDesignerOffersExactlyTheStringsThePortalRenders(t *testing.T) {
-	src, err := os.ReadFile(filepath.Join("..", "..", "..", "hotel-admin", "app", "(app)", "portal-branding", "strings.ts"))
-	if err != nil {
-		t.Skipf("the branding screen is not in this checkout (%v); the two lists cannot be compared", err)
+// Two consumers of one map is the whole point of moving it out of the template. If the page ever rendered
+// something other than what /api/languages reports, Hotel Admin would be showing an operator wording no guest
+// receives -- which is the defect this replaced, in a new place.
+func TestTheRenderedPageCarriesTheShippedWording(t *testing.T) {
+	html := renderLanding(t, "10.77.0.42", "")
+	for _, l := range portalLanguages {
+		if !strings.Contains(html, `"code":"`+l.Code+`"`) {
+			t.Errorf("the page does not carry language %s", l.Code)
+		}
+		if !strings.Contains(html, l.Label) {
+			t.Errorf("the page does not carry %s's native name", l.Code)
+		}
 	}
-	offered := map[string]bool{}
-	for _, m := range regexp.MustCompile(`key: "([a-z][a-z0-9.]+)"`).FindAllStringSubmatch(string(src), -1) {
-		offered[m[1]] = true
+	// A sample from each dictionary, rather than all 306: enough to prove the map reached the page.
+	for code, key := range map[string]string{
+		"ar": "pms.room", "de": "btn.submit", "fr": "voucher.label", "it": "tab.guest", "ru": "info.device",
+	} {
+		if want := builtinStrings[code][key]; want != "" && !strings.Contains(html, want) {
+			t.Errorf("the page does not carry %s/%s (%q)", code, key, want)
+		}
 	}
-	if len(offered) == 0 {
-		t.Fatal("no translatable strings were found in the branding screen; this test is not reading what it thinks it is")
-	}
+}
 
-	rendered := builtinDicts(t, renderLanding(t, "10.77.0.42", ""))["en"]
-	var onlyPortal, onlyDesigner []string
-	for k := range rendered {
-		if !offered[k] {
-			onlyPortal = append(onlyPortal, k)
+func TestTheLanguagesEndpointServesWhatThePageRenders(t *testing.T) {
+	h := &handler{}
+	w := httptest.NewRecorder()
+	h.languages(w, httptest.NewRequest(http.MethodGet, "/api/languages", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d", w.Code)
+	}
+	var got struct {
+		Languages []portalLanguage             `json:"languages"`
+		Strings   map[string]map[string]string `json:"strings"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("the endpoint does not serve JSON: %v", err)
+	}
+	if len(got.Languages) != len(portalLanguages) {
+		t.Errorf("serves %d languages, the page renders %d", len(got.Languages), len(portalLanguages))
+	}
+	for code, want := range builtinStrings {
+		for k, v := range want {
+			if got.Strings[code][k] != v {
+				t.Errorf("%s/%s served as %q, rendered as %q", code, k, got.Strings[code][k], v)
+				break
+			}
 		}
-	}
-	for k := range offered {
-		if !rendered[k] {
-			onlyDesigner = append(onlyDesigner, k)
-		}
-	}
-	sort.Strings(onlyPortal)
-	sort.Strings(onlyDesigner)
-	if len(onlyPortal) > 0 {
-		t.Errorf("the portal renders %v, which the branding screen never offers to translate", onlyPortal)
-	}
-	if len(onlyDesigner) > 0 {
-		t.Errorf("the branding screen offers %v, which no longer appears on the portal — an operator would translate nothing", onlyDesigner)
 	}
 }
 
 func TestArabicIsLaidOutRightToLeft(t *testing.T) {
 	// Translating the words and leaving the page left-aligned is half a translation. The direction follows the
 	// chosen language, and the two corner-anchored controls flip with it.
-	html := renderLanding(t, "10.77.0.42", "")
-	if !strings.Contains(html, "rtl: true") {
-		t.Error("no language is marked right-to-left, so Arabic renders left-aligned")
+	var rtl []string
+	for _, l := range portalLanguages {
+		if l.RTL {
+			rtl = append(rtl, l.Code)
+		}
 	}
+	if len(rtl) != 1 || rtl[0] != "ar" {
+		t.Errorf("right-to-left languages are %v; Arabic and only Arabic should be", rtl)
+	}
+	html := renderLanding(t, "10.77.0.42", "")
 	if !strings.Contains(html, `document.documentElement.dir = (meta && meta.rtl) ? 'rtl' : 'ltr'`) {
 		t.Error("the page direction does not follow the chosen language")
 	}
@@ -312,6 +328,35 @@ func TestTheSelectorOffersOnlyWhatTheHotelConfigured(t *testing.T) {
 	}
 	if !strings.Contains(html, "if (!meta && !(I18N[code] && Object.keys(I18N[code]).length)) return;") {
 		t.Error("a configured language with no words behind it would still be offered")
+	}
+}
+
+// AUTOMATIC LANGUAGE SELECTION.
+//
+// The behaviour is asserted for real in a browser -- see hotel-admin/e2e/guest-language-detection.spec.ts,
+// which drives the actual page under a dozen device locale lists including an iPhone profile. What is
+// asserted HERE is that the page still contains the rules those tests exercise, because each one replaced a
+// specific way of getting this wrong.
+func TestAutomaticLanguageSelectionReadsTheWholeDeviceList(t *testing.T) {
+	html := renderLanding(t, "10.77.0.42", "")
+	for _, want := range []struct{ frag, why string }{
+		{"navigator.languages", "the device's ORDERED list, not just its first language"},
+		{"push(t.split('-')[0])", "ar-EG must match a hotel that enabled ar"},
+		{"function chooseLanguage(offeredCodes)", "the choice is made against what the HOTEL enabled"},
+		{"var want = rememberedLanguage();", "a guest's own choice outranks detection"},
+		{"if (!want || codes.indexOf(want) < 0) want = chooseLanguage(codes);", "detection runs only when there is no usable stored choice"},
+		{"want = codes.indexOf('en') >= 0 ? 'en' : (codes[0] || 'en');", "English is the safe fallback"},
+		{"document.cookie = LANG_KEY", "iOS captive-portal WebViews do not reliably keep localStorage"},
+	} {
+		if !strings.Contains(html, want.frag) {
+			t.Errorf("automatic language selection is missing %s (%q)", want.why, want.frag)
+		}
+	}
+	// A DETECTION MUST LEAVE NO TRACE. If detection wrote the preference, the first load would record a
+	// "choice" the guest never made, and every later load would defer to it -- including after the hotel
+	// changed which languages it offers.
+	if strings.Contains(html, "rememberLanguage(want)") {
+		t.Error("automatic detection stores its result, which makes it indistinguishable from a guest's choice")
 	}
 }
 
@@ -455,5 +500,54 @@ func TestABrokenLogoLeavesNothingBehind(t *testing.T) {
 	html := renderLanding(t, "10.77.0.42", "")
 	if !strings.Contains(html, "img.onerror") {
 		t.Error("a logo that fails to load is not hidden, so the sign-in page shows a broken image")
+	}
+}
+
+// THE TRANSLATION CONTRACT, PINNED ON BOTH SIDES.
+//
+// The portal decides what strings exist; Hotel Admin offers an operator a field per string. If the two lists
+// drift, an operator either types words that never appear or cannot change words that do. This reads the
+// operator's list out of the branding screen and compares it with the shipped English, in both directions.
+func TestTheDesignerOffersExactlyTheStringsThePortalRenders(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "..", "hotel-admin", "app", "(app)", "portal-branding", "strings.ts"))
+	if err != nil {
+		t.Skipf("the branding screen is not in this checkout (%v); the two lists cannot be compared", err)
+	}
+	offered := map[string]bool{}
+	for _, m := range regexp.MustCompile(`key: "([a-z][a-zA-Z0-9.]*)"`).FindAllStringSubmatch(string(src), -1) {
+		offered[m[1]] = true
+	}
+	if len(offered) == 0 {
+		t.Fatal("no translatable strings were found in the branding screen; this test is not reading what it thinks it is")
+	}
+	en := builtinStrings["en"]
+	var onlyPortal, onlyDesigner []string
+	for k := range en {
+		if !offered[k] {
+			onlyPortal = append(onlyPortal, k)
+		}
+	}
+	for k := range offered {
+		if _, ok := en[k]; !ok {
+			onlyDesigner = append(onlyDesigner, k)
+		}
+	}
+	sort.Strings(onlyPortal)
+	sort.Strings(onlyDesigner)
+	if len(onlyPortal) > 0 {
+		t.Errorf("the portal ships %v, which the branding screen never offers to translate", onlyPortal)
+	}
+	if len(onlyDesigner) > 0 {
+		t.Errorf("the branding screen offers %v, which the portal no longer ships — an operator would translate nothing", onlyDesigner)
+	}
+	// AND THE ENGLISH MUST MATCH, not merely the keys. The admin shows its own English as the reference an
+	// operator compares a translation against; if it says something different from what the page renders,
+	// every translation is made against the wrong original.
+	englishRe := regexp.MustCompile(`key: "([a-z][a-zA-Z0-9.]*)", english: "([^"]*)"`)
+	for _, m := range englishRe.FindAllStringSubmatch(string(src), -1) {
+		want := m[2]
+		if got, ok := en[m[1]]; ok && got != want {
+			t.Errorf("%s reads %q on the portal and %q in the branding screen", m[1], got, want)
+		}
 	}
 }

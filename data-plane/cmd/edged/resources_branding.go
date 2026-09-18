@@ -53,6 +53,11 @@ const maxRevisions = 20
 // preview renders, so the preview cannot drift from what a guest receives.
 const portalPreviewURL = "http://127.0.0.1:8380/"
 
+// portalLanguagesURL is the portal's own shipped wording -- the map it renders into every guest's page.
+// Hotel Admin reads it through here so the Languages screen can show an operator the ACTUAL Italian a guest
+// receives, rather than an empty field with the English behind it as a placeholder.
+const portalLanguagesURL = "http://127.0.0.1:8380/api/languages"
+
 type brandingDoc struct {
 	Design    map[string]any     `json:"design,omitempty"`
 	Draft     map[string]any     `json:"draft,omitempty"`
@@ -78,6 +83,8 @@ func (s *server) brandingRoutes() http.Handler {
 	// The preview reads the REAL portal page rather than a second implementation of it in the admin. See
 	// previewPortal.
 	r.Get("/preview", s.previewPortal)
+	// The shipped wording, read from the portal for the same reason. See portalLanguages.
+	r.Get("/languages", s.portalLanguages)
 	r.Post("/publish", s.publishBranding)
 	r.Post("/rollback/{version}", s.rollbackBranding)
 	return r
@@ -555,4 +562,43 @@ func (s *server) previewPortal(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"html": string(body)})
+}
+
+// portalLanguages hands the admin the wording the portal actually ships.
+//
+// WHY THIS IS A PROXY AND NOT A COPY. The obvious implementation is six dictionaries in the admin's own
+// source. That is 306 strings maintained in two places, and the failure mode is silent and expensive: the
+// operator edits Italian against wording no guest receives, is satisfied, and the mismatch surfaces as a
+// guest complaint months later. The portal owns the words; this fetches them.
+//
+// It is fetched fresh rather than cached in edged. The wording changes when portald is redeployed, which is
+// exactly when a cached copy would be wrong, and one loopback request per visit to a settings screen is not
+// a cost worth being clever about.
+func (s *server) portalLanguages(w http.ResponseWriter, req *http.Request) {
+	ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+	defer cancel()
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, portalLanguagesURL, nil)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "the request could not be built")
+		return
+	}
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		// Named for what it is. "Failed to load languages" would send an operator looking at their own
+		// settings; it is the PORTAL service that is not answering.
+		jsonErr(w, http.StatusServiceUnavailable, "portal_unreachable",
+			"the guest portal service is not answering on this appliance, so its built-in wording cannot be "+
+				"shown. Your settings are unaffected.")
+		return
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		jsonErr(w, http.StatusServiceUnavailable, "portal_unreachable",
+			"the guest portal service did not return its built-in wording.")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
 }

@@ -30,10 +30,8 @@ import {
   Paintbrush, Building2, Languages as LanguagesIcon, Code2, Upload, Trash2, Check, AlertTriangle,
 } from "lucide-react";
 import { PortalPreview } from "./preview";
-import {
-  Design, PORTAL_STRINGS, STRING_GROUPS, SHIPPED_LANGUAGES,
-  advancedChanged, assetSrc, knownLanguages, languageStatus, offeredLanguages,
-} from "./strings";
+import { Design, advancedChanged, assetSrc } from "./strings";
+import { LanguagesSection } from "./languages";
 
 type BrandingState = { design: Design; draft: Design };
 
@@ -65,9 +63,6 @@ export default function PortalSettingsPage() {
   const [uploading, setUploading] = useState<string | null>(null);
   const [password, setPassword] = useState("");
   const [assets, setAssets] = useState<PortalAsset[]>([]);
-  const [editingLang, setEditingLang] = useState("en");
-  const [newLangCode, setNewLangCode] = useState("");
-  const [newLangLabel, setNewLangLabel] = useState("");
 
   const writable = canWrite("portal-branding", roles);
   const set = <K extends keyof Design>(k: K, v: Design[K]) => setD((p) => ({ ...p, [k]: v }));
@@ -163,32 +158,6 @@ export default function PortalSettingsPage() {
       const list = await api.get<ListResp<PortalAsset>>("/portal-assets");
       setAssets(list.data ?? []);
     } catch (e) { setErr(errMsg(e)); }
-  }
-
-  // ---- languages ----------------------------------------------------------------------------------------
-  const known = useMemo(() => knownLanguages(d), [d]);
-  const offeredCodes = useMemo(() => offeredLanguages(d).map((l) => l.code), [d]);
-  const editing = known.find((l) => l.code === editingLang) ?? known[0];
-  const editingState = languageStatus(d, editing?.code ?? "en");
-
-  function setOffered(code: string, on: boolean) {
-    setD((p) => {
-      const list = offeredLanguages(p);
-      const label = known.find((l) => l.code === code)?.label ?? code.toUpperCase();
-      const next = on
-        ? [...list.filter((l) => l.code !== code), { code, label }]
-        : list.filter((l) => l.code !== code || code === "en"); // English is the fallback and stays
-      const order = known.map((l) => l.code);
-      next.sort((a, b) => order.indexOf(a.code) - order.indexOf(b.code));
-      return { ...p, languages: next };
-    });
-  }
-
-  function setTranslation(code: string, key: string, value: string) {
-    setD((p) => ({
-      ...p,
-      translations: { ...(p.translations ?? {}), [code]: { ...((p.translations ?? {})[code] ?? {}), [key]: value } },
-    }));
   }
 
   const preview = { ...DEFAULTS, ...d };
@@ -374,140 +343,7 @@ export default function PortalSettingsPage() {
           )}
 
           {/* ---- LANGUAGES --------------------------------------------------------------------------- */}
-          {tab === "languages" && (
-            <div className="space-y-5">
-              <Card>
-                <CardHeader><CardTitle>Shown to guests</CardTitle></CardHeader>
-                <CardBody className="space-y-3">
-                  <p className="text-sm text-muted-foreground">
-                    The portal ships complete wording for {SHIPPED_LANGUAGES.length} languages — nothing to
-                    translate, just tick the ones your guests should be offered. English is always available
-                    and is what any missing wording falls back to.
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {known.map((l) => {
-                      const on = offeredCodes.includes(l.code);
-                      const fixed = l.code === "en";
-                      return (
-                        <label key={l.code}
-                          className={`inline-flex cursor-pointer items-center gap-2 rounded-full border px-3.5 py-2 text-sm ${
-                            on ? "border-primary bg-primary/5 text-primary" : "text-muted-foreground"
-                          } ${fixed ? "cursor-default" : ""}`}>
-                          <input type="checkbox" className="h-4 w-4" checked={on}
-                            disabled={fixed || !writable}
-                            aria-label={`Offer ${l.label} to guests`}
-                            onChange={(e) => setOffered(l.code, e.target.checked)} />
-                          {l.label}
-                        </label>
-                      );
-                    })}
-                  </div>
-                </CardBody>
-              </Card>
-
-              <Card>
-                <CardHeader><CardTitle>Wording</CardTitle></CardHeader>
-                <CardBody className="space-y-4">
-                  <p className="text-sm text-muted-foreground">
-                    Only change these if your property words something differently. Anything you leave empty
-                    keeps the wording the portal ships.
-                  </p>
-
-                  {/* ONE LANGUAGE AT A TIME. Six of these stacked was roughly three hundred inputs down a
-                      single column, with no way to see the state of any one of them. */}
-                  <div className="flex flex-wrap gap-2" role="tablist" aria-label="Language being edited">
-                    {known.map((l) => {
-                      const st = languageStatus(d, l.code);
-                      return (
-                        <button key={l.code} type="button" role="tab"
-                          aria-selected={editing?.code === l.code}
-                          onClick={() => setEditingLang(l.code)}
-                          className={`inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${
-                            editing?.code === l.code ? "border-primary bg-primary/5 text-primary" : "text-muted-foreground"
-                          }`}>
-                          {l.label}
-                          {st.missing > 0
-                            ? <Badge tone="warn">{st.missing} in English</Badge>
-                            : st.custom > 0
-                              ? <Badge tone="neutral">{st.custom} changed</Badge>
-                              : null}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {editing && (
-                    <div className="space-y-3 rounded-lg border p-4">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <strong className="text-sm">{editing.label}</strong>
-                        <span className="text-xs text-muted-foreground">
-                          {editingState.shipped
-                            ? `Ships complete. ${editingState.custom} of ${editingState.total} changed by this hotel.`
-                            : `Added by this hotel. ${editingState.missing} of ${editingState.total} strings will show English.`}
-                        </span>
-                      </div>
-
-                      {STRING_GROUPS.map((g) => (
-                        // A language the hotel ADDED has every string to fill in, so its groups start open.
-                        // A shipped one needs almost nothing changed, so it opens on the first group only and
-                        // does not present fifty fields to somebody who came to change one.
-                        <details key={g} open={!editingState.shipped || g === STRING_GROUPS[0]}
-                          className="rounded-md border">
-                          <summary className="cursor-pointer px-3 py-2 text-sm font-medium">{g}</summary>
-                          <div className="grid gap-3 p-3 pt-0 sm:grid-cols-2">
-                            {PORTAL_STRINGS.filter((s) => s.group === g).map((st) => {
-                              const v = d.translations?.[editing.code]?.[st.key] ?? "";
-                              const fallsBack = !v && !editingState.shipped;
-                              return (
-                                <label key={st.key} className="block text-xs">
-                                  <span className="flex items-center gap-1.5 text-muted-foreground">
-                                    {st.english}
-                                    {fallsBack && <Badge tone="warn">English</Badge>}
-                                  </span>
-                                  <Input className="mt-1" value={v} placeholder={st.english} disabled={!writable}
-                                    dir={editing.code === "ar" ? "rtl" : undefined}
-                                    aria-label={`${st.english} in ${editing.label}`}
-                                    onChange={(e) => setTranslation(editing.code, st.key, e.target.value)} />
-                                </label>
-                              );
-                            })}
-                          </div>
-                        </details>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="flex flex-wrap items-end gap-2 border-t pt-4">
-                    <Field label="Add another language" help="A language the portal does not ship. It starts empty, so every string you do not fill in shows English.">
-                      {(a) => <span className="flex gap-2">
-                        <Input {...a} value={newLangCode} className="w-20" placeholder="es" disabled={!writable}
-                          aria-label="Language code"
-                          onChange={(e) => setNewLangCode(e.target.value.toLowerCase().slice(0, 5))} />
-                        <Input value={newLangLabel} placeholder="Español" disabled={!writable}
-                          aria-label="Shown as"
-                          onChange={(e) => setNewLangLabel(e.target.value)} />
-                        <Button variant="secondary" disabled={!newLangCode.trim() || !writable}
-                          onClick={() => {
-                            const code = newLangCode.trim();
-                            setD((p) => ({
-                              ...p,
-                              translations: { ...(p.translations ?? {}), [code]: (p.translations ?? {})[code] ?? {} },
-                              languages: [
-                                ...offeredLanguages(p).filter((l) => l.code !== code),
-                                { code, label: newLangLabel.trim() || code.toUpperCase() },
-                              ],
-                            }));
-                            setEditingLang(code); setNewLangCode(""); setNewLangLabel("");
-                          }}>
-                          Add
-                        </Button>
-                      </span>}
-                    </Field>
-                  </div>
-                </CardBody>
-              </Card>
-            </div>
-          )}
+          {tab === "languages" && <LanguagesSection d={d} setD={setD} writable={writable} />}
 
           {/* ---- ADVANCED ---------------------------------------------------------------------------- */}
           {tab === "advanced" && (
