@@ -107,3 +107,58 @@ func TestBrandingBoundsTheTemplateSize(t *testing.T) {
 		t.Fatal("a 70 KB stylesheet was accepted")
 	}
 }
+
+// THE STEP-UP GUARDS THE SURFACE IT WAS WRITTEN FOR.
+//
+// Publishing used to require a password for every change, which meant a receptionist correcting a typo in the
+// hotel's name met the same challenge as somebody injecting CSS into the page that collects voucher codes.
+// The check is now on the boundary that matters, and these assert the line is drawn by CONTENT rather than by
+// which screen the request came from.
+func TestOnlyAdvancedContentTriggersTheStepUp(t *testing.T) {
+	current := map[string]any{
+		"hotel_name": "Coral Sea", "brand_color": "#0f6b63",
+		"custom_css": ".card { box-shadow: none; }",
+	}
+	for _, c := range []struct {
+		name string
+		next map[string]any
+		want bool
+	}{
+		{"renaming the hotel", map[string]any{"hotel_name": "Coral Sea Resort", "custom_css": ".card { box-shadow: none; }"}, false},
+		{"changing a colour", map[string]any{"hotel_name": "Coral Sea", "brand_color": "#123456", "custom_css": ".card { box-shadow: none; }"}, false},
+		{"editing the stylesheet", map[string]any{"hotel_name": "Coral Sea", "custom_css": ".card { display: none; }"}, true},
+		// REMOVING it counts too. "Advanced is empty now" is still a change to what the page executes, and a
+		// rule that only looked at the new value would let a session clear the hotel's own styling unchallenged.
+		{"clearing the stylesheet", map[string]any{"hotel_name": "Coral Sea"}, true},
+		{"adding markup", map[string]any{"custom_css": ".card { box-shadow: none; }", "custom_html": "<p>hi</p>"}, true},
+	} {
+		if got := advancedChanged(c.next, current); got != c.want {
+			t.Errorf("%s: step-up required = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestSavingSettingsStillRefusesScript(t *testing.T) {
+	// The step-up decides WHO may change the escape hatch. validateDesign decides WHAT may go in it, and the
+	// settings door must run it exactly as publish does -- a second way in that skipped validation would be a
+	// way to put script on the sign-in page.
+	for _, bad := range []map[string]any{
+		{"custom_html": "<script>steal()</script>"},
+		{"custom_html": "<img src=x onerror=steal()>"},
+		{"custom_css": "@import url(//evil/x.css)"},
+		{"custom_html": "<iframe src=//evil></iframe>"},
+		{"custom_html": "<form action=//evil>"},
+	} {
+		if err := validateDesign(bad); err == nil {
+			t.Errorf("a design containing %v was accepted", bad)
+		}
+	}
+}
+
+func TestThePreviewReadsTheRealPortal(t *testing.T) {
+	// A preview drawn separately in the admin would agree with the portal on the day it was written and drift
+	// from then on. This pins it to portald's own page rather than to a copy.
+	if portalPreviewURL != "http://127.0.0.1:8380/" {
+		t.Errorf("the preview source is %q; it must be the portal's own sign-in page on this appliance", portalPreviewURL)
+	}
+}

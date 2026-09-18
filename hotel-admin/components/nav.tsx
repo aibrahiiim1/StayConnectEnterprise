@@ -124,7 +124,7 @@ const SECTIONS: Section[] = [
       // Sign-in methods leads the group: which ways a guest may prove who they are is the first thing an
       // operator sets up on the portal, and it was previously not settable anywhere in the product.
       { href: "/sign-in-methods",  label: "Sign-in methods", icon: LogIn,    resource: "auth-methods", keywords: "room number voucher otp sms email social" },
-      { href: "/portal-branding",  label: "Branding",        icon: Paintbrush, resource: "portal-branding", keywords: "logo colours terms languages" },
+      { href: "/portal-branding",  label: "Portal settings", icon: Paintbrush, resource: "portal-branding", keywords: "branding logo background colours terms languages translations" },
       { href: "/walled-garden",    label: "Allowed sites", icon: Shield,     resource: "walled-garden", keywords: "whitelist domains before login" },
       { href: "/social-providers", label: "Social login",  icon: KeyRound,   resource: "social-providers", keywords: "google apple facebook microsoft oauth" },
       { href: "/notifications",    label: "Email & SMS",   icon: Send,       resource: "notification-providers", keywords: "sendgrid twilio ses otp delivery" },

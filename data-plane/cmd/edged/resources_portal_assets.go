@@ -71,6 +71,11 @@ func (s *server) portalAssetRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", s.listPortalAssets)
 	r.Post("/", s.uploadPortalAsset)
+	// The BYTES, for Hotel Admin. The portal serves these at /assets/<name> on the GUEST network; the admin is
+	// a different origin and that path resolves to nothing there -- which is why the branding screen's own
+	// thumbnail of the current logo was a broken image, and why the settings preview could not show one
+	// either. This is the same file, read back through the authenticated operator API.
+	r.Get("/{name}/raw", s.rawPortalAsset)
 	r.Delete("/{name}", s.deletePortalAsset)
 	return r
 }
@@ -185,6 +190,35 @@ func (s *server) uploadPortalAsset(w http.ResponseWriter, r *http.Request) {
 		Name: name, URL: "/assets/" + name, SizeBytes: int64(n),
 		Uploaded: time.Now().UTC().Format(time.RFC3339),
 	})
+}
+
+// rawPortalAsset streams one stored asset to an authenticated operator.
+//
+// It reads the type from the CONTENT for the same reason the upload does: the name on disk was generated from
+// a sniff, but a file is only what its bytes say it is, and re-deriving costs nothing. Anything that no longer
+// sniffs as an image is refused rather than served with a guessed type.
+func (s *server) rawPortalAsset(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if !regexpAssetName.MatchString(name) {
+		jsonErr(w, http.StatusNotFound, "not_found", "no such asset")
+		return
+	}
+	data, err := os.ReadFile(filepath.Join(portalAssetDir, name))
+	if err != nil {
+		jsonErr(w, http.StatusNotFound, "not_found", "no such asset")
+		return
+	}
+	_, mime := sniffImage(data)
+	if mime == "" {
+		jsonErr(w, http.StatusUnsupportedMediaType, "unsupported_image", "the stored file is not a recognised image")
+		return
+	}
+	w.Header().Set("Content-Type", mime)
+	// Content-addressed by name, so it can be cached hard; and never sniffed by the browser into something else.
+	w.Header().Set("Cache-Control", "private, max-age=86400, immutable")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }
 
 func (s *server) deletePortalAsset(w http.ResponseWriter, r *http.Request) {

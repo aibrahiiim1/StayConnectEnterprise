@@ -51,6 +51,26 @@ export const api = {
   put:   <T>(path: string, body?: any)    => request<T>("PUT", path, body),
   patch: <T>(path: string, body?: any)    => request<T>("PATCH", path, body),
   del:   <T>(path: string)                => request<T>("DELETE", path),
+  // upload sends a file as multipart/form-data.
+  //
+  // IT EXISTS BECAUSE THE ONE CALL THAT DID NOT USE THIS CLIENT WAS BROKEN. Portal asset upload hand-wrote
+  // `fetch("/edge/v1/portal-assets")` because FormData must not carry a JSON content-type — and dropped the
+  // `/api` prefix that EDGE_BASE carries. Only `/api/*` is rewritten to edged, so the request matched no
+  // route, Next redirected it to the login page, and the browser re-POSTed the image at a page that answers
+  // HTML. The parse failed and the operator was told the image was refused. Both uploads failed identically,
+  // for a reason that had nothing to do with the image.
+  //
+  // The content-type is deliberately NOT set: fetch derives it from the FormData along with the multipart
+  // boundary, and setting it by hand produces a body no server can parse.
+  upload: async <T>(path: string, file: File, field = "file"): Promise<T> => {
+    const form = new FormData();
+    form.append(field, file);
+    const res = await fetch(`${EDGE_BASE}${path}`, { method: "POST", body: form, cache: "no-store" });
+    const contentType = res.headers.get("content-type") ?? "";
+    const payload = contentType.includes("application/json") ? await res.json() : await res.text();
+    if (!res.ok) throw new ApiError(res.status, payload);
+    return payload as T;
+  },
   // postRaw sends a pre-serialized body (e.g. a pasted license envelope)
   // without re-encoding it.
   postRaw: async <T>(path: string, raw: string): Promise<T> => {
