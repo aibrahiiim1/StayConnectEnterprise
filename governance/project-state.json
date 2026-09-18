@@ -1592,7 +1592,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "1fee3a57477573ec1093f836ea14baca1031f442",
     "base_note": "The master merge commit of PR #154. This delivery begins exactly where that one ended.",
-    "head": "79b2e930",
+    "head": "47870d98",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
     "note": "T0158. The backup settings handlers were merged through four green gates while mounted on nothing; scd and edged then refused to write four paths that were not on their ProtectSystem allowlists. All four correct refusals, widened by exactly what the features need and nothing adjacent, with the paths provisioned by a repo tmpfiles config because systemd resolves the allowlist at unit start. Proven live: retention reaches the sweep itself, an SVG is refused while a PNG is served from the appliance's own origin, and a published Arabic design rolls back without rewinding history. Also rebuilds the guest login page to the Product Owner's reference screenshots: Voucher and Personal Account merge into one panel behind a 'Use Personal Account' pill that did not previously exist, with Submit/Login and title-case labels."
   },
