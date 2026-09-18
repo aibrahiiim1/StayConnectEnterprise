@@ -55,7 +55,8 @@ command -v python3 >/dev/null 2>&1 || { echo "CANNOT CHECK: python3 is required"
 # A carriage return, spelled so this file never CONTAINS one. The first version of these strips was
 # written as $'<literal CR>' and the byte did not survive editing, so the strip silently did nothing
 # and every route comparison failed on a bundle that contained every route.
-CR=$''
+CR=$'
+'
 
 jget() { python3 -c 'import json,sys
 try: d=json.load(open(sys.argv[1], encoding="utf-8"))
@@ -108,7 +109,7 @@ fi
 if SERVED="$(ha_served_build_id "http://127.0.0.1:$PORT/login")"; then
   if [ -z "$BID" ]; then
     no "the service serves BUILD_ID '$SERVED' but the release on disk records none to compare it with"
-  elif [ "$SERVED" != "$BID" ]; then
+  elif ! ha_build_ids_match "$SERVED" "$BID"; then
     no "the RUNNING service serves BUILD_ID '$SERVED' but the recorded live release is '$BID' — the process is running a different bundle than the one on disk"
   else
     ok "the running service serves the recorded BUILD_ID ($SERVED)"
@@ -125,7 +126,7 @@ fi
 # checked, and it must serve the SAME BUILD_ID as the managed release.
 if [ -n "${HOTEL_ADMIN_PUBLIC_URL:-}" ]; then
   if PUBLIC_ID="$(ha_served_build_id "${HOTEL_ADMIN_PUBLIC_URL%/}/login")"; then
-    if [ -n "$BID" ] && [ "$PUBLIC_ID" = "$BID" ]; then
+    if ha_build_ids_match "$PUBLIC_ID" "$BID"; then
       ok "the operator endpoint ${HOTEL_ADMIN_PUBLIC_URL} serves the managed release ($PUBLIC_ID)"
     else
       no "the operator endpoint ${HOTEL_ADMIN_PUBLIC_URL} serves BUILD_ID '$PUBLIC_ID' but the managed release is '$BID'"
@@ -208,7 +209,8 @@ done
 
 if [ $JSON -eq 1 ]; then
   printf '{"healthy":%s,"failures":%d,"live_release":"%s","source_commit":"%s","build_id":"%s"}\n' \
-    "$([ $fails -eq 0 ] && echo true || echo false | tr -d '')" "$fails" "$LIVE" "$COMMIT" "$BID"
+    "$([ $fails -eq 0 ] && echo true || echo false | tr -d '
+')" "$fails" "$LIVE" "$COMMIT" "$BID"
 else
   echo "============================================================"
   echo "HOTEL_ADMIN_INTEGRITY = $([ $fails -eq 0 ] && echo PASS || echo "FAIL ($fails)")"

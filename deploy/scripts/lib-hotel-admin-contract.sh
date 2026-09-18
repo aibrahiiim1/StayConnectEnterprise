@@ -123,6 +123,20 @@ ha_served_build_id() {
   printf '%s\n' "$id"
 }
 
+# ha_build_ids_match <a> <b> — compare two BUILD_IDs the way the two sources actually spell them.
+#
+# .next/BUILD_ID holds Next's id verbatim; the id Next STAMPS INTO THE DOCUMENT has '-' rewritten to '_'. For
+# every release until now that difference was invisible, because the generated ids happened to contain no
+# hyphen — and then one did, and the integrity check reported that the running service was serving a
+# different bundle than the one on disk. It was serving exactly the right bundle.
+#
+# Normalising both sides is the fix rather than relaxing the comparison: every other character still has to
+# match exactly, and an id that differs in any other way still fails.
+ha_build_ids_match() {
+  [ -n "$1" ] && [ -n "$2" ] || return 1
+  [ "${1//-/_}" = "${2//-/_}" ]
+}
+
 # ha_release_satisfies_contract <release-dir> <contract> — THE WHOLE CONTRACT, one implementation.
 #
 # Provenance, inlined flags, required routes and required navigation. Prints reasons on stderr and returns
