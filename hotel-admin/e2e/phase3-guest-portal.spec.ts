@@ -233,7 +233,10 @@ test("with Phase 3 off the page keeps using the legacy endpoint", async ({ page 
   await page.goto("http://localhost/portal");
   await submitStay(page, "412", "Okonkwo");
 
-  expect(calls).toHaveLength(1);
+  // WAIT FOR THE CALL, do not assume it has landed. submitStay clicks and returns; the request is in flight.
+  // Every other test in this file polls for exactly this reason, and this one did not -- so it passed on a
+  // quiet workstation and failed on a loaded CI runner, which reads as a product regression and is not one.
+  await expect.poll(() => calls.length, { timeout: 10_000 }).toBe(1);
   expect(calls[0].path).toBe("/auth/pms/verify");
   expect(calls[0].body).not.toHaveProperty("request_id");
 });
