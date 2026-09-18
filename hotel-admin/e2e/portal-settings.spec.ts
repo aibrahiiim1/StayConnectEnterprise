@@ -1,5 +1,5 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
-import { portalHTML } from "./portal-page";
+import { portalHTML, shippedWording } from "./portal-page";
 
 // PORTAL SETTINGS, IN A BROWSER.
 //
@@ -47,6 +47,7 @@ async function installBackend(page: Page) {
       return route.fulfill(json(200, { saved: true }));
     }
     if (path === "/portal-branding/preview") return route.fulfill(json(200, { html: PORTAL_HTML }));
+    if (path === "/portal-branding/languages") return route.fulfill(json(200, shippedWording()));
     if (path === "/portal-assets" && method === "POST")
       return route.fulfill(json(200, { name: "aaaa1111bbbb2222.png", url: "/assets/aaaa1111bbbb2222.png", size_bytes: PNG.length }));
     if (path === "/portal-assets") return route.fulfill(json(200, { data: [], meta: { has_more: false } }));
@@ -143,11 +144,16 @@ test("languages are chosen for guests and edited one at a time", async ({ page }
   await expect(page.getByLabel("Offer English to guests")).toBeDisabled();
 
   await page.getByRole("tab", { name: /Italiano/ }).click();
-  // Fifty strings are grouped by where they appear on the page; a shipped language opens on the first group
-  // because most properties change nothing here at all.
-  await page.getByText("Room sign-in", { exact: true }).click();
-  await expect(page.getByLabel(/Room Number in Italiano/)).toBeVisible();
-  await expect(page.getByLabel(/Room Number in Deutsch/)).toHaveCount(0);
+  // Fifty-one strings are grouped by where they appear on the page; a shipped language opens on the first
+  // group, because most properties change nothing here at all.
+  // the group's <summary>, not the field labelled "Guest Login" that lives inside Navigation -- the string
+  // and the group share a name, which is correct for an operator and ambiguous for a text locator.
+  await page.locator("summary").filter({ hasText: "Guest Login" }).click();
+  // AND THE FIELD HOLDS THE REAL ITALIAN, which is the whole point: an empty box with English behind it is
+  // what made selecting a language look like it had done nothing.
+  const shipped = shippedWording().strings.it["pms.room"];
+  await expect(page.getByRole("textbox", { name: "Room Number in Italiano" })).toHaveValue(shipped);
+  await expect(page.getByRole("textbox", { name: "Room Number in Deutsch" })).toHaveCount(0);
 
   // Turning one off removes it from what a guest is offered, which the preview's own selector shows.
   await page.getByLabel("Offer Русский to guests").uncheck();

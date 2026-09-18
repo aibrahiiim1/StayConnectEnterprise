@@ -1,6 +1,5 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { portalHTML as renderLanding } from "./portal-page";
 
 // PHASE-3 GUEST PORTAL, in a real browser, running the REAL client JS.
 //
@@ -17,23 +16,18 @@ import { join } from "node:path";
 // proven separately against a real PostgreSQL in data-plane/cmd/scd/phase3_auth_integration_test.go and
 // data-plane/cmd/portald/pms_phase3_handlers_test.go. Neither half proves the other, which is why both exist.
 
-const templatesGo = join(__dirname, "../../data-plane/cmd/portald/templates.go");
-
 const UNIFORM_MESSAGE =
   "We could not verify your stay. Please check your details or contact reception.";
 
-function renderLanding(): string {
-  const src = readFileSync(templatesGo, "utf8");
-  const marker = "const landingHTML = `";
-  const start = src.indexOf(marker) + marker.length;
-  const end = src.indexOf("`", start);
-  if (start < marker.length || end < 0) throw new Error("landingHTML not found in templates.go");
-  let html = src.slice(start, end);
-  // The landing template has no Go actions in the PMS path; strip any that exist elsewhere so the page
-  // parses as plain HTML.
-  html = html.replace(/\{\{[^}]*\}\}/g, "");
-  return html;
-}
+// renderLanding comes from ./portal-page now.
+//
+// IT USED TO BE A COPY IN THIS FILE, one of five, each ending `.replace(/\{\{[^}]*\}\}/g, "")` -- strip every
+// Go action and hope the rest is HTML. That worked while the only actions were the two client-address
+// conditionals, whose empty branch is a legitimate rendering. It stopped working the moment the shipped
+// wording moved out of the template into languages.go: `var LANGS = {{.Languages}};` became `var LANGS = ;`,
+// a syntax error that killed the entire script block, and thirty-one tests across four files failed with as
+// many symptoms and one cause. The shared helper RENDERS the actions and refuses a page that still contains
+// one.
 
 type Call = { path: string; body: Record<string, unknown> };
 
