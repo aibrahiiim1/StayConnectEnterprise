@@ -35,10 +35,31 @@ vi.mock("@/app/(app)/portal-branding/preview", () => ({
 beforeEach(() => { get.mockReset(); put.mockReset(); post.mockReset(); del.mockReset(); upload.mockReset(); });
 afterEach(() => vi.resetModules());
 
+/** A slice of what the portal really ships, enough to prove the screen shows it rather than English. */
+const SHIPPED = {
+  languages: [
+    { code: "en", label: "English" },
+    { code: "ar", label: "\u0627\u0644\u0639\u0631\u0628\u064a\u0629", rtl: true },
+    { code: "de", label: "Deutsch" },
+    { code: "fr", label: "Fran\u00e7ais" },
+    { code: "it", label: "Italiano" },
+    { code: "ru", label: "\u0420\u0443\u0441\u0441\u043a\u0438\u0439" },
+  ],
+  strings: {
+    en: { "pms.room": "Room Number", "btn.submit": "Submit", "tab.guest": "Guest Login" },
+    ar: { "pms.room": "\u0631\u0642\u0645 \u0627\u0644\u063a\u0631\u0641\u0629", "btn.submit": "\u0625\u0631\u0633\u0627\u0644", "tab.guest": "\u062a\u0633\u062c\u064a\u0644 \u062f\u062e\u0648\u0644 \u0627\u0644\u0646\u0632\u0644\u0627\u0621" },
+    de: { "pms.room": "Zimmernummer", "btn.submit": "Senden", "tab.guest": "G\u00e4ste-Anmeldung" },
+    fr: { "pms.room": "Num\u00e9ro de chambre", "btn.submit": "Envoyer", "tab.guest": "Connexion client" },
+    it: { "pms.room": "Numero di camera", "btn.submit": "Invia", "tab.guest": "Accesso ospiti" },
+    ru: { "pms.room": "\u041d\u043e\u043c\u0435\u0440 \u043a\u043e\u043c\u043d\u0430\u0442\u044b", "btn.submit": "\u041e\u0442\u043f\u0440\u0430\u0432\u0438\u0442\u044c", "tab.guest": "\u0412\u0445\u043e\u0434 \u0434\u043b\u044f \u0433\u043e\u0441\u0442\u0435\u0439" },
+  },
+};
+
 function mock(design: Record<string, any> = {}, draft: Record<string, any> = {}, assets: any[] = []) {
   get.mockImplementation((p: string) => {
     if (p === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
     if (p === "/portal-branding") return Promise.resolve({ design, draft, revisions: [], published: true });
+    if (p === "/portal-branding/languages") return Promise.resolve(SHIPPED);
     if (p === "/portal-assets") return Promise.resolve({ data: assets, meta: { has_more: false } });
     return Promise.resolve({});
   });
@@ -166,21 +187,117 @@ describe("logo and background are really uploadable", () => {
 });
 
 describe("languages", () => {
-  it("separates who sees a language from who edits its words", async () => {
+  it("separates who sees a language from whose words are being edited", async () => {
     mock({});
     await renderPage();
     fireEvent.click(screen.getByRole("tab", { name: /Languages/ }));
 
-    // Availability: a checkbox per shipped language, English fixed.
     for (const l of ["English", "العربية", "Deutsch", "Français", "Italiano", "Русский"]) {
       expect(screen.getByLabelText(new RegExp(`Offer ${l} to guests`))).toBeTruthy();
     }
     expect((screen.getByLabelText(/Offer English to guests/) as HTMLInputElement).disabled).toBe(true);
+  });
 
-    // Editing: one language at a time.
+  it("SHOWS the shipped wording for the language being edited", async () => {
+    // The defect this replaces: picking Italiano drew empty boxes with the English as placeholder text, so
+    // it looked like selecting a language did nothing.
+    mock({});
+    await renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: /Languages/ }));
     fireEvent.click(screen.getByRole("tab", { name: /Italiano/ }));
-    expect(await screen.findByLabelText(/Room Number in Italiano/)).toBeTruthy();
-    expect(screen.queryByLabelText(/Room Number in Deutsch/)).toBeNull();
+
+    const room = await screen.findByLabelText(/Room Number in Italiano/) as HTMLInputElement;
+    expect(room.value).toBe("Numero di camera");
+    expect(room.placeholder).toBe("Room Number");
+
+    fireEvent.click(screen.getByRole("tab", { name: /Deutsch/ }));
+    expect((await screen.findByLabelText(/Room Number in Deutsch/) as HTMLInputElement).value)
+      .toBe("Zimmernummer");
+    // One language at a time.
+    expect(screen.queryByLabelText(/Room Number in Italiano/)).toBeNull();
+  });
+
+  it("stores an override only when the wording actually differs", async () => {
+    mock({ hotel_name: "Coral Sea" });
+    post.mockResolvedValue({ saved: true });
+    await renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: /Languages/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /Italiano/ }));
+
+    const room = await screen.findByLabelText(/Room Number in Italiano/);
+    // Retyping the shipped wording is not a customisation.
+    fireEvent.change(room, { target: { value: "Numero di camera" } });
+    expect(screen.queryByRole("button", { name: /Save changes/i })?.hasAttribute("disabled")).toBe(true);
+
+    fireEvent.change(room, { target: { value: "Camera n." } });
+    fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    const tr = post.mock.calls[0][1].design.translations;
+    expect(tr.it["pms.room"]).toBe("Camera n.");
+    // ONLY that one. Pre-filling every field with the shipped text would otherwise save fifty-one
+    // "customisations" identical to the built-ins for any language an operator merely looked at.
+    expect(Object.keys(tr.it)).toEqual(["pms.room"]);
+  });
+
+  it("removes the override when the wording is put back", async () => {
+    mock({ translations: { it: { "pms.room": "Camera n." } } });
+    post.mockResolvedValue({ saved: true });
+    await renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: /Languages/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /Italiano/ }));
+
+    // by ROLE, because the reset button beside the field is deliberately labelled with the field's name too.
+    const room = await screen.findByRole("textbox", { name: "Room Number in Italiano" }) as HTMLInputElement;
+    expect(room.value).toBe("Camera n.");
+    fireEvent.click(screen.getByRole("button", { name: /Reset Room Number in Italiano/ }));
+    await waitFor(() =>
+      expect((screen.getByRole("textbox", { name: "Room Number in Italiano" }) as HTMLInputElement).value)
+        .toBe("Numero di camera"));
+
+    fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    expect(post.mock.calls[0][1].design.translations.it).toBeUndefined();
+  });
+
+  it("says which languages are untouched and which the hotel has changed", async () => {
+    mock({ translations: { de: { "btn.submit": "Los" } } });
+    await renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: /Languages/ }));
+    expect(within(screen.getByRole("tab", { name: /Italiano/ })).getByText("Built-in")).toBeTruthy();
+    expect(within(screen.getByRole("tab", { name: /Deutsch/ })).getByText(/1 customised/)).toBeTruthy();
+  });
+
+  it("counts what a hotel-added language will show in English", async () => {
+    mock({});
+    await renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: /Languages/ }));
+    fireEvent.change(screen.getByLabelText(/Language code/i), { target: { value: "es" } });
+    fireEvent.change(screen.getByLabelText(/Shown as/i), { target: { value: "Español" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Add$/ }));
+
+    const tab = await screen.findByRole("tab", { name: /Español/ });
+    expect(within(tab).getByText(/\d+ in English/)).toBeTruthy();
+    // A shipped language is never short of words, even while its wording is still being fetched.
+    expect(within(screen.getByRole("tab", { name: /Italiano/ })).queryByText(/in English/)).toBeNull();
+  });
+
+  it("types Arabic right to left", async () => {
+    mock({});
+    await renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: /Languages/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /العربية/ }));
+    const field = await screen.findByLabelText(/Room Number in العربية/) as HTMLInputElement;
+    expect(field.getAttribute("dir")).toBe("rtl");
+    expect(field.value).toBe("رقم الغرفة");
+  });
+
+  it("finds a string without scrolling through fifty", async () => {
+    mock({});
+    await renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: /Languages/ }));
+    fireEvent.change(screen.getByLabelText(/Find a string/i), { target: { value: "voucher code" } });
+    expect(await screen.findByLabelText(/Voucher Code in English/)).toBeTruthy();
+    expect(screen.queryByLabelText(/Room Number in English/)).toBeNull();
   });
 
   it("only sends the languages the operator ticked", async () => {
@@ -197,29 +314,6 @@ describe("languages", () => {
     expect(codes).toContain("en");
     expect(codes).not.toContain("ru");
     expect(codes).not.toContain("de");
-  });
-
-  it("counts what an added language will show in English", async () => {
-    mock({});
-    await renderPage();
-    fireEvent.click(screen.getByRole("tab", { name: /Languages/ }));
-    fireEvent.change(screen.getByLabelText(/Language code/i), { target: { value: "es" } });
-    fireEvent.change(screen.getByLabelText(/Shown as/i), { target: { value: "Español" } });
-    fireEvent.click(screen.getByRole("button", { name: /^Add$/ }));
-
-    const tab = await screen.findByRole("tab", { name: /Español/ });
-    expect(within(tab).getByText(/\d+ in English/)).toBeTruthy();
-    // A shipped language is never missing anything, so it never carries that badge.
-    expect(within(screen.getByRole("tab", { name: /Italiano/ })).queryByText(/in English/)).toBeNull();
-  });
-
-  it("types Arabic right to left", async () => {
-    mock({});
-    await renderPage();
-    fireEvent.click(screen.getByRole("tab", { name: /Languages/ }));
-    fireEvent.click(screen.getByRole("tab", { name: /العربية/ }));
-    const field = await screen.findByLabelText(/Room Number in العربية/);
-    expect(field.getAttribute("dir")).toBe("rtl");
   });
 });
 

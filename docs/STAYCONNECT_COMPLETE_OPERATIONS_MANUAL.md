@@ -29,6 +29,7 @@
 11. [Guest networks / VLANs](#11-guest-networks--vlans)
 12. [Worked examples: VLAN 100 & VLAN 200](#12-worked-examples-vlan-100--vlan-200)
 13. [DHCP, DNS, NAT & the captive portal](#13-dhcp-dns-nat--the-captive-portal)
+13a. [Guest portal settings](#13a-guest-portal-settings)
 14. [Guest authentication methods](#14-guest-authentication-methods)
 14a. [Guest sign-in protection (configurable)](#14a-guest-sign-in-protection-configurable)
 15. [Access plans & vouchers](#15-access-plans--vouchers)
@@ -387,12 +388,12 @@ Steps: create two guest networks on parent **`ens192`**, VLAN tagged, ids **100*
 and **200**, with the subnets/gateways above; give each its own DHCP pool; enable
 captive portal + NAT on both; apply + confirm each. On your wireless controller,
 map SSID "Hotel Guest" → VLAN 100 and SSID "Conference" → VLAN 200. Set branding
-per network in Portal branding.
+per network in Portal settings.
 
 ### Example B — two VLANs sharing one portal/experience
 
 Create VLAN 100 and VLAN 200 exactly as above but give them the **same** portal
-branding and the **same** enabled auth methods. Guests on either VLAN see an
+settings and the **same** enabled auth methods. Guests on either VLAN see an
 identical login page. This is common when you segment traffic (e.g. floors or
 buildings) for routing/DHCP reasons but want one guest experience.
 
@@ -417,6 +418,86 @@ shared across VLAN 100 **and** VLAN 200 (and any legacy `br-lan`), not 300 each.
   the WAN. **Client isolation** (per-network) stops guests talking to each other.
 - The **captive portal** (`portald`) listens on `:8380` (HTTP) and `:8343`
   (HTTPS) and is reached at the network's gateway IP.
+
+### 13a. Guest portal settings
+
+**Hotel Admin → Guest portal → Portal settings.** How the sign-in page looks and
+reads. There is one portal and one current configuration for it: change
+something, watch the preview, press **Save changes**, and guests see it. There is
+no draft to promote, no version to pick and no publish step.
+
+| Section | What it holds |
+|---|---|
+| **General** | Hotel name, welcome line, help line, terms-of-use link. |
+| **Branding** | Logo, background photograph, brand colour, button shade, text colour, corner radius, typeface. |
+| **Languages** | Which languages guests are offered, and the wording in each. |
+| **Advanced** | Custom CSS and a custom HTML fragment. |
+
+**Images live on the appliance.** Upload a PNG, JPEG, WebP or GIF up to 8 MB; it
+is stored locally and served from the same origin as the sign-in page, which is
+what makes it load for a guest who has no internet yet. The file type is decided
+by inspecting the bytes, not the filename. **SVG is refused** — it is a document
+format that can carry script, and this page collects room numbers and voucher
+codes.
+
+**The preview is the real page.** It is the portal's own sign-in page rendered
+with the settings you are editing, in a sandboxed frame at real Desktop and
+Mobile widths — not a drawing of it that could drift.
+
+#### Password confirmation: what needs it, and why
+
+*Approved by the Product Owner, 2026-09-18.*
+
+| Change | Confirmation |
+|---|---|
+| Hotel name, welcome/help text, terms link, logo, background, colours, typeface, corner radius, languages, wording | **None.** Save and it is live. |
+| **Custom CSS or custom HTML**, including clearing them | **Password step-up required.** |
+
+The reason is the boundary, not the screen. Those two fields are the only ones
+that can put executable-shaped content on a page where guests type their surname
+and voucher codes; every other field is constrained on the appliance to a colour,
+a length, a font stack, a bounded string, or an appliance path / https URL /
+inline image, so a save that leaves the Advanced fields untouched cannot
+introduce executable content at all. Requiring a password to correct a typo in
+the hotel's name was ceremony that taught operators to type it without reading.
+
+What is unchanged: the operator still needs the portal-branding write
+permission, every save is audited with who made it, and a design containing a
+script tag, an inline event handler, a frame, an extra form or `@import` is
+**refused outright** rather than quietly cleaned up.
+
+#### Languages, and how a guest gets theirs
+
+Six languages ship complete with the product — **English, Arabic, Italian,
+French, Russian, German** — so offering one costs a tick, not an afternoon of
+translation. Two separate things, deliberately:
+
+- **Guest languages** — which of them appear in the portal's selector. English is
+  always available and is what anything missing falls back to.
+- **Wording** — one language at a time, every field already showing the real text
+  a guest reads. Type over a string to change it for your property; press its
+  reset button, or type the original back, and the customisation is removed
+  rather than stored. **Only strings you actually changed are kept**, so improved
+  wording reaches your guests without you re-entering anything.
+
+A language you add yourself is not shipped with the product, so you supply its
+wording; anything left empty shows English, and the screen says how many strings
+that is.
+
+**Arabic is laid out right to left** on the portal and in the editor.
+
+**A guest's language is chosen automatically**, in this order:
+
+1. what that guest chose on this device before, if they chose;
+2. otherwise their device's own ordered language list, first entry the hotel
+   offers — `ar-EG` matches Arabic, `de-AT` matches German, and a phone set to
+   Japanese then Italian gets Italian at a hotel offering Italian;
+3. otherwise English.
+
+A guest's own choice always outranks detection and survives being bounced back
+to the portal. Detection never records a preference, so it cannot be mistaken
+for a choice later. If you switch a language off after a guest chose it,
+detection simply runs again for them.
 
 ---
 

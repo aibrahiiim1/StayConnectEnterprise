@@ -1,0 +1,67 @@
+{
+  "transition_id": "T0162",
+  "seq": 162,
+  "timestamp": "2026-09-18T17:20:00Z",
+  "timestamp_derivation": "After the content commit of this delivery and after the language work was exercised in Chromium and WebKit; before the author timestamp of the commit that introduces this receipt. After the merge commit 5dea6e14 it follows. Per T0091, in the order T0108 requires.",
+  "record_type": "PORTAL_SETTINGS_ACCEPTED_STEP_UP_POLICY_APPROVED_AND_LANGUAGE_UX_COMPLETED",
+
+  "product_owner_acceptance": {
+    "what_was_accepted": "The Portal Settings delivery recorded in T0161 — the asset-upload defect, the four-section settings screen, the removal of the operator-facing draft/published/version/rollback vocabulary, the live preview, and the five settings that had been rendered by nothing.",
+    "verbatim": "I accept the Portal Settings delivery and I explicitly approve the current step-up policy: ordinary constrained branding/settings changes do not require password re-authentication; changes to custom_css or custom_html, including clearing them, do require step-up. Record this as the approved security behavior and synchronize the authoritative documentation.",
+    "date": "2026-09-18",
+    "decision": "D80"
+  },
+
+  "approved_security_behaviour": {
+    "status": "APPROVED by the Product Owner. It is no longer an agent judgement stated for visibility; it is the recorded policy for this surface.",
+    "no_step_up": "hotel_name, welcome_text, help_text, terms_url, logo_url, background_url, brand_color, brand_color_dark, text_color, font_family, corner_radius, languages, translations.",
+    "step_up_required": "custom_css and custom_html, in both directions — setting, changing and CLEARING them.",
+    "why_the_line_is_where_it_is": "Those two fields are the only ones that can carry executable-shaped content onto a page that collects room numbers, surnames and voucher codes. Every other field is constrained on the appliance by validateDesign to a hex/rgb colour, a bounded length, a font stack containing no braces or angle brackets, a bounded string, or an appliance path / https URL / inline image — so a save that leaves both Advanced fields byte-identical cannot introduce executable content at all. The rule is decided by CONTENT, not by which screen the request arrived from, and it is enforced server-side in advancedChanged.",
+    "unchanged_controls": "The operator still holds the portal-branding write permission; every save is audited with the actor; validateDesign still REFUSES a design containing a script tag, an inline event handler, a frame, an extra form or @import rather than sanitising it; and the settings endpoint runs the identical validation as publish.",
+    "documented_in": "docs/STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md §13a, under 'Password confirmation: what needs it, and why', marked as Product-Owner approved."
+  },
+
+  "the_languages_defect": {
+    "symptom": "Selecting Arabic, Italian, French, Russian or German in Hotel Admin appeared to change almost nothing.",
+    "cause": "The shipped wording existed only as a JavaScript object literal inside portald's landing template, which made it invisible to everything except a guest's browser. Hotel Admin had the ENGLISH list and nothing else, so it drew fifty-one empty boxes with the English as placeholder text. The portal had spoken complete Italian the whole time; the screen had no way to show it, and 'pick a language, nothing changes' is indistinguishable from 'this is broken'.",
+    "what_was_NOT_done": "Copying the six dictionaries into the admin. That is 306 strings maintained in two places, and the drift would surface as an operator confidently editing wording no guest receives.",
+    "fix": "The wording is Go data now (cmd/portald/languages.go). The landing template renders it, /api/languages serves it, and edged proxies that to Hotel Admin. One source, three consumers, no copy to keep in step. A test asserts the page and the endpoint carry the same words, and a second asserts the admin's string list and English match the portal's in both directions."
+  },
+
+  "the_languages_screen": {
+    "guest_languages": "Separate from wording: which of the six a guest is offered. English cannot be switched off, because it is what everything falls back to.",
+    "wording": "One language at a time. Every field is PRE-FILLED with the wording a guest actually reads, grouped by where it appears (Navigation, Guest Login, Account Login, Email and SMS, Post-stay, Buttons, Social sign-in, Device info, Messages), with a search box for finding one string among fifty-one.",
+    "overrides_are_minimal_by_construction": "An override is stored only when the text actually differs from the shipped wording. Typing the shipped text back, or pressing the reset beside the field, REMOVES the key rather than storing a second copy of it. Without this, every language an operator merely looked at would have been saved back as fifty-one 'customisations' identical to the built-ins — a document that grows without bound and freezes the hotel's copy of wording the product is meant to be able to improve underneath it.",
+    "status_indicator": "Each language reads Built-in, or N customised, or — only for a language the hotel added itself — N in English. A shipped language is never reported as incomplete, including while its wording is still being fetched: asking only the fetched map meant a momentary and false '51 strings will show English' on every language.",
+    "rtl": "Arabic is right-to-left in the editor fields as well as on the portal."
+  },
+
+  "automatic_guest_language": {
+    "order": "1. the language this guest CHOSE on this device, if they chose; 2. otherwise the device's ORDERED preference list, first entry the hotel offers; 3. otherwise English.",
+    "what_changed": "It read navigator.language alone and took its first two characters. That throws away the device's ranking: a phone set to Japanese first and Italian second was answered with Japanese, found nothing, and fell to English at a hotel that offers Italian. It now reads navigator.languages in order, and each entry contributes both the full tag and its primary subtag, so ar-EG matches a hotel that enabled ar.",
+    "a_choice_outranks_a_detection": "Detection deliberately stores NOTHING. If it recorded its result, the first load would write a 'choice' the guest never made and every later load would defer to it — including after the hotel changed which languages it offers. A stored choice the hotel has since switched off falls through to detection rather than pinning the guest to a language that is no longer on the page.",
+    "ios": "iOS opens the portal in the Captive Network Assistant, a WebView that is not the Safari profile and whose storage does not reliably outlive the sheet; on a managed device localStorage can throw on the first write. The chosen language is therefore written to a cookie as well as localStorage, and read back from whichever survived.",
+    "verified": "Seven browser cases in hotel-admin/e2e/guest-language-detection.spec.ts, driving the REAL landing page: ar-EG, it-IT, fr-FR, ru-RU, de-AT and en-GB each selecting their language and direction; an ordered list falling to its second and third entries according to what the hotel enabled; ja-JP/ko-KR falling back to English; a language the hotel disabled not being selected; a manual choice surviving a reload; a stored choice for a now-disabled language falling through to detection; and detection leaving no stored trace. The iOS case runs under WebKit with the iPhone 13 device profile AND with localStorage made to throw, which is the condition that used to lose the guest's choice. Then re-run against the live PRE-LIVE portal.",
+    "honest_limit": "WebKit with the iPhone device profile is the same engine and the same viewport, user agent and touch profile as an iPhone; it is not a physical handset and no physical iPhone was used."
+  },
+
+  "no_migration": "None in this delivery.",
+
+  "scope_held": "No database schema or migration, no destructive or historical-data change, no PMS configuration or traffic, no financial traffic, no networking or topology change, no Root-CA or trust-root change, no privilege, capability or sandbox widening, no Go-Live. No .23 access. No gate or test weakened. The accepted portal design, uploads, branding and guest authentication are unchanged. No guest data in any evidence.",
+
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+
+  "authorization": "Product Owner, 2026-09-18: accept the Portal Settings delivery, record the approved step-up policy and synchronize the authoritative documentation; finish the Languages UX so that selecting a language shows the real shipped wording; verify and harden automatic guest-language selection on the real captive portal including an iOS flow; complete the normal protected delivery and PRE-LIVE verification.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}

@@ -479,219 +479,10 @@ const landingHTML = `<!doctype html>
     //   3. the built-in English, which is also the text already in the markup
     // A half-translated portal therefore still reads. A portal that shows raw keys is not a language anybody
     // speaks, and this cannot produce one.
-    var LANGS = [
-      { code: 'en', label: 'English'  },
-      { code: 'ar', label: 'العربية', rtl: true },
-      { code: 'de', label: 'Deutsch'  },
-      { code: 'fr', label: 'Français' },
-      { code: 'it', label: 'Italiano' },
-      { code: 'ru', label: 'Русский'  }
-    ];
-
-    var BUILTIN = {
-      en: {
-        "tab.guest": "Guest Login", "tab.account": "Account Login",
-        "method.pms": "Room", "method.poststay": "Post-stay", "method.voucher": "Voucher",
-        "method.account": "Personal account", "method.email": "Email", "method.sms": "Phone",
-        "method.social": "Social", "alt.title": "Or sign in with",
-        "account.personal": "Use Personal Account", "voucher.label": "Voucher Code",
-        "account.user": "Username", "account.pass": "Password",
-        "pms.room": "Room Number", "pms.secondary": "Password",
-        "pms.prompt.lastname": "Last name on the reservation",
-        "pms.prompt.firstname": "First name on the reservation",
-        "pms.prompt.reservation": "Reservation / confirmation number",
-        "pms.prompt.any": "First name, last name, or reservation number",
-        "pms.prompt.either": "Last name OR reservation number",
-        "pms.choose": "Choose your internet package",
-        "email.dest": "Email address", "sms.dest": "Phone number",
-        "sms.hint": "Include the country code, for example +44 20 7946 0958",
-        "otp.code": "Verification code",
-        "otp.sent.email": "We sent a 6-digit code to", "otp.sent.sms": "We texted a 6-digit code to",
-        "otp.retry.email": "Try a different email", "otp.retry.sms": "Use a different number",
-        "poststay.pin": "Post-stay PIN", "poststay.hint": "The PIN you were given at checkout",
-        "btn.login": "Login", "btn.submit": "Submit", "btn.sendcode": "Send code",
-        "btn.verify": "Verify", "btn.reconnect": "Reconnect",
-        "social.note": "You will be redirected to the provider, then back here.",
-        "social.google": "Continue with Google", "social.apple": "Continue with Apple",
-        "social.facebook": "Continue with Facebook",
-        "info.device": "Your device", "info.ip": "IP address", "info.mac": "MAC address",
-        "info.help": "Reception may ask for these if you need help connecting.",
-        "notice.nomethods": "There is no way to sign in on this network yet. Please contact reception.",
-        "notice.nopackages": "Internet access is not available here at the moment. You can still sign in, but there is nothing to connect you to yet — please let reception know.",
-        "err.generic": "We could not verify your stay. Please check your details or contact reception.",
-        "err.retry": "You can try again now.", "lang.label": "Language",
-        "terms.link": "Terms of use"
-      },
-      ar: {
-        "tab.guest": "تسجيل دخول النزلاء", "tab.account": "الدخول بحساب",
-        "method.pms": "الغرفة", "method.poststay": "ما بعد المغادرة", "method.voucher": "قسيمة",
-        "method.account": "حساب شخصي", "method.email": "البريد الإلكتروني", "method.sms": "الهاتف",
-        "method.social": "حسابات التواصل", "alt.title": "أو سجّل الدخول عبر",
-        "account.personal": "استخدام حساب شخصي", "voucher.label": "رمز القسيمة",
-        "account.user": "اسم المستخدم", "account.pass": "كلمة المرور",
-        "pms.room": "رقم الغرفة", "pms.secondary": "كلمة المرور",
-        "pms.prompt.lastname": "اسم العائلة كما في الحجز",
-        "pms.prompt.firstname": "الاسم الأول كما في الحجز",
-        "pms.prompt.reservation": "رقم الحجز أو التأكيد",
-        "pms.prompt.any": "الاسم الأول أو اسم العائلة أو رقم الحجز",
-        "pms.prompt.either": "اسم العائلة أو رقم الحجز",
-        "pms.choose": "اختر باقة الإنترنت",
-        "email.dest": "البريد الإلكتروني", "sms.dest": "رقم الهاتف",
-        "sms.hint": "أدرج رمز الدولة، مثل +44 20 7946 0958",
-        "otp.code": "رمز التحقق",
-        "otp.sent.email": "أرسلنا رمزاً من ٦ أرقام إلى", "otp.sent.sms": "أرسلنا رمزاً من ٦ أرقام برسالة نصية إلى",
-        "otp.retry.email": "جرّب بريداً إلكترونياً آخر", "otp.retry.sms": "استخدم رقماً آخر",
-        "poststay.pin": "رمز ما بعد المغادرة", "poststay.hint": "الرمز الذي تسلمته عند المغادرة",
-        "btn.login": "تسجيل الدخول", "btn.submit": "إرسال", "btn.sendcode": "إرسال الرمز",
-        "btn.verify": "تحقق", "btn.reconnect": "إعادة الاتصال",
-        "social.note": "سيتم تحويلك إلى مزوّد الخدمة ثم تعود إلى هنا.",
-        "social.google": "المتابعة باستخدام Google", "social.apple": "المتابعة باستخدام Apple",
-        "social.facebook": "المتابعة باستخدام Facebook",
-        "info.device": "جهازك", "info.ip": "عنوان IP", "info.mac": "عنوان MAC",
-        "info.help": "قد يطلب منك مكتب الاستقبال هذه البيانات إذا احتجت مساعدة في الاتصال.",
-        "notice.nomethods": "لا توجد طريقة لتسجيل الدخول على هذه الشبكة بعد. يرجى التواصل مع مكتب الاستقبال.",
-        "notice.nopackages": "خدمة الإنترنت غير متاحة هنا في الوقت الحالي. يمكنك تسجيل الدخول، لكن لا توجد باقة لتوصيلك بها بعد — يرجى إبلاغ مكتب الاستقبال.",
-        "err.generic": "تعذّر التحقق من إقامتك. يرجى مراجعة بياناتك أو التواصل مع مكتب الاستقبال.",
-        "err.retry": "يمكنك المحاولة مرة أخرى الآن.", "lang.label": "اللغة",
-        "terms.link": "شروط الاستخدام"
-      },
-      de: {
-        "tab.guest": "Gäste-Anmeldung", "tab.account": "Konto-Anmeldung",
-        "method.pms": "Zimmer", "method.poststay": "Nach dem Aufenthalt", "method.voucher": "Gutschein",
-        "method.account": "Persönliches Konto", "method.email": "E-Mail", "method.sms": "Telefon",
-        "method.social": "Social Media", "alt.title": "Oder anmelden mit",
-        "account.personal": "Persönliches Konto verwenden", "voucher.label": "Gutscheincode",
-        "account.user": "Benutzername", "account.pass": "Passwort",
-        "pms.room": "Zimmernummer", "pms.secondary": "Passwort",
-        "pms.prompt.lastname": "Nachname auf der Reservierung",
-        "pms.prompt.firstname": "Vorname auf der Reservierung",
-        "pms.prompt.reservation": "Reservierungs- oder Bestätigungsnummer",
-        "pms.prompt.any": "Vorname, Nachname oder Reservierungsnummer",
-        "pms.prompt.either": "Nachname ODER Reservierungsnummer",
-        "pms.choose": "Wählen Sie Ihr Internetpaket",
-        "email.dest": "E-Mail-Adresse", "sms.dest": "Telefonnummer",
-        "sms.hint": "Bitte mit Ländervorwahl, zum Beispiel +44 20 7946 0958",
-        "otp.code": "Bestätigungscode",
-        "otp.sent.email": "Wir haben einen 6-stelligen Code gesendet an",
-        "otp.sent.sms": "Wir haben einen 6-stelligen Code per SMS gesendet an",
-        "otp.retry.email": "Andere E-Mail-Adresse verwenden", "otp.retry.sms": "Andere Nummer verwenden",
-        "poststay.pin": "PIN nach dem Aufenthalt", "poststay.hint": "Die PIN, die Sie beim Check-out erhalten haben",
-        "btn.login": "Anmelden", "btn.submit": "Senden", "btn.sendcode": "Code senden",
-        "btn.verify": "Bestätigen", "btn.reconnect": "Erneut verbinden",
-        "social.note": "Sie werden zum Anbieter weitergeleitet und danach hierher zurückgebracht.",
-        "social.google": "Weiter mit Google", "social.apple": "Weiter mit Apple",
-        "social.facebook": "Weiter mit Facebook",
-        "info.device": "Ihr Gerät", "info.ip": "IP-Adresse", "info.mac": "MAC-Adresse",
-        "info.help": "Die Rezeption fragt möglicherweise nach diesen Angaben, wenn Sie Hilfe beim Verbinden brauchen.",
-        "notice.nomethods": "In diesem Netzwerk gibt es noch keine Anmeldemöglichkeit. Bitte wenden Sie sich an die Rezeption.",
-        "notice.nopackages": "Internetzugang ist hier derzeit nicht verfügbar. Sie können sich anmelden, aber es gibt noch nichts, womit wir Sie verbinden können — bitte informieren Sie die Rezeption.",
-        "err.generic": "Wir konnten Ihren Aufenthalt nicht bestätigen. Bitte prüfen Sie Ihre Angaben oder wenden Sie sich an die Rezeption.",
-        "err.retry": "Sie können es jetzt erneut versuchen.", "lang.label": "Sprache",
-        "terms.link": "Nutzungsbedingungen"
-      },
-      fr: {
-        "tab.guest": "Connexion client", "tab.account": "Connexion au compte",
-        "method.pms": "Chambre", "method.poststay": "Après le séjour", "method.voucher": "Bon d'accès",
-        "method.account": "Compte personnel", "method.email": "E-mail", "method.sms": "Téléphone",
-        "method.social": "Réseaux sociaux", "alt.title": "Ou connectez-vous avec",
-        "account.personal": "Utiliser un compte personnel", "voucher.label": "Code d'accès",
-        "account.user": "Nom d'utilisateur", "account.pass": "Mot de passe",
-        "pms.room": "Numéro de chambre", "pms.secondary": "Mot de passe",
-        "pms.prompt.lastname": "Nom de famille figurant sur la réservation",
-        "pms.prompt.firstname": "Prénom figurant sur la réservation",
-        "pms.prompt.reservation": "Numéro de réservation ou de confirmation",
-        "pms.prompt.any": "Prénom, nom ou numéro de réservation",
-        "pms.prompt.either": "Nom de famille OU numéro de réservation",
-        "pms.choose": "Choisissez votre forfait Internet",
-        "email.dest": "Adresse e-mail", "sms.dest": "Numéro de téléphone",
-        "sms.hint": "Indiquez l'indicatif du pays, par exemple +44 20 7946 0958",
-        "otp.code": "Code de vérification",
-        "otp.sent.email": "Nous avons envoyé un code à 6 chiffres à",
-        "otp.sent.sms": "Nous avons envoyé un code à 6 chiffres par SMS au",
-        "otp.retry.email": "Essayer une autre adresse e-mail", "otp.retry.sms": "Utiliser un autre numéro",
-        "poststay.pin": "Code après séjour", "poststay.hint": "Le code qui vous a été remis au départ",
-        "btn.login": "Se connecter", "btn.submit": "Envoyer", "btn.sendcode": "Envoyer le code",
-        "btn.verify": "Vérifier", "btn.reconnect": "Se reconnecter",
-        "social.note": "Vous serez redirigé vers le fournisseur, puis ramené ici.",
-        "social.google": "Continuer avec Google", "social.apple": "Continuer avec Apple",
-        "social.facebook": "Continuer avec Facebook",
-        "info.device": "Votre appareil", "info.ip": "Adresse IP", "info.mac": "Adresse MAC",
-        "info.help": "La réception peut vous demander ces informations si vous avez besoin d'aide pour vous connecter.",
-        "notice.nomethods": "Aucun moyen de connexion n'est encore disponible sur ce réseau. Veuillez contacter la réception.",
-        "notice.nopackages": "L'accès à Internet n'est pas disponible ici pour le moment. Vous pouvez vous connecter, mais il n'y a encore rien à quoi vous relier — merci de prévenir la réception.",
-        "err.generic": "Nous n'avons pas pu vérifier votre séjour. Veuillez vérifier vos informations ou contacter la réception.",
-        "err.retry": "Vous pouvez réessayer maintenant.", "lang.label": "Langue",
-        "terms.link": "Conditions d'utilisation"
-      },
-      it: {
-        "tab.guest": "Accesso ospiti", "tab.account": "Accesso account",
-        "method.pms": "Camera", "method.poststay": "Dopo il soggiorno", "method.voucher": "Voucher",
-        "method.account": "Account personale", "method.email": "E-mail", "method.sms": "Telefono",
-        "method.social": "Social", "alt.title": "Oppure accedi con",
-        "account.personal": "Usa un account personale", "voucher.label": "Codice voucher",
-        "account.user": "Nome utente", "account.pass": "Password",
-        "pms.room": "Numero di camera", "pms.secondary": "Password",
-        "pms.prompt.lastname": "Cognome indicato nella prenotazione",
-        "pms.prompt.firstname": "Nome indicato nella prenotazione",
-        "pms.prompt.reservation": "Numero di prenotazione o di conferma",
-        "pms.prompt.any": "Nome, cognome o numero di prenotazione",
-        "pms.prompt.either": "Cognome OPPURE numero di prenotazione",
-        "pms.choose": "Scegli il tuo pacchetto Internet",
-        "email.dest": "Indirizzo e-mail", "sms.dest": "Numero di telefono",
-        "sms.hint": "Includi il prefisso internazionale, ad esempio +44 20 7946 0958",
-        "otp.code": "Codice di verifica",
-        "otp.sent.email": "Abbiamo inviato un codice di 6 cifre a",
-        "otp.sent.sms": "Abbiamo inviato via SMS un codice di 6 cifre a",
-        "otp.retry.email": "Usa un altro indirizzo e-mail", "otp.retry.sms": "Usa un altro numero",
-        "poststay.pin": "PIN dopo il soggiorno", "poststay.hint": "Il PIN che hai ricevuto al check-out",
-        "btn.login": "Accedi", "btn.submit": "Invia", "btn.sendcode": "Invia il codice",
-        "btn.verify": "Verifica", "btn.reconnect": "Riconnetti",
-        "social.note": "Verrai reindirizzato al provider e poi di nuovo qui.",
-        "social.google": "Continua con Google", "social.apple": "Continua con Apple",
-        "social.facebook": "Continua con Facebook",
-        "info.device": "Il tuo dispositivo", "info.ip": "Indirizzo IP", "info.mac": "Indirizzo MAC",
-        "info.help": "La reception potrebbe chiederti questi dati se hai bisogno di aiuto per connetterti.",
-        "notice.nomethods": "Su questa rete non è ancora disponibile alcun modo per accedere. Contatta la reception.",
-        "notice.nopackages": "Al momento l'accesso a Internet non è disponibile qui. Puoi comunque accedere, ma non c'è ancora nulla a cui collegarti — avvisa la reception.",
-        "err.generic": "Non è stato possibile verificare il tuo soggiorno. Controlla i dati inseriti o contatta la reception.",
-        "err.retry": "Puoi riprovare adesso.", "lang.label": "Lingua",
-        "terms.link": "Condizioni d'uso"
-      },
-      ru: {
-        "tab.guest": "Вход для гостей", "tab.account": "Вход в аккаунт",
-        "method.pms": "Номер", "method.poststay": "После выезда", "method.voucher": "Ваучер",
-        "method.account": "Личный аккаунт", "method.email": "Эл. почта", "method.sms": "Телефон",
-        "method.social": "Соцсети", "alt.title": "Или войдите через",
-        "account.personal": "Использовать личный аккаунт", "voucher.label": "Код ваучера",
-        "account.user": "Имя пользователя", "account.pass": "Пароль",
-        "pms.room": "Номер комнаты", "pms.secondary": "Пароль",
-        "pms.prompt.lastname": "Фамилия, указанная в брони",
-        "pms.prompt.firstname": "Имя, указанное в брони",
-        "pms.prompt.reservation": "Номер брони или подтверждения",
-        "pms.prompt.any": "Имя, фамилия или номер брони",
-        "pms.prompt.either": "Фамилия ИЛИ номер брони",
-        "pms.choose": "Выберите интернет-пакет",
-        "email.dest": "Адрес эл. почты", "sms.dest": "Номер телефона",
-        "sms.hint": "Укажите код страны, например +44 20 7946 0958",
-        "otp.code": "Код подтверждения",
-        "otp.sent.email": "Мы отправили 6-значный код на",
-        "otp.sent.sms": "Мы отправили 6-значный код в SMS на номер",
-        "otp.retry.email": "Указать другой адрес", "otp.retry.sms": "Указать другой номер",
-        "poststay.pin": "PIN после выезда", "poststay.hint": "PIN, который вам выдали при выезде",
-        "btn.login": "Войти", "btn.submit": "Отправить", "btn.sendcode": "Отправить код",
-        "btn.verify": "Подтвердить", "btn.reconnect": "Подключиться снова",
-        "social.note": "Вы перейдёте на сайт провайдера, а затем вернётесь сюда.",
-        "social.google": "Продолжить с Google", "social.apple": "Продолжить с Apple",
-        "social.facebook": "Продолжить с Facebook",
-        "info.device": "Ваше устройство", "info.ip": "IP-адрес", "info.mac": "MAC-адрес",
-        "info.help": "На стойке регистрации могут попросить эти данные, если вам нужна помощь с подключением.",
-        "notice.nomethods": "В этой сети пока нет способа войти. Пожалуйста, обратитесь на стойку регистрации.",
-        "notice.nopackages": "Доступ в интернет здесь сейчас недоступен. Вы можете войти, но подключать пока не к чему — сообщите об этом на стойку регистрации.",
-        "err.generic": "Не удалось подтвердить ваше проживание. Проверьте данные или обратитесь на стойку регистрации.",
-        "err.retry": "Теперь можно попробовать снова.", "lang.label": "Язык",
-        "terms.link": "Условия использования"
-      }
-    };
+    // THE WORDS COME FROM THE BINARY, not from a literal maintained here. See languages.go: the same map
+    // is served at /api/languages so Hotel Admin can show an operator what the portal actually says.
+    var LANGS = {{.Languages}};
+    var BUILTIN = {{.Strings}};
 
     var I18N = {};        // the HOTEL's published overrides: code -> { key: text }
     var LANG = 'en';
@@ -738,12 +529,87 @@ const landingHTML = `<!doctype html>
       });
       var sel = document.getElementById('lang');
       if (sel) sel.setAttribute('aria-label', t('lang.label'));
-      try { localStorage.setItem('sc-lang', code); } catch (e) {}
+    }
+
+    // REMEMBERING A CHOICE ON A CAPTIVE PORTAL IS NOT localStorage ALONE.
+    //
+    // iOS opens the portal in the Captive Network Assistant, a throwaway WebView. Its storage is not the
+    // Safari profile's and does not reliably outlive the sheet, and on a locked-down device localStorage can
+    // throw on the first write. A guest who picks Arabic and is bounced back to the portal a moment later
+    // must not be reading English again. So the choice is written to both a cookie and localStorage, and read
+    // back from whichever survived.
+    //
+    // It is written ONLY when the guest chooses. Automatic detection deliberately leaves no trace: a stored
+    // value must mean "this person decided", or the first thing detection does is overwrite the evidence of
+    // the decision it is supposed to defer to.
+    var LANG_KEY = 'sc-lang';
+
+    function rememberLanguage(code) {
+      try { localStorage.setItem(LANG_KEY, code); } catch (e) {}
+      try {
+        // A year, path-wide. SameSite=Lax so the redirect back from a sign-in POST still carries it.
+        document.cookie = LANG_KEY + '=' + encodeURIComponent(code) + '; path=/; max-age=31536000; SameSite=Lax';
+      } catch (e) {}
+    }
+
+    function rememberedLanguage() {
+      var v = '';
+      try { v = localStorage.getItem(LANG_KEY) || ''; } catch (e) {}
+      if (v) return v;
+      try {
+        var m = ('; ' + document.cookie).match(/; sc-lang=([^;]*)/);
+        if (m) v = decodeURIComponent(m[1]);
+      } catch (e) {}
+      return v;
+    }
+
+    // THE DEVICE'S OWN LANGUAGE PREFERENCE, IN THE ORDER THE DEVICE GIVES IT.
+    //
+    // navigator.languages is an ORDERED list -- a guest whose phone is set to Italian first and French second
+    // should get Italian at a hotel offering both, and French at one offering only French. Reading
+    // navigator.language alone, as this did, throws that away and answers with the first entry regardless of
+    // what the hotel enabled.
+    //
+    // Each entry contributes twice: the tag as given and its primary subtag, so ar-EG matches a hotel that
+    // enabled 'ar', and an exact 'pt-BR' would still be preferred over plain 'pt' if a hotel offered both.
+    // Order is preserved and duplicates dropped, so the result reads as the device's own ranking.
+    function devicePreferredLanguages() {
+      var raw = [];
+      if (navigator.languages && navigator.languages.length) {
+        raw = Array.prototype.slice.call(navigator.languages);
+      } else if (navigator.language) {
+        raw = [navigator.language];
+      }
+      var out = [];
+      function push(v) { if (v && out.indexOf(v) < 0) out.push(v); }
+      raw.forEach(function (tag) {
+        var t = String(tag || '').toLowerCase().replace(/_/g, '-');
+        push(t);
+        push(t.split('-')[0]);
+      });
+      return out;
+    }
+
+    // chooseLanguage answers the only question that matters: which of the languages THIS HOTEL offers should
+    // this guest see? Returns '' when the device asked for nothing the hotel has.
+    function chooseLanguage(offeredCodes) {
+      var have = {};
+      offeredCodes.forEach(function (c) { have[String(c).toLowerCase()] = c; });
+      var prefs = devicePreferredLanguages();
+      for (var i = 0; i < prefs.length; i++) {
+        if (have[prefs[i]]) return have[prefs[i]];
+        // A hotel offering 'pt-br' should also answer a device asking for plain 'pt'.
+        for (var j = 0; j < offeredCodes.length; j++) {
+          if (String(offeredCodes[j]).toLowerCase().split('-')[0] === prefs[i]) return offeredCodes[j];
+        }
+      }
+      return '';
     }
 
     // Remember the guest's choice for this device: a guest who picked their language once should not have to
     // do it again on the next captive-portal redirect.
     document.getElementById('lang').addEventListener('change', function (e) {
+      rememberLanguage(e.target.value);
       applyLanguage(e.target.value);
     });
 
@@ -830,14 +696,18 @@ const landingHTML = `<!doctype html>
         sel.appendChild(o);
       });
 
-      var want = '';
-      try { want = localStorage.getItem('sc-lang') || ''; } catch (e) {}
-      // The browser's own preference is a better first guess than English for a guest who has never chosen.
-      if (!want && navigator.language) want = navigator.language.slice(0, 2).toLowerCase();
-      if (!Array.prototype.some.call(sel.options, function (o) { return o.value === want; })) {
-        want = Array.prototype.some.call(sel.options, function (o) { return o.value === 'en'; })
-          ? 'en' : (sel.options[0] ? sel.options[0].value : 'en');
-      }
+      // THE ORDER OF PREFERENCE, and each step's reason:
+      //
+      //   1. what this guest CHOSE, if they chose. A decision outranks a detection, always.
+      //   2. what their device asks for, best match against what the hotel enabled.
+      //   3. English, which the hotel cannot switch off and every other language falls back to.
+      //
+      // A remembered choice the hotel no longer offers falls THROUGH to detection rather than pinning the
+      // guest to a language that is not on the page any more.
+      var codes = Array.prototype.map.call(sel.options, function (o) { return o.value; });
+      var want = rememberedLanguage();
+      if (!want || codes.indexOf(want) < 0) want = chooseLanguage(codes);
+      if (!want || codes.indexOf(want) < 0) want = codes.indexOf('en') >= 0 ? 'en' : (codes[0] || 'en');
       sel.value = want;
       applyLanguage(want);
     }

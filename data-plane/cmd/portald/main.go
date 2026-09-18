@@ -167,6 +167,10 @@ func (h *handler) landing(w http.ResponseWriter, r *http.Request, errMsg string)
 		"Error":     errMsg,
 		"ClientIP":  ipStr,
 		"ClientMAC": macStr,
+		// The shipped wording, from languages.go. html/template marshals both to JSON in a script context,
+		// so the page carries the same words /api/languages serves and there is no second copy to drift.
+		"Languages": portalLanguages,
+		"Strings":   builtinStrings,
 	})
 }
 
@@ -422,6 +426,10 @@ func (h *handler) routes() http.Handler {
 	r.Post("/devices/release", h.deviceRelease)
 	r.Get("/api/auth-methods", h.authMethods)
 	r.Get("/api/branding", h.branding)
+	// The shipped wording, so Hotel Admin can show an operator what a guest actually reads in Italian rather
+	// than an empty box with the English behind it. Unauthenticated like the rest of /api on this service:
+	// it is the same text already inside the page every device on the guest network is served.
+	r.Get("/api/languages", h.languages)
 
 	// THE HOTEL'S OWN IMAGES, from the appliance. A captive portal is reached by a device with no internet,
 	// so a logo hosted anywhere else is a logo that does not load exactly when it matters. Served read-only

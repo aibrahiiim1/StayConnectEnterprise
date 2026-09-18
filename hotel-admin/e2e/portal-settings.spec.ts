@@ -1,6 +1,5 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { portalHTML } from "./portal-page";
 
 // PORTAL SETTINGS, IN A BROWSER.
 //
@@ -22,13 +21,7 @@ const PNG = Buffer.from(
   "8b000000124944415478da63e0cd4efe8f0f338c0c0500c4cc768141e7381700" +
   "00000049454e44ae426082", "hex");
 
-const PORTAL_HTML = readFileSync(
-  resolve(__dirname, "..", "..", "data-plane", "cmd", "portald", "templates.go"), "utf8",
-).match(/const landingHTML = `([\s\S]*?)`\n/)![1]
-  // The template is Go's text/template; the two conditionals the preview meets are resolved the way portald
-  // resolves them for a device it has no ARP entry for.
-  .replace(/\{\{if \.ClientIP\}\}\{\{\.ClientIP\}\}\{\{else\}\}([^{]*)\{\{end\}\}/g, "$1")
-  .replace(/\{\{if \.ClientMAC\}\}\{\{\.ClientMAC\}\}\{\{else\}\}([^{]*)\{\{end\}\}/g, "$1");
+const PORTAL_HTML = portalHTML();
 
 let design: Record<string, unknown> = {};
 
