@@ -259,7 +259,7 @@ jobs:
       - name: Install Chrome for the browser tests
         if: steps.reuse.outputs.hit != 'true'
         working-directory: hotel-admin
-        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh playwright-install -- npx playwright install --with-deps chrome"
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh playwright-install -- npx playwright install --with-deps chrome webkit"
 
       - name: Hotel-Admin E2E — the FULL browser suite
         if: steps.reuse.outputs.hit != 'true'

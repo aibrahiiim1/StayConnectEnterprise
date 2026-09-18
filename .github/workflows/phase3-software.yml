@@ -163,7 +163,7 @@ jobs:
             typecheck:            npx tsc --noEmit                                      (cwd hotel-admin)
             vitest:               npx vitest run --reporter=default --reporter=json     (cwd hotel-admin)
             production build:     npx next build   (Phase-3 flags OFF)                  (cwd hotel-admin)
-            playwright browsers:  npx playwright install --with-deps chrome             (cwd hotel-admin)
+            playwright browsers:  npx playwright install --with-deps chrome webkit      (cwd hotel-admin)
             playwright:           npx playwright test --reporter=list,json              (cwd hotel-admin)
           CMDS
 
@@ -462,7 +462,7 @@ jobs:
       - name: Install Playwright browser
         if: steps.reuse.outputs.hit != 'true'
         working-directory: hotel-admin
-        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh playwright-install -- npx playwright install --with-deps chrome"
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh playwright-install -- npx playwright install --with-deps chrome webkit"
 
       - name: Playwright (Hotel-Admin + guest-portal real template + a11y)
         if: steps.reuse.outputs.hit != 'true'
