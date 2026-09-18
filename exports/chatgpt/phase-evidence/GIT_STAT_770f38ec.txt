@@ -1,0 +1,4 @@
+commit 770f38ecd19b8e69497e9b6668003749a6f9a5fd
+Date:   Fri Sep 18 08:47:13 2026 +0300
+
+    The integrity check called a correctly deployed bundle the wrong one
