@@ -311,7 +311,10 @@ smoke_live() {
     echo "SMOKE FAIL: could not extract a BUILD_ID from $base/login — the endpoint asserts no identity" >&2
     return 1
   fi
-  if [ "$(printf %s "$served_bid" | tr -- - _)" != "$(printf %s "$want_bid" | tr -- - _)" ]; then
+  # THE SAME COMPARISON THE INTEGRITY CHECKER USES. This normalisation lived here and only here, so the
+  # checker -- which asks the identical question after the switch -- reported a correctly deployed bundle as
+  # the wrong one the first time a generated BUILD_ID contained a hyphen. One helper, one answer.
+  if ! ha_build_ids_match "$served_bid" "$want_bid"; then
     echo "SMOKE FAIL: $base is serving BUILD_ID '$served_bid', not '$want_bid'" >&2
     return 1
   fi

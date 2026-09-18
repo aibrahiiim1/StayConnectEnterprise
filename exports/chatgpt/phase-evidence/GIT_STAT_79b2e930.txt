@@ -1,4 +1,0 @@
-commit 79b2e93090d0e5cc4e4eb8892af977fc4bd3b7ef
-Date:   Fri Sep 18 07:21:34 2026 +0300
-
-    The legacy-endpoint test asserts on a request it never waited for
