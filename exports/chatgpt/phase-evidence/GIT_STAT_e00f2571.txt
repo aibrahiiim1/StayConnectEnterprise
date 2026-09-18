@@ -1,0 +1,4 @@
+commit e00f2571595789ff82006fc07cbd036d3e1a3f77
+Date:   Fri Sep 18 04:13:41 2026 +0300
+
+    Provision the paths the operator surfaces write, in the repo rather than by hand

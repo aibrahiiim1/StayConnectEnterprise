@@ -1592,7 +1592,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "99d18dcab2c6fe20dd206fa27631930389ad6aa2",
     "base_note": "The master merge commit of PR #153. This delivery begins exactly where that one ended.",
-    "head": "93292ad6",
+    "head": "e00f2571",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
     "note": "T0157. Retention and the nightly schedule are editable through the sweep's own config and a systemd drop-in, with bounds that name where recovery would be lost. Portal images are uploaded to the appliance and served from the sign-in page's own origin, with the type decided by the bytes and SVG refused as stored XSS. The language selector is backed by published translations with English fallback, and the contract is pinned on both sides. The System section was reviewed, found free of duplication, and ordered by the job rather than by the order things were added."
   },
