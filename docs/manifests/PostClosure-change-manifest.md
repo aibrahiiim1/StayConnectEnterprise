@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `1fee3a57477573ec1093f836ea14baca1031f442`
-- **HEAD commit:** `c4fb2dea`
-- **Provenance (generation HEAD = inventory_head):** `c4fb2dea82ca0335bd7f4daa9a7864d9fc01f3e3`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `d2a78ad6`
+- **Provenance (generation HEAD = inventory_head):** `d2a78ad6eead8d805083bddda53c02de189ac474`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `master`
 - **Remote branch:** `origin/master`
 - **Changed files:** 33
@@ -23,7 +23,7 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0158 records what the sandboxes and the router caught |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0158 records what the sandboxes and the router caught |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0158 records what the sandboxes and the router caught |
-| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0158 records what the sandboxes and the router caught |
+| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: manifest lists itself |
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0158 records what the sandboxes and the router caught |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0158 records what the sandboxes and the router caught |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0158 records what the sandboxes and the router caught |
@@ -49,17 +49,17 @@
 ## Total diff statistics (`git diff --stat`)
 ```text
  data-plane/cmd/edged/resources_portal_assets.go    |   8 +-
- data-plane/cmd/scd/backup_settings.go              |  23 +--
+ data-plane/cmd/scd/backup_settings.go              |  23 ++--
  data-plane/cmd/scd/main.go                         |   2 +
- data-plane/cmd/scd/routes_reachable_test.go        |  77 ++++++++++
+ data-plane/cmd/scd/routes_reachable_test.go        |  77 ++++++++++++
  deploy/systemd/stayconnect-edged.service           |   6 +
  deploy/systemd/stayconnect-scd.service             |  11 ++
- deploy/tmpfiles/stayconnect-operator-surfaces.conf |  37 +++++
+ deploy/tmpfiles/stayconnect-operator-surfaces.conf |  37 ++++++
  .../StayConnect-IAM-Phase0-Contract.md             |   2 +-
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   2 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   2 +-
  docs/context/StayConnect-IAM-Handoff.md            |   2 +-
- docs/manifests/PostClosure-change-manifest.md      | 167 +++++++++++----------
+ docs/manifests/PostClosure-change-manifest.md      | 140 ++++++++++-----------
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 340767 -> 340763 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 140420 -> 140409 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 43968 -> 43972 bytes
@@ -72,25 +72,26 @@
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |   2 +-
  .../chatgpt/stayconnectenterprise/00-START-HERE.md |   2 +-
- exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  60 ++++----
+ exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  60 ++++-----
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   2 +-
  .../StayConnect-IAM-Handoff.md                     |   2 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   2 +-
  .../StayConnect-IAM-Phase1A-Plan.md                |   2 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |   2 +-
- governance/project-state.json                      |  14 +-
+ governance/project-state.json                      |  14 +--
  governance/transitions/T0157.json                  |   3 +-
- governance/transitions/T0158.json                  |  45 ++++++
- 33 files changed, 352 insertions(+), 153 deletions(-)
+ governance/transitions/T0158.json                  |  45 +++++++
+ 33 files changed, 327 insertions(+), 151 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-(clean)
+M  governance/project-state.json
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: d2a78ad6 Delivery: manifest lists itself
 HISTORICAL: c4fb2dea Governance: T0158 records what the sandboxes and the router caught
 HISTORICAL: 58e4b20e Delivery: manifest lists itself
 HISTORICAL: d289df00 Governance: T0157 records what the sandboxes and the router caught
