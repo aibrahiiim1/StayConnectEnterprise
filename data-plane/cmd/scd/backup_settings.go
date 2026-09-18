@@ -176,16 +176,19 @@ func (s *server) backupSettingsSet(w http.ResponseWriter, r *http.Request) {
 	for _, set := range current {
 		fmt.Fprintf(&b, "%s=%d\n", set.Key, set.Value)
 	}
-	// Written beside the target and renamed, so a sweep firing mid-write reads either the old policy or the
-	// new one and never half of each.
-	tmp := retentionConf + ".new"
-	if err := os.WriteFile(tmp, []byte(b.String()), 0o644); err != nil {
-		httpErr(w, http.StatusInternalServerError, "the retention policy could not be written")
-		return
-	}
-	if err := os.Rename(tmp, retentionConf); err != nil {
-		_ = os.Remove(tmp)
-		httpErr(w, http.StatusInternalServerError, "the retention policy could not be installed")
+	// WRITTEN IN PLACE, and that is a deliberate trade against a narrower sandbox.
+	//
+	// Write-to-temp-and-rename is the usual way to avoid a torn read, but it needs the DIRECTORY writable.
+	// This service runs under ProtectSystem=full with an explicit ReadWritePaths allowlist, and widening that
+	// to all of /etc/stayconnect to gain atomicity on a 300-byte file would hand it write access to the
+	// identity, licence and certificate material sitting beside it. The allowlist names this one file.
+	//
+	// What is given up is small and bounded: the payload is a few hundred bytes written by a single
+	// os.WriteFile, and the only reader is a nightly sweep that sources it once at start.
+	if err := os.WriteFile(retentionConf, []byte(b.String()), 0o644); err != nil {
+		slog.Error("retention policy not written", "path", retentionConf, "err", err)
+		httpErr(w, http.StatusInternalServerError,
+			"the retention policy could not be written to "+retentionConf+": "+err.Error())
 		return
 	}
 

@@ -53,5 +53,6 @@
     "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
   },
   "authorization": "Product Owner, 2026-09-18: complete the remaining authorized scope of the Hotel Admin / Guest Portal mission -- editable backup scheduling and retention, logo and background asset management, the System-section review, and a language selector backed by real translated content.",
-  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE.",
+  "live_verification": "Recorded separately in T0158: these surfaces met the real appliance after this delivery merged, and four defects -- one of wiring and three of sandboxing -- were found and fixed there."
 }

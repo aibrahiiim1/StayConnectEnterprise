@@ -67,6 +67,17 @@ ProtectSystem=full
 #                 assignment ("read-only file system") and stays unassigned.
 #   certs/      — the mTLS client certificate + CA bundle
 ReadWritePaths=/etc/stayconnect/identity /etc/stayconnect/license /etc/stayconnect/assignment /etc/stayconnect/certs
+# Backup retention and the nightly schedule are operator settings, so scd writes the two files that carry
+# them. Scoped as tightly as the stores above: ONE config file, and ONE unit's override directory.
+#
+# NOT /etc/stayconnect, which holds the identity, licence and certificate material listed above — this
+# service should not gain write access to those to configure a retention policy. NOT /etc/systemd/system,
+# which would let it define or alter any unit on the appliance, i.e. arbitrary persistent root.
+#
+# Both paths must EXIST before systemd can add them to the allowlist, so deployment creates them; the file is
+# also written in place rather than renamed over, because a temp-and-rename needs the whole directory.
+ReadWritePaths=/etc/stayconnect/backup-retention.conf
+ReadWritePaths=/etc/systemd/system/stayconnect-backup-cleanup.timer.d
 NoNewPrivileges=yes
 
 [Install]

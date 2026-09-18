@@ -1,0 +1,54 @@
+{
+  "transition_id": "T0158",
+  "seq": 158,
+  "timestamp": "2026-09-18T01:55:02Z",
+  "timestamp_derivation": "After the merged operator surfaces met the real appliance, exposing four defects that were fixed, re-deployed and re-verified there, and the full Go and UI suites were re-run; before the author timestamp of the commit that introduces this receipt. After the merge commit 1fee3a57 it follows. Per T0091, in the order T0108 requires.",
+  "record_type": "THE_SANDBOXES_THE_ROUTER_AND_THE_REFERENCE_DESIGN",
+  "why_this_is_a_second_cycle": "PR #154 merged when its four gates went green, and the new surfaces were then exercised against the real appliance for the first time. Everything below was found there. Protected master cannot carry post-deployment fixes in the commit that produced the artefact being deployed.",
+  "what_the_live_appliance_found": {
+    "_note": "Four defects, found by exercising the new surfaces against the real appliance. Three are about sandboxing and one about wiring; none was reachable from a test that calls a handler directly.",
+    "1_the_handlers_were_mounted_on_nothing": "The backup settings handlers were written, built, vetted, unit-tested and merged through four green gates while scd had no route for them. edged proxied to a path that answered 404 and the operator saw '404 page not found' where a retention policy should have been. An exported method nobody references is legal Go, and every test called the handler directly rather than through the router. The route is added, and so is a test that reads the routes actually registered on scd's mux and asserts every path edged calls is one of them -- METHOD and path, because the first version matched paths only and a probe deleting the GET still passed on the strength of the POST beside it.",
+    "2_scd_could_not_write_its_config": "scd runs under ProtectSystem=full with an explicit ReadWritePaths allowlist covering identity, licence, assignment and certificates. /etc/stayconnect/backup-retention.conf was not on it. Widened by exactly that one file and one unit's override directory -- not /etc/stayconnect, which holds the identity and certificate material beside it, and not /etc/systemd/system, which would let this service define or alter any unit on the appliance.",
+    "3_the_write_had_to_change_shape": "Write-to-temp-and-rename needs the DIRECTORY writable, so the first attempt still failed against a file-scoped allowlist. The policy is written in place instead: a deliberate trade of atomicity on a 300-byte file, read once a night, against not granting write access to the stores beside it.",
+    "4_edged_could_not_write_its_uploads": "edged runs under ProtectSystem=strict, so /opt/stayconnect/portal-assets was read-only. Widened by that one directory -- not /opt/stayconnect, which holds the service binaries, rollback sets and database backups. The upload error names the path and the reason now; 'the image could not be stored' sent me looking at disk space when the filesystem was read-only.",
+    "and_the_provisioning_that_follows_from_it": "systemd resolves ReadWritePaths at unit start, so a path that does not exist then is not writable afterwards however the service tries. All four paths this delivery needs -- the config file, the timer override directory, the database backup directory and the portal asset directory -- are now created by a tmpfiles config in the repo, with the ownership the two services need to hand files to each other. That is also where the earlier root-owned-dump-unreadable-by-edged failure came from."
+  },
+  "proven_live": {
+    "retention": "KEEP_DB set to 14 and the sweep time to 04:15 through the operator API under step-up; the value appears in /etc/stayconnect/backup-retention.conf, systemd reports OnCalendar 04:15, and a dry run of stayconnect-backup-cleanup reports keep_db 14 -- so the change reaches the thing that actually performs retention, not just a file. Restored to 7 and 03:30 afterwards. An out-of-range value and an inverted warning/critical pair were both refused with the reason.",
+    "assets": "A PNG uploaded through Hotel Admin, stored content-addressed, served by the portal as image/png from the appliance's own origin, and listed back. An SVG carrying <script> was refused with the reason. The asset directory returns 404 rather than an index, and an encoded traversal returns 404.",
+    "languages": "A design published carrying English and Arabic with six translated keys; the portal serves it, and the rendered page carries fourteen tagged strings and the translation pass. Publishing a second design and rolling back to the first left three versions in the history and the first design in force -- the rollback re-published rather than rewound.",
+    "system": "Nav ordered by job with no screen removed."
+  },
+  "what_this_says_about_the_gates": "Four green gates passed a handler that was mounted on nothing. The gates test behaviour thoroughly and wiring not at all, because a unit test calls a handler directly and an unreferenced exported method is legal Go. The reachability test added here closes that specific hole for scd's surface; it is worth knowing it was open.",
+  "no_migration": "None.",
+  "constraints_observed": {
+    "sandbox_widening_is_scoped": "Four paths, each named individually and justified: one config file and one unit override directory for scd, one image directory for edged, and the database backup directory's group ownership. Explicitly NOT /etc/stayconnect, /etc/systemd/system or /opt/stayconnect, each of which would have been easier and each of which holds material these services have no business writing.",
+    "no_privilege_escalation": "No service gained a new user, group or capability. edged is still not in the docker group.",
+    "no_destructive_action": "Nothing deleted. Retention values changed during verification were restored.",
+    "no_pms_or_financial": "No PMS configuration change, no PMS write, no financial traffic.",
+    "retired_host": "172.21.60.23 neither contacted nor modified."
+  },
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-18: complete the remaining authorized scope of the Hotel Admin / Guest Portal mission, carried to DONE including PRE-LIVE deployment, live verification and governance synchronization.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE.",
+  "the_login_page_did_not_match_the_reference": {
+    "reported": "The Product Owner reported the login page as 'totally different' from the supplied screenshots.",
+    "what_was_actually_wrong": "The first pass styled the page like the reference while leaving it structured like the old portal -- which looks close and behaves differently, the exact failure a reference screenshot exists to prevent.",
+    "the_structural_gap": "Voucher and Personal Account were two separate sign-in methods reached from an alternatives list. The reference presents them as ONE panel behind a 'Use Personal Account' pill, because from a guest's side they are the same question. That pill did not exist anywhere in the product.",
+    "the_details_that_were_wrong_too": "Buttons said Connect where the reference says Submit for a guest and Login for an account. Labels were sentence case where the reference is title case. The guest's second field was a placeholder-only 'Last name or reservation number' where the reference labels it Password with the hint beneath -- so it is now announced to a screen reader instead of vanishing the moment the guest types.",
+    "two_things_the_rebuild_had_to_get_right": "Both account forms stay in the DOM so neither loses what the guest typed when they flip between them; and the hidden form's required fields are DISABLED while hidden, because otherwise the browser blocks submission of the visible form on an invisible empty field -- a dead Submit button with no error. The pill is hidden entirely when a site enables only one of the two, since a choice with a single option invites a guest to look for the other way in.",
+    "pinned": "A test asserts the specifics rather than the impression, including that the superseded wording is GONE, so the page cannot quietly carry both vocabularies. Both account forms and the toggle are asserted reachable, because merging two sign-in methods into one panel is exactly where one of them stops being reachable."
+  },
+  "tests": "319 UI tests, 30 portal E2E specs and the full Go suite, including two new tests holding the landing page to the reference design."
+}

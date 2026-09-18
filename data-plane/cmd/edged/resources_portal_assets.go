@@ -24,6 +24,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -169,7 +170,12 @@ func (s *server) uploadPortalAsset(w http.ResponseWriter, r *http.Request) {
 	name := hex.EncodeToString(sum[:8]) + ext
 	dest := filepath.Join(portalAssetDir, name)
 	if err := os.WriteFile(dest, data, 0o644); err != nil {
-		jsonErr(w, http.StatusInternalServerError, "internal", "the image could not be stored")
+		// Name the path and the reason. "The image could not be stored" sent the first operator who hit this
+		// looking at disk space, when the cause was a read-only filesystem: edged runs under
+		// ProtectSystem=strict and this directory has to be on its allowlist.
+		slog.Error("portal asset not stored", "path", dest, "err", err)
+		jsonErr(w, http.StatusInternalServerError, "asset_dir_unavailable",
+			"the image could not be written to "+portalAssetDir+": "+err.Error())
 		return
 	}
 	s.audit(r, "portal_asset.uploaded", "portal_asset", name, map[string]any{

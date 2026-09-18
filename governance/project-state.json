@@ -1093,7 +1093,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0157",
+  "latest_transition_id": "T0158",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1587,14 +1587,14 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "THE_FOUR_SURFACES_THAT_WERE_DISPLAYED_BUT_NOT_DOABLE",
-    "decision": "D75",
+    "kind": "THE_SANDBOXES_THE_ROUTER_AND_THE_REFERENCE_DESIGN",
+    "decision": "D76",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "99d18dcab2c6fe20dd206fa27631930389ad6aa2",
-    "base_note": "The master merge commit of PR #153. This delivery begins exactly where that one ended.",
-    "head": "93292ad6",
+    "base": "1fee3a57477573ec1093f836ea14baca1031f442",
+    "base_note": "The master merge commit of PR #154. This delivery begins exactly where that one ended.",
+    "head": "47870d98",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
-    "note": "T0157. Retention and the nightly schedule are editable through the sweep's own config and a systemd drop-in, with bounds that name where recovery would be lost. Portal images are uploaded to the appliance and served from the sign-in page's own origin, with the type decided by the bytes and SVG refused as stored XSS. The language selector is backed by published translations with English fallback, and the contract is pinned on both sides. The System section was reviewed, found free of duplication, and ordered by the job rather than by the order things were added."
+    "note": "T0158. The backup settings handlers were merged through four green gates while mounted on nothing; scd and edged then refused to write four paths that were not on their ProtectSystem allowlists. All four correct refusals, widened by exactly what the features need and nothing adjacent, with the paths provisioned by a repo tmpfiles config because systemd resolves the allowlist at unit start. Proven live: retention reaches the sweep itself, an SVG is refused while a PNG is served from the appliance's own origin, and a published Arabic design rolls back without rewinding history. Also rebuilds the guest login page to the Product Owner's reference screenshots: Voucher and Personal Account merge into one panel behind a 'Use Personal Account' pill that did not previously exist, with Submit/Login and title-case labels."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
