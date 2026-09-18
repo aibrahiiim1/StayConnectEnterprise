@@ -1093,7 +1093,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0159",
+  "latest_transition_id": "T0160",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1587,14 +1587,14 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "MISSION_DEPLOYED_VERIFIED_AND_ONE_LATENT_IDENTITY_DEFECT_CLOSED",
-    "decision": "D77",
+    "kind": "GUEST_PORTAL_VISUAL_AND_TRANSLATION_ACCEPTANCE_GAP_CORRECTED",
+    "decision": "D78",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "7e7af573ca25be43f02cd2845ff4456257bee22a",
-    "base_note": "The master merge commit of PR #155. This delivery begins exactly where that one ended.",
-    "head": "dd34f91f",
+    "base": "305587b6fff4725d49a2fa2b83c69e69e00711f1",
+    "base_note": "The master merge commit of PR #156. This delivery begins exactly where that one ended.",
+    "head": "648f3710bd197d231e5dfa3adf4aa066a77f7ed5",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
-    "note": "T0159. The mission deployed and verified across every changed surface. Post-deployment verification exposed a latent identity defect: .next/BUILD_ID holds Next's id verbatim while the stamped document rewrites '-' to '_', so the first release whose generated id contained a hyphen was reported as the wrong bundle. The deploy script already normalised for it at one call site and the integrity checker never had; both now share one helper."
+    "note": "T0160. The Product Owner reopened the Guest Portal visual and translation acceptance gap: the surface was functionally delivered but did not match the supplied reference, and the mobile rendering was rejected outright. The defect was structural rather than cosmetic -- the page was a flex ROW with the language bar as a sibling of the card, so on a phone the bar became a flex item beside it and stretched to the full viewport height, leaving a white column down the left and the sign-in form squeezed into what remained. The page is now a column and the card takes the width it is given at every size. Six languages (en, ar, de, fr, it, ru) now ship complete in the build with Arabic laid out right to left, the hotel's own wording merges over them, and the Hotel Admin editor edits one language at a time instead of stacking six. Verified by rendering the real template and photographing it at 1440x900, 834x1112 and 390x844 in English and Arabic, on both tab groups, with the personal-account form and the information panel open -- structural tests alone were explicitly not accepted as proof. No backend, API, database, PMS, financial, networking, Root-CA or Go-Live change."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

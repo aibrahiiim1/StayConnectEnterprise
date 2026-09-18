@@ -44,28 +44,82 @@ type BrandingState = { design: Design; draft: Design; revisions: Revision[]; pub
 
 /** What an unbranded appliance shows. The portal carries the same defaults; these mirror them so the preview
  *  is honest about what a guest would actually see before anything is published. */
-/** The guest-facing strings the portal tags for translation. Keys must match data-i18n in the portal
- *  template: if they drift, the operator types words that never appear. */
-const PORTAL_STRINGS: { key: string; english: string }[] = [
-  { key: "tab.guest", english: "Guest Login" },
-  { key: "tab.account", english: "Account Login" },
-  { key: "pms.room", english: "Room Number" },
-  { key: "account.pass", english: "Password" },
-  { key: "account.user", english: "Username" },
-  { key: "voucher.label", english: "Voucher Code" },
-  { key: "email.dest", english: "Email address" },
-  { key: "sms.dest", english: "Phone number" },
-  { key: "otp.code", english: "Verification code" },
-  { key: "btn.submit", english: "Submit" },
-  { key: "btn.login", english: "Login" },
-  { key: "account.personal", english: "Use Personal Account" },
-  { key: "pms.secondary", english: "Password" },
-  { key: "btn.verify", english: "Verify" },
-  { key: "info.device", english: "Your device" },
-  { key: "info.ip", english: "IP address" },
-  { key: "info.mac", english: "MAC address" },
-  { key: "info.help", english: "Reception may ask for these if you need help connecting." },
+/** The six languages the portal ships words for. Codes, order and native names match LANGS in
+ *  data-plane/cmd/portald/templates.go. A hotel may still add a seventh of its own. */
+const SHIPPED_LANGUAGES: { code: string; label: string }[] = [
+  { code: "en", label: "English" },
+  { code: "ar", label: "العربية" },
+  { code: "de", label: "Deutsch" },
+  { code: "fr", label: "Français" },
+  { code: "it", label: "Italiano" },
+  { code: "ru", label: "Русский" },
 ];
+
+/** The guest-facing strings the portal tags for translation, grouped the way they appear on the page rather
+ *  than as one undifferentiated list. Keys must match data-i18n / BUILTIN in the portal template: if they
+ *  drift, the operator types words that never appear. A test in cmd/portald holds the two lists together. */
+const PORTAL_STRINGS: { group: string; key: string; english: string }[] = [
+  { group: "Tabs and navigation", key: "tab.guest", english: "Guest Login" },
+  { group: "Tabs and navigation", key: "tab.account", english: "Account Login" },
+  { group: "Tabs and navigation", key: "alt.title", english: "Or sign in with" },
+  { group: "Tabs and navigation", key: "method.pms", english: "Room" },
+  { group: "Tabs and navigation", key: "method.poststay", english: "Post-stay" },
+  { group: "Tabs and navigation", key: "method.voucher", english: "Voucher" },
+  { group: "Tabs and navigation", key: "method.account", english: "Personal account" },
+  { group: "Tabs and navigation", key: "method.email", english: "Email" },
+  { group: "Tabs and navigation", key: "method.sms", english: "Phone" },
+  { group: "Tabs and navigation", key: "method.social", english: "Social" },
+
+  { group: "Room sign-in", key: "pms.room", english: "Room Number" },
+  { group: "Room sign-in", key: "pms.secondary", english: "Password" },
+  { group: "Room sign-in", key: "pms.prompt.lastname", english: "Last name on the reservation" },
+  { group: "Room sign-in", key: "pms.prompt.firstname", english: "First name on the reservation" },
+  { group: "Room sign-in", key: "pms.prompt.reservation", english: "Reservation / confirmation number" },
+  { group: "Room sign-in", key: "pms.prompt.any", english: "First name, last name, or reservation number" },
+  { group: "Room sign-in", key: "pms.prompt.either", english: "Last name OR reservation number" },
+  { group: "Room sign-in", key: "pms.choose", english: "Choose your internet package" },
+
+  { group: "Voucher and account", key: "account.personal", english: "Use Personal Account" },
+  { group: "Voucher and account", key: "voucher.label", english: "Voucher Code" },
+  { group: "Voucher and account", key: "account.user", english: "Username" },
+  { group: "Voucher and account", key: "account.pass", english: "Password" },
+
+  { group: "Email and SMS", key: "email.dest", english: "Email address" },
+  { group: "Email and SMS", key: "sms.dest", english: "Phone number" },
+  { group: "Email and SMS", key: "sms.hint", english: "Include the country code, for example +44 20 7946 0958" },
+  { group: "Email and SMS", key: "otp.code", english: "Verification code" },
+  { group: "Email and SMS", key: "otp.sent.email", english: "We sent a 6-digit code to" },
+  { group: "Email and SMS", key: "otp.sent.sms", english: "We texted a 6-digit code to" },
+  { group: "Email and SMS", key: "otp.retry.email", english: "Try a different email" },
+  { group: "Email and SMS", key: "otp.retry.sms", english: "Use a different number" },
+
+  { group: "Post-stay", key: "poststay.pin", english: "Post-stay PIN" },
+  { group: "Post-stay", key: "poststay.hint", english: "The PIN you were given at checkout" },
+
+  { group: "Buttons", key: "btn.login", english: "Login" },
+  { group: "Buttons", key: "btn.submit", english: "Submit" },
+  { group: "Buttons", key: "btn.sendcode", english: "Send code" },
+  { group: "Buttons", key: "btn.verify", english: "Verify" },
+  { group: "Buttons", key: "btn.reconnect", english: "Reconnect" },
+
+  { group: "Social sign-in", key: "social.note", english: "You will be redirected to the provider, then back here." },
+  { group: "Social sign-in", key: "social.google", english: "Continue with Google" },
+  { group: "Social sign-in", key: "social.apple", english: "Continue with Apple" },
+  { group: "Social sign-in", key: "social.facebook", english: "Continue with Facebook" },
+
+  { group: "Device information", key: "info.device", english: "Your device" },
+  { group: "Device information", key: "info.ip", english: "IP address" },
+  { group: "Device information", key: "info.mac", english: "MAC address" },
+  { group: "Device information", key: "info.help", english: "Reception may ask for these if you need help connecting." },
+
+  { group: "Notices", key: "notice.nomethods", english: "There is no way to sign in on this network yet. Please contact reception." },
+  { group: "Notices", key: "notice.nopackages", english: "Internet access is not available here at the moment. You can still sign in, but there is nothing to connect you to yet — please let reception know." },
+  { group: "Notices", key: "err.generic", english: "We could not verify your stay. Please check your details or contact reception." },
+  { group: "Notices", key: "err.retry", english: "You can try again now." },
+  { group: "Notices", key: "lang.label", english: "Language" },
+];
+
+const STRING_GROUPS = Array.from(new Set(PORTAL_STRINGS.map((s) => s.group)));
 
 const DEFAULTS: Required<Pick<Design, "brand_color" | "brand_color_dark" | "text_color" | "corner_radius">> = {
   brand_color: "#0f6b63",
@@ -90,6 +144,8 @@ export default function PortalBrandingPage() {
   const [uploading, setUploading] = useState<string | null>(null);
   const [langCode, setLangCode] = useState("");
   const [langLabel, setLangLabel] = useState("");
+  /** Which language the string editor is showing. One at a time — see the Languages card. */
+  const [editing, setEditing] = useState("en");
 
   const writable = canWrite("portal-branding", roles);
   const set = <K extends keyof Design>(k: K, v: Design[K]) => setD((p) => ({ ...p, [k]: v }));
@@ -178,7 +234,54 @@ export default function PortalBrandingPage() {
     } catch (e) { setErr(errMsg(e)); }
   }
 
-  const langs = Object.keys(d.translations ?? {});
+  // ---- languages ---------------------------------------------------------------------------------------
+  //
+  // Two different lists that used to be one, which is what made the old selector offer languages nobody had
+  // chosen: WHICH languages a guest is offered, and WHICH languages this hotel has written its own words for.
+  // Writing an Italian greeting is not a decision to offer Italian.
+
+  /** Every language this appliance knows about: the six that ship, plus anything the hotel added. */
+  const offeredList = useMemo(() => {
+    const seen = new Map<string, { code: string; label: string }>();
+    SHIPPED_LANGUAGES.forEach((l) => seen.set(l.code, l));
+    (d.languages ?? []).forEach((l) => { if (!seen.has(l.code)) seen.set(l.code, l); });
+    Object.keys(d.translations ?? {}).forEach((c) => {
+      if (!seen.has(c)) seen.set(c, { code: c, label: c.toUpperCase() });
+    });
+    return Array.from(seen.values());
+  }, [d.languages, d.translations]);
+
+  /** An unset list means all six — the same rule the portal applies, so the screen and the page agree. */
+  const currentOffered = (p: Design) => (p.languages?.length ? p.languages : SHIPPED_LANGUAGES);
+  const offered = useMemo(() => currentOffered(d).map((l) => l.code), [d]);
+
+  function setOffered(code: string, on: boolean) {
+    setD((p) => {
+      const list = currentOffered(p);
+      const label = offeredList.find((l) => l.code === code)?.label ?? code.toUpperCase();
+      const next = on
+        ? [...list.filter((l) => l.code !== code), { code, label }]
+        : list.filter((l) => l.code !== code || code === "en"); // English is not removable
+      // Keep the shipped order, so the guest's selector does not reshuffle as this screen is edited.
+      const order = offeredList.map((l) => l.code);
+      next.sort((a, b) => order.indexOf(a.code) - order.indexOf(b.code));
+      return { ...p, languages: next };
+    });
+  }
+
+  const isShipped = (code: string) => SHIPPED_LANGUAGES.some((l) => l.code === code);
+
+  /** What the badge on each language tab counts. A shipped language is never "missing" a string — the portal
+   *  has a word for it — so only a language this hotel added can fall back to English. */
+  function statusOf(code: string) {
+    const tr = d.translations?.[code] ?? {};
+    const custom = PORTAL_STRINGS.filter((s) => (tr[s.key] ?? "").trim() !== "").length;
+    const shipped = isShipped(code);
+    return { shipped, custom, missing: shipped ? 0 : PORTAL_STRINGS.length - custom };
+  }
+
+  const editingMeta = offeredList.find((l) => l.code === editing) ?? offeredList[0] ?? null;
+  const editingStatus = statusOf(editingMeta?.code ?? "en");
 
   const preview = { ...DEFAULTS, ...d };
 
@@ -312,38 +415,83 @@ export default function PortalBrandingPage() {
               <CardTitle className="flex items-center gap-2"><Languages className="h-4 w-4" /> Languages</CardTitle>
             </CardHeader>
             <CardBody className="space-y-4">
-              {/* A SELECTOR THAT CHANGES NOTHING IS WORSE THAN NO SELECTOR: it tells a guest their language
-                  is supported and then does not support it. The portal only offers a language once there are
-                  words behind it, so this is where a language starts existing. */}
+              {/* SIX LANGUAGES AT ONCE IS A SCROLL, NOT A SCREEN.
+                  This used to render every language as its own block, one under another, each with the full
+                  string list inside it — six languages meant roughly three hundred inputs stacked vertically
+                  and no way to see what any one language was missing. It is now one language at a time: pick
+                  it, see its state, edit it.
+                  It is also no longer a data-entry job. The portal SHIPS words for all six, so offering a
+                  guest Arabic costs one tick; the fields below exist for a property that wants its own
+                  wording, not for one that has to supply the basics. */}
               <p className="text-sm text-muted">
-                English is always offered and is the fallback for anything a translation leaves out — a
-                half-translated portal still reads. Add a language and give it the words guests see.
+                The portal ships complete wording for {SHIPPED_LANGUAGES.length} languages. Tick the ones your
+                guests should see, and edit any string you want to say differently. Anything you leave blank
+                uses the shipped wording, and anything neither you nor the portal has a word for falls back to
+                English — a half-translated portal still reads.
               </p>
 
-              <div className="flex flex-wrap items-end gap-2">
+              {/* WHICH LANGUAGES A GUEST IS OFFERED. Separate from which ones have overrides: an operator who
+                  writes an Italian greeting has not decided that Italian is offered, and the two being the
+                  same setting is what produced a selector full of languages nobody chose. */}
+              <fieldset className="space-y-2">
+                <legend className="text-sm font-medium">Offered to guests</legend>
+                <div className="flex flex-wrap gap-2">
+                  {offeredList.map((l) => {
+                    const on = offered.includes(l.code);
+                    const fixed = l.code === "en";
+                    return (
+                      <label
+                        key={l.code}
+                        className={`inline-flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 text-sm ${
+                          on ? "border-primary text-primary" : "text-muted-foreground"
+                        } ${fixed ? "cursor-default opacity-80" : ""}`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4"
+                          aria-label={`Offer ${l.label} to guests`}
+                          checked={on}
+                          disabled={fixed || !writable}
+                          onChange={(e) => setOffered(l.code, e.target.checked)}
+                        />
+                        {l.label} <span className="text-2xs text-muted">({l.code})</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-muted">
+                  English is always offered; it is what the portal falls back to. A language with no words
+                  behind it is never shown to a guest, whatever is ticked here.
+                </p>
+              </fieldset>
+
+              {/* Adding a seventh language the portal does not ship. It arrives with nothing, so every string
+                  it leaves blank shows English — which is exactly what the counter below says. */}
+              <div className="flex flex-wrap items-end gap-2 border-t pt-4">
                 <label className="block text-sm">
                   Language code
                   <Input value={langCode} onChange={(e) => setLangCode(e.target.value.toLowerCase().slice(0, 5))}
-                    placeholder="ar" className="w-24" />
+                    placeholder="es" className="w-24" />
                 </label>
                 <label className="block text-sm">
                   Shown as
-                  <Input value={langLabel} onChange={(e) => setLangLabel(e.target.value)} placeholder="العربية" />
+                  <Input value={langLabel} onChange={(e) => setLangLabel(e.target.value)} placeholder="Español" />
                 </label>
                 <Button
                   type="button"
                   variant="secondary"
-                  disabled={!langCode.trim()}
+                  disabled={!langCode.trim() || !writable}
                   onClick={() => {
                     const code = langCode.trim();
                     setD((p) => ({
                       ...p,
                       translations: { ...(p.translations ?? {}), [code]: (p.translations ?? {})[code] ?? {} },
                       languages: [
-                        ...(p.languages ?? [{ code: "en", label: "English" }]).filter((l) => l.code !== code),
+                        ...currentOffered(p).filter((l) => l.code !== code),
                         { code, label: langLabel.trim() || code.toUpperCase() },
                       ],
                     }));
+                    setEditing(code);
                     setLangCode(""); setLangLabel("");
                   }}
                 >
@@ -351,44 +499,113 @@ export default function PortalBrandingPage() {
                 </Button>
               </div>
 
-              {langs.length === 0 ? (
-                <p className="text-sm text-muted">Only English is offered.</p>
-              ) : (
-                langs.map((code) => (
-                  <div key={code} className="space-y-2 rounded border p-3">
-                    <div className="flex items-center justify-between">
+              {/* ---- the language being edited ------------------------------------------------ */}
+              <div className="space-y-3 border-t pt-4">
+                <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Language being edited">
+                  {offeredList.map((l) => {
+                    const st = statusOf(l.code);
+                    return (
+                      <button
+                        key={l.code}
+                        type="button"
+                        role="tab"
+                        aria-selected={editing === l.code}
+                        onClick={() => setEditing(l.code)}
+                        className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm ${
+                          editing === l.code ? "border-primary bg-primary/5 text-primary" : "text-muted-foreground"
+                        }`}
+                      >
+                        {l.label}
+                        {/* MISSING IS COUNTED, NOT GUESSED AT. A shipped language cannot be missing anything;
+                            a language the hotel added itself shows English for every string it has not been
+                            given, and the badge is that number. */}
+                        {st.missing > 0 ? (
+                          <Badge tone="warn">{st.missing} in English</Badge>
+                        ) : st.custom > 0 ? (
+                          <Badge tone="neutral">{st.custom} edited</Badge>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {editingMeta && (
+                  <div className="space-y-3 rounded border p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <strong className="text-sm">
-                        {(d.languages ?? []).find((l) => l.code === code)?.label ?? code}{" "}
-                        <span className="text-muted">({code})</span>
+                        {editingMeta.label} <span className="text-muted">({editingMeta.code})</span>
                       </strong>
-                      <Button size="sm" variant="secondary" onClick={() => setD((p) => {
-                        const t = { ...(p.translations ?? {}) }; delete t[code];
-                        return { ...p, translations: t, languages: (p.languages ?? []).filter((l) => l.code !== code) };
-                      })}>
-                        Remove
-                      </Button>
-                    </div>
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      {PORTAL_STRINGS.map((st) => (
-                        <label key={st.key} className="block text-xs">
-                          {st.english}
-                          <Input
-                            value={(d.translations?.[code]?.[st.key]) ?? ""}
-                            placeholder={st.english}
-                            onChange={(e) => setD((p) => ({
+                      <span className="flex items-center gap-2">
+                        {editingStatus.shipped ? (
+                          <span className="text-xs text-muted">
+                            Ships with the portal. Leave a field empty to use its wording.
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted">
+                            Added by this hotel. Empty fields show English.
+                          </span>
+                        )}
+                        {!editingStatus.shipped && (
+                          <Button size="sm" variant="secondary" disabled={!writable} onClick={() => setD((p) => {
+                            const tr = { ...(p.translations ?? {}) }; delete tr[editingMeta.code];
+                            return {
                               ...p,
-                              translations: {
-                                ...(p.translations ?? {}),
-                                [code]: { ...((p.translations ?? {})[code] ?? {}), [st.key]: e.target.value },
-                              },
-                            }))}
-                          />
-                        </label>
-                      ))}
+                              translations: tr,
+                              languages: currentOffered(p).filter((l) => l.code !== editingMeta.code),
+                            };
+                          })}>
+                            Remove
+                          </Button>
+                        )}
+                      </span>
                     </div>
+
+                    {editingMeta.code === "en" ? (
+                      <p className="text-sm text-muted">
+                        English is the portal&apos;s own wording and the fallback for every other language.
+                        Change a string here and it changes for guests reading English and for every language
+                        that has not been given its own word for it.
+                      </p>
+                    ) : null}
+
+                    {STRING_GROUPS.map((g) => (
+                      <details key={g} open className="rounded border">
+                        <summary className="cursor-pointer px-3 py-2 text-sm font-medium">{g}</summary>
+                        <div className="grid gap-2 p-3 pt-0 sm:grid-cols-2">
+                          {PORTAL_STRINGS.filter((s) => s.group === g).map((st) => {
+                            const v = d.translations?.[editingMeta.code]?.[st.key] ?? "";
+                            const usesEnglish = !v && !editingStatus.shipped;
+                            return (
+                              <label key={st.key} className="block text-xs">
+                                <span className="flex items-center gap-1.5">
+                                  {st.english}
+                                  {usesEnglish && <span className="text-2xs text-warning-subtle-foreground">English</span>}
+                                </span>
+                                <Input
+                                  value={v}
+                                  placeholder={st.english}
+                                  disabled={!writable}
+                                  aria-label={`${st.english} in ${editingMeta.label}`}
+                                  onChange={(e) => setD((p) => ({
+                                    ...p,
+                                    translations: {
+                                      ...(p.translations ?? {}),
+                                      [editingMeta.code]: {
+                                        ...((p.translations ?? {})[editingMeta.code] ?? {}),
+                                        [st.key]: e.target.value,
+                                      },
+                                    },
+                                  }))}
+                                />
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </details>
+                    ))}
                   </div>
-                ))
-              )}
+                )}
+              </div>
             </CardBody>
           </Card>
 

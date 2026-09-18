@@ -1,4 +1,0 @@
-commit ac728285ff1fe2e01f5881282df98c01f0af39c5
-Date:   Fri Sep 18 08:47:17 2026 +0300
-
-    Governance: T0158 records the final verification and the BUILD_ID drift

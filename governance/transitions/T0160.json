@@ -1,0 +1,49 @@
+{
+  "transition_id": "T0160",
+  "seq": 160,
+  "timestamp": "2026-09-18T09:52:00Z",
+  "timestamp_derivation": "After the content commit 648f3710 (authored 2026-09-18T12:45:09+03:00 = 09:45:09Z) and after the rendered portal was photographed at the three viewport sizes; before the author timestamp of the commit that introduces this receipt. After the merge commit 305587b6 it follows. Per T0091, in the order T0108 requires.",
+  "record_type": "GUEST_PORTAL_VISUAL_AND_TRANSLATION_ACCEPTANCE_GAP_CORRECTED",
+
+  "why_this_exists": "T0159 recorded the consolidated mission as closed, including 'the guest portal redesigned to the reference screenshots with working translations'. The Product Owner did not accept that surface. The functional claims in T0159 stand -- the tagged strings, the two account forms, the superseded wording being gone -- but they were verified by reading the rendered HTML, and what was rejected was how the page LOOKS. A structural test cannot see a sidebar.",
+
+  "the_defect_was_structural_not_cosmetic": {
+    "symptom": "On a 390px phone the portal showed a tall rounded white column down roughly the left third of the screen containing nothing but the language selector, with the sign-in form compressed into what was left.",
+    "cause": "The body was a flex ROW and the language bar was a SIBLING of the card. At the phone breakpoint the bar became position:static, so it turned into a flex ITEM beside the card, and align-items:stretch gave it the full height of the viewport.",
+    "fix": "The page is a COLUMN. A column layout cannot place anything beside the card, so the failure mode is removed rather than counter-styled.",
+    "a_second_wrong_answer_that_was_tried_and_rejected": "A full-bleed card with min-height:100dvh removed the sidebar and produced the other thing the reference forbids -- a sheet of white with its bottom half empty and the information button pushed off the fold. The card is now as tall as its contents behind a 12px gutter, so the photograph is present around it at every size."
+  },
+
+  "how_it_was_verified": "By looking at it, as the Product Owner required. The real template was rendered through the real landing handler and photographed at 1440x900, 834x1112 and 390x844, in English and in Arabic, on both tab groups, with the personal-account form shown and the information panel open. Structural tests were explicitly not accepted as proof of visual completion and were not offered as such. Three further defects were found by looking that no test had asked about: the room prompt was printed twice (as the hint AND as the field's placeholder, the second copy sitting where the guest's answer goes), 'Or sign in with: Personal account' selected the panel the guest was already on, and the voucher field was the only input in the portal that ignored the shared field width.",
+
+  "translations": {
+    "what_shipped": "English, Arabic, German, French, Italian and Russian, complete -- all 49 guest-facing strings in each -- compiled into portald rather than typed by an operator. Offering a guest Arabic is now one tick.",
+    "hotel_overrides": "A hotel's published translations merge OVER the shipped dictionary per key, so a property that words one field differently keeps the other 48. A blank override is not an override: clearing a field asks for the shipped wording back.",
+    "right_to_left": "Arabic sets dir=rtl and the two corner-anchored controls (language bar, information button) mirror with it. Translating the words and leaving the page left-aligned is half a translation.",
+    "generated_text": "Tabs, alternative methods, the room prompt, the provider buttons, the two site notices and the package chooser are created by script. Each now carries its translation key, so the language pass reaches them; text set once at render time stays in whatever language the page started in.",
+    "selector": "Offers the hotel's configured languages, or all six if it has never chosen, and never a language with nothing behind it.",
+    "designer": "Six languages rendered as six stacked blocks was roughly three hundred inputs down one column with no way to see what any one language was missing. Hotel Admin now edits one language at a time behind a tab strip, grouped by where the strings appear on the page. WHICH languages guests are offered is a separate control from which ones the hotel has rewritten; conflating those two is what produced a selector full of languages nobody chose. A shipped language cannot be missing a string, so only a language the hotel added itself carries a count of what will show in English."
+  },
+
+  "the_contract_is_now_pinned_on_both_sides": "The old test asserted a hand-copied list of fourteen keys and carried a comment asking whoever edited Hotel Admin to remember. The replacement reads the operator's string list out of the branding screen and compares it with the dictionary the portal actually renders, in both directions, so a key added on either side alone fails rather than becoming a field an operator fills in for nothing. A second test asserts every shipped language is complete against English.",
+
+  "no_migration": "None in this delivery.",
+
+  "scope_held": "No backend, API, database, PMS, financial, networking, Root-CA or Go-Live change. No privilege, capability or sandbox widening. No .23 access. No gate or test weakened. No unrelated completed work reopened. No guest data in any evidence.",
+
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+
+  "authorization": "Product Owner, 2026-09-18, verbatim in part: 'REOPEN ONLY THE GUEST PORTAL VISUAL/TRANSLATION ACCEPTANCE GAP... Do not accept structural tests alone as proof of visual completion. Verify the actual rendered portal at representative desktop and mobile captive-portal viewport sizes against the supplied Product Owner references. Treat the existing ugly mobile screenshots as failing evidence.' Delivery of the correction continues under the same mission authorization that named PRE-LIVE deployment of this surface.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}
