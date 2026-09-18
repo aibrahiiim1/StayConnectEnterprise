@@ -1592,7 +1592,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "7e7af573ca25be43f02cd2845ff4456257bee22a",
     "base_note": "The master merge commit of PR #155. This delivery begins exactly where that one ended.",
-    "head": "ac728285",
+    "head": "dd34f91f",
     "head_note": "The last content commit of this delivery; the manifest, generated blocks and this pointer are committed after it.",
     "note": "T0159. The mission deployed and verified across every changed surface. Post-deployment verification exposed a latent identity defect: .next/BUILD_ID holds Next's id verbatim while the stamped document rewrites '-' to '_', so the first release whose generated id contained a hyphen was reported as the wrong bundle. The deploy script already normalised for it at one call site and the integrity checker never had; both now share one helper."
   },
