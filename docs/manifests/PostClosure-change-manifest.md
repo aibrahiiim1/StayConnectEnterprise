@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `1fee3a57477573ec1093f836ea14baca1031f442`
-- **HEAD commit:** `4ab44271`
-- **Provenance (generation HEAD = inventory_head):** `4ab44271295e79f1707c94a8b3b2c61ea50d449d`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `c3151697`
+- **Provenance (generation HEAD = inventory_head):** `c31516973da57d61cd51c6a28af9a2842ec30e76`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `master`
 - **Remote branch:** `origin/master`
 - **Changed files:** 39
@@ -25,26 +25,26 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0158 records what the sandboxes and the router caught |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0158 records what the sandboxes and the router caught |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0158 records what the sandboxes and the router caught |
-| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0158 also records the login-page rebuild |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0158 also records the login-page rebuild |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0158 also records the login-page rebuild |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0158 also records the login-page rebuild |
-| `exports/chatgpt/phase-evidence/GIT_STAT_4ab44271.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: packs resynchronized |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized |
+| `exports/chatgpt/phase-evidence/GIT_STAT_4ab44271.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: packs resynchronized |
 | `exports/chatgpt/phase-evidence/GIT_STAT_93292ad6.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Governance: T0157 records what the sandboxes and the router caught |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0158 also records the login-page rebuild |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0158 also records the login-page rebuild |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0158 also records the login-page rebuild |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0158 also records the login-page rebuild |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0158 also records the login-page rebuild |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0158 records what the sandboxes and the router caught |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0158 records what the sandboxes and the router caught |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0158 also records the login-page rebuild |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0158 records what the sandboxes and the router caught |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0158 records what the sandboxes and the router caught |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0158 records what the sandboxes and the router caught |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0158 records what the sandboxes and the router caught |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0158 records what the sandboxes and the router caught |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0158 also records the login-page rebuild |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: packs resynchronized |
 | `governance/transitions/T0157.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0158 records what the sandboxes and the router caught |
 | `governance/transitions/T0158.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0158 also records the login-page rebuild |
 | `hotel-admin/app/(app)/portal-branding/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | The login page now matches the reference, structurally and not just visually |
@@ -67,7 +67,7 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   2 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   2 +-
  docs/context/StayConnect-IAM-Handoff.md            |   2 +-
- docs/manifests/PostClosure-change-manifest.md      | 168 +++++++++++----------
+ docs/manifests/PostClosure-change-manifest.md      | 170 +++++++++++----------
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 340767 -> 340764 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 140420 -> 140426 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 43968 -> 43972 bytes
@@ -93,28 +93,17 @@
  .../e2e/phase3-guest-portal-resilience.spec.ts     |  20 +--
  hotel-admin/e2e/phase3-guest-portal.spec.ts        |   6 +-
  .../test/backup-settings-and-assets.test.tsx       |   7 +-
- 39 files changed, 531 insertions(+), 198 deletions(-)
+ 39 files changed, 533 insertions(+), 198 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-M  docs/manifests/PostClosure-change-manifest.md
-M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_2609876d.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_4ab44271.txt
-M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/MANIFEST.md
-M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
 M  governance/project-state.json
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: c3151697 Delivery: packs resynchronized
 HISTORICAL: 4ab44271 Governance: T0158 also records the login-page rebuild
 HISTORICAL: 2609876d The login page now matches the reference, structurally and not just visually
 HISTORICAL: 146d1c0f Delivery: head pointer and manifest aligned
