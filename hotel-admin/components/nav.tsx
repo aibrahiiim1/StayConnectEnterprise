@@ -151,14 +151,28 @@ const SECTIONS: Section[] = [
   },
   {
     title: "System",
+    // ORDERED BY THE JOB, NOT BY THE COMPONENT.
+    //
+    // Reviewed against the other System screens and none of them duplicates another: Diagnostics answers "is
+    // this appliance working", Alerts answers "did something happen that needs a person", Audit answers "who
+    // did what", and the three appliance screens answer "what is this appliance licensed and able to do".
+    // Nothing here was removed, because every one of them is the only place its evidence lives -- the
+    // duplication in this product was Cloud connection against License, and that is already resolved.
+    //
+    // What WAS wrong was the order: seven items in the sequence they happened to be added, so an operator
+    // looking for one scanned the whole list. They are now grouped by the question being asked -- watch it,
+    // run it, then the people who may.
     items: [
+      // Watching it.
       { href: "/health",             label: "Diagnostics", icon: Activity,   resource: "diagnostics", keywords: "services health checks scd netd kea" },
       { href: "/operational-alerts", label: "Alerts",      icon: Shield,     resource: "operational-alerts", enabled: CAP_PMS, keywords: "warnings acknowledge" },
-      { href: "/operators",          label: "Operators",   icon: Users,      resource: "operators", keywords: "staff users roles password" },
+      { href: "/audit",              label: "Audit log",   icon: ScrollText, resource: "audit", keywords: "who did what history trail" },
+      // Running it.
       { href: "/setup/enrollment",   label: "Activation",  icon: ServerCog,  resource: "network", keywords: "enrol claim serial activate setup cloud connection central nats outbox first-time" },
       { href: "/license",            label: "License",     icon: BadgeCheck, resource: "license", keywords: "capacity expiry plan offline activation central connection" },
-      { href: "/backups",            label: "Backups",     icon: Archive,    resource: "backups", keywords: "restore snapshot database" },
-      { href: "/audit",              label: "Audit log",   icon: ScrollText, resource: "audit", keywords: "who did what history trail" },
+      { href: "/backups",            label: "Backups",     icon: Archive,    resource: "backups", keywords: "restore snapshot database retention schedule" },
+      // Who may.
+      { href: "/operators",          label: "Operators",   icon: Users,      resource: "operators", keywords: "staff users roles password" },
     ],
   },
 ];

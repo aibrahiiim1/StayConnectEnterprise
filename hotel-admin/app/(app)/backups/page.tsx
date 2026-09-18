@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  api, ListResp, BackupHealth, BackupArtifact, BackupVerifyResult, Whoami,
+  api, ListResp, BackupHealth, BackupArtifact, BackupVerifyResult, BackupSettings, Whoami,
 } from "@/lib/api";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
@@ -54,16 +54,25 @@ export default function BackupsPage() {
   const [confirming, setConfirming] = useState(false);
   const [verifying, setVerifying] = useState<string | null>(null);
   const [verdict, setVerdict] = useState<Record<string, BackupVerifyResult>>({});
+  const [settings, setSettings] = useState<BackupSettings | null>(null);
+  const [edits, setEdits] = useState<Record<string, number>>({});
+  const [schedule, setSchedule] = useState("");
+  const [settingsPw, setSettingsPw] = useState("");
+  const [savingSettings, setSavingSettings] = useState(false);
 
   const writable = canWrite("backups", roles);
 
   const load = useCallback(async () => {
     try {
-      const [h, arts] = await Promise.all([
+      const [h, arts, st] = await Promise.all([
         api.get<BackupHealth>("/backups/health"),
         api.get<ListResp<BackupArtifact>>("/backups/artifacts"),
+        api.get<BackupSettings>("/backups/settings"),
       ]);
       setHealth(h);
+      setSettings(st);
+      setEdits(Object.fromEntries(st.retention.map((x) => [x.key, x.value])));
+      setSchedule(st.schedule ?? "");
       setArtifacts(arts.data ?? []);
     } catch (e) {
       setErr(errMsg(e));
@@ -94,6 +103,25 @@ export default function BackupsPage() {
     } catch (e) { setErr(errMsg(e)); }
     finally { setVerifying(null); }
   }
+
+  async function saveSettings() {
+    setSavingSettings(true); setErr(null); setMsg(null);
+    try {
+      const r = await api.put<BackupSettings>("/backups/settings", {
+        retention: edits, schedule, password: settingsPw,
+      });
+      setSettings(r);
+      setSchedule(r.schedule ?? "");
+      setSettingsPw("");
+      setMsg("Retention policy saved. The nightly sweep uses it from its next run.");
+      await load();
+    } catch (e) { setErr(errMsg(e)); }
+    finally { setSavingSettings(false); }
+  }
+
+  const settingsDirty =
+    !!settings &&
+    (settings.retention.some((x) => edits[x.key] !== x.value) || schedule !== (settings.schedule ?? ""));
 
   const ret = health?.retention ?? {};
   const diskPct = typeof ret.disk_pct === "number" ? ret.disk_pct : null;
@@ -181,22 +209,79 @@ export default function BackupsPage() {
         </Card>
       </div>
 
-      {/* ---- RETENTION POLICY, as the sweep actually applies it ---- */}
-      {health?.retention_readable && (
+      {/* ---- RETENTION POLICY: shown as applied, and editable (§0C) ---- */}
+      {settings && (
         <Card>
-          <CardHeader><CardTitle>Retention policy in force</CardTitle></CardHeader>
-          <CardBody>
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-4" aria-label="Retention policy">
-              <dt>Service binaries</dt><dd>keep {String(ret.keep_binaries ?? "—")}</dd>
-              <dt>Releases</dt><dd>keep {String(ret.keep_releases ?? "—")}</dd>
-              <dt>Database backups</dt><dd>keep {String(ret.keep_db ?? "—")}</dd>
-              <dt>Configuration</dt><dd>keep {String(ret.keep_config ?? "—")}</dd>
-            </dl>
-            <p className="mt-3 text-sm text-muted">
+          <CardHeader><CardTitle>Retention and schedule</CardTitle></CardHeader>
+          <CardBody className="space-y-4">
+            <p className="text-sm text-muted">
+              What the nightly sweep keeps, and when it runs.{" "}
+              {settings.config_present
+                ? "These values are stored on the appliance."
+                : "No policy has been saved yet, so the built-in defaults below are in force."}
+            </p>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              {settings.retention.map((sIt) => (
+                <label key={sIt.key} className="block text-sm">
+                  {sIt.label} <span className="text-muted">({sIt.unit})</span>
+                  <Input
+                    type="number"
+                    min={sIt.min}
+                    max={sIt.max}
+                    value={edits[sIt.key] ?? sIt.value}
+                    onChange={(e) => setEdits((m) => ({ ...m, [sIt.key]: Number(e.target.value) }))}
+                  />
+                  <span className="mt-1 block text-xs text-muted">
+                    {sIt.explains} Allowed {sIt.min}–{sIt.max}; default {sIt.default}.
+                  </span>
+                </label>
+              ))}
+              <label className="block text-sm">
+                Nightly sweep runs at
+                <Input
+                  type="time"
+                  value={schedule}
+                  onChange={(e) => setSchedule(e.target.value)}
+                />
+                <span className="mt-1 block text-xs text-muted">
+                  Appliance local time.{" "}
+                  {settings.schedule_known
+                    ? `Currently scheduled for ${settings.schedule}.`
+                    : "The current schedule could not be read from the appliance."}
+                </span>
+              </label>
+            </div>
+
+            {/* The sweep is what stands between this appliance and a full disk, and retention decides how far
+                back it can recover. Changing either is attributed. */}
+            {settingsDirty && (
+              <div className="space-y-3 border-t pt-3">
+                <label className="block max-w-sm text-sm">
+                  Confirm your password
+                  <Input type="password" autoComplete="current-password"
+                    value={settingsPw} onChange={(e) => setSettingsPw(e.target.value)} />
+                </label>
+                <div className="flex gap-2">
+                  <Button disabled={!writable || savingSettings} onClick={saveSettings}>
+                    {savingSettings ? "Saving…" : "Save retention policy"}
+                  </Button>
+                  <Button variant="secondary" disabled={savingSettings} onClick={() => {
+                    setEdits(Object.fromEntries(settings.retention.map((x) => [x.key, x.value])));
+                    setSchedule(settings.schedule ?? "");
+                    setSettingsPw("");
+                  }}>
+                    Discard changes
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            <p className="text-xs text-muted">
               {String(ret.retained ?? 0)} artefacts retained, {String(ret.protected ?? 0)} protected and never
               deleted (identity, certificates and trust material), {String(ret.pinned ?? 0)} pinned by an
               operator. The sweep never removes the current or previous release, the newest database backup,
-              or anything pinned.
+              or anything pinned — whatever these numbers say.
             </p>
           </CardBody>
         </Card>

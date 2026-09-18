@@ -1,4 +1,0 @@
-commit 7ef91b94cd85613579a904d89de1848baa3a24f1
-Date:   Thu Sep 17 22:15:14 2026 +0300
-
-    Delivery: manifest lists itself

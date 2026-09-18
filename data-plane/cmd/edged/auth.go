@@ -180,7 +180,7 @@ var rolePerms = map[string]map[string]perm{
 		"guest-accounts": permWrite,
 		"sessions":       permWrite,
 		"auth-methods":   permWrite, "walled-garden": permWrite,
-		"portal-branding": permWrite, "notification-providers": permWrite,
+		"portal-branding": permWrite, "portal-assets": permWrite, "notification-providers": permWrite,
 		"social-providers": permWrite, "stripe-accounts": permWrite,
 		"network": permWrite,
 		// Phase 2 (DARK) commercial packages: revisioned CRUD is a manager action.
@@ -322,7 +322,7 @@ var rolePerms = map[string]map[string]perm{
 		// evidence of the same kind they read everywhere else — and acts on neither.
 		"guest-signin-protection": permRead, "guest-signin-restrictions": permRead,
 		"guest-accounts": permRead, "sessions": permRead, "auth-methods": permRead,
-		"walled-garden": permRead, "portal-branding": permRead, "notification-providers": permRead, "social-providers": permRead,
+		"walled-garden": permRead, "portal-branding": permRead, "portal-assets": permRead, "notification-providers": permRead, "social-providers": permRead,
 		"stripe-accounts": permRead, "audit": permRead, "reports": permRead,
 		"backups": permRead, "license": permRead, "network": permRead, "diagnostics": permRead,
 		"commercial-packages": permRead,

@@ -165,9 +165,9 @@ const landingHTML = `<!doctype html>
   <!-- Voucher panel -->
   <div class="panel" id="panel-voucher">
     <form method="POST" action="/auth/voucher">
-      <label for="voucher">Voucher code</label>
+      <label for="voucher"><span data-i18n="voucher.label" data-i18n-en="Voucher code">Voucher code</span></label>
       <input id="voucher" name="code" type="text" autocomplete="off" required maxlength="32" placeholder="XXXX-XXXX-XXXX">
-      <button type="submit">Connect</button>
+      <button type="submit"><span data-i18n="btn.connect" data-i18n-en="Connect">Connect</span></button>
       <div class="err">{{.Error}}</div>
     </form>
   </div>
@@ -175,9 +175,9 @@ const landingHTML = `<!doctype html>
   <!-- Guest account (username + password) panel -->
   <div class="panel" id="panel-account">
     <form method="POST" action="/auth/credentials" autocomplete="off">
-      <label for="ga-username">Username</label>
+      <label for="ga-username"><span data-i18n="account.user" data-i18n-en="Username">Username</span></label>
       <input id="ga-username" name="username" type="text" autocomplete="username" required maxlength="64" placeholder="username">
-      <label for="ga-password" style="margin-top:10px">Password</label>
+      <label for="ga-password" style="margin-top:10px"><span data-i18n="account.pass" data-i18n-en="Password">Password</span></label>
       <input id="ga-password" name="password" type="password" autocomplete="current-password" required maxlength="128" placeholder="password">
       <button type="submit" style="margin-top:10px">Connect</button>
       <div class="err">{{.Error}}</div>
@@ -187,16 +187,16 @@ const landingHTML = `<!doctype html>
   <!-- Email panel -->
   <div class="panel" id="panel-email">
     <form data-otp="email" data-stage="dest" autocomplete="off">
-      <label for="email">Email address</label>
+      <label for="email"><span data-i18n="email.dest" data-i18n-en="Email address">Email address</span></label>
       <input id="email" name="dest" type="email" required placeholder="you@example.com" autocomplete="email">
-      <button type="submit">Send code</button>
+      <button type="submit"><span data-i18n="btn.sendcode" data-i18n-en="Send code">Send code</span></button>
       <div class="err"></div>
     </form>
     <form data-otp="email" data-stage="code" autocomplete="off" style="display:none">
       <p class="small">We sent a 6-digit code to <span class="dest"></span>.</p>
-      <label>Verification code</label>
+      <label><span data-i18n="otp.code" data-i18n-en="Verification code">Verification code</span></label>
       <input name="code" type="text" inputmode="numeric" pattern="[0-9]*" required maxlength="6" placeholder="------">
-      <button type="submit">Verify</button>
+      <button type="submit"><span data-i18n="btn.verify" data-i18n-en="Verify">Verify</span></button>
       <button type="button" class="link" data-resend>Try a different email</button>
       <div class="err"></div>
     </form>
@@ -205,7 +205,7 @@ const landingHTML = `<!doctype html>
   <!-- PMS / Room panel — guest enters room number plus one verification field -->
   <div class="panel" id="panel-pms">
     <form id="form-pms" autocomplete="off">
-      <label for="pms-room">Room number</label>
+      <label for="pms-room"><span data-i18n="pms.room" data-i18n-en="Room number">Room number</span></label>
       <input id="pms-room" name="room" type="text" inputmode="numeric" required placeholder="e.g. 101">
       <p class="small" id="pms-prompt" style="margin-top:10px"></p>
       <input id="pms-secondary" name="secondary" type="text" required placeholder="Last name or reservation number">
@@ -241,7 +241,7 @@ const landingHTML = `<!doctype html>
   <!-- SMS panel -->
   <div class="panel" id="panel-sms">
     <form data-otp="sms" data-stage="dest" autocomplete="off">
-      <label for="phone">Phone number</label>
+      <label for="phone"><span data-i18n="sms.dest" data-i18n-en="Phone number">Phone number</span></label>
       <input id="phone" name="dest" type="tel" required placeholder="+1 555 123 4567" autocomplete="tel">
       <p class="small">Include country code, e.g. <span class="small">+44 20 7946 0958</span></p>
       <button type="submit">Send code</button>
@@ -263,12 +263,12 @@ const landingHTML = `<!doctype html>
     <button class="info-btn" id="info-btn" type="button" aria-expanded="false" aria-controls="info-panel"
             aria-label="Device information" title="Device information">i</button>
     <div class="info-panel" id="info-panel" hidden>
-      <strong>Your device</strong>
+      <strong data-i18n="info.device" data-i18n-en="Your device">Your device</strong>
       <dl>
-        <dt>IP address</dt><dd>{{if .ClientIP}}{{.ClientIP}}{{else}}not detected{{end}}</dd>
-        <dt>MAC address</dt><dd>{{if .ClientMAC}}{{.ClientMAC}}{{else}}not detected{{end}}</dd>
+        <dt><span data-i18n="info.ip" data-i18n-en="IP address">IP address</span></dt><dd>{{if .ClientIP}}{{.ClientIP}}{{else}}not detected{{end}}</dd>
+        <dt><span data-i18n="info.mac" data-i18n-en="MAC address">MAC address</span></dt><dd>{{if .ClientMAC}}{{.ClientMAC}}{{else}}not detected{{end}}</dd>
       </dl>
-      <p class="small" style="margin-top:10px">Reception may ask for these if you need help connecting.</p>
+      <p class="small" style="margin-top:10px" data-i18n="info.help" data-i18n-en="Reception may ask for these if you need help connecting.">Reception may ask for these if you need help connecting.</p>
     </div>
   </main>
 
@@ -344,6 +344,45 @@ const landingHTML = `<!doctype html>
       }
     }
 
+    // TRANSLATIONS. The language selector used to change nothing, which is worse than not offering one: it
+    // tells a guest their language is supported and then does not support it.
+    //
+    // Every guest-facing string carries a data-i18n key. The hotel publishes translations as part of its
+    // design, so a property can say "Room number" in the words its guests actually use without anyone
+    // shipping a build. English is the fallback for any key a translation omits -- a half-translated portal
+    // still reads, where a portal showing raw keys does not.
+    var I18N = {};        // code -> { key: text }
+    var LANG = 'en';
+
+    function applyLanguage(code) {
+      LANG = code;
+      var dict = I18N[code] || {};
+      document.documentElement.lang = code;
+      document.querySelectorAll('[data-i18n]').forEach(function (el) {
+        var k = el.dataset.i18n;
+        if (dict[k]) el.textContent = dict[k];
+        else if (el.dataset.i18nEn) el.textContent = el.dataset.i18nEn;
+      });
+      document.querySelectorAll('[data-i18n-ph]').forEach(function (el) {
+        var k = el.dataset.i18nPh;
+        if (dict[k]) el.placeholder = dict[k];
+        else if (el.dataset.i18nPhEn) el.placeholder = el.dataset.i18nPhEn;
+      });
+      // Tab labels are generated, so they are re-rendered rather than translated in place.
+      document.querySelectorAll('.tab[data-group]').forEach(function (el) {
+        var g = el.dataset.group;
+        var span = el.querySelector('span');
+        if (span) span.textContent = dict['tab.' + g] || Groups[g].label;
+      });
+      try { localStorage.setItem('sc-lang', code); } catch (e) {}
+    }
+
+    // Remember the guest's choice for this device: a guest who picked their language once should not have to
+    // do it again on the next captive-portal redirect.
+    document.getElementById('lang').addEventListener('change', function (e) {
+      applyLanguage(e.target.value);
+    });
+
     // BRANDING. Applied before anything else paints so the guest never sees the default teal flash to the
     // hotel's colour. Every value is optional and every default is a deliberate, finished-looking fallback.
     fetch('/api/branding').then(r => r.ok ? r.json() : {}).then(b => {
@@ -363,15 +402,31 @@ const landingHTML = `<!doctype html>
         const img = document.getElementById('brand-logo');
         img.src = d.logo_url; img.alt = d.hotel_name || 'Hotel'; img.style.display = '';
       }
-      if (Array.isArray(d.languages) && d.languages.length) {
-        const sel = document.getElementById('lang');
-        sel.innerHTML = '';
-        d.languages.forEach(l => {
-          const o = document.createElement('option');
-          o.value = l.code || l; o.textContent = l.label || l;
-          sel.appendChild(o);
-        });
+      I18N = (d.translations && typeof d.translations === 'object') ? d.translations : {};
+      const sel = document.getElementById('lang');
+      // The offered languages are the ones the hotel actually published words for, plus English. Offering a
+      // language with no translation behind it is the defect this replaces.
+      const codes = Array.isArray(d.languages) && d.languages.length
+        ? d.languages
+        : ['en'].concat(Object.keys(I18N).filter(c => c !== 'en')).map(c => ({ code: c }));
+      sel.innerHTML = '';
+      codes.forEach(l => {
+        const code = l.code || l;
+        const o = document.createElement('option');
+        o.value = code;
+        o.textContent = l.label || (I18N[code] && I18N[code]['lang.name']) || code.toUpperCase();
+        sel.appendChild(o);
+      });
+      let want = 'en';
+      try { want = localStorage.getItem('sc-lang') || 'en'; } catch (e) {}
+      // The browser's own preference is a better first guess than English for a guest who has never chosen.
+      if (want === 'en' && navigator.language) {
+        const short = navigator.language.slice(0, 2).toLowerCase();
+        if (I18N[short]) want = short;
       }
+      if (!Array.prototype.some.call(sel.options, o => o.value === want)) want = sel.options[0] ? sel.options[0].value : 'en';
+      sel.value = want;
+      applyLanguage(want);
     }).catch(() => {});
 
     // The information affordance. Purely local: the addresses are already rendered into the panel.
@@ -479,7 +534,7 @@ const landingHTML = `<!doctype html>
           const el = document.createElement('button');
           el.type = 'button'; el.className = 'tab'; el.dataset.group = gid;
           el.setAttribute('role', 'tab');
-          el.innerHTML = Groups[gid].icon + '<span>' + Groups[gid].label + '</span>';
+          el.innerHTML = Groups[gid].icon + '<span>' + ((I18N[LANG] || {})['tab.' + gid] || Groups[gid].label) + '</span>';
           el.addEventListener('click', () => setGroup(gid, groupMembers));
           tabsEl.appendChild(el);
         });

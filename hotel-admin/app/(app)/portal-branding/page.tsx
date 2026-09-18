@@ -11,14 +11,14 @@
 // implementation detail the operator never meets.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, Whoami } from "@/lib/api";
+import { api, ListResp, PortalAsset, Whoami } from "@/lib/api";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { canWrite } from "@/lib/roles";
 import { errMsg, formatDate } from "@/lib/utils";
-import { Paintbrush, Eye, History, Code2 } from "lucide-react";
+import { Paintbrush, Eye, History, Code2, Upload, Trash2, Languages } from "lucide-react";
 
 type Design = {
   hotel_name?: string;
@@ -32,6 +32,9 @@ type Design = {
   welcome_text?: string;
   help_text?: string;
   terms_url?: string;
+  /** code -> { key: text }. What makes the language selector do something. */
+  translations?: Record<string, Record<string, string>>;
+  languages?: { code: string; label: string }[];
   custom_css?: string;
   custom_html?: string;
 };
@@ -41,6 +44,26 @@ type BrandingState = { design: Design; draft: Design; revisions: Revision[]; pub
 
 /** What an unbranded appliance shows. The portal carries the same defaults; these mirror them so the preview
  *  is honest about what a guest would actually see before anything is published. */
+/** The guest-facing strings the portal tags for translation. Keys must match data-i18n in the portal
+ *  template: if they drift, the operator types words that never appear. */
+const PORTAL_STRINGS: { key: string; english: string }[] = [
+  { key: "tab.guest", english: "Guest Login" },
+  { key: "tab.account", english: "Account Login" },
+  { key: "pms.room", english: "Room number" },
+  { key: "account.pass", english: "Password" },
+  { key: "account.user", english: "Username" },
+  { key: "voucher.label", english: "Voucher code" },
+  { key: "email.dest", english: "Email address" },
+  { key: "sms.dest", english: "Phone number" },
+  { key: "otp.code", english: "Verification code" },
+  { key: "btn.connect", english: "Connect" },
+  { key: "btn.verify", english: "Verify" },
+  { key: "info.device", english: "Your device" },
+  { key: "info.ip", english: "IP address" },
+  { key: "info.mac", english: "MAC address" },
+  { key: "info.help", english: "Reception may ask for these if you need help connecting." },
+];
+
 const DEFAULTS: Required<Pick<Design, "brand_color" | "brand_color_dark" | "text_color" | "corner_radius">> = {
   brand_color: "#0f6b63",
   brand_color_dark: "#0b544e",
@@ -60,6 +83,10 @@ export default function PortalBrandingPage() {
   const [password, setPassword] = useState("");
   const [note, setNote] = useState("");
   const [rollbackTo, setRollbackTo] = useState<number | null>(null);
+  const [assets, setAssets] = useState<PortalAsset[]>([]);
+  const [uploading, setUploading] = useState<string | null>(null);
+  const [langCode, setLangCode] = useState("");
+  const [langLabel, setLangLabel] = useState("");
 
   const writable = canWrite("portal-branding", roles);
   const set = <K extends keyof Design>(k: K, v: Design[K]) => setD((p) => ({ ...p, [k]: v }));
@@ -70,6 +97,10 @@ export default function PortalBrandingPage() {
       setState(s);
       // An operator returning to an unfinished design should find it, not a blank form.
       setD(Object.keys(s.draft ?? {}).length ? s.draft : (s.design ?? {}));
+      try {
+        const a = await api.get<ListResp<PortalAsset>>("/portal-assets");
+        setAssets(a.data ?? []);
+      } catch { setAssets([]); }
     } catch (e) { setErr(errMsg(e)); }
   }, []);
 
@@ -117,6 +148,35 @@ export default function PortalBrandingPage() {
     finally { setBusy(false); }
   }
 
+  /** Upload goes straight to the appliance and the field is pointed at the result -- an operator should not
+   *  have to copy a URL from one place to another. */
+  async function upload(field: "logo_url" | "background_url", file: File) {
+    setUploading(field); setErr(null); setMsg(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/edge/v1/portal-assets", { method: "POST", body: form, credentials: "same-origin" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.message || "the image was refused");
+      set(field, body.url);
+      const a = await api.get<ListResp<PortalAsset>>("/portal-assets");
+      setAssets(a.data ?? []);
+      setMsg("Image uploaded and applied to the design. Publish to show it to guests.");
+    } catch (e: any) { setErr(e?.message ?? "the image could not be uploaded"); }
+    finally { setUploading(null); }
+  }
+
+  async function removeAsset(name: string) {
+    setErr(null);
+    try {
+      await api.del(`/portal-assets/${encodeURIComponent(name)}`);
+      const a = await api.get<ListResp<PortalAsset>>("/portal-assets");
+      setAssets(a.data ?? []);
+    } catch (e) { setErr(errMsg(e)); }
+  }
+
+  const langs = Object.keys(d.translations ?? {});
+
   const preview = { ...DEFAULTS, ...d };
 
   return (
@@ -142,20 +202,41 @@ export default function PortalBrandingPage() {
                 <Input value={d.hotel_name ?? ""} onChange={(e) => set("hotel_name", e.target.value)}
                   placeholder="Coral Sea Holiday Resort" />
               </label>
-              <label className="block text-sm">
-                Logo
-                <Input value={d.logo_url ?? ""} onChange={(e) => set("logo_url", e.target.value)}
-                  placeholder="/assets/logo.png or https://…" />
-                <span className="mt-1 block text-xs text-muted">
-                  An appliance path or an https address. Plain http is refused — a logo fetched over http can
-                  be replaced by anyone on the network.
-                </span>
-              </label>
-              <label className="block text-sm">
-                Background photograph
-                <Input value={d.background_url ?? ""} onChange={(e) => set("background_url", e.target.value)}
-                  placeholder="/assets/portal-background.jpg" />
-              </label>
+              {(["logo_url", "background_url"] as const).map((field) => (
+                <div key={field} className="space-y-2 text-sm">
+                  <span className="block">{field === "logo_url" ? "Logo" : "Background photograph"}</span>
+                  {d[field] ? (
+                    <div className="flex items-center gap-3">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={d[field]} alt="" className="h-12 w-20 rounded border object-contain" />
+                      <code className="text-xs text-muted">{d[field]}</code>
+                      <Button size="sm" variant="secondary" onClick={() => set(field, "")}>Remove</Button>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted">Nothing set — the portal uses its own default.</p>
+                  )}
+                  <label className="inline-flex cursor-pointer items-center gap-2 rounded border px-3 py-1.5">
+                    <Upload className="h-4 w-4" />
+                    {uploading === field ? "Uploading…" : "Upload image"}
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      className="hidden"
+                      aria-label={field === "logo_url" ? "Upload logo" : "Upload background photograph"}
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(field, f); e.target.value = ""; }}
+                    />
+                  </label>
+                  <Input value={d[field] ?? ""} onChange={(e) => set(field, e.target.value)}
+                    placeholder="or paste an https address" />
+                  {/* Stored on the appliance and served from the same origin as the sign-in page. A guest
+                      reaches the portal precisely because they have no internet yet, so an image hosted
+                      anywhere else is one that fails exactly when it matters. */}
+                  <span className="block text-xs text-muted">
+                    PNG, JPEG, WebP or GIF, up to 8 MB. SVG is refused: it can carry script, and this image is
+                    served to every guest device before sign-in.
+                  </span>
+                </div>
+              ))}
             </CardBody>
           </Card>
 
@@ -220,6 +301,91 @@ export default function PortalBrandingPage() {
                 <Input value={d.terms_url ?? ""} onChange={(e) => set("terms_url", e.target.value)}
                   placeholder="https://…/terms" />
               </label>
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><Languages className="h-4 w-4" /> Languages</CardTitle>
+            </CardHeader>
+            <CardBody className="space-y-4">
+              {/* A SELECTOR THAT CHANGES NOTHING IS WORSE THAN NO SELECTOR: it tells a guest their language
+                  is supported and then does not support it. The portal only offers a language once there are
+                  words behind it, so this is where a language starts existing. */}
+              <p className="text-sm text-muted">
+                English is always offered and is the fallback for anything a translation leaves out — a
+                half-translated portal still reads. Add a language and give it the words guests see.
+              </p>
+
+              <div className="flex flex-wrap items-end gap-2">
+                <label className="block text-sm">
+                  Language code
+                  <Input value={langCode} onChange={(e) => setLangCode(e.target.value.toLowerCase().slice(0, 5))}
+                    placeholder="ar" className="w-24" />
+                </label>
+                <label className="block text-sm">
+                  Shown as
+                  <Input value={langLabel} onChange={(e) => setLangLabel(e.target.value)} placeholder="العربية" />
+                </label>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={!langCode.trim()}
+                  onClick={() => {
+                    const code = langCode.trim();
+                    setD((p) => ({
+                      ...p,
+                      translations: { ...(p.translations ?? {}), [code]: (p.translations ?? {})[code] ?? {} },
+                      languages: [
+                        ...(p.languages ?? [{ code: "en", label: "English" }]).filter((l) => l.code !== code),
+                        { code, label: langLabel.trim() || code.toUpperCase() },
+                      ],
+                    }));
+                    setLangCode(""); setLangLabel("");
+                  }}
+                >
+                  Add language
+                </Button>
+              </div>
+
+              {langs.length === 0 ? (
+                <p className="text-sm text-muted">Only English is offered.</p>
+              ) : (
+                langs.map((code) => (
+                  <div key={code} className="space-y-2 rounded border p-3">
+                    <div className="flex items-center justify-between">
+                      <strong className="text-sm">
+                        {(d.languages ?? []).find((l) => l.code === code)?.label ?? code}{" "}
+                        <span className="text-muted">({code})</span>
+                      </strong>
+                      <Button size="sm" variant="secondary" onClick={() => setD((p) => {
+                        const t = { ...(p.translations ?? {}) }; delete t[code];
+                        return { ...p, translations: t, languages: (p.languages ?? []).filter((l) => l.code !== code) };
+                      })}>
+                        Remove
+                      </Button>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {PORTAL_STRINGS.map((st) => (
+                        <label key={st.key} className="block text-xs">
+                          {st.english}
+                          <Input
+                            value={(d.translations?.[code]?.[st.key]) ?? ""}
+                            placeholder={st.english}
+                            onChange={(e) => setD((p) => ({
+                              ...p,
+                              translations: {
+                                ...(p.translations ?? {}),
+                                [code]: { ...((p.translations ?? {})[code] ?? {}), [st.key]: e.target.value },
+                              },
+                            }))}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
             </CardBody>
           </Card>
 

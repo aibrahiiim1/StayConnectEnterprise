@@ -1084,6 +1084,23 @@ export type BackupVerifyResult = {
   duration: string;
 };
 
+/** One retention knob, with everything needed to set it responsibly. The appliance owns the schema. */
+export type RetentionSetting = {
+  key: string; label: string; unit: string;
+  default: number; min: number; max: number; value: number; explains: string;
+};
+
+export type BackupSettings = {
+  retention: RetentionSetting[];
+  schedule?: string;
+  schedule_known: boolean;
+  config_present: boolean;
+};
+
+export type PortalAsset = {
+  name: string; url: string; size_bytes: number; uploaded_at: string; in_use: boolean;
+};
+
 export type SetupStatus = {
   serial?: string;
   hardware?: {

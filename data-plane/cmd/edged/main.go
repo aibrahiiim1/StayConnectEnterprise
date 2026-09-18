@@ -376,6 +376,7 @@ func main() {
 			mountResource(r, s, "auth-methods", s.authMethodsRoutes)
 			mountResource(r, s, "walled-garden", s.walledGardenRoutes)
 			mountResource(r, s, "portal-branding", s.brandingRoutes)
+			mountResource(r, s, "portal-assets", s.portalAssetRoutes)
 			// payments is REMOVED. It was a read-only list over public.payments, a Stripe-session record
 			// keyed to a superseded voucher and access plan. The current financial surface is
 			// "financial-ops" below, over the Phase-4 iam_v2 payment transactions and settlements.

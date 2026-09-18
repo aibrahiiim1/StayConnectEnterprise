@@ -118,6 +118,33 @@ func clientIP(r *http.Request) net.IP {
 	return net.ParseIP(host)
 }
 
+// portalAssetDir is written by Hotel Admin and served here. Both run as the same service user.
+const portalAssetDir = "/opt/stayconnect/portal-assets"
+
+// neuteredFS serves files and refuses to enumerate directories.
+//
+// http.FileServer lists a directory when it has no index, which would publish every image the hotel has ever
+// uploaded -- including ones it replaced and would rather nobody saw -- to any device on the guest network
+// before sign-in. Files only.
+type neuteredFS struct{ fs http.FileSystem }
+
+func (n neuteredFS) Open(name string) (http.File, error) {
+	f, err := n.fs.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	if fi.IsDir() {
+		_ = f.Close()
+		return nil, os.ErrNotExist
+	}
+	return f, nil
+}
+
 func (h *handler) landing(w http.ResponseWriter, r *http.Request, errMsg string) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -395,6 +422,13 @@ func (h *handler) routes() http.Handler {
 	r.Post("/devices/release", h.deviceRelease)
 	r.Get("/api/auth-methods", h.authMethods)
 	r.Get("/api/branding", h.branding)
+
+	// THE HOTEL'S OWN IMAGES, from the appliance. A captive portal is reached by a device with no internet,
+	// so a logo hosted anywhere else is a logo that does not load exactly when it matters. Served read-only
+	// from a directory only Hotel Admin writes, with the content type decided at upload by inspecting the
+	// bytes -- never guessed here from an extension.
+	r.Handle("/assets/*", http.StripPrefix("/assets/",
+		http.FileServer(neuteredFS{http.Dir(portalAssetDir)})))
 
 	// Phase 2 (DARK): guest commerce bridge routes are mounted ONLY when the portal surface is ON. While
 	// dark they are absent (404) and no scd commerce call is ever made.

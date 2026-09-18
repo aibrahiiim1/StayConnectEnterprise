@@ -1,0 +1,57 @@
+{
+  "transition_id": "T0157",
+  "seq": 157,
+  "timestamp": "2026-09-17T22:33:43Z",
+  "timestamp_derivation": "After the four remaining gaps were implemented across scd, edged, portald and Hotel Admin, and the full Go suite, 319 UI tests and 111 E2E specs were run locally; before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "THE_FOUR_SURFACES_THAT_WERE_DISPLAYED_BUT_NOT_DOABLE",
+  "what_these_four_had_in_common": "Each told an operator that something was under their control when it was not. Retention was shown and not editable. The logo was configurable only as a URL, on a page a guest reaches because they have no internet. The language selector offered languages and changed nothing. The System section presented seven screens in the order they were added. None of them was broken; all of them were misleading, which is harder to notice and worse to rely on.",
+  "retention_and_schedule_are_settings": {
+    "where_they_lived": "Defaults inside stayconnect-backup-cleanup, plus an optional /etc/stayconnect/backup-retention.conf which did not exist on this appliance. The Backups screen could report the policy in force; nobody could change it without a shell.",
+    "how_they_are_edited": "Through the sweep's OWN contract -- the shell-sourced KEY=value file it reads on every run -- so nothing re-implements retention; it configures the thing that already performs it. The schedule is a systemd drop-in rather than an edit of the shipped unit, because a package update replaces the unit and would silently discard an in-place change, leaving the operator's schedule quietly reverted.",
+    "each_knob_carries_what_it_needs": "Unit, default, bounds and an explanation, served from the appliance so the screen cannot drift from what the sweep enforces. The lower bounds are not decoration: below two service binaries there is nothing to roll back to, and below one database backup only the newest-always-kept rule stands between the hotel and total loss.",
+    "refuses_the_whole_request": "A partially-applied retention policy is worse than a rejected one -- the operator believes they set six values and the sweep acts on four. A critical disk threshold at or below the warning threshold is also refused: it is not a stricter policy, it is one that can never warn before it alarms.",
+    "step_up": "Required. Retention decides how far back this appliance can recover, and a schedule that never fires is indistinguishable from a backup policy that works right up until it is needed.",
+    "privilege": "scd writes the files, because /etc/stayconnect and the systemd drop-in are root's. edged keeps the RBAC mount, the step-up and the audit record. No privilege was widened."
+  },
+  "portal_images_live_on_the_appliance": {
+    "why_url_only_was_not_enough": "The https option asks a hotel to find somewhere to host its logo and makes the captive portal depend on the open internet to look right -- on a page a guest reaches precisely BECAUSE they have no internet yet. The appliance-path option pointed at a directory nothing served: /assets/logo.png was a 404, so the only workable answer was an external URL.",
+    "now": "Uploaded through Hotel Admin, stored on the appliance, served by the portal from the same origin as the sign-in page. Nothing about signing in depends on reaching anything else.",
+    "the_bytes_decide": "Content type is determined by inspecting the file, never by a filename or a client-supplied Content-Type -- both of which the uploader chose. PNG, JPEG, WebP and GIF are recognised; anything else is refused.",
+    "svg_is_refused_outright": "It is XML, browsers execute script inside it when it loads as a document, and it arrives looking exactly like a logo. This directory is served unauthenticated to every device on the guest network BEFORE sign-in, decorating a page that collects room numbers, surnames and voucher codes. An uploadable SVG there is stored XSS against guest credentials.",
+    "other_boundaries": "The stored name is content-addressed by this handler, so an operator's filename -- which may contain a path, a traversal or a second extension -- never reaches the filesystem or the served URL. Directory listing is disabled, or every image the hotel ever uploaded, including ones it replaced, would be public before sign-in. Deleting an image the published design or the working draft points at is refused, because removing it would leave guests looking at a broken sign-in page.",
+    "size": "8 MB, enforced before the body is read into memory rather than after."
+  },
+  "the_language_selector_now_changes_something": {
+    "what_was_wrong": "It listed languages and did nothing. That is worse than having no selector: it tells a guest their language is supported and then does not support it.",
+    "how_it_works": "Every guest-facing string carries a key. Hotels publish translations as part of their design, so a property can say 'Room number' in the words its guests use without anyone shipping a build. The portal offers a language only once there are words behind it, remembers the guest's choice for that device, and takes the browser's own preference as a better first guess than English for a guest who has never chosen.",
+    "partial_translations_still_read": "English is carried on every tagged element as the fallback. A hotel that translates six strings and forgets the seventh gets a portal that still reads; showing a raw key is worse than showing English, because it is not a language anybody speaks.",
+    "the_contract_is_pinned_on_both_sides": "The portal tags keys and Hotel Admin offers a field per key. If those lists drift, an operator types words that never appear and has no way to discover why. A test asserts the portal tags every key the designer offers -- and writing it found one string, the SMS phone-number label, that the portal never tagged at all."
+  },
+  "system_section_reviewed_and_ordered": {
+    "what_the_review_found": "No duplication among the remaining screens. Diagnostics answers whether the appliance is working, Alerts whether something happened that needs a person, Audit who did what, and Activation/License/Backups what this appliance is licensed and able to do. Each is the only place its evidence lives.",
+    "so_nothing_was_removed": "The real duplication in this product was Cloud connection against License, and that was resolved in the previous delivery. Removing a screen here would have destroyed operational evidence to make a list shorter.",
+    "what_was_actually_wrong": "Seven items in the order they happened to be added, so an operator looking for one scanned the whole list. They are grouped by the question being asked -- watch it, run it, who may -- and the Diagnostics heading no longer says the same thing twice."
+  },
+  "tests": "319 UI tests, 111 E2E specs and the full Go suite. New: eight covering editable retention and the asset and language surfaces, four on image sniffing and stored-name generation, five on retention bounds and schedule parsing, and three pinning the translation contract from the portal side.",
+  "no_migration": "None. Retention lives in the appliance config the sweep already reads, translations and assets in the branding document and the appliance filesystem.",
+  "constraints_observed": {
+    "no_privilege_widening": "scd writes root-owned files because it already runs as root and is already the privileged helper. edged was not given new privileges.",
+    "no_destructive_action": "Nothing deletes an artefact, a revision or an image the portal is using.",
+    "no_pms_or_financial": "No PMS configuration change, no PMS write, no financial traffic.",
+    "retired_host": "172.21.60.23 neither contacted nor modified."
+  },
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product Owner, 2026-09-18: complete the remaining authorized scope of the Hotel Admin / Guest Portal mission -- editable backup scheduling and retention, logo and background asset management, the System-section review, and a language selector backed by real translated content.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}
