@@ -1,151 +1,73 @@
 "use client";
 
-// PORTAL BRANDING — a designer, not a textarea full of JSON.
+// GUEST PORTAL SETTINGS.
 //
-// What was here asked the operator to hand-edit a raw JSON document with no schema, no validation, no
-// history and no rollback. It also had no effect: the captive portal never fetched branding, so whatever was
-// typed changed nothing a guest saw. It was write-only configuration behind a syntax check.
+// WHAT THIS REPLACES, AND WHY
+// ---------------------------
+// The screen before it was a revision-management tool wearing a settings page's name. It asked a hotel
+// receptionist to hold in their head: a draft, a published design, a version number, which version was live,
+// and a rollback. None of those are things a hotel has. A hotel has ONE guest portal, and one current
+// configuration for it.
 //
-// This screen edits a DESIGN. It shows what the design will look like while it is being edited, publishes it
-// under a password step-up, keeps versioned revisions and rolls back to one. The JSON underneath is an
-// implementation detail the operator never meets.
+// So the vocabulary is now: change something, look at the preview, save. The immutable revision history is
+// still written on every save — it is how a bad change is recovered and how the audit says who changed the
+// page guests type their room number into — but it is not a concept the operator is asked to operate.
+// Nothing was deleted to achieve that.
+//
+// The four sections are the four questions an operator actually arrives with: what is this hotel called, what
+// does the page look like, what language does it speak, and the escape hatch for the one property in fifty
+// that has a designer.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, ListResp, PortalAsset, Whoami } from "@/lib/api";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { api, ApiError, ListResp, PortalAsset, Whoami } from "@/lib/api";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { canWrite } from "@/lib/roles";
-import { errMsg, formatDate } from "@/lib/utils";
-import { Paintbrush, Eye, History, Code2, Upload, Trash2, Languages } from "lucide-react";
+import { errMsg } from "@/lib/utils";
+import {
+  Paintbrush, Building2, Languages as LanguagesIcon, Code2, Upload, Trash2, Check, AlertTriangle,
+} from "lucide-react";
+import { PortalPreview } from "./preview";
+import {
+  Design, PORTAL_STRINGS, STRING_GROUPS, SHIPPED_LANGUAGES,
+  advancedChanged, assetSrc, knownLanguages, languageStatus, offeredLanguages,
+} from "./strings";
 
-type Design = {
-  hotel_name?: string;
-  logo_url?: string;
-  background_url?: string;
-  brand_color?: string;
-  brand_color_dark?: string;
-  text_color?: string;
-  font_family?: string;
-  corner_radius?: string;
-  welcome_text?: string;
-  help_text?: string;
-  terms_url?: string;
-  /** code -> { key: text }. What makes the language selector do something. */
-  translations?: Record<string, Record<string, string>>;
-  languages?: { code: string; label: string }[];
-  custom_css?: string;
-  custom_html?: string;
-};
+type BrandingState = { design: Design; draft: Design };
 
-type Revision = { version: number; published_at: string; published_by?: string; note?: string };
-type BrandingState = { design: Design; draft: Design; revisions: Revision[]; published: boolean };
-
-/** What an unbranded appliance shows. The portal carries the same defaults; these mirror them so the preview
- *  is honest about what a guest would actually see before anything is published. */
-/** The six languages the portal ships words for. Codes, order and native names match LANGS in
- *  data-plane/cmd/portald/templates.go. A hotel may still add a seventh of its own. */
-const SHIPPED_LANGUAGES: { code: string; label: string }[] = [
-  { code: "en", label: "English" },
-  { code: "ar", label: "العربية" },
-  { code: "de", label: "Deutsch" },
-  { code: "fr", label: "Français" },
-  { code: "it", label: "Italiano" },
-  { code: "ru", label: "Русский" },
-];
-
-/** The guest-facing strings the portal tags for translation, grouped the way they appear on the page rather
- *  than as one undifferentiated list. Keys must match data-i18n / BUILTIN in the portal template: if they
- *  drift, the operator types words that never appear. A test in cmd/portald holds the two lists together. */
-const PORTAL_STRINGS: { group: string; key: string; english: string }[] = [
-  { group: "Tabs and navigation", key: "tab.guest", english: "Guest Login" },
-  { group: "Tabs and navigation", key: "tab.account", english: "Account Login" },
-  { group: "Tabs and navigation", key: "alt.title", english: "Or sign in with" },
-  { group: "Tabs and navigation", key: "method.pms", english: "Room" },
-  { group: "Tabs and navigation", key: "method.poststay", english: "Post-stay" },
-  { group: "Tabs and navigation", key: "method.voucher", english: "Voucher" },
-  { group: "Tabs and navigation", key: "method.account", english: "Personal account" },
-  { group: "Tabs and navigation", key: "method.email", english: "Email" },
-  { group: "Tabs and navigation", key: "method.sms", english: "Phone" },
-  { group: "Tabs and navigation", key: "method.social", english: "Social" },
-
-  { group: "Room sign-in", key: "pms.room", english: "Room Number" },
-  { group: "Room sign-in", key: "pms.secondary", english: "Password" },
-  { group: "Room sign-in", key: "pms.prompt.lastname", english: "Last name on the reservation" },
-  { group: "Room sign-in", key: "pms.prompt.firstname", english: "First name on the reservation" },
-  { group: "Room sign-in", key: "pms.prompt.reservation", english: "Reservation / confirmation number" },
-  { group: "Room sign-in", key: "pms.prompt.any", english: "First name, last name, or reservation number" },
-  { group: "Room sign-in", key: "pms.prompt.either", english: "Last name OR reservation number" },
-  { group: "Room sign-in", key: "pms.choose", english: "Choose your internet package" },
-
-  { group: "Voucher and account", key: "account.personal", english: "Use Personal Account" },
-  { group: "Voucher and account", key: "voucher.label", english: "Voucher Code" },
-  { group: "Voucher and account", key: "account.user", english: "Username" },
-  { group: "Voucher and account", key: "account.pass", english: "Password" },
-
-  { group: "Email and SMS", key: "email.dest", english: "Email address" },
-  { group: "Email and SMS", key: "sms.dest", english: "Phone number" },
-  { group: "Email and SMS", key: "sms.hint", english: "Include the country code, for example +44 20 7946 0958" },
-  { group: "Email and SMS", key: "otp.code", english: "Verification code" },
-  { group: "Email and SMS", key: "otp.sent.email", english: "We sent a 6-digit code to" },
-  { group: "Email and SMS", key: "otp.sent.sms", english: "We texted a 6-digit code to" },
-  { group: "Email and SMS", key: "otp.retry.email", english: "Try a different email" },
-  { group: "Email and SMS", key: "otp.retry.sms", english: "Use a different number" },
-
-  { group: "Post-stay", key: "poststay.pin", english: "Post-stay PIN" },
-  { group: "Post-stay", key: "poststay.hint", english: "The PIN you were given at checkout" },
-
-  { group: "Buttons", key: "btn.login", english: "Login" },
-  { group: "Buttons", key: "btn.submit", english: "Submit" },
-  { group: "Buttons", key: "btn.sendcode", english: "Send code" },
-  { group: "Buttons", key: "btn.verify", english: "Verify" },
-  { group: "Buttons", key: "btn.reconnect", english: "Reconnect" },
-
-  { group: "Social sign-in", key: "social.note", english: "You will be redirected to the provider, then back here." },
-  { group: "Social sign-in", key: "social.google", english: "Continue with Google" },
-  { group: "Social sign-in", key: "social.apple", english: "Continue with Apple" },
-  { group: "Social sign-in", key: "social.facebook", english: "Continue with Facebook" },
-
-  { group: "Device information", key: "info.device", english: "Your device" },
-  { group: "Device information", key: "info.ip", english: "IP address" },
-  { group: "Device information", key: "info.mac", english: "MAC address" },
-  { group: "Device information", key: "info.help", english: "Reception may ask for these if you need help connecting." },
-
-  { group: "Notices", key: "notice.nomethods", english: "There is no way to sign in on this network yet. Please contact reception." },
-  { group: "Notices", key: "notice.nopackages", english: "Internet access is not available here at the moment. You can still sign in, but there is nothing to connect you to yet — please let reception know." },
-  { group: "Notices", key: "err.generic", english: "We could not verify your stay. Please check your details or contact reception." },
-  { group: "Notices", key: "err.retry", english: "You can try again now." },
-  { group: "Notices", key: "lang.label", english: "Language" },
-];
-
-const STRING_GROUPS = Array.from(new Set(PORTAL_STRINGS.map((s) => s.group)));
-
-const DEFAULTS: Required<Pick<Design, "brand_color" | "brand_color_dark" | "text_color" | "corner_radius">> = {
+/** What an unbranded appliance shows. The portal carries the same values; these mirror them so a colour well
+ *  that has never been set shows what a guest is actually looking at rather than black. */
+const DEFAULTS = {
   brand_color: "#0f6b63",
   brand_color_dark: "#0b544e",
-  text_color: "#1c2b2a",
-  corner_radius: "18px",
-};
+  text_color: "#14302e",
+  corner_radius: "20px",
+} as const;
 
-export default function PortalBrandingPage() {
-  const [state, setState] = useState<BrandingState | null>(null);
+type Tab = "general" | "branding" | "languages" | "advanced";
+const TABS: { id: Tab; label: string; icon: typeof Building2 }[] = [
+  { id: "general", label: "General", icon: Building2 },
+  { id: "branding", label: "Branding", icon: Paintbrush },
+  { id: "languages", label: "Languages", icon: LanguagesIcon },
+  { id: "advanced", label: "Advanced", icon: Code2 },
+];
+
+export default function PortalSettingsPage() {
+  const [saved, setSaved] = useState<Design | null>(null);
   const [d, setD] = useState<Design>({});
   const [roles, setRoles] = useState<string[]>([]);
+  const [tab, setTab] = useState<Tab>("general");
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [advanced, setAdvanced] = useState(false);
-  const [publishing, setPublishing] = useState(false);
-  const [password, setPassword] = useState("");
-  const [note, setNote] = useState("");
-  const [rollbackTo, setRollbackTo] = useState<number | null>(null);
-  const [assets, setAssets] = useState<PortalAsset[]>([]);
   const [uploading, setUploading] = useState<string | null>(null);
-  const [langCode, setLangCode] = useState("");
-  const [langLabel, setLangLabel] = useState("");
-  /** Which language the string editor is showing. One at a time — see the Languages card. */
-  const [editing, setEditing] = useState("en");
+  const [password, setPassword] = useState("");
+  const [assets, setAssets] = useState<PortalAsset[]>([]);
+  const [editingLang, setEditingLang] = useState("en");
+  const [newLangCode, setNewLangCode] = useState("");
+  const [newLangLabel, setNewLangLabel] = useState("");
 
   const writable = canWrite("portal-branding", roles);
   const set = <K extends keyof Design>(k: K, v: Design[K]) => setD((p) => ({ ...p, [k]: v }));
@@ -153,9 +75,10 @@ export default function PortalBrandingPage() {
   const load = useCallback(async () => {
     try {
       const s = await api.get<BrandingState>("/portal-branding");
-      setState(s);
-      // An operator returning to an unfinished design should find it, not a blank form.
-      setD(Object.keys(s.draft ?? {}).length ? s.draft : (s.design ?? {}));
+      const live = s.design ?? {};
+      setSaved(live);
+      // An operator who was interrupted mid-edit finds their work, without ever being told the word "draft".
+      setD(Object.keys(s.draft ?? {}).length ? s.draft : live);
       try {
         const a = await api.get<ListResp<PortalAsset>>("/portal-assets");
         setAssets(a.data ?? []);
@@ -169,634 +92,535 @@ export default function PortalBrandingPage() {
   }, [load]);
 
   const dirty = useMemo(
-    () => JSON.stringify(d) !== JSON.stringify(state?.design ?? {}),
-    [d, state],
+    () => saved !== null && JSON.stringify(d) !== JSON.stringify(saved),
+    [d, saved],
+  );
+  const needsPassword = useMemo(
+    () => saved !== null && advancedChanged(d, saved),
+    [d, saved],
   );
 
-  async function saveDraft() {
+  // UNSAVED WORK SURVIVES A CLOSED TAB. Written quietly and never named: an operator should not have to learn
+  // a second save verb to get the protection every document editor gives them for free.
+  const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!dirty || !writable) return;
+    if (settle.current) clearTimeout(settle.current);
+    settle.current = setTimeout(() => {
+      api.put("/portal-branding/draft", { design: d }).catch(() => { /* a lost keystroke cache is not an error to report */ });
+    }, 1500);
+    return () => { if (settle.current) clearTimeout(settle.current); };
+  }, [d, dirty, writable]);
+
+  // Leaving with work in progress is caught by the browser rather than by a modal of our own.
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
+  async function save() {
     setBusy(true); setErr(null); setMsg(null);
     try {
-      await api.put("/portal-branding/draft", { design: d });
-      setMsg("Draft saved. Guests still see the published design.");
+      await api.post("/portal-branding/settings", { design: d, password: password || undefined });
+      setPassword("");
+      setMsg("Saved. Guests see these settings now.");
       await load();
-    } catch (e) { setErr(errMsg(e)); }
-    finally { setBusy(false); }
+    } catch (e) {
+      // The step-up refusal is not a failure to explain away — it is the one case where the operator has
+      // something specific to do, so it is said plainly rather than as a red line of API text.
+      if (e instanceof ApiError && e.code === "reauth_required") setErr(e.message);
+      else setErr(errMsg(e));
+    } finally { setBusy(false); }
   }
 
-  async function publish() {
-    setBusy(true); setErr(null); setMsg(null);
-    try {
-      const r = await api.post<{ version: number }>("/portal-branding/publish", { design: d, note, password });
-      setMsg(`Published as version ${r.version}. Guests see it now.`);
-      setPassword(""); setNote(""); setPublishing(false);
-      await load();
-    } catch (e) { setErr(errMsg(e)); }
-    finally { setBusy(false); }
+  async function discard() {
+    if (!saved) return;
+    setD(saved); setPassword(""); setErr(null); setMsg(null);
+    try { await api.put("/portal-branding/draft", { design: saved }); } catch { /* best effort */ }
   }
 
-  async function doRollback(v: number) {
-    setBusy(true); setErr(null); setMsg(null);
-    try {
-      const r = await api.post<{ version: number; restored_from: number }>(
-        `/portal-branding/rollback/${v}`, { password },
-      );
-      setMsg(`Rolled back to version ${r.restored_from}, published as version ${r.version}.`);
-      setPassword(""); setRollbackTo(null);
-      await load();
-    } catch (e) { setErr(errMsg(e)); }
-    finally { setBusy(false); }
-  }
-
-  /** Upload goes straight to the appliance and the field is pointed at the result -- an operator should not
-   *  have to copy a URL from one place to another. */
   async function upload(field: "logo_url" | "background_url", file: File) {
     setUploading(field); setErr(null); setMsg(null);
     try {
-      const form = new FormData();
-      form.append("file", file);
-      const res = await fetch("/edge/v1/portal-assets", { method: "POST", body: form, credentials: "same-origin" });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body?.message || "the image was refused");
-      set(field, body.url);
-      const a = await api.get<ListResp<PortalAsset>>("/portal-assets");
-      setAssets(a.data ?? []);
-      setMsg("Image uploaded and applied to the design. Publish to show it to guests.");
-    } catch (e: any) { setErr(e?.message ?? "the image could not be uploaded"); }
-    finally { setUploading(null); }
+      // Through the API CLIENT, which knows where edged is. The hand-written URL that used to be here is the
+      // whole reason both uploads failed — see api.upload.
+      const a = await api.upload<PortalAsset>("/portal-assets", file);
+      set(field, a.url);
+      const list = await api.get<ListResp<PortalAsset>>("/portal-assets");
+      setAssets(list.data ?? []);
+      setMsg(`${field === "logo_url" ? "Logo" : "Background"} uploaded. Save changes to show it to guests.`);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "the image could not be uploaded");
+    } finally { setUploading(null); }
   }
 
-  async function removeAsset(name: string) {
+  async function removeUnusedAsset(name: string) {
     setErr(null);
     try {
       await api.del(`/portal-assets/${encodeURIComponent(name)}`);
-      const a = await api.get<ListResp<PortalAsset>>("/portal-assets");
-      setAssets(a.data ?? []);
+      const list = await api.get<ListResp<PortalAsset>>("/portal-assets");
+      setAssets(list.data ?? []);
     } catch (e) { setErr(errMsg(e)); }
   }
 
-  // ---- languages ---------------------------------------------------------------------------------------
-  //
-  // Two different lists that used to be one, which is what made the old selector offer languages nobody had
-  // chosen: WHICH languages a guest is offered, and WHICH languages this hotel has written its own words for.
-  // Writing an Italian greeting is not a decision to offer Italian.
-
-  /** Every language this appliance knows about: the six that ship, plus anything the hotel added. */
-  const offeredList = useMemo(() => {
-    const seen = new Map<string, { code: string; label: string }>();
-    SHIPPED_LANGUAGES.forEach((l) => seen.set(l.code, l));
-    (d.languages ?? []).forEach((l) => { if (!seen.has(l.code)) seen.set(l.code, l); });
-    Object.keys(d.translations ?? {}).forEach((c) => {
-      if (!seen.has(c)) seen.set(c, { code: c, label: c.toUpperCase() });
-    });
-    return Array.from(seen.values());
-  }, [d.languages, d.translations]);
-
-  /** An unset list means all six — the same rule the portal applies, so the screen and the page agree. */
-  const currentOffered = (p: Design) => (p.languages?.length ? p.languages : SHIPPED_LANGUAGES);
-  const offered = useMemo(() => currentOffered(d).map((l) => l.code), [d]);
+  // ---- languages ----------------------------------------------------------------------------------------
+  const known = useMemo(() => knownLanguages(d), [d]);
+  const offeredCodes = useMemo(() => offeredLanguages(d).map((l) => l.code), [d]);
+  const editing = known.find((l) => l.code === editingLang) ?? known[0];
+  const editingState = languageStatus(d, editing?.code ?? "en");
 
   function setOffered(code: string, on: boolean) {
     setD((p) => {
-      const list = currentOffered(p);
-      const label = offeredList.find((l) => l.code === code)?.label ?? code.toUpperCase();
+      const list = offeredLanguages(p);
+      const label = known.find((l) => l.code === code)?.label ?? code.toUpperCase();
       const next = on
         ? [...list.filter((l) => l.code !== code), { code, label }]
-        : list.filter((l) => l.code !== code || code === "en"); // English is not removable
-      // Keep the shipped order, so the guest's selector does not reshuffle as this screen is edited.
-      const order = offeredList.map((l) => l.code);
+        : list.filter((l) => l.code !== code || code === "en"); // English is the fallback and stays
+      const order = known.map((l) => l.code);
       next.sort((a, b) => order.indexOf(a.code) - order.indexOf(b.code));
       return { ...p, languages: next };
     });
   }
 
-  const isShipped = (code: string) => SHIPPED_LANGUAGES.some((l) => l.code === code);
-
-  /** What the badge on each language tab counts. A shipped language is never "missing" a string — the portal
-   *  has a word for it — so only a language this hotel added can fall back to English. */
-  function statusOf(code: string) {
-    const tr = d.translations?.[code] ?? {};
-    const custom = PORTAL_STRINGS.filter((s) => (tr[s.key] ?? "").trim() !== "").length;
-    const shipped = isShipped(code);
-    return { shipped, custom, missing: shipped ? 0 : PORTAL_STRINGS.length - custom };
+  function setTranslation(code: string, key: string, value: string) {
+    setD((p) => ({
+      ...p,
+      translations: { ...(p.translations ?? {}), [code]: { ...((p.translations ?? {})[code] ?? {}), [key]: value } },
+    }));
   }
 
-  const editingMeta = offeredList.find((l) => l.code === editing) ?? offeredList[0] ?? null;
-  const editingStatus = statusOf(editingMeta?.code ?? "en");
-
   const preview = { ...DEFAULTS, ...d };
+  const currentLogo = assetSrc(d.logo_url);
+  const currentBackground = assetSrc(d.background_url);
+  const unused = assets.filter((a) => !a.in_use && a.url !== d.logo_url && a.url !== d.background_url);
+
+  if (!saved) {
+    return <p className="p-6 text-sm text-muted-foreground">{err ?? "Loading portal settings…"}</p>;
+  }
 
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-5">
-      <div className="mb-4">
-        <div className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground">Guest portal</div>
-        <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight sm:text-2xl">
-          <Paintbrush className="h-5 w-5" /> Branding
-        </h1>
-      </div>
+    <div className="mx-auto w-full max-w-7xl">
+      {/* ---- header: what this is, and the only two actions there are --------------------------------- */}
+      <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <div className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground">Guest portal</div>
+          <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight sm:text-2xl">
+            <Paintbrush className="h-5 w-5" /> Portal settings
+          </h1>
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+            How the Wi-Fi sign-in page looks and reads. Changes take effect for guests as soon as you save.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {dirty
+            ? <span className="text-xs text-warning-subtle-foreground">Unsaved changes</span>
+            : <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Check className="h-3.5 w-3.5" /> All changes saved</span>}
+          <Button variant="secondary" disabled={!dirty || busy} onClick={discard}>Discard</Button>
+          <Button disabled={!dirty || busy || !writable} onClick={save}>
+            {busy ? "Saving…" : "Save changes"}
+          </Button>
+        </div>
+      </header>
 
-      {err && <div role="alert" className="text-sm text-destructive">{err}</div>}
-      {msg && <div role="status" className="text-sm text-success-subtle-foreground">{msg}</div>}
+      {/* The step-up is asked for ONLY when the change needs it, in the place the change is made, rather than
+          as a password prompt on every save. */}
+      {needsPassword && (
+        <div className="mb-4 flex flex-wrap items-end gap-3 rounded-lg border border-warning/30 bg-warning-subtle p-3">
+          <AlertTriangle className="h-4 w-4 text-warning-subtle-foreground" />
+          <label className="block text-sm text-warning-subtle-foreground">
+            You changed the portal&apos;s custom CSS or HTML. Confirm your password to save.
+            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+              aria-label="Confirm your password" className="mt-1 w-56" autoComplete="current-password" />
+          </label>
+        </div>
+      )}
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
-        {/* ------------------------------------------------------------------ the design */}
-        <div className="space-y-5">
-          <Card>
-            <CardHeader><CardTitle>Hotel</CardTitle></CardHeader>
-            <CardBody className="space-y-4">
-              <label className="block text-sm">
-                Hotel name
-                <Input value={d.hotel_name ?? ""} onChange={(e) => set("hotel_name", e.target.value)}
-                  placeholder="Coral Sea Holiday Resort" />
-              </label>
-              {(["logo_url", "background_url"] as const).map((field) => (
-                <div key={field} className="space-y-2 text-sm">
-                  <span className="block">{field === "logo_url" ? "Logo" : "Background photograph"}</span>
-                  {d[field] ? (
-                    <div className="flex items-center gap-3">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={d[field]} alt="" className="h-12 w-20 rounded border object-contain" />
-                      <code className="text-xs text-muted">{d[field]}</code>
-                      <Button size="sm" variant="secondary" onClick={() => set(field, "")}>Remove</Button>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-muted">Nothing set — the portal uses its own default.</p>
-                  )}
-                  <label className="inline-flex cursor-pointer items-center gap-2 rounded border px-3 py-1.5">
-                    <Upload className="h-4 w-4" />
-                    {uploading === field ? "Uploading…" : "Upload image"}
-                    <input
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp,image/gif"
-                      className="hidden"
-                      aria-label={field === "logo_url" ? "Upload logo" : "Upload background photograph"}
-                      onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(field, f); e.target.value = ""; }}
-                    />
-                  </label>
-                  <Input value={d[field] ?? ""} onChange={(e) => set(field, e.target.value)}
-                    placeholder="or paste an https address" />
-                  {/* Stored on the appliance and served from the same origin as the sign-in page. A guest
-                      reaches the portal precisely because they have no internet yet, so an image hosted
-                      anywhere else is one that fails exactly when it matters. */}
-                  <span className="block text-xs text-muted">
-                    PNG, JPEG, WebP or GIF, up to 8 MB. SVG is refused: it can carry script, and this image is
-                    served to every guest device before sign-in.
-                  </span>
-                </div>
-              ))}
-            </CardBody>
-          </Card>
+      {err && <div role="alert" className="mb-4 rounded-lg border border-destructive/25 bg-destructive-subtle p-3 text-sm text-destructive-subtle-foreground">{err}</div>}
+      {msg && <div role="status" className="mb-4 rounded-lg border border-success/25 bg-success-subtle p-3 text-sm text-success-subtle-foreground">{msg}</div>}
 
-          <Card>
-            <CardHeader><CardTitle>Appearance</CardTitle></CardHeader>
-            <CardBody className="grid gap-4 sm:grid-cols-2">
-              <label className="block text-sm">
-                Brand colour
-                <span className="mt-1 flex items-center gap-2">
-                  <input type="color" aria-label="Brand colour"
-                    value={preview.brand_color}
-                    onChange={(e) => set("brand_color", e.target.value)}
-                    className="h-9 w-12 rounded border" />
-                  <Input value={d.brand_color ?? ""} onChange={(e) => set("brand_color", e.target.value)}
-                    placeholder={DEFAULTS.brand_color} />
-                </span>
-              </label>
-              <label className="block text-sm">
-                Button shade
-                <span className="mt-1 flex items-center gap-2">
-                  <input type="color" aria-label="Button shade"
-                    value={preview.brand_color_dark}
-                    onChange={(e) => set("brand_color_dark", e.target.value)}
-                    className="h-9 w-12 rounded border" />
-                  <Input value={d.brand_color_dark ?? ""} onChange={(e) => set("brand_color_dark", e.target.value)}
-                    placeholder={DEFAULTS.brand_color_dark} />
-                </span>
-              </label>
-              <label className="block text-sm">
-                Text colour
-                <Input value={d.text_color ?? ""} onChange={(e) => set("text_color", e.target.value)}
-                  placeholder={DEFAULTS.text_color} />
-              </label>
-              <label className="block text-sm">
-                Corner radius
-                <Input value={d.corner_radius ?? ""} onChange={(e) => set("corner_radius", e.target.value)}
-                  placeholder={DEFAULTS.corner_radius} />
-              </label>
-              <label className="block text-sm sm:col-span-2">
-                Typeface
-                <Input value={d.font_family ?? ""} onChange={(e) => set("font_family", e.target.value)}
-                  placeholder="Inter, system-ui, sans-serif" />
-              </label>
-            </CardBody>
-          </Card>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,520px)]">
+        <div className="min-w-0">
+          {/* ---- section tabs ------------------------------------------------------------------------ */}
+          <div className="mb-4 flex flex-wrap gap-1 border-b" role="tablist" aria-label="Settings sections">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                role="tab"
+                type="button"
+                aria-selected={tab === t.id}
+                onClick={() => setTab(t.id)}
+                className={`-mb-px inline-flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm ${
+                  tab === t.id ? "border-primary font-medium text-primary" : "border-transparent text-muted-foreground"
+                }`}
+              >
+                <t.icon className="h-4 w-4" /> {t.label}
+              </button>
+            ))}
+          </div>
 
-          <Card>
-            <CardHeader><CardTitle>Words</CardTitle></CardHeader>
-            <CardBody className="space-y-4">
-              <label className="block text-sm">
-                Welcome line
-                <Input value={d.welcome_text ?? ""} onChange={(e) => set("welcome_text", e.target.value)}
-                  placeholder="Welcome — connect to our Wi-Fi" />
-              </label>
-              <label className="block text-sm">
-                Help text
-                <Input value={d.help_text ?? ""} onChange={(e) => set("help_text", e.target.value)}
-                  placeholder="Ask reception if you need a code" />
-              </label>
-              <label className="block text-sm">
-                Terms link
-                <Input value={d.terms_url ?? ""} onChange={(e) => set("terms_url", e.target.value)}
-                  placeholder="https://…/terms" />
-              </label>
-            </CardBody>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2"><Languages className="h-4 w-4" /> Languages</CardTitle>
-            </CardHeader>
-            <CardBody className="space-y-4">
-              {/* SIX LANGUAGES AT ONCE IS A SCROLL, NOT A SCREEN.
-                  This used to render every language as its own block, one under another, each with the full
-                  string list inside it — six languages meant roughly three hundred inputs stacked vertically
-                  and no way to see what any one language was missing. It is now one language at a time: pick
-                  it, see its state, edit it.
-                  It is also no longer a data-entry job. The portal SHIPS words for all six, so offering a
-                  guest Arabic costs one tick; the fields below exist for a property that wants its own
-                  wording, not for one that has to supply the basics. */}
-              <p className="text-sm text-muted">
-                The portal ships complete wording for {SHIPPED_LANGUAGES.length} languages. Tick the ones your
-                guests should see, and edit any string you want to say differently. Anything you leave blank
-                uses the shipped wording, and anything neither you nor the portal has a word for falls back to
-                English — a half-translated portal still reads.
-              </p>
-
-              {/* WHICH LANGUAGES A GUEST IS OFFERED. Separate from which ones have overrides: an operator who
-                  writes an Italian greeting has not decided that Italian is offered, and the two being the
-                  same setting is what produced a selector full of languages nobody chose. */}
-              <fieldset className="space-y-2">
-                <legend className="text-sm font-medium">Offered to guests</legend>
-                <div className="flex flex-wrap gap-2">
-                  {offeredList.map((l) => {
-                    const on = offered.includes(l.code);
-                    const fixed = l.code === "en";
-                    return (
-                      <label
-                        key={l.code}
-                        className={`inline-flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 text-sm ${
-                          on ? "border-primary text-primary" : "text-muted-foreground"
-                        } ${fixed ? "cursor-default opacity-80" : ""}`}
-                      >
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4"
-                          aria-label={`Offer ${l.label} to guests`}
-                          checked={on}
-                          disabled={fixed || !writable}
-                          onChange={(e) => setOffered(l.code, e.target.checked)}
-                        />
-                        {l.label} <span className="text-2xs text-muted">({l.code})</span>
-                      </label>
-                    );
-                  })}
-                </div>
-                <p className="text-xs text-muted">
-                  English is always offered; it is what the portal falls back to. A language with no words
-                  behind it is never shown to a guest, whatever is ticked here.
-                </p>
-              </fieldset>
-
-              {/* Adding a seventh language the portal does not ship. It arrives with nothing, so every string
-                  it leaves blank shows English — which is exactly what the counter below says. */}
-              <div className="flex flex-wrap items-end gap-2 border-t pt-4">
-                <label className="block text-sm">
-                  Language code
-                  <Input value={langCode} onChange={(e) => setLangCode(e.target.value.toLowerCase().slice(0, 5))}
-                    placeholder="es" className="w-24" />
-                </label>
-                <label className="block text-sm">
-                  Shown as
-                  <Input value={langLabel} onChange={(e) => setLangLabel(e.target.value)} placeholder="Español" />
-                </label>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={!langCode.trim() || !writable}
-                  onClick={() => {
-                    const code = langCode.trim();
-                    setD((p) => ({
-                      ...p,
-                      translations: { ...(p.translations ?? {}), [code]: (p.translations ?? {})[code] ?? {} },
-                      languages: [
-                        ...currentOffered(p).filter((l) => l.code !== code),
-                        { code, label: langLabel.trim() || code.toUpperCase() },
-                      ],
-                    }));
-                    setEditing(code);
-                    setLangCode(""); setLangLabel("");
-                  }}
+          {/* ---- GENERAL ----------------------------------------------------------------------------- */}
+          {tab === "general" && (
+            <Card>
+              <CardHeader><CardTitle>Hotel identity</CardTitle></CardHeader>
+              <CardBody className="space-y-5">
+                <Field label="Hotel name" help="Shown at the top of the sign-in page and in the browser tab.">
+                  {(a) => <Input {...a} value={d.hotel_name ?? ""} disabled={!writable}
+                    onChange={(e) => set("hotel_name", e.target.value)} placeholder="Coral Sea Holiday Resort" />}
+                </Field>
+                <Field label="Welcome line" help="One short sentence under the hotel name. Leave empty to show nothing.">
+                  {(a) => <Input {...a} value={d.welcome_text ?? ""} disabled={!writable}
+                    onChange={(e) => set("welcome_text", e.target.value)}
+                    placeholder="Welcome — connect to our Wi-Fi" />}
+                </Field>
+                <Field label="Help line" help="Shown at the foot of the card, for guests who cannot get on.">
+                  {(a) => <Input {...a} value={d.help_text ?? ""} disabled={!writable}
+                    onChange={(e) => set("help_text", e.target.value)}
+                    placeholder="Ask reception if you need a code" />}
+                </Field>
+                <Field
+                  label="Terms of use link"
+                  help="Opens in a new tab. A guest reaching the portal has no internet yet, so link to something on this appliance or accept that an external page will not load until they are online."
                 >
-                  Add language
-                </Button>
-              </div>
+                  {(a) => <Input {...a} value={d.terms_url ?? ""} disabled={!writable}
+                    onChange={(e) => set("terms_url", e.target.value)} placeholder="https://…/terms" />}
+                </Field>
+              </CardBody>
+            </Card>
+          )}
 
-              {/* ---- the language being edited ------------------------------------------------ */}
-              <div className="space-y-3 border-t pt-4">
-                <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Language being edited">
-                  {offeredList.map((l) => {
-                    const st = statusOf(l.code);
-                    return (
-                      <button
-                        key={l.code}
-                        type="button"
-                        role="tab"
-                        aria-selected={editing === l.code}
-                        onClick={() => setEditing(l.code)}
-                        className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm ${
-                          editing === l.code ? "border-primary bg-primary/5 text-primary" : "text-muted-foreground"
-                        }`}
-                      >
-                        {l.label}
-                        {/* MISSING IS COUNTED, NOT GUESSED AT. A shipped language cannot be missing anything;
-                            a language the hotel added itself shows English for every string it has not been
-                            given, and the badge is that number. */}
-                        {st.missing > 0 ? (
-                          <Badge tone="warn">{st.missing} in English</Badge>
-                        ) : st.custom > 0 ? (
-                          <Badge tone="neutral">{st.custom} edited</Badge>
-                        ) : null}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {editingMeta && (
-                  <div className="space-y-3 rounded border p-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <strong className="text-sm">
-                        {editingMeta.label} <span className="text-muted">({editingMeta.code})</span>
-                      </strong>
-                      <span className="flex items-center gap-2">
-                        {editingStatus.shipped ? (
-                          <span className="text-xs text-muted">
-                            Ships with the portal. Leave a field empty to use its wording.
-                          </span>
-                        ) : (
-                          <span className="text-xs text-muted">
-                            Added by this hotel. Empty fields show English.
-                          </span>
-                        )}
-                        {!editingStatus.shipped && (
-                          <Button size="sm" variant="secondary" disabled={!writable} onClick={() => setD((p) => {
-                            const tr = { ...(p.translations ?? {}) }; delete tr[editingMeta.code];
-                            return {
-                              ...p,
-                              translations: tr,
-                              languages: currentOffered(p).filter((l) => l.code !== editingMeta.code),
-                            };
-                          })}>
-                            Remove
-                          </Button>
-                        )}
-                      </span>
-                    </div>
-
-                    {editingMeta.code === "en" ? (
-                      <p className="text-sm text-muted">
-                        English is the portal&apos;s own wording and the fallback for every other language.
-                        Change a string here and it changes for guests reading English and for every language
-                        that has not been given its own word for it.
-                      </p>
-                    ) : null}
-
-                    {STRING_GROUPS.map((g) => (
-                      <details key={g} open className="rounded border">
-                        <summary className="cursor-pointer px-3 py-2 text-sm font-medium">{g}</summary>
-                        <div className="grid gap-2 p-3 pt-0 sm:grid-cols-2">
-                          {PORTAL_STRINGS.filter((s) => s.group === g).map((st) => {
-                            const v = d.translations?.[editingMeta.code]?.[st.key] ?? "";
-                            const usesEnglish = !v && !editingStatus.shipped;
-                            return (
-                              <label key={st.key} className="block text-xs">
-                                <span className="flex items-center gap-1.5">
-                                  {st.english}
-                                  {usesEnglish && <span className="text-2xs text-warning-subtle-foreground">English</span>}
-                                </span>
-                                <Input
-                                  value={v}
-                                  placeholder={st.english}
-                                  disabled={!writable}
-                                  aria-label={`${st.english} in ${editingMeta.label}`}
-                                  onChange={(e) => setD((p) => ({
-                                    ...p,
-                                    translations: {
-                                      ...(p.translations ?? {}),
-                                      [editingMeta.code]: {
-                                        ...((p.translations ?? {})[editingMeta.code] ?? {}),
-                                        [st.key]: e.target.value,
-                                      },
-                                    },
-                                  }))}
-                                />
-                              </label>
-                            );
-                          })}
-                        </div>
-                      </details>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </CardBody>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2"><Code2 className="h-4 w-4" /> Advanced</CardTitle>
-            </CardHeader>
-            <CardBody className="space-y-3">
-              {!advanced ? (
-                <Button variant="secondary" onClick={() => setAdvanced(true)}>Custom CSS and HTML</Button>
-              ) : (
-                <>
-                  {/* SAID BEFORE THEY TYPE, not after it is rejected. */}
-                  <p className="text-sm">
-                    This is the page guests type their room number, surname and voucher codes into. Styling and
-                    markup are accepted; <strong>scripts, inline event handlers, frames, extra forms and
-                    @import are refused</strong> — anything executable here could collect a guest&apos;s
-                    credentials. A design containing them is rejected rather than quietly cleaned up.
+          {/* ---- BRANDING ---------------------------------------------------------------------------- */}
+          {tab === "branding" && (
+            <div className="space-y-5">
+              <Card>
+                <CardHeader><CardTitle>Images</CardTitle></CardHeader>
+                <CardBody className="space-y-6">
+                  <ImageField
+                    label="Logo"
+                    help="Shown at the top of the sign-in card, up to 60px tall."
+                    src={currentLogo}
+                    busy={uploading === "logo_url"}
+                    writable={writable}
+                    frame="bg-surface"
+                    onPick={(f) => upload("logo_url", f)}
+                    onClear={() => set("logo_url", "")}
+                  />
+                  <ImageField
+                    label="Background photograph"
+                    help="Fills the screen behind the sign-in card. A wide, uncluttered photograph works best — the card sits over the middle of it."
+                    src={currentBackground}
+                    busy={uploading === "background_url"}
+                    writable={writable}
+                    frame="bg-surface"
+                    wide
+                    onPick={(f) => upload("background_url", f)}
+                    onClear={() => set("background_url", "")}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    PNG, JPEG, WebP or GIF, up to 8&nbsp;MB. Images are stored on this appliance and served from
+                    it, so they load for a guest who has no internet yet. SVG is refused: it can carry script,
+                    and this page collects room numbers and voucher codes.
                   </p>
-                  <label className="block text-sm">
-                    Custom CSS
-                    <textarea
-                      className="mt-1 h-40 w-full rounded border bg-panel p-2 font-mono text-xs"
-                      value={d.custom_css ?? ""} onChange={(e) => set("custom_css", e.target.value)}
-                      placeholder=".card { box-shadow: 0 10px 40px rgba(0,0,0,.2); }" />
-                  </label>
-                  <label className="block text-sm">
-                    Custom HTML
-                    <textarea
-                      className="mt-1 h-32 w-full rounded border bg-panel p-2 font-mono text-xs"
-                      value={d.custom_html ?? ""} onChange={(e) => set("custom_html", e.target.value)}
-                      placeholder="<p class=&quot;small&quot;>Ask reception for help on extension 9.</p>" />
-                  </label>
-                </>
-              )}
-            </CardBody>
-          </Card>
+
+                  {unused.length > 0 && (
+                    <div className="border-t pt-4">
+                      <h3 className="text-sm font-medium">Previously uploaded</h3>
+                      <p className="mb-2 text-xs text-muted-foreground">Not used by the current settings.</p>
+                      <ul className="flex flex-wrap gap-3">
+                        {unused.map((a) => (
+                          <li key={a.name} className="flex items-center gap-2 rounded border p-2">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={assetSrc(a.url)} alt="" className="h-10 w-16 rounded object-contain" />
+                            <span className="text-xs text-muted-foreground">{Math.round(a.size_bytes / 1024)} KB</span>
+                            <Button size="sm" variant="secondary" disabled={!writable}
+                              onClick={() => removeUnusedAsset(a.name)} aria-label={`Delete ${a.name}`}>
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </CardBody>
+              </Card>
+
+              <Card>
+                <CardHeader><CardTitle>Colours and type</CardTitle></CardHeader>
+                <CardBody className="grid gap-5 sm:grid-cols-2">
+                  <ColorField label="Brand colour" help="Buttons, the selected tab and links."
+                    value={d.brand_color} fallback={preview.brand_color} disabled={!writable}
+                    onChange={(v) => set("brand_color", v)} />
+                  <ColorField label="Button shade" help="The darker end of the button gradient."
+                    value={d.brand_color_dark} fallback={preview.brand_color_dark} disabled={!writable}
+                    onChange={(v) => set("brand_color_dark", v)} />
+                  <ColorField label="Text colour" help="Headings and field labels."
+                    value={d.text_color} fallback={preview.text_color} disabled={!writable}
+                    onChange={(v) => set("text_color", v)} />
+                  <Field label="Corner radius" help="How rounded the card and fields are, e.g. 20px.">
+                    {(a) => <Input {...a} value={d.corner_radius ?? ""} disabled={!writable}
+                      onChange={(e) => set("corner_radius", e.target.value)} placeholder={DEFAULTS.corner_radius} />}
+                  </Field>
+                  <div className="sm:col-span-2">
+                    <Field label="Typeface" help="A font stack. Only fonts already on the guest's device will be used — the portal loads nothing from the internet.">
+                      {(a) => <Input {...a} value={d.font_family ?? ""} disabled={!writable}
+                        onChange={(e) => set("font_family", e.target.value)}
+                        placeholder="Inter, system-ui, sans-serif" />}
+                    </Field>
+                  </div>
+                </CardBody>
+              </Card>
+            </div>
+          )}
+
+          {/* ---- LANGUAGES --------------------------------------------------------------------------- */}
+          {tab === "languages" && (
+            <div className="space-y-5">
+              <Card>
+                <CardHeader><CardTitle>Shown to guests</CardTitle></CardHeader>
+                <CardBody className="space-y-3">
+                  <p className="text-sm text-muted-foreground">
+                    The portal ships complete wording for {SHIPPED_LANGUAGES.length} languages — nothing to
+                    translate, just tick the ones your guests should be offered. English is always available
+                    and is what any missing wording falls back to.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {known.map((l) => {
+                      const on = offeredCodes.includes(l.code);
+                      const fixed = l.code === "en";
+                      return (
+                        <label key={l.code}
+                          className={`inline-flex cursor-pointer items-center gap-2 rounded-full border px-3.5 py-2 text-sm ${
+                            on ? "border-primary bg-primary/5 text-primary" : "text-muted-foreground"
+                          } ${fixed ? "cursor-default" : ""}`}>
+                          <input type="checkbox" className="h-4 w-4" checked={on}
+                            disabled={fixed || !writable}
+                            aria-label={`Offer ${l.label} to guests`}
+                            onChange={(e) => setOffered(l.code, e.target.checked)} />
+                          {l.label}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </CardBody>
+              </Card>
+
+              <Card>
+                <CardHeader><CardTitle>Wording</CardTitle></CardHeader>
+                <CardBody className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    Only change these if your property words something differently. Anything you leave empty
+                    keeps the wording the portal ships.
+                  </p>
+
+                  {/* ONE LANGUAGE AT A TIME. Six of these stacked was roughly three hundred inputs down a
+                      single column, with no way to see the state of any one of them. */}
+                  <div className="flex flex-wrap gap-2" role="tablist" aria-label="Language being edited">
+                    {known.map((l) => {
+                      const st = languageStatus(d, l.code);
+                      return (
+                        <button key={l.code} type="button" role="tab"
+                          aria-selected={editing?.code === l.code}
+                          onClick={() => setEditingLang(l.code)}
+                          className={`inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${
+                            editing?.code === l.code ? "border-primary bg-primary/5 text-primary" : "text-muted-foreground"
+                          }`}>
+                          {l.label}
+                          {st.missing > 0
+                            ? <Badge tone="warn">{st.missing} in English</Badge>
+                            : st.custom > 0
+                              ? <Badge tone="neutral">{st.custom} changed</Badge>
+                              : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {editing && (
+                    <div className="space-y-3 rounded-lg border p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <strong className="text-sm">{editing.label}</strong>
+                        <span className="text-xs text-muted-foreground">
+                          {editingState.shipped
+                            ? `Ships complete. ${editingState.custom} of ${editingState.total} changed by this hotel.`
+                            : `Added by this hotel. ${editingState.missing} of ${editingState.total} strings will show English.`}
+                        </span>
+                      </div>
+
+                      {STRING_GROUPS.map((g) => (
+                        // A language the hotel ADDED has every string to fill in, so its groups start open.
+                        // A shipped one needs almost nothing changed, so it opens on the first group only and
+                        // does not present fifty fields to somebody who came to change one.
+                        <details key={g} open={!editingState.shipped || g === STRING_GROUPS[0]}
+                          className="rounded-md border">
+                          <summary className="cursor-pointer px-3 py-2 text-sm font-medium">{g}</summary>
+                          <div className="grid gap-3 p-3 pt-0 sm:grid-cols-2">
+                            {PORTAL_STRINGS.filter((s) => s.group === g).map((st) => {
+                              const v = d.translations?.[editing.code]?.[st.key] ?? "";
+                              const fallsBack = !v && !editingState.shipped;
+                              return (
+                                <label key={st.key} className="block text-xs">
+                                  <span className="flex items-center gap-1.5 text-muted-foreground">
+                                    {st.english}
+                                    {fallsBack && <Badge tone="warn">English</Badge>}
+                                  </span>
+                                  <Input className="mt-1" value={v} placeholder={st.english} disabled={!writable}
+                                    dir={editing.code === "ar" ? "rtl" : undefined}
+                                    aria-label={`${st.english} in ${editing.label}`}
+                                    onChange={(e) => setTranslation(editing.code, st.key, e.target.value)} />
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </details>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap items-end gap-2 border-t pt-4">
+                    <Field label="Add another language" help="A language the portal does not ship. It starts empty, so every string you do not fill in shows English.">
+                      {(a) => <span className="flex gap-2">
+                        <Input {...a} value={newLangCode} className="w-20" placeholder="es" disabled={!writable}
+                          aria-label="Language code"
+                          onChange={(e) => setNewLangCode(e.target.value.toLowerCase().slice(0, 5))} />
+                        <Input value={newLangLabel} placeholder="Español" disabled={!writable}
+                          aria-label="Shown as"
+                          onChange={(e) => setNewLangLabel(e.target.value)} />
+                        <Button variant="secondary" disabled={!newLangCode.trim() || !writable}
+                          onClick={() => {
+                            const code = newLangCode.trim();
+                            setD((p) => ({
+                              ...p,
+                              translations: { ...(p.translations ?? {}), [code]: (p.translations ?? {})[code] ?? {} },
+                              languages: [
+                                ...offeredLanguages(p).filter((l) => l.code !== code),
+                                { code, label: newLangLabel.trim() || code.toUpperCase() },
+                              ],
+                            }));
+                            setEditingLang(code); setNewLangCode(""); setNewLangLabel("");
+                          }}>
+                          Add
+                        </Button>
+                      </span>}
+                    </Field>
+                  </div>
+                </CardBody>
+              </Card>
+            </div>
+          )}
+
+          {/* ---- ADVANCED ---------------------------------------------------------------------------- */}
+          {tab === "advanced" && (
+            <Card>
+              <CardHeader><CardTitle>Custom CSS and HTML</CardTitle></CardHeader>
+              <CardBody className="space-y-4">
+                {/* SAID BEFORE THEY TYPE, not after it is rejected. */}
+                <p className="rounded-lg border border-warning/30 bg-warning-subtle p-3 text-sm text-warning-subtle-foreground">
+                  This is the page guests type their room number, surname and voucher codes into. Styling and
+                  markup are accepted; <strong>scripts, inline event handlers, frames, extra forms and
+                  @import are refused</strong> — anything executable here could collect a guest&apos;s
+                  credentials. A design containing them is rejected rather than quietly cleaned up, and saving
+                  a change here asks for your password.
+                </p>
+                <Field label="Custom CSS" help="Added after the portal's own stylesheet, so it wins.">
+                  {(a) => <textarea {...a} rows={10} value={d.custom_css ?? ""} disabled={!writable}
+                    onChange={(e) => set("custom_css", e.target.value)}
+                    className="w-full rounded-md border bg-card p-3 font-mono text-xs"
+                    placeholder=".card { box-shadow: none; }" />}
+                </Field>
+                <Field label="Custom HTML" help="Inserted at the foot of the sign-in card.">
+                  {(a) => <textarea {...a} rows={8} value={d.custom_html ?? ""} disabled={!writable}
+                    onChange={(e) => set("custom_html", e.target.value)}
+                    className="w-full rounded-md border bg-card p-3 font-mono text-xs"
+                    placeholder="<p>Room service: dial 9</p>" />}
+                </Field>
+              </CardBody>
+            </Card>
+          )}
         </div>
 
-        {/* ------------------------------------------------------------------ preview + publish */}
-        <div className="space-y-5">
-          <Card>
-            <CardHeader><CardTitle className="flex items-center gap-2"><Eye className="h-4 w-4" /> Preview</CardTitle></CardHeader>
-            <CardBody>
-              {/* A REPRESENTATION, and it says so. It shows the design decisions -- colours, logo, name,
-                  shape -- against the real portal layout. It is not the portal itself, and claiming it were
-                  would be the more expensive lie. */}
-              <div
-                aria-label="Portal preview"
-                className="overflow-hidden rounded border"
-                style={{
-                  background: d.background_url
-                    ? `center/cover no-repeat url("${d.background_url}")`
-                    : "linear-gradient(160deg,#cfe3e6,#eef3f2)",
-                  padding: 16,
-                }}
-              >
-                <div
-                  style={{
-                    background: "#fff",
-                    borderRadius: preview.corner_radius,
-                    padding: 16,
-                    color: preview.text_color,
-                    fontFamily: d.font_family || "inherit",
-                  }}
-                >
-                  <div className="flex items-center gap-2" style={{ minHeight: 28 }}>
-                    {d.logo_url
-                      // eslint-disable-next-line @next/next/no-img-element
-                      ? <img src={d.logo_url} alt="" style={{ maxHeight: 28, maxWidth: 140, objectFit: "contain" }} />
-                      : <span className="text-xs text-muted">{d.hotel_name || "Your hotel"}</span>}
-                  </div>
-                  <hr className="my-3" />
-                  <div className="flex gap-4 text-xs">
-                    <span style={{ color: preview.brand_color, borderBottom: `2px solid ${preview.brand_color}`, paddingBottom: 6 }}>
-                      Guest Login
-                    </span>
-                    <span className="text-muted" style={{ paddingBottom: 6 }}>Account Login</span>
-                  </div>
-                  <div className="mt-3 space-y-2">
-                    <div className="text-xs">Room Number</div>
-                    <div className="h-7 rounded border" />
-                    <div className="text-xs">Password</div>
-                    <div className="h-7 rounded border" />
-                    <button
-                      type="button"
-                      style={{
-                        background: `linear-gradient(180deg, ${preview.brand_color}, ${preview.brand_color_dark})`,
-                        color: "#fff", border: 0, borderRadius: 8, padding: "6px 18px", fontSize: 12,
-                      }}
-                    >
-                      Submit
-                    </button>
-                  </div>
-                </div>
-              </div>
-              <p className="mt-2 text-xs text-muted">
-                A representation of the published design, not a live copy of the portal.
-              </p>
-            </CardBody>
-          </Card>
+        {/* ---- preview ------------------------------------------------------------------------------- */}
+        <div className="lg:sticky lg:top-6 lg:self-start">
+          <PortalPreview design={d} />
+        </div>
+      </div>
+    </div>
+  );
+}
 
-          <Card>
-            <CardHeader><CardTitle>Publish</CardTitle></CardHeader>
-            <CardBody className="space-y-3">
-              <p className="text-sm text-muted">
-                {dirty
-                  ? "This design differs from what guests currently see."
-                  : "This design is what guests currently see."}
-              </p>
-              {!publishing ? (
-                <div className="flex flex-wrap gap-2">
-                  <Button disabled={!writable || busy || !dirty} onClick={() => setPublishing(true)}>
-                    Publish to guests
-                  </Button>
-                  <Button variant="secondary" disabled={!writable || busy} onClick={saveDraft}>
-                    Save draft
-                  </Button>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <label className="block text-sm">
-                    What changed
-                    <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="New summer photography" />
-                  </label>
-                  <label className="block text-sm">
-                    Confirm your password
-                    <Input type="password" autoComplete="current-password"
-                      value={password} onChange={(e) => setPassword(e.target.value)} />
-                  </label>
-                  <div className="flex gap-2">
-                    <Button disabled={busy} onClick={publish}>{busy ? "Publishing…" : "Confirm and publish"}</Button>
-                    <Button variant="secondary" disabled={busy} onClick={() => { setPublishing(false); setPassword(""); }}>
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              )}
-              {!writable && <p className="text-sm text-muted">Your role can view branding but not change it.</p>}
-            </CardBody>
-          </Card>
+/** A labelled control with its explanation underneath rather than in a tooltip nobody opens.
+ *
+ *  THE HELP IS DESCRIBED, NOT LABELLED. Wrapping both in one <label> was the obvious spelling and it made the
+ *  whole paragraph part of the control's accessible NAME: "Welcome line, one short sentence under the hotel
+ *  name" is what a screen reader announced, and any two fields whose help mentioned the same words became
+ *  indistinguishable to anyone navigating by label. The label names the control and aria-describedby carries
+ *  the explanation, which is the division those two attributes exist for. */
+function Field({ label, help, children }: {
+  label: string;
+  help?: string;
+  children: (a: { id: string; "aria-describedby"?: string }) => React.ReactNode;
+}) {
+  const id = useId();
+  const helpId = help ? id + "-help" : undefined;
+  return (
+    <div>
+      <label htmlFor={id} className="block text-sm font-medium">{label}</label>
+      {help && <p id={helpId} className="mb-1.5 text-xs text-muted-foreground">{help}</p>}
+      {children({ id, "aria-describedby": helpId })}
+    </div>
+  );
+}
 
-          <Card>
-            <CardHeader><CardTitle className="flex items-center gap-2"><History className="h-4 w-4" /> Published versions</CardTitle></CardHeader>
-            <CardBody className="p-0">
-              {!state?.revisions?.length ? (
-                <p className="p-4 text-sm text-muted">No design has been published yet.</p>
-              ) : (
-                <ul className="divide-y" aria-label="Published design versions">
-                  {state.revisions.map((r, i) => (
-                    <li key={r.version} className="space-y-2 px-4 py-3 text-sm">
-                      <div className="flex flex-wrap items-baseline gap-2">
-                        <span className="font-medium">v{r.version}</span>
-                        {i === 0 && <Badge tone="ok">live</Badge>}
-                        <span className="text-muted">{formatDate(r.published_at)}</span>
-                        {r.published_by && <span className="text-muted">· {r.published_by}</span>}
-                      </div>
-                      {r.note && <div className="text-muted">{r.note}</div>}
-                      {i !== 0 && writable && (
-                        rollbackTo === r.version ? (
-                          <div className="space-y-2">
-                            <Input type="password" autoComplete="current-password" placeholder="Confirm your password"
-                              value={password} onChange={(e) => setPassword(e.target.value)} />
-                            <div className="flex gap-2">
-                              <Button size="sm" disabled={busy} onClick={() => doRollback(r.version)}>
-                                Confirm rollback
-                              </Button>
-                              <Button size="sm" variant="secondary" disabled={busy}
-                                onClick={() => { setRollbackTo(null); setPassword(""); }}>
-                                Cancel
-                              </Button>
-                            </div>
-                          </div>
-                        ) : (
-                          <Button size="sm" variant="secondary" onClick={() => setRollbackTo(r.version)}>
-                            Roll back to this
-                          </Button>
-                        )
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {/* Rolling back publishes the old design as a NEW version rather than deleting the newer one,
-                  so the history says what actually happened. */}
-              <p className="border-t p-3 text-xs text-muted">
-                Rolling back re-publishes an earlier design as a new version. Nothing is removed from this
-                list — it records what the hotel actually showed, and when.
-              </p>
-            </CardBody>
-          </Card>
+function ColorField({ label, help, value, fallback, disabled, onChange }: {
+  label: string; help: string; value?: string; fallback: string; disabled?: boolean;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <Field label={label} help={help}>
+      {(a) => (
+        <span className="mt-1 flex items-center gap-2">
+          <input {...a} type="color" value={value || fallback} disabled={disabled}
+            onChange={(e) => onChange(e.target.value)} className="h-9 w-12 rounded border" />
+          <Input value={value ?? ""} placeholder={fallback} disabled={disabled}
+            aria-label={label + " as a hex value"}
+            onChange={(e) => onChange(e.target.value)} />
+        </span>
+      )}
+    </Field>
+  );
+}
+
+/** Upload, replace, remove — and see what is actually set, which the old screen could not do: it pointed an
+ *  <img> at /assets/<name>, a guest-network path that resolves to nothing from the admin origin. */
+function ImageField({ label, help, src, busy, writable, wide, frame, onPick, onClear }: {
+  label: string; help: string; src?: string; busy: boolean; writable: boolean; wide?: boolean;
+  frame: string; onPick: (f: File) => void; onClear: () => void;
+}) {
+  return (
+    <div>
+      <span className="block text-sm font-medium">{label}</span>
+      <span className="mb-2 block text-xs text-muted-foreground">{help}</span>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className={`flex items-center justify-center overflow-hidden rounded-lg border ${frame} ${wide ? "h-24 w-44" : "h-20 w-32"}`}>
+          {src
+            // eslint-disable-next-line @next/next/no-img-element
+            ? <img src={src} alt={`${label} currently set`} className="h-full w-full object-contain" />
+            : <span className="px-2 text-center text-2xs text-muted-foreground">Nothing set — the portal uses its own default</span>}
+        </div>
+        <div className="flex flex-col gap-2">
+          <label className={`inline-flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm ${!writable ? "opacity-50" : ""}`}>
+            <Upload className="h-4 w-4" />
+            {busy ? "Uploading…" : src ? `Replace ${label.toLowerCase()}` : `Upload ${label.toLowerCase()}`}
+            <input type="file" className="hidden" disabled={!writable || busy}
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              aria-label={`Upload ${label.toLowerCase()}`}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(f); e.target.value = ""; }} />
+          </label>
+          {src && (
+            <Button size="sm" variant="secondary" disabled={!writable} onClick={onClear}>
+              Remove {label.toLowerCase()}
+            </Button>
+          )}
         </div>
       </div>
     </div>

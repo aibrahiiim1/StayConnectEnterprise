@@ -32,8 +32,10 @@ package main
 // rather than sanitising it. Silently stripping a tag teaches an operator that their template "worked".
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"strings"
@@ -46,6 +48,10 @@ import (
 // hotel that has re-themed two hundred times does not need its first attempt, and an unbounded array inside
 // a row read on every portal load is a performance problem waiting to happen.
 const maxRevisions = 20
+
+// portalPreviewURL is portald's own sign-in page, on the loopback of this appliance. It is the source the
+// preview renders, so the preview cannot drift from what a guest receives.
+const portalPreviewURL = "http://127.0.0.1:8380/"
 
 type brandingDoc struct {
 	Design    map[string]any     `json:"design,omitempty"`
@@ -65,6 +71,13 @@ func (s *server) brandingRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", s.getBranding)
 	r.Put("/draft", s.saveBrandingDraft)
+	// SETTINGS IS WHAT AN OPERATOR PRESSES. It is /publish's behaviour under the only vocabulary a hotel has:
+	// there is one current configuration, you change it, you save it, guests see it. The revision history it
+	// appends is kept for audit and recovery and is not something the screen talks about.
+	r.Post("/settings", s.saveBrandingSettings)
+	// The preview reads the REAL portal page rather than a second implementation of it in the admin. See
+	// previewPortal.
+	r.Get("/preview", s.previewPortal)
 	r.Post("/publish", s.publishBranding)
 	r.Post("/rollback/{version}", s.rollbackBranding)
 	return r
@@ -399,4 +412,147 @@ func (s *server) rollbackBranding(w http.ResponseWriter, req *http.Request) {
 	s.audit(req, "branding.rolled_back", "tenant", s.tenantID,
 		map[string]any{"to_version": want, "new_version": next})
 	writeJSON(w, http.StatusOK, map[string]any{"version": next, "restored_from": want})
+}
+
+// ------------------------------------------------------------------- the operator-facing settings surface
+
+// saveBrandingSettings is what "Save changes" calls.
+//
+// WHY A SECOND DOOR ONTO THE SAME ROOM. publishBranding is correct and stays: it appends an immutable
+// revision, records who and when, and is what rollback re-publishes. What was wrong was the VOCABULARY it
+// forced on the screen -- draft, publish, version, live version, rollback. A hotel has one guest portal and
+// one current configuration for it; "which version is live" is a question the product invented and then asked
+// the operator to answer. So the history stays, in the document, for audit and recovery, and the screen says
+// Save changes.
+//
+// THE STEP-UP NOW GUARDS THE SURFACE IT WAS WRITTEN FOR, AND ONLY THAT.
+//
+// Requiring a password to change a hotel's name is ceremony; requiring one to inject CSS and markup into the
+// page that collects room numbers and voucher codes is the control. The two were the same check because they
+// were the same endpoint. They are separated here on a measurable line rather than a judgement: a save that
+// leaves custom_css and custom_html byte-identical to what is already stored cannot introduce executable
+// content, because every other field is constrained by validateDesign to a colour, a length, a font stack, a
+// bounded string or an appliance/https image path. A save that CHANGES either of them re-authenticates.
+//
+// Everything else that made publishing accountable is unchanged: the operator holds a permission, the action
+// is audited with the actor, and the design is validated and refused rather than repaired.
+type brandingSettingsReq struct {
+	Design   map[string]any `json:"design"`
+	Password string         `json:"password"`
+}
+
+// advancedChanged reports whether this save alters the executable-content escape hatch.
+func advancedChanged(next, current map[string]any) bool {
+	get := func(m map[string]any, k string) string {
+		if m == nil {
+			return ""
+		}
+		if v, ok := m[k].(string); ok {
+			return v
+		}
+		return ""
+	}
+	for _, k := range []string{"custom_css", "custom_html"} {
+		if get(next, k) != get(current, k) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *server) saveBrandingSettings(w http.ResponseWriter, req *http.Request) {
+	if s.tenantID == "" {
+		writeAwaitingAssignment(w, "portal branding")
+		return
+	}
+	var in brandingSettingsReq
+	if err := decodeJSON(req, &in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")
+		return
+	}
+	if in.Design == nil {
+		jsonErr(w, http.StatusBadRequest, "validation", "there are no settings to save")
+		return
+	}
+	if err := validateDesign(in.Design); err != nil {
+		jsonErr(w, http.StatusBadRequest, "validation", err.Error())
+		return
+	}
+	doc, err := s.loadBranding(req)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "branding load failed")
+		return
+	}
+	if advancedChanged(in.Design, doc.Design) && !s.reauth(req, in.Password) {
+		jsonErr(w, http.StatusUnauthorized, "reauth_required",
+			"confirm your password to change the portal's custom CSS or HTML. This page collects room numbers "+
+				"and voucher codes, so the styling and markup injected into it are confirmed separately.")
+		return
+	}
+
+	sess := sessFrom(req.Context())
+	actor := ""
+	if sess != nil {
+		actor = sess.Email
+	}
+	next := 1
+	if n := len(doc.Revisions); n > 0 {
+		next = doc.Revisions[n-1].Version + 1
+	}
+	doc.Revisions = append(doc.Revisions, brandingRevision{
+		Version: next, PublishedAt: time.Now().UTC(), PublishedBy: actor, Design: in.Design,
+	})
+	if len(doc.Revisions) > maxRevisions {
+		doc.Revisions = doc.Revisions[len(doc.Revisions)-maxRevisions:]
+	}
+	doc.Design = in.Design
+	doc.Draft = nil // there is nothing in progress once it is saved
+	if err := s.storeBranding(req, doc); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "the settings could not be saved")
+		return
+	}
+	s.audit(req, "branding.published", "tenant", s.tenantID, map[string]any{"version": next, "via": "settings"})
+	writeJSON(w, http.StatusOK, map[string]any{"saved": true})
+}
+
+// previewPortal hands the admin the REAL guest portal page.
+//
+// The alternative was to draw an approximation of the portal inside Hotel Admin, which is a second
+// implementation of a page whose whole purpose is to be exactly what the guest sees. It would agree with the
+// portal on the day it was written and drift from it forever after -- and a preview that is subtly wrong is
+// worse than none, because it is believed.
+//
+// So the admin asks for portald's own landing HTML and renders it in a sandboxed frame with the settings
+// being edited supplied to it. What the operator is looking at is the real template, the real stylesheet and
+// the real script.
+//
+// THE HTML IS RETURNED INSIDE JSON, never served as a document from this origin. The admin puts it in an
+// iframe with `sandbox="allow-scripts"` -- an opaque origin with no form submission and no access to the
+// admin page around it -- and the frame needs no network at all, because the design is injected rather than
+// fetched.
+func (s *server) previewPortal(w http.ResponseWriter, req *http.Request) {
+	ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+	defer cancel()
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, portalPreviewURL, nil)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "preview request could not be built")
+		return
+	}
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		// Said plainly: the preview is a convenience and its absence must not read as "your settings are
+		// broken". It is the PORTAL that is not answering.
+		jsonErr(w, http.StatusServiceUnavailable, "portal_unreachable",
+			"the guest portal service is not answering on this appliance, so a live preview cannot be shown. "+
+				"Your settings are unaffected.")
+		return
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		jsonErr(w, http.StatusServiceUnavailable, "portal_unreachable",
+			"the guest portal service did not return its sign-in page, so a live preview cannot be shown.")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"html": string(body)})
 }

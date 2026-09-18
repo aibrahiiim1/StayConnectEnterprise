@@ -75,7 +75,13 @@ const landingHTML = `<!doctype html>
   .brand { display: flex; align-items: center; gap: 16px; min-height: 60px; }
   .brand img { max-height: 60px; max-width: 280px; object-fit: contain; }
   .brand .name { font-size: clamp(1.05rem, 1.6vw, 1.35rem); font-weight: 600; letter-spacing: .01em; }
+  .welcome { margin: 10px 0 0; color: var(--sc-muted); font-size: clamp(.95rem, 1.1vw, 1.05rem); max-width: 60ch; }
   .rule { border: 0; border-top: 1px solid var(--sc-line); margin: clamp(14px, 2vw, 22px) 0 0; }
+  .help { margin: 22px 0 0; color: var(--sc-muted); font-size: .92rem; max-width: 60ch; }
+  .terms { margin: 10px 0 0; font-size: .88rem; }
+  .terms a { color: var(--sc-brand); }
+  #custom-html:empty { display: none; }
+  #custom-html { margin-top: 18px; }
 
   .tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
   .tab {
@@ -194,6 +200,11 @@ const landingHTML = `<!doctype html>
       <img id="brand-logo" alt="" style="display:none">
       <span class="name" id="brand-name"></span>
     </div>
+    <!-- THE HOTEL'S OWN WORDS. Welcome, help and terms were settable in Hotel Admin and rendered by NOTHING:
+         three fields an operator could fill in that changed nothing a guest saw, which is the same write-only
+         configuration the branding screen was rebuilt to stop being. Each is hidden until it has content, so
+         an appliance that has set none of them looks deliberate rather than gappy. -->
+    <p class="welcome" id="brand-welcome" hidden></p>
     <hr class="rule">
 
     <!-- WHY THE INTERNET STOPPED. Shown only when this device's most recent access ended because it ran out
@@ -331,6 +342,17 @@ const landingHTML = `<!doctype html>
 
       <div class="alt" id="alt-methods" style="display:none"></div>
     </div>
+
+    <!-- The hotel's own footer: a help line, an optional terms link, and the Advanced fragment. The fragment
+         is inserted as MARKUP, which is safe here only because edged refuses a design containing script, an
+         inline handler, a frame, a form or @import at the point it is saved -- see validateAdvanced. A
+         portal that sanitised on render instead would teach an operator their template "worked". -->
+    <p class="help" id="brand-help" hidden></p>
+    <div id="custom-html"></div>
+    <p class="terms" id="brand-terms-wrap" hidden>
+      <a id="brand-terms" target="_blank" rel="noopener noreferrer"
+         data-i18n="terms.link" data-i18n-en="Terms of use">Terms of use</a>
+    </p>
 
     <button class="info-btn" id="info-btn" type="button" aria-expanded="false" aria-controls="info-panel"
             aria-label="Device information" title="Device information">i</button>
@@ -497,7 +519,8 @@ const landingHTML = `<!doctype html>
         "notice.nomethods": "There is no way to sign in on this network yet. Please contact reception.",
         "notice.nopackages": "Internet access is not available here at the moment. You can still sign in, but there is nothing to connect you to yet — please let reception know.",
         "err.generic": "We could not verify your stay. Please check your details or contact reception.",
-        "err.retry": "You can try again now.", "lang.label": "Language"
+        "err.retry": "You can try again now.", "lang.label": "Language",
+        "terms.link": "Terms of use"
       },
       ar: {
         "tab.guest": "تسجيل دخول النزلاء", "tab.account": "الدخول بحساب",
@@ -529,7 +552,8 @@ const landingHTML = `<!doctype html>
         "notice.nomethods": "لا توجد طريقة لتسجيل الدخول على هذه الشبكة بعد. يرجى التواصل مع مكتب الاستقبال.",
         "notice.nopackages": "خدمة الإنترنت غير متاحة هنا في الوقت الحالي. يمكنك تسجيل الدخول، لكن لا توجد باقة لتوصيلك بها بعد — يرجى إبلاغ مكتب الاستقبال.",
         "err.generic": "تعذّر التحقق من إقامتك. يرجى مراجعة بياناتك أو التواصل مع مكتب الاستقبال.",
-        "err.retry": "يمكنك المحاولة مرة أخرى الآن.", "lang.label": "اللغة"
+        "err.retry": "يمكنك المحاولة مرة أخرى الآن.", "lang.label": "اللغة",
+        "terms.link": "شروط الاستخدام"
       },
       de: {
         "tab.guest": "Gäste-Anmeldung", "tab.account": "Konto-Anmeldung",
@@ -562,7 +586,8 @@ const landingHTML = `<!doctype html>
         "notice.nomethods": "In diesem Netzwerk gibt es noch keine Anmeldemöglichkeit. Bitte wenden Sie sich an die Rezeption.",
         "notice.nopackages": "Internetzugang ist hier derzeit nicht verfügbar. Sie können sich anmelden, aber es gibt noch nichts, womit wir Sie verbinden können — bitte informieren Sie die Rezeption.",
         "err.generic": "Wir konnten Ihren Aufenthalt nicht bestätigen. Bitte prüfen Sie Ihre Angaben oder wenden Sie sich an die Rezeption.",
-        "err.retry": "Sie können es jetzt erneut versuchen.", "lang.label": "Sprache"
+        "err.retry": "Sie können es jetzt erneut versuchen.", "lang.label": "Sprache",
+        "terms.link": "Nutzungsbedingungen"
       },
       fr: {
         "tab.guest": "Connexion client", "tab.account": "Connexion au compte",
@@ -595,7 +620,8 @@ const landingHTML = `<!doctype html>
         "notice.nomethods": "Aucun moyen de connexion n'est encore disponible sur ce réseau. Veuillez contacter la réception.",
         "notice.nopackages": "L'accès à Internet n'est pas disponible ici pour le moment. Vous pouvez vous connecter, mais il n'y a encore rien à quoi vous relier — merci de prévenir la réception.",
         "err.generic": "Nous n'avons pas pu vérifier votre séjour. Veuillez vérifier vos informations ou contacter la réception.",
-        "err.retry": "Vous pouvez réessayer maintenant.", "lang.label": "Langue"
+        "err.retry": "Vous pouvez réessayer maintenant.", "lang.label": "Langue",
+        "terms.link": "Conditions d'utilisation"
       },
       it: {
         "tab.guest": "Accesso ospiti", "tab.account": "Accesso account",
@@ -628,7 +654,8 @@ const landingHTML = `<!doctype html>
         "notice.nomethods": "Su questa rete non è ancora disponibile alcun modo per accedere. Contatta la reception.",
         "notice.nopackages": "Al momento l'accesso a Internet non è disponibile qui. Puoi comunque accedere, ma non c'è ancora nulla a cui collegarti — avvisa la reception.",
         "err.generic": "Non è stato possibile verificare il tuo soggiorno. Controlla i dati inseriti o contatta la reception.",
-        "err.retry": "Puoi riprovare adesso.", "lang.label": "Lingua"
+        "err.retry": "Puoi riprovare adesso.", "lang.label": "Lingua",
+        "terms.link": "Condizioni d'uso"
       },
       ru: {
         "tab.guest": "Вход для гостей", "tab.account": "Вход в аккаунт",
@@ -661,7 +688,8 @@ const landingHTML = `<!doctype html>
         "notice.nomethods": "В этой сети пока нет способа войти. Пожалуйста, обратитесь на стойку регистрации.",
         "notice.nopackages": "Доступ в интернет здесь сейчас недоступен. Вы можете войти, но подключать пока не к чему — сообщите об этом на стойку регистрации.",
         "err.generic": "Не удалось подтвердить ваше проживание. Проверьте данные или обратитесь на стойку регистрации.",
-        "err.retry": "Теперь можно попробовать снова.", "lang.label": "Язык"
+        "err.retry": "Теперь можно попробовать снова.", "lang.label": "Язык",
+        "terms.link": "Условия использования"
       }
     };
 
@@ -736,7 +764,36 @@ const landingHTML = `<!doctype html>
       }
       if (d.logo_url) {
         const img = document.getElementById('brand-logo');
-        img.src = d.logo_url; img.alt = d.hotel_name || 'Hotel'; img.style.display = '';
+        // AN IMAGE THAT DOES NOT LOAD MUST LEAVE NOTHING BEHIND. A logo whose file has been deleted, or whose
+        // https host is unreachable -- which on a captive portal is EVERY external host -- otherwise renders
+        // as a broken-image glyph at the top of the sign-in page on every guest device.
+        img.onerror = function () { img.style.display = 'none'; };
+        img.onload = function () { img.style.display = ''; };
+        img.alt = d.hotel_name || 'Hotel';
+        img.src = d.logo_url;
+      }
+      // The hotel's own words. Each is shown only when it has something to say.
+      if (d.welcome_text) {
+        const el = document.getElementById('brand-welcome');
+        el.textContent = d.welcome_text; el.hidden = false;
+      }
+      if (d.help_text) {
+        const el = document.getElementById('brand-help');
+        el.textContent = d.help_text; el.hidden = false;
+      }
+      if (d.terms_url) {
+        document.getElementById('brand-terms').href = d.terms_url;
+        document.getElementById('brand-terms-wrap').hidden = false;
+      }
+      if (d.custom_css) {
+        const st = document.createElement('style');
+        st.textContent = d.custom_css;
+        document.head.appendChild(st);
+      }
+      if (d.custom_html) {
+        // innerHTML, deliberately: the fragment IS markup, and the executable spellings were refused when the
+        // design was saved rather than stripped here.
+        document.getElementById('custom-html').innerHTML = d.custom_html;
       }
       I18N = (d.translations && typeof d.translations === 'object') ? d.translations : {};
       // ONLY THE CONFIGURED LANGUAGES ARE OFFERED. A hotel that has chosen which languages its guests see gets

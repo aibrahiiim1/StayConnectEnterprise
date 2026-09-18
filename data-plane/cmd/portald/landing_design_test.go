@@ -252,7 +252,7 @@ func TestEveryShippedLanguageIsComplete(t *testing.T) {
 // branding screen and compares it with the dictionary the portal actually renders, so a key added on either
 // side without the other is a failing test rather than a field an operator fills in for nothing.
 func TestTheDesignerOffersExactlyTheStringsThePortalRenders(t *testing.T) {
-	src, err := os.ReadFile(filepath.Join("..", "..", "..", "hotel-admin", "app", "(app)", "portal-branding", "page.tsx"))
+	src, err := os.ReadFile(filepath.Join("..", "..", "..", "hotel-admin", "app", "(app)", "portal-branding", "strings.ts"))
 	if err != nil {
 		t.Skipf("the branding screen is not in this checkout (%v); the two lists cannot be compared", err)
 	}
@@ -422,5 +422,38 @@ func TestAccountLoginKeepsBothFormsReachable(t *testing.T) {
 	// submission of the VISIBLE form because an invisible field elsewhere is empty and required.
 	if !strings.Contains(html, "el.disabled = personal") {
 		t.Error("the hidden form's required fields are not disabled; the visible form will refuse to submit")
+	}
+}
+
+// THE HOTEL'S OWN WORDS MUST REACH THE PAGE.
+//
+// welcome_text, help_text, terms_url, custom_css and custom_html were all settable in Hotel Admin and read by
+// NOTHING. Five fields an operator could fill in that changed nothing a guest saw -- the same write-only
+// configuration the branding screen was built to replace, sitting inside the replacement.
+func TestLandingRendersTheHotelsOwnContent(t *testing.T) {
+	html := renderLanding(t, "10.77.0.42", "")
+	for _, want := range []struct{ frag, why string }{
+		{`id="brand-welcome"`, "the welcome line"},
+		{`id="brand-help"`, "the help line"},
+		{`id="brand-terms"`, "the terms link"},
+		{`id="custom-html"`, "the Advanced markup fragment"},
+		{`d.welcome_text`, "the welcome line is filled from the design"},
+		{`d.help_text`, "the help line is filled from the design"},
+		{`d.terms_url`, "the terms link is filled from the design"},
+		{`d.custom_css`, "the Advanced stylesheet is applied"},
+		{`d.custom_html`, "the Advanced markup is inserted"},
+	} {
+		if !strings.Contains(html, want.frag) {
+			t.Errorf("the portal does not carry %s (%q); the setting would change nothing a guest sees", want.why, want.frag)
+		}
+	}
+}
+
+func TestABrokenLogoLeavesNothingBehind(t *testing.T) {
+	// A logo whose file has been removed, or whose https host is unreachable -- which on a captive portal is
+	// every external host -- otherwise renders as a broken-image glyph on every guest device.
+	html := renderLanding(t, "10.77.0.42", "")
+	if !strings.Contains(html, "img.onerror") {
+		t.Error("a logo that fails to load is not hidden, so the sign-in page shows a broken image")
 	}
 }

@@ -1,0 +1,60 @@
+{
+  "transition_id": "T0161",
+  "seq": 161,
+  "timestamp": "2026-09-18T14:10:00Z",
+  "timestamp_derivation": "After the content commit 2d62e1c7 and after the upload failure was reproduced against PRE-LIVE and the fix verified by test; before the author timestamp of the commit that introduces this receipt (2026-09-18T17:14:18+03:00 = 14:14:18Z). After the merge commit 1990c83e it follows. Per T0091, in the order T0108 requires.",
+  "record_type": "PORTAL_SETTINGS_REDESIGNED_AND_ASSET_UPLOAD_DEFECT_CLOSED",
+
+  "the_upload_defect_the_product_owner_found": {
+    "symptom": "Logo and background upload both returned an error in the real Hotel Admin on PRE-LIVE. Neither had ever worked.",
+    "reproduced_before_anything_was_changed": "On the appliance, against the real vhost. POST https://hotel.stayconnect.local/edge/v1/portal-assets -- the path the UI used -- answered 307 to /login. POST .../api/edge/v1/portal-assets answered 401 unauthenticated, and with an operator session answered 200 and wrote the file.",
+    "cause": "Every call in Hotel Admin goes through the API client, which knows edged is behind /api/edge/v1. The asset upload did not, because FormData must not carry a JSON content-type, so it hand-wrote fetch('/edge/v1/portal-assets') and dropped the /api prefix the Next rewrite matches on. Next treated it as an unknown app route and redirected the POST to the login page; the browser re-submitted the multipart body there, received HTML, and the JSON parse threw into the catch that reports 'the image was refused'.",
+    "why_both_failed_identically": "Neither request ever reached the appliance. The failure had nothing to do with the image, the format, the size or the operator's permission.",
+    "what_was_NOT_broken": "Authentication, the step-up, the permission key, edged's ProtectSystem sandbox, the ownership of /opt/stayconnect/portal-assets, the byte-sniffing that decides the type, the refusal of SVG, and portald serving /assets on the guest network. All were verified working during the reproduction.",
+    "fix": "api.upload, on the shared client, so no screen hand-writes that base again."
+  },
+
+  "a_second_defect_the_first_one_hid": "The admin could not display its own images either. /assets/<name> is a GUEST-network path served by portald; from the admin origin it resolves to nothing, so the branding screen's thumbnail of the current logo was a broken image and a preview could not have shown one at all. edged now serves the same bytes back through the authenticated operator API at /portal-assets/{name}/raw, typed by sniffing the content again rather than by trusting the stored name.",
+
+  "five_settings_that_changed_nothing": "welcome_text, help_text, terms_url, custom_css and custom_html were all editable in Hotel Admin and read by NOTHING in portald -- the same write-only configuration the branding screen was built to replace, sitting inside the replacement. The portal renders all five now. A logo that fails to load also hides itself: on a captive portal every external host is unreachable by definition, and a broken-image glyph at the top of the sign-in page is what that looks like to a guest.",
+
+  "the_screen": {
+    "what_was_removed_from_the_operator_surface": "Draft, published, version number, which version is live, and rollback. A hotel has one guest portal and one current configuration for it; 'which version is live' is a question the product invented and then asked a receptionist to answer.",
+    "what_it_is_now": "Four sections -- General, Branding, Languages, Advanced -- one Save changes button, a Discard, and a live preview. Unsaved work is kept quietly so a closed tab does not lose it, and is never named.",
+    "history_is_intact": "Every save still appends an immutable revision with its actor and time, bounded at 20 as before. Rollback and publish endpoints are unchanged and still work. NOTHING was deleted to remove the vocabulary."
+  },
+
+  "a_security_control_moved_rather_than_weakened": {
+    "before": "Publishing any branding change required a password step-up.",
+    "now": "A save re-authenticates only when it changes custom_css or custom_html -- including clearing them.",
+    "why_this_is_not_a_weakening": "The step-up exists because the portal collects room numbers and voucher codes and executable content injected into it can steal them. custom_css and custom_html are the only fields that can carry executable-shaped content; every other field is constrained by validateDesign to a hex/rgb colour, a bounded length, a font stack with no braces or angle brackets, a bounded string, or an appliance path / https URL / inline image. A save that leaves both byte-identical therefore cannot introduce executable content. Requiring a password to correct a typo in the hotel's name is ceremony; requiring one to inject CSS into the sign-in page is the control.",
+    "what_is_unchanged": "The operator still holds the portal-branding write permission, the action is still audited with the actor, and validateDesign still REFUSES a design containing script, an inline handler, a frame, an extra form or @import rather than sanitising it. The settings door runs the identical validation as publish; a second way in that skipped it would be a way to put script on the page.",
+    "product_owner_visibility": "Stated plainly in the delivery report and in the PR body rather than made silently."
+  },
+
+  "the_preview": "It renders the REAL portal: edged hands the admin portald's own landing page and it is displayed in a sandbox=\"allow-scripts\" frame -- opaque origin, no form submission, no cookies, no access to the admin page -- with the settings under edit injected ahead of the portal's own script and images inlined as data URIs, so the frame needs no network at all. Desktop and mobile are the real breakpoints at real pixel widths, scaled to fit the column. The alternative, drawing an approximation of the portal in the admin, is a second implementation of a page whose whole purpose is to be exactly what the guest sees; it would agree on the day it was written and drift afterwards, and a preview that is subtly wrong is worse than none because it is believed.",
+
+  "languages": "Unchanged in shape from T0160 and extended by one string: terms.link, the fifty-first, present in all six shipped languages. Six ship complete, the operator ticks which guests are offered, editing is one language at a time, Arabic is right-to-left, English is the fallback. A language the hotel adds itself is the only kind that can be incomplete, and it says how many strings will show English.",
+
+  "two_defects_found_by_building_it": "Help text placed inside a <label> becomes part of the control's accessible NAME -- 'Welcome line' was announced as 'Welcome line, one short sentence under the hotel name', and two fields whose help shared words were indistinguishable to anyone navigating by label. The label now names and aria-describedby describes. Separately, a test fixture with correct PNG magic bytes and a corrupt IDAT passes a sniffer and cannot be DRAWN, which made the preview's own correct handling of a broken image look like a product defect.",
+
+  "no_migration": "None in this delivery.",
+
+  "scope_held": "No database schema or migration, no destructive or historical-data change, no PMS configuration or traffic, no financial traffic, no networking or topology change, no Root-CA or trust-root change, no privilege, capability or sandbox widening, no Go-Live. No .23 access. No gate or test weakened. No guest data in any evidence.",
+
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+
+  "authorization": "Product Owner, 2026-09-18: reproduce and fix the real Logo and Background upload failure end to end on PRE-LIVE .25, redesign Portal Settings around one current configuration, remove the operator-facing draft/published/version/rollback workflow while preserving history internally, complete the six built-in languages, and carry it through the protected path to PRE-LIVE with live verification.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}
