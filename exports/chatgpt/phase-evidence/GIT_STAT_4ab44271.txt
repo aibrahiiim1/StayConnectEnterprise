@@ -1,0 +1,4 @@
+commit 4ab44271295e79f1707c94a8b3b2c61ea50d449d
+Date:   Fri Sep 18 06:08:09 2026 +0300
+
+    Governance: T0158 also records the login-page rebuild
