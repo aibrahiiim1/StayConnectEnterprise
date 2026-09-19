@@ -35,6 +35,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     return item.label;
   }, [pathname, caps]);
 
+  // A PAGE THAT IS ABOUT TO BE REPLACED MUST NOT LOAD FIRST.
+  //
+  // The final sweep caught this with one page left: Cross-PMS transfer still logged a 404. Until the
+  // capability answer arrives, `unavailable` is null -- it has to be, or every screen would flash an
+  // explanation on every load -- so the real page mounted, fired the request its data needs, and was
+  // replaced a moment later by the explanation. The operator saw the right thing; the appliance still got a
+  // doomed request and the console still got an error, which is exactly the noise this delivery removed
+  // everywhere else.
+  //
+  // So children wait for the answer rather than racing it. The cost is one request on the first navigation
+  // of a session: loadCapabilities caches for the lifetime of the page, so every subsequent screen renders
+  // immediately. Nothing waits on a failure either -- the loader resolves to an empty set, which fails open.
+  const capsKnown = caps !== null;
+
   useEffect(() => {
     let cancelled = false;
     const bounce = async () => {
@@ -205,7 +219,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           */}
           <main ref={mainRef} className="min-w-0 flex-1 overflow-y-auto">
             <div className="mx-auto w-full max-w-[104rem] px-4 py-5 sm:px-6 sm:py-6 lg:px-8">
-              {unavailable ? <SurfaceNotEnabled label={unavailable} /> : children}
+              {!capsKnown ? <Skeleton className="h-64" /> : unavailable ? <SurfaceNotEnabled label={unavailable} /> : children}
             </div>
           </main>
         </div>
