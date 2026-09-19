@@ -10,6 +10,8 @@ import { ApplianceStatus } from "@/components/appliance-status";
 import { Skeleton } from "@/components/ui/misc";
 import { api, Whoami } from "@/lib/api";
 import { useSidebarCollapsed } from "@/lib/sidebar-state";
+import { useCapabilities, surfaceAvailable } from "@/lib/capabilities";
+import { SurfaceNotEnabled } from "@/components/surface-not-enabled";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -20,6 +22,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [drawer, setDrawer] = useState(false);
   // Desktop only. The drawer below `lg` is a full-width overlay and never consults this.
   const { collapsed, toggle: toggleCollapsed } = useSidebarCollapsed();
+  // WHETHER THIS APPLIANCE CAN SERVE THE SCREEN THE OPERATOR IS ON.
+  //
+  // Handled here rather than in each page because it is the same answer for all of them, and because the
+  // eight that needed it were eight chances to write a slightly different wrong one. A page whose resource
+  // is not mounted renders an explanation instead of itself -- reached by menu, by bookmark or by typed URL.
+  const caps = useCapabilities();
+  const unavailable = useMemo(() => {
+    const href = activeNavHref(pathname);
+    const item = NAV_ITEMS.find((i) => i.href === href);
+    if (!item || surfaceAvailable(caps, item.capability ?? item.resource)) return null;
+    return item.label;
+  }, [pathname, caps]);
 
   useEffect(() => {
     let cancelled = false;
@@ -124,6 +138,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <DialogPrimitive.Content
             className="fixed inset-y-0 left-0 z-50 h-full w-64 outline-none lg:hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left"
             aria-label="Navigation"
+            /*
+              OPENING A MENU IS NOT ASKING TO TYPE.
+
+              Radix focuses a dialog's first focusable element on open. In this drawer that is the navigation
+              filter, so tapping the hamburger on a phone raised the software keyboard over the menu the
+              operator had just asked to see — they then had to dismiss a keyboard before they could read
+              anything. Focus goes to the panel itself instead: Escape still closes it, Tab still walks it,
+              and the filter is still one tap away when somebody actually wants it.
+
+              Desktop is untouched. There is no drawer above `lg`, and "/" focuses the filter as before.
+            */
+            onOpenAutoFocus={(e) => {
+              e.preventDefault();
+              (e.currentTarget as HTMLElement | null)?.focus({ preventScroll: true });
+            }}
           >
             <DialogPrimitive.Title className="sr-only">Navigation</DialogPrimitive.Title>
             <Nav email={me.email} roles={roles} onLogout={onLogout} onNavigate={() => setDrawer(false)} />
@@ -176,7 +205,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           */}
           <main ref={mainRef} className="min-w-0 flex-1 overflow-y-auto">
             <div className="mx-auto w-full max-w-[104rem] px-4 py-5 sm:px-6 sm:py-6 lg:px-8">
-              {children}
+              {unavailable ? <SurfaceNotEnabled label={unavailable} /> : children}
             </div>
           </main>
         </div>

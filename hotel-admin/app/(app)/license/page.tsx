@@ -151,7 +151,7 @@ export default function LicensePage() {
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight sm:text-2xl"><BadgeCheck className="h-5 w-5" /> License &amp; Activation</h1>
+        <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight sm:text-2xl"><BadgeCheck className="h-5 w-5" /> License</h1>
         <Badge tone={activationTone(activation)}>{activationLabel(activation)}</Badge>
       </div>
 

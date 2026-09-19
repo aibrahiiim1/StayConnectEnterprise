@@ -174,7 +174,7 @@ export default function DashboardPage() {
   // static by design, and an actionable warning here would be asking somebody to undo a decision — with the
   // obvious "repair" being the one thing that must not happen.
   if (outbox.tone === "err" && health?.sync_outbox?.mode !== "LICENSING_ONLY") {
-    attention.push({ text: outbox.summary, href: "/network/cloud", tone: "warn" });
+    attention.push({ text: outbox.summary, href: "/license", tone: "warn" });
   }
 
   const dayLabel = snap?.day_start
@@ -717,11 +717,36 @@ export default function DashboardPage() {
                   still here — they are real and occasionally matter — but they now come with the sentence that
                   makes them actionable, and the reassurance that no guest depends on this queue.
                 */}
-                <ServiceRow
-                  title="Reporting to the StayConnect cloud"
-                  info={outbox}
-                  href="/network/cloud"
-                />
+                {/*
+                  WHAT THE CLOUD ROW BECAME, AND WHY IT IS NOT A SERVICE ROW ANY MORE.
+
+                  This card answers one question: is anything this appliance RUNS in trouble? The site
+                  database and the session controller belong to it. "Reporting to the StayConnect cloud" did
+                  not — under the licensing-only model there is no reporting, by decision, so the row
+                  reported the health of something that does not run. It also linked to /network/cloud,
+                  which is a redirect to License, and sat a few centimetres below a Licence tile that had
+                  already answered the only cloud question an operator has.
+
+                  Three presentations of one fact, one of them shaped like a fault. The fact is now stated
+                  once, as what it is -- a decision about this property -- and points at the single screen
+                  that owns licensing.
+                */}
+                {outbox.headline === "Licensing only" ? (
+                  <div className="rounded-lg border border-border bg-surface px-3 py-2.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm font-medium">StayConnect cloud</span>
+                      <Link href="/license" className="text-xs text-muted-foreground hover:text-foreground">
+                        License &rarr;
+                      </Link>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Used for this appliance&rsquo;s licence only. Operational reporting is intentionally
+                      off — nothing is queued and nothing needs reconnecting.
+                    </p>
+                  </div>
+                ) : (
+                  <ServiceRow title="Reporting to the StayConnect cloud" info={outbox} href="/license" />
+                )}
                 <Separator />
                 <div className="flex items-center justify-between gap-4 text-xs text-muted-foreground">
                   <span>Admin service {health.version}</span>

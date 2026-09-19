@@ -188,7 +188,24 @@ func (s *server) sessionsRoutes() http.Handler {
 	// wins, and mounted here rather than as its own resource because it is live access state -- exactly what
 	// this resource already means -- so it inherits the role matrix instead of adding a row to it.
 	if s.phase6.AggregateTimeOn() {
+		// A SUB-CAPABILITY OF A MOUNTED RESOURCE. Online-time budgets live under "sessions", which is always
+		// mounted, so the resource name alone cannot tell the navigation whether this screen has anything
+		// behind it. Recorded under its own name for the same reason mountResource records the others: where
+		// it becomes reachable is the only place that cannot drift.
+		s.surfaces.add("sessions.aggregate-time")
 		r.Get("/aggregate-time", s.listAggregateTime)
+	} else {
+		// A FEATURE THAT IS OFF MUST SAY SO, NOT BE MISREAD AS A SESSION ID.
+		//
+		// Without this the request fell through to /{id} below, which looked up the guest session whose id is
+		// the literal string "aggregate-time", asked PostgreSQL to compare a uuid column with it, and
+		// answered the operator HTTP 500 "query failed". The Online-time screen therefore reported a server
+		// error for a capability this appliance simply does not run. The route now exists in both states and
+		// tells the truth in the disabled one.
+		r.Get("/aggregate-time", func(w http.ResponseWriter, _ *http.Request) {
+			jsonErr(w, http.StatusNotFound, "not_enabled",
+				"online-time budgets are not enabled on this appliance")
+		})
 	}
 	r.Get("/{id}", s.getGuestSession)
 	r.Post("/{id}/disconnect", s.disconnectGuestSession)

@@ -82,6 +82,10 @@ type server struct {
 	siteID   string
 	secure   bool
 
+	// surfaces records every resource mountResource actually mounted on THIS appliance, so the admin can ask
+	// rather than infer it from build-time flags. See capabilities.go.
+	surfaces *mountedSurfaces
+
 	// Phase 2 DARK Hotel-Admin commerce. commerce is ALWAYS constructed but holds a nil repository while
 	// the master flag is OFF (zero Phase-2 SQL); commerceCfg gates whether the admin routes are mounted.
 	commerce    *iamv2.CommerceAdmin
@@ -199,6 +203,7 @@ func main() {
 		tenantID: c.TenantID,
 		siteID:   c.SiteID,
 		secure:   c.CookieSecure,
+		surfaces: newMountedSurfaces(),
 	}
 
 	// Phase 2 DARK Hotel-Admin commerce. Config from env (all flags default OFF); nil repository while the
@@ -350,6 +355,10 @@ func main() {
 			// backwards compatibility, but the wizard is a SETUP concern, not a
 			// networking one, and the Hotel Admin UI calls them here — without this
 			// the whole wizard renders "Could not read setup status: HTTP 404".
+			// WHAT THIS APPLIANCE SERVES. Read by the navigation so it never offers a destination that would
+			// 404. Authenticated, but not role-filtered -- see capabilities.go.
+			r.Get("/capabilities", s.capabilities)
+
 			r.Get("/setup/status", s.setupStatus)
 			r.With(s.requireRole("network", permWrite)).Post("/setup/enroll", s.setupEnroll)
 			r.With(s.requireRole("network", permWrite)).Post("/setup/offline-import", s.setupOfflineImport)
@@ -494,6 +503,9 @@ func main() {
 // need permRead on the key, writes permWrite. Fine-grained checks happen in
 // requireRole using the role→permission matrix in auth.go.
 func mountResource(r chi.Router, s *server, name string, routes func() http.Handler) {
+	// Recorded HERE, where a surface actually becomes reachable, so /capabilities cannot drift from what is
+	// mounted. A separate list would be a second thing to remember.
+	s.surfaces.add(name)
 	r.Route("/"+name, func(r chi.Router) {
 		r.Use(s.resourcePermission(name))
 		r.Mount("/", routes())
