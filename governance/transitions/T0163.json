@@ -1,0 +1,71 @@
+{
+  "transition_id": "T0163",
+  "seq": 163,
+  "timestamp": "2026-09-19T20:00:00Z",
+  "timestamp_derivation": "After the content commits 23d879d0 and c060e9d8, after edged and the admin bundle were deployed to PRE-LIVE, migration 0081 applied there, and the appliance walked end to end twice; before the author timestamp of the commit that introduces this receipt (2026-09-19T23:05:26+03:00 = 20:05:26Z). After the merge commit 69f925ee it follows. Per T0091, in the order T0108 requires.",
+  "record_type": "HOTEL_ADMIN_OPERATOR_SWEEP_AND_PORTAL_SETTINGS_ACCEPTANCE",
+
+  "carried_forward_product_owner_acceptance": {
+    "what": "The Product Owner accepted the Portal Settings and Languages delivery as the baseline on 2026-09-19 — the shared translation source, minimal hotel overrides, the language-management UX, automatic guest-language detection and the approved step-up policy.",
+    "verbatim_instruction_on_the_welcome_and_help_fields": "No further change is required for the welcome/help text at this time. Leave those fields exactly as they are today; do not make them per-language.",
+    "standing": "Do not reopen that work unless new failing evidence appears. Recorded here rather than in a governance-only delivery, at the Product Owner's explicit instruction.",
+    "decisions": "D80 (step-up policy) stands as recorded in T0162; this is its acceptance."
+  },
+
+  "what_was_reviewed": "Every navigation destination available to a site admin on the real PRE-LIVE appliance — 38 of them — walked twice on desktop and once on an iPhone profile, recording for each page what an operator sees, every console error and every operator-API call that did not answer 2xx. Before: 8 destinations blank with 12 failing API calls and 11 console errors. After: 38 destinations, 0 console errors, 0 failing calls, every page with a heading, and no horizontal overflow at 390px.",
+
+  "eight_dead_destinations": {
+    "symptom": "Guest devices, Online-time budgets, Post-stay access, Cross-PMS transfer, Charge health, Manual review, Settlements and Recovery were offered in the menu, answered 404 and rendered a blank page.",
+    "cause": "Navigation was decided by NEXT_PUBLIC_PHASE*_ADMIN, substituted when the bundle is BUILT. edged decides what to mount at RUNTIME from the appliance's own configuration. Two different facts, and on this appliance they disagreed. An operator cannot tell 'this hotel does not have that' from 'this is broken'.",
+    "fix": "GET /edge/v1/capabilities reports the surfaces edged actually mounted. mountResource records the name as it mounts, so there is no second list to drift. The menu hides what is not served and the layout renders one honest explanation for a page reached by bookmark or typed URL — in one place, because eight pages would have been eight chances to write a slightly different wrong answer.",
+    "the_regression_this_caused_and_how_it_was_caught": "The very next sweep found the License destination reporting itself unavailable: licence, diagnostics and reports are registered as plain routes rather than through mountResource, so nothing recorded them. Fixed, and a test now reads the navigation's resource names and checks edged knows how to say each one. The sweep caught the sweep's own regression, which is the argument for sweeping."
+  },
+
+  "the_audit_log_said_nothing_had_ever_happened": {
+    "evidence": "379 rows in public.audit_log, 345 scoped to this tenant, from 2026-08-21 to the morning of the sweep. The screen read 'No audit entries. Operator and system actions are recorded here.'",
+    "two_independent_causes": "svc_edged held INSERT and not SELECT — no service role could read the table at all. AND the handler never checked rows.Err(), so pgx's permission failure on the first Next() became HTTP 200 with an empty list. Either alone would have hidden the trail; together they made the screen confidently wrong.",
+    "fix": "Migration 0081 grants SELECT on public.audit_log to svc_edged — one table, one role, read only, explicitly authorised by the Product Owner. The handler now distinguishes an empty trail from an unreadable one, logs the failure, and says 'the audit trail could not be read'. No row was written, altered, deleted or backfilled.",
+    "the_general_lesson_recorded_for_the_second_time": "0080 recorded that the integration harness connects as the schema owner, which can read everything, so a test running as owner is structurally incapable of finding a least-privilege defect. This is the same shape of bug two deliveries later. The lesson is not 'remember the grant'."
+  },
+
+  "online_time_returned_a_server_error_for_a_disabled_feature": "With Phase 6 off, /sessions/aggregate-time was never registered, so chi fell through to /sessions/{id} and looked up the guest session whose id is the literal string 'aggregate-time'. PostgreSQL was asked to compare a uuid with it and the screen reported HTTP 500 'query failed'. The route now exists in both states and says it is not enabled in the disabled one.",
+
+  "the_named_presentation_defects": {
+    "dashboard_cloud": "'Reporting to the StayConnect cloud' sat in the service-health card, reporting the health of something that by decision does not run, linking to /network/cloud which is a redirect, a few centimetres below a Licence tile that had already answered the only cloud question an operator has. Three presentations of one fact, one of them shaped like a fault. Stated once now, as a decision, pointing at License.",
+    "activation_vs_license": "Genuinely two jobs — connecting and recovering an appliance, versus the licence it runs on — so both screens stay, including the offline licence upload, which is the recovery path and belongs nowhere else. What went was License calling itself 'License & Activation' while Activation restated the licence without saying where the rest of it lived. Titles separated, one link between them.",
+    "activation_completion": "The page announced 'Setup complete' at the top and 'Connected: no' in red at the bottom, plus a count of a queue nothing fills. Both described the real-time channel, which under the licensing-only model is deliberately never opened — the card above says exactly that. Completion now reports what completion consists of: enrolled, licensed, and the assignment it is bound to.",
+    "pms_routing_site_default": "The badge said SITE about guest_network_pms_map.is_default, which is per GUEST NETWORK and enforced one-per-network by the gnpm_one_default partial index. It implied the page manages Sites — it does not; the Site is fixed by the signed assignment. And setPMSRoute writes is_default=true on every row it creates, so the badge was present on every row the table can ever show. Removed, and the page now states its scope in one sentence.",
+    "mobile_sidebar": "Radix focuses a dialog's first focusable element on open; in the drawer that is the navigation filter, so tapping the hamburger raised the software keyboard over the menu. Focus goes to the panel. Verified live on an iPhone profile: focus lands on a DIV, and tapping the filter still focuses it and still filters."
+  },
+
+  "the_licence_enforcement_alert": {
+    "verified_cause": "/etc/stayconnect/scd.env carried SCD_LICENSE_REQUIRED=false — the stale rejected misconfiguration, exactly as the Product Owner suspected.",
+    "action": "Removed from the active file on PRE-LIVE, with a timestamped backup kept; scd restarted.",
+    "result": "permissive_blocked is now empty and the licence still evaluates Active. NOTHING about licence semantics changed: resolveLicenseRequired returns required=true unconditionally on a production build, the variable was already being ignored, and the alert was the report of it being ignored.",
+    "what_was_not_done": "The variable was not set to true. On a production build it has no true-branch to take, and leaving a meaningless setting in place is how the next reader concludes it does something."
+  },
+
+  "what_was_intentionally_retained": "Both the Activation and License screens, because onboarding/recovery and ongoing licensing are different jobs an operator arrives at from different situations. The Real-time channel card on Activation, because a decision that is explained is better than a fact that is hidden. The offline licence upload on Activation, because it is the recovery path. The /network/cloud redirect, because operators bookmark pages and a 404 is a worse answer than a move.",
+
+  "no_destructive_action": "No history was mutated, no rows deleted, no audit entries fabricated or backfilled. The only appliance configuration changed was the removal of one ignored environment line, backed up first.",
+
+  "migration": "0081_the_service_may_read_the_trail_it_writes — GRANT SELECT ON public.audit_log TO svc_edged, with a matching down migration. Authorised by the Product Owner on 2026-09-19 after the evidence was presented. Applied on PRE-LIVE and verified: svc_edged now holds INSERT and SELECT.",
+
+  "scope_held": "No destructive or historical-data change, no PMS configuration change and no PMS or financial traffic, no networking or topology change, no Root-CA or trust-root change, no new authentication or security semantics, no privilege widening beyond the one authorised read grant, no Go-Live. No .23 access. No gate or test weakened. The accepted Portal Settings and Languages behaviour is unchanged.",
+
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+
+  "authorization": "Product Owner, 2026-09-19: perform a complete Hotel Admin operator-acceptance sweep on the real PRE-LIVE appliance, fix all directly-related ordinary defects found, resolve the seven named issues, and carry the result through the protected PR/merge path to PRE-LIVE with live verification and governance synchronization. The audit read grant was authorised separately and explicitly after its evidence was presented.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE."
+}
