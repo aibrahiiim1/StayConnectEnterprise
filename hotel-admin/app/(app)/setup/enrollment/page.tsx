@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError, EnrollResult, SetupStatus, Whoami } from "@/lib/api";
@@ -432,7 +434,21 @@ export default function SetupEnrollmentPage() {
       {enrolled && (
         <Card>
           <CardBody className="space-y-3">
-            <div className="text-base font-semibold">Licence</div>
+            {/*
+              ONE JOURNEY, TWO JOBS, AND A LINK BETWEEN THEM.
+
+              Activation is how an appliance gets connected and how that connection is recovered -- including
+              the offline upload below, which is the recovery path and belongs nowhere else. License is where
+              the licence LIVES: capacity, expiry, identity, enforcement. They were confusing because the
+              License screen also called itself "Activation" while this one restated the licence without
+              saying where the rest of it was. The titles are separated now and this says where to look.
+            */}
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-base font-semibold">Licence</div>
+              <Link href="/license" className="text-xs text-muted-foreground hover:text-foreground">
+                Capacity, expiry and identity &rarr;
+              </Link>
+            </div>
             <div className="flex items-center gap-2 text-sm">
               <Badge tone={licenseTone(lic?.state)}>{lic?.state || "unknown"}</Badge>
               {lic?.valid_until && <span className="text-muted-foreground">valid until {lic.valid_until}</span>}
@@ -647,11 +663,23 @@ export default function SetupEnrollmentPage() {
                 <Row k="Site" v={st?.assignment?.site_name || "—"} />
                 <Row k="Assignment version" v={st?.assignment?.version ?? "—"} />
               </div>
+              {/*
+                COMPLETION MEANS COMPLETE, AND MUST NOT ARGUE WITH THE SCREEN IT IS ON.
+
+                This block used to carry `Connected: no` in red, and a count of a queue nothing fills. Both
+                described the real-time channel, which under the licensing-only model is deliberately never
+                opened -- the card two above this one says exactly that, in those words. So the appliance
+                announced "Setup complete" at the top of the page and "Connected: no" in red at the bottom,
+                and an operator had to know which one to believe.
+
+                What completion actually consists of is the two facts below: this appliance has an identity
+                Central recognises, and a licence that authorises guests. Neither depends on a transport this
+                property does not use. The real-time channel keeps its own card, where it is explained rather
+                than scored.
+              */}
               <div>
                 <Row k="Enrolled" v={<Badge tone={enrolled ? "ok" : "err"}>{enrolled ? "yes" : "no"}</Badge>} />
                 <Row k="Licensed" v={<Badge tone={licOk ? "ok" : "err"}>{licOk ? "yes" : "no"}</Badge>} />
-                <Row k="Connected" v={<Badge tone={nats?.connected ? "ok" : "err"}>{nats?.connected ? "yes" : "no"}</Badge>} />
-                <Row k="Outbox (pending/dead)" v={`${st?.outbox?.pending ?? 0} / ${st?.outbox?.dead ?? 0}`} />
               </div>
             </CardBody>
           </Card>

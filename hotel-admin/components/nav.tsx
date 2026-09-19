@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { canRead } from "@/lib/roles";
+import { useCapabilities, surfaceAvailable } from "@/lib/capabilities";
 import { ROLE_LABELS, type SiteRole } from "@/lib/roles";
 import {
   LayoutDashboard, Users, LogOut, Monitor, Shield, ScrollText, Hotel, Send, KeyRound,
@@ -41,6 +42,10 @@ type Item = {
   label: string;
   icon: any;
   resource: string;
+  /** The capability this destination needs, when that is narrower than the resource. Online-time budgets
+   *  live under the always-mounted "sessions" resource but need a sub-feature that most appliances do not
+   *  run, so the resource name alone would keep offering a screen with nothing behind it. */
+  capability?: string;
   enabled?: boolean;
   keywords?: string;
 };
@@ -77,7 +82,7 @@ const SECTIONS: Section[] = [
       { href: "/guest-accounts", label: "Guest accounts",  icon: KeyRound, resource: "guest-accounts", keywords: "username password login credentials voucher" },
       { href: "/sessions",       label: "Active sessions", icon: Monitor,  resource: "sessions", keywords: "online now devices connected who is on wifi disconnect" },
       { href: "/guest-device-self-service", label: "Guest devices", icon: Smartphone, resource: "guest-device-self-service", enabled: CAP_GUEST_DEVICES, keywords: "phone laptop remove device" },
-      { href: "/online-time",    label: "Online-time budgets", icon: Activity, resource: "sessions", enabled: CAP_GUEST_DEVICES, keywords: "time remaining allowance hours" },
+      { href: "/online-time",    label: "Online-time budgets", icon: Activity, resource: "sessions", capability: "sessions.aggregate-time", enabled: CAP_GUEST_DEVICES, keywords: "time remaining allowance hours" },
       { href: "/post-stay",      label: "Post-stay access", icon: KeyRound, resource: "post-stay-profiles", enabled: CAP_POST_STAY, keywords: "after departure loyalty" },
     ],
   },
@@ -230,12 +235,17 @@ export function Nav({
   // A FILTER, NOT A SEARCH ENGINE. Thirty-four screens in eight groups is past the point where scanning is
   // reliable, and the operator who needs "the page with the resync button" should not have to remember that it
   // lives under Property management system.
+  // WHAT THIS APPLIANCE SERVES, not what the bundle was built with. See lib/capabilities.ts: these two
+  // disagreed about eight destinations on PRE-LIVE, and the menu was the half that was wrong.
+  const caps = useCapabilities();
+
   const visibleSections = useMemo(() => {
     const q = query.trim().toLowerCase();
     return SECTIONS.map((sec) => ({
       title: sec.title,
       items: sec.items.filter((it) => {
         if (it.enabled === false || !canRead(it.resource, roles)) return false;
+        if (!surfaceAvailable(caps, it.capability ?? it.resource)) return false;
         if (!q) return true;
         return (
           it.label.toLowerCase().includes(q) ||
@@ -244,7 +254,7 @@ export function Nav({
         );
       }),
     })).filter((sec) => sec.items.length > 0);
-  }, [query, roles]);
+  }, [query, roles, caps]);
 
   // Opening the filter is also a request to SEE it. From the rail there is no input to focus, so the column
   // expands first and the focus is deferred to the render in which the input exists.

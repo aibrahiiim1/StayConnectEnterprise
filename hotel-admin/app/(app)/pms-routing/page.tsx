@@ -157,6 +157,15 @@ export default function PMSRoutingPage() {
           </div>
         </CardHeader>
         <CardBody className="p-0">
+          {/*
+            WHAT THIS PAGE IS AND IS NOT. Said here because "Site" appeared in the table for years and an
+            operator who wondered what a Site was had nowhere to find out.
+          */}
+          <p className="mb-3 text-xs text-muted-foreground">
+            Every row is one of this property&rsquo;s guest networks. The property itself is fixed when the
+            appliance is activated and cannot be chosen here — this page only decides which PMS connection
+            each network&rsquo;s room sign-ins are checked against.
+          </p>
           {routes === null ? (
             <SkeletonRows rows={3} cols={4} />
           ) : routes.length === 0 ? (
@@ -194,8 +203,23 @@ export default function PMSRoutingPage() {
                       )}
                     </TD>
                     <TD>
+                      {/*
+                        "SITE DEFAULT" IS GONE, AND WAS THREE PROBLEMS IN TWO WORDS.
+
+                        It said SITE. The flag it rendered, guest_network_pms_map.is_default, is per GUEST
+                        NETWORK -- it marks which connection is the default for that one network, and the
+                        partial unique index gnpm_one_default enforces one per network, not one per site.
+
+                        It implied this page has something to do with Sites. It does not. The Site is fixed by
+                        the signed assignment this appliance is bound to; nothing here creates, chooses or
+                        changes one.
+
+                        And it carried no information. setPMSRoute deletes any other mapping for the network
+                        and inserts with is_default=true, so every row this table can ever show has the flag
+                        set. A badge that is always present tells an operator nothing except that there is
+                        something they have not understood.
+                      */}
                       <div className="text-sm">{r.pms_interface_label || "Unnamed connection"}</div>
-                      {r.is_default && <Badge tone="info" className="mt-0.5">Site default</Badge>}
                     </TD>
                     <TD className="text-sm text-muted-foreground">
                       {MODE_WORDS[r.routing_mode] ?? r.routing_mode.replace(/_/g, " ").toLowerCase()}

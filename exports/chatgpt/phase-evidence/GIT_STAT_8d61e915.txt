@@ -1,4 +1,0 @@
-commit 8d61e915aeec373a535d7e285431686f4071f963
-Date:   Fri Sep 18 21:20:49 2026 +0300
-
-    Governance: T0162 records the acceptance, the approved step-up policy and the language work

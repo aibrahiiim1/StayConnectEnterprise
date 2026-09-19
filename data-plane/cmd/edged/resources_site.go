@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net"
 	"net/http"
 	"sort"
@@ -304,19 +305,33 @@ func (s *server) auditRoutes() http.Handler {
 		defer cancel()
 		rows, err := s.db.Query(ctx, q, args...)
 		if err != nil {
-			jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+			slog.Error("audit read failed", "err", err)
+			jsonErr(w, http.StatusInternalServerError, "internal", "the audit trail could not be read")
 			return
 		}
 		defer rows.Close()
-		var out []auditRow
+		out := []auditRow{}
 		for rows.Next() {
 			var a auditRow
 			if err := rows.Scan(&a.TS, &a.ActorType, &a.ActorID, &a.Action,
 				&a.TargetType, &a.TargetID, &a.IP, &a.Payload); err != nil {
-				jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
+				slog.Error("audit scan failed", "err", err)
+				jsonErr(w, http.StatusInternalServerError, "internal", "the audit trail could not be read")
 				return
 			}
 			out = append(out, a)
+		}
+		// A FAILED READ IS NOT AN EMPTY ONE.
+		//
+		// pgx reports a permission error on the first Next(), not at Query() -- so without this, "svc_edged
+		// may not read audit_log" arrived at the operator as HTTP 200 and the words "No audit entries.
+		// Operator and system actions are recorded here." On PRE-LIVE that sentence was false in the most
+		// expensive way available: 345 rows for this tenant, going back to the day the appliance was
+		// commissioned, and a screen calmly reporting that nothing had ever happened.
+		if err := rows.Err(); err != nil {
+			slog.Error("audit read failed", "err", err)
+			jsonErr(w, http.StatusInternalServerError, "internal", "the audit trail could not be read")
+			return
 		}
 		writeList(w, out)
 	})
