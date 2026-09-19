@@ -347,6 +347,19 @@ func main() {
 
 			// License is readable by anyone who can log in; install/refresh
 			// are site_admin actions.
+			// ALWAYS-PRESENT SURFACES THAT DO NOT GO THROUGH mountResource.
+			//
+			// The licence, diagnostics and the setup wizard are registered as plain routes because they are not
+			// tenant resources behind the role matrix in the same way. They are still SURFACES the navigation
+			// asks about, and the first sweep after /capabilities shipped caught the consequence of forgetting
+			// that: the License destination reported itself unavailable on an appliance that serves it.
+			//
+			// Recorded next to the routes themselves rather than in a list somewhere else, for the same reason
+			// mountResource records its own.
+			s.surfaces.add("license")
+			s.surfaces.add("diagnostics")
+			s.surfaces.add("reports")
+
 			r.Get("/license", s.licenseStatus)
 			r.With(s.requireRole("license", permWrite)).Post("/license", s.licenseInstall)
 			r.With(s.requireRole("license", permWrite)).Post("/license/refresh", s.licenseRefresh)

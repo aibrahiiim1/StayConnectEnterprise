@@ -23,7 +23,11 @@ export function SurfaceNotEnabled({ label }: { label: string }) {
           <div className="flex items-start gap-3">
             <Info className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
             <div className="space-y-2">
-              <h1 className="text-lg font-semibold tracking-tight">{label} is not enabled on this appliance</h1>
+              {/* Two lines, not one sentence. "Guest devices is not enabled" and "Settlements is not
+                  enabled" are both wrong, and a product that cannot agree with its own labels reads as
+                  careless at exactly the moment an operator is already wondering whether it is broken. */}
+              <h1 className="text-lg font-semibold tracking-tight">{label}</h1>
+              <p className="text-sm font-medium">Not enabled on this appliance</p>
               <p className="text-sm text-muted-foreground">
                 This is a configuration of the appliance, not a fault. The feature exists in StayConnect but
                 is not switched on for this property, so there is nothing here to show or to fix.

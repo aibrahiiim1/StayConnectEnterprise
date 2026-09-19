@@ -94,7 +94,9 @@ describe("a destination that is not enabled explains itself", () => {
     const { SurfaceNotEnabled } = await import("@/components/surface-not-enabled");
     render(<SurfaceNotEnabled label="Charge health" />);
 
-    expect(screen.getByText(/Charge health is not enabled on this appliance/)).toBeTruthy();
+    // The label and the state are separate lines: "Guest devices is not enabled" does not agree with itself.
+    expect(screen.getByRole("heading", { name: "Charge health" })).toBeTruthy();
+    expect(screen.getByText("Not enabled on this appliance")).toBeTruthy();
     expect(screen.getByText(/configuration of the appliance, not a fault/)).toBeTruthy();
     // The question behind every unexpected screen in an admin.
     expect(screen.getByText(/Guest internet, sign-in, the PMS connection, sessions and accounting are unaffected/)).toBeTruthy();
