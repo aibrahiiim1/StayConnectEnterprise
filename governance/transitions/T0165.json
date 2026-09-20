@@ -1,0 +1,64 @@
+{
+  "transition_id": "T0165",
+  "seq": 165,
+  "timestamp": "2026-09-20T15:25:00Z",
+  "timestamp_derivation": "After the last content commit of this follow-up and after every live proof it records: migration 0083 applied to PRE-LIVE, the content-integrity model proven by corrupting a verified archive in place, a further successful restore, and the five journeys plus the dashboard walked on the deployed bundle at 172.21.60.25 on a desktop and an iPhone profile. Before the author timestamp of the commit that introduces this receipt.",
+  "record_type": "HOTEL_ADMIN_OPERATOR_JOURNEY_FINDINGS_CLOSED",
+  "relationship_to_the_previous_delivery": "T0164 and PR #162 stand exactly as recorded and are NOT rewritten. This is the follow-up that closes the three findings that delivery left open: the attribution gap named in T0164's product_owner_decision_requested, and two duplications the Product Owner identified on review.",
+  "finding_1_guest_activity_attribution": {
+    "what_was_open": "Guest Activity could name a room only for offers that were TAKEN. iam_v2.auth_contexts is the only recorded link from a quote to a stay before an offer is taken, and svc_edged could not read it. T0164 named the decision rather than taking it.",
+    "authorisation": "The Product Owner authorised the minimum controlled read-only privilege change required, with the instruction to inspect the data first, keep it strictly least-privilege, and stop and explain if the required access would cross a materially wider security boundary.",
+    "what_the_inspection_found": "auth_contexts is the authentication record, not a lookup table. Its ac_one_subject constraint means every row carries exactly ONE subject -- a stay, a voucher, a guest account, a guest principal or a post-stay profile -- plus a device and a guest network that are NOT NULL on every row. Table-level SELECT would therefore have handed the operator API the credential linkage for every authentication the appliance has performed. That IS materially wider than attribution, so it was not taken.",
+    "what_was_applied": "Migration 0083: column-level GRANT SELECT on exactly (id, tenant_id, site_id, stay_id, pms_interface_id) to svc_edged, on iam_v2.auth_contexts. No schema change, no write privilege, no schema-wide or default-privileges grant, no other role. It is the narrowest grant that exists on that table -- narrower than svc_scd's INSERT/SELECT/UPDATE and narrower than sc_payment_runtime's table-wide SELECT.",
+    "what_remains_refused_and_was_verified_refused": "method, guest_account_id, voucher_id, guest_principal_id, post_stay_profile_id, authentication_interface_revision_id, device_id, guest_network_id, expires_at, consumed_at, pinned_lifecycle_version, pinned_occupancy_evidence_version, resolution_request_id. Reading any of them as svc_edged returns permission denied on the live appliance; table-level SELECT for svc_edged is NONE.",
+    "correctness_proof": "Both attribution paths were available for all sixteen recorded offers and returned the SAME stay and the SAME PMS interface every time, with zero disagreements. With the purchase path removed entirely -- which is exactly what an untaken offer sees -- all sixteen still resolved to a stay, a room and an interface. The purchase is preferred where it exists because it records what was actually granted.",
+    "rules_preserved": "A room is not an identity: stays are keyed by (tenant, site, pms_interface, stay), so every room this returns travels with the interface that gives it meaning. Nothing is inferred from timing or from the interface alone -- the stay comes from the recorded link or the room stays blank. No write, no backfill, no historical change. The operator view stays in words; technical ids remain in the expandable record, and the live endpoint returns no credential field at all.",
+    "build_time_guard": "A column grant is invisible in Go: adding ac.voucher_id would compile and review as one word, then fail in front of an operator. A test reads the query and fails the build, naming the reason."
+  },
+  "finding_2_backup_verification_is_content_bound": {
+    "what_was_wrong": "The verification marker recorded a backup's size and modification time. That is a change NOTICE, not an integrity check: both are metadata and anybody able to write the file is able to write them back. This was not theoretical -- the deliberate failure proof in the previous delivery had to corrupt an archive IN PLACE and restore its timestamp precisely because the size check refused the first attempt, and it then sailed through. The proof worked; what it proved was that the gate did not.",
+    "what_changed": "Verification records the SHA-256 of the archive. The restore boundary RECOMPUTES it from the bytes as they are at that moment rather than trusting the marker's claim. Size and time are still recorded and checked first, because they are free and produce a clearer message when they are the reason. The screen re-reads the file too, so it cannot show Verified for content that no longer matches; only artefacts that CLAIM verification are digested. There is deliberately no cache keyed on size and modification time, because that is the signal this replaced. A marker with no digest is NOT verified.",
+    "live_proof": {
+      "pre_digest_markers": "0 of 7 database backups still reported verified -- fail closed, as designed.",
+      "unchanged_stays_eligible": "A freshly verified backup reported verified_at, and a restore attempt was refused on the CONFIRM phrase rather than on verification -- proving verification passed.",
+      "forged_metadata_is_refused": "The archive was corrupted in place: 27,281,735 bytes before and after, the nanosecond modification time restored with touch -r, and only the digest different. edged reported NOT VERIFIED and the appliance refused with: this backup's contents no longer match what was verified, even though its size and timestamp are unchanged; verify it again.",
+      "no_destructive_restore_began": "Maintenance clear, zero staging databases, no new safety dump, the previous last-restore record untouched, all five services active and the guest portal answering 200.",
+      "re_verify_does_not_launder_it": "Re-verifying the corrupted archive FAILED and did not make it eligible.",
+      "existing_protections_intact": "A full successful restore was run again on the new build: nine steps green, safety dump, maintenance, staging load, rename swap, privileges reinstated and verified, integrity, housekeeping and services back."
+    }
+  },
+  "finding_2b_a_restore_that_dropped_a_column_grant": {
+    "how_it_was_found": "By running the two halves of this delivery against each other. The restore proof ran after migration 0083 had been applied, and the column grant was gone afterwards -- while the restore reported 'all 1491 ownership and access rules reinstated and verified identical'.",
+    "why_the_self_check_could_not_catch_it": "Both statements were true. The capture reads nspacl, relacl and proacl. Column privileges live in pg_attribute.attacl, which it never looked at, so the replay dropped them AND the before/after comparison could not see anything missing. Comparing a blind capture with itself agrees every time: a capture is only as complete as the catalogs it reads.",
+    "fix": "Column privileges are captured and replayed in PostgreSQL's GRANT <priv> (<col>) ON TABLE form, skipping dropped columns because those keep a pg_attribute row and would fail the whole replay. And the general problem is addressed rather than this instance of it: any privilege kind the capture cannot reproduce -- default privileges, type privileges, row-level security policies -- now STOPS the restore before it touches anything and names what it found. None exist on this appliance; the point is that the day one does it is a refusal, not a discovery weeks later.",
+    "live_proof": "After the fix, a further backup-verify-restore cycle left the five-column grant intact, the captured rule count rose from 1491 to 1496 -- exactly the five -- and Guest Activity answered 200 through edged afterwards. PRE-LIVE's grant was re-applied immediately when the loss was found."
+  },
+  "finding_3_duplication_removed": {
+    "dashboard": "'Services this appliance depends on' answers one question: is anything the appliance RUNS in trouble? Central is not a runtime dependency at this property -- it serves the licence and nothing else, by decision -- so the row reported the health of something that does not run, a few centimetres below an Appliance & licence card that had already answered it. In the normal licensing-only state the card now says nothing about the cloud. If the mode is ever something else the cloud IS a live dependency and returns as an ordinary row, and a genuine problem still arrives through the attention list, which routes to the same screen. Verified live: the card contains Site database and Session controller and nothing else; the cloud row, the explanatory box and the 'Licensing only' wording are all absent.",
+    "licence_upload": "Appliance Setup ONBOARDS: assignment, trust material and the first licence, which is why its offline path still accepts a signed activation package -- that package carries all three together and there is nowhere else it could go. Renewing a licence afterwards was a second file input installing exactly what the Licence section installs. Once the appliance is ACTIVATED, Setup shows licence state and points at the one screen that owns renewals; before activation the upload stays, because an appliance part-way through onboarding may still need to finish the licence half there. Verified live on an activated appliance: Setup shows the status line and the pointer, with no upload control.",
+    "preserved": "Old route redirects and the accepted activation/licensing semantics are unchanged."
+  },
+  "verification": {
+    "unit_and_regression": "Go: gofmt, build, vet including build tags, production-tag build and test -count=1, all clean. Hotel Admin: 31 test files, 346 tests passing, tsc clean, production build clean.",
+    "live": "The deployed bundle driven in a real browser at 1440x900 and on an iPhone 13 profile: 16/16 checks, zero failing operator-API calls, zero horizontal overflow.",
+    "appliance_state_after": "All services active, maintenance clear, guest portal answering, Activity, Usage and Guest Activity all 200, and the five-column grant present."
+  },
+  "migration_ledger_reconciled": "public.schema_migrations recorded nothing after 0080 while 0081 and 0082 were in force, both applied by hand in earlier deliveries. Both are pure idempotent GRANTs and both were verified present before this ran, so re-applying them changed no state and the ledger now agrees with the appliance. No earlier timestamp was invented: applied_at records this application, and this record says why.",
+  "guest_data": "No guest name, room number or reservation identifier appears in this record, in the commit messages of this delivery, in its manifest or in its test fixtures. Live observations are described rather than reproduced. Note for a future delivery, not corrected here because the file is an applied and merged migration: the header comment of migrations/0082 contains a real room number from the PRE-LIVE roster.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "The Product Owner authorised this follow-up end to end -- implementation, tests, the controlled read-only migration if required, the four gates, a protected merge, PRE-LIVE deployment, live verification and governance synchronisation. Migration 0083 is the authorised change and is read-only and column-scoped. Nothing else is authorised by this record.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE.",
+  "base": "1c117937ac266e3c6e270330efcd4a45ccaf0755",
+  "head": "96f566ea302b5e60d7ca61147d1552be9642e472"
+}
