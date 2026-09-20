@@ -284,6 +284,18 @@ func (s *server) runRestore(ctx context.Context, name string, rec *verifiedRecor
 			"psql", "-U", pgUser, "-d", "postgres", "-tAc", sql).CombinedOutput()
 	}
 
+	// ---- 0. what the services are allowed to do, captured while the live database still says it ---------
+	//
+	// A backup does not contain this: dumps are taken --no-owner --no-privileges. Read first, because it is a
+	// read -- failing here costs nothing, and discovering it after the swap would mean an appliance that
+	// cannot serve and no record of what it was allowed to do. See privileges.go.
+	privileges, err := capturePrivileges(ctx, pgDatabase)
+	if err != nil {
+		fail("privileges", "the database's access rules could not be read, so the restore was not attempted: "+err.Error())
+		return
+	}
+	ok("privileges", fmt.Sprintf("%d ownership and access rules captured from the live database", len(privileges)))
+
 	// ---- 1. a safety dump of the CURRENT state, before anything is touched ------------------------------
 	safety, err := s.dumpTo(ctx, "db-safety-"+stamp+".sql.gz")
 	if err != nil {
@@ -359,7 +371,44 @@ func (s *server) runRestore(ctx context.Context, name string, rec *verifiedRecor
 	}
 	ok("swap", "the restored database is live; the previous one is kept as "+aside)
 
-	// ---- 5. integrity, on what is now live -------------------------------------------------------------
+	// ---- 5. put the access rules back, and prove they took ---------------------------------------------
+	//
+	// The restored database arrived owned by the superuser with PUBLIC holding the default EXECUTE on every
+	// function. Replaying is only half the job: the same capture is run again and compared, because a replay
+	// that half-worked leaves an appliance that starts and then fails on whichever table the operator reaches
+	// last -- which is worse than one that fails now and puts the original data back.
+	rollback := func(step, detail string) {
+		if out, err := admin("ALTER DATABASE " + pgDatabase + " RENAME TO " + staging); err == nil {
+			if out2, err2 := admin("ALTER DATABASE " + aside + " RENAME TO " + pgDatabase); err2 == nil {
+				dropStaging()
+				s.startDependents(ctx)
+				fail(step, detail+" The appliance was rolled back and is running on its original data.")
+				return
+			} else {
+				_ = out2
+			}
+		} else {
+			_ = out
+		}
+		s.startDependents(ctx)
+		fail(step, "CRITICAL: "+detail+" The rollback ALSO failed. The original data is intact under "+
+			aside+" and must be renamed back by hand.")
+	}
+
+	if err := applyPrivileges(ctx, pgDatabase, privileges); err != nil {
+		rollback("privileges", "the database's access rules could not be put back: "+err.Error())
+		return
+	}
+	if after, err := capturePrivileges(ctx, pgDatabase); err != nil {
+		rollback("privileges", "the restored database's access rules could not be read back: "+err.Error())
+		return
+	} else if diff := privilegesMatch(privileges, after); diff != "" {
+		rollback("privileges", "the access rules did not come back as they were: "+diff)
+		return
+	}
+	ok("privileges", fmt.Sprintf("all %d ownership and access rules reinstated and verified identical", len(privileges)))
+
+	// ---- 6. integrity, on what is now live -------------------------------------------------------------
 	detail, good := s.restoreIntegrity(ctx)
 	if !good {
 		// ROLL BACK. A rename back is fast and certain, and does not depend on a second dump being good.
@@ -378,7 +427,7 @@ func (s *server) runRestore(ctx context.Context, name string, rec *verifiedRecor
 	}
 	ok("integrity", detail)
 
-	// ---- 6. back in service ----------------------------------------------------------------------------
+	// ---- 7. back in service ----------------------------------------------------------------------------
 	s.resetPool()
 	maintenanceOff()
 	s.startDependents(ctx)

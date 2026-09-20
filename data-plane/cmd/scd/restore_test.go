@@ -217,7 +217,6 @@ func TestDatabaseNamesSurviveIdentifierFolding(t *testing.T) {
 	}
 }
 
-
 func TestTheRequestDoesNotWaitForTheRestore(t *testing.T) {
 	// FOUND ON THE APPLIANCE, and it was the worst available way to be wrong.
 	//
@@ -308,3 +307,59 @@ func maintenanceFileForTest(t *testing.T, path string) func() {
 }
 
 var _ = json.Marshal
+
+func TestTheAccessRulesTravelWithTheRestore(t *testing.T) {
+	// FOUND ON THE APPLIANCE, and it is the finding that mattered most.
+	//
+	// The first successful restore replaced the data correctly and left the appliance unable to serve.
+	// Backups are taken --no-owner --no-privileges, so the restored database came up owned by the superuser
+	// with PUBLIC holding the default EXECUTE on every function. scd could not read pms_providers, edged
+	// could not reach schema iam_v2, and once that was fixed edged still refused to serve -- correctly --
+	// because PUBLIC held EXECUTE on iam_v2.apply_entitlement_transition. Every service was behaving
+	// properly; the database had lost its shape.
+	//
+	// A restore that produces an appliance which cannot serve is not a restore.
+	s := restoreSequence(t)
+
+	capture := strings.Index(s, "capturePrivileges(ctx, pgDatabase)")
+	dump := strings.Index(s, "s.dumpTo(ctx,")
+	apply := strings.Index(s, "applyPrivileges(ctx, pgDatabase")
+	swap := strings.Index(s, "RENAME TO \" + pgDatabase")
+	if capture < 0 || apply < 0 {
+		t.Fatal("the restore does not carry the database's access rules across the swap")
+	}
+	if capture > dump {
+		t.Error("the access rules are captured after the safety dump; the read that costs nothing should come first")
+	}
+	if apply < swap {
+		t.Error("the access rules are replayed before the swap, onto the database being replaced")
+	}
+
+	// Replaying is half the job. A replay that half-worked leaves an appliance that fails later.
+	if !strings.Contains(s, "privilegesMatch(privileges, after)") {
+		t.Error("the replay is never verified; a partial replay would be indistinguishable from success")
+	}
+	if !strings.Contains(s, `rollback("privileges"`) {
+		t.Error("a failed privilege replay does not roll back, leaving an appliance that cannot serve")
+	}
+
+	// The revokes are the half that is easy to forget: an absent privilege is as deliberate as a present one.
+	src, err := os.ReadFile("privileges.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := string(src)
+	for _, needed := range []string{
+		"REVOKE ALL ON FUNCTION ", "REVOKE ALL ON SCHEMA ", "REVOKE ALL ON TABLE ",
+	} {
+		if !strings.Contains(p, needed) {
+			t.Errorf("the capture emits no %q; PUBLIC would keep the default EXECUTE the migrations revoke", needed)
+		}
+	}
+	if !strings.Contains(p, "ALTER FUNCTION ") {
+		t.Error("function ownership is not captured; the owner is the grantor recorded in every acl entry")
+	}
+	if !strings.Contains(p, "ON_ERROR_STOP=1") {
+		t.Error("a privilege replay that continues past an error produces a half-privileged database")
+	}
+}
