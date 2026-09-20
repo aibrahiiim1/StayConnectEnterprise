@@ -70,6 +70,7 @@ export default function ActivityPage() {
   const [securityOnly, setSecurityOnly] = useState(false);
   const [text, setText] = useState("");
   const [open, setOpen] = useState<string | null>(null);
+  const [names, setNames] = useState<Map<string, string>>(new Map());
 
   const load = useCallback(async () => {
     setBusy(true); setErr(null);
@@ -91,6 +92,16 @@ export default function ActivityPage() {
   }, [range, category]);
 
   useEffect(() => { load(); }, [load]);
+
+  // THE OPERATOR DIRECTORY, ONCE. An audit row records who by id, which is the precise fact and the useless
+  // one -- nobody scanning for "who changed the retention policy" can read a uuid. The exact id stays in the
+  // expandable record; this is what puts a name on the summary line. Failure is silent on purpose: an
+  // activity trail that would not render because a second request failed is worse than one showing ids.
+  useEffect(() => {
+    api.get<{ data: { id: string; display_name?: string; email?: string }[] }>("/operators")
+      .then((r) => setNames(new Map((r.data ?? []).map((o) => [o.id, o.display_name || o.email || o.id]))))
+      .catch(() => {});
+  }, []);
 
   const visible = useMemo(() => {
     if (!rows) return null;
@@ -204,7 +215,7 @@ export default function ActivityPage() {
                           <Badge tone="default">{w.category}</Badge>
                         </div>
                         <div className="mt-0.5 text-xs text-muted-foreground">
-                          {auditActor(r.actor_type, r.actor_id)} · {formatDate(r.ts)}
+                          {auditActor(r.actor_type, r.actor_id, names)} · {formatDate(r.ts)}
                           {r.ip ? ` · from ${r.ip.replace(/\/\d+$/, "")}` : ""}
                           {r.target_type ? ` · ${r.target_type}` : ""}
                         </div>

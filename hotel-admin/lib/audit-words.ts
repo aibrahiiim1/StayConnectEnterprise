@@ -173,9 +173,29 @@ function categoryFromPrefix(action: string): AuditCategory {
 }
 
 /** Who did it, as something readable. A system action says so rather than showing an empty column. */
-export function auditActor(actorType?: string | null, actorID?: string | null): string {
+/** Who did it, in words.
+ *
+ *  Found on the live appliance: half the rows said "An operator" and half showed a raw uuid, depending only
+ *  on whether the action happened to record an actor id. The uuid is the more precise fact and the less
+ *  useful one -- an operator scanning the trail for "who changed the retention policy" cannot read it, and
+ *  the screen has the answer, because the operator directory is one request away.
+ *
+ *  `names` maps operator id to a human name. An id that is not in it is an operator who has since been
+ *  removed, which is worth saying plainly rather than printing their uuid as if it were a name. The exact id
+ *  is always in the expandable record; this is the summary line. */
+export function auditActor(
+  actorType?: string | null,
+  actorID?: string | null,
+  names?: Map<string, string>,
+): string {
   if (actorType === "system" || !actorType) return "The appliance";
   if (!actorID) return "An operator";
+  const known = names?.get(actorID);
+  if (known) return known;
+  // Anything that is not a uuid is already readable -- a username, a service name, a device.
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(actorID)) {
+    return "A removed operator";
+  }
   return actorID;
 }
 
