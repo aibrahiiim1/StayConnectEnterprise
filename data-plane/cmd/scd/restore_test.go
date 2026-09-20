@@ -182,10 +182,15 @@ func TestTheRestoreOutcomeSurvivesTheServiceRestart(t *testing.T) {
 	// reconnected to a restarted service would never learn what happened.
 	src, _ := os.ReadFile("restore.go")
 	s := string(src)
-	write := strings.Index(s, "os.WriteFile(restoreResultFile")
+	write := strings.Index(s, "writeResultAtomically")
 	restart := strings.Index(s, "func (s *server) startDependents")
 	if write < 0 {
 		t.Fatal("the restore outcome is never written durably")
+	}
+	// AND IT IS WRITTEN IN ONE STEP. A screen polls this file every few seconds while it is being rewritten;
+	// os.WriteFile truncates first, so a direct write hands a reader half a document about a hotel's data.
+	if !strings.Contains(s, `os.Rename(tmp, restoreResultFile)`) {
+		t.Error("the outcome record is not written atomically; a poller can read a half-written document")
 	}
 	if restart < 0 {
 		t.Fatal("dependent services are never restarted")

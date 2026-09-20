@@ -427,6 +427,31 @@ func (s *server) runRestore(ctx context.Context, name string, rec *verifiedRecor
 	}
 	ok("integrity", detail)
 
+	// ---- 6b. keep exactly ONE database aside -----------------------------------------------------------
+	//
+	// The database just replaced is kept so a restore can be undone, which is the point. But nothing removed
+	// the PREVIOUS one, so each restore left another full copy of the site behind: three restores, three
+	// copies, and a disk gauge climbing on the Backups page with nothing on that page to explain it.
+	//
+	// One step back is the guarantee that was designed; two was an accident of never cleaning up. Older
+	// set-aside databases are dropped now that this restore has passed its integrity and privilege checks --
+	// after, never before, because until those pass the thing being kept may be the only good copy.
+	if out, err := admin("SELECT datname FROM pg_database WHERE datname LIKE '" + pgDatabase +
+		`\_before\_%' AND datname <> '` + aside + "'"); err == nil {
+		dropped := 0
+		for _, old := range strings.Fields(string(out)) {
+			if _, err := admin("DROP DATABASE IF EXISTS " + old + " WITH (FORCE)"); err == nil {
+				dropped++
+			} else {
+				slog.Warn("an older set-aside database could not be dropped", "database", old)
+			}
+		}
+		if dropped > 0 {
+			ok("housekeeping", fmt.Sprintf("%d older set-aside database(s) removed; %s is kept so this "+
+				"restore can be undone", dropped, aside))
+		}
+	}
+
 	// ---- 7. back in service ----------------------------------------------------------------------------
 	s.resetPool()
 	maintenanceOff()
@@ -511,7 +536,10 @@ func (s *server) finishRestore(name string, started time.Time,
 		"steps":    steps,
 	}
 	if b, err := json.Marshal(res); err == nil {
-		if err := os.WriteFile(restoreResultFile, b, 0o644); err != nil {
+		// WRITE THEN RENAME. This file is polled every few seconds by a screen waiting to be told what
+		// happened to a hotel's data; os.WriteFile truncates first, so a reader arriving mid-write sees
+		// half a document. A rename is atomic, so a reader sees either the old answer or the new one.
+		if err := writeResultAtomically(b); err != nil {
 			slog.Error("restore result not written", "err", err)
 		}
 	}
@@ -527,6 +555,19 @@ func (s *server) finishRestore(name string, started time.Time,
 // Without it the screen would keep showing the PREVIOUS restore's result while a new one ran -- and if that
 // previous one said "ok", an operator would be reading a success banner about a database currently being
 // replaced. The record is overwritten by finishRestore either way.
+// writeResultAtomically replaces the outcome record in one step, so a poller never reads a partial document.
+func writeResultAtomically(b []byte) error {
+	tmp := restoreResultFile + ".partial"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, restoreResultFile); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
 func (s *server) markRestoreRunning(name string, started time.Time) {
 	b, err := json.Marshal(map[string]any{
 		"backup": name, "started": started, "running": true, "ok": false,
@@ -536,7 +577,7 @@ func (s *server) markRestoreRunning(name string, started time.Time) {
 	if err != nil {
 		return
 	}
-	if err := os.WriteFile(restoreResultFile, b, 0o644); err != nil {
+	if err := writeResultAtomically(b); err != nil {
 		slog.Error("restore progress not written", "err", err)
 	}
 }
