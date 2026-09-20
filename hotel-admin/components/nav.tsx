@@ -172,7 +172,7 @@ const SECTIONS: Section[] = [
       // Watching it.
       { href: "/health",             label: "Diagnostics", icon: Activity,   resource: "diagnostics", keywords: "services health checks scd netd kea" },
       { href: "/operational-alerts", label: "Alerts",      icon: Shield,     resource: "operational-alerts", enabled: CAP_PMS, keywords: "warnings acknowledge" },
-      { href: "/audit",              label: "Audit log",   icon: ScrollText, resource: "audit", keywords: "who did what history trail" },
+      { href: "/audit",              label: "Activity",    icon: ScrollText, resource: "audit", keywords: "audit log who did what history trail security changes" },
       // Running it.
       { href: "/appliance",          label: "Appliance & licence", icon: ServerCog, resource: "license", keywords: "enrol claim serial activate setup cloud connection central licence capacity expiry plan offline renewal first-time" },
       { href: "/backups",            label: "Backups",     icon: Archive,    resource: "backups", keywords: "restore snapshot database retention schedule" },
