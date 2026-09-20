@@ -35,13 +35,17 @@ package main
 //   identity claim the data cannot support.
 
 import (
+	"errors"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 func (s *server) usageRoutes() http.Handler {
@@ -323,12 +327,50 @@ func (s *server) getStayUsage(w http.ResponseWriter, r *http.Request) {
 
 // ------------------------------------------------------------------------ one device, one period ---------
 
+// macFromPath reads the {mac} path parameter, whatever shape the caller sent it in.
+//
+// WHY THIS IS NOT JUST chi.URLParam. A MAC contains colons, and a colon is a reserved character in a URL
+// path, so a correct client escapes it: encodeURIComponent turns 7e:58:… into 7e%3A58%3A…. chi hands back
+// the RAW segment, still escaped, and `$1::macaddr` then fails to cast. The screen reported "this appliance
+// has no record of that device" about a device with twelve sessions and 576 MB of traffic, because a cast
+// error and an empty result had been given the same answer.
+//
+// The client was not wrong and neither was the database. The server was simply reading an encoded string as
+// if it were a literal one. So: unescape first, then PARSE it as hardware address rather than trusting the
+// text -- which also makes the endpoint accept the dash and dot notations an operator might paste from a
+// router or a switch, and normalise every one of them to the single form Postgres stores.
+//
+// The second return value distinguishes "you did not give me a MAC" from "I have no record of it". Those are
+// different answers and only one of them is about the device.
+func macFromPath(r *http.Request) (string, bool) {
+	raw := chi.URLParam(r, "mac")
+	if unescaped, err := url.PathUnescape(raw); err == nil {
+		raw = unescaped
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", false
+	}
+	hw, err := net.ParseMAC(raw)
+	if err != nil || len(hw) != 6 {
+		// PostgreSQL's macaddr is six bytes. An EUI-64 or an Infiniband address parses here but cannot be
+		// stored there, so refusing it now is better than a cast error later.
+		return "", false
+	}
+	return hw.String(), true
+}
+
 // getDeviceUsage answers "how much did this device use between these dates".
 //
 // It reports a DEVICE. It does not name a guest, and it does not imply the MAC identifies one -- it lists the
 // stays the device was associated with over the period, which is a different and defensible claim.
 func (s *server) getDeviceUsage(w http.ResponseWriter, r *http.Request) {
-	mac := strings.TrimSpace(chi.URLParam(r, "mac"))
+	mac, ok := macFromPath(r)
+	if !ok {
+		jsonErr(w, http.StatusBadRequest, "bad_mac",
+			"that is not a device address. A device address looks like 7a:1b:2c:3d:4e:5f.")
+		return
+	}
 	from, to := parseWindow(r)
 
 	var out struct {
@@ -344,11 +386,20 @@ func (s *server) getDeviceUsage(w http.ResponseWriter, r *http.Request) {
 	out.MAC, out.From, out.To = mac, from, to
 	out.Sessions, out.Stays = []staySessionRow{}, []usageStayRow{}
 
-	if err := s.db.QueryRow(r.Context(),
+	// THREE OUTCOMES, THREE ANSWERS. Collapsing them into one 404 is what hid this: a device with twelve
+	// sessions was reported as unknown because the query had errored, not because the row was absent.
+	switch err := s.db.QueryRow(r.Context(),
 		`SELECT first_seen, last_seen FROM iam_v2.devices
 		  WHERE mac = $1::macaddr AND tenant_id = $2 AND site_id = $3`,
-		mac, s.tenantID, s.siteID).Scan(&out.FirstSeen, &out.LastSeen); err != nil {
+		mac, s.tenantID, s.siteID).Scan(&out.FirstSeen, &out.LastSeen); {
+	case err == nil:
+		// found
+	case errors.Is(err, pgx.ErrNoRows):
 		jsonErr(w, http.StatusNotFound, "not_found", "this appliance has no record of that device")
+		return
+	default:
+		slog.Error("device lookup failed", "err", err)
+		jsonErr(w, http.StatusInternalServerError, "internal", "the device record could not be read")
 		return
 	}
 
