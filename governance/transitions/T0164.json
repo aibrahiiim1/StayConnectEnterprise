@@ -99,5 +99,5 @@
   "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE.",
   "guest_data": "No guest name, room number or reservation identifier appears in this record, in the commit messages of this delivery or in its manifest. Two commit messages drafted early in the delivery used a real room number from the PRE-LIVE roster as an illustration; they were redacted before anything was pushed, which is the only point at which a commit message can still be corrected.",
   "base": "71cfb44e28938e0b79d63997e9f1bf3fd67b5d51",
-  "head": "393be231b9cf25a9e891bccb9a1dc2569c67ddbc"
+  "head": "ab12b233c47811737cbf44b07729a199ff66906f"
 }
