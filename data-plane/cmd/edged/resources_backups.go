@@ -24,7 +24,10 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -226,24 +229,48 @@ type verifiedRecord struct {
 	SizeBytes  int64     `json:"size_bytes"`
 	ModTime    time.Time `json:"mod_time"`
 	Tables     int       `json:"tables"`
+	SHA256     string    `json:"sha256"`
 }
 
-// readVerification returns the marker only when it still describes the file on disk.
+// readVerification returns the marker only when the archive on disk is, byte for byte, the one that was
+// verified.
 //
-// The size/mtime comparison is the whole point: "this NAME was verified once" is a weaker claim than "these
-// BYTES were verified", and only the second one is safe to restore from. A nightly job that rewrites a name,
-// a hand-copied file, an interrupted write -- all of them must drop the verification rather than inherit it.
+// IT RE-READS THE FILE. Size and modification time are metadata: anybody who can change the file can change
+// them back, so a check built on them is a change NOTICE, not an integrity check. The screen must not show
+// "Verified" for content that no longer matches -- an operator deciding whether to replace a hotel's data
+// should not be reading a claim that only holds while nobody is adversarial or unlucky.
+//
+// A marker with no digest is not verified: it was written before content checks existed and there is no way
+// to know what it vouched for.
+//
+// The cost is honest and bounded. Only artefacts that CLAIM verification are digested -- on the appliance
+// two of seven -- at roughly 250ms per 27 MB archive, on a page an operator opens to answer "could we
+// recover from this?". There is deliberately no cache keyed on size and modification time, because that is
+// the exact signal this replaced.
 func readVerification(dir, name string) (*verifiedRecord, bool) {
 	b, err := os.ReadFile(filepath.Join(dir, name+".verified"))
 	if err != nil {
 		return nil, false
 	}
 	var rec verifiedRecord
-	if json.Unmarshal(b, &rec) != nil {
+	if json.Unmarshal(b, &rec) != nil || rec.SHA256 == "" {
 		return nil, false
 	}
-	fi, err := os.Stat(filepath.Join(dir, name))
+	full := filepath.Join(dir, name)
+	fi, err := os.Stat(full)
 	if err != nil || fi.Size() != rec.SizeBytes || !fi.ModTime().UTC().Equal(rec.ModTime) {
+		return nil, false
+	}
+	f, err := os.Open(full)
+	if err != nil {
+		return nil, false
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return nil, false
+	}
+	if hex.EncodeToString(h.Sum(nil)) != rec.SHA256 {
 		return nil, false
 	}
 	return &rec, true

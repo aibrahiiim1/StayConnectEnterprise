@@ -27,8 +27,11 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -54,9 +57,20 @@ var restoreResultFile = "/run/stayconnect/last-restore.json"
 
 // verifiedMarker is written by a successful verification and REQUIRED by restore.
 //
-// It records the size and modification time of the archive it vouches for. A backup file that has been
-// replaced since -- same name, different content -- no longer matches its marker and is refused, because
-// "this name was verified once" is not the same claim as "these bytes were verified".
+// IT RECORDS THE SHA-256 OF THE ARCHIVE IT VOUCHES FOR. It used to record only the size and the modification
+// time, and that was not an integrity check -- it was a change NOTICE. Both are metadata: anybody able to
+// write the file is able to write them back. Truncate an archive, restore its length with padding and put
+// the timestamp back with `touch -r`, and a corrupt backup presented itself as verified. That is not a
+// theoretical objection; it is how the deliberate failure proof for this feature had to be built.
+//
+// A digest is a statement about the BYTES. Size and modification time are still recorded, and are still
+// checked first -- they are free, they catch the ordinary case, and they let the refusal say something more
+// useful than "the digest differs". But the digest is what the answer rests on, and it is recomputed at the
+// restore boundary rather than trusted from the marker.
+//
+// A marker with no digest is NOT VERIFIED. Markers written before this existed carry no sha256, and there is
+// no way to know what they vouched for; treating them as verified would be trusting the one field that was
+// never recorded. Re-verifying costs one command and eleven seconds.
 func verifiedMarker(name string) string { return filepath.Join(scdBackupDir, name+".verified") }
 
 type verifiedRecord struct {
@@ -64,15 +78,39 @@ type verifiedRecord struct {
 	SizeBytes  int64     `json:"size_bytes"`
 	ModTime    time.Time `json:"mod_time"`
 	Tables     int       `json:"tables"`
+	SHA256     string    `json:"sha256"`
+}
+
+// fileDigest is the hex SHA-256 of a file, streamed so a 27 MB archive costs no more memory than a 27 KB one.
+func fileDigest(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func writeVerifiedMarker(name string, tables int) {
-	fi, err := os.Stat(filepath.Join(scdBackupDir, name))
+	full := filepath.Join(scdBackupDir, name)
+	fi, err := os.Stat(full)
 	if err != nil {
 		return
 	}
+	// NO DIGEST, NO MARKER. A marker that omitted it would be indistinguishable from a pre-digest one, and
+	// would be read as unverified anyway -- writing it would only mislead whoever read the file by hand.
+	sum, err := fileDigest(full)
+	if err != nil {
+		slog.Error("verification marker not written: the archive could not be digested", "backup", name, "err", err)
+		return
+	}
 	b, _ := json.Marshal(verifiedRecord{
-		VerifiedAt: time.Now().UTC(), SizeBytes: fi.Size(), ModTime: fi.ModTime().UTC(), Tables: tables,
+		VerifiedAt: time.Now().UTC(), SizeBytes: fi.Size(), ModTime: fi.ModTime().UTC(),
+		Tables: tables, SHA256: sum,
 	})
 	path := verifiedMarker(name)
 	if err := os.WriteFile(path, b, 0o640); err != nil {
@@ -93,7 +131,12 @@ func writeVerifiedMarker(name string, tables int) {
 	}
 }
 
-// readVerifiedMarker returns the record only if it still describes the file on disk.
+// readVerifiedMarker returns the record only if the archive on disk is still, byte for byte, the one that
+// was verified.
+//
+// THIS IS THE RESTORE BOUNDARY. The screen checks too, and the screen is not the security boundary: it can
+// be stale, it can be a second tab, it can be a curl. Everything that decides whether a restore may begin is
+// decided here, immediately before it begins, from the bytes as they are now.
 func readVerifiedMarker(name string) (*verifiedRecord, error) {
 	b, err := os.ReadFile(verifiedMarker(name))
 	if err != nil {
@@ -103,12 +146,29 @@ func readVerifiedMarker(name string) (*verifiedRecord, error) {
 	if err := json.Unmarshal(b, &rec); err != nil {
 		return nil, fmt.Errorf("this backup's verification record could not be read")
 	}
-	fi, err := os.Stat(filepath.Join(scdBackupDir, name))
+	if rec.SHA256 == "" {
+		return nil, fmt.Errorf("this backup was verified before content checks existed, so what it " +
+			"contained cannot be confirmed; verify it again")
+	}
+	full := filepath.Join(scdBackupDir, name)
+	fi, err := os.Stat(full)
 	if err != nil {
 		return nil, fmt.Errorf("the backup file is missing")
 	}
+	// Cheap first, and it produces the clearer message when it is the ordinary case.
 	if fi.Size() != rec.SizeBytes || !fi.ModTime().UTC().Equal(rec.ModTime) {
 		return nil, fmt.Errorf("this backup has changed since it was verified; verify it again")
+	}
+	// THE BINDING CHECK. Size and time are metadata and can be restored by whoever changed the file; the
+	// digest cannot. ~250ms on a 27 MB archive, against a restore that takes half a minute and is
+	// irreversible in every way except the one this file goes to such lengths to preserve.
+	sum, err := fileDigest(full)
+	if err != nil {
+		return nil, fmt.Errorf("this backup could not be read to confirm its contents")
+	}
+	if sum != rec.SHA256 {
+		return nil, fmt.Errorf("this backup's contents no longer match what was verified, even though its " +
+			"size and timestamp are unchanged; verify it again")
 	}
 	return &rec, nil
 }
