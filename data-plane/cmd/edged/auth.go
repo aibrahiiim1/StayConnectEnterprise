@@ -180,8 +180,8 @@ var rolePerms = map[string]map[string]perm{
 		"guest-accounts": permWrite,
 		"sessions":       permWrite,
 		// The Usage Explorer only ever READS durable accounting; there is no write to grant.
-		"usage": permRead,
-		"auth-methods":   permWrite, "walled-garden": permWrite,
+		"usage":        permRead,
+		"auth-methods": permWrite, "walled-garden": permWrite,
 		"portal-branding": permWrite, "portal-assets": permWrite, "notification-providers": permWrite,
 		"social-providers": permWrite, "stripe-accounts": permWrite,
 		"network": permWrite,
