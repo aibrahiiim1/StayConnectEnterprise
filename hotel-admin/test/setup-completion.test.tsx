@@ -47,7 +47,8 @@ function mock(status: Record<string, any>) {
 }
 
 async function renderSetup() {
-  const Page = (await import("@/app/(app)/setup/enrollment/page")).default;
+  // Activation is a SECTION of the consolidated Appliance & licence screen now, not its own page.
+  const Page = (await import("@/app/(app)/appliance/setup-section")).ApplianceSetupSection;
   render(<Page />);
 }
 

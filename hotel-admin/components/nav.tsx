@@ -174,8 +174,7 @@ const SECTIONS: Section[] = [
       { href: "/operational-alerts", label: "Alerts",      icon: Shield,     resource: "operational-alerts", enabled: CAP_PMS, keywords: "warnings acknowledge" },
       { href: "/audit",              label: "Audit log",   icon: ScrollText, resource: "audit", keywords: "who did what history trail" },
       // Running it.
-      { href: "/setup/enrollment",   label: "Activation",  icon: ServerCog,  resource: "network", keywords: "enrol claim serial activate setup cloud connection central nats outbox first-time" },
-      { href: "/license",            label: "License",     icon: BadgeCheck, resource: "license", keywords: "capacity expiry plan offline activation central connection" },
+      { href: "/appliance",          label: "Appliance & licence", icon: ServerCog, resource: "license", keywords: "enrol claim serial activate setup cloud connection central licence capacity expiry plan offline renewal first-time" },
       { href: "/backups",            label: "Backups",     icon: Archive,    resource: "backups", keywords: "restore snapshot database retention schedule" },
       // Who may.
       { href: "/operators",          label: "Operators",   icon: Users,      resource: "operators", keywords: "staff users roles password" },
