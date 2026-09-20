@@ -487,3 +487,53 @@ func TestTheAccessRulesTravelWithTheRestore(t *testing.T) {
 		t.Error("a privilege replay that continues past an error produces a half-privileged database")
 	}
 }
+
+func TestColumnPrivilegesAreCarriedToo(t *testing.T) {
+	// FOUND ON THE APPLIANCE, and it is the worst shape a bug in this file can take.
+	//
+	// Migration 0083 grants svc_edged five COLUMNS of iam_v2.auth_contexts. A restore ran, and the grant was
+	// gone afterwards -- while the restore reported "all 1491 ownership and access rules reinstated and
+	// verified identical". The capture read nspacl, relacl and proacl; column privileges live in
+	// pg_attribute.attacl, which it never looked at. Both the replay AND the before/after comparison were
+	// blind to the same thing, so the self-check could not possibly have caught it. A capture is only ever
+	// as complete as the catalogs it reads.
+	src, err := os.ReadFile("privileges.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(src)
+
+	if !strings.Contains(s, "pg_attribute") || !strings.Contains(s, "att.attacl") {
+		t.Error("column privileges are not captured; a column grant would be silently dropped by a restore")
+	}
+	if !strings.Contains(s, "GRANT ' || a.privilege_type || ' (' || quote_ident(att.attname) || ') ON TABLE ") {
+		t.Error("the column grant is not emitted in PostgreSQL's GRANT <priv> (<col>) ON TABLE form")
+	}
+	// Dropped columns keep a row in pg_attribute; replaying a grant for one would fail the whole replay.
+	if !strings.Contains(s, "NOT att.attisdropped") {
+		t.Error("dropped columns are not excluded; the replay would fail on a table that ever lost a column")
+	}
+
+	// AND WHAT IT STILL CANNOT CARRY MUST REFUSE, NOT PROCEED.
+	if !strings.Contains(s, "unhandledPrivilegeSQL") {
+		t.Fatal("nothing checks for privilege kinds the capture cannot reproduce")
+	}
+	for _, kind := range []string{"pg_default_acl", "typacl", "pg_policy"} {
+		if !strings.Contains(s, kind) {
+			t.Errorf("%s is neither carried nor refused; it would be lost in silence", kind)
+		}
+	}
+
+	rsrc, _ := os.ReadFile("restore.go")
+	seq := string(rsrc)
+	seq = seq[strings.Index(seq, "func (s *server) runRestore("):]
+	guard := strings.Index(seq, "unhandledPrivileges(ctx, pgDatabase)")
+	capture := strings.Index(seq, "capturePrivileges(ctx, pgDatabase)")
+	dump := strings.Index(seq, "s.dumpTo(ctx,")
+	if guard < 0 {
+		t.Fatal("the restore does not refuse privilege kinds it cannot carry")
+	}
+	if guard > capture || guard > dump {
+		t.Error("the refusal happens after the restore has already started doing work")
+	}
+}

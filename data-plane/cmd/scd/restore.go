@@ -349,6 +349,14 @@ func (s *server) runRestore(ctx context.Context, name string, rec *verifiedRecor
 	// A backup does not contain this: dumps are taken --no-owner --no-privileges. Read first, because it is a
 	// read -- failing here costs nothing, and discovering it after the swap would mean an appliance that
 	// cannot serve and no record of what it was allowed to do. See privileges.go.
+	if kinds, err := unhandledPrivileges(ctx, pgDatabase); err != nil {
+		fail("privileges", "the database's access rules could not be inspected, so the restore was not attempted: "+err.Error())
+		return
+	} else if kinds != "" {
+		fail("privileges", "this database uses access rules this appliance cannot carry across a restore ("+
+			kinds+"), so the restore was not attempted. Restoring would silently drop them.")
+		return
+	}
 	privileges, err := capturePrivileges(ctx, pgDatabase)
 	if err != nil {
 		fail("privileges", "the database's access rules could not be read, so the restore was not attempted: "+err.Error())
