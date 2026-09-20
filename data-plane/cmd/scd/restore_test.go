@@ -271,6 +271,125 @@ func TestTheRequestDoesNotWaitForTheRestore(t *testing.T) {
 	}
 }
 
+func TestVerificationIsBoundToTHEBYTESNotTheirSizeAndTimestamp(t *testing.T) {
+	// THE HOLE THIS CLOSES, demonstrated rather than described.
+	//
+	// The marker used to record only size and modification time. Both are metadata, and anybody able to
+	// write the file is able to write them back: truncate an archive, pad it to its original length, put the
+	// timestamp back with `touch -r`, and a corrupt backup presented itself as verified and was eligible for
+	// a restore that replaces a hotel's data. That is not hypothetical -- it is exactly how the deliberate
+	// failure proof for this feature had to be constructed, which is what showed the check was a change
+	// notice rather than an integrity check.
+	dir := t.TempDir()
+	defer scdBackupDirForTest(t, dir)()
+
+	name := "db-20260921T090000Z.sql.gz"
+	path := filepath.Join(dir, name)
+	original := []byte("the contents that were actually verified")
+	if err := os.WriteFile(path, original, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	writeVerifiedMarker(name, 141)
+
+	rec, err := readVerifiedMarker(name)
+	if err != nil {
+		t.Fatalf("an unchanged verified backup was refused: %v", err)
+	}
+	if rec.SHA256 == "" {
+		t.Fatal("the marker records no digest, so it still vouches for metadata rather than content")
+	}
+	before, _ := os.Stat(path)
+
+	// SAME LENGTH, SAME MODIFICATION TIME, DIFFERENT BYTES.
+	replaced := []byte("the contents that were NOT verified.....")
+	if len(replaced) != len(original) {
+		t.Fatalf("the test's own premise is broken: %d vs %d bytes", len(replaced), len(original))
+	}
+	if err := os.WriteFile(path, replaced, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, before.ModTime(), before.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.Stat(path)
+	if after.Size() != before.Size() || !after.ModTime().Equal(before.ModTime()) {
+		t.Fatal("the test failed to forge size and mtime, so it is not testing what it claims")
+	}
+
+	_, err = readVerifiedMarker(name)
+	if err == nil {
+		t.Fatal("a backup whose CONTENT changed was still accepted for restore; the check is not content-bound")
+	}
+	if !strings.Contains(err.Error(), "verify it again") {
+		t.Errorf("the refusal does not tell the operator what to do: %q", err)
+	}
+	if !strings.Contains(err.Error(), "size and timestamp are unchanged") {
+		t.Errorf("the refusal does not explain why it looks unchanged, which is the confusing part: %q", err)
+	}
+}
+
+func TestAMarkerWithNoDigestIsNotVerified(t *testing.T) {
+	// Markers written before content checks existed carry no sha256. Treating one as verified would be
+	// trusting the single field that was never recorded, on the one operation that can lose a hotel's data.
+	dir := t.TempDir()
+	defer scdBackupDirForTest(t, dir)()
+
+	name := "db-20260921T091111Z.sql.gz"
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("an archive from before digests"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	fi, _ := os.Stat(path)
+	legacy, _ := json.Marshal(map[string]any{
+		"verified_at": time.Now().UTC(), "size_bytes": fi.Size(),
+		"mod_time": fi.ModTime().UTC(), "tables": 141,
+	})
+	if err := os.WriteFile(verifiedMarker(name), legacy, 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := readVerifiedMarker(name)
+	if err == nil {
+		t.Fatal("a pre-digest marker was accepted; what it vouched for cannot be established")
+	}
+	if !strings.Contains(err.Error(), "verify it again") {
+		t.Errorf("the refusal does not tell the operator what to do: %q", err)
+	}
+}
+
+func TestTheDigestIsCheckedAtTheRestoreBoundaryNotOnlyInTheUI(t *testing.T) {
+	// The screen checks too, and the screen is not the security boundary: it can be stale, a second tab, or
+	// a curl. Asserted on the source because the property is WHERE the check happens.
+	src, err := os.ReadFile("restore.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(src)
+
+	// readVerifiedMarker must recompute, not trust the recorded digest.
+	read := s[strings.Index(s, "func readVerifiedMarker("):]
+	if end := strings.Index(read, "\n// ---"); end > 0 {
+		read = read[:end]
+	}
+	if !strings.Contains(read, "fileDigest(full)") {
+		t.Error("readVerifiedMarker does not recompute the digest; it is trusting the marker's own claim")
+	}
+
+	// And backupRestore must go through it before anything destructive.
+	h := s[strings.Index(s, "func (s *server) backupRestore("):]
+	if end := strings.Index(h, "func (s *server) runRestore("); end > 0 {
+		h = h[:end]
+	}
+	gate := strings.Index(h, "readVerifiedMarker(in.Name)")
+	start := strings.Index(h, "go func()")
+	if gate < 0 {
+		t.Fatal("the restore no longer checks verification at all")
+	}
+	if start >= 0 && gate > start {
+		t.Error("verification is checked after the restore has already been started")
+	}
+}
+
 // ---- helpers --------------------------------------------------------------------------------------------
 
 // restoreSequence returns the BODY of backupRestore.
@@ -366,5 +485,55 @@ func TestTheAccessRulesTravelWithTheRestore(t *testing.T) {
 	}
 	if !strings.Contains(p, "ON_ERROR_STOP=1") {
 		t.Error("a privilege replay that continues past an error produces a half-privileged database")
+	}
+}
+
+func TestColumnPrivilegesAreCarriedToo(t *testing.T) {
+	// FOUND ON THE APPLIANCE, and it is the worst shape a bug in this file can take.
+	//
+	// Migration 0083 grants svc_edged five COLUMNS of iam_v2.auth_contexts. A restore ran, and the grant was
+	// gone afterwards -- while the restore reported "all 1491 ownership and access rules reinstated and
+	// verified identical". The capture read nspacl, relacl and proacl; column privileges live in
+	// pg_attribute.attacl, which it never looked at. Both the replay AND the before/after comparison were
+	// blind to the same thing, so the self-check could not possibly have caught it. A capture is only ever
+	// as complete as the catalogs it reads.
+	src, err := os.ReadFile("privileges.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(src)
+
+	if !strings.Contains(s, "pg_attribute") || !strings.Contains(s, "att.attacl") {
+		t.Error("column privileges are not captured; a column grant would be silently dropped by a restore")
+	}
+	if !strings.Contains(s, "GRANT ' || a.privilege_type || ' (' || quote_ident(att.attname) || ') ON TABLE ") {
+		t.Error("the column grant is not emitted in PostgreSQL's GRANT <priv> (<col>) ON TABLE form")
+	}
+	// Dropped columns keep a row in pg_attribute; replaying a grant for one would fail the whole replay.
+	if !strings.Contains(s, "NOT att.attisdropped") {
+		t.Error("dropped columns are not excluded; the replay would fail on a table that ever lost a column")
+	}
+
+	// AND WHAT IT STILL CANNOT CARRY MUST REFUSE, NOT PROCEED.
+	if !strings.Contains(s, "unhandledPrivilegeSQL") {
+		t.Fatal("nothing checks for privilege kinds the capture cannot reproduce")
+	}
+	for _, kind := range []string{"pg_default_acl", "typacl", "pg_policy"} {
+		if !strings.Contains(s, kind) {
+			t.Errorf("%s is neither carried nor refused; it would be lost in silence", kind)
+		}
+	}
+
+	rsrc, _ := os.ReadFile("restore.go")
+	seq := string(rsrc)
+	seq = seq[strings.Index(seq, "func (s *server) runRestore("):]
+	guard := strings.Index(seq, "unhandledPrivileges(ctx, pgDatabase)")
+	capture := strings.Index(seq, "capturePrivileges(ctx, pgDatabase)")
+	dump := strings.Index(seq, "s.dumpTo(ctx,")
+	if guard < 0 {
+		t.Fatal("the restore does not refuse privilege kinds it cannot carry")
+	}
+	if guard > capture || guard > dump {
+		t.Error("the refusal happens after the restore has already started doing work")
 	}
 }

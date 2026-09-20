@@ -100,6 +100,18 @@ FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace CROSS JOIN LATERAL
 WHERE n.nspname IN ('public','iam_v2') AND c.relkind = 'S'
   AND pg_get_userbyid(a.grantee) <> pg_get_userbyid(c.relowner)
 UNION ALL
+-- COLUMN PRIVILEGES. These live in pg_attribute.attacl, nowhere near pg_class.relacl, and a capture that
+-- reads only relacl is blind to them in BOTH directions: the replay drops them and the before/after
+-- comparison reports everything identical, because neither side can see the thing that was lost.
+SELECT 3, 'GRANT ' || a.privilege_type || ' (' || quote_ident(att.attname) || ') ON TABLE '
+          || quote_ident(n.nspname) || '.' || quote_ident(c.relname)
+          || ' TO ' || CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(a.grantee)) END || ';'
+FROM pg_attribute att
+JOIN pg_class c ON c.oid = att.attrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+CROSS JOIN LATERAL aclexplode(att.attacl) a
+WHERE n.nspname IN ('public','iam_v2') AND att.attnum > 0 AND NOT att.attisdropped
+UNION ALL
 SELECT 3, 'GRANT ' || a.privilege_type || ' ON FUNCTION ' || quote_ident(n.nspname) || '.' || quote_ident(p.proname)
           || '(' || pg_get_function_identity_arguments(p.oid) || ')'
           || ' TO ' || CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(a.grantee)) END || ';'
@@ -107,6 +119,41 @@ FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace CROSS JOIN LATERAL 
 WHERE n.nspname IN ('public','iam_v2')
   AND pg_get_userbyid(a.grantee) <> pg_get_userbyid(p.proowner)
 ORDER BY 1, 2`
+
+// unhandledPrivilegeSQL counts the privilege kinds this file does NOT know how to reproduce.
+//
+// WHY A COUNT AND NOT A BEST EFFORT. A restore that carries most of the privileges and loses the rest is the
+// worst outcome available: the appliance comes up, serves a while, and fails on whichever path needed the
+// one that went missing -- and the before/after comparison cannot catch it, because a capture is only as
+// complete as the catalogs it reads. That is not a hypothetical. Column privileges were missed exactly this
+// way, and the restore reported "all rules reinstated and verified identical" while one had been dropped.
+//
+// So anything not handled here stops the restore BEFORE it touches anything, and says what it found. None of
+// these exist on this appliance today; the point is that the day one does, it is a refusal rather than a
+// discovery weeks later.
+const unhandledPrivilegeSQL = `
+SELECT coalesce(string_agg(what || ' (' || n::text || ')', ', '), '')
+FROM (
+  SELECT 'default privileges' AS what, count(*) AS n FROM pg_default_acl
+  UNION ALL
+  SELECT 'type privileges', count(*) FROM pg_type t JOIN pg_namespace ns ON ns.oid = t.typnamespace
+   WHERE ns.nspname IN ('public','iam_v2') AND t.typacl IS NOT NULL
+  UNION ALL
+  SELECT 'row-level security policies', count(*) FROM pg_policy pol
+     JOIN pg_class pc ON pc.oid = pol.polrelid JOIN pg_namespace pn ON pn.oid = pc.relnamespace
+   WHERE pn.nspname IN ('public','iam_v2')
+) k WHERE n > 0`
+
+// unhandledPrivileges returns a description of any privilege kind the capture cannot reproduce, or "".
+func unhandledPrivileges(ctx context.Context, db string) (string, error) {
+	out, err := exec.CommandContext(ctx, "docker", "exec", pgContainer,
+		"psql", "-U", pgUser, "-d", db, "-tA", "-v", "ON_ERROR_STOP=1",
+		"-c", unhandledPrivilegeSQL).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%s", tailLine(string(out)))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
 
 // capturePrivileges reads the ownership and access state of one database as replayable statements.
 //

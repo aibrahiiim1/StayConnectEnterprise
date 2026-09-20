@@ -427,22 +427,30 @@ export function ApplianceSetupSection() {
         </Card>
       )}
 
-      {/* ---------- OFFLINE LICENCE RENEWAL (already assigned) ---------- */}
+      {/* ---------- LICENCE, ONCE ONBOARDING IS DONE ---------- */}
       {enrolled && (
         <Card>
           <CardBody className="space-y-3">
             {/*
-              ONE JOURNEY, TWO JOBS, AND A LINK BETWEEN THEM.
+              TWO JOBS, AND ONLY ONE OF THEM IS THIS SCREEN'S.
 
-              Activation is how an appliance gets connected and how that connection is recovered -- including
-              the offline upload below, which is the recovery path and belongs nowhere else. License is where
-              the licence LIVES: capacity, expiry, identity, enforcement. They were confusing because the
-              License screen also called itself "Activation" while this one restated the licence without
-              saying where the rest of it was. The titles are separated now and this says where to look.
+              Setup ONBOARDS an appliance: it establishes assignment, trust material and the first licence,
+              which is why the offline path above accepts a signed activation package -- that package carries
+              all three together and there is nowhere else it could go.
+
+              Renewing a licence afterwards is a different job, and it lived here too: a second file input
+              that installed a licence exactly as the Licence section's own upload does. Two controls that
+              install the same thing is not a convenience. It is two places to look when a renewal is
+              refused, two sets of wording to keep true, and a standing invitation to upload a renewal into
+              the onboarding flow of an appliance that finished onboarding months ago.
+
+              So once the appliance is ACTIVATED this becomes a status line and a pointer. Before activation
+              it stays, because an appliance part-way through onboarding may legitimately still need to
+              complete the licence half of it here.
             */}
             <div className="flex items-center justify-between gap-3">
               <div className="text-base font-semibold">Licence</div>
-              <Link href="/license" className="text-xs text-muted-foreground hover:text-foreground">
+              <Link href="/appliance?section=license" className="text-xs text-muted-foreground hover:text-foreground">
                 Capacity, expiry and identity &rarr;
               </Link>
             </div>
@@ -450,16 +458,28 @@ export function ApplianceSetupSection() {
               <Badge tone={licenseTone(lic?.state)}>{lic?.state || "unknown"}</Badge>
               {lic?.valid_until && <span className="text-muted-foreground">valid until {lic.valid_until}</span>}
             </div>
-            <p className="text-sm text-muted-foreground">
-              To renew offline: generate the new licence in the control panel under <b>Commercial →
-              Licenses</b>, download it, and upload it here. An older licence than the one installed is
-              refused, so a renewal can never roll you backwards.
-            </p>
-            <Input type="file" accept=".json,application/json" disabled={!writable || pkgBusy}
-              onChange={(e) => onPackageFile(e.target.files?.[0] ?? null)} />
-            {pkgErr && <div className="rounded border border-destructive/25 bg-destructive-subtle p-2 text-sm text-destructive-subtle-foreground">{pkgErr}</div>}
-            {pkgOk && <div className="text-sm text-success-subtle-foreground">{pkgOk}</div>}
-            {pkgBusy && <div className="flex items-center gap-2 text-sm text-muted"><Loader2 className="h-4 w-4 animate-spin" /> Checking and applying…</div>}
+            {complete ? (
+              <p className="text-sm text-muted-foreground">
+                This appliance is activated, so renewals happen in one place:{" "}
+                <Link href="/appliance?section=license" className="underline underline-offset-2">Licence</Link>.
+                Generate the new licence in the control panel under <b>Commercial &rarr; Licenses</b>,
+                download it, and upload it there. An older licence than the one installed is refused, so a
+                renewal can never roll you backwards.
+              </p>
+            ) : (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  Onboarding is not finished, so the licence half of it can still be completed here. Generate
+                  the licence in the control panel under <b>Commercial &rarr; Licenses</b>, download it, and
+                  upload it below. An older licence than the one installed is refused.
+                </p>
+                <Input type="file" accept=".json,application/json" disabled={!writable || pkgBusy}
+                  onChange={(e) => onPackageFile(e.target.files?.[0] ?? null)} />
+                {pkgErr && <div className="rounded border border-destructive/25 bg-destructive-subtle p-2 text-sm text-destructive-subtle-foreground">{pkgErr}</div>}
+                {pkgOk && <div className="text-sm text-success-subtle-foreground">{pkgOk}</div>}
+                {pkgBusy && <div className="flex items-center gap-2 text-sm text-muted"><Loader2 className="h-4 w-4 animate-spin" /> Checking and applying&hellip;</div>}
+              </>
+            )}
           </CardBody>
         </Card>
       )}

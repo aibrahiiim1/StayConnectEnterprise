@@ -729,33 +729,26 @@ export default function DashboardPage() {
                   makes them actionable, and the reassurance that no guest depends on this queue.
                 */}
                 {/*
-                  WHAT THE CLOUD ROW BECAME, AND WHY IT IS NOT A SERVICE ROW ANY MORE.
+                  THE CLOUD IS NOT A RUNTIME DEPENDENCY OF THIS SITE, SO IT IS NOT LISTED AS ONE.
 
-                  This card answers one question: is anything this appliance RUNS in trouble? The site
-                  database and the session controller belong to it. "Reporting to the StayConnect cloud" did
-                  not — under the licensing-only model there is no reporting, by decision, so the row
-                  reported the health of something that does not run. It also linked to /network/cloud,
-                  which is a redirect to License, and sat a few centimetres below a Licence tile that had
-                  already answered the only cloud question an operator has.
+                  This card answers exactly one question: is anything the appliance RUNS in trouble? The site
+                  database and the session controller are. Central is not — at this property it serves the
+                  licence and nothing else, by decision, so a row here reported the health of something that
+                  does not run.
 
-                  Three presentations of one fact, one of them shaped like a fault. The fact is now stated
-                  once, as what it is -- a decision about this property -- and points at the single screen
-                  that owns licensing.
+                  It went through two wrong shapes before this one. First a service row reading "not
+                  draining", which presented a correct configuration as a fault and whose obvious repair is
+                  the one thing that must never happen. Then an explanatory box, which was honest but still
+                  repeated -- permanently, on the operational dashboard -- a healthy fact the Appliance &
+                  licence card at the top of this same page had already given.
+
+                  A dashboard earns attention by spending it only on what changed. So in the normal
+                  licensing-only state this card says nothing about the cloud at all: the Appliance & licence
+                  card owns that status, and anything genuinely wrong arrives through the attention list
+                  above, which routes to the same place. If the mode is ever something OTHER than
+                  licensing-only, the cloud IS a live dependency and it comes back as an ordinary row.
                 */}
-                {outbox.headline === "Licensing only" ? (
-                  <div className="rounded-lg border border-border bg-surface px-3 py-2.5">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-sm font-medium">StayConnect cloud</span>
-                      <Link href="/appliance?section=license" className="text-xs text-muted-foreground hover:text-foreground">
-                        Appliance &amp; licence &rarr;
-                      </Link>
-                    </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Used for this appliance&rsquo;s licence only. Operational reporting is intentionally
-                      off — nothing is queued and nothing needs reconnecting.
-                    </p>
-                  </div>
-                ) : (
+                {outbox.headline !== "Licensing only" && (
                   <ServiceRow title="Reporting to the StayConnect cloud" info={outbox} href="/appliance?section=license" />
                 )}
                 <Separator />
