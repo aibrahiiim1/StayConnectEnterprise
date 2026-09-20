@@ -13,6 +13,10 @@
 // and History keeps them visible for audit.
 
 import { Fragment, useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { ChevronRight } from "lucide-react";
+import { formatDate } from "@/lib/utils";
+import { formatBytes } from "@/lib/bytes";
 import { api, ApiError, ListResp } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
@@ -498,52 +502,125 @@ function toLocalInput(iso?: string | null): string | undefined {
   return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}T${pad(t.getHours())}:${pad(t.getMinutes())}`;
 }
 
+
+/** One offer and what became of it. The ids remain for support; the words are what the screen leads with. */
+export type GuestActivityRow = {
+  quote_id: string; purchase_id?: string; package_revision_id?: string;
+  offered_at?: string; taken_at?: string; expires_at?: string;
+  room?: string; pms_interface?: string; reservation?: string; stay_id?: string; sign_in_method?: string;
+  package: string; package_type?: string; price_minor: number; currency?: string;
+  outcome: string; trigger?: string;
+  service_plan?: string; quota_bytes?: number | null; entitlement_id?: string;
+};
+
 function InspectionTab({ guard, setErr }: TabProps) {
-  const [quotes, setQuotes] = useState<QuoteInspect[]>([]);
-  const [purchases, setPurchases] = useState<PurchaseInspect[]>([]);
+  // GUEST ACTIVITY, REWRITTEN AROUND THE QUESTION AN OPERATOR ASKS.
+  //
+  // What it was: two tables of identifiers. "Packages offered to guests" listed a quote uuid, a package
+  // revision uuid, a price and two timestamps. "Packages taken by guests" listed a purchase uuid, another
+  // revision uuid and a state token. Nothing said which guest, which room, which package by name, or what
+  // access any of it produced -- so the screen could not answer a single question a hotel actually has.
+  //
+  // What it is: one list, one row per offer, in words. Which room (with the PMS connection that gives the
+  // room meaning), how the guest signed in, which package, whether they took it, what it cost, and what
+  // access it actually granted. The quote, purchase and revision ids are still here, under Details, because
+  // support needs them -- they are simply no longer the answer.
+  const [rows, setRows] = useState<GuestActivityRow[] | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const [q, p] = await Promise.all([
-          api.get<ListResp<QuoteInspect>>("/commercial-packages/quotes"),
-          api.get<ListResp<PurchaseInspect>>("/commercial-packages/purchases"),
-        ]);
-        setQuotes(q.data ?? []); setPurchases(p.data ?? []);
-      } catch (e) { if (!guard(e)) setErr((e as Error)?.message ?? "Failed to load"); }
+        const r = await api.get<ListResp<GuestActivityRow>>("/commercial-packages/guest-activity");
+        setRows(r.data ?? []);
+      } catch (e) { if (!guard(e)) setErr((e as Error)?.message ?? "Guest activity could not be read"); }
     })();
   }, [guard, setErr]);
 
+  if (rows === null) return <SkeletonRows rows={5} cols={4} />;
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        title="No guest has been offered a package yet"
+        hint="This fills in as guests sign in and choose their internet. Nothing here means nothing has been offered, not that something is wrong."
+      />
+    );
+  }
+
   return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader><CardTitle>Packages offered to guests</CardTitle></CardHeader>
-        <CardBody>
-          {quotes.length === 0 ? <EmptyState title="No quotes" /> : (
-            <Table>
-              <THead><TR><TH>ID</TH><TH>Revision</TH><TH>Price</TH><TH>Expires</TH><TH>Consumed</TH></TR></THead>
-              <tbody>{quotes.map((q) => (
-                <TR key={q.id}><TD><MonoId value={q.id} title="Quote" /></TD><TD><MonoId value={q.package_revision_id} title="Package version" /></TD>
-                  <TD>{q.price_minor === 0 ? "free" : `${q.price_minor} ${q.currency}`}</TD><TD className="text-xs">{q.expires_at}</TD><TD className="text-xs">{q.consumed_at || "—"}</TD></TR>
-              ))}</tbody>
-            </Table>
-          )}
-        </CardBody>
-      </Card>
-      <Card>
-        <CardHeader><CardTitle>Packages taken by guests</CardTitle></CardHeader>
-        <CardBody>
-          {purchases.length === 0 ? <EmptyState title="No purchases" /> : (
-            <Table>
-              <THead><TR><TH>ID</TH><TH>Revision</TH><TH>State</TH><TH>Amount</TH></TR></THead>
-              <tbody>{purchases.map((p) => (
-                <TR key={p.id}><TD><MonoId value={p.id} title="Purchase" /></TD><TD><MonoId value={p.package_revision_id} title="Package version" /></TD>
-                  <TD><Badge tone={p.state === "GRANTED" ? "ok" : "default"}>{p.state}</Badge></TD><TD>{p.amount_minor === 0 ? "free" : `${p.amount_minor} ${p.currency}`}</TD></TR>
-              ))}</tbody>
-            </Table>
-          )}
-        </CardBody>
-      </Card>
-    </div>
+    <Card>
+      <CardHeader>
+        <div>
+          <CardTitle>Guest activity</CardTitle>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Every internet package offered to a guest, and what became of it.
+          </p>
+        </div>
+      </CardHeader>
+      <CardBody>
+        <ul className="divide-y">
+          {rows.map((r, i) => {
+            const id = `${r.quote_id}-${i}`;
+            const isOpen = open === id;
+            const free = !r.price_minor;
+            return (
+              <li key={id} className="py-3">
+                <button type="button" className="flex w-full items-start gap-3 text-left"
+                  aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : id)}>
+                  <ChevronRight className={`mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform ${isOpen ? "rotate-90" : ""}`} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium">
+                        {r.room ? `Room ${r.room}` : r.sign_in_method ? `A ${r.sign_in_method.toLowerCase()} guest` : "A guest"}
+                      </span>
+                      <span className="text-muted-foreground">was offered</span>
+                      <span className="font-medium">{r.package}</span>
+                      <OutcomeBadge outcome={r.outcome} />
+                    </div>
+                    <div className="mt-0.5 text-xs text-muted-foreground">
+                      {free ? "Free" : `${(r.price_minor / 100).toFixed(2)} ${r.currency || ""}`.trim()}
+                      {r.pms_interface ? ` · ${r.pms_interface}` : ""}
+                      {r.taken_at ? ` · taken ${formatDate(r.taken_at)}` : r.expires_at ? ` · offer expired ${formatDate(r.expires_at)}` : ""}
+                      {r.service_plan ? ` · got ${r.service_plan}` : ""}
+                    </div>
+                  </div>
+                </button>
+
+                {isOpen && (
+                  <div className="ml-7 mt-3 space-y-2 rounded-md border bg-surface p-3 text-xs">
+                    <dl className="grid grid-cols-[10rem_1fr] gap-x-4 gap-y-1">
+                      {r.reservation && <><dt className="text-muted-foreground">Reservation</dt><dd className="m-0">{r.reservation}</dd></>}
+                      {r.sign_in_method && <><dt className="text-muted-foreground">Signed in with</dt><dd className="m-0">{r.sign_in_method}</dd></>}
+                      {r.package_type && <><dt className="text-muted-foreground">Package type</dt><dd className="m-0">{r.package_type.replace(/_/g, " ").toLowerCase()}</dd></>}
+                      {r.trigger && <><dt className="text-muted-foreground">Chosen by</dt><dd className="m-0">{r.trigger.replace(/_/g, " ").toLowerCase()}</dd></>}
+                      {r.service_plan && <><dt className="text-muted-foreground">Access granted</dt><dd className="m-0">{r.service_plan}</dd></>}
+                      {r.quota_bytes != null && <><dt className="text-muted-foreground">Data allowance</dt><dd className="m-0">{formatBytes(r.quota_bytes)}</dd></>}
+                      <dt className="text-muted-foreground">Quote id</dt><dd className="m-0 break-all font-mono">{r.quote_id}</dd>
+                      {r.purchase_id && <><dt className="text-muted-foreground">Purchase id</dt><dd className="m-0 break-all font-mono">{r.purchase_id}</dd></>}
+                      {r.package_revision_id && <><dt className="text-muted-foreground">Package version</dt><dd className="m-0 break-all font-mono">{r.package_revision_id}</dd></>}
+                    </dl>
+                    {r.stay_id && (
+                      <Link href="/usage" className="inline-block text-primary hover:underline">
+                        See what this stay actually used &rarr;
+                      </Link>
+                    )}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </CardBody>
+    </Card>
   );
+}
+
+/** The four outcomes, in words. TAKEN is the ordinary one and is deliberately quiet. */
+function OutcomeBadge({ outcome }: { outcome: string }) {
+  switch (outcome) {
+    case "TAKEN": return <Badge tone="ok">Taken</Badge>;
+    case "NOT_TAKEN": return <Badge tone="default">Not taken yet</Badge>;
+    case "EXPIRED": return <Badge tone="default">Offer expired</Badge>;
+    default: return <Badge tone="warn">{outcome.replace(/_/g, " ").toLowerCase()}</Badge>;
+  }
 }

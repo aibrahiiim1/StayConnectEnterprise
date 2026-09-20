@@ -234,7 +234,7 @@ func (s *server) getStayUsage(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(st.external_reservation_id, ''),
 		       st.status, st.arrival, st.departure, st.effective_checkout_at,
 		       e.data_quota_bytes, e.consumed_data_bytes, COALESCE(e.terminal_reason, ''),
-		       COALESCE(spr.display_name, '')
+		       COALESCE(spr.name, '')
 		  FROM iam_v2.stays st
 		  LEFT JOIN iam_v2.pms_interfaces pi ON pi.id = st.pms_interface_id
 		  LEFT JOIN LATERAL (
