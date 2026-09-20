@@ -63,6 +63,11 @@ func (s *server) backupsRoutes() http.Handler {
 	r.Post("/run", s.runDatabaseBackup)
 	r.Get("/artifacts/{name}/download", s.downloadBackupArtifact)
 	r.Post("/artifacts/{name}/verify", s.verifyBackupArtifact)
+	// THE DESTRUCTIVE ONE. Password step-up and a typed confirmation inside the handler; see
+	// restoreDatabaseBackup. Only a backup that has passed Verify is accepted, enforced again by scd.
+	r.Post("/artifacts/{name}/restore", s.restoreDatabaseBackup)
+	r.Get("/maintenance", s.backupMaintenance)
+	r.Get("/last-restore", s.lastRestoreResult)
 	return r
 }
 
@@ -446,4 +451,103 @@ func lastLine(s string) string {
 		return last[:300] + "…"
 	}
 	return last
+}
+
+// ------------------------------------------------------------------ RESTORE, THE AUTHORISED HALF --------
+
+// restoreDatabaseBackup is the operator-facing door to the one destructive operation in the product.
+//
+// WHAT THIS SIDE IS RESPONSIBLE FOR. Everything about WHO: the permission, the password step-up and the
+// audit record. The mechanics -- safety backup, staging load, rename swap, integrity check, rollback -- are
+// scd's, over its private socket. See cmd/scd/restore.go.
+//
+// THE AUDIT IS WRITTEN FIRST, DELIBERATELY. A restore replaces the database, including the audit table, so a
+// record written afterwards lands in restored data and describes an event that data has never seen. Written
+// first, it is captured by the safety backup scd takes -- which is the copy that would be used if anything
+// went wrong, and therefore the copy that most needs to say what was attempted.
+func (s *server) restoreDatabaseBackup(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if _, ok := resolveArtifact(name); !ok || !strings.HasPrefix(name, "db-") {
+		jsonErr(w, http.StatusNotFound, "not_found", "no such database backup")
+		return
+	}
+	var in struct {
+		Password string `json:"password"`
+		Confirm  string `json:"confirm"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")
+		return
+	}
+	// TWO INDEPENDENT CONFIRMATIONS, because one is a click and this is not a click-sized decision. The
+	// password proves who is asking; typing the backup's own name proves they know WHICH backup they chose.
+	if in.Confirm != name {
+		jsonErr(w, http.StatusBadRequest, "confirm_mismatch",
+			"type the name of the backup you are restoring to confirm")
+		return
+	}
+	if !s.reauth(r, in.Password) {
+		jsonErr(w, http.StatusUnauthorized, "reauth_required",
+			"confirm your password. Restoring replaces this property's data with the contents of the backup.")
+		return
+	}
+
+	s.audit(r, "backup.restore_started", "backup", name, map[string]any{"backup": name})
+
+	code, body, err := s.scd.call(r.Context(), http.MethodPost, "/v1/backup/restore",
+		map[string]any{"name": name})
+	if err != nil || code != http.StatusOK {
+		detail := scdDetail(body, err)
+		s.audit(r, "backup.restore_failed", "backup", name, map[string]any{"detail": detail})
+		jsonErr(w, http.StatusBadGateway, "restore_failed", detail)
+		return
+	}
+	var out map[string]any
+	if jerr := json.Unmarshal(body, &out); jerr != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "the restore result could not be read")
+		return
+	}
+	okFlag, _ := out["ok"].(bool)
+	summary, _ := out["summary"].(string)
+	if okFlag {
+		s.audit(r, "backup.restore_succeeded", "backup", name, map[string]any{"summary": summary})
+	} else {
+		s.audit(r, "backup.restore_failed", "backup", name, map[string]any{"summary": summary})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// backupMaintenance reports whether the appliance is currently withholding service, and why.
+//
+// Read by the Backups screen so an operator who reloads mid-restore is told what is happening rather than
+// meeting a wall of failed requests.
+func (s *server) backupMaintenance(w http.ResponseWriter, r *http.Request) {
+	code, body, err := s.scd.call(r.Context(), http.MethodGet, "/v1/maintenance", nil)
+	if err != nil || code != http.StatusOK {
+		// scd being unreachable is not proof of maintenance, and claiming it would be its own false alarm.
+		writeJSON(w, http.StatusOK, map[string]any{"active": false, "unknown": true})
+		return
+	}
+	var out map[string]any
+	if json.Unmarshal(body, &out) != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"active": false, "unknown": true})
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// lastRestoreResult serves the durable outcome of the most recent restore, which survives the service
+// restarts a restore performs -- including edged's own.
+func (s *server) lastRestoreResult(w http.ResponseWriter, r *http.Request) {
+	code, body, err := s.scd.call(r.Context(), http.MethodGet, "/v1/backup/last-restore", nil)
+	if err != nil || code != http.StatusOK {
+		writeJSON(w, http.StatusOK, map[string]any{"present": false})
+		return
+	}
+	var out map[string]any
+	if json.Unmarshal(body, &out) != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"present": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }

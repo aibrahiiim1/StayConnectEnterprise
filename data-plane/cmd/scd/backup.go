@@ -33,11 +33,14 @@ import (
 	"time"
 )
 
+// scdBackupDir is a var rather than a const so tests can point it at a temporary directory. Nothing in the
+// product reassigns it.
+var scdBackupDir = "/opt/stayconnect/backups/db"
+
 const (
-	scdBackupDir = "/opt/stayconnect/backups/db"
-	pgContainer  = "stayconnect-pg"
-	pgUser       = "stayconnect"
-	pgDatabase   = "stayconnect_site"
+	pgContainer = "stayconnect-pg"
+	pgUser      = "stayconnect"
+	pgDatabase  = "stayconnect_site"
 )
 
 // safeBackupName bounds what verify/download may name. The caller is edged, but a path joined from a string
@@ -182,6 +185,10 @@ func (s *server) backupVerify(w http.ResponseWriter, r *http.Request) {
 	}
 	if tables == 0 {
 		res["detail"] = "the dump loaded but produced no tables"
+	} else {
+		// A SUCCESSFUL VERIFICATION IS RECORDED, because restore requires one. The marker names the size and
+		// mtime of the archive it vouches for, so a file replaced under the same name stops being verified.
+		writeVerifiedMarker(in.Name, tables)
 	}
 	writeJSON(w, http.StatusOK, res)
 }
@@ -233,4 +240,45 @@ func tailLine(s string) string {
 		return last[:300] + "…"
 	}
 	return last
+}
+
+// dumpTo writes a compressed logical dump under the given name and returns it.
+//
+// FACTORED OUT OF backupRun so that the safety copy a restore takes is produced by exactly the same code as
+// an operator's backup -- same flags, same .partial discipline, same empty-dump check, same ownership. A
+// second implementation of "take a backup" is the one that turns out to differ on the day it matters.
+func (s *server) dumpTo(ctx context.Context, name string) (string, error) {
+	if err := os.MkdirAll(scdBackupDir, 0o750); err != nil {
+		return "", fmt.Errorf("the backup directory could not be created: %w", err)
+	}
+	dest := filepath.Join(scdBackupDir, name)
+	partial := dest + ".partial"
+
+	out, err := exec.CommandContext(ctx, "/bin/sh", "-c",
+		"docker exec "+pgContainer+" pg_dump -U "+pgUser+" -d "+pgDatabase+
+			" --no-owner --no-privileges | gzip -c > "+shq(partial)).CombinedOutput()
+	if err != nil {
+		_ = os.Remove(partial)
+		return "", fmt.Errorf("%s", tailLine(string(out)))
+	}
+	if err := os.Rename(partial, dest); err != nil {
+		_ = os.Remove(partial)
+		return "", fmt.Errorf("the completed dump could not be moved into place")
+	}
+	fi, err := os.Stat(dest)
+	if err != nil {
+		return "", fmt.Errorf("the completed dump could not be measured")
+	}
+	// gzip of nothing still exits 0, so an empty dump is a failure wearing a success's clothes.
+	if fi.Size() < 1024 {
+		_ = os.Remove(dest)
+		return "", fmt.Errorf("the dump was empty and has been discarded")
+	}
+	_ = os.Chmod(dest, 0o640)
+	if gid, ok := serviceGroupID(); ok {
+		if err := os.Chown(dest, 0, gid); err != nil {
+			slog.Warn("backup written but not group-readable by the operator surface", "err", err)
+		}
+	}
+	return name, nil
 }
