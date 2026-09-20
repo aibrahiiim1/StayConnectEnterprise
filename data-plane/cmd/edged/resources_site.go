@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -292,12 +293,40 @@ func (s *server) auditRoutes() http.Handler {
 		if v, err := strconv.Atoi(req.URL.Query().Get("limit")); err == nil && v > 0 {
 			limit = min(v, 500)
 		}
+		// THE FILTERS AN OPERATOR ACTUALLY ARRIVES WITH: a period, a person, or a kind of thing.
+		//
+		// All three are applied in SQL rather than in the browser. The trail on a year-old appliance is tens
+		// of thousands of rows, and filtering a page of 100 that the server already chose is the kind of
+		// search box that looks like it works until the day somebody needs it.
 		q := `SELECT ts, actor_type, actor_id, action, target_type, target_id, ip::text, payload
                 FROM audit_log WHERE tenant_id = $1`
 		args := []any{s.tenantID}
+		bind := func(v any) int { args = append(args, v); return len(args) }
+
 		if actions := req.URL.Query().Get("action"); actions != "" {
-			q += ` AND action = ANY($2)`
-			args = append(args, strings.Split(actions, ","))
+			q += fmt.Sprintf(` AND action = ANY($%d)`, bind(strings.Split(actions, ",")))
+		}
+		// A PREFIX, not an exact match, so one category maps to one clause: "network" selects network.apply,
+		// network.guest.created and the rest without the screen enumerating them.
+		if p := req.URL.Query().Get("action_prefix"); p != "" {
+			q += fmt.Sprintf(` AND action LIKE $%d`, bind(p+"%"))
+		}
+		// ONE PLACEHOLDER, REFERENCED TWICE. On a sign-in the operator is the TARGET, not the actor, so an
+		// actor search that only looked at actor_id would miss every login on the appliance -- which is the
+		// most common thing anyone searches for.
+		if v := req.URL.Query().Get("actor"); v != "" {
+			n := bind(v)
+			q += fmt.Sprintf(` AND (actor_id = $%d OR target_id = $%d)`, n, n)
+		}
+		if v := req.URL.Query().Get("from"); v != "" {
+			if t, err := time.Parse(time.RFC3339, v); err == nil {
+				q += fmt.Sprintf(` AND ts >= $%d`, bind(t))
+			}
+		}
+		if v := req.URL.Query().Get("to"); v != "" {
+			if t, err := time.Parse(time.RFC3339, v); err == nil {
+				q += fmt.Sprintf(` AND ts <= $%d`, bind(t))
+			}
 		}
 		q += ` ORDER BY ts DESC LIMIT ` + strconv.Itoa(limit)
 

@@ -130,7 +130,7 @@ export default function DashboardPage() {
   if (health && !health.db) attention.push({ text: describeDatabase(false).summary, href: "/health", tone: "err" });
   if (health && !health.scd) attention.push({ text: describeSessionController(false).summary, href: "/health", tone: "err" });
   if (health && !health.license_installed) {
-    attention.push({ text: "This appliance has no signed licence installed yet — activate it before the property opens.", href: "/license", tone: "warn" });
+    attention.push({ text: "This appliance has no signed licence installed yet — activate it before the property opens.", href: "/appliance?section=setup", tone: "warn" });
   }
   for (const i of snap?.pms.interfaces ?? []) {
     if (i.lifecycle_state === "ACTIVE" && !i.room_auth_ready) {
@@ -174,7 +174,7 @@ export default function DashboardPage() {
   // static by design, and an actionable warning here would be asking somebody to undo a decision — with the
   // obvious "repair" being the one thing that must not happen.
   if (outbox.tone === "err" && health?.sync_outbox?.mode !== "LICENSING_ONLY") {
-    attention.push({ text: outbox.summary, href: "/license", tone: "warn" });
+    attention.push({ text: outbox.summary, href: "/appliance?section=license", tone: "warn" });
   }
 
   const dayLabel = snap?.day_start
@@ -293,21 +293,32 @@ export default function DashboardPage() {
               </Explain>
             }
           />
+          {/*
+            ONE APPLIANCE & LICENCE CARD, not two.
+
+            The dashboard used to carry a Licence tile, and the attention list could separately send an
+            operator to Activation -- two entries for one question ("is this appliance working and licensed?")
+            pointing at two screens that each told half the answer. They are one destination now, and this
+            card leads the operator to the half that needs them: setup while setup is incomplete, the licence
+            once it is done.
+          */}
           <StatCard
-            label="Licence"
+            label="Appliance & licence"
             value={
               <Badge
-                tone={license.tone === "default" ? "default" : license.tone}
+                tone={!health?.license_installed ? "warn" : license.tone === "default" ? "default" : license.tone}
                 className="text-sm"
                 dot
               >
-                {license.headline}
+                {health && !health.license_installed ? "Setup incomplete" : license.headline}
               </Badge>
             }
             icon={<BadgeCheck />}
-            tone={license.tone === "ok" ? "ok" : license.tone === "err" ? "err" : "warn"}
-            href="/license"
-            hint={license.summary}
+            tone={!health?.license_installed ? "warn" : license.tone === "ok" ? "ok" : license.tone === "err" ? "err" : "warn"}
+            href={health && !health.license_installed ? "/appliance?section=setup" : "/appliance?section=license"}
+            hint={health && !health.license_installed
+              ? "This appliance is not licensed yet. Finish setup before the property opens."
+              : license.summary}
           />
         </div>
       )}
@@ -735,8 +746,8 @@ export default function DashboardPage() {
                   <div className="rounded-lg border border-border bg-surface px-3 py-2.5">
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-sm font-medium">StayConnect cloud</span>
-                      <Link href="/license" className="text-xs text-muted-foreground hover:text-foreground">
-                        License &rarr;
+                      <Link href="/appliance?section=license" className="text-xs text-muted-foreground hover:text-foreground">
+                        Appliance &amp; licence &rarr;
                       </Link>
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
@@ -745,7 +756,7 @@ export default function DashboardPage() {
                     </p>
                   </div>
                 ) : (
-                  <ServiceRow title="Reporting to the StayConnect cloud" info={outbox} href="/license" />
+                  <ServiceRow title="Reporting to the StayConnect cloud" info={outbox} href="/appliance?section=license" />
                 )}
                 <Separator />
                 <div className="flex items-center justify-between gap-4 text-xs text-muted-foreground">

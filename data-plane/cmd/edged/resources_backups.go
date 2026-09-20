@@ -63,6 +63,11 @@ func (s *server) backupsRoutes() http.Handler {
 	r.Post("/run", s.runDatabaseBackup)
 	r.Get("/artifacts/{name}/download", s.downloadBackupArtifact)
 	r.Post("/artifacts/{name}/verify", s.verifyBackupArtifact)
+	// THE DESTRUCTIVE ONE. Password step-up and a typed confirmation inside the handler; see
+	// restoreDatabaseBackup. Only a backup that has passed Verify is accepted, enforced again by scd.
+	r.Post("/artifacts/{name}/restore", s.restoreDatabaseBackup)
+	r.Get("/maintenance", s.backupMaintenance)
+	r.Get("/last-restore", s.lastRestoreResult)
 	return r
 }
 
@@ -202,6 +207,46 @@ type backupArtifact struct {
 	// Downloadable is false for directories: a deploy rollback set is a tree, and offering a download that
 	// cannot be produced is worse than not offering one.
 	Downloadable bool `json:"downloadable"`
+
+	// VERIFICATION STATE, READ FROM THE APPLIANCE rather than remembered by the browser.
+	//
+	// Restore eligibility depends on it, so it has to be a fact about the file on disk and not a flag the
+	// screen set after a successful verify. A page reloaded, opened in a second tab, or opened by a different
+	// operator must reach the same answer -- and the answer must go stale the moment the archive changes,
+	// which is what the marker's size/mtime check gives. scd enforces the same rule again before it restores
+	// anything; this is what lets the screen explain WHY the button is unavailable instead of just disabling it.
+	VerifiedAt     string `json:"verified_at,omitempty"`
+	VerifiedTables int    `json:"verified_tables,omitempty"`
+}
+
+// verifiedRecord mirrors the marker scd writes beside a verified archive. Read-only here: edged reports
+// verification, it does not confer it.
+type verifiedRecord struct {
+	VerifiedAt time.Time `json:"verified_at"`
+	SizeBytes  int64     `json:"size_bytes"`
+	ModTime    time.Time `json:"mod_time"`
+	Tables     int       `json:"tables"`
+}
+
+// readVerification returns the marker only when it still describes the file on disk.
+//
+// The size/mtime comparison is the whole point: "this NAME was verified once" is a weaker claim than "these
+// BYTES were verified", and only the second one is safe to restore from. A nightly job that rewrites a name,
+// a hand-copied file, an interrupted write -- all of them must drop the verification rather than inherit it.
+func readVerification(dir, name string) (*verifiedRecord, bool) {
+	b, err := os.ReadFile(filepath.Join(dir, name+".verified"))
+	if err != nil {
+		return nil, false
+	}
+	var rec verifiedRecord
+	if json.Unmarshal(b, &rec) != nil {
+		return nil, false
+	}
+	fi, err := os.Stat(filepath.Join(dir, name))
+	if err != nil || fi.Size() != rec.SizeBytes || !fi.ModTime().UTC().Equal(rec.ModTime) {
+		return nil, false
+	}
+	return &rec, true
 }
 
 // artifactKind names what an artefact IS in the operator's terms, from the naming the appliance already uses.
@@ -227,13 +272,23 @@ func (s *server) listBackupArtifacts(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return
 		}
-		out = append(out, backupArtifact{
+		// A verification marker is bookkeeping, not an artefact. Listing it would put a second entry beside
+		// every verified backup that an operator could neither download nor restore.
+		if strings.HasSuffix(e.Name(), ".verified") {
+			return
+		}
+		a := backupArtifact{
 			Name:         e.Name(),
 			Kind:         artifactKind(e.Name(), e.IsDir()),
 			SizeBytes:    fi.Size(),
 			ModTime:      fi.ModTime().UTC().Format(time.RFC3339),
 			Downloadable: !e.IsDir(),
-		})
+		}
+		if rec, ok := readVerification(base, e.Name()); ok {
+			a.VerifiedAt = rec.VerifiedAt.Format(time.RFC3339)
+			a.VerifiedTables = rec.Tables
+		}
+		out = append(out, a)
 	}
 	if entries, err := os.ReadDir(backupRoot); err == nil {
 		for _, e := range entries {
@@ -446,4 +501,112 @@ func lastLine(s string) string {
 		return last[:300] + "…"
 	}
 	return last
+}
+
+// ------------------------------------------------------------------ RESTORE, THE AUTHORISED HALF --------
+
+// restoreDatabaseBackup is the operator-facing door to the one destructive operation in the product.
+//
+// WHAT THIS SIDE IS RESPONSIBLE FOR. Everything about WHO: the permission, the password step-up and the
+// audit record. The mechanics -- safety backup, staging load, rename swap, integrity check, rollback -- are
+// scd's, over its private socket. See cmd/scd/restore.go.
+//
+// THE AUDIT IS WRITTEN FIRST, DELIBERATELY. A restore replaces the database, including the audit table, so a
+// record written afterwards lands in restored data and describes an event that data has never seen. Written
+// first, it is captured by the safety backup scd takes -- which is the copy that would be used if anything
+// went wrong, and therefore the copy that most needs to say what was attempted.
+func (s *server) restoreDatabaseBackup(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if _, ok := resolveArtifact(name); !ok || !strings.HasPrefix(name, "db-") {
+		jsonErr(w, http.StatusNotFound, "not_found", "no such database backup")
+		return
+	}
+	var in struct {
+		Password string `json:"password"`
+		Confirm  string `json:"confirm"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")
+		return
+	}
+	// TWO INDEPENDENT CONFIRMATIONS, because one is a click and this is not a click-sized decision. The
+	// password proves who is asking; typing the backup's own name proves they know WHICH backup they chose.
+	if in.Confirm != name {
+		jsonErr(w, http.StatusBadRequest, "confirm_mismatch",
+			"type the name of the backup you are restoring to confirm")
+		return
+	}
+	if !s.reauth(r, in.Password) {
+		jsonErr(w, http.StatusUnauthorized, "reauth_required",
+			"confirm your password. Restoring replaces this property's data with the contents of the backup.")
+		return
+	}
+
+	s.audit(r, "backup.restore_started", "backup", name, map[string]any{"backup": name})
+
+	// THIS CALL STARTS THE RESTORE; IT DOES NOT WAIT FOR IT.
+	//
+	// It used to wait, and on the appliance that produced the worst available outcome: the socket call gave up
+	// after fifteen seconds and this handler told the operator the restore had FAILED, while scd went on and
+	// finished it successfully ten seconds later. Someone reading "failed" about a destructive operation that
+	// is still running is one keystroke away from starting a second one -- and scd's deliberate refusal to
+	// retry destructive steps is worth nothing if the screen invites the human to do the retrying.
+	//
+	// A restore can take 45 minutes; no HTTP client, proxy or browser tab should be load-bearing for that
+	// long. scd answers 202 immediately and records the outcome durably. The screen polls /last-restore, which
+	// already had to survive the edged restart the restore itself performs.
+	//
+	// Consequently there is no restore_succeeded audit entry written from here. There could not be an honest
+	// one: the swap replaces the audit table, so a row written after it either lands in restored data or
+	// describes an outcome this process never saw. The durable record in scd is the outcome; restore_started,
+	// written above and captured by the safety backup, is what the audit trail can truthfully hold.
+	code, body, err := s.scd.call(r.Context(), http.MethodPost, "/v1/backup/restore",
+		map[string]any{"name": name})
+	if err != nil || (code != http.StatusOK && code != http.StatusAccepted) {
+		detail := scdDetail(body, err)
+		s.audit(r, "backup.restore_failed", "backup", name, map[string]any{"detail": detail})
+		jsonErr(w, http.StatusBadGateway, "restore_failed", detail)
+		return
+	}
+	var out map[string]any
+	if jerr := json.Unmarshal(body, &out); jerr != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "the restore result could not be read")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, out)
+}
+
+// backupMaintenance reports whether the appliance is currently withholding service, and why.
+//
+// Read by the Backups screen so an operator who reloads mid-restore is told what is happening rather than
+// meeting a wall of failed requests.
+func (s *server) backupMaintenance(w http.ResponseWriter, r *http.Request) {
+	code, body, err := s.scd.call(r.Context(), http.MethodGet, "/v1/maintenance", nil)
+	if err != nil || code != http.StatusOK {
+		// scd being unreachable is not proof of maintenance, and claiming it would be its own false alarm.
+		writeJSON(w, http.StatusOK, map[string]any{"active": false, "unknown": true})
+		return
+	}
+	var out map[string]any
+	if json.Unmarshal(body, &out) != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"active": false, "unknown": true})
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// lastRestoreResult serves the durable outcome of the most recent restore, which survives the service
+// restarts a restore performs -- including edged's own.
+func (s *server) lastRestoreResult(w http.ResponseWriter, r *http.Request) {
+	code, body, err := s.scd.call(r.Context(), http.MethodGet, "/v1/backup/last-restore", nil)
+	if err != nil || code != http.StatusOK {
+		writeJSON(w, http.StatusOK, map[string]any{"present": false})
+		return
+	}
+	var out map[string]any
+	if json.Unmarshal(body, &out) != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"present": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }

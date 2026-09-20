@@ -158,6 +158,25 @@ plan_appliance() {
   else fail "hotel-admin rollback path invalid (current=$cur previous=$prev)"; fi
   retain_group "hotel-admin-release" "$KEEP_RELEASES" "$cur,$prev" $(ls -1d "$ROOT"/releases/hotel-admin/*/ 2>/dev/null | sed 's:/$::')
 
+  # OPERATOR DATABASE BACKUPS, INCLUDING THE SAFETY DUMP EVERY RESTORE TAKES.
+  #
+  # This directory was never swept. The Central role has always retained its dumps from /root/backups, but
+  # the appliance's own -- the ones an operator sees on the Backups page, and the only ones a restore can use
+  # -- accumulated forever. It became urgent when Restore shipped: every attempt, successful or not, writes a
+  # full safety copy of the site here before it touches anything, so the directory now grows by ~27MB per
+  # attempt while the same page shows a disk gauge with nothing on it to explain the climb.
+  #
+  # Same rule as everywhere else: the newest is never deleted, pinned artefacts are never deleted, and
+  # KEEP_DB of them are retained.
+  retain_db "db-dump" "$KEEP_DB" $(ls -1d "$ROOT"/backups/db/*.sql.gz 2>/dev/null)
+
+  # A verification marker whose archive is gone is inert -- scd re-checks size and mtime before trusting one,
+  # so an orphan can never make a missing backup look restorable -- but it should not outlive its subject.
+  for m in "$ROOT"/backups/db/*.verified; do
+    [ -e "$m" ] || continue
+    [ -e "${m%.verified}" ] || R_DEL+=("db-dump|$m|verification marker with no backup")
+  done
+
   # config backups
   retain_group "config-backup" "$KEEP_CONFIG" "" $(ls -1d /etc/netplan/*.bak* /etc/stayconnect/*.bak* 2>/dev/null)
 }

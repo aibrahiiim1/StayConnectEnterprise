@@ -179,7 +179,9 @@ var rolePerms = map[string]map[string]perm{
 	"hotel_it_manager": {
 		"guest-accounts": permWrite,
 		"sessions":       permWrite,
-		"auth-methods":   permWrite, "walled-garden": permWrite,
+		// The Usage Explorer only ever READS durable accounting; there is no write to grant.
+		"usage":        permRead,
+		"auth-methods": permWrite, "walled-garden": permWrite,
 		"portal-branding": permWrite, "portal-assets": permWrite, "notification-providers": permWrite,
 		"social-providers": permWrite, "stripe-accounts": permWrite,
 		"network": permWrite,
@@ -321,7 +323,7 @@ var rolePerms = map[string]map[string]perm{
 		// A viewer sees WHAT the policy is and WHICH devices are waiting it out — both are operational
 		// evidence of the same kind they read everywhere else — and acts on neither.
 		"guest-signin-protection": permRead, "guest-signin-restrictions": permRead,
-		"guest-accounts": permRead, "sessions": permRead, "auth-methods": permRead,
+		"guest-accounts": permRead, "sessions": permRead, "usage": permRead, "auth-methods": permRead,
 		"walled-garden": permRead, "portal-branding": permRead, "portal-assets": permRead, "notification-providers": permRead, "social-providers": permRead,
 		"stripe-accounts": permRead, "audit": permRead, "reports": permRead,
 		"backups": permRead, "license": permRead, "network": permRead, "diagnostics": permRead,

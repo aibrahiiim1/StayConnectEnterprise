@@ -53,6 +53,16 @@ async function installBackend(page: Page, opts: {
     // grace
     if (path === "/commercial-packages/grace" && method === "PUT") { const g = opts.gracePut ?? { status: 200, body: { grace_package_revision_id: "r1" } }; return route.fulfill(json(g.status, g.body)); }
     if (path === "/commercial-packages/grace" && method === "GET") return route.fulfill(json(200, { grace_package_revision_id: "", config: {} }));
+    // GUEST ACTIVITY, which is what the Inspection tab became. The quote and purchase listings below stay
+    // for support; this is the one the screen reads.
+    if (path === "/commercial-packages/guest-activity") return route.fulfill(json(200, list([{
+      quote_id: "q1", purchase_id: "pu1", package_revision_id: "r1",
+      offered_at: "2026-08-01T00:00:00Z", taken_at: "2026-08-01T00:05:00Z", expires_at: "2026-08-01T00:10:00Z",
+      room: "101", pms_interface: "Protel", reservation: "RES-1", stay_id: "st1",
+      sign_in_method: "PMS", package: "Free Internet Package", package_type: "GENERAL",
+      price_minor: 0, currency: "USD", outcome: "TAKEN", trigger: "GUEST_SELECTION",
+      service_plan: "Free Internet", quota_bytes: 1000000000, entitlement_id: "e1",
+    }])));
     // inspection
     if (path === "/commercial-packages/quotes") return route.fulfill(json(200, list([{ id: "q1", package_revision_id: "r1", price_minor: 0, currency: "USD", expires_at: "2026-08-01T00:00:00Z", consumed_at: null }])));
     if (path === "/commercial-packages/purchases") return route.fulfill(json(200, list([{ id: "pu1", package_revision_id: "r1", state: "GRANTED", amount_minor: 0, currency: "USD" }])));
@@ -151,10 +161,17 @@ test("internet packages: guest activity rows are sanitized and carry no guest PI
   });
   await page.goto("/internet-packages");
   await page.getByRole("tab", { name: /guest activity/i }).click();
-  await expect(page.getByText(/^q1/)).toBeVisible();
-  await expect(page.getByText("GRANTED")).toBeVisible();
+
+  // WHAT THE ROW SAYS, not which uuids produced it. This assertion used to wait for the quote id to appear
+  // on screen; removing that id IS the journey, so a test demanding it was pinning the defect.
+  await expect(page.getByText(/Room 101/)).toBeVisible();
+  await expect(page.getByText(/Free Internet Package/)).toBeVisible();
+  await expect(page.getByText(/Taken/i).first()).toBeVisible();
+
   const html = (await page.content()).toLowerCase();
   for (const pii of ["auth_context", "device_id", "guest_network", "voucher_id", "guest_account", "password\"", "mac address"]) {
     expect(html).not.toContain(pii);
   }
+  // And no bare uuid-shaped identifier anywhere in the rendered rows.
+  expect(html).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/);
 });

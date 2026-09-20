@@ -774,6 +774,11 @@ func main() {
 	r.Get("/v1/tenant/branding", s.tenantBranding)
 	r.Post("/v1/backup/run", s.backupRun)
 	r.Post("/v1/backup/verify", s.backupVerify)
+	// THE DESTRUCTIVE ONE. edged performs the password step-up, the permission check and the audit record
+	// before it reaches here; this socket is not reachable from the network. See restore.go.
+	r.Post("/v1/backup/restore", s.backupRestore)
+	r.Get("/v1/backup/last-restore", s.lastRestore)
+	r.Get("/v1/maintenance", s.maintenanceStatus)
 	r.Get("/v1/backup/settings", s.backupSettingsGet)
 	r.Post("/v1/backup/settings", s.backupSettingsSet)
 	// Edge-first refactor: license + local-admin plumbing for edged.

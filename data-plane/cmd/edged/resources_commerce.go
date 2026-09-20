@@ -10,8 +10,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +35,9 @@ func (s *server) commercialPackagesRoutes() http.Handler {
 	r.Get("/grace", s.getGraceConfig)
 	r.Put("/grace", s.setGraceConfig)
 	// read-only inspection (guest-PII-free)
+	// GUEST ACTIVITY, in words. The quote/purchase listings below stay for support; this is what the
+	// operator screen reads. See listGuestActivity.
+	r.Get("/guest-activity", s.listGuestActivity)
 	r.Get("/quotes", s.listCommerceQuotes)
 	r.Get("/purchases", s.listCommercePurchases)
 	// package-scoped
@@ -499,4 +504,143 @@ func (s *server) getCommercialPackageCurrent(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	writeJSON(w, http.StatusOK, cur)
+}
+
+// ------------------------------------------------------------------- GUEST ACTIVITY ----------------------
+
+// guestActivityRow is what happened between one guest and one internet package, in the order an operator
+// asks about it: who, what, did they take it, when, what did it cost, and what did they actually get.
+//
+// The ids are still here -- quote, purchase, package revision -- because support needs them. They are simply
+// no longer the ANSWER. The screen leads with the sentence and keeps these for the details view.
+type guestActivityRow struct {
+	QuoteID    string     `json:"quote_id,omitempty"`
+	PurchaseID string     `json:"purchase_id,omitempty"`
+	RevisionID string     `json:"package_revision_id,omitempty"`
+	OfferedAt  *time.Time `json:"offered_at,omitempty"`
+	TakenAt    *time.Time `json:"taken_at,omitempty"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
+
+	// WHO, as far as the data honestly supports. A room is always shown with its PMS interface; a guest who
+	// signed in with a voucher or an account has no room, and the screen says which rather than leaving a gap.
+	Room         string `json:"room,omitempty"`
+	PMSInterface string `json:"pms_interface,omitempty"`
+	Reservation  string `json:"reservation,omitempty"`
+	StayID       string `json:"stay_id,omitempty"`
+	SignInMethod string `json:"sign_in_method,omitempty"`
+
+	// WHAT
+	Package     string `json:"package"`
+	PackageType string `json:"package_type,omitempty"`
+	PriceMinor  int64  `json:"price_minor"`
+	Currency    string `json:"currency,omitempty"`
+
+	// THE OUTCOME, already decided here rather than left to the browser: TAKEN, NOT_TAKEN, EXPIRED, or the
+	// purchase state when it is something else.
+	Outcome string `json:"outcome"`
+	Trigger string `json:"trigger,omitempty"`
+
+	// WHAT ACCESS IT ACTUALLY PRODUCED. An offer that was taken but granted nothing is the interesting case,
+	// and the old screen could not show it at all.
+	ServicePlan   string `json:"service_plan,omitempty"`
+	QuotaBytes    *int64 `json:"quota_bytes,omitempty"`
+	EntitlementID string `json:"entitlement_id,omitempty"`
+}
+
+// listGuestActivity answers "what happened with internet packages", per guest, in words.
+func (s *server) listGuestActivity(w http.ResponseWriter, r *http.Request) {
+	limit := queryLimit(r, 100, 500)
+
+	// ONE QUERY, starting from the OFFER, because an offer that was never taken is exactly as much a part of
+	// the story as one that was -- and starting from purchases would silently drop it.
+	//
+	// IT DOES NOT TOUCH iam_v2.auth_contexts, AND THAT COSTS SOMETHING. Found live: this returned 500 on
+	// PRE-LIVE with "permission denied for table auth_contexts" -- svc_edged holds SELECT on 58 iam_v2 tables
+	// and that is not one of them. auth_contexts is the ONLY link from a quote to a stay before the offer is
+	// taken, so without it an offer nobody accepted cannot be attributed to a room.
+	//
+	// Widening a service role's reach is a controlled privilege change and needs its own decision, so this
+	// reads what edged is actually allowed to read, and what it cannot establish it leaves EMPTY rather than
+	// guessing. A taken offer is complete: the purchase carries the stay, and the session that the
+	// entitlement produced carries the sign-in method. An untaken offer shows what was offered, when, at what
+	// price, and that nobody took it -- which is most of the question -- without the room.
+	//
+	// The alternative, inferring the stay from timing or from the interface, would have filled the column with
+	// plausible attributions. Rooms are not identity, and a wrong room on a screen an operator uses to settle
+	// a dispute is worse than a blank one.
+	rows, err := s.db.Query(r.Context(), `
+		SELECT q.id::text,
+		       COALESCE(p.id::text, ''),
+		       COALESCE(q.package_revision_id::text, ''),
+		       q.expires_at, q.consumed_at,
+		       COALESCE(st.normalized_room_number, ''),
+		       COALESCE(pi.display_label, ''),
+		       COALESCE(st.external_reservation_id, ''),
+		       COALESCE(st.id::text, ''),
+		       COALESCE(sess.credential_method, ''),
+		       COALESCE(NULLIF(ipr.display->>'name', ''), 'Internet package'),
+		       COALESCE(ipr.package_type, ''),
+		       COALESCE(q.price_minor, 0),
+		       COALESCE(NULLIF(q.currency, ''), NULLIF(ipr.currency, ''), ''),
+		       COALESCE(p.state, ''),
+		       COALESCE(p.trigger, ''),
+		       COALESCE(spr.name, ''),
+		       e.data_quota_bytes,
+		       COALESCE(e.id::text, '')
+		  FROM iam_v2.offer_quotes q
+		  LEFT JOIN iam_v2.purchases p ON p.offer_quote_id = q.id
+		  LEFT JOIN iam_v2.stays st ON st.id = p.stay_id
+		  LEFT JOIN iam_v2.pms_interfaces pi ON pi.id = COALESCE(st.pms_interface_id, q.pms_interface_id)
+		  LEFT JOIN iam_v2.internet_package_revisions ipr ON ipr.id = q.package_revision_id
+		  LEFT JOIN iam_v2.entitlements e ON e.purchase_id = p.id
+		  LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
+		  -- The earliest session on the entitlement: how the guest actually signed in to use what they took.
+		  LEFT JOIN LATERAL (
+		      SELECT s2.credential_method FROM iam_v2.sessions s2
+		       WHERE s2.entitlement_id = e.id ORDER BY s2.started LIMIT 1
+		  ) sess ON true
+		 WHERE q.tenant_id = $1 AND q.site_id = $2
+		 ORDER BY COALESCE(q.consumed_at, q.expires_at) DESC NULLS LAST
+		 LIMIT `+strconv.Itoa(limit), s.tenantID, s.siteID)
+	if err != nil {
+		slog.Error("guest activity read failed", "err", err)
+		jsonErr(w, http.StatusInternalServerError, "internal", "guest activity could not be read")
+		return
+	}
+	defer rows.Close()
+
+	out := []guestActivityRow{}
+	now := time.Now().UTC()
+	for rows.Next() {
+		var x guestActivityRow
+		var state string
+		if err := rows.Scan(&x.QuoteID, &x.PurchaseID, &x.RevisionID, &x.ExpiresAt, &x.TakenAt,
+			&x.Room, &x.PMSInterface, &x.Reservation, &x.StayID, &x.SignInMethod,
+			&x.Package, &x.PackageType, &x.PriceMinor, &x.Currency,
+			&state, &x.Trigger, &x.ServicePlan, &x.QuotaBytes, &x.EntitlementID); err != nil {
+			slog.Error("guest activity scan failed", "err", err)
+			jsonErr(w, http.StatusInternalServerError, "internal", "guest activity could not be read")
+			return
+		}
+		x.OfferedAt = x.ExpiresAt // the offer's own timestamp is its expiry window; see the UI note
+		switch {
+		case state == "GRANTED":
+			x.Outcome = "TAKEN"
+		case state != "":
+			x.Outcome = state
+		case x.TakenAt != nil:
+			x.Outcome = "TAKEN"
+		case x.ExpiresAt != nil && x.ExpiresAt.Before(now):
+			x.Outcome = "EXPIRED"
+		default:
+			x.Outcome = "NOT_TAKEN"
+		}
+		out = append(out, x)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Error("guest activity read failed", "err", err)
+		jsonErr(w, http.StatusInternalServerError, "internal", "guest activity could not be read")
+		return
+	}
+	writeList(w, out)
 }

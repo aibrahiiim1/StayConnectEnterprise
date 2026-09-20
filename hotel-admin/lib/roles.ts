@@ -74,6 +74,7 @@ const MATRIX: Matrix = {
     "guest-device-self-service": "write",
     "guest-accounts": "write",
     sessions: "write",
+    usage: "read",
     "auth-methods": "write", "walled-garden": "write",
     "portal-branding": "write", "notification-providers": "write",
     "social-providers": "write", "stripe-accounts": "write",
@@ -99,7 +100,7 @@ const MATRIX: Matrix = {
     "pms-interfaces": "read", "pms-routing": "read", "pms-source-conflicts": "read",
     "post-stay-profiles": "write", "stay-transfers": "write",
     "financial-review": "read", "financial-ops": "read",
-    "guest-accounts": "write", sessions: "write",
+    "guest-accounts": "write", sessions: "write", usage: "read",
     "auth-methods": "read", "walled-garden": "read", reports: "read", audit: "read", license: "read", backups: "read", diagnostics: "read",
   },
   guest_relations_operator: {
@@ -111,12 +112,12 @@ const MATRIX: Matrix = {
     // Same desk, same conversation, same read-only relationship with the engine.
     "pms-reconciliation": "read",
     "post-stay-profiles": "write", "stay-transfers": "write",
-    "guest-accounts": "write", sessions: "write",
+    "guest-accounts": "write", sessions: "write", usage: "read",
     "auth-methods": "read", reports: "read",
     audit: "read", license: "read", backups: "read", "walled-garden": "read", diagnostics: "read",
   },
   voucher_operator: {
-    "guest-accounts": "write", sessions: "read", reports: "read",
+    "guest-accounts": "write", sessions: "read", usage: "read", reports: "read",
     license: "read", diagnostics: "read",
   },
   payments_operator: {
@@ -125,7 +126,7 @@ const MATRIX: Matrix = {
     // Contract section 15 gives the charge decision to this role; edged additionally requires password
     // re-authentication at the route.
     "financial-review": "write", "financial-ops": "write",
-    sessions: "read", reports: "read", audit: "read", license: "read", diagnostics: "read",
+    sessions: "read", usage: "read", reports: "read", audit: "read", license: "read", diagnostics: "read",
   },
   site_viewer: {
     // The list only. A read-only observer has no reason to hold thirty days of what guests typed, so the
@@ -143,7 +144,7 @@ const MATRIX: Matrix = {
     "commercial-packages": "read",
     "post-stay-profiles": "read", "stay-transfers": "read",
     "financial-review": "read", "financial-ops": "read",
-    "guest-accounts": "read", sessions: "read", "auth-methods": "read",
+    "guest-accounts": "read", sessions: "read", usage: "read", "auth-methods": "read",
     "walled-garden": "read", "portal-branding": "read", "notification-providers": "read", "social-providers": "read",
     "stripe-accounts": "read", audit: "read", reports: "read",
     backups: "read", license: "read", network: "read", diagnostics: "read",

@@ -392,6 +392,10 @@ func main() {
 			// up editing the plan that nothing reads.
 			mountResource(r, s, "guest-accounts", s.guestAccountsRoutes)
 			mountResource(r, s, "sessions", s.sessionsRoutes)
+			// USAGE EXPLORER. Read-only investigation over durable accounting and session data; see
+			// resources_usage.go. Under the "sessions" role because it is the same live-access state that
+			// resource already governs, rather than a new row in the role matrix.
+			mountResource(r, s, "usage", s.usageRoutes)
 			// "pms-providers" is NOT mounted. It was the superseded PMS configuration model, replaced by the
 			// PMS Interface surface below; keeping both meant two operator screens configuring one property
 			// management system, and the older one could start a competing connector. See resources_providers.go.

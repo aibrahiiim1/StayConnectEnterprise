@@ -139,23 +139,52 @@ describe("InternetPackagesPage", () => {
     expect(confirm).toBeEnabled();
   });
 
-  it("inspection tab renders sanitized quotes/purchases with NO guest PII", async () => {
+  it("guest activity reads as words, not identifiers, and still leaks no guest PII", async () => {
+    // WHAT THIS REPLACED. The tab used to render two tables of uuids -- a quote id, a package revision id, a
+    // purchase id and a state token -- which is a correct record and an unusable screen. An operator could
+    // not tell which guest, which room, which package by name, or what access any of it produced.
     g.mockImplementation((path: string) => {
-      if (path === "/commercial-packages/quotes") return Promise.resolve(list([{ id: "q1", package_revision_id: "r1", price_minor: 0, currency: "USD", expires_at: "2026-08-01T00:00:00Z", consumed_at: null }]));
-      if (path === "/commercial-packages/purchases") return Promise.resolve(list([{ id: "pu1", package_revision_id: "r1", state: "GRANTED", amount_minor: 0, currency: "USD" }]));
+      if (path === "/commercial-packages/guest-activity") {
+        return Promise.resolve(list([
+          {
+            quote_id: "q1", purchase_id: "pu1", package_revision_id: "r1",
+            room: "4202", pms_interface: "Protel", sign_in_method: "PMS", stay_id: "st1",
+            package: "Free Internet Package", package_type: "GENERAL",
+            price_minor: 0, currency: "USD",
+            outcome: "TAKEN", trigger: "GUEST_SELECTION",
+            service_plan: "Free Internet", quota_bytes: 1073741824,
+            taken_at: "2026-09-19T10:00:00Z",
+          },
+          {
+            quote_id: "q2", package_revision_id: "r1", sign_in_method: "VOUCHER",
+            package: "Premium", price_minor: 500, currency: "USD",
+            outcome: "NOT_TAKEN", expires_at: "2026-09-19T11:00:00Z",
+          },
+        ]));
+      }
       return Promise.resolve(list([]));
     });
     render(<InternetPackagesPage />);
-    // userEvent, not fireEvent: the tab strip is a real Radix Tabs widget now and activates on the pointer
-    // sequence a person produces. A bare click event is not that sequence, so fireEvent would leave the first
-    // tab selected and the assertion below would fail for a reason that has nothing to do with the product.
     await userEvent.click(await screen.findByRole("tab", { name: /guest activity/i }));
-    // Long ids are rendered as copyable, truncated chips now, so the assertion matches the shortened form the
-    // operator actually sees rather than the full string.
-    expect(await screen.findByText(/^q1/)).toBeInTheDocument();
-    expect(screen.getByText("GRANTED")).toBeInTheDocument();
+
+    // THE SENTENCE, not the identifiers: which room, which package, what became of it.
+    expect(await screen.findByText(/Room 4202/)).toBeInTheDocument();
+    expect(screen.getByText("Free Internet Package")).toBeInTheDocument();
+    expect(screen.getByText("Taken")).toBeInTheDocument();
+    // An offer nobody took is part of the story, and a guest with no room says how they signed in instead.
+    expect(screen.getByText("Not taken yet")).toBeInTheDocument();
+    expect(screen.getByText(/A voucher guest/i)).toBeInTheDocument();
+
+    // The raw ids are NOT on the surface -- they are behind Details, for support.
+    expect(screen.queryByText("q1")).toBeNull();
+    await userEvent.click(screen.getByText(/Room 4202/));
+    expect(await screen.findByText("q1")).toBeInTheDocument();
+    expect(screen.getByText("pu1")).toBeInTheDocument();
+
+    // AND THE PII RULE STILL HOLDS. A room number is operational data the hotel already has; a guest's name,
+    // device, credential or account is not, and none of it appears here.
     const html = document.body.innerHTML.toLowerCase();
-    for (const pii of ["auth_context", "auth-context", "device_id", "guest_network", "mac", "subject", "voucher_id", "guest_account", "password"]) {
+    for (const pii of ["auth_context", "auth-context", "device_id", "guest_network", "voucher_id", "guest_account", "password", "subject"]) {
       expect(html).not.toContain(pii);
     }
   });
