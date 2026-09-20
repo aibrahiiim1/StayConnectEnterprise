@@ -73,8 +73,22 @@ func writeVerifiedMarker(name string, tables int) {
 	b, _ := json.Marshal(verifiedRecord{
 		VerifiedAt: time.Now().UTC(), SizeBytes: fi.Size(), ModTime: fi.ModTime().UTC(), Tables: tables,
 	})
-	if err := os.WriteFile(verifiedMarker(name), b, 0o640); err != nil {
+	path := verifiedMarker(name)
+	if err := os.WriteFile(path, b, 0o640); err != nil {
 		slog.Error("verification marker not written", "backup", name, "err", err)
+		return
+	}
+	// HAND IT TO THE SERVICE GROUP, exactly as the dump itself is handed over.
+	//
+	// Found on the appliance: verify reported ok and 141 tables, the marker was written, and the operator
+	// screen still showed the backup as unverified. scd writes as root; edged reads as `stayconnect`. The
+	// archives are chowned root:stayconnect at 0640 so the unprivileged side can read them, and the marker
+	// -- which is now the thing Restore eligibility depends on -- was left root:root. It was a fact nobody
+	// could read, which is indistinguishable from no fact at all.
+	if gid, ok := serviceGroupID(); ok {
+		if err := os.Chown(path, 0, gid); err != nil {
+			slog.Error("verification marker not handed to the service group", "backup", name, "err", err)
+		}
 	}
 }
 
