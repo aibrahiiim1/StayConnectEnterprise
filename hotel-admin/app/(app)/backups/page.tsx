@@ -16,7 +16,7 @@
 // does it -- take a safety copy, stop serving, swap, check, and put everything back if the check fails.
 
 import { useCallback, useEffect, useState } from "react";
-import { api, ApiError, ListResp } from "@/lib/api";
+import { api, ApiError, ListResp, BackupHealth, BackupSettings } from "@/lib/api";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -229,6 +229,9 @@ export default function BackupsPage() {
         </CardBody>
       </Card>
 
+      {/* ---- 3. THE SETTINGS THAT GOVERN THEM: present, and not in the way ------------------------- */}
+      <StorageAndRetention writable={writable} setErr={setErr} setMsg={setMsg} />
+
       {restoring && (
         <RestoreDialog
           backup={restoring}
@@ -376,6 +379,169 @@ function RestoreDialog({ backup, onClose, onDone }: {
           )}
         </CardBody>
       </Card>
+    </div>
+  );
+}
+
+/** RETENTION, SCHEDULE, DISK AND THE SWEEP.
+ *
+ *  Kept in full, moved below the journey. The previous page gave these equal billing with the backups
+ *  themselves, so an operator arriving to answer "could we recover from this?" had to assemble the answer
+ *  from four panels of roughly equal weight. They are not unimportant -- the sweep is what stands between
+ *  this appliance and a full disk, and retention decides how far back it can recover -- they are just not
+ *  the question anyone opens this page with.
+ *
+ *  Collapsed by default and opened in one click, because the numbers matter on the day somebody is looking
+ *  for them and are noise on every other day. */
+function StorageAndRetention({ writable, setErr, setMsg }: {
+  writable: boolean;
+  setErr: (s: string | null) => void;
+  setMsg: (s: string | null) => void;
+}) {
+  const [health, setHealth] = useState<BackupHealth | null>(null);
+  const [settings, setSettings] = useState<BackupSettings | null>(null);
+  const [edits, setEdits] = useState<Record<string, number>>({});
+  const [schedule, setSchedule] = useState("");
+  const [settingsPw, setSettingsPw] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const [h, s] = await Promise.all([
+        api.get<BackupHealth>("/backups/health"),
+        api.get<BackupSettings>("/backups/settings"),
+      ]);
+      setHealth(h);
+      setSettings(s);
+      setEdits(Object.fromEntries(s.retention.map((x) => [x.key, x.value])));
+      setSchedule(s.schedule ?? "");
+    } catch { /* the section reports its own absence below rather than breaking the page */ }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const dirty = !!settings && (
+    settings.retention.some((x) => (edits[x.key] ?? x.value) !== x.value) ||
+    (schedule !== (settings.schedule ?? ""))
+  );
+
+  async function save() {
+    if (!settings) return;
+    setSaving(true); setErr(null); setMsg(null);
+    try {
+      await api.put("/backups/settings", {
+        retention: Object.fromEntries(settings.retention.map((x) => [x.key, edits[x.key] ?? x.value])),
+        schedule,
+        password: settingsPw,
+      });
+      setMsg("Retention policy saved.");
+      setSettingsPw("");
+      await load();
+    } catch (e) { setErr(errMsg(e)); } finally { setSaving(false); }
+  }
+
+  const ret = (health?.retention ?? {}) as Record<string, unknown>;
+  const diskPct = Number(ret.disk_pct ?? 0);
+
+  return (
+    <details className="rounded-lg border">
+      <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
+        Storage, retention and the nightly sweep
+      </summary>
+      <div className="space-y-4 border-t p-4">
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Figure label="Disk used"
+            value={health?.retention_readable ? `${diskPct}%` : "—"}
+            hint={health?.retention_readable
+              ? `Warns at ${ret.disk_warn ?? "—"}%, critical at ${ret.disk_crit ?? "—"}%`
+              : (health?.retention_error ?? "Checking…")} />
+          <Figure label="Backups kept"
+            value={health ? String(health.database_backups ?? 0) : "—"}
+            hint={health?.newest_database_backup ? `Newest ${formatDate(health.newest_database_backup)}` : undefined} />
+          <Figure label="Nightly sweep"
+            value={health ? (health.timer_readable ? (health.timer_active ? "Scheduled" : "Not scheduled") : "Unknown") : "—"}
+            hint={settings?.schedule_known ? `Runs at ${settings.schedule}` : undefined} />
+        </div>
+
+        {health?.retention_readable && Number(ret.failures ?? 0) > 0 && (
+          <p role="alert" className="text-sm text-destructive-subtle-foreground">
+            {String(ret.failures)} failure(s) on the last sweep: {String(ret.failure_detail || "no detail")}
+          </p>
+        )}
+
+        {settings && (
+          <>
+            <p className="text-sm text-muted-foreground">
+              What the nightly sweep keeps, and when it runs.{" "}
+              {settings.config_present
+                ? "These values are stored on the appliance."
+                : "No policy has been saved yet, so the built-in defaults below are in force."}
+            </p>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {settings.retention.map((sIt) => (
+                <label key={sIt.key} className="block text-sm">
+                  {sIt.label} <span className="text-muted-foreground">({sIt.unit})</span>
+                  <Input type="number" min={sIt.min} max={sIt.max} disabled={!writable}
+                    value={edits[sIt.key] ?? sIt.value}
+                    onChange={(e) => setEdits((m) => ({ ...m, [sIt.key]: Number(e.target.value) }))} />
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    {sIt.explains} Allowed {sIt.min}–{sIt.max}; default {sIt.default}.
+                  </span>
+                </label>
+              ))}
+              <label className="block text-sm">
+                Nightly sweep runs at
+                <Input type="time" value={schedule} disabled={!writable}
+                  onChange={(e) => setSchedule(e.target.value)} />
+                <span className="mt-1 block text-xs text-muted-foreground">
+                  Appliance local time.{" "}
+                  {settings.schedule_known
+                    ? `Currently scheduled for ${settings.schedule}.`
+                    : "The current schedule could not be read from the appliance."}
+                </span>
+              </label>
+            </div>
+
+            {/* The sweep is what stands between this appliance and a full disk, and retention decides how
+                far back it can recover. Changing either is attributed. */}
+            {dirty && (
+              <div className="space-y-3 border-t pt-3">
+                <label className="block max-w-sm text-sm">
+                  Confirm your password
+                  <Input type="password" autoComplete="current-password" value={settingsPw}
+                    onChange={(e) => setSettingsPw(e.target.value)} />
+                </label>
+                <div className="flex gap-2">
+                  <Button disabled={!writable || saving || !settingsPw} onClick={save}>
+                    {saving ? "Saving…" : "Save retention policy"}
+                  </Button>
+                  <Button variant="secondary" disabled={saving} onClick={() => {
+                    setEdits(Object.fromEntries(settings.retention.map((x) => [x.key, x.value])));
+                    setSchedule(settings.schedule ?? "");
+                    setSettingsPw("");
+                  }}>Discard changes</Button>
+                </div>
+              </div>
+            )}
+
+            <p className="text-xs text-muted-foreground">
+              {String(ret.retained ?? 0)} artefacts retained, {String(ret.protected ?? 0)} protected and never
+              deleted (identity, certificates and trust material), {String(ret.pinned ?? 0)} pinned by an
+              operator. The sweep never removes the current or previous release, the newest database backup,
+              or anything pinned — whatever these numbers say.
+            </p>
+          </>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function Figure({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div>
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="text-lg font-semibold tabular-nums">{value}</div>
+      {hint && <div className="text-xs text-muted-foreground">{hint}</div>}
     </div>
   );
 }

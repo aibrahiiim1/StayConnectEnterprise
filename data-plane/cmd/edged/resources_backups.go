@@ -207,6 +207,46 @@ type backupArtifact struct {
 	// Downloadable is false for directories: a deploy rollback set is a tree, and offering a download that
 	// cannot be produced is worse than not offering one.
 	Downloadable bool `json:"downloadable"`
+
+	// VERIFICATION STATE, READ FROM THE APPLIANCE rather than remembered by the browser.
+	//
+	// Restore eligibility depends on it, so it has to be a fact about the file on disk and not a flag the
+	// screen set after a successful verify. A page reloaded, opened in a second tab, or opened by a different
+	// operator must reach the same answer -- and the answer must go stale the moment the archive changes,
+	// which is what the marker's size/mtime check gives. scd enforces the same rule again before it restores
+	// anything; this is what lets the screen explain WHY the button is unavailable instead of just disabling it.
+	VerifiedAt     string `json:"verified_at,omitempty"`
+	VerifiedTables int    `json:"verified_tables,omitempty"`
+}
+
+// verifiedRecord mirrors the marker scd writes beside a verified archive. Read-only here: edged reports
+// verification, it does not confer it.
+type verifiedRecord struct {
+	VerifiedAt time.Time `json:"verified_at"`
+	SizeBytes  int64     `json:"size_bytes"`
+	ModTime    time.Time `json:"mod_time"`
+	Tables     int       `json:"tables"`
+}
+
+// readVerification returns the marker only when it still describes the file on disk.
+//
+// The size/mtime comparison is the whole point: "this NAME was verified once" is a weaker claim than "these
+// BYTES were verified", and only the second one is safe to restore from. A nightly job that rewrites a name,
+// a hand-copied file, an interrupted write -- all of them must drop the verification rather than inherit it.
+func readVerification(dir, name string) (*verifiedRecord, bool) {
+	b, err := os.ReadFile(filepath.Join(dir, name+".verified"))
+	if err != nil {
+		return nil, false
+	}
+	var rec verifiedRecord
+	if json.Unmarshal(b, &rec) != nil {
+		return nil, false
+	}
+	fi, err := os.Stat(filepath.Join(dir, name))
+	if err != nil || fi.Size() != rec.SizeBytes || !fi.ModTime().UTC().Equal(rec.ModTime) {
+		return nil, false
+	}
+	return &rec, true
 }
 
 // artifactKind names what an artefact IS in the operator's terms, from the naming the appliance already uses.
@@ -232,13 +272,23 @@ func (s *server) listBackupArtifacts(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return
 		}
-		out = append(out, backupArtifact{
+		// A verification marker is bookkeeping, not an artefact. Listing it would put a second entry beside
+		// every verified backup that an operator could neither download nor restore.
+		if strings.HasSuffix(e.Name(), ".verified") {
+			return
+		}
+		a := backupArtifact{
 			Name:         e.Name(),
 			Kind:         artifactKind(e.Name(), e.IsDir()),
 			SizeBytes:    fi.Size(),
 			ModTime:      fi.ModTime().UTC().Format(time.RFC3339),
 			Downloadable: !e.IsDir(),
-		})
+		}
+		if rec, ok := readVerification(base, e.Name()); ok {
+			a.VerifiedAt = rec.VerifiedAt.Format(time.RFC3339)
+			a.VerifiedTables = rec.Tables
+		}
+		out = append(out, a)
 	}
 	if entries, err := os.ReadDir(backupRoot); err == nil {
 		for _, e := range entries {
