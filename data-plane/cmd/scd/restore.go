@@ -213,8 +213,22 @@ func (s *server) backupRestore(w http.ResponseWriter, r *http.Request) {
 	started := time.Now().UTC()
 	steps := []restoreStep{}
 	stamp := started.Format("20060102T150405Z")
-	staging := "restore_" + stamp
-	aside := pgDatabase + "_before_" + stamp
+
+	// LOWERCASE, because an unquoted SQL identifier is folded and a connection name is not.
+	//
+	// Found on the appliance. `CREATE DATABASE restore_20260920T090146Z` succeeded and created
+	// `restore_20260920t090146z`; `psql -d restore_20260920T090146Z` then reported that the database did not
+	// exist, and the restore failed at the load step with a message about a missing database it had just
+	// created. The two halves disagreed because only one of them folds case: SQL folds unquoted identifiers,
+	// libpq passes the dbname through verbatim.
+	//
+	// The timestamp is the right name -- it ties the staging database, the set-aside database and the safety
+	// dump to one restore -- so the fix is to make the name one that survives both paths unchanged. Every
+	// database identifier in this function is now lowercase (pgDatabase already was), which makes folding a
+	// no-op rather than something each call site has to remember.
+	dbStamp := strings.ToLower(stamp)
+	staging := "restore_" + dbStamp
+	aside := pgDatabase + "_before_" + dbStamp
 
 	fail := func(step, detail string) {
 		steps = append(steps, restoreStep{Step: step, OK: false, Detail: detail})

@@ -195,6 +195,28 @@ func TestTheRestoreOutcomeSurvivesTheServiceRestart(t *testing.T) {
 	}
 }
 
+func TestDatabaseNamesSurviveIdentifierFolding(t *testing.T) {
+	// FOUND ON THE APPLIANCE, not here, which is why it is pinned here now.
+	//
+	// The staging name was built from an RFC3339-ish stamp containing `T` and `Z`. `CREATE DATABASE
+	// restore_20260920T090146Z` created `restore_20260920t090146z` -- SQL folds unquoted identifiers -- and
+	// the very next command, `psql -d restore_20260920T090146Z`, was told no such database existed, because
+	// libpq passes a dbname through verbatim. The restore failed at the load step complaining about a
+	// database it had just successfully created.
+	//
+	// It failed safely: the live database had not been opened. But "safe" is not "working", and the next
+	// person to reintroduce an uppercase character in a database name would get the same hour back.
+	s := restoreSequence(t)
+	if !strings.Contains(s, "strings.ToLower(stamp)") {
+		t.Error("the database-name stamp is no longer lowercased; SQL folds identifiers and libpq does not")
+	}
+	for _, built := range []string{`staging := "restore_" + stamp`, `aside := pgDatabase + "_before_" + stamp`} {
+		if strings.Contains(s, built) {
+			t.Errorf("a database name is built from the raw stamp (%q), which contains T and Z", built)
+		}
+	}
+}
+
 // ---- helpers --------------------------------------------------------------------------------------------
 
 // restoreSequence returns the BODY of backupRestore.
