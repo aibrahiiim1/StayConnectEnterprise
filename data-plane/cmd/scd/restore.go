@@ -35,6 +35,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -188,6 +189,13 @@ var dependentServices = []string{
 	"stayconnect-edged", "stayconnect-portald", "stayconnect-pmsd", "stayconnect-acctd",
 }
 
+// restoreInFlight is the in-process single-flight guard.
+//
+// The maintenance flag is the DURABLE guard -- it survives a crash and fails closed -- but it is only raised
+// after the safety dump, which leaves a window where a second request would start a second restore. One
+// destructive operation at a time is not negotiable, so the window is closed here.
+var restoreInFlight atomic.Bool
+
 func (s *server) backupRestore(w http.ResponseWriter, r *http.Request) {
 	var in restoreReq
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || !safeBackupName.MatchString(in.Name) {
@@ -206,11 +214,44 @@ func (s *server) backupRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Its own deadline. A restore outlives any client, and a caller giving up must not kill it halfway.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 45*time.Minute)
-	defer cancel()
+	if !restoreInFlight.CompareAndSwap(false, true) {
+		httpErr(w, http.StatusConflict, "a restore is already running on this appliance")
+		return
+	}
 
+	// THE ANSWER IS THE RECORD ON DISK, NOT THIS RESPONSE.
+	//
+	// Found on the appliance, and it was the worst possible way to be wrong. edged's socket call gave up after
+	// fifteen seconds and told the operator the restore had FAILED; scd finished it successfully ten seconds
+	// later. An operator reading "failed" while a destructive operation is still running is one keystroke away
+	// from starting a second one -- and the deliberate design decision not to retry destructive steps is worth
+	// nothing if the screen invites the human to do it instead.
+	//
+	// A restore can take 45 minutes. No HTTP client, no reverse proxy and no browser tab should be load-bearing
+	// for that long. So the request STARTS the restore and returns; the durable record in
+	// /run/stayconnect/last-restore.json is where the outcome lives, and it is already the thing that survives
+	// the edged restart the restore itself performs. The screen polls it.
 	started := time.Now().UTC()
+	s.markRestoreRunning(in.Name, started)
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"started": true, "backup": in.Name, "started_at": started,
+		"detail": "the restore is running; its outcome is recorded on the appliance",
+	})
+
+	// Its own deadline and its own context. A restore outlives any client, and a caller giving up -- or a
+	// request whose context ends the moment this handler returns -- must not kill it halfway.
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
+	go func() {
+		defer cancel()
+		defer restoreInFlight.Store(false)
+		s.runRestore(ctx, in.Name, rec, started)
+	}()
+}
+
+// runRestore performs the restore. It reports only durably: by the time it finishes, the HTTP request that
+// asked for it is long gone and edged has been restarted.
+func (s *server) runRestore(ctx context.Context, name string, rec *verifiedRecord, started time.Time) {
+	in := restoreReq{Name: name}
 	steps := []restoreStep{}
 	stamp := started.Format("20060102T150405Z")
 
@@ -232,7 +273,7 @@ func (s *server) backupRestore(w http.ResponseWriter, r *http.Request) {
 
 	fail := func(step, detail string) {
 		steps = append(steps, restoreStep{Step: step, OK: false, Detail: detail})
-		s.finishRestore(w, in.Name, started, steps, false, detail)
+		s.finishRestore(in.Name, started, steps, false, detail)
 	}
 	ok := func(step, detail string) {
 		steps = append(steps, restoreStep{Step: step, OK: true, Detail: detail})
@@ -343,7 +384,7 @@ func (s *server) backupRestore(w http.ResponseWriter, r *http.Request) {
 	s.startDependents(ctx)
 	ok("services", "the appliance is serving again")
 
-	s.finishRestore(w, in.Name, started, steps, true,
+	s.finishRestore(in.Name, started, steps, true,
 		"restored from "+in.Name+"; the previous database is kept as "+aside)
 }
 
@@ -407,7 +448,7 @@ func (s *server) restoreIntegrity(ctx context.Context) (string, bool) {
 
 // finishRestore writes the outcome durably BEFORE responding, so the answer survives the service restarts,
 // and audits it on the way out.
-func (s *server) finishRestore(w http.ResponseWriter, name string, started time.Time,
+func (s *server) finishRestore(name string, started time.Time,
 	steps []restoreStep, success bool, summary string) {
 
 	res := map[string]any{
@@ -416,6 +457,7 @@ func (s *server) finishRestore(w http.ResponseWriter, name string, started time.
 		"finished": time.Now().UTC(),
 		"duration": time.Since(started).Round(time.Second).String(),
 		"ok":       success,
+		"running":  false,
 		"summary":  summary,
 		"steps":    steps,
 	}
@@ -429,5 +471,23 @@ func (s *server) finishRestore(w http.ResponseWriter, name string, started time.
 	} else {
 		slog.Error("database restore failed", "backup", name, "summary", summary)
 	}
-	writeJSON(w, http.StatusOK, res)
+}
+
+// markRestoreRunning replaces the previous outcome with an in-progress record, the moment the restore starts.
+//
+// Without it the screen would keep showing the PREVIOUS restore's result while a new one ran -- and if that
+// previous one said "ok", an operator would be reading a success banner about a database currently being
+// replaced. The record is overwritten by finishRestore either way.
+func (s *server) markRestoreRunning(name string, started time.Time) {
+	b, err := json.Marshal(map[string]any{
+		"backup": name, "started": started, "running": true, "ok": false,
+		"summary": "the restore is running",
+		"steps":   []restoreStep{},
+	})
+	if err != nil {
+		return
+	}
+	if err := os.WriteFile(restoreResultFile, b, 0o644); err != nil {
+		slog.Error("restore progress not written", "err", err)
+	}
 }

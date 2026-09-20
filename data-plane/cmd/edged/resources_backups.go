@@ -544,9 +544,25 @@ func (s *server) restoreDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 
 	s.audit(r, "backup.restore_started", "backup", name, map[string]any{"backup": name})
 
+	// THIS CALL STARTS THE RESTORE; IT DOES NOT WAIT FOR IT.
+	//
+	// It used to wait, and on the appliance that produced the worst available outcome: the socket call gave up
+	// after fifteen seconds and this handler told the operator the restore had FAILED, while scd went on and
+	// finished it successfully ten seconds later. Someone reading "failed" about a destructive operation that
+	// is still running is one keystroke away from starting a second one -- and scd's deliberate refusal to
+	// retry destructive steps is worth nothing if the screen invites the human to do the retrying.
+	//
+	// A restore can take 45 minutes; no HTTP client, proxy or browser tab should be load-bearing for that
+	// long. scd answers 202 immediately and records the outcome durably. The screen polls /last-restore, which
+	// already had to survive the edged restart the restore itself performs.
+	//
+	// Consequently there is no restore_succeeded audit entry written from here. There could not be an honest
+	// one: the swap replaces the audit table, so a row written after it either lands in restored data or
+	// describes an outcome this process never saw. The durable record in scd is the outcome; restore_started,
+	// written above and captured by the safety backup, is what the audit trail can truthfully hold.
 	code, body, err := s.scd.call(r.Context(), http.MethodPost, "/v1/backup/restore",
 		map[string]any{"name": name})
-	if err != nil || code != http.StatusOK {
+	if err != nil || (code != http.StatusOK && code != http.StatusAccepted) {
 		detail := scdDetail(body, err)
 		s.audit(r, "backup.restore_failed", "backup", name, map[string]any{"detail": detail})
 		jsonErr(w, http.StatusBadGateway, "restore_failed", detail)
@@ -557,14 +573,7 @@ func (s *server) restoreDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "the restore result could not be read")
 		return
 	}
-	okFlag, _ := out["ok"].(bool)
-	summary, _ := out["summary"].(string)
-	if okFlag {
-		s.audit(r, "backup.restore_succeeded", "backup", name, map[string]any{"summary": summary})
-	} else {
-		s.audit(r, "backup.restore_failed", "backup", name, map[string]any{"summary": summary})
-	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusAccepted, out)
 }
 
 // backupMaintenance reports whether the appliance is currently withholding service, and why.

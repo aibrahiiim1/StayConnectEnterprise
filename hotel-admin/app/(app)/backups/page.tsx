@@ -38,7 +38,7 @@ type Artifact = {
 type Maintenance = { active: boolean; reason?: string; since?: string; backup?: string; unknown?: boolean };
 type RestoreStep = { step: string; ok: boolean; detail?: string };
 type RestoreResult = {
-  present?: boolean; ok?: boolean; backup?: string; summary?: string;
+  present?: boolean; ok?: boolean; running?: boolean; backup?: string; summary?: string;
   started?: string; finished?: string; duration?: string; steps?: RestoreStep[];
 };
 
@@ -251,20 +251,31 @@ function Banner({ tone, children }: { tone: "ok" | "err"; children: React.ReactN
 }
 
 function LastRestoreCard({ result }: { result: RestoreResult }) {
+  // A RESTORE IN PROGRESS IS NOT A FAILED ONE. The durable record carries ok:false until it finishes, which
+  // is correct -- nothing has succeeded yet -- but rendering it with a warning icon and a red step list would
+  // tell an operator their restore had gone wrong while it was quietly working.
+  const running = result.running === true;
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          {result.ok ? <CheckCircle2 className="h-4 w-4 text-success-subtle-foreground" />
-                     : <AlertTriangle className="h-4 w-4 text-destructive-subtle-foreground" />}
-          Last restore
+          {running ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            : result.ok ? <CheckCircle2 className="h-4 w-4 text-success-subtle-foreground" />
+                        : <AlertTriangle className="h-4 w-4 text-destructive-subtle-foreground" />}
+          {running ? "Restore in progress" : "Last restore"}
         </CardTitle>
       </CardHeader>
       <CardBody className="space-y-2 text-sm">
-        <p>{result.summary}</p>
+        <p>
+          {running
+            ? "The appliance is replacing the database. It stops serving guests until this finishes. Do not start another restore."
+            : result.summary}
+        </p>
         <p className="text-xs text-muted-foreground">
-          {result.backup} · {result.finished ? formatDate(result.finished) : ""}
-          {result.duration ? ` · took ${result.duration}` : ""}
+          {result.backup}
+          {running
+            ? (result.started ? ` · started ${formatDate(result.started)}` : "")
+            : <>{result.finished ? ` · ${formatDate(result.finished)}` : ""}{result.duration ? ` · took ${result.duration}` : ""}</>}
         </p>
         {/* EVERY STEP, INCLUDING THE ONES THAT DID NOT RUN. A restore that stopped early should show where. */}
         {result.steps && result.steps.length > 0 && (
@@ -292,17 +303,32 @@ function RestoreDialog({ backup, onClose, onDone }: {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
+  const [started, setStarted] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // START IT, THEN WATCH IT. The request returns as soon as the appliance has accepted the restore; the
+  // outcome arrives from the durable record. This is not a nicety: the restore restarts edged, so the
+  // connection this request was made over is one of the things being taken away. A screen that waited for a
+  // reply would eventually show a timeout as a FAILURE while the restore was still running -- which is how an
+  // operator ends up starting a second destructive operation on top of the first.
+  //
+  // Nothing here retries anything. It asks what happened until the appliance says.
   async function go() {
     setBusy(true); setErr(null);
     try {
-      const r = await api.post<RestoreResult>(
-        `/backups/artifacts/${encodeURIComponent(backup.name)}/restore`, { password, confirm });
-      onDone(r);
+      await api.post(`/backups/artifacts/${encodeURIComponent(backup.name)}/restore`, { password, confirm });
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : errMsg(e));
       setBusy(false);
+      return;
+    }
+    setStarted(true);
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 4000));
+      let r: RestoreResult | null = null;
+      // A failed poll means edged is restarting, which is expected mid-restore. Keep asking.
+      try { r = await api.get<RestoreResult>("/backups/last-restore"); } catch { continue; }
+      if (r?.present && r.running === false) { onDone(r); return; }
     }
   }
 
@@ -368,13 +394,15 @@ function RestoreDialog({ backup, onClose, onDone }: {
           <div className="flex flex-wrap justify-end gap-2 pt-2">
             <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
             <Button onClick={go} disabled={busy || confirm !== backup.name || !password}>
-              {busy ? "Restoring — do not close this page…" : "Restore this backup"}
+              {busy ? (started ? "Restoring…" : "Starting…") : "Restore this backup"}
             </Button>
           </div>
-          {busy && (
+          {started && (
             <p className="text-xs text-muted-foreground">
-              This can take several minutes. The result is recorded on the appliance, so if this page
-              disconnects you will still see the outcome when it comes back.
+              The appliance has accepted the restore and is working through it. This can take several minutes,
+              and the appliance stops serving guests while the database is replaced. The outcome is recorded on
+              the appliance, so if this page disconnects — it will, briefly, because the services are
+              restarted — you will still see what happened when it comes back. Do not start another restore.
             </p>
           )}
         </CardBody>

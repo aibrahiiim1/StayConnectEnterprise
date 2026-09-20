@@ -217,6 +217,56 @@ func TestDatabaseNamesSurviveIdentifierFolding(t *testing.T) {
 	}
 }
 
+
+func TestTheRequestDoesNotWaitForTheRestore(t *testing.T) {
+	// FOUND ON THE APPLIANCE, and it was the worst available way to be wrong.
+	//
+	// edged's socket call gave up after fifteen seconds and told the operator the restore had FAILED. scd
+	// finished it successfully ten seconds later. An operator reading "failed" while a destructive operation
+	// is still running is one keystroke away from starting a second one -- which makes the deliberate decision
+	// never to retry a destructive step worth nothing, because the screen invites the human to do it instead.
+	//
+	// So the handler starts the work and returns; the durable record is the answer. These assertions are on
+	// the source because the property is structural: a later edit that "simplified" the goroutine away would
+	// restore the original bug and pass every behavioural test.
+	src, err := os.ReadFile("restore.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(src)
+
+	h := s[strings.Index(s, "func (s *server) backupRestore("):]
+	if end := strings.Index(h, "func (s *server) runRestore("); end > 0 {
+		h = h[:end]
+	}
+	if !strings.Contains(h, "http.StatusAccepted") {
+		t.Error("the restore request does not return 202; a caller is being made to wait for a 45-minute operation")
+	}
+	if !strings.Contains(h, "go func()") {
+		t.Error("the restore runs inside the request; a client timeout would report a failure that did not happen")
+	}
+	if !strings.Contains(h, "s.markRestoreRunning(") {
+		t.Error("nothing records that a restore is in progress, so the screen would show the PREVIOUS outcome")
+	}
+	// The worker must not inherit the request context: it ends when the handler returns.
+	if !strings.Contains(h, "context.Background()") {
+		t.Error("the restore's context is tied to the request, which ends the moment the handler returns")
+	}
+
+	// ONE AT A TIME. The maintenance flag is the durable guard but is only raised after the safety dump.
+	if !strings.Contains(h, "restoreInFlight.CompareAndSwap(false, true)") {
+		t.Error("two concurrent requests could start two restores in the window before maintenance is raised")
+	}
+	if !strings.Contains(s, "restoreInFlight.Store(false)") {
+		t.Error("the single-flight guard is never released; one restore would wedge the appliance forever")
+	}
+
+	// A poller has to be able to tell running from finished.
+	if !strings.Contains(s, `"running":  false`) {
+		t.Error("the finished record does not clear `running`, so a polling screen never stops waiting")
+	}
+}
+
 // ---- helpers --------------------------------------------------------------------------------------------
 
 // restoreSequence returns the BODY of backupRestore.
@@ -231,12 +281,12 @@ func restoreSequence(t *testing.T) string {
 		t.Fatal(err)
 	}
 	s := string(src)
-	i := strings.Index(s, "func (s *server) backupRestore(")
+	i := strings.Index(s, "func (s *server) runRestore(")
 	if i < 0 {
-		t.Fatal("backupRestore not found")
+		t.Fatal("runRestore not found")
 	}
 	body := s[i:]
-	if end := strings.Index(body, "// startDependents brings"); end > 0 {
+	if end := strings.Index(body, "// resetPool replaces"); end > 0 {
 		body = body[:end]
 	}
 	return body
