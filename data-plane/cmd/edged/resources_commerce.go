@@ -554,20 +554,30 @@ func (s *server) listGuestActivity(w http.ResponseWriter, r *http.Request) {
 	// ONE QUERY, starting from the OFFER, because an offer that was never taken is exactly as much a part of
 	// the story as one that was -- and starting from purchases would silently drop it.
 	//
-	// IT DOES NOT TOUCH iam_v2.auth_contexts, AND THAT COSTS SOMETHING. Found live: this returned 500 on
-	// PRE-LIVE with "permission denied for table auth_contexts" -- svc_edged holds SELECT on 58 iam_v2 tables
-	// and that is not one of them. auth_contexts is the ONLY link from a quote to a stay before the offer is
-	// taken, so without it an offer nobody accepted cannot be attributed to a room.
+	// WHERE THE ROOM COMES FROM, AND WHY THERE ARE TWO SOURCES.
 	//
-	// Widening a service role's reach is a controlled privilege change and needs its own decision, so this
-	// reads what edged is actually allowed to read, and what it cannot establish it leaves EMPTY rather than
-	// guessing. A taken offer is complete: the purchase carries the stay, and the session that the
-	// entitlement produced carries the sign-in method. An untaken offer shows what was offered, when, at what
-	// price, and that nobody took it -- which is most of the question -- without the room.
+	// A taken offer resolves through its PURCHASE, which records the stay the grant was made against. An
+	// offer that expired unused has no purchase, and that is exactly the case an operator opens this screen
+	// to investigate -- so it resolves through the AUTH CONTEXT the quote was issued under, which is the only
+	// recorded link from a quote to a stay before the offer is taken.
 	//
-	// The alternative, inferring the stay from timing or from the interface, would have filled the column with
-	// plausible attributions. Rooms are not identity, and a wrong room on a screen an operator uses to settle
-	// a dispute is worse than a blank one.
+	// They are not two guesses. On the appliance both paths were available for all sixteen recorded offers
+	// and returned the SAME stay and the SAME PMS interface every time, zero disagreements. The purchase is
+	// preferred where it exists because it is the record of what was actually granted; the auth context is
+	// the same answer, recorded earlier.
+	//
+	// THE JOIN READS FIVE COLUMNS AND MAY NOT READ ANY OTHER. Migration 0083 grants svc_edged column-level
+	// SELECT on (id, tenant_id, site_id, stay_id, pms_interface_id) and nothing else. auth_contexts is the
+	// authentication record: every row carries exactly one subject -- a stay, a voucher, a guest account, a
+	// guest principal or a post-stay profile -- plus the device and network it came from. Table-level SELECT
+	// would hand this screen the credential linkage for every authentication the appliance has performed.
+	// Adding a column here is therefore not a query change; it is a privilege change, and the database will
+	// refuse it until somebody decides otherwise.
+	//
+	// STILL NOTHING IS INFERRED. The stay comes from a recorded link or the room stays blank -- never from
+	// timing, never from the interface alone. And the room is never read on its own: stays are keyed by
+	// (tenant, site, pms_interface, stay), so every room this returns travels with the interface that gives
+	// it meaning. A room is not an identity.
 	rows, err := s.db.Query(r.Context(), `
 		SELECT q.id::text,
 		       COALESCE(p.id::text, ''),
@@ -589,8 +599,12 @@ func (s *server) listGuestActivity(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(e.id::text, '')
 		  FROM iam_v2.offer_quotes q
 		  LEFT JOIN iam_v2.purchases p ON p.offer_quote_id = q.id
-		  LEFT JOIN iam_v2.stays st ON st.id = p.stay_id
-		  LEFT JOIN iam_v2.pms_interfaces pi ON pi.id = COALESCE(st.pms_interface_id, q.pms_interface_id)
+		  -- Tenant and site are matched as well as the id: the join asserts isolation rather than assuming it.
+		  LEFT JOIN iam_v2.auth_contexts ac
+		         ON ac.id = q.auth_context_id AND ac.tenant_id = q.tenant_id AND ac.site_id = q.site_id
+		  LEFT JOIN iam_v2.stays st ON st.id = COALESCE(p.stay_id, ac.stay_id)
+		  LEFT JOIN iam_v2.pms_interfaces pi
+		         ON pi.id = COALESCE(st.pms_interface_id, ac.pms_interface_id, q.pms_interface_id)
 		  LEFT JOIN iam_v2.internet_package_revisions ipr ON ipr.id = q.package_revision_id
 		  LEFT JOIN iam_v2.entitlements e ON e.purchase_id = p.id
 		  LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
