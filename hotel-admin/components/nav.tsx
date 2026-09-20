@@ -81,6 +81,7 @@ const SECTIONS: Section[] = [
       { href: "/stays",          label: "Stays",           icon: Hotel,    resource: "pms-stays", enabled: CAP_PMS, keywords: "rooms reservations in house occupancy guest list" },
       { href: "/guest-accounts", label: "Guest accounts",  icon: KeyRound, resource: "guest-accounts", keywords: "username password login credentials voucher" },
       { href: "/sessions",       label: "Active sessions", icon: Monitor,  resource: "sessions", keywords: "online now devices connected who is on wifi disconnect" },
+      { href: "/usage",          label: "Usage explorer",  icon: Activity, resource: "usage", keywords: "data used quota dispute how much room device mac gigabytes consumption investigate" },
       { href: "/guest-device-self-service", label: "Guest devices", icon: Smartphone, resource: "guest-device-self-service", enabled: CAP_GUEST_DEVICES, keywords: "phone laptop remove device" },
       { href: "/online-time",    label: "Online-time budgets", icon: Activity, resource: "sessions", capability: "sessions.aggregate-time", enabled: CAP_GUEST_DEVICES, keywords: "time remaining allowance hours" },
       { href: "/post-stay",      label: "Post-stay access", icon: KeyRound, resource: "post-stay-profiles", enabled: CAP_POST_STAY, keywords: "after departure loyalty" },
