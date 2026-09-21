@@ -1,11 +1,9 @@
 {
-  "_note": "THE HOTEL ADMIN CAPABILITY CONTRACT. Next.js inlines NEXT_PUBLIC_* at BUILD time: a variable that is absent when `next build` runs is not merely empty, it is never substituted, and the compiled comparison `\"1\" === process.env.NEXT_PUBLIC_PHASE2_ADMIN` is evaluated in the browser against an empty env shim and is therefore ALWAYS FALSE. The routes still compile and remain reachable by URL, so nothing crashes and nothing 404s - the operator simply loses the navigation to them. That is exactly how a bundle built with no flags was deployed to the PRE-LIVE appliance and served an operator surface with no Internet Packages, no Service Plans and no PMS Connection while every structural check passed. This file is what a build is held to, so that outcome cannot be produced silently again.",
+  "_note": "THE HOTEL ADMIN CAPABILITY CONTRACT. It was written after a bundle built with no NEXT_PUBLIC_PHASE*_ADMIN flags was deployed to PRE-LIVE and served an operator surface with no Internet Packages, no Service Plans and no PMS Connection for five days: Next inlines NEXT_PUBLIC_* at BUILD time, so a flag absent when `next build` runs is never substituted, the compiled comparison is permanently false in the browser, and the routes still answer by URL while the operator simply loses the navigation to them. Nothing crashes and every structural check passes. IT HAPPENED A SECOND TIME, and that is why the contract now reads as it does: a plain `next build` removed ELEVEN destinations, and the safety net did not fire because it lives at deploy time and has to be remembered. Navigation therefore no longer consults a build flag at all. edged reports which surfaces it has mounted, the sidebar offers a destination when the appliance serves it and the operator's role may read it, and a build-time variable can no longer remove anything. This file is what a build is still held to for ROUTES and NAVIGATION, and it now also forbids the flag mechanism from returning.",
   "contract_version": "1",
   "applies_to": "PRE-LIVE appliance and every later Hotel Admin release until the contract is deliberately changed",
   "required_build_flags": {
-    "_note": "Every flag MUST be present in the build environment with exactly this value. Packaging supplies them from this file and then PROVES the substitution happened, because supplying a variable and having it inlined are two different facts.",
-    "NEXT_PUBLIC_PHASE2_ADMIN": "1",
-    "NEXT_PUBLIC_PHASE3_ADMIN": "1"
+    "_note": "EMPTY BY DESIGN, AND NOT AN OVERSIGHT. Navigation is decided at runtime from edged's mounted surfaces, so there is no build flag whose absence can hide a destination. A flag listed here would reintroduce exactly the failure this contract exists to prevent. Packaging still supplies nothing and proves nothing about flags, because there is nothing left to prove."
   },
   "required_routes": {
     "_note": "Operator surfaces that must exist in the built app-path route manifest. A build that cannot serve these is not a candidate for this appliance, whatever else is right about it.",
@@ -23,30 +21,148 @@
     ]
   },
   "required_navigation": {
-    "_note": "The gated NAVIGATION, which is the thing the operator actually sees and the thing that silently disappeared. Each entry names a capability flag and one route it must lead to; verification asserts the compiled bundle can reach the route AND that the flag governing it was inlined true.",
+    "_note": "THE NAVIGATION, which is the thing the operator actually sees and the thing that silently disappeared -- twice. Each entry names a destination, the route it leads to, and the edged surface that must be mounted for it to apply. Verification asserts that on an appliance serving that surface, a site_admin is offered the destination. Entries whose surface is not mounted are correctly absent: that is the appliance saying it does not run the feature, which is a different statement from a build having forgotten it.",
     "entries": [
       {
-        "label": "Internet Packages",
-        "flag": "NEXT_PUBLIC_PHASE2_ADMIN",
-        "route": "/internet-packages"
+        "label": "Internet packages",
+        "route": "/internet-packages",
+        "surface": "commercial-packages"
       },
       {
-        "label": "Service Plans",
-        "flag": "NEXT_PUBLIC_PHASE2_ADMIN",
-        "route": "/service-plans"
+        "label": "Service plans",
+        "route": "/service-plans",
+        "surface": "commercial-packages"
       },
       {
-        "label": "PMS Connection",
-        "flag": "NEXT_PUBLIC_PHASE3_ADMIN",
-        "route": "/pms-interfaces"
+        "label": "Checkout grace",
+        "route": "/checkout-grace",
+        "surface": "checkout-grace"
+      },
+      {
+        "label": "Stays",
+        "route": "/stays",
+        "surface": "pms-stays"
+      },
+      {
+        "label": "PMS connection",
+        "route": "/pms-interfaces",
+        "surface": "pms-interfaces"
+      },
+      {
+        "label": "Network routing",
+        "route": "/pms-routing",
+        "surface": "pms-routing"
+      },
+      {
+        "label": "PMS activity",
+        "route": "/stay-events",
+        "surface": "pms-events"
+      },
+      {
+        "label": "Guest sign-in checks",
+        "route": "/pms-resolutions",
+        "surface": "pms-resolutions"
+      },
+      {
+        "label": "Guest sign-in attempts",
+        "route": "/guest-signin-attempts",
+        "surface": "guest-signin-attempts"
+      },
+      {
+        "label": "Duplicate sources",
+        "route": "/pms-source-conflicts",
+        "surface": "pms-source-conflicts"
+      },
+      {
+        "label": "Alerts",
+        "route": "/operational-alerts",
+        "surface": "operational-alerts"
+      },
+      {
+        "label": "Guest accounts",
+        "route": "/guest-accounts",
+        "surface": "guest-accounts"
+      },
+      {
+        "label": "Active sessions",
+        "route": "/sessions",
+        "surface": "sessions"
+      },
+      {
+        "label": "Usage explorer",
+        "route": "/usage",
+        "surface": "usage"
+      },
+      {
+        "label": "Sign-in methods",
+        "route": "/sign-in-methods",
+        "surface": "auth-methods"
+      },
+      {
+        "label": "Portal settings",
+        "route": "/portal-branding",
+        "surface": "portal-branding"
+      },
+      {
+        "label": "Allowed sites",
+        "route": "/walled-garden",
+        "surface": "walled-garden"
+      },
+      {
+        "label": "Social login",
+        "route": "/social-providers",
+        "surface": "social-providers"
+      },
+      {
+        "label": "Email & SMS",
+        "route": "/notifications",
+        "surface": "notification-providers"
+      },
+      {
+        "label": "Guest networks",
+        "route": "/network",
+        "surface": "network"
+      },
+      {
+        "label": "Diagnostics",
+        "route": "/health",
+        "surface": "diagnostics"
+      },
+      {
+        "label": "Activity",
+        "route": "/audit",
+        "surface": "audit"
+      },
+      {
+        "label": "Appliance & licence",
+        "route": "/appliance",
+        "surface": "license"
+      },
+      {
+        "label": "Backups",
+        "route": "/backups",
+        "surface": "backups"
+      },
+      {
+        "label": "Operators",
+        "route": "/operators",
+        "surface": "operators"
+      },
+      {
+        "label": "Dashboard",
+        "route": "/dashboard",
+        "surface": "reports"
       }
     ]
   },
   "forbidden_in_client_bundle": {
-    "_note": "A residual runtime lookup of a REQUIRED capability flag in the CLIENT chunks is the fingerprint of a build that never received it: Next left the property access in place instead of substituting a literal. Finding one means the flag was missing however confidently the build environment was set up, so it is a hard packaging failure. Only the REQUIRED flags are listed: a lookup for a deliberately-absent flag is the correct compiled form of 'this surface is off'.",
+    "_note": "ANY capability-flag lookup in the client bundle is now a packaging failure, not just the ones that were required. Previously a residual lookup meant 'this flag went missing'; now it means 'somebody reintroduced the build-time gate', which is the mechanism that produced both outages. All five are listed so the mechanism cannot come back for one surface while the others stay correct.",
     "patterns": [
       "env.NEXT_PUBLIC_PHASE2_ADMIN",
-      "env.NEXT_PUBLIC_PHASE3_ADMIN"
+      "env.NEXT_PUBLIC_PHASE3_ADMIN",
+      "env.NEXT_PUBLIC_PHASE4_ADMIN",
+      "env.NEXT_PUBLIC_PHASE5_ADMIN",
+      "env.NEXT_PUBLIC_PHASE6_ADMIN"
     ]
   },
   "minimum_rollback_contract": {
@@ -55,9 +171,9 @@
     "must_satisfy_required_build_flags": true
   },
   "deliberately_absent_flags": {
-    "_note": "NOT AN OVERSIGHT, AND NOT SAFE TO ADD. These surfaces exist in the source and are deliberately compiled OFF for this appliance. Phase 4 is accepted at DARK maturity with NO financial traffic authorized, and the Phase-4 DARK gate refuses any delivered configuration that enables its operator screens - correctly, and it refused the first draft of this contract. Phases 5 and 6 are likewise not part of the authorized PRE-LIVE operator surface. A residual runtime lookup for these flags in the client bundle is therefore EXPECTED and is what 'off' looks like; only the required flags above are forbidden to appear unsubstituted.",
-    "NEXT_PUBLIC_PHASE4_ADMIN": "deliberately unset — Phase 4 is DARK, no financial traffic authorized",
-    "NEXT_PUBLIC_PHASE5_ADMIN": "deliberately unset — post-stay operator surface not authorized for PRE-LIVE",
-    "NEXT_PUBLIC_PHASE6_ADMIN": "deliberately unset — guest device self-service not authorized for PRE-LIVE"
+    "_note": "STILL DARK, AND BY A STRONGER MECHANISM THAN A UI CONSTANT. These surfaces exist in the source and are not part of the authorized PRE-LIVE operator surface. What keeps them off an operator's screen is that edged DOES NOT MOUNT THEM -- the sidebar asks the appliance and is told no -- which is the same answer the build flags used to give and one that cannot be lost by forgetting a variable. The backend flags remain the authorization control and the Phase-4 DARK gate still refuses any delivered configuration that turns one on. Phase 4 is accepted at DARK maturity with NO financial traffic authorized; phases 5 and 6 are likewise not authorized here. Nothing in this delivery enables any of them.",
+    "NEXT_PUBLIC_PHASE4_ADMIN": "not used by the product any more; Phase 4 is DARK, no financial traffic authorized",
+    "NEXT_PUBLIC_PHASE5_ADMIN": "not used by the product any more; post-stay operator surface not authorized for PRE-LIVE",
+    "NEXT_PUBLIC_PHASE6_ADMIN": "not used by the product any more; guest device self-service not authorized for PRE-LIVE"
   }
 }

@@ -14,25 +14,35 @@ import {
 } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 
-// DEPLOYMENT GATES, NOT PRODUCT VOCABULARY.
+// THERE IS NO BUILD-TIME GATE IN THIS FILE, AND THAT IS THE POINT.
 //
-// These env vars keep their historical names because they are a deployment contract: renaming one would
-// silently un-gate a surface on every appliance already configured under the old name. What changed is that
-// they are now read as the CAPABILITY each gates, so nobody has to know which release shipped what in order
-// to follow this file — and nothing here reaches the operator, who sees capabilities in the sidebar and has
-// no reason to learn the project's release history to find a screen.
+// Navigation used to be gated a second time by NEXT_PUBLIC_PHASE*_ADMIN. Next substitutes those at BUILD
+// time, so a flag that is absent when `next build` runs is never substituted at all: the comparison compiles
+// to a permanent false, the routes still exist and still answer by URL, and the operator simply loses the
+// menu to them. Nothing crashes, nothing 404s, every structural check passes.
 //
-// Each is a convenience only. edged is the authority and does not mount the routes behind a dark surface at
-// all, so hiding a link prevents a dead end rather than enforcing anything.
-const CAP_INTERNET_OFFERING = process.env.NEXT_PUBLIC_PHASE2_ADMIN === "1"; // packages + service plans
-const CAP_PMS = process.env.NEXT_PUBLIC_PHASE3_ADMIN === "1";              // PMS connection, stays, routing
-const CAP_CHARGES = process.env.NEXT_PUBLIC_PHASE4_ADMIN === "1";          // charges, settlements, recovery
-const CAP_POST_STAY = process.env.NEXT_PUBLIC_PHASE5_ADMIN === "1";        // post-stay access, transfers
-const CAP_GUEST_DEVICES = process.env.NEXT_PUBLIC_PHASE6_ADMIN === "1";    // guest device self-service
+// That failure shipped twice. Once for five days, which is why capability-contract.json and the deployment
+// integrity checker exist. And again here — a bundle built with a plain `next build` removed ELEVEN
+// destinations an operator was entitled to: Internet packages, Service plans, Checkout grace, Stays, PMS
+// connection, Network routing, PMS activity, Guest sign-in checks, Guest sign-in attempts, Duplicate sources
+// and Alerts. Every one of those surfaces was mounted and answering on the appliance at the time.
+//
+// The second occurrence is what settled the design. A safety net that has to be REMEMBERED is not a
+// property of the system, and the unit test alongside this file asserted that the hiding was correct, so the
+// regression was indistinguishable from intent at the source level.
+//
+// So availability now has exactly one author: edged. It reports what it has mounted, that answer describes
+// the appliance in front of the operator, and it cannot go missing at build time because it is not compiled
+// in. A destination is offered when the appliance serves it AND the operator's role may read it — two
+// questions, each answered by the system that owns it.
+//
+// Surfaces that are deliberately dark are still dark, and by a stronger mechanism than a UI constant: edged
+// does not mount them, so surfaceAvailable() returns false for exactly the same set the old flags covered.
+// This was never an authorization control -- the previous comment here said so in as many words -- and
+// removing it takes nothing away. edged enforces server-side regardless of what any menu shows.
 
 // Each item names the edged resource that gates its visibility. Items the operator's roles cannot read are
-// hidden (edged still enforces server-side). `enabled: false` hides an item behind a deployment gate
-// regardless of role.
+// hidden (edged still enforces server-side).
 //
 // `keywords` feeds the filter box only. An operator looking for "wifi speed" should find Service plans, and
 // one looking for "room sign in" should find the PMS resolution screen, without having to know what this
@@ -46,7 +56,6 @@ type Item = {
    *  live under the always-mounted "sessions" resource but need a sub-feature that most appliances do not
    *  run, so the resource name alone would keep offering a screen with nothing behind it. */
   capability?: string;
-  enabled?: boolean;
   keywords?: string;
 };
 type Section = { title: string; items: Item[] };
@@ -70,21 +79,21 @@ const SECTIONS: Section[] = [
     // offer that uses it — so they sit adjacent instead of being buried in one tabbed screen.
     title: "Internet offering",
     items: [
-      { href: "/internet-packages", label: "Internet packages", icon: Package, resource: "commercial-packages", enabled: CAP_INTERNET_OFFERING, keywords: "offer tariff price free paid" },
-      { href: "/service-plans",     label: "Service plans",     icon: Gauge,   resource: "commercial-packages", enabled: CAP_INTERNET_OFFERING, keywords: "speed bandwidth quota devices mbps" },
-      { href: "/checkout-grace",    label: "Checkout grace",    icon: Shield,  resource: "checkout-grace",      enabled: CAP_PMS, keywords: "after checkout late departure" },
+      { href: "/internet-packages", label: "Internet packages", icon: Package, resource: "commercial-packages", keywords: "offer tariff price free paid" },
+      { href: "/service-plans",     label: "Service plans",     icon: Gauge,   resource: "commercial-packages", keywords: "speed bandwidth quota devices mbps" },
+      { href: "/checkout-grace",    label: "Checkout grace",    icon: Shield,  resource: "checkout-grace", keywords: "after checkout late departure" },
     ],
   },
   {
     title: "Guests",
     items: [
-      { href: "/stays",          label: "Stays",           icon: Hotel,    resource: "pms-stays", enabled: CAP_PMS, keywords: "rooms reservations in house occupancy guest list" },
+      { href: "/stays",          label: "Stays",           icon: Hotel,    resource: "pms-stays", keywords: "rooms reservations in house occupancy guest list" },
       { href: "/guest-accounts", label: "Guest accounts",  icon: KeyRound, resource: "guest-accounts", keywords: "username password login credentials voucher" },
       { href: "/sessions",       label: "Active sessions", icon: Monitor,  resource: "sessions", keywords: "online now devices connected who is on wifi disconnect" },
       { href: "/usage",          label: "Usage explorer",  icon: Activity, resource: "usage", keywords: "data used quota dispute how much room device mac gigabytes consumption investigate" },
-      { href: "/guest-device-self-service", label: "Guest devices", icon: Smartphone, resource: "guest-device-self-service", enabled: CAP_GUEST_DEVICES, keywords: "phone laptop remove device" },
-      { href: "/online-time",    label: "Online-time budgets", icon: Activity, resource: "sessions", capability: "sessions.aggregate-time", enabled: CAP_GUEST_DEVICES, keywords: "time remaining allowance hours" },
-      { href: "/post-stay",      label: "Post-stay access", icon: KeyRound, resource: "post-stay-profiles", enabled: CAP_POST_STAY, keywords: "after departure loyalty" },
+      { href: "/guest-device-self-service", label: "Guest devices", icon: Smartphone, resource: "guest-device-self-service", keywords: "phone laptop remove device" },
+      { href: "/online-time",    label: "Online-time budgets", icon: Activity, resource: "sessions", capability: "sessions.aggregate-time", keywords: "time remaining allowance hours" },
+      { href: "/post-stay",      label: "Post-stay access", icon: KeyRound, resource: "post-stay-profiles", keywords: "after departure loyalty" },
     ],
   },
   {
@@ -99,11 +108,11 @@ const SECTIONS: Section[] = [
     // stays are the symptom.
     title: "Property management system",
     items: [
-      { href: "/pms-interfaces",       label: "PMS connection",       icon: Hotel,  resource: "pms-interfaces",       enabled: CAP_PMS, keywords: "protel fias connect sync resync opera status" },
-      { href: "/pms-routing",          label: "Network routing",      icon: Router, resource: "pms-routing",          enabled: CAP_PMS, keywords: "which pms per network vlan mapping" },
-      { href: "/stay-events",          label: "PMS activity",         icon: Send,   resource: "pms-events",           enabled: CAP_PMS, keywords: "feed messages check in out log" },
-      { href: "/pms-resolutions",      label: "Guest sign-in checks", icon: Send,   resource: "pms-resolutions",      enabled: CAP_PMS, keywords: "room verification failures evidence" },
-    { href: "/guest-signin-attempts", label: "Guest sign-in attempts", icon: KeyRound, resource: "guest-signin-attempts", enabled: CAP_PMS, keywords: "attempt failed reason room typed credential mismatch why cannot connect" },
+      { href: "/pms-interfaces",       label: "PMS connection",       icon: Hotel,  resource: "pms-interfaces", keywords: "protel fias connect sync resync opera status" },
+      { href: "/pms-routing",          label: "Network routing",      icon: Router, resource: "pms-routing", keywords: "which pms per network vlan mapping" },
+      { href: "/stay-events",          label: "PMS activity",         icon: Send,   resource: "pms-events", keywords: "feed messages check in out log" },
+      { href: "/pms-resolutions",      label: "Guest sign-in checks", icon: Send,   resource: "pms-resolutions", keywords: "room verification failures evidence" },
+    { href: "/guest-signin-attempts", label: "Guest sign-in attempts", icon: KeyRound, resource: "guest-signin-attempts", keywords: "attempt failed reason room typed credential mismatch why cannot connect" },
       // RECONCILIATION IS NOT DAY-TO-DAY WORK, so it is not day-to-day navigation.
       //
       // Both reconciliation screens are diagnostics. Neither has an action on it, both describe machinery
@@ -111,17 +120,17 @@ const SECTIONS: Section[] = [
       // working. They stay routable and are reached from PMS connection under Advanced diagnostics, where
       // somebody troubleshooting will look for them -- and the PMS connection page now says plainly when
       // there is something in them worth looking at.
-      { href: "/pms-source-conflicts", label: "Duplicate sources",    icon: Shield, resource: "pms-source-conflicts", enabled: CAP_PMS, keywords: "conflict two interfaces same room" },
-      { href: "/stay-transfers",       label: "Cross-PMS transfer",   icon: Send,   resource: "stay-transfers",       enabled: CAP_POST_STAY, keywords: "move stay between systems" },
+      { href: "/pms-source-conflicts", label: "Duplicate sources",    icon: Shield, resource: "pms-source-conflicts", keywords: "conflict two interfaces same room" },
+      { href: "/stay-transfers",       label: "Cross-PMS transfer",   icon: Send,   resource: "stay-transfers", keywords: "move stay between systems" },
     ],
   },
   {
     title: "Charges",
     items: [
-      { href: "/financial-health",      label: "Charge health", icon: Wallet, resource: "financial-review", enabled: CAP_CHARGES, keywords: "posting queue outbox money" },
-      { href: "/financial-review",      label: "Manual review", icon: Shield, resource: "financial-review", enabled: CAP_CHARGES, keywords: "failed posting decide" },
-      { href: "/financial-settlements", label: "Settlements",   icon: Wallet, resource: "financial-review", enabled: CAP_CHARGES, keywords: "payment room charge card" },
-      { href: "/financial-recovery",    label: "Recovery",      icon: Shield, resource: "financial-review", enabled: CAP_CHARGES, keywords: "held restore epoch" },
+      { href: "/financial-health",      label: "Charge health", icon: Wallet, resource: "financial-review", keywords: "posting queue outbox money" },
+      { href: "/financial-review",      label: "Manual review", icon: Shield, resource: "financial-review", keywords: "failed posting decide" },
+      { href: "/financial-settlements", label: "Settlements",   icon: Wallet, resource: "financial-review", keywords: "payment room charge card" },
+      { href: "/financial-recovery",    label: "Recovery",      icon: Shield, resource: "financial-review", keywords: "held restore epoch" },
     ],
   },
   {
@@ -171,7 +180,7 @@ const SECTIONS: Section[] = [
     items: [
       // Watching it.
       { href: "/health",             label: "Diagnostics", icon: Activity,   resource: "diagnostics", keywords: "services health checks scd netd kea" },
-      { href: "/operational-alerts", label: "Alerts",      icon: Shield,     resource: "operational-alerts", enabled: CAP_PMS, keywords: "warnings acknowledge" },
+      { href: "/operational-alerts", label: "Alerts",      icon: Shield,     resource: "operational-alerts", keywords: "warnings acknowledge" },
       { href: "/audit",              label: "Activity",    icon: ScrollText, resource: "audit", keywords: "audit log who did what history trail security changes" },
       // Running it.
       { href: "/appliance",          label: "Appliance & licence", icon: ServerCog, resource: "license", keywords: "enrol claim serial activate setup cloud connection central licence capacity expiry plan offline renewal first-time" },
@@ -244,7 +253,7 @@ export function Nav({
     return SECTIONS.map((sec) => ({
       title: sec.title,
       items: sec.items.filter((it) => {
-        if (it.enabled === false || !canRead(it.resource, roles)) return false;
+        if (!canRead(it.resource, roles)) return false;
         if (!surfaceAvailable(caps, it.capability ?? it.resource)) return false;
         if (!q) return true;
         return (
