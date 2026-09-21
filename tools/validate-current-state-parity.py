@@ -1776,7 +1776,58 @@ def main():
                            "the recorded blocker is the roster's AGE, not the feed state or a resync in flight"))
 
     deployed = str(facts.get("deployed_head_on_appliance") or "").strip()
-    if len(deployed) >= 8:
+
+    # THE APPLIANCE MAY RUN MORE THAN ONE COMMIT, and on 2026-09-21 it ran three: scd, pmsd/acctd and
+    # edged/portald/netd were each built from a different head. Two things follow, and this rule set got both
+    # wrong before they were needed.
+    #
+    # First, deployed_head_on_appliance stops being a commit id. It reads MIXED, and the rule below used to
+    # accept anything eight characters or longer as the head -- so it would have compared every appliance sha
+    # on every surface against the string "MIXED --" and called all of them contradictions.
+    #
+    # Second, and the reason this matters beyond mechanics: with three heads running, naming ONE of them as
+    # what the appliance runs is false for four of the six binaries, and naming the NEWEST is the most
+    # misleading choice available because it is the one a reader trusts. So the acceptable set is every
+    # commit the per-service record names, and a sentence that generalises across all binaries while more
+    # than one head is running is a contradiction in its own right.
+    service_heads = []
+    for _name, _val in (facts.get("deployed_runtime_services") or {}).items():
+        if _name.startswith("_"):
+            continue
+        _c = str(_val).partition("(")[2].partition(",")[0].strip().lower()
+        if len(_c) >= 8 and re.fullmatch(r"[0-9a-f]+", _c) and _c not in service_heads:
+            service_heads.append(_c)
+
+    if len(service_heads) >= 2:
+        # A surface that says every binary runs one head, while the record says otherwise.
+        every_rx = re.compile(
+            r"(?:every|all)\s+(?:service\s+)?binar(?:y|ies)[^.;\n]{0,80}?"
+            r"(?:runs?|built from|from)[^.;\n]{0,40}?\b([0-9a-f]{8,40})\b", re.I)
+        heads_list = ", ".join(h[:8] for h in service_heads)
+
+        # REPORTING A PAST CLAIM IS NOT MAKING ONE, and this rule caught its own receipt before it caught
+        # anything else. T0172 exists to correct this very field and says so: the register SAID every
+        # service binary came from 94c25c20, and not one did. A rule that cannot tell that from an assertion
+        # would force the correction to be deleted so that the corrected repository could pass -- which is
+        # how a project loses the record of its own mistakes.
+        #
+        # The exemption is deliberately narrow: a past-tense reporting verb, or this file's existing
+        # historical markers, in the SAME clause. "every binary runs X" on its own is still refused, which
+        # is the assertion that actually misleads.
+        reported_rx = re.compile(
+            r"\b(?:said|claimed|stated|asserted|recorded|read|used to say|had (?:said|claimed|recorded))\b",
+            re.I)
+
+        def generalised(m):
+            clause = m.string
+            return not (HIST_RX.search(clause) or reported_rx.search(clause))
+
+        live_rules.append((
+            "deployed-head-generalised", every_rx, generalised,
+            "the appliance runs %d different heads (%s); no single one describes every binary"
+            % (len(service_heads), heads_list)))
+
+    if re.fullmatch(r"[0-9a-f]{8,40}", deployed.lower()) or len(service_heads) >= 2:
         # A superseded deployed head presented as what the appliance runs. Any 8+ hex prefix that is claimed as
         # deployed and is neither the recorded head nor the recorded repository master is a contradiction.
         master = str(facts.get("repository_master_head") or "").strip()
@@ -1791,6 +1842,15 @@ def main():
         rx = re.compile(r"(?:runs|running|deployed(?:\s+(?:at|on|from))?|appliance\s+(?:is\s+)?at)"
                         r"[^.;\n]{0,40}?\b([0-9a-f]{8,40})\b", re.I)
 
+        # Every commit the appliance actually runs is acceptable, plus repository master. Built from the
+        # per-service record rather than from the single field, because the single field is the one that
+        # cannot express a mixed appliance.
+        acceptable = list(service_heads)
+        if re.fullmatch(r"[0-9a-f]{8,40}", deployed.lower()):
+            acceptable.append(deployed.lower())
+        if master:
+            acceptable.append(master.lower())
+
         def wrong_head(m):
             h = m.group(1).lower()
             clause = m.string
@@ -1798,10 +1858,11 @@ def main():
                 return False
             if not re.search(r"[a-f]", h):
                 return False  # a decimal identifier: a CI run, not a commit
-            return not (deployed.startswith(h) or h.startswith(deployed[:8]) or
-                        (master and (master.startswith(h) or h.startswith(master[:8]))))
+            return not any(a.startswith(h) or h.startswith(a[:8]) for a in acceptable)
+
+        _named = ", ".join(a[:8] for a in acceptable) or "none recorded"
         live_rules.append(("deployed-head", rx, wrong_head,
-                           "the recorded deployed head is %s (repository master %s)" % (deployed[:8], master[:8])))
+                           "the appliance runs %s (repository master %s)" % (_named, (master or "?")[:8])))
 
     for rel in DOC_SURFACES:
         text = load_surface(rel)

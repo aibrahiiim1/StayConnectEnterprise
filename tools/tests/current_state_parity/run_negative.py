@@ -928,6 +928,29 @@ def _(d):
                "The PRE-LIVE appliance runs b9cf8330d3511bd452931016ca6b0b1a65e13bc6 for all runtime services.")
 
 
+# ---- an appliance that runs MORE THAN ONE head ---------------------------------------------------------------
+#
+# On 2026-09-21 the PRE-LIVE appliance ran three commits at once: scd from one, pmsd and acctd from another,
+# and edged, portald and netd from a third. The register had said, for days, that every binary came from a
+# single commit -- and by then not one of them did.
+#
+# The failure is not arithmetic. A sentence naming ONE head for all six is false for whichever binaries were
+# built elsewhere, and naming the NEWEST is the most misleading option available, because it is the one a
+# reader has no reason to doubt. Both cases below are that mistake, in the two shapes it takes.
+
+@case("one head generalised across every binary while the appliance runs several",
+      "deployed-head-generalised")
+def _(d):
+    append_doc(d, "docs/context/StayConnect-IAM-Handoff.md",
+               "On the PRE-LIVE appliance every service binary runs a4124ce595b8bc590f1eb5708bd75cc8a3579587.")
+
+
+@case("a head no deployed binary was built from, on a mixed appliance", "deployed-head")
+def _(d):
+    append_doc(d, "docs/context/StayConnect-IAM-Handoff.md",
+               "The PRE-LIVE appliance is deployed at 94c25c20abc80b7d91b5e3086ba7e867b9ecba35 today.")
+
+
 # ...and the other half for these four: the SAME sentences, labelled as the history they are, must pass. A rule
 # that cannot tell a record of what was true from a claim about what is true would delete this project's
 # evidence model.
