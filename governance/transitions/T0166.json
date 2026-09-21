@@ -1,0 +1,38 @@
+{
+  "transition_id": "T0166",
+  "seq": 166,
+  "timestamp": "2026-09-21T03:30:00Z",
+  "timestamp_derivation": "After the content commit of this fix (2026-09-20T20:47:45Z) and after its live verification on PRE-LIVE, where the escaped form an operator's browser actually sends was confirmed to return the device's twelve sessions. Before the author timestamp of the commit that introduces this receipt.",
+  "record_type": "USAGE_EXPLORER_DEVICE_LOOKUP_CORRECTION",
+  "relationship_to_previous_deliveries": "T0164 and T0165, and PRs #162 and #163, stand exactly as recorded and are not rewritten. This is a single-defect correction to the Usage Explorer delivered in T0164.",
+  "how_it_was_found": "By the Product Owner using the feature on the appliance. The per-stay view showed a device with twelve sessions and 576,996,393 bytes of traffic; searching for that same address in the per-device view answered 'this appliance has no record of that device'.",
+  "the_defect": {
+    "what_was_wrong": "A MAC contains colons and a colon is reserved in a URL path, so the screen escapes it with encodeURIComponent. The server received the still-escaped segment from chi.URLParam and passed it straight into `$1::macaddr`, where the cast failed. The client was correct and the database was correct; the server was reading an encoded string as though it were a literal one.",
+    "why_nothing_caught_it": "A shell sends the colons unescaped, so curl worked. Every check anyone had run by hand took the one path that happened to work, and only a browser took the broken one.",
+    "the_second_half": "'This appliance has no record of that device' is a claim ABOUT A DEVICE, and it was being returned for a query ERROR. The message blamed the data for a fault in the request, which is what made the defect invisible rather than obvious. A malformed address, an absent row and a failed query had been given one answer between them."
+  },
+  "the_fix": "The path parameter is unescaped and then PARSED as a hardware address rather than trusted as text, and normalised to the single form PostgreSQL stores. This also makes the endpoint accept the dash and dot notations an operator might paste from a router or a switch. Eight-byte EUI-64 addresses are refused at the boundary rather than failing the cast later, because macaddr holds six. The three failure modes are now three answers: 400 bad_mac naming what an address looks like, 404 only when the address is valid and genuinely unknown, and 500 with a log line when the query itself failed.",
+  "scope": "One handler and its tests. No schema change, no migration, no privilege change, no UI change -- the client was already correct. No other endpoint takes a path parameter that can carry a reserved character; the repository was checked for siblings and {mac} is the only one.",
+  "verification": {
+    "tests": "A new test drives every form a client might send -- literal colons, percent-encoded, uppercase, uppercase-and-encoded, dashes, and surrounding encoded whitespace -- and requires all six to resolve to one canonical address. Separate tests require that something which is not an address is never reported as an unknown device, that an eight-byte address is refused, and that the handler keeps its three failure modes distinct.",
+    "live_before_the_fix": "Same address, three ways: literal colons 200, percent-encoded 404, uppercase 200. The 404 was the form the browser sends.",
+    "live_after_the_fix": "The percent-encoded form returns 12 sessions, 576,996,393 bytes and 12 associated stays. Literal colons, dashes and uppercase-encoded all return 200. A malformed address returns 400 with the corrected message. A well-formed but unknown address returns an honest 404."
+  },
+  "guest_data": "No guest name, room number or reservation identifier appears in this record, in the commit message or in the test fixtures. The tests use a documentation address; the real address the Product Owner reported is not reproduced here.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "The Product Owner authorised this correction end to end: tests, full required validation, the protected PR path, all four required gates, merge only when green, PRE-LIVE running the merged master source, live re-verification and governance synchronisation. The PRE-LIVE deployment and live verification performed while diagnosing are accepted as part of this work. No unrelated work was opened.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE.",
+  "base": "c7ca03aed127a05dc27ced2ffa641d2b58f6cdbd",
+  "head": "b29326656a842204fed5dc02875e5460e0b37e48"
+}
