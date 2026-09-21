@@ -1,0 +1,64 @@
+{
+  "transition_id": "T0170",
+  "seq": 170,
+  "timestamp": "2026-09-21T16:29:00Z",
+  "timestamp_derivation": "After PR #167 merged as 6c9877da and after the merged netd and edged were deployed on PRE-LIVE and the regenerated ruleset was verified from a client on the guest bridge at 16:28Z. Before the author timestamp of the commit that introduces this receipt.",
+  "record_type": "GUEST_PILOT_SECOND_DEFECT_CORRECTION",
+  "what_was_authorised": "The same guest-pilot mission as T0169: run and stabilise Guest Internet on PRE-LIVE, surface real guest-path issues and resolve them end to end, including gates, protected merge, deployment to 172.21.60.25 and live verification. This receipt records the second defect that exercising the guest journey surfaced. It is not a new authorisation and it enables no product capability.",
+  "first_delivery_completed": {
+    "pr": "#167, merged as 6c9877da with all four required gates green at 591d14da.",
+    "deployed": "netd and edged built from merged master and installed on 172.21.60.25.",
+    "ruleset_regenerated": "netd converged on boot_reconcile from fingerprint 37abce917b9b5d0804ac476cb6e6a14c to 92f9c310b8d97bedebbaeb8ebc9420de, carrying 0 authorisation elements because none were held. This was a genuine re-render, not a replay of the stored bundle.",
+    "verified_live": {
+      "port_443_dnat_rules": "0 (was 1)",
+      "explicit_refusal": "iifname @guest_interfaces oifname ens160 tcp dport 443 reject with tcp reset, rendered last in the forward chain, after both authorisation accepts and the walled garden.",
+      "port_80_captive_redirect": "intact, to the portal's HTTP port.",
+      "dead_tls_port": "no longer opened to guests; the input chain now accepts the HTTP port only.",
+      "operator_access": "the management interface's own 443 accept survives."
+    }
+  },
+  "guest_journey_exercised": {
+    "method": "A client in its own network namespace with one end of a veth enslaved to the existing guest bridge. From the bridge it is a device that plugged in: it ARPs, takes a real DHCP lease, resolves through the appliance's resolver and is subject to the same nftables rules. portald requires a real client address with a real ARP entry, which is why a request from the appliance itself could not have stood in for it. No guest network was added and no configuration or network revision changed.",
+    "before_and_after": {
+      "captive_detection": "Working, unchanged. Apple's probe is served the portal directly; Google's and Microsoft's take a 302 to the portal host, which was followed and returned the full portal page.",
+      "pre_auth_https": "Refused in 14ms before the change and 13ms after. The guest experience is identical: what changed is that the refusal is now explicit instead of a redirect to a port that never had a listener.",
+      "pre_auth_internet": "Blocked before and after, proved on a port that is not redirected and on ICMP, to a destination read from the live set and confirmed not to be in the walled garden.",
+      "dhcp": "A lease was obtained from the appliance's own DHCP on the guest bridge."
+    },
+    "harness_errors_found_and_corrected": "Three, all of which produced confident wrong answers before they were caught, and none of which reached this record as evidence. The first probed an address that is IN the walled garden and so is reachable before sign-in by design, and called it an open path. The second resolved its target to IPv6, so curl rejected the URL as malformed and a non-zero exit was read as 'blocked' -- two checks passed without a packet being sent. The third asserted that the captive redirect pointed at the gateway address when the portal uses a hostname, and reported working captive detection as a failure twice before the Location header was actually read."
+  },
+  "defect_found_and_fixed": {
+    "symptom": "A voucher issued through the real issuance path authenticates correctly, and the guest is then redirected to package selection, where the supporting service answers 404. The guest lands on a page with nothing on it and is told to choose another package.",
+    "root_cause": "The portal's commerce session store was constructed unconditionally, while the routes it leads to are mounted only when the Phase-2 portal surface is on. Every 'store is nil' guard in the package was therefore dead code -- including the one in the authentication bridge whose entire purpose is to tell the guest, when that surface is off, that packages are unavailable and to ask reception. The field's own comment claimed the store is only built when the surface is on; it was not.",
+    "fix": "The store is built behind the same gate that mounts the routes, so one flag decides whether the surface exists at all and the nil guards become the honest refusals they were written to be. This enables no capability and changes no guest's access: it replaces a dead end with the message the code already contained.",
+    "scope": "The authentication bridge is reached only from the voucher and guest-account handlers. Room sign-in does not pass through it, which is why every session this appliance has recorded came from a stay, and why the dead end never presented as an outage.",
+    "not_a_capability_change": "Phase-2 commerce remains dark. Nothing here turns it on, and turning it on would be a product decision outside this mission."
+  },
+  "product_owner_decision_requested": {
+    "what": "The guest portal advertises six sign-in methods. Voucher and guest-account sign-in cannot complete while Phase-2 commerce is dark, which is the accepted state of this appliance. After this fix they fail honestly and direct the guest to reception, rather than stranding them; they still cannot put a guest online.",
+    "evidence": "Every session this appliance has recorded -- 16 of them -- used the PMS room method. No voucher or account entitlement has ever existed here. The last session began on 2026-09-12.",
+    "why_it_is_not_decided_here": "Both remedies are product decisions rather than repairs. Enabling the Phase-2 portal commerce surface is a capability enablement that Phase 7 accepted as OFF everywhere. Hiding the methods the appliance cannot complete is a change to what the guest portal offers. Neither is within a stabilisation mission.",
+    "options": "(a) leave the methods visible, now failing honestly, and record that room sign-in is the working path on this appliance; (b) authorise enabling the Phase-2 portal commerce surface so voucher and account sign-in can complete; or (c) authorise showing the guest only the methods this appliance can actually complete."
+  },
+  "verification": {
+    "tests": "The portald suite passes. Three new tests cover the dark state: the guest is told packages are unavailable and is neither redirected nor given a cookie; a cookie is not honoured once the surface is off; and the store exists exactly when the surface does.",
+    "mutation_proven": "Reintroducing the defect fails the constructor test in two of its three cases. This mattered here: the first version of that test asserted over the package's own fixtures, which build the field themselves, and so passed happily with the defect put back. It now drives the real constructor through the environment. A test that cannot fail on the broken code is not protection, and the defect being fixed is itself a guard that could not fire.",
+    "existing_behaviour_preserved": "The pre-existing tests for the surface-on path still pass unchanged, so the correction did not buy an honest OFF state by breaking the ON one."
+  },
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Guest pilot operation and directly related fixes, end to end, under the same mission as T0169. The authorised networking change was completed and verified in the first delivery. No PMS, financial, schema, security-boundary or Go-Live change was made, and no product capability was enabled.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE. The retired appliance was not contacted.",
+  "base": "6c9877dac34c91110a7d0f5355b5e3a408311eec",
+  "head": "aec69a6b9bd69970919ef70e8ef8a76857521ce0"
+}

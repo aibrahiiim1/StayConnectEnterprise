@@ -1093,7 +1093,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0169",
+  "latest_transition_id": "T0170",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1587,14 +1587,14 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "GUEST_PILOT_OPERATION_DEFECT_CORRECTION_AND_AUTHORISED_443_DNAT_REMOVAL",
+    "kind": "GUEST_PILOT_SECOND_DEFECT_CORRECTION",
     "decision": "D87",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "759286afc50bc2ef74038daea88b39b0bddf0278",
-    "base_note": "The master merge commit of PR #166.",
-    "head": "0001b1664a5f52384a0b9a51c8fa8924f3c9cc23",
+    "base": "6c9877dac34c91110a7d0f5355b5e3a408311eec",
+    "base_note": "The master merge commit of PR #167, which carried the first half of this mission.",
+    "head": "aec69a6b9bd69970919ef70e8ef8a76857521ce0",
     "head_note": "The last content commit of this delivery. The governance receipt and generated blocks follow it and the manifest last of all -- the manifest must list itself.",
-    "note": "T0169. Guest Internet operated as a controlled pilot on PRE-LIVE. The path was walked end to end and is healthy: Kea serving 192.168.77.100-200 with option 114, Unbound answering, portald offering all six sign-in methods, the PMS mirror CONNECTED/IN_SYNC with 468 in-house stays, and device captive-detection observed working. No guest has attempted a sign-in for nine days, so the pilot is available but not exercised. ONE DEFECT FIXED: the dashboard reported 'no address range is configured, so this appliance cannot hand out addresses here' for the network Kea was serving 101 addresses from, because the pool-size guard compared /32 host networks and so admitted only single-address pools; the sum returned NULL and COALESCE rendered it as a confident zero. On an operator screen that sends somebody to repair a working configuration and hides a real outage behind the normal display. THE ITEM RAISED FOR DECISION WAS DECIDED AND CARRIED OUT: guest port 443 was DNATed to a portal TLS listener that has never been provisioned, and the Product Owner authorised removing that redirect on 172.21.60.25 without HTTPS interception, certificate impersonation, a portal PKI model or any trust-root change. PortalTLSPort now states the fact -- zero, this appliance serves no TLS portal -- and the renderer emits no 443 redirect and no longer opens the port. Because the forward chain is policy drop, a bare removal would have replaced an immediate connection-refused with a silent half-minute hang, so an unauthenticated guest's 443 is now rejected with a TCP reset, ordered after both authorisation accepts and the walled garden. An appliance that genuinely serves a TLS portal renders exactly as before."
+    "note": "T0170. The second defect surfaced by exercising the guest journey on PRE-LIVE with a client actually on the guest bridge. A voucher issued through the real issuance path authenticates correctly and the guest is then sent to package selection, where the supporting service answers 404 because Phase-2 commerce is deliberately dark on this appliance. The 404 is correct; the portal was not. Its commerce session store was built unconditionally while the routes it leads to are mounted only when that surface is on, so every 'store is nil' guard in the package was dead code -- including the one whose whole purpose is to tell the guest that packages are unavailable and to ask reception. The store is now built behind the same gate that mounts the routes. This enables nothing and changes no guest's access; it replaces a dead end with the message the code already contained. The bridge is reached only from voucher and guest-account sign-in -- room sign-in does not pass through it, which is why every session this appliance has recorded came from a stay. RAISED FOR DECISION: the portal advertises six sign-in methods and two of them cannot complete while commerce is dark; both remedies are product decisions rather than repairs."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

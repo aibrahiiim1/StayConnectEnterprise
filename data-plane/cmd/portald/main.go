@@ -63,8 +63,10 @@ type handler struct {
 	tmplSucc *template.Template
 	arpCache arpLookup
 
-	// Phase 2 DARK commerce bridge. commerceCfg gates whether the guest commerce routes are mounted;
-	// commerceSessions holds trusted server-derived pins (empty while IAM-v2 auth is dark).
+	// Phase 2 DARK commerce bridge. commerceCfg gates whether the guest commerce routes are mounted, and
+	// commerceSessions -- which holds the trusted server-derived pins -- is NIL unless that same gate is on.
+	// Nil is therefore the honest signal that this surface does not exist here, and every reader of this
+	// field is expected to check it rather than assume a store is present.
 	commerceCfg      iamv2.CommerceConfig
 	commerceSessions *commerceSessionStore
 
@@ -93,15 +95,30 @@ func newHandler(c cfg) (*handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &handler{
-		cfg:              c,
-		scd:              &http.Client{Transport: tr, Timeout: 5 * time.Second},
-		tmplLand:         tland,
-		tmplSucc:         tsucc,
-		arpCache:         defaultArp,
-		commerceCfg:      commCfg,
-		commerceSessions: newCommerceSessionStore(),
-	}, nil
+	h := &handler{
+		cfg:         c,
+		scd:         &http.Client{Transport: tr, Timeout: 5 * time.Second},
+		tmplLand:    tland,
+		tmplSucc:    tsucc,
+		arpCache:    defaultArp,
+		commerceCfg: commCfg,
+	}
+	// THE STORE EXISTS ONLY WHERE THERE IS SOMEWHERE FOR IT TO LEAD.
+	//
+	// It used to be built unconditionally, which quietly disabled every `commerceSessions == nil` guard in
+	// this package -- including the one in tryIAMv2Auth whose whole purpose is to tell a guest, when the
+	// Phase-2 portal surface is off, that packages are unavailable and to ask reception. That branch could
+	// never be reached, so a guest who signed in with a voucher was instead issued a commerce cookie and
+	// redirected to /packages, which calls scd routes that are deliberately absent while commerce is dark.
+	// They landed on an empty page and were told to choose another package.
+	//
+	// Constructing it behind the same gate that mounts the routes puts the two back in step: one flag
+	// decides whether the surface exists at all, and the nil guards become the honest refusals they were
+	// written to be. This enables nothing -- it makes the OFF state tell the truth.
+	if commCfg.PortalOn() {
+		h.commerceSessions = newCommerceSessionStore()
+	}
+	return h, nil
 }
 
 // clientIP extracts the source address from the CONNECTION, and only from the connection.

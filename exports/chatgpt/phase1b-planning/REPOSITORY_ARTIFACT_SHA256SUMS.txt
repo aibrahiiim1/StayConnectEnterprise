@@ -1,12 +1,12 @@
-# cited committed source, not packaged. Verify at SOURCE_COMMIT 50fe59c4.
-22815432a5b603cbea9f354d99409ffb301c69fa39f056395f82e5f9a21ddb83  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
+# cited committed source, not packaged. Verify at SOURCE_COMMIT 4f3cd008.
+5f755066de8c31268c993b6d72dbfd9df54387d8a3c8bbb891493c4e4c56b37a  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
 d7ffc726816e4ed6a677d35cf0b645b79278ea2a48ed4eb561008fcebb640e3d  docs/architecture/Phase1B-Privilege-Matrix.md
 bb6281470a81df07fc8060b559eb55cf1e9265c536e6fe43d8258f78072a93d0  data-plane/internal/pmsguard/guard.go
 a1bd9d3ac8cf242ac2e5cf2eb8da1ff9d9832d1f16acba4213f9f74d3331a314  data-plane/cmd/scd/main.go
 66429a15336b6b0b72191174aa9539b1e56fa15c7879adb45ecf0e5623abfdb6  data-plane/cmd/acctd/main.go
 faaf280a4bf085b2d7f3a3563ef9a92676dfc928ee7788472d6b9a28e5afb0d7  data-plane/cmd/edged/main.go
 c209e78776b490f875078aa6fdf9f4cff5b11449057f476b0d4652fa4987183f  data-plane/cmd/netd/main.go
-20d9c822279c3e2a9129887917fe632b4874ba3d35b607976723fbd6649eeda3  data-plane/cmd/portald/main.go
+5f585ecb35a738dc279d0fdac6988d77f975710e1a9785a84ea57d5520d60476  data-plane/cmd/portald/main.go
 MISSING  data-plane/internal/session/session.go
 MISSING  data-plane/internal/voucher/voucher.go
 3b40443df98a1daf833d2380f5cf60a2e420d26049e4e203712c573ec2873e91  data-plane/internal/otp/otp.go
