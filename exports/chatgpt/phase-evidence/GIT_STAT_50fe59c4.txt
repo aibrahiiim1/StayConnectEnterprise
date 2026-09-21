@@ -1,0 +1,4 @@
+commit 50fe59c464d7606204af7fbd9cc9817c00921fbe
+Date:   Mon Sep 21 18:42:11 2026 +0300
+
+    Governance: T0169 records the decision it asked for

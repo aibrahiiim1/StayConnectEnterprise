@@ -1,4 +1,0 @@
-commit e126a3b3cf30a6ed259fe770ad221ca613aba905
-Date:   Mon Sep 21 18:20:11 2026 +0300
-
-    Governance: T0169 records the guest pilot and what it surfaced
