@@ -1,0 +1,70 @@
+{
+  "transition_id": "T0172",
+  "seq": 172,
+  "timestamp": "2026-09-21T20:30:00Z",
+  "timestamp_derivation": "After the three rebuilt binaries were installed on PRE-LIVE, their embedded provenance read back out of the installed bytes, and the guest path re-verified 11/11 at 20:24Z. Before the author timestamp of the commit that introduces this receipt.",
+  "record_type": "ADMINISTRATIVE_CLOSURE_AND_DEPLOYED_PROVENANCE_RECONCILIATION",
+  "what_was_authorised": "Carry the guest-pilot mission to final administrative closure: reconcile the authoritative project state with the actual deployed state on PRE-LIVE, record real deployed provenance per service without generalising or inventing a single source commit, reconcile delivery-metadata inconsistencies including the PR #169 changed-file count, and synchronise affected documentation. Explicitly NOT authorised: changing product behaviour, enabling commerce, contacting the retired appliance, or any networking, PMS, financial, security or Go-Live change.",
+  "what_the_appliance_was_actually_running": {
+    "method": "Every binary was copied off /opt/stayconnect/bin and its embedded metadata read with the pinned toolchain in a container. The appliance carries no Go toolchain, so the artifact was brought to the toolchain rather than the claim being trusted.",
+    "as_found": {
+      "scd": "759286af, tags=stayconnect_production, modified=false",
+      "pmsd": "305587b6, tags=stayconnect_production, modified=false",
+      "acctd": "305587b6, tags=stayconnect_production, modified=false",
+      "edged": "NO vcs stamp, NO build tag",
+      "portald": "NO vcs stamp, NO build tag",
+      "netd": "NO vcs stamp, NO build tag"
+    },
+    "what_the_register_said": "That every service binary was built from 94c25c20. Not one of them was. scd had been rebuilt at 759286af and pmsd and acctd at 305587b6 by earlier deliveries that did not update the field, and the guest-pilot mission replaced the other three. The digests recorded beside 94c25c20 had not matched the appliance for days."
+  },
+  "defect_in_this_missions_own_deployment": {
+    "what": "netd, edged and portald were deployed during this mission from builds made outside scripts/build-appliance-binaries.sh, with -ldflags='-s -w' and GOFLAGS=-buildvcs=false. They carried no vcs stamp and not the stayconnect_production build tag.",
+    "why_the_tag_matters": "It selects the production build profile. edged loads the IAM-v2 configuration and therefore runs the guest-authority lock, which on a production build forces the voucher and account methods on and refuses to start on a configuration that would select the removed authority. Built without the tag, that lock returns early and is not enforced. portald and netd do not load that configuration, so for them the profile had no functional effect -- but all three were unidentifiable from their own artifacts, which is the property the build recipe exists to guarantee.",
+    "severity_stated_plainly": "No guest-visible behaviour was observed to differ, and the lock guards against a configuration that is not present on this appliance. It is recorded as a defect anyway: an appliance running binaries that cannot be traced to a commit is exactly the condition the build script was written to end, and its own header documents this same failure happening once before.",
+    "remedy": "All three rebuilt from master a4124ce5 with scripts/build-appliance-binaries.sh -- pinned toolchain, -trimpath, CGO disabled, -tags stayconnect_production, no -ldflags -- and reinstalled. APPLIANCE_BUILD = PASS. Read back from the installed bytes afterwards: all six binaries now report vcs.modified=false and tags=stayconnect_production.",
+    "rollback": "The untagged builds are retained on the appliance as *.bak-untagged."
+  },
+  "verified_deployed_provenance": {
+    "scd": "5ef0b0a64c1306e1... 759286afc50b",
+    "edged": "1d422ffea59fee71... a4124ce595b8",
+    "pmsd": "3f5da8387627c6fa... 305587b6fff4",
+    "portald": "278c69a2a6499138... a4124ce595b8",
+    "netd": "1cd48486f477866e... a4124ce595b8",
+    "acctd": "dfb1562dc5620537... 305587b6fff4",
+    "_why_three_and_not_one": "scd, pmsd and acctd were not changed by this mission. Rebuilding them from a newer head to make the record uniform would have shipped unrelated merged changes onto a PRE-LIVE appliance for the sake of a tidier field. The mixed state is the honest one and is recorded per service.",
+    "_appliance_manifest": "/opt/stayconnect/DEPLOYED_BINARIES.txt was rewritten from the same reading, carries the per-service commit column, and verifies with sha256sum -c against the installed bytes. The previous version was written on 2026-09-16 and had been wrong since."
+  },
+  "tooling_corrected": {
+    "renderer": "The summary derives the deployed head from the per-service record and names every head when more than one is running. It previously took the single field and truncated it to eight characters, which turned a non-commit value into something shaped like a commit -- the sentinel rendered as the head 'MIXED --'.",
+    "parity_validator": "Its deployed-head rule accepted any eight-plus-character value as the head, so a non-sha in that field would have made every appliance commit on every surface read as a contradiction. It now builds the acceptable set from the per-service record. A new rule catches the substantive error: a sentence naming one head for every binary while several are running.",
+    "negative_cases": "Two cases added to the suite the governance gate runs, one per rule, each proven to fail for the rule it is named for. 79 passing."
+  },
+  "delivery_metadata_reconciled": {
+    "pr_169": "Its body carried a changed-file count of 29 and two EMPTY head fields. The real count is 28 -- git diff --name-status 6a9ea685..d610d24b, which the committed manifest and the GitHub API both agree on. The heads were emptied by an edit that substituted values already substituted. Corrected in place, with a dated note saying what was wrong, rather than silently.",
+    "pr_167_and_168": "Checked against the API: 30 and 28, both correct. Left alone."
+  },
+  "guest_path_after_the_rebuild": "Re-verified from a client genuinely on the guest bridge after the production-tagged binaries were installed: 11 checks, 0 failures. No error banner on arrival; an empty voucher asks for one; a valid voucher while commerce is dark gives the honest refusal with no redirect and no cookie; room sign-in still corrects a wrong room; captive detection serves the portal on both probes checked; pre-auth HTTPS still refused promptly. The firewall is unchanged: zero 443 DNAT rules, the explicit reset last in the forward chain, the port-80 captive redirect intact.",
+  "what_was_not_done": {
+    "product_behaviour": "Unchanged. No handler, route, flow or wording was touched in this delivery.",
+    "commerce": "Still dark. Nothing here enables it.",
+    "retired_appliance": "172.21.60.23 was not contacted.",
+    "other_boundaries": "No networking, PMS, financial, schema, security-boundary or Go-Live change. The three services restarted are the same three this mission had already deployed, now carrying correct provenance."
+  },
+  "open_product_owner_decision": "Carried forward unchanged from T0170 and T0171, and not a blocker to this closure: the appliance offers two guest sign-in methods, voucher and PMS room, and voucher cannot put a guest online while Phase-2 commerce is dark. It now refuses honestly. The options are to leave it visible, to authorise enabling the portal commerce surface, or to authorise showing only the working method. All three are product decisions.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Administrative closure of the guest-pilot mission: provenance reconciliation, delivery-metadata correction and documentation synchronisation, plus the redeployment of three already-deployed services to correct their build provenance. No product capability was enabled.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE.",
+  "base": "a4124ce595b8bc590f1eb5708bd75cc8a3579587",
+  "head": "1e24e9852637f1c021e161ddbe71f792cbaaa3b6"
+}
