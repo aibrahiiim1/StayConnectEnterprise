@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
 // THE SEAM THIS GUARDS.
@@ -23,10 +25,23 @@ import (
 // portalFixture builds a handler with just enough state for the refusal paths to render. landing() executes
 // tmplLand, so a bare &handler{} panics there -- a fixture gap, not a product one, but a panicking test
 // proves nothing either way.
+// It models a portal whose Phase-2 commerce surface is ON, because that is the world in which redirecting to
+// package selection is the right answer. The OFF world is a different fixture and a different expectation;
+// see portalFixtureCommerceOff.
 func portalFixture() *handler {
 	return &handler{
+		commerceCfg:      iamv2.CommerceConfig{MasterEnabled: true, PortalEnabled: true},
 		commerceSessions: newCommerceSessionStore(),
 		tmplLand:         template.Must(template.New("land").Parse(`<html><body>{{.Error}}</body></html>`)),
+	}
+}
+
+// portalFixtureCommerceOff models the appliance as it actually ships and as PRE-LIVE actually runs: Phase-2
+// commerce dark, so there is no commerce session store, exactly as newHandler now builds it.
+func portalFixtureCommerceOff() *handler {
+	return &handler{
+		commerceCfg: iamv2.CommerceConfig{},
+		tmplLand:    template.Must(template.New("land").Parse(`<html><body>{{.Error}}</body></html>`)),
 	}
 }
 
