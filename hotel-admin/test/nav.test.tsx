@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, cleanup } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -20,6 +20,22 @@ import { join } from "node:path";
 vi.mock("next/link", () => ({ default: ({ href, children }: { href: string; children: React.ReactNode }) => <a href={href}>{children}</a> }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
 
+// THE CAPABILITY ANSWER IS INJECTED THROUGH A FILE-SCOPED MOCK, NOT A MODULE RESET.
+//
+// The first version of this file used vi.doMock plus vi.resetModules() per test. That works, and it also
+// invalidates the module registry for every test file that runs afterwards in the same worker, which pushed
+// several already-slow async page tests past their five-second timeout under preflight's load -- and a test
+// that times out leaves its DOM mounted, so the NEXT test in that file then failed on duplicate elements.
+// Two unrelated-looking failures, both caused by how this file asked its question.
+//
+// vi.mock is hoisted and file-scoped. The holder lets each test choose the answer without touching the
+// registry, and surfaceAvailable stays the real implementation.
+const CAPS: { surfaces: string[] | null } = { surfaces: null };
+vi.mock("@/lib/capabilities", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/capabilities")>();
+  return { ...actual, useCapabilities: () => (CAPS.surfaces === null ? null : { surfaces: CAPS.surfaces }) };
+});
+
 const NAV_SRC = readFileSync(join(process.cwd(), "components/nav.tsx"), "utf8");
 const CONTRACT = JSON.parse(readFileSync(join(process.cwd(), "capability-contract.json"), "utf8"));
 
@@ -34,18 +50,14 @@ const SERVED = [
 ];
 
 async function renderNavWith(surfaces: string[], roles: string[]) {
-  vi.resetModules();
-  vi.doMock("@/lib/capabilities", async () => {
-    const actual = await vi.importActual<typeof import("@/lib/capabilities")>("@/lib/capabilities");
-    return { ...actual, useCapabilities: () => ({ surfaces }) };
-  });
+  CAPS.surfaces = surfaces;
   const { Nav } = await import("@/components/nav");
   render(<Nav roles={roles} email="a@b.c" onLogout={() => {}} />);
 }
 
 describe("the navigation contract", () => {
-  beforeEach(() => vi.resetModules());
-  afterEach(() => { vi.unstubAllEnvs(); vi.doUnmock("@/lib/capabilities"); });
+  beforeEach(() => { CAPS.surfaces = null; });
+  afterEach(() => { cleanup(); CAPS.surfaces = null; });
 
   it("offers every destination the contract requires, on an appliance that serves it", async () => {
     // Data-driven from capability-contract.json, so a destination added to the contract is covered without
