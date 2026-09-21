@@ -18,6 +18,7 @@
   },
   "verification": {
     "tests": "Four tests that parse the SHIPPED landing template rather than a stub, because a fixture that substitutes its own template cannot prove anything about what a guest reads. They cover every refusal landing() is given, that a first visit renders no empty error box, and that the message is escaped rather than interpolated as markup.",
+    "gate_failure_and_direct_fix": "Two gates failed on the new template block, correctly. The E2E portal helper reads the landing template out of the Go source and renders it in TypeScript so the browser specs exercise the page portald actually serves; anything it cannot render is left as a Go action, which inside a script block is a syntax error that takes the whole block down, so it refuses loudly on any action it does not recognise. It now drops the refusal block exactly as html/template drops it when .Error is empty, because those specs exercise the page a guest meets on arrival. Local preflight cannot catch this: its E2E stage checks the server lifecycle and finishes in about a second, and the specs that call the helper run only in the gates.",
     "mutation_proven": "Removing the template block fails six subtests. The whole portald suite passes with it restored, including the pre-existing tests for the flows that were already working.",
     "a_test_that_was_wrong_in_an_instructive_direction": "One assertion searched for the raw string and failed on Your device isn't on the guest network. That message reaches the page with its apostrophe escaped, which is correct, and which a browser shows as the apostrophe the guest expects. It now compares against the escaped form. A test that mistakes correct escaping for a missing message would push somebody to remove the escaping in order to make it pass."
   },
@@ -46,5 +47,5 @@
   "authorization": "Guest pilot operation and directly related fixes, end to end, under the same mission as T0169 and T0170. No product capability was enabled, and no PMS, financial, schema, networking, security-boundary or Go-Live change was made.",
   "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE. The retired appliance was not contacted.",
   "base": "6a9ea6858b11ee9ef6ded8d4224133561f389abe",
-  "head": "a5a567ea02f0117a8e5f2d5985422671ec1224bd"
+  "head": "0b172d7de80cd073a72d8266d3cb3fd52f2358be"
 }
