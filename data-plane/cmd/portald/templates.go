@@ -140,6 +140,8 @@ const landingHTML = `<!doctype html>
   .notice { display:none; margin:0 0 16px; padding:12px 16px; border-radius:10px; font-size:.92rem;
             background:#fff8e1; border:1px solid #f0d38a; color:#6b4e00; }
   .notice.show { display:block; }
+  /* A refusal is not a hint. It reads as an error rather than as the amber advisory the other notices use. */
+  .notice--error { background:#fdecef; border-color:#f3b8c2; color:#8c0f2a; }
   .small { font-size:.85rem; color: var(--sc-muted); }
   .alt { margin-top: 22px; padding-top: 18px; border-top: 1px dashed var(--sc-line); }
   .alt h3 { font-size: .9rem; font-weight: 600; color: var(--sc-muted); margin: 0 0 12px; }
@@ -211,6 +213,17 @@ const landingHTML = `<!doctype html>
          of data or time; the sign-in below is unchanged and the guest carries straight on into it. -->
     <div class="notice" id="access-ended" role="status" aria-live="polite"></div>
     <div class="notice" id="site-notice" role="status" aria-live="polite"></div>
+    {{if .Error}}
+    <!-- WHAT THE SERVER SAID, WHERE THE GUEST CAN READ IT.
+         landing() has always composed a message for every refusal it handles -- an empty voucher box, a
+         device it cannot place on the guest network, packages that are unavailable -- and passed it in as
+         .Error. Nothing here rendered it, so all of those arrived as a page that looked exactly like the one
+         the guest had just submitted. The voucher and personal-account forms are plain HTML POSTs, so this
+         response IS the page they land on; the PMS and OTP flows fetch and fill their own .err boxes, which
+         is why their messages always showed and these never did.
+         role="alert" rather than "status": this is the answer to something the guest just did. -->
+    <div class="notice notice--error show" id="server-error" role="alert" aria-live="assertive">{{.Error}}</div>
+    {{end}}
 
     <div class="tabs" id="tabs" role="tablist"></div>
     <div class="panels">
