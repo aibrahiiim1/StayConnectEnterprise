@@ -70,7 +70,53 @@ def _runtime_head(st):
     disagree while both looked authoritative.
     """
     head = str((st.get("current_state_facts") or {}).get("deployed_head_on_appliance") or "").strip()
-    return head if len(head) >= 8 else ""
+    if not _is_sha(head):
+        # Anything that is not a commit id -- including the MIXED sentinel -- is NOT a head. Returning it
+        # anyway is how `MIXED -- see deployed_runtime_services` once rendered as the head "MIXED --": the
+        # caller truncates to eight characters, which turns any prose into something shaped like a commit.
+        return ""
+    return head
+
+
+def _is_sha(s):
+    return len(s) >= 8 and all(c in "0123456789abcdef" for c in s.lower())
+
+
+def _runtime_heads_by_service(st):
+    """Group the deployed services by the commit their own bytes name: [(commit, [services...]), ...].
+
+    THE APPLIANCE MAY RUN MORE THAN ONE COMMIT, and on 2026-09-21 it ran three. A register that can only
+    express a single head will, faced with that, either name one of them -- which is false for the other
+    four binaries -- or keep naming an older one. So the grouping is derived from the per-service record,
+    which is the only place that can be right, and the summary is built from it rather than from a second
+    copy of the fact.
+    """
+    svcs = (st.get("current_state_facts") or {}).get("deployed_runtime_services") or {}
+    order, groups = [], {}
+    for name, val in svcs.items():
+        if name.startswith("_"):
+            continue
+        # Each value reads "<sha256>  (<commit>, tags=...)"; the commit is the first hex run inside the
+        # parentheses. Read rather than assumed: a value that does not carry one is skipped, not guessed at.
+        rest = str(val).partition("(")[2]
+        commit = rest.partition(",")[0].strip()
+        if not _is_sha(commit):
+            continue
+        if commit not in groups:
+            groups[commit] = []
+            order.append(commit)
+        groups[commit].append(name)
+    return [(c, groups[c]) for c in order]
+
+
+def _join_names(names):
+    if len(names) == 1:
+        return names[0]
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _spell(n):
+    return {2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}.get(n, str(n))
 
 
 def render_block(st):
@@ -113,9 +159,16 @@ def render_block(st):
         # kept only while there is no such fact to render.
         (f"every service binary now runs repository head `{_runtime_head(st)[:8]}`, each digest verified on "
          f"the appliance against the build host. "
-         if _runtime_head(st) else
-         f"first-bring-up fixes were then applied live and afterwards committed "
-         f"(`{prod['first_bringup_fixes_commit_sha'][:7]}`), so no single commit describes what is running. ")
+         if _runtime_head(st) and len(_runtime_heads_by_service(st)) <= 1 else
+         # MORE THAN ONE HEAD IS RUNNING, so the summary names them all. Saying "head X" here would be false
+         # for every binary not built from X, and picking the newest would be the most misleading choice of
+         # all -- it is the one a reader would trust.
+         ("its service binaries run " + _spell(len(_runtime_heads_by_service(st))) + " different repository "
+          "heads: " + "; ".join(f"`{c[:8]}` ({_join_names(n)})" for c, n in _runtime_heads_by_service(st)) +
+          ". Each digest and each commit was read back out of the installed bytes on the appliance. "
+          if _runtime_heads_by_service(st) else
+          f"first-bring-up fixes were then applied live and afterwards committed "
+          f"(`{prod['first_bringup_fixes_commit_sha'][:7]}`), so no single commit describes what is running. "))
         + f"{prod['lifecycle']}. "
         # DERIVED, never asserted. This sentence used to read "Enrollment, claim and signed assignment are NOT
         # complete" as fixed English with only the licence word substituted, so it kept saying so through
