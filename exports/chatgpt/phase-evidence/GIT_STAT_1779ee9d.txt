@@ -1,0 +1,4 @@
+commit 1779ee9df7cf62d65ece6b96d072c242679ea500
+Date:   Mon Sep 21 12:10:31 2026 +0300
+
+    Governance: head follows the route-union correction

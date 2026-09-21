@@ -412,20 +412,37 @@ package() {
       [ "${HOTEL_ADMIN_ALLOW_DIRTY:-0}" = "1" ]         || die "the hotel-admin tree has uncommitted changes; the bundle would not correspond to $commit. Commit them, or set HOTEL_ADMIN_ALLOW_DIRTY=1 to record the build as dirty on purpose"
     fi
 
-    # ---- THE CAPABILITY CONTRACT SUPPLIES THE BUILD ENVIRONMENT. Never a bare `npm run build`: that is the
-    # exact command that produced the flagless bundle now serving the appliance, and it succeeded quietly.
+    # ---- THE CAPABILITY CONTRACT STILL GOVERNS THE BUILD, BUT NO LONGER THROUGH FLAGS.
+    #
+    # This block used to refuse an empty flag list, because an empty list meant the contract had not been
+    # read and a bare `npm run build` was about to produce a flagless bundle -- the exact command that once
+    # served this appliance a UI with no Internet Packages, no Service Plans and no PMS Connection.
+    #
+    # Navigation no longer consults a build flag at all: edged reports what it has mounted and the sidebar
+    # asks it. So "no required flags" is now the CORRECT state of the contract, and refusing it would refuse
+    # every future build. What must still be refused is the outcome that guard was aiming at -- a bundle that
+    # cannot present the operator surfaces -- and that is asserted directly, against the built tree, by
+    # assert_contract_satisfied below: the required routes must be present, and no capability-flag lookup may
+    # survive in the client bundle, which now means the gate was reintroduced rather than that a flag went
+    # missing.
+    #
+    # Flags are still exported when the contract names any, so reinstating one remains possible without
+    # editing this script.
     local contract; contract="$(contract_file .)"
     [ -f "$contract" ] || die "no capability contract at $contract — refusing to build an unconstrained UI"
     local flaglist flagline flags_json=""
     flaglist="$(contract_flags "$contract")"
-    [ -n "$flaglist" ] || die "the capability contract yielded no build flags; a build would silently produce a reduced UI"
-    while IFS= read -r flagline; do
-      flagline="${flagline%$CR}"
-      [ -n "$flagline" ] || continue
-      export "${flagline?}"
-      flags_json="$flags_json${flags_json:+, }\"${flagline%%=*}\": \"${flagline#*=}\""
-      echo ">> build flag ${flagline}"
-    done <<< "$flaglist"
+    if [ -n "$flaglist" ]; then
+      while IFS= read -r flagline; do
+        flagline="${flagline%$CR}"
+        [ -n "$flagline" ] || continue
+        export "${flagline?}"
+        flags_json="$flags_json${flags_json:+, }\"${flagline%%=*}\": \"${flagline#*=}\""
+        echo ">> build flag ${flagline}"
+      done <<< "$flaglist"
+    else
+      echo ">> the contract requires no build flags: navigation is decided at runtime from edged's mounted surfaces"
+    fi
 
     echo ">> npm ci"
     npm ci --no-fund --no-audit

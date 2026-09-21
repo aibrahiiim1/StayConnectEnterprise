@@ -36,6 +36,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Explain, Tooltip } from "@/components/ui/tooltip";
 import { Meter, Metric, Skeleton, Separator } from "@/components/ui/misc";
 import { ColumnChart, SplitBar } from "@/components/ui/chart";
+import { useCapabilities, surfaceAvailable } from "@/lib/capabilities";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { formatBytes, formatRelative } from "@/lib/utils";
 import {
@@ -118,6 +119,7 @@ export default function DashboardPage() {
     return () => clearInterval(id);
   }, [load]);
 
+  const caps = useCapabilities();
   const outbox = describeOutbox(health?.sync_outbox);
   const license = describeLicense(health?.license_state, health?.license_installed);
 
@@ -769,7 +771,13 @@ export default function DashboardPage() {
                 Paid internet billed to a guest&rsquo;s room account.
               </p>
             </div>
-            {snap?.postings.available && (
+            {/* TWO DIFFERENT FACTS, AND THIS USED TO TRUST THE WRONG ONE.
+                `postings.available` says room charging is IN USE at this property. Whether the operator
+                SCREEN for it is served here is a separate question, answered by edged, and on an appliance
+                where charging runs but the financial surface is dark this link led to a 404. It now asks the
+                same question the sidebar asks, so a destination is offered when the appliance can serve it
+                and not merely when the underlying feature exists. */}
+            {snap?.postings.available && surfaceAvailable(caps, "financial-review") && (
               <Link href="/financial-health" className="text-xs text-muted-foreground hover:text-foreground">
                 Charge health →
               </Link>

@@ -1,0 +1,80 @@
+{
+  "transition_id": "T0167",
+  "seq": 167,
+  "timestamp": "2026-09-21T08:10:30Z",
+  "timestamp_derivation": "After the last content commit of this delivery (2026-09-21T08:09:46Z) and after the corrected bundle was installed on PRE-LIVE through the contract-enforcing installer and its sidebar verified on a desktop and an iPhone profile. Before the author timestamp of the commit that introduces this receipt.",
+  "record_type": "HOTEL_ADMIN_NAVIGATION_CONTRACT_CORRECTION",
+  "how_it_was_found": "The Product Owner reported that Stays, Service plans and Internet packages were missing from the Hotel Admin sidebar, and asked for the whole navigation to be audited rather than those three treated as the list. The audit found ELEVEN destinations missing, not three.",
+  "the_complete_inventory": {
+    "declared": 38,
+    "visible_before": 19,
+    "visible_after": 30,
+    "required_by_contract_and_served": 26,
+    "missing_before_and_restored": [
+      "Internet packages",
+      "Service plans",
+      "Checkout grace",
+      "Stays",
+      "PMS connection",
+      "Network routing",
+      "PMS activity",
+      "Guest sign-in checks",
+      "Guest sign-in attempts",
+      "Duplicate sources",
+      "Alerts"
+    ],
+    "correctly_absent_and_still_absent": {
+      "_note": "Hidden because edged does not mount their surfaces on this appliance, which is the appliance saying it does not run the feature. That is a different statement from a build having forgotten them, and it is the only statement allowed to remove a destination.",
+      "items": [
+        "Guest devices (guest-device-self-service)",
+        "Online-time budgets (sessions.aggregate-time)",
+        "Post-stay access (post-stay-profiles)",
+        "Cross-PMS transfer (stay-transfers)",
+        "Charge health / Manual review / Settlements / Recovery (financial-review)"
+      ]
+    }
+  },
+  "root_cause": "Navigation was gated twice: by what edged reports it has mounted, and by NEXT_PUBLIC_PHASE*_ADMIN. Next inlines NEXT_PUBLIC_* at BUILD time, so a flag absent when `next build` runs is never substituted at all -- the comparison compiles to a permanent false, the routes still exist and answer by URL, and the operator simply loses the menu to them. Nothing crashes, nothing 404s, every structural check passes. The bundles deployed during the preceding deliveries were built with a plain `next build`.",
+  "why_the_existing_protection_did_not_fire": "This shipped once before, for five days, which is why capability-contract.json, deploy/scripts/deploy-hotel-admin.sh and check-hotel-admin-integrity.sh exist. They work: run against the corrected release they report PASS on every question, including that the operator endpoint serves the managed release. They did not fire because they live at deploy time and the deployments in the preceding deliveries used an ad-hoc script that went around them. A safety net that has to be remembered is not a property of the system.",
+  "why_no_test_caught_it": "hotel-admin/test/nav.test.tsx ASSERTED THE HIDING WAS CORRECT -- 'hides Commercial Packages when NEXT_PUBLIC_PHASE2_ADMIN is absent/OFF (even for site_admin)'. At the source level the regression was indistinguishable from intent, so no test below the deploy-time checker could have distinguished them.",
+  "the_fix": "Availability now has one author. edged reports what it has mounted; that answer describes the appliance in front of the operator and cannot go missing at build time because it is not compiled in. A destination is offered when the appliance serves it AND the operator's role may read it. Nineteen build-time gates were removed from the menu, and nav.tsx now reads no build-time variable at all.",
+  "nothing_was_un_darkened": "Surfaces that are deliberately dark remain dark by a STRONGER mechanism than a UI constant: edged does not mount them, so the runtime answer is false for exactly the set the flags covered -- verified against the live appliance, where phases 4, 5 and 6 remain absent from both the capability list and the sidebar. The removed flag was never an authorization control; the previous comment in nav.tsx said so in as many words, and edged enforces server-side regardless of any menu. The Phase-4 DARK gate passes unchanged, and no delivered configuration enables a Phase-4 screen.",
+  "what_prevents_recurrence": [
+    "Every contract-required destination whose surface is served must be offered to a site_admin -- asserted as a property over the whole menu, driven from capability-contract.json, so a destination added later is covered the day it is added rather than when somebody remembers to extend a test.",
+    "A destination may be removed only by the appliance not serving it, or by the operator's role.",
+    "nav.tsx may read no build-time variable at all; the capability contract now forbids ALL FIVE flags from the client bundle rather than the two that were once required, so a residual lookup means the gate was reintroduced rather than that a flag went missing.",
+    "Every sidebar route must have a page compiled for it, and every contract route must be one the sidebar declares -- the two ways a rename can silently break navigation in either direction.",
+    "Proven by reintroducing the exact defect: three tests fail and name the missing destination."
+  ],
+  "a_second_defect_of_the_same_class": "Found while verifying: the dashboard's charge card linked to /financial-health whenever postings.available was true. That flag says room charging is IN USE at the property; whether the operator screen is served is a separate question edged answers, and on an appliance where charging runs and the financial surface is dark the link led to a 404. It now asks the same question the sidebar asks.",
+  "product_owner_decision_requested": {
+    "status": "DECIDED — Product Owner, 2026-09-21. No longer an open item.",
+    "what_was_asked": "Two operator destinations had been removed from the sidebar by an AGENT UX JUDGEMENT in commit cb3831ee (2026-09-14): PMS reconciliation (/pms-reconciliation, labelled 'Unresolved departures') and Roster reconciliation (/roster-reconciliation). Both surfaces are mounted and served, both pages compiled, both permissions intact. No Product-Owner authorization for that demotion could be established, so it was reported for decision rather than reversed or ratified by the agent.",
+    "decision": "The consolidation is CONFIRMED, with a clarification. Both are approved as NOT top-level sidebar items, and are required to be available and clearly discoverable under PMS Connection -> Advanced. Routes, permissions, the full diagnostic and evidence pages, the direct links from PMS health and alerts when attention is needed, and clear labels inside the Advanced PMS area are all to be kept. The goal is to avoid unnecessary sidebar clutter, NOT to hide or remove functionality. This is now an explicit Product-Owner navigation decision, not an agent judgement.",
+    "how_it_is_now_enforced": "Recorded in capability-contract.json under authorized_consolidations, with each entry naming its route, its surface, the file and section it must be reachable from, that it is deliberately not top-level, and that an attention link is required. Five tests hold it: the record must name a Product-Owner decision; neither route may return to the top-level sidebar; each must stay linked WITH ITS LABEL from the Advanced diagnostics section; a direct route must exist from PMS health or the attention list for the rare occasion one is not empty; and both pages must still exist. Proven by removing an Advanced link -- the test fails and names the destination. Without this, an authorized consolidation would be indistinguishable from the accidental disappearance this delivery exists to prevent.",
+    "verified_as_implemented": "Both appear under 'Advanced diagnostics' on PMS connection with their labels and an explanation of what each shows. PMS health raises a warning callout linking straight to Unresolved departures when review_events > 0, and the dashboard attention list links to Roster reconciliation. Nothing was changed to satisfy the decision; it was already implemented this way and is now authorised and protected."
+  },
+  "verification": {
+    "tests": "31 UI test files, 346 tests, all passing; tsc clean; production build clean.",
+    "packaging": "Packaged through deploy/scripts/deploy-hotel-admin.sh, which reports 'capability contract satisfied (routes, inlined flags, operator navigation)' and writes a manifest proving commit and BUILD_ID.",
+    "installed": "Installed through the same script on PRE-LIVE. check-hotel-admin-integrity.sh reports PASS on all ten questions, including that the running service and the operator endpoint serve the recorded BUILD_ID.",
+    "live_sidebar": "Desktop 1440x1800 and an iPhone 13 profile, with the mobile drawer opened: 30 sidebar destinations, all 26 contract-required-and-served present, zero dark surfaces offered. Before the fix the same measurement returned 19."
+  },
+  "guest_data": "No guest name, room number or reservation identifier appears in this record, in the commit messages, in the manifest or in the test fixtures.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "The Product Owner authorised the complete fix end to end: audit, correction, tests, required CI and gates, protected PR and merge, deployment to PRE-LIVE, live desktop and mobile verification and governance synchronisation. No new removal, hiding or demotion decision was made; the one demotion whose authorization could not be established is reported for decision rather than reversed.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE.",
+  "base": "a04220b751bb315da6a598359c256023b4ab97f9",
+  "head": "9bf5ad7370895261fcf3e0f46cec8cc78fd10ddb"
+}
