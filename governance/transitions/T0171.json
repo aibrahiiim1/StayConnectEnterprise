@@ -1,0 +1,62 @@
+{
+  "transition_id": "T0171",
+  "seq": 171,
+  "timestamp": "2026-09-21T17:23:00Z",
+  "timestamp_derivation": "After PR #168 merged as 6a9ea685 and after the merged portald was deployed to PRE-LIVE and the live check showed the page arriving blank. Before the author timestamp of the commit that introduces this receipt.",
+  "record_type": "GUEST_PILOT_THIRD_DEFECT_CORRECTION_AND_CORRECTION_OF_RECORD",
+  "correction_of_record": {
+    "what_was_claimed": "T0170 and the body of PR #168 state that after the commerce-dark fix a guest who signs in with a voucher is told that packages are unavailable and to ask reception.",
+    "what_is_true": "They were not told. The fix did remove the dead end -- no commerce cookie is issued and the guest is no longer redirected to a page that cannot serve them, both verified live -- but the message never reached them. The landing template contained no reference to .Error, so landing() discarded every message it was given and returned a page indistinguishable from the one the guest had just submitted.",
+    "how_it_was_missed": "The test asserting that behaviour parses a stub template rather than the one that ships. It was true of the stub and false of the product. It was reported as verified on that basis, and the error was found only by checking the rendered page on the appliance after deployment.",
+    "status": "T0170 is left as written -- it is a record of what was believed at the time -- and this receipt is the correction. The claim it makes about the guest-facing message was wrong; its claims about the removed redirect and the absent cookie were verified live and stand."
+  },
+  "second_correction_of_record": {
+    "what_was_claimed": "T0170 and the bodies of PR #168 and PR #169 state that the guest portal advertises six sign-in methods, of which two cannot complete while Phase-2 commerce is dark.",
+    "what_is_true": "The appliance offers TWO. Its live auth-methods response enables voucher and PMS room sign-in; guest accounts and post-stay PIN are off, and email and SMS are not enabled either. The portal builds its tabs from that response, so a guest sees exactly two ways in. The six method names in the page source are static markup for every method the portal can offer, shown or hidden by script -- reading them out of the HTML is what produced the wrong number.",
+    "why_it_matters": "It sharpens the decision rather than softening it. This is not two of six; it is one of the two sign-in methods this appliance offers guests being unable to put them online.",
+    "how_it_was_found": "By asking the appliance which methods it serves instead of counting form fields in the rendered page."
+  },
+  "advisory_that_does_not_fire": {
+    "what": "The portal carries a notice for exactly this situation -- that a guest can sign in but there is nothing to connect them to, and to let reception know. It is shown only when the appliance reports no internet packages available.",
+    "why_it_stays_silent_here": "That flag counts non-system package rows in the catalogue, and this site has some. It is accurate on its own terms. But the catalogue having packages is not the same as the appliance being able to grant one, and with the commerce surface dark it cannot, so the advisory written for this exact case never appears.",
+    "not_changed_here": "Deliberately. It is not wrong in its own terms, the refusal at the point of sign-in is now honest, and redefining what the notice means changes what every arriving guest is told -- which belongs with the decision below rather than inside a stabilisation fix. Both of the options put to the Product Owner resolve it without touching this flag."
+  },
+  "defect_found_and_fixed": {
+    "symptom": "A guest submits a voucher and the page reloads looking exactly as it did, with no explanation. The same is true of every refusal the landing path handles: an empty voucher box, a device that cannot be placed on the guest network, a session that must be started again.",
+    "root_cause": "landing() has always composed a message and passed it to the template as .Error. The landing template never referenced it.",
+    "why_it_survived": "Which forms it affects. The voucher and personal-account forms are plain HTML POSTs, so the server's response is the page the guest lands on, and those are the flows whose messages vanished. The PMS, OTP and post-stay flows submit with fetch() and render errors into their own boxes from the JSON reply, so their messages always appeared -- which is why exercising the portal through room sign-in, the only method that works on this appliance, would never have revealed it.",
+    "fix": "The landing template renders the message when there is one, as an error-styled banner with role=alert, and renders nothing when there is not. No wording changed: these are the strings the handlers were already composing."
+  },
+  "verification": {
+    "tests": "Four tests that parse the SHIPPED landing template rather than a stub, because a fixture that substitutes its own template cannot prove anything about what a guest reads. They cover every refusal landing() is given, that a first visit renders no empty error box, and that the message is escaped rather than interpolated as markup.",
+    "gate_failure_and_direct_fix": "Two gates failed on the new template block, correctly. The E2E portal helper reads the landing template out of the Go source and renders it in TypeScript so the browser specs exercise the page portald actually serves; anything it cannot render is left as a Go action, which inside a script block is a syntax error that takes the whole block down, so it refuses loudly on any action it does not recognise. It now drops the refusal block exactly as html/template drops it when .Error is empty, because those specs exercise the page a guest meets on arrival. Local preflight cannot catch this: its E2E stage checks the server lifecycle and finishes in about a second, and the specs that call the helper run only in the gates.",
+    "mutation_proven": "Removing the template block fails six subtests. The whole portald suite passes with it restored, including the pre-existing tests for the flows that were already working.",
+    "a_test_that_was_wrong_in_an_instructive_direction": "One assertion searched for the raw string and failed on Your device isn't on the guest network. That message reaches the page with its apostrophe escaped, which is correct, and which a browser shows as the apostrophe the guest expects. It now compares against the escaped form. A test that mistakes correct escaping for a missing message would push somebody to remove the escaping in order to make it pass."
+  },
+  "live_state_after_second_delivery": {
+    "deployed": "portald built from merged master 6a9ea685 and installed on 172.21.60.25.",
+    "verified_live": {
+      "redirect_to_package_selection": "gone",
+      "commerce_cookie": "no longer issued",
+      "guest_facing_message": "ABSENT -- the defect this receipt records",
+      "room_sign_in": "unaffected; an invalid room still returns its own guest-facing correction",
+      "captive_detection": "working on both probes checked, portal served"
+    }
+  },
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Guest pilot operation and directly related fixes, end to end, under the same mission as T0169 and T0170. No product capability was enabled, and no PMS, financial, schema, networking, security-boundary or Go-Live change was made.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE. The retired appliance was not contacted.",
+  "base": "6a9ea6858b11ee9ef6ded8d4224133561f389abe",
+  "head": "0b172d7de80cd073a72d8266d3cb3fd52f2358be"
+}
