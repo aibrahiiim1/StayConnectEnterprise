@@ -2,7 +2,7 @@
 
 - **Base commit:** `6a9ea6858b11ee9ef6ded8d4224133561f389abe`
 - **HEAD commit:** `0b172d7de80cd073a72d8266d3cb3fd52f2358be`
-- **Provenance (generation HEAD = inventory_head):** `9d8f1a2d89fd667ac74fef2859e7fd1787a1fa93`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `9611e73e82e5df2bea9978f01aaabacdaf955094`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `fix/portal-error-message-reaches-the-guest`
 - **Remote branch:** `origin/fix/portal-error-message-reaches-the-guest`
 - **Changed files:** 28
@@ -19,26 +19,26 @@
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0171 corrects what T0170 claimed about the guest-facing message |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0171 corrects what T0170 claimed about the guest-facing message |
 | `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: manifest lists itself |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0171 |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0171 |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0171 |
-| `exports/chatgpt/phase-evidence/GIT_STAT_2e3f1931.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: packs rebuilt for T0171 |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for the corrected T0171 |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for the corrected T0171 |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for the corrected T0171 |
 | `exports/chatgpt/phase-evidence/GIT_STAT_4f3cd008.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Delivery: packs rebuilt for T0171 |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0171 |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0171 |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0171 |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0171 |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0171 |
+| `exports/chatgpt/phase-evidence/GIT_STAT_f6506fd2.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: packs rebuilt for the corrected T0171 |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for the corrected T0171 |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for the corrected T0171 |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for the corrected T0171 |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for the corrected T0171 |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for the corrected T0171 |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0171 |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0171 corrects what T0170 claimed about the guest-facing message |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0171 |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for the corrected T0171 |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0171 corrects what T0170 claimed about the guest-facing message |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0171 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0171 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0171 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0171 |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0171 corrects what T0170 claimed about the guest-facing message |
-| `governance/transitions/T0171.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0171 corrects what T0170 claimed about the guest-facing message |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0171 corrects a second claim, found while checking the first |
+| `governance/transitions/T0171.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0171 corrects a second claim, found while checking the first |
 | `hotel-admin/e2e/portal-page.ts` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | The E2E portal helper learns about the refusal banner |
 
 ## Total diff statistics (`git diff --stat`)
@@ -49,12 +49,12 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   2 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   2 +-
  docs/context/StayConnect-IAM-Handoff.md            |   2 +-
- docs/manifests/PostClosure-change-manifest.md      | 104 ++++++++++----------
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 342561 -> 342562 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 140429 -> 140437 bytes
+ docs/manifests/PostClosure-change-manifest.md      | 105 ++++++++++----------
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 342561 -> 342561 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 140429 -> 140439 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 43967 -> 43971 bytes
- .../chatgpt/phase-evidence/GIT_STAT_2e3f1931.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_4f3cd008.txt   |   4 -
+ .../chatgpt/phase-evidence/GIT_STAT_f6506fd2.txt   |   4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   4 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
  exports/chatgpt/phase1b-planning/MANIFEST.md       |   2 +-
@@ -69,9 +69,9 @@
  .../StayConnect-IAM-Phase1A-Plan.md                |   2 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |   2 +-
  governance/project-state.json                      |  12 +--
- governance/transitions/T0171.json                  |  51 ++++++++++
+ governance/transitions/T0171.json                  |  62 ++++++++++++
  hotel-admin/e2e/portal-page.ts                     |   5 +
- 28 files changed, 292 insertions(+), 111 deletions(-)
+ 28 files changed, 305 insertions(+), 110 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -81,6 +81,9 @@ M  docs/manifests/PostClosure-change-manifest.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 9611e73e Delivery: packs rebuilt for the corrected T0171
+HISTORICAL: f6506fd2 Governance: T0171 corrects a second claim, found while checking the first
+HISTORICAL: dbc4b41f Delivery: manifest lists itself
 HISTORICAL: 9d8f1a2d Delivery: packs rebuilt for T0171
 HISTORICAL: 2e3f1931 Governance: T0171 corrects what T0170 claimed about the guest-facing message
 HISTORICAL: 0b172d7d The E2E portal helper learns about the refusal banner
