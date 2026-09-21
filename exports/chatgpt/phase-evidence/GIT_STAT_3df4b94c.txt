@@ -1,0 +1,4 @@
+commit 3df4b94cb9373a40a1d7217fbcf4043bc9bdc5b5
+Date:   Mon Sep 21 11:35:06 2026 +0300
+
+    Governance: head follows the consolidation decision
