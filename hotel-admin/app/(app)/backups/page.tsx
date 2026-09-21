@@ -152,17 +152,6 @@ export default function BackupsPage() {
               <Button onClick={backupNow} disabled={!writable || busy === "backup"}>
                 {busy === "backup" ? "Backing up…" : "Back up now"}
               </Button>
-              {askPw && (
-                <label className="mt-2 block max-w-xs text-sm">
-                  Confirm your password
-                  <Input type="password" autoComplete="current-password" autoFocus className="mt-1"
-                    value={pw} onChange={(e) => setPw(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter" && pw) void backupNow(); }} />
-                  <span className="mt-1 block text-xs text-muted-foreground">
-                    A backup writes a complete copy of this property&rsquo;s data.
-                  </span>
-                </label>
-              )}
             </div>
           ) : (
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -196,6 +185,21 @@ export default function BackupsPage() {
                 </Button>
               </div>
             </div>
+          )}
+
+          {/* ONE PROMPT FOR THE CARD, not one per button. Both branches above render a "Back up now", and a
+              copy beside each would be two places to keep true -- which is how the first attempt at this fix
+              put the prompt in the branch that is not rendered when a backup already exists. */}
+          {askPw && (
+            <label className="block max-w-xs text-sm">
+              Confirm your password
+              <Input type="password" autoComplete="current-password" autoFocus className="mt-1"
+                value={pw} onChange={(e) => setPw(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && pw) void backupNow(); }} />
+              <span className="mt-1 block text-xs text-muted-foreground">
+                A backup writes a complete copy of this property&rsquo;s data.
+              </span>
+            </label>
           )}
         </CardBody>
       </Card>
