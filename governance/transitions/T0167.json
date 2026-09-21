@@ -76,5 +76,5 @@
   "authorization": "The Product Owner authorised the complete fix end to end: audit, correction, tests, required CI and gates, protected PR and merge, deployment to PRE-LIVE, live desktop and mobile verification and governance synchronisation. No new removal, hiding or demotion decision was made; the one demotion whose authorization could not be established is reported for decision rather than reversed.",
   "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE.",
   "base": "a04220b751bb315da6a598359c256023b4ab97f9",
-  "head": "47bcce2cb7b47070cbb7dcceda083c21671ebd57"
+  "head": "9bf5ad7370895261fcf3e0f46cec8cc78fd10ddb"
 }
