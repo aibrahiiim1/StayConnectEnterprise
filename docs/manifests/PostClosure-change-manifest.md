@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `a04220b751bb315da6a598359c256023b4ab97f9`
-- **HEAD commit:** `47a5cd078631ba68780ba85d009b499302fea982`
-- **Provenance (generation HEAD = inventory_head):** `3c32da67308ac538d8c03d5f32549978fb854770`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `47bcce2cb7b47070cbb7dcceda083c21671ebd57`
+- **Provenance (generation HEAD = inventory_head):** `720e13fb22f361cf0458519485dd53cf4c6374da`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `fix/navigation-capability-contract`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 30
@@ -18,44 +18,44 @@
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0167 records the navigation regression, its root cause and its protection |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0167 records the navigation regression, its root cause and its protection |
 | `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: manifest lists itself |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized at T0167 |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized at T0167 |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized at T0167 |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized |
 | `exports/chatgpt/phase-evidence/GIT_STAT_1295fe9f.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Delivery: packs resynchronized at T0167 |
-| `exports/chatgpt/phase-evidence/GIT_STAT_a912eae2.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: packs resynchronized at T0167 |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized at T0167 |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized at T0167 |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized at T0167 |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized at T0167 |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized at T0167 |
+| `exports/chatgpt/phase-evidence/GIT_STAT_3df4b94c.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: packs resynchronized |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized at T0167 |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0167 records the navigation regression, its root cause and its protection |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized at T0167 |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0167 records the navigation regression, its root cause and its protection |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized at T0167 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized at T0167 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized at T0167 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs resynchronized at T0167 |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0167 records the navigation regression, its root cause and its protection |
-| `governance/transitions/T0167.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0167 records the navigation regression, its root cause and its protection |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: head follows the consolidation decision |
+| `governance/transitions/T0167.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: head follows the consolidation decision |
 | `hotel-admin/app/(app)/dashboard/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | A link is offered when the appliance can serve it, not when the feature exists |
-| `hotel-admin/capability-contract.json` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Availability has one author, and a build variable is not it |
+| `hotel-admin/capability-contract.json` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | The consolidation is a decision now, and decisions are enforced |
 | `hotel-admin/components/nav.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Availability has one author, and a build variable is not it |
-| `hotel-admin/test/nav.test.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Availability has one author, and a build variable is not it |
+| `hotel-admin/test/nav.test.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | The consolidation is a decision now, and decisions are enforced |
 
 ## Total diff statistics (`git diff --stat`)
 ```text
- deploy/scripts/deploy-hotel-admin.sh               |  37 +++--
+ deploy/scripts/deploy-hotel-admin.sh               |  37 +++-
  .../StayConnect-IAM-Phase0-Contract.md             |   2 +-
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   2 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   2 +-
  docs/context/StayConnect-IAM-Handoff.md            |   2 +-
- docs/manifests/PostClosure-change-manifest.md      | 103 +++++++-------
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 342561 -> 342558 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 140425 -> 140441 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 43972 -> 43967 bytes
+ docs/manifests/PostClosure-change-manifest.md      | 110 ++++++-----
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 342561 -> 342561 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 140425 -> 140422 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 43972 -> 43969 bytes
  .../chatgpt/phase-evidence/GIT_STAT_1295fe9f.txt   |   4 -
- .../chatgpt/phase-evidence/GIT_STAT_a912eae2.txt   |   4 +
+ .../chatgpt/phase-evidence/GIT_STAT_3df4b94c.txt   |   4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   4 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
  exports/chatgpt/phase1b-planning/MANIFEST.md       |   2 +-
@@ -63,19 +63,19 @@
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |   2 +-
  .../chatgpt/stayconnectenterprise/00-START-HERE.md |   2 +-
- exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  60 ++++----
+ exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  60 +++---
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   2 +-
  .../StayConnect-IAM-Handoff.md                     |   2 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   2 +-
  .../StayConnect-IAM-Phase1A-Plan.md                |   2 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |   2 +-
  governance/project-state.json                      |  14 +-
- governance/transitions/T0167.json                  |  78 ++++++++++
+ governance/transitions/T0167.json                  |  80 ++++++++
  hotel-admin/app/(app)/dashboard/page.tsx           |  10 +-
- hotel-admin/capability-contract.json               | 156 +++++++++++++++++---
- hotel-admin/components/nav.tsx                     |  81 ++++++-----
- hotel-admin/test/nav.test.tsx                      | 157 ++++++++++++---------
- 30 files changed, 501 insertions(+), 245 deletions(-)
+ hotel-admin/capability-contract.json               | 182 +++++++++++++++--
+ hotel-admin/components/nav.tsx                     |  81 ++++----
+ hotel-admin/test/nav.test.tsx                      | 220 ++++++++++++++-------
+ 30 files changed, 597 insertions(+), 247 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -85,7 +85,12 @@
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
-HISTORICAL: 3c32da67 Delivery: manifest lists itself
+HISTORICAL: 720e13fb Delivery: manifest lists itself
+HISTORICAL: 0923b089 Delivery: packs resynchronized
+HISTORICAL: 3df4b94c Governance: head follows the consolidation decision
+HISTORICAL: 47bcce2c The consolidation is a decision now, and decisions are enforced
+HISTORICAL: a73b5ae1 The nav test asks its question without resetting the module registry
+HISTORICAL: ea489489 Delivery: manifest lists itself
 HISTORICAL: 38cd4b41 Delivery: packs resynchronized at T0167
 HISTORICAL: a912eae2 Governance: T0167 records the navigation regression, its root cause and its protection
 HISTORICAL: 47a5cd07 A link is offered when the appliance can serve it, not when the feature exists
