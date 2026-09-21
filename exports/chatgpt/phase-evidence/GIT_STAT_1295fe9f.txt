@@ -1,0 +1,4 @@
+commit 1295fe9f7f44b34156ee8b663d9442bb35a2c999
+Date:   Mon Sep 21 06:50:40 2026 +0300
+
+    Governance: T0166 records the device-lookup correction
