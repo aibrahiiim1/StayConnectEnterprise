@@ -6,18 +6,37 @@
     "_note": "EMPTY BY DESIGN, AND NOT AN OVERSIGHT. Navigation is decided at runtime from edged's mounted surfaces, so there is no build flag whose absence can hide a destination. A flag listed here would reintroduce exactly the failure this contract exists to prevent. Packaging still supplies nothing and proves nothing about flags, because there is nothing left to prove."
   },
   "required_routes": {
-    "_note": "Operator surfaces that must exist in the built app-path route manifest. A build that cannot serve these is not a candidate for this appliance, whatever else is right about it.",
+    "_note": "EVERY ROUTE THE PRODUCT MUST BE ABLE TO SERVE, and it is now the UNION of what packaging always required with every route the navigation contract names -- including the authorized consolidations, which are not in the sidebar but must still be reachable. They were separate lists, and a navigation entry could name a route the build was never held to: 'no destination leads nowhere' was asserted in the unit tests but not in the contract a release is verified against. A build that cannot serve these is not a candidate for this appliance, whatever else is right about it.",
     "routes": [
-      "/internet-packages",
-      "/service-plans",
+      "/appliance",
+      "/audit",
+      "/backups",
+      "/checkout-grace",
       "/commercial-packages",
+      "/dashboard",
+      "/guest-accounts",
+      "/guest-signin-attempts",
+      "/health",
+      "/internet-packages",
+      "/network",
+      "/notifications",
+      "/operational-alerts",
+      "/operators",
       "/pms-interfaces",
+      "/pms-reconciliation",
+      "/pms-resolutions",
       "/pms-routing",
-      "/stays",
+      "/pms-source-conflicts",
+      "/portal-branding",
+      "/roster-reconciliation",
+      "/service-plans",
       "/sessions",
       "/sign-in-methods",
-      "/network",
-      "/dashboard"
+      "/social-providers",
+      "/stay-events",
+      "/stays",
+      "/usage",
+      "/walled-garden"
     ]
   },
   "required_navigation": {
