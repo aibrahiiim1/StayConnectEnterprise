@@ -153,7 +153,13 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 		fmt.Fprintf(&b, "\t\tiifname \"%s\" udp dport { 67, 68 } accept\n", br)
 		fmt.Fprintf(&b, "\t\tiifname \"%s\" udp dport 53 accept\n", br)
 		fmt.Fprintf(&b, "\t\tiifname \"%s\" tcp dport 53 accept\n", br)
-		fmt.Fprintf(&b, "\t\tiifname \"%s\" tcp dport { %d, %d } accept comment \"portal\"\n", br, topo.PortalHTTPPort, topo.PortalTLSPort)
+		// The TLS portal port is opened only when there IS one. Accepting traffic to a port nothing listens
+		// on is not harmful in itself, but it advertises a service the appliance does not run.
+		if topo.PortalTLSPort > 0 {
+			fmt.Fprintf(&b, "\t\tiifname \"%s\" tcp dport { %d, %d } accept comment \"portal\"\n", br, topo.PortalHTTPPort, topo.PortalTLSPort)
+		} else {
+			fmt.Fprintf(&b, "\t\tiifname \"%s\" tcp dport %d accept comment \"portal\"\n", br, topo.PortalHTTPPort)
+		}
 		fmt.Fprintf(&b, "\t\tiifname \"%s\" icmp type echo-request accept\n", br)
 	}
 	b.WriteString("\t}\n\n")
@@ -182,6 +188,19 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @phase3_auth_ipv4 accept comment \"phase-3 authorized guests\"\n", topo.WANInterface)
 	// walled-garden pre-auth -> WAN for any guest interface
 	fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" ip daddr @walled_garden_ip accept\n", topo.WANInterface)
+	// AN UNAUTHENTICATED HTTPS ATTEMPT FAILS FAST, AND ON PURPOSE.
+	//
+	// With no TLS portal there is no redirect, and the chain's policy would simply DROP these packets. A drop
+	// is silent: the guest's browser retransmits and spins for half a minute before giving up, which is a
+	// worse experience than the closed-port reset they got when the DNAT pointed at a phantom listener.
+	//
+	// So the refusal is explicit. The guest learns immediately that this connection will not be served, which
+	// is also what prompts an operating system to fall back to its captive-portal probe -- the HTTP path that
+	// actually works. This rule sits AFTER both authorized-guest accepts and the walled garden, so it can
+	// only ever match a guest who has not signed in.
+	if topo.PortalTLSPort == 0 {
+		fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" tcp dport 443 reject with tcp reset comment \"no TLS portal: refuse promptly rather than hang\"\n", topo.WANInterface)
+	}
 	b.WriteString("\t}\n\n")
 
 	// --- prerouting nat (captive redirect per network to its own gateway) ---
@@ -197,8 +216,16 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 		// but every page still the login screen.
 		fmt.Fprintf(&b, "\t\tiifname \"%s\" iifname . ip saddr != @auth_ipv4 iifname . ip saddr != @phase3_auth_ipv4 ip daddr != @walled_garden_ip tcp dport 80  dnat ip to %s:%d\n",
 			br, gw, topo.PortalHTTPPort)
-		fmt.Fprintf(&b, "\t\tiifname \"%s\" iifname . ip saddr != @auth_ipv4 iifname . ip saddr != @phase3_auth_ipv4 ip daddr != @walled_garden_ip tcp dport 443 dnat ip to %s:%d\n",
-			br, gw, topo.PortalTLSPort)
+		// PORT 443 IS REDIRECTED ONLY IF THERE IS SOMETHING TO REDIRECT IT TO.
+		//
+		// This rule used to be emitted unconditionally, to a port that has never had a listener, so every
+		// unauthenticated guest who opened an HTTPS site was DNAT'd to a closed socket. The kernel answered
+		// with a reset, which at least failed quickly -- but the firewall was describing a captive TLS portal
+		// that does not exist, and the next person to read the ruleset would reasonably believe it did.
+		if topo.PortalTLSPort > 0 {
+			fmt.Fprintf(&b, "\t\tiifname \"%s\" iifname . ip saddr != @auth_ipv4 iifname . ip saddr != @phase3_auth_ipv4 ip daddr != @walled_garden_ip tcp dport 443 dnat ip to %s:%d\n",
+				br, gw, topo.PortalTLSPort)
+		}
 	}
 	b.WriteString("\t}\n\n")
 
