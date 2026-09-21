@@ -76,10 +76,27 @@ export default function BackupsPage() {
   const newest = artifacts?.[0] ?? null;
   const verifiedNewest = !!newest?.verified_at;
 
+  // TAKING A BACKUP NEEDS THE OPERATOR'S PASSWORD, AND THIS NEVER SENT ONE.
+  //
+  // The endpoint has always required a step-up -- a backup writes a complete copy of the property's data to
+  // disk -- and this posted no body at all, so every click returned "malformed request body". Not a
+  // permission error, not "confirm your password": a parse failure, which reads like the appliance is broken
+  // rather than like it is waiting for something.
+  //
+  // The prompt is inline rather than a dialog because there is one field and one decision. The step-up is
+  // unchanged; what changes is that the screen now takes part in it.
+  const [pw, setPw] = useState("");
+  const [askPw, setAskPw] = useState(false);
+
   async function backupNow() {
+    if (!pw) { setAskPw(true); return; }
     setBusy("backup"); setErr(null); setMsg(null);
-    try { await api.post("/backups/run"); setMsg("Backup created."); await load(); }
-    catch (e) { setErr(errMsg(e)); } finally { setBusy(null); }
+    try {
+      await api.post("/backups/run", { password: pw });
+      setMsg("Backup created.");
+      setPw(""); setAskPw(false);
+      await load();
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(null); }
   }
 
   async function verify(name: string) {
@@ -135,6 +152,17 @@ export default function BackupsPage() {
               <Button onClick={backupNow} disabled={!writable || busy === "backup"}>
                 {busy === "backup" ? "Backing up…" : "Back up now"}
               </Button>
+              {askPw && (
+                <label className="mt-2 block max-w-xs text-sm">
+                  Confirm your password
+                  <Input type="password" autoComplete="current-password" autoFocus className="mt-1"
+                    value={pw} onChange={(e) => setPw(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && pw) void backupNow(); }} />
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    A backup writes a complete copy of this property&rsquo;s data.
+                  </span>
+                </label>
+              )}
             </div>
           ) : (
             <div className="flex flex-wrap items-center justify-between gap-3">

@@ -45,7 +45,15 @@ const (
 
 // safeBackupName bounds what verify/download may name. The caller is edged, but a path joined from a string
 // that came over HTTP is worth constraining regardless of who is holding it.
-var safeBackupName = regexp.MustCompile(`^db-[0-9TZ]{1,24}\.sql\.gz$`)
+// THE SAFETY DUMPS COUNT. This was `^db-[0-9TZ]{1,24}\.sql\.gz$`, which matches db-<stamp>.sql.gz and
+// nothing else -- so every db-safety-<stamp>.sql.gz a restore takes before it touches anything was refused by
+// verify and by restore. The one copy an operator would most want back after a bad restore was the one copy
+// the guard would not name, and the refusal read "a database backup name is required" about a file the
+// screen had just listed.
+//
+// Still strict, and for the reason it was written: this bounds a string that gets joined onto a path, so it
+// admits no separator, no dot-dot and no arbitrary text -- only the two shapes this appliance produces.
+var safeBackupName = regexp.MustCompile(`^db-(safety-)?[0-9TZ]{1,24}\.sql\.gz$`)
 
 // backupRun takes a compressed logical dump of the site database.
 func (s *server) backupRun(w http.ResponseWriter, r *http.Request) {
