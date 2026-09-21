@@ -1,0 +1,50 @@
+{
+  "transition_id": "T0171",
+  "seq": 171,
+  "timestamp": "2026-09-21T17:23:00Z",
+  "timestamp_derivation": "After PR #168 merged as 6a9ea685 and after the merged portald was deployed to PRE-LIVE and the live check showed the page arriving blank. Before the author timestamp of the commit that introduces this receipt.",
+  "record_type": "GUEST_PILOT_THIRD_DEFECT_CORRECTION_AND_CORRECTION_OF_RECORD",
+  "correction_of_record": {
+    "what_was_claimed": "T0170 and the body of PR #168 state that after the commerce-dark fix a guest who signs in with a voucher is told that packages are unavailable and to ask reception.",
+    "what_is_true": "They were not told. The fix did remove the dead end -- no commerce cookie is issued and the guest is no longer redirected to a page that cannot serve them, both verified live -- but the message never reached them. The landing template contained no reference to .Error, so landing() discarded every message it was given and returned a page indistinguishable from the one the guest had just submitted.",
+    "how_it_was_missed": "The test asserting that behaviour parses a stub template rather than the one that ships. It was true of the stub and false of the product. It was reported as verified on that basis, and the error was found only by checking the rendered page on the appliance after deployment.",
+    "status": "T0170 is left as written -- it is a record of what was believed at the time -- and this receipt is the correction. The claim it makes about the guest-facing message was wrong; its claims about the removed redirect and the absent cookie were verified live and stand."
+  },
+  "defect_found_and_fixed": {
+    "symptom": "A guest submits a voucher and the page reloads looking exactly as it did, with no explanation. The same is true of every refusal the landing path handles: an empty voucher box, a device that cannot be placed on the guest network, a session that must be started again.",
+    "root_cause": "landing() has always composed a message and passed it to the template as .Error. The landing template never referenced it.",
+    "why_it_survived": "Which forms it affects. The voucher and personal-account forms are plain HTML POSTs, so the server's response is the page the guest lands on, and those are the flows whose messages vanished. The PMS, OTP and post-stay flows submit with fetch() and render errors into their own boxes from the JSON reply, so their messages always appeared -- which is why exercising the portal through room sign-in, the only method that works on this appliance, would never have revealed it.",
+    "fix": "The landing template renders the message when there is one, as an error-styled banner with role=alert, and renders nothing when there is not. No wording changed: these are the strings the handlers were already composing."
+  },
+  "verification": {
+    "tests": "Four tests that parse the SHIPPED landing template rather than a stub, because a fixture that substitutes its own template cannot prove anything about what a guest reads. They cover every refusal landing() is given, that a first visit renders no empty error box, and that the message is escaped rather than interpolated as markup.",
+    "mutation_proven": "Removing the template block fails six subtests. The whole portald suite passes with it restored, including the pre-existing tests for the flows that were already working.",
+    "a_test_that_was_wrong_in_an_instructive_direction": "One assertion searched for the raw string and failed on Your device isn't on the guest network. That message reaches the page with its apostrophe escaped, which is correct, and which a browser shows as the apostrophe the guest expects. It now compares against the escaped form. A test that mistakes correct escaping for a missing message would push somebody to remove the escaping in order to make it pass."
+  },
+  "live_state_after_second_delivery": {
+    "deployed": "portald built from merged master 6a9ea685 and installed on 172.21.60.25.",
+    "verified_live": {
+      "redirect_to_package_selection": "gone",
+      "commerce_cookie": "no longer issued",
+      "guest_facing_message": "ABSENT -- the defect this receipt records",
+      "room_sign_in": "unaffected; an invalid room still returns its own guest-facing correction",
+      "captive_detection": "working on both probes checked, portal served"
+    }
+  },
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Guest pilot operation and directly related fixes, end to end, under the same mission as T0169 and T0170. No product capability was enabled, and no PMS, financial, schema, networking, security-boundary or Go-Live change was made.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE. The retired appliance was not contacted.",
+  "base": "6a9ea6858b11ee9ef6ded8d4224133561f389abe",
+  "head": "a5a567ea02f0117a8e5f2d5985422671ec1224bd"
+}
