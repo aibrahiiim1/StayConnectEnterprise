@@ -134,3 +134,50 @@ describe("no destination leads nowhere", () => {
     expect(orphaned, "contract requires a destination the sidebar does not declare").toEqual([]);
   });
 });
+
+describe("authorized consolidations stay reachable", () => {
+  // A destination that is deliberately not in the sidebar and one that vanished by accident look identical
+  // from outside; the difference is an authorization, and this is where that authorization is enforced.
+  //
+  // PMS reconciliation and Roster reconciliation are approved as NOT top-level, by Product-Owner decision of
+  // 2026-09-21, on condition that they stay available and clearly discoverable under PMS Connection ->
+  // Advanced with their routes, permissions and attention links intact. Without these checks, the approved
+  // consolidation could decay into exactly the disappearance the rest of this file exists to prevent.
+  const PMS_PAGE = readFileSync(join(process.cwd(), "app/(app)/pms-interfaces/page.tsx"), "utf8");
+  const DASH = readFileSync(join(process.cwd(), "app/(app)/dashboard/page.tsx"), "utf8");
+  const consolidated = CONTRACT.authorized_consolidations.entries;
+
+  it("records a Product-Owner decision, not an agent judgement", () => {
+    expect(CONTRACT.authorized_consolidations.decision).toMatch(/Product Owner/i);
+  });
+
+  it("keeps each one out of the top-level sidebar, as decided", () => {
+    const routes = new Set([...NAV_SRC.matchAll(/href:\s*"(\/[^"]*)"/g)].map((m) => m[1]));
+    for (const e of consolidated) {
+      expect(e.top_level_sidebar, `${e.label} is recorded as top-level`).toBe(false);
+      expect(routes.has(e.route), `${e.label} is back in the sidebar; the decision says it should not be`).toBe(false);
+    }
+  });
+
+  it("keeps each one linked, with its label, from the required Advanced section", () => {
+    expect(PMS_PAGE).toContain("Advanced diagnostics");
+    for (const e of consolidated) {
+      expect(PMS_PAGE, `${e.label} is no longer linked from PMS Connection -> Advanced`).toContain(`href="${e.route}"`);
+      expect(PMS_PAGE, `${e.label} lost its label in the Advanced area`).toContain(e.label);
+    }
+  });
+
+  it("keeps a direct route from PMS health or the attention list when it matters", () => {
+    // The whole basis of the consolidation is that these screens are empty almost always. That only holds if
+    // the rare time one is NOT empty reaches the operator without them going to look.
+    expect(PMS_PAGE).toMatch(/review_events/);
+    expect(PMS_PAGE + DASH).toContain('href: "/roster-reconciliation"');
+  });
+
+  it("keeps the pages and does not merely link at nothing", () => {
+    const { existsSync } = require("node:fs") as typeof import("node:fs");
+    for (const e of consolidated) {
+      expect(existsSync(join(process.cwd(), `app/(app)${e.route}/page.tsx`)), `${e.label} page is gone`).toBe(true);
+    }
+  });
+});

@@ -175,5 +175,31 @@
     "NEXT_PUBLIC_PHASE4_ADMIN": "not used by the product any more; Phase 4 is DARK, no financial traffic authorized",
     "NEXT_PUBLIC_PHASE5_ADMIN": "not used by the product any more; post-stay operator surface not authorized for PRE-LIVE",
     "NEXT_PUBLIC_PHASE6_ADMIN": "not used by the product any more; guest device self-service not authorized for PRE-LIVE"
+  },
+  "authorized_consolidations": {
+    "_note": "DESTINATIONS THAT ARE DELIBERATELY NOT TOP-LEVEL, BY PRODUCT-OWNER DECISION, AND WHICH MUST STILL BE REACHABLE. This section exists because 'not in the sidebar' and 'gone' look identical from the outside, and the difference is an authorization. An entry here is a decision on record: the destination stays built, permitted and discoverable, at a NAMED location, and the checks below hold that location the same way the sidebar contract holds the menu. Without this, a consolidation is indistinguishable from the accidental disappearance this contract was written to prevent.",
+    "decision": "Product Owner, 2026-09-21. Confirms the consolidation first made in commit cb3831ee, which until now carried only an agent's UX judgement. Both reconciliation screens are approved as NOT top-level sidebar items, and are required to be available and clearly discoverable under PMS Connection -> Advanced. Routes, permissions, the full diagnostic and evidence pages, and the direct links from PMS health when attention is needed are all to be kept. The stated goal is to avoid unnecessary sidebar clutter, NOT to hide or remove the functionality.",
+    "entries": [
+      {
+        "label": "Unresolved departures",
+        "route": "/pms-reconciliation",
+        "surface": "pms-reconciliation",
+        "required_location": "app/(app)/pms-interfaces/page.tsx",
+        "required_section": "Advanced diagnostics",
+        "top_level_sidebar": false,
+        "attention_link_required": true,
+        "attention_link_note": "PMS health must link straight to it when review_events > 0. Reconciliation runs by itself and is nearly always empty, so the one time it matters an operator must not have to go looking."
+      },
+      {
+        "label": "Roster reconciliation",
+        "route": "/roster-reconciliation",
+        "surface": "pms-roster-reconciliation",
+        "required_location": "app/(app)/pms-interfaces/page.tsx",
+        "required_section": "Advanced diagnostics",
+        "top_level_sidebar": false,
+        "attention_link_required": true,
+        "attention_link_note": "Surfaced from the dashboard attention list when a comparison needs investigating."
+      }
+    ]
   }
 }
