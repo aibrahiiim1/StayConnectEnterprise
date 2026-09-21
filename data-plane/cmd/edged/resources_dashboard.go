@@ -483,6 +483,18 @@ func (s *server) dashNetworks(ctx context.Context) []dashNetwork {
 		       -- THE POOL SIZE, summed across every range configured for the network. Counted from the stored
 		       -- start/end addresses rather than from the subnet mask: a /22 with one small pool in it has 1,022
 		       -- usable addresses and perhaps 50 issuable ones, and the number that matters is the second.
+		       --
+		       -- THE SAME-SUBNET GUARD USED TO EXCLUDE EVERY REAL POOL. It read
+		       --     network(p.start_ip::cidr) = network(p.end_ip::cidr)
+		       -- and an inet host cast to cidr carries a /32, so that compares 192.168.77.100/32 with
+		       -- 192.168.77.200/32 and is true only when the pool is a SINGLE address. Every range of more than
+		       -- one address failed it, the sum came back NULL, and the dashboard told the operator "no address
+		       -- range is configured, so this appliance cannot hand out addresses here" about a network Kea was
+		       -- actively serving 101 addresses from. During a guest pilot that is worse than silence: it sends
+		       -- somebody to repair a working DHCP configuration.
+		       --
+		       -- The guard exists because the arithmetic below subtracts the FOURTH OCTET, which is only
+		       -- meaningful inside one /24. So it now asks exactly that question.
 		       COALESCE((SELECT sum(
 		                    (split_part(host(p.end_ip),'.',4)::bigint
 		                   - split_part(host(p.start_ip),'.',4)::bigint) + 1
@@ -490,7 +502,9 @@ func (s *server) dashNetworks(ctx context.Context) []dashNetwork {
 		                  FROM public.dhcp_pools p
 		                 WHERE p.guest_network_id = gn.id
 		                   AND family(p.start_ip) = 4 AND family(p.end_ip) = 4
-		                   AND network(p.start_ip::cidr) = network(p.end_ip::cidr)), 0)::bigint,
+		                   AND network(set_masklen(p.start_ip::cidr, 24))
+		                     = network(set_masklen(p.end_ip::cidr, 24))
+		                   AND p.end_ip >= p.start_ip), 0)::bigint,
 		       COALESCE((SELECT count(DISTINCT se.mac) FROM iam_v2.sessions se
 		                  WHERE se.tenant_id = gn.tenant_id AND se.site_id = gn.site_id
 		                    AND se.state = 'active'

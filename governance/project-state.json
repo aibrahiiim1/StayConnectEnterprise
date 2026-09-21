@@ -1093,7 +1093,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     }
   },
-  "latest_transition_id": "T0168",
+  "latest_transition_id": "T0169",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1587,14 +1587,14 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "OPERATOR_SCREEN_DEFECT_CORRECTION",
-    "decision": "D86",
+    "kind": "GUEST_PILOT_OPERATION_DEFECT_CORRECTION_AND_AUTHORISED_443_DNAT_REMOVAL",
+    "decision": "D87",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "f5ed0543796c074ed08fa81404abb077da0594c2",
-    "base_note": "The master merge commit of PR #165.",
-    "head": "7227501101db673ac53fabd839706686b9def328",
-    "head_note": "The last content commit of this delivery. The governance receipt and generated blocks are committed after it and the manifest last of all, as always -- the manifest must list itself.",
-    "note": "T0168. Three operator-facing defects, all reported by the Product Owner using the appliance. BACK UP NOW posted no body to an endpoint that has always required a password step-up, so decodeJSON failed before the step-up was reached and every click returned 'malformed request body' -- a parse failure where a prompt belonged. The screen now takes part in the step-up; the endpoint, the reauth check and the audit record are unchanged. VERIFY refused the appliance's own safety dumps: safeBackupName matched db-<stamp>.sql.gz only, so every db-safety-<stamp>.sql.gz a restore writes before touching anything was rejected by verify and by restore -- the copy most wanted after a bad restore was the only one the guard would not name. The pattern now admits exactly the two shapes the appliance produces and still bounds a path: no separator, no dot-dot, no arbitrary text. PMS CONNECTION announced a verdict it had not obtained: the interface list is one request and health is one per interface fetched after it, so between them the summary read 'Not working' in an error tone about a connection that was fine. Not asked and answered-no are different facts; the page now says it is checking until there is an answer to state. Every restore protection and the step-up boundary are preserved; no schema, migration, privilege, PMS, networking, trust or financial change."
+    "base": "759286afc50bc2ef74038daea88b39b0bddf0278",
+    "base_note": "The master merge commit of PR #166.",
+    "head": "0001b1664a5f52384a0b9a51c8fa8924f3c9cc23",
+    "head_note": "The last content commit of this delivery. The governance receipt and generated blocks follow it and the manifest last of all -- the manifest must list itself.",
+    "note": "T0169. Guest Internet operated as a controlled pilot on PRE-LIVE. The path was walked end to end and is healthy: Kea serving 192.168.77.100-200 with option 114, Unbound answering, portald offering all six sign-in methods, the PMS mirror CONNECTED/IN_SYNC with 468 in-house stays, and device captive-detection observed working. No guest has attempted a sign-in for nine days, so the pilot is available but not exercised. ONE DEFECT FIXED: the dashboard reported 'no address range is configured, so this appliance cannot hand out addresses here' for the network Kea was serving 101 addresses from, because the pool-size guard compared /32 host networks and so admitted only single-address pools; the sum returned NULL and COALESCE rendered it as a confident zero. On an operator screen that sends somebody to repair a working configuration and hides a real outage behind the normal display. THE ITEM RAISED FOR DECISION WAS DECIDED AND CARRIED OUT: guest port 443 was DNATed to a portal TLS listener that has never been provisioned, and the Product Owner authorised removing that redirect on 172.21.60.25 without HTTPS interception, certificate impersonation, a portal PKI model or any trust-root change. PortalTLSPort now states the fact -- zero, this appliance serves no TLS portal -- and the renderer emits no 443 redirect and no longer opens the port. Because the forward chain is policy drop, a bare removal would have replaced an immediate connection-refused with a silent half-minute hang, so an unauthenticated guest's 443 is now rejected with a TCP reset, ordered after both authorisation accepts and the walled garden. An appliance that genuinely serves a TLS portal renders exactly as before."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

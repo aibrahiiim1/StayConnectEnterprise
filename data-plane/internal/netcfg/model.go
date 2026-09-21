@@ -74,7 +74,20 @@ type Topology struct {
 	// admin UI on the WAN IP. Empty => interface-wide.
 	MgmtCIDRs      []string // management subnets guests must never reach
 	PortalHTTPPort int      // 8380
-	PortalTLSPort  int      // 8343
+
+	// PortalTLSPort is the captive portal's HTTPS port, or ZERO when this appliance does not serve one.
+	//
+	// It is zero here, and that is a statement of fact rather than a default waiting to be filled in.
+	// portald serves TLS only if a certificate exists at PORTALD_CERT, no tooling in this repository has
+	// ever provisioned one, and /etc/stayconnect/tls does not exist on the appliance. The firewall, however,
+	// redirected every unauthenticated guest's port-443 connection to that port regardless -- so a guest who
+	// opened an HTTPS site before signing in was sent to a listener that has never existed.
+	//
+	// Nothing here introduces HTTPS interception, a certificate or a PKI model: a captive portal that
+	// terminated TLS would have to present a certificate for somebody else's domain, which is precisely what
+	// is NOT being built. Zero means the appliance does not pretend to serve that port, and the renderer
+	// stops emitting rules that depend on it.
+	PortalTLSPort int
 }
 
 func DefaultTopology() Topology {
@@ -83,7 +96,8 @@ func DefaultTopology() Topology {
 		MgmtInterface:  "ens160",
 		MgmtCIDRs:      []string{"172.16.0.0/12", "192.168.0.0/16"},
 		PortalHTTPPort: 8380,
-		PortalTLSPort:  8343,
+		// No TLS portal on this appliance. See the field comment: this is a fact, not an unset default.
+		PortalTLSPort: 0,
 	}
 }
 

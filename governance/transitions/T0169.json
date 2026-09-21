@@ -1,0 +1,63 @@
+{
+  "transition_id": "T0169",
+  "seq": 169,
+  "timestamp": "2026-09-21T15:05:00Z",
+  "timestamp_derivation": "After the guest-path assessment on PRE-LIVE and after the corrected pool-size expression was verified against the appliance's own database. Before the author timestamp of the commit that introduces this receipt.",
+  "record_type": "GUEST_PILOT_OPERATION_AND_DEFECT_CORRECTION",
+  "what_was_authorised": "Run and stabilise Guest Internet on PRE-LIVE through a controlled guest pilot, investigate any directly related guest-access issue, and complete directly related fixes end to end. Explicitly NOT authorised without a new decision: networking or topology changes, PMS configuration or traffic, financial behaviour, database schema, security or architecture boundaries, and Go-Live.",
+  "guest_path_as_found": {
+    "services": "scd, edged, portald, pmsd, acctd, netd, Kea, Unbound and Caddy all active.",
+    "addressing": "Kea serving 192.168.77.100-200 on br-g-00d1fa1a with option 114 pointing at http://192.168.77.1:8380/. Live leases present; nine devices on the bridge.",
+    "dns": "Unbound answering on the guest gateway.",
+    "portal": "portald serving on :8380; the page offers all six sign-in methods -- voucher, personal account, email OTP, room number, post-stay PIN and phone OTP.",
+    "pms_mirror": "CONNECTED / CONTINUOUS / IN_SYNC, 468 in-house stays, every one carrying a room number and a reservation id.",
+    "captive_detection": "Working. Operating-system and application probes are intercepted and answered with the portal, observed in portald's own log.",
+    "conversion": "NO guest has attempted a sign-in for nine days; the last successful session was 2026-09-12. The current guest traffic is captive probes from operating systems and apps, not people. The pilot is available but is not being exercised."
+  },
+  "defect_found_and_fixed": {
+    "symptom": "The dashboard reported 'No address range is configured, so this appliance cannot hand out addresses here' for the guest network Kea was actively serving 101 addresses from, and had been doing so throughout the pilot.",
+    "root_cause": "The dashboard's pool-size query guarded with network(p.start_ip::cidr) = network(p.end_ip::cidr). An inet host cast to cidr carries a /32, so that compares 192.168.77.100/32 with 192.168.77.200/32 and is true only when a pool is a single address. Every real range failed it, the sum returned NULL, and COALESCE turned 'I excluded everything' into a confident zero.",
+    "why_it_matters_in_a_pilot": "The screen does not say unknown; it states that the appliance cannot hand out addresses. That sends an operator to repair a working DHCP configuration, and it makes a real addressing outage indistinguishable from the normal display.",
+    "fix": "The guard now asks the question the arithmetic assumes -- that start and end lie in the same /24, because the size is computed from the fourth octet -- and a reversed range is rejected rather than subtracting from the total. Verified against the appliance's database: the pool that scored 0 scores 101, and a range spanning two /24s is still correctly excluded.",
+    "scope": "One read-only reporting query in edged. No DHCP, Kea, netd, nftables, schema or guest-network configuration was touched."
+  },
+  "checked_and_left_alone": {
+    "devices_online": "The same card shows 'Devices online 0' while nine devices sit on the bridge. That figure counts SIGNED-IN sessions, of which there are none, so it is accurate. It was checked rather than assumed.",
+    "portal_https_listener": "See product_owner_decision_requested."
+  },
+  "product_owner_decision_requested": {
+    "what": "nftables DNATs unauthenticated guest traffic on port 443 to 192.168.77.1:8343, and nothing listens there. portald logs 'portald HTTPS disabled - cert missing' at every start, because /etc/stayconnect/tls/ does not exist on the appliance at all.",
+    "consequence": "A guest who opens an HTTPS site before signing in gets a connection refused rather than the portal. The HTTP captive path is unaffected and is what device captive-detection uses, which is why the portal still appears normally -- observed working during this assessment.",
+    "why_it_is_not_decided_here": "It is not a regression. SYSTEM_OVERVIEW documents the listener as conditional -- 'HTTPS only if cert exists' -- netd's own portal_listen health check asserts the HTTP port only, and no portal-certificate tooling has ever existed in the repository. Both available remedies fall outside this mission's authorisation: minting a portal certificate is PKI and a security-boundary decision, and it buys a certificate warning in place of a connection error because a captive portal necessarily presents a certificate for somebody else's domain; removing the port-443 DNAT is a networking change.",
+    "options": "(a) leave it and record the HTTPS captive path as deliberately unserved; (b) authorise a portal certificate and the provisioning for it; or (c) authorise removing the 443 DNAT so the failure is immediate and intentional rather than a redirect to a closed port.",
+    "status": "DECIDED on 2026-09-21. The Product Owner chose option (c) and authorised the networking change on 172.21.60.25 to remove the unauthenticated guest TCP/443 DNAT to the non-existent portal listener, explicitly WITHOUT HTTPS interception, certificate impersonation, a new portal PKI model or any trust-root change. See product_owner_decision_taken."
+  },
+  "verification": {
+    "tests": "Go build, vet and the edged suite clean. A new test reads the QUERY rather than the prose around it, because the comment explaining the defect quotes the broken predicate; mutation-proven by reintroducing the /32 guard, which fails it.",
+    "ci_limitation_recorded": "The repository's integration tests are compiled by CI but never executed by it -- the workflows vet '-tags integration' and nothing runs them. A behavioural test behind that tag would look like protection and provide none, so the behaviour was verified directly against the appliance instead."
+  },
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Guest pilot operation and directly related fixes, end to end. No networking, PMS, financial, schema, security-boundary or Go-Live change was made.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE. 172.21.60.23 was not contacted.",
+  "base": "759286afc50bc2ef74038daea88b39b0bddf0278",
+  "head": "0001b1664a5f52384a0b9a51c8fa8924f3c9cc23",
+  "product_owner_decision_taken": {
+    "decision": "Remove the port-443 DNAT. Do not introduce HTTPS interception, certificate impersonation, a portal PKI model or any trust-root change. Verify captive-portal detection and the HTTP guest journey on real client devices before and after.",
+    "scope_of_the_networking_authorisation": "This is a CONTROLLED networking change, authorised for 172.21.60.25 and for this mission only. It changes which packets the firewall redirects. It does not change topology, addressing, routing, interfaces, VLANs or the WAN, and it authorises nothing on any other appliance.",
+    "what_changed": "PortalTLSPort is now zero on this appliance, meaning it serves no TLS portal, and the renderer emits rules conditional on that fact: no port-443 redirect, and the TLS portal port is no longer opened on the input chain. An appliance that does serve a TLS portal renders exactly as before.",
+    "why_a_refusal_was_added_rather_than_a_bare_removal": "The forward chain is policy drop, so removing the redirect alone would have replaced today's immediate connection-refused with a silent drop -- a browser spinning for roughly half a minute. That is a worse guest experience than the defect being corrected. An unauthenticated guest's 443 is therefore rejected with a TCP reset, placed after both authorisation accepts and the walled garden so it can only match a guest who has not signed in. Prompt failure is also what prompts an operating system to fall back to its captive probe, which is the HTTP path that works.",
+    "the_property_that_had_to_survive": "Removing a redirect must not turn a blocked connection into an allowed one. The forward chain remains default-deny with accepts only for @auth_ipv4, @phase3_auth_ipv4 and @walled_garden_ip; a test asserts this from the rendered ruleset rather than from intent, and asserts separately that the management interface's own 443 accept -- the operator's way in to Hotel Admin -- survives.",
+    "no_tls_material_introduced": "A test asserts the rendered ruleset never mentions certificate, .crt, .pem, acme or self-signed, in both the TLS-portal and no-TLS-portal configurations. A captive portal that intercepted HTTPS would necessarily present a certificate for somebody else's domain; that is what was refused, and this keeps a later 'restore HTTPS' from arriving by this route unnoticed."
+  }
+}
