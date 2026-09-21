@@ -1,0 +1,47 @@
+{
+  "transition_id": "T0168",
+  "seq": 168,
+  "timestamp": "2026-09-21T12:00:00Z",
+  "timestamp_derivation": "After the last content commit of this delivery and after both defects were verified on PRE-LIVE in a real browser on a desktop and an iPhone profile. Before the author timestamp of the commit that introduces this receipt.",
+  "record_type": "OPERATOR_SCREEN_DEFECT_CORRECTION",
+  "how_they_were_found": "The Product Owner used the appliance. Two reports: backup verify answered 'a database backup name is required' and Back up now answered 'malformed request body'; and the PMS Connection page showed its numbers late and reported room sign-in as not working until it had finished loading.",
+  "defect_1_backup_creation": {
+    "symptom": "Every click of Back up now returned 'malformed request body'.",
+    "root_cause": "The endpoint has always required a password step-up -- a backup writes a complete copy of the property's data to disk -- and the screen posted NO BODY AT ALL. decodeJSON therefore failed before the step-up was ever reached, so the operator saw a parse failure rather than a request for a password. It reads like the appliance is broken rather than like it is waiting for something.",
+    "fix": "The screen now takes part in the step-up: one inline password field beside the button, sent as {\"password\": ...}. The endpoint, the reauth check and the audit record are unchanged; nothing was relaxed to make the click work.",
+    "a_correction_within_the_fix": "The first attempt put the prompt beside the first 'Back up now' in the file, which is the one in the 'there is no backup yet' branch -- a branch that does not render once a backup exists. The button an operator actually sees is in the other branch, so the click still did nothing visible. There is now ONE prompt at card level for whichever button the card rendered, rather than a copy beside each, because two copies are two places to keep true."
+  },
+  "defect_2_backup_name_rule": {
+    "symptom": "Verify on the newest backup answered 'a database backup name is required'.",
+    "root_cause": "safeBackupName was ^db-[0-9TZ]{1,24}\\.sql\\.gz$, which matches db-<stamp>.sql.gz and nothing else. Every db-safety-<stamp>.sql.gz that a restore writes before touching anything was therefore refused -- by verify AND by restore. The copy an operator would most want back after a bad restore was the only one the guard would not name, and the refusal was phrased as a missing name about a file the screen had just listed. The Product Owner hit it because the newest backup in the list was a safety dump.",
+    "fix": "The pattern is ^db-(safety-)?[0-9TZ]{1,24}\\.sql\\.gz$. It stays strict for the reason it was written -- it bounds a string that is joined onto a path -- and admits exactly the two shapes this appliance produces: no separator, no dot-dot, no arbitrary text. A test drives both accepted shapes and six rejected ones including traversal attempts.",
+    "security_boundary_preserved": "No validation was weakened and no restore protection changed. Restore still requires a verified backup whose SHA-256 still matches, the operator's password, the backup's own name typed out, and an appliance not already in maintenance."
+  },
+  "defect_3_pms_verdict_before_the_answer": {
+    "symptom": "On opening PMS Connection the figures were absent and Room sign-in read 'Not working' in an error tone, correcting itself to 'Working' a few seconds later.",
+    "root_cause": "The interface list is one request; health is one request PER INTERFACE, fetched after it. In between, the health map is an empty object -- so `ready` was 0 while `active` was already 1, and the summary announced '0 of 1 connections can verify guests right now' about a connection that was fine. Not asked and answered-no are different facts and had been collapsed into one. The missing figures were the same cause: they were rendering from an empty object.",
+    "fix": "The page distinguishes not-yet-asked from answered. Until the health requests resolve the summary renders a checking state; the verdict appears only once there is an answer to state. No polling interval, PMS traffic, configuration or health semantics changed."
+  },
+  "verification": {
+    "tests": "32 UI test files, 356 tests; Go build and scd tests clean. A new test file asserts what each screen does BEFORE an answer exists -- which a render test with mocked data cannot reach, because mocking the data removes the race -- plus the name rule accepting both legitimate shapes and rejecting traversal.",
+    "live": "PRE-LIVE, real browser, desktop 1440x1600 and an iPhone 13 profile: PMS shows no failure verdict on first paint and settles correctly; Back up now asks for the password, and the backup is created with no malformed-body error; Verify succeeds on a safety dump that previously returned a missing-name refusal (ok, 141 tables)."
+  },
+  "scope": "Two screens and one regular expression. No schema change, no migration, no privilege change, no PMS traffic or configuration change, no networking, trust or financial action, no Go-Live. The backup step-up boundary and every restore protection are preserved exactly.",
+  "guest_data": "No guest name, room number or reservation identifier appears in this record, in the commit messages, in the manifest or in the test fixtures.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "The Product Owner authorised this correction end to end: tests, full preflight, the protected PR path, all four required gates, merge, rebuild and redeploy of PRE-LIVE from the exact merged master, live desktop and mobile verification and governance synchronisation. The PRE-LIVE fixes deployed while diagnosing are accepted as part of this mission.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE.",
+  "base": "f5ed0543796c074ed08fa81404abb077da0594c2",
+  "head": "7227501101db673ac53fabd839706686b9def328"
+}

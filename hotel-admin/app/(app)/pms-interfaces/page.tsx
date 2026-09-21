@@ -55,7 +55,7 @@ import {
   DialogForm, ConfirmDialog, Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Explain } from "@/components/ui/tooltip";
-import { DList, MonoId, Separator, SkeletonRows, Metric } from "@/components/ui/misc";
+import { DList, MonoId, Separator, SkeletonRows, Metric, Skeleton } from "@/components/ui/misc";
 import { formatRelative, formatDate } from "@/lib/utils";
 import { describePmsReadiness } from "@/lib/health-words";
 import { Hotel, Plus, RefreshCw, Router } from "lucide-react";
@@ -134,6 +134,15 @@ export default function PMSInterfacesPage() {
   const [rows, setRows] = useState<PmsInterface[] | null>(null);
   // Live health per interface, so the LIST can answer "is it working" without the operator opening anything.
   const [health, setHealth] = useState<Record<string, PmsInterfaceHealth>>({});
+  // HEALTH ARRIVES AFTER THE LIST, AND UNTIL IT DOES NOTHING HERE KNOWS ANYTHING.
+  //
+  // The list is one request; health is one request per interface, fetched after it. In between, `health` is
+  // an empty object -- so `ready` was 0 while `active` was already 1, and the summary announced "Not working"
+  // in an error tone with "0 of 1 connections can verify guests right now". Room sign-in was fine. The page
+  // had simply not asked yet, and it was reporting the answer it did not have as the answer no.
+  //
+  // Three states, not two: not asked, asked and answered, asked and failed. This separates the first.
+  const [healthLoaded, setHealthLoaded] = useState(false);
   const [err, setErr] = useState<unknown>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -171,6 +180,7 @@ export default function PMSInterfacesPage() {
           }),
       );
       setHealth(Object.fromEntries(results.filter(Boolean) as [string, PmsInterfaceHealth][]));
+      setHealthLoaded(true);
     } catch (e) {
       setErr(e);
       setRows([]);
@@ -251,7 +261,16 @@ export default function PMSInterfacesPage() {
       <ErrorBanner err={err} />
       {note && <Callout tone="success">{note}</Callout>}
 
-      {rows !== null && list.length > 0 && (
+      {rows !== null && list.length > 0 && !healthLoaded && (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {["Room sign-in", "Guests in house", "Waiting to be applied", "Guest list refresh"].map((label) => (
+            <StatCard key={label} label={label} value={<Skeleton className="h-6 w-24" />}
+              hint="Checking the connection\u2026" />
+          ))}
+        </div>
+      )}
+
+      {rows !== null && list.length > 0 && healthLoaded && (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
             label="Room sign-in"
