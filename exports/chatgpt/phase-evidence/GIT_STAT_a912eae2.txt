@@ -1,0 +1,4 @@
+commit a912eae2831cc8f7e9f6b99a3c28c8608991151e
+Date:   Mon Sep 21 11:11:00 2026 +0300
+
+    Governance: T0167 records the navigation regression, its root cause and its protection
