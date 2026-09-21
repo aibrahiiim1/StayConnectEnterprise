@@ -55,6 +55,11 @@ export function portalHTML(): string {
   const html = tmpl[1]
     .replace(/\{\{if \.ClientIP\}\}\{\{\.ClientIP\}\}\{\{else\}\}([^{]*)\{\{end\}\}/g, "$1")
     .replace(/\{\{if \.ClientMAC\}\}\{\{\.ClientMAC\}\}\{\{else\}\}([^{]*)\{\{end\}\}/g, "$1")
+    // The refusal banner, which landing() fills only when it has something to tell the guest. These specs
+    // exercise the page a guest meets on ARRIVAL, so the block is dropped exactly as html/template drops it
+    // when .Error is empty — rendering an empty banner here would put markup on the page that a real first
+    // visit never carries. The Go tests cover the branch where there IS a message.
+    .replace(/\{\{if \.Error\}\}[\s\S]*?\{\{end\}\}/g, "")
     .replace(/\{\{\.Languages\}\}/g, JSON.stringify(shipped.languages))
     .replace(/\{\{\.Strings\}\}/g, JSON.stringify(shipped.strings));
   if (html.includes("{{")) {
