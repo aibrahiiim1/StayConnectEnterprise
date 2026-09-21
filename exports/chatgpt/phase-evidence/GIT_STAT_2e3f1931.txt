@@ -1,4 +1,0 @@
-commit 2e3f19314cfe175cc67f8b59e3e0ab6b8aff9ba3
-Date:   Mon Sep 21 21:13:29 2026 +0300
-
-    Governance: T0171 corrects what T0170 claimed about the guest-facing message

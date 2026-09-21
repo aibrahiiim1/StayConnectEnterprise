@@ -1,0 +1,4 @@
+commit e0e9c0ec42d7b719c78995cb8b7a2af05de46f01
+Date:   Mon Sep 21 21:47:02 2026 +0300
+
+    Governance: T0171 corrects a second claim, found while checking the first
