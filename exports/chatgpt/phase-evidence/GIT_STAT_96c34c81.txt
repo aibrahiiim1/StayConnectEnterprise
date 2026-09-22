@@ -1,4 +1,0 @@
-commit 96c34c81a3e45f366e631632894944669e8f971a
-Date:   Tue Sep 22 17:29:22 2026 +0300
-
-    Governance: T0176 records the merge of PR #173
