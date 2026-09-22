@@ -119,6 +119,10 @@ BINARY_PY
   # directory no runner reads, through four green gates, and a rebuild from the repository would have come
   # up three privilege grants short of the appliance.
   python tools/validate-migration-location.py       || rc=1
+  # The standing records -- the retired host, the onboarding milestones, Central's licensing-only scope and
+  # any stated master head -- checked over the WHOLE tree, including the shell scripts no other validator
+  # reads. Two of those scripts defaulted to the retired appliance and one of them reboots it.
+  python tools/validate-standing-records.py         || rc=1
 
   # The governance gate's LAST step fails if anything is left in the tree, including untracked build output.
   # Discovering that after everything else has passed is the most annoying possible way to fail.

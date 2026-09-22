@@ -184,12 +184,26 @@ systemctl start stayconnect-ctrlapi
 ```
 
 Post-restore checks: `readyz`; `GET /cloud/v1/licenses/` lists envelopes; an
-appliance license fetch succeeds; telemetry ingest resumes — appliances will
-re-drain anything unacked and `fleet_telemetry_dedupe` (restored with the
-dump) drops what already landed. If the dedupe table was restored *older*
-than `fleet_telemetry`, some duplicates may land; dedupe rows can be rebuilt:
-`INSERT INTO fleet_telemetry_dedupe SELECT appliance_id, seq, now() FROM
-fleet_telemetry ON CONFLICT DO NOTHING`.
+appliance license fetch succeeds. That is the whole list — Central serves the
+appliance for **licensing only**.
+
+> **HISTORICAL — do not perform.** This step used to continue: "telemetry
+> ingest resumes — appliances will re-drain anything unacked and
+> `fleet_telemetry_dedupe` (restored with the dump) drops what already landed",
+> and it offered a rebuild statement `INSERT INTO fleet_telemetry_dedupe SELECT
+> appliance_id, seq, now() FROM fleet_telemetry ON CONFLICT DO NOTHING`.
+>
+> Both tables are **gone**. Migration `0045_central_is_licensing_only_remove_telemetry`
+> dropped them, `control-plane/internal/fleet` was deleted, the telemetry
+> endpoints answer 404 and there are no NATS containers on Central. The
+> statement would fail on a table that does not exist, and an operator following
+> it after a restore would reasonably conclude the restore was incomplete.
+>
+> The telemetry link was built, verified and **switched off by decision** —
+> 87 000 records were delivered and both sides reconciled first. A static
+> outbox, a closed transport and a missing fleet view are that decision, not a
+> fault, and reconnecting telemetry is **not** a repair for anything. See
+> `current_state_facts.central_scope` in `governance/project-state.json`.
 
 **Key property of the architecture: a cloud restore never interrupts hotels.**
 Appliances keep serving guests on their persisted licenses throughout

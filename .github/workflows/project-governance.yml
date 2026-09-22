@@ -134,6 +134,28 @@ jobs:
         if: steps.reuse.outputs.hit != 'true'
         run: python tools/validate-migration-location.py
 
+      # STANDING RECORDS MUST BE TRUE EVERYWHERE, INCLUDING IN THE FILES NOBODY VALIDATES.
+      #
+      # validate-current-state-parity.py reaches five markdown/json files in DOC_SURFACES and seven in
+      # STATIC_SURFACES, and reads markdown and JSON only. A sweep against the standing records found 44
+      # current-state contradictions outside that reach, and the two most dangerous were SHELL SCRIPTS,
+      # which no validator read at all: two harnesses defaulted PHASE7_APPLIANCE to the RETIRED
+      # 172.21.60.23, and one of them issues a real reboot. The largest cluster — surfaces describing the
+      # Central telemetry that migration 0045 dropped, including a runbook telling an on-call engineer to
+      # "restore quorum" — survived because the removal delivery touched no architecture document.
+      #
+      # This validator is the opposite shape: four rules, whole tree, every text file, each keyed to a fact
+      # in governance/project-state.json so the rule and the truth cannot drift apart.
+      - name: Standing records — retired hosts, onboarding milestones, Central scope, stated master head
+        if: steps.reuse.outputs.hit != 'true'
+        run: python tools/validate-standing-records.py
+
+      # Does it refuse the mistakes it exists to catch? Each case plants a defect that actually shipped,
+      # runs the real validator, and requires a refusal naming the expected rule.
+      - name: Standing records — negative tests
+        if: steps.reuse.outputs.hit != 'true'
+        run: python tools/tests/standing_records_negative.py
+
       # Does the enforcement above actually refuse the mistakes it exists to catch? A policy validator that
       # passes on a correct repository is indistinguishable from one that returns zero. This drives the real
       # validator against fixtures carrying each specific defect.

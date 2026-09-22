@@ -1,53 +1,76 @@
 # Continuation checkpoint
 
-Master is at merge commit `0582eb78` (PR #120), all four required gates ALL_GREEN before merge.
-Appliance `172.21.60.25` and Central `150.0.0.252` both run artefacts rebuilt from that exact commit.
+> **This file is a CHECKPOINT, not a state store.** The authoritative current state is
+> `governance/project-state.json`, and it is the only place current operational state is defined. This file
+> exists to hand a session to the next one: what was just done, what is known to be open, and the
+> environment facts that cost time to rediscover. If the two ever disagree, the register wins.
+>
+> It went stale once, badly: it announced PR #120 as the master head for nine days and 52 merges, and
+> carried an "OPEN DEFECT" that four later PRs had closed. Nothing read it, because it was in no validator's
+> surface list. It now is — `tools/validate-standing-records.py` checks any stated master head here against
+> `current_state_facts.master_head_at_delivery_base` and live master.
 
-## Verified complete
+## Where the tree is
 
-* PMS departure fix: live-proven. Generation 248 admitted 424 roster records and ZERO snapshot departures,
-  against 143 (gen 246) and 149 (gen 247). Backlog frozen, no longer growing.
-* Snapshot-closure audit: 547 events -> 328 stays; 311 correct, 10 self-healed, 7 stale IN_HOUSE, ZERO in a
-  proven-incorrect state. The 13 checked-out-but-rostered stays were live departures AFTER the roster
-  boundary and are correct. No guest lost or regained access.
-* Central non-licensing removal: code, APIs, UI, jobs and dependency gone; 251 166 telemetry rows dropped;
-  nats-authz inactive AND disabled; 0 NATS containers; 0 telemetry tables. Removed endpoints answer 404,
-  licensing endpoints answer 401 (present and enforcing).
-* Provenance reconciled: all three deployed binaries now hash-match a rebuild from `0582eb78`.
+Delivery base: master `44077fb8` — the merge of PR #172, D41/T0174, which deferred all real Guest
+activation until StayConnect is functionally complete. Current work is the functional-completeness closure
+that deferral asks for.
 
-## OPEN DEFECT, found by live verification after merge
+## PRE-LIVE 172.21.60.25, as read on 2026-09-22
 
-**The completeness test no longer has its evidence.** Reconciliation proves a roster is complete by counting
-the DISTINCT rooms a generation names -- occupied rooms arrive as GI/GC, vacant rooms as GO. The ingestion
-fix discards vacant-room GO records, which are exactly the ones that made the sweep countable:
+The only appliance. Onboarded, enrolled, claimed, licensed, under a pinned signed assignment. `172.21.60.23`
+is RETIRED and must not be contacted.
 
-    gen 247 (before fix)   439 roster + 149 snapshot GO = 587 rooms
-    gen 248 (after fix)    424 roster +   0 snapshot GO = 423 rooms
-    gen 249 (after fix)    413 roster +   0 snapshot GO = 412 rooms
+* Schema head `0083`. All eight StayConnect units active; `kea-dhcp4-server` enabled; containers
+  `stayconnect-pg` (timescaledb 2.16.1-pg16), `-redis`, `-nats`.
+* **The database superuser role is `stayconnect`, not `postgres`.** `su - postgres` and `psql -U postgres`
+  both fail on this appliance; every query goes through
+  `docker exec stayconnect-pg psql -U stayconnect -d stayconnect_site`.
+* Networking: `ens160` WAN/management `172.21.60.25/24`; `ens192` is a member of `br-g-00d1fa1a`
+  (`192.168.77.1/24`), so the single guest network is **untagged**. There is no `ens192.<vid>` and **no
+  `br-lan`** — an assertion about a legacy bridge will fail here, and that is the appliance, not the test.
+* Counters (live read, recorded in `current_state_facts.live_counters`): 28 purchases, 28 entitlements,
+  4 active, 17 sessions, 0 live, 14 310 accounting records, 8 vouchers (all REVOKED).
+* **Financial traffic is ZERO** on all five counters and has never been anything else.
+* Deployed runtime is MIXED, per service, and is recorded that way: `scd` 759286af,
+  `edged`/`portald`/`netd` a4124ce5, `pmsd`/`acctd` 305587b6, `keybootstrap` d4e1dc76,
+  `sitemigrate`/`svc-run` 29a6b21f. All five are ancestors of master. A service this delivery does not
+  change is not rebuilt merely to make the record uniform.
 
-So `pms_roster_reconcile` now refuses with REFUSED_ROSTER_INCOMPLETE (423 of 587) and will keep refusing.
-That is FAIL-SAFE -- it closes nothing and no guest is affected -- but the feature cannot be enabled.
+## Verified complete in the closure so far
 
-**The fix is to record the evidence rather than infer it from admitted rows.** pmsd already counts the
-records it skips (`RecordSkipped`). It should persist, per resync generation, the count of DISTINCT ROOMS the
-sweep named including the skipped vacant ones, and `pms_roster_reconcile` should read that instead of
-counting `stay_events`. Needs: a column or small table for per-generation room coverage, the pmsd counter,
-a migration, tests, gates, merge, redeploy.
+* **Three migrations the runner could not see.** 0081–0083 were in a root `migrations/` directory; every
+  tool reads `data-plane/migrations`. A rebuild from the repository would have stopped at 0080 and called
+  itself complete, three least-privilege grants short of the appliance.
+  `tools/validate-migration-location.py` now refuses it, proven bidirectionally.
+* **A voucher could not be redeemed once.** The single-use burn was a direct `UPDATE iam_v2.vouchers` by
+  `svc_scd`, which holds no UPDATE on that table, in the same transaction as the grant — so the grant rolled
+  back. Migration 0084 moves the burn into the SECURITY DEFINER grant kernel; `svc_scd` gains no privilege.
+* **Voucher code format is a setting** (0085): digits-only or mixed, 6–8 characters, audited, with the
+  issuance path wired to `internal/codegen` instead of its own hardcoded alphabet.
+* **Guest-network update** refused topology changes silently and overwrote `dns_servers` with JSON `null`
+  on any PUT that omitted it. Both fixed.
+* **Operator rollback of a confirmed revision** took the whole guest network down and reported success. It
+  now refuses with 409.
+* Four harnesses that defaulted to or asserted the retired appliance, one of which reboots it.
 
-Do NOT work around it by re-admitting snapshot GO records; that reopens the 14 000-case defect.
+## Open, and known
 
-## Also outstanding
-
-* The 13 717 historical MANUAL_REVIEW cases are frozen and harmless but not yet dispositioned. The
-  `pms_dispose_snapshot_cases` function and its UI button are deployed and will answer them; running it is
-  safe independently of the completeness defect above, as it closes no stay and deletes nothing.
-* Stage 6 of preflight OOMs on this workstation under default parallelism (system commit charge, not a
-  product fault). tsc, vitest 280/280 and next build each pass when run individually.
+* The functional-completeness gap inventory is wider than what is closed above — guest networking
+  multi-VLAN proof on the current architecture, the voucher admin surface (issuance has no caller at all),
+  reveal/export, and the live recovery drills. See the delivery's own report for the current list.
+* One Product-Owner decision remains open and is unchanged: whether master protection should additionally
+  require an approving review. It needs a second reviewing account, because GitHub will not let a PR author
+  approve their own PR.
 
 ## Build environment
 
-Designated workstation, Docker 29.5.2, data disk on C: (F: is NOT achievable -- Docker Desktop 4.76 on the
+Designated workstation, Docker 29.5.2, data disk on C: (F: is NOT achievable — Docker Desktop 4.76 on the
 WSL2 backend ignores `DataFolder` and reverts a supported WSL distro move). Go builds need `-p 2` /
 `GOMAXPROCS=2`; Node needs `--no-file-parallelism`. Do NOT set `MSYS_NO_PATHCONV=1` for
-`clean-install-reconstruction.sh` or `generate-production-baseline.sh` -- they manage path conversion
+`clean-install-reconstruction.sh` or `generate-production-baseline.sh` — they manage path conversion
 themselves and the override breaks them.
+
+`iam_v2_scratch/run.sh` refuses `stayconnect_site`, `stayconnect` and `stayconnect_site_b` as scratch
+database names — a live-database guard. Use a name like `iam_scratch`. The `timescale/timescaledb` image
+initialises, shuts down and restarts, so wait on `pg_isready` rather than on a first successful query.
