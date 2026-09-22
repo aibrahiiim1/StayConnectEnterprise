@@ -1,0 +1,98 @@
+{
+  "transition_id": "T0175",
+  "seq": 175,
+  "timestamp": "2026-09-22T11:50:00Z",
+  "timestamp_derivation": "After the live read of PRE-LIVE 172.21.60.25 at 11:26:28Z that this delivery records, and after the seven content commits were written, built and tested. Before the commit that carries this receipt.",
+  "record_type": "FUNCTIONAL_COMPLETENESS_CLOSURE_INCREMENT_1",
+  "what_this_is": "The first increment of the functional-completeness closure D41 asks for. D41 deferred all real Guest activation until StayConnect is functionally complete and no known development gap required for Guest operation remains, and explicitly did NOT define what completeness consists of. This increment builds the gap inventory from current master and live PRE-LIVE evidence, and closes the defects in it that either break recovery, break a guest-facing capability outright, or make the repository state false. It is NOT a claim of functional completeness.",
+  "authorization": "Product-Owner mission of 2026-09-22 authorising the functional-completeness closure end to end, including controlled PRE-LIVE work, commits, push, PRs, merge through the protected master path, and governance synchronisation.",
+  "defects_found_and_closed": {
+    "migrations_invisible_to_every_runner": {
+      "severity": "HIGH -- broke recovery",
+      "what": "Migrations 0081, 0082 and 0083 were committed to a `migrations/` directory at the repository ROOT. scripts/edge-migrate.sh, scripts/clean-install-reconstruction.sh, scripts/generate-production-baseline.sh and tools/check-fixture-parity.py all read data-plane/migrations, and edge-migrate.sh refuses a --dir override unless the target is disposable. A grep of tools/, scripts/ and .github/ for the root path returned ZERO references.",
+      "consequence": "All three are least-privilege GRANTs -- svc_edged's read of public.audit_log, of iam_v2.accounting_records and devices, and the five auth_contexts columns behind guest attribution. They had been applied to PRE-LIVE by hand, so the appliance is at schema 0083 while a factory-clean rebuild FROM THE REPOSITORY stops at 0080 and asserts ledger completeness over the same directory it applied -- reporting success. The Audit log screen, the Usage Explorer and Guest Activity would each have silently broken again.",
+      "fix": "Relocated with git mv. Content-neutral: public.schema_migrations records only (version, applied_at), no checksum and no path, and version is the filename stem. tools/validate-migration-location.py added, proven bidirectionally (fails on a planted stray and on a removed 0060), wired into preflight stage 1 and the governance gate, classified tree-pure.",
+      "survived": "Four green gates."
+    },
+    "voucher_could_not_be_redeemed_once": {
+      "severity": "CRITICAL -- guest-facing capability structurally impossible",
+      "what": "Single-use redemption was a direct `UPDATE iam_v2.vouchers SET state='REDEEMED'` in the commerce transaction, run as svc_scd. Read live off PRE-LIVE: has_table_privilege('svc_scd','iam_v2.vouchers','UPDATE') = FALSE, with SELECT and INSERT true. deploy/gatep/svc-scd-iamv2-guest-auth-grants.sql declines that privilege on purpose.",
+      "consequence": "The statement raises permission denied and, sharing the grant's transaction, takes the grant down with it. NOT a voucher that redeems twice -- a voucher that cannot redeem ONCE: authentication succeeds, the quote is confirmed, and the entitlement disappears on commit. Nothing had met it because the Phase-2 commerce surface is dark and nothing reaches the grant.",
+      "why_the_record_said_otherwise": "The single-use evidence was measured on the DEVELOPMENT appliance, whose live privileges exceeded what the repository grants. PRE-LIVE, built from the repository, does not have them.",
+      "fix": "Migration 0084 moves the burn INTO iam_v2.p4_entitlement_grant_kernel, which is SECURITY DEFINER, owned by iam_v2_owner which does hold UPDATE, is the one kernel both the free and paid grant paths funnel through (so the paid path is now covered, which the Go statement never was), and already holds the per-subject advisory lock. svc_scd gains NO privilege -- the fix removes the need for one -- and the migration asserts that svc_scd still cannot UPDATE the table. The burn refuses rather than skipping: it requires exactly one row and raises VOUCHER_NOT_REDEEMABLE otherwise.",
+      "verified": "Applied to a disposable timescaledb/pg16 with the full chain: burn present inside the SECURITY DEFINER kernel, down migration reverses it, re-apply restores it."
+    },
+    "voucher_code_format_was_a_constant": {
+      "severity": "Product-Owner requirement",
+      "what": "The Product Owner requires a voucher to be issuable as DIGITS ONLY or as digits MIXED with letters, neither longer than EIGHT characters. Issuance carried one hardcoded alphabet and a per-request length bounded 6..24, while internal/codegen already implemented exactly the configurable generator needed and had been left generating post-stay PINs after 0049 dropped the columns that used to configure it.",
+      "fix": "Migration 0085 adds iam_v2.site_voucher_code_settings, following the 0068 site_guest_signin_protection precedent exactly: CHECK-bounded row per site, versioned config_version, append-only change table with the actor the server resolved, SECURITY DEFINER _get/_set so neither service role writes the tables. Issuance reads the setting and calls codegen.GenerateN for the whole batch, which brings in-batch uniqueness and the code-space guard. `length` on the request is now REFUSED rather than ignored.",
+      "bounds": "6..8. The ceiling is the requirement. The floor is the floor the shipped code already enforced, carried forward rather than invented -- digits-only with ambiguous characters excluded leaves seven symbols, so six characters is 117 649 codes and four would be 2 401. Checked in three places: the table CHECK, the setter, and again at the point of USE, which is the only one a hand-edited row cannot bypass.",
+      "verified": "On a disposable database: defaults for a site with no row (mixed/8/version 0), all six out-of-bound combinations refused, four accepted values incrementing config_version 1..4 with four matching audit rows, append-only enforced against UPDATE and DELETE, empty operator label refused, down and re-apply clean."
+    },
+    "guest_network_update_lied_twice": {
+      "severity": "MEDIUM",
+      "what": "updateGuestNetwork accepted network_type, parent_interface and vlan_id and named none of them in its UPDATE, answering 200 {\"status\":\"updated\"} to a change it dropped. Separately, dns_servers was bound as string(json.Marshal(nil)) -- the four bytes `null`, which is JSON null and not SQL NULL -- so COALESCE did not fall through and every PUT that omitted the field overwrote the stored resolver list.",
+      "fix": "A topology CHANGE is refused with 409 immutable_topology naming the supported sequence; an unchanged echo is accepted, compared against what is stored rather than against presence in the body. dns_servers is SQL NULL when absent and `[]` when deliberately cleared.",
+      "answers": "The closure question of whether untagged-to-tagged conversion needs a product change: delete and recreate IS the intentional lifecycle, and the API now says so instead of only the code comment and the UI prose."
+    },
+    "rollback_of_the_configuration_in_force_destroyed_it": {
+      "severity": "HIGH -- operational hazard",
+      "what": "applier.Rollback called the internal a.rollback straight through. That function finds its target with `WHERE state='active' AND id<>$1`, which is correct while a revision is pending confirmation but returns nothing once one is CONFIRMED -- there is then exactly one active row and it is the revision itself. With no target, a.rollback takes its factory-clean branch: every guest bridge destroyed, netplan and the unbound fragment deleted, Kea restored to stopped and disabled.",
+      "consequence": "An operator pressing Rollback on the configuration currently in force took the entire guest network offline, and the endpoint answered {\"state\":\"rolled_back\"}.",
+      "fix": "Rollback reads the revision state first and proceeds only for applying / pending_confirmation. A confirmed active revision is refused with 409 and a message naming what to do instead; anything not in force, and any unknown revision, is refused; an unreadable state fails closed. Refusals wrap errRollbackRefused so a deliberate refusal is not reported as an internal error. The automatic rollback -- failed apply, failed health check, watchdog -- is untouched and always runs against a mid-flight revision. The tests assert the refusal AND that it issues no kernel mutation.",
+      "authority": "apply_ops.go already states the rule twenty lines above the branch: 'A rollback that cannot be done safely must stay unfinished and say so.'"
+    },
+    "four_harnesses_aimed_at_the_retired_appliance": {
+      "severity": "HIGH -- one of them reboots it",
+      "what": "deploy/scripts/phase7-appliance-m4.sh, deploy/scripts/phase7-final-reboot.sh and iam_v2_scratch/phase7_ledger_material_effect.sh defaulted PHASE7_APPLIANCE to 172.21.60.23, which is RETIRED and must not be contacted; the second issues a real reboot. scripts/phase19-network-test.sh went further and ASSERTED that address as the management IP, plus br-lan at 10.10.0.1/24 and three hardcoded owner uuids.",
+      "consequence_of_the_fourth": "phase19-network-test.sh is the only end-to-end proof of a real tagged guest VLAN, and it could only ever run on the retired machine. On PRE-LIVE it would report MANAGEMENT LOST while management was intact, and 'legacy network disturbed' about a bridge that does not exist there.",
+      "fix": "The three defaults are removed -- the target is named or the script refuses, and the retired address is refused even when named, the correction deploy/scripts/hotel-admin-mint-cert.sh already made. phase19-network-test.sh now derives the owner from the appliance's own guest_networks rows and refuses rather than inventing one, and RECORDS the management and legacy addresses before the deliberately-bad apply and compares them afterwards, which is portable and a stronger assertion than matching a literal.",
+      "historical_evidence": "Not rewritten. What 172.21.60.23 proved stands exactly as recorded; these are the harnesses, not the records."
+    },
+    "the_records_contradicted_themselves": {
+      "severity": "Governance",
+      "count": "44 current-state contradictions found by sweep; the load-bearing ones closed here.",
+      "in_the_authoritative_file": [
+        "Three fields said the appliance was awaiting onboarding, enrollment, claim and signed assignment -- milestones D37/T0087 reconciled as done a month earlier -- beside appliance_enrolled/claimed/assigned/licensed all recorded true in the same file. The booleans existed and no rule read them.",
+        "production_appliance.runtime_provenance asserted SINGLE-COMMIT for every service binary while deployed_head_on_appliance said MIXED. A live read settles it: five commits, all ancestors of master.",
+        "Three notes read as current and contradicted live_counters in the same block: one said NO ROOM LOGIN HAS SUCCEEDED END TO END beside guest_signin_end_to_end_proven=true, one gave accounting_records as 1037 against 1808, one closed with 'The retry is NOT performed and requires deployment first' about a retry performed weeks earlier.",
+        "A post-closure record called a merge commit 'the current master head', 64 merges ago."
+      ],
+      "live_read_taken": "live_counters said its successor totals were DELIBERATELY NOT STATED because proving them needed an appliance read that closure was not authorised to perform. This mission is authorised, so the read was taken read-only at 2026-09-22T11:26:28Z and recorded; the old snapshot is preserved as live_counters_historical_20260906.",
+      "two_runbooks_told_an_operator_to_restore_a_removed_system": "docs/BACKUP_AND_RESTORE.md listed 'telemetry ingest resumes' as a post-restore check and offered an INSERT into a table migration 0045 dropped -- so an operator following it after a real restore would reasonably conclude the restore had failed. docs/DEPLOYMENT_CLOUD.md listed 'NATS cluster degraded -> restore quorum' as a failure mode. Both corrected and labelled historical.",
+      "the_renderer_published_a_retired_host_as_current": "project-state.json has carried status RETIRED for the development appliance since 2026-09-12; the generated block ignored the field and rendered it present tense into four documents and six pack copies. One unread field, ten stale surfaces. The renderer now reads the status.",
+      "a_validator_rule_was_rewarding_the_false_statement": "The provenance coherence check guarded on len(head) >= 8, and deployed_head_on_appliance legitimately holds the sentence 'MIXED -- there is no single deployed head'. Longer than eight characters, so the rule treated it as a recorded head and demanded the summary NOT say mixed -- requiring a single-commit claim precisely when there was not one. It passed for months on the false wording and failed the moment it was corrected. It now applies only to an actual sha, and is still proven to fail on the real defect."
+    }
+  },
+  "new_facts_recorded": {
+    "master_head_at_delivery_base": "Nothing recorded a master head at all, so every 'master is at <sha>' sentence was unenforceable by construction -- the parity validator reads such a field, found nothing, and dropped master from its acceptable-head set. CONTINUATION.md then announced PR #120 as the head for nine days and 52 merges through four green gates. Recorded as the BASE rather than 'current master', because a tracked file cannot hold the sha of the commit that contains it.",
+    "retired_hosts": "The ban on 172.21.60.23 existed only in prose, so there was nothing to diff against -- and three harnesses still defaulted to it.",
+    "central_scope": "LICENSING_ONLY. The decision lived only in prose, and the removal delivery updated no architecture document."
+  },
+  "what_stops_it_coming_back": {
+    "tool": "tools/validate-standing-records.py",
+    "shape": "Four rules, WHOLE tree, every text file, each keyed to a fact in governance/project-state.json so the rule and the truth cannot drift apart. Deliberately the opposite shape to validate-current-state-parity.py, which reaches five markdown/json files and reads markdown and JSON only -- the two most dangerous findings were shell scripts, which no validator read.",
+    "scoping_was_earned": "The onboarding rule over the whole tree flagged slog.Warn(\"awaiting assignment: edged running without a tenant/site (generic appliance)\"), which is correct product code for an appliance that genuinely has none. That rule is therefore scoped to the authoritative store, while the retired-host rule stays whole-tree because its target is a machine-readable shell default.",
+    "proven": "tools/tests/standing_records_negative.py plants each defect that actually shipped, requires the matching refusal, and requires the tree to come back clean. All four pass.",
+    "wired": "preflight stage 1 and the governance gate, classified tree-pure in governance/ci-reuse-policy.json."
+  },
+  "what_this_does_not_claim": "NOT functional completeness. The gap inventory is wider than what is closed here: multi-VLAN tagged guest networking is not yet proven on the current architecture, the voucher admin surface does not exist at all (issuance has no caller -- no admin route, no UI, no CLI), voucher reveal/export remains unimplemented, and the live recovery, rollback, reboot and Central-outage drills have not been run. Those are named in the delivery report rather than implied to be done.",
+  "what_this_does_not_authorize": "No change to PRE-LIVE. Nothing here is deployed, no service is restarted, no migration is applied to any appliance, and the only appliance access performed was read-only. It enables no commerce surface, changes no guest sign-in behaviour, and authorises no PMS, financial, networking, schema, security-boundary or Go-Live action. It does not contact 172.21.60.23. D41 remains in force: real Guest activation and Guest pilot use stay DEFERRED.",
+  "financial_traffic": "ZERO, re-verified live on all five counters at 2026-09-22T11:26:28Z: pms_postings 0, posting_attempts 0, posting_outbox 0, payment_transactions 0, settlements 0. No financial traffic was generated by this delivery; the appliance access was SELECT count(*) and a read of netd's shaping epochs.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Neither the phase nor the activity moves. This delivery closes defects in the existing state; it does not open a phase, and no Phase 8 exists. The appliance is where it was -- onboarded and PRE-LIVE -- because nothing here was deployed to it."
+  },
+  "base": "44077fb88e25574476f54e213802c020d95225f5",
+  "head": "773b0da6c836e39c4813c252629054444c6f2c59",
+  "go_live": "NOT PERFORMED and NOT AUTHORIZED. Unchanged by this delivery."
+}
