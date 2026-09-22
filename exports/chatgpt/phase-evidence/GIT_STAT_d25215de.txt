@@ -1,4 +1,0 @@
-commit d25215de177da9b3e57084b4b235d6045d51900e
-Date:   Wed Sep 23 01:42:14 2026 +0300
-
-    Governance: T0177 records the review round and the three defects it caught
