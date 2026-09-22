@@ -1,0 +1,67 @@
+{
+  "transition_id": "T0176",
+  "seq": 176,
+  "timestamp": "2026-09-22T14:27:06Z",
+  "timestamp_derivation": "The moment GitHub recorded the merge of PR #173 (merged_at, read back from the API). A merge receipt may not pre-date the merge it records, and this is that merge exactly.",
+  "record_type": "MERGE_OF_FUNCTIONAL_COMPLETENESS_CLOSURE_INCREMENT_1",
+  "what_was_merged": {
+    "pr": 173,
+    "branch": "delivery/functional-completeness",
+    "base": "44077fb88e25574476f54e213802c020d95225f5",
+    "pr_head": "57b34f86ca8b2232179b0d8099eb0c1d1b42b157",
+    "merge_commit": "f04995dfd40a7f5bf3ff39dda4b36d47a351c73a",
+    "merge_method": "MERGE COMMIT, two parents, no squash and no rebase",
+    "delivery_receipt": "T0175",
+    "content_commits": 12,
+    "changed_files": 69,
+    "total_commits": 30,
+    "commit_split_note": "30 commits in 44077fb8..57b34f86: 12 content commits and 18 delivery/governance bookkeeping commits (head moves, pack rebuilds and the manifest, which must be regenerated after each of them because it lists itself). COUNTED FROM GIT, not from memory -- see the correction below.",
+    "changed_files_note": "69, and the authority for it is docs/manifests/PostClosure-change-manifest.md, which derives the set from git rather than restating it. A receipt should point at the generated artifact instead of duplicating a number by hand.",
+    "a_correction_before_this_receipt_landed": "This receipt first said 70 changed files and 14 content commits. Both were typed from memory and both were wrong: git gives 69 and 12, and the delivery's own manifest already said 69. An automated reviewer caught it on PR #174 before the receipt reached master, so it is corrected in place rather than by a later correcting receipt -- it had not yet become part of the permanent record. Recorded here because a receipt whose numbers disagree with git is worse than no receipt: it is the artifact everything else is checked against."
+  },
+  "merge_introduced_no_content": "PROVEN BY TREE IDENTITY, not asserted. The master tree at f04995df and the PR head tree at 57b34f86 are the same object, 1b78ba79317d5553cd6de005307666fc637b1f81. A merge introduces a commit, not content.",
+  "gates": {
+    "all_green_on": "57b34f86ca8b2232179b0d8099eb0c1d1b42b157 -- the exact head that was merged",
+    "governance": "success",
+    "phase3-full-software-gate": "success",
+    "phase4-financial-core-gate": "success",
+    "phase5-post-stay-transfer-gate": "success",
+    "mergeable_state_before_merge": "clean"
+  },
+  "five_gate_rounds_and_three_were_my_own_errors": {
+    "_note": "Recorded rather than smoothed over, because the pattern is worth reading: THREE SEPARATE CHECKS HAD ENCODED A FALSE BELIEF ABOUT THE SYSTEM AS AN INVARIANT, and each failed the moment the truth was written. That is the opposite of a flake and it is the most useful thing this delivery learned.",
+    "round_1": "governance failed on a mutation-matrix FIXTURE that pinned the sentence 'SINGLE-COMMIT for every service binary' -- a claim that had been false throughout, since the appliance has run binaries from five commits. The rule behind it guarded on len(head) >= 8 and read the sentence 'MIXED -- there is no single deployed head' as if it were a recorded sha, so it demanded a single-commit claim precisely when there was not one. phase3 failed on FACTORY_CLEAN_BASELINE, 52 facts, which led to the grant-durability finding.",
+    "round_2": "governance failed on a counter-staleness rule that decided 'is this block superseded' by testing whether the substring 'supersed' appeared anywhere in its note. The new CURRENT block legitimately describes its predecessor, so the rule read the description as a confession. Narrowed to statements about the block itself, and widened in two directions it could not cover before.",
+    "round_3": "phase3, phase4 and phase5 all failed at once on `gofmt needs to be run on: cmd/netd/rollback_target_test.go`. MY ERROR, and the tool was already there: tools/preflight.sh stage 5 runs the same gofmt-check.sh the gates run and takes 65 seconds. Targeted `go test -run ...` was run instead, which cannot see formatting. This is exactly the rework docs/FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md measured and exists to prevent.",
+    "round_4": "ALL_GREEN, merge blocked by two unresolved review threads.",
+    "round_5": "ALL_GREEN and clean; merged."
+  },
+  "automated_review": {
+    "findings": 2,
+    "both_correct": true,
+    "p1": "A confirmation landing between the caller's state read and a.rollback's target lookup would have taken the factory-clean branch and destroyed every guest bridge. WIDER THAN THE NEW CODE: watchdogLoop has the identical race and always did, so the fix went to the decision point inside a.rollback rather than to the new guard. An ACTIVE revision has by definition been confirmed, and the factory-clean path is for a first apply that never was.",
+    "p2": "validate-migration-location.py's scan overwrote a filename when two migrations shared a number and a direction, so the uniqueness check it feeds saw one stem and passed. Now a list.",
+    "handling": "Both fixed, both threads replied to with what changed, both resolved. Neither was resolved without a fix."
+  },
+  "what_the_merge_changes_operationally": "NOTHING. No binary was built for an appliance, no service restarted, no migration applied anywhere live. Migrations 0084 and 0085 are committed and verified on a disposable database only; PRE-LIVE remains at schema head 0083 with all services active, confirmed after the merge. The only appliance access this delivery made was read-only.",
+  "financial_traffic": "ZERO, unchanged. Re-verified live on all five counters during the delivery: pms_postings 0, posting_attempts 0, posting_outbox 0, payment_transactions 0, settlements 0.",
+  "d41_and_go_live": "D41 REMAINS IN FORCE: real Guest activation and Guest pilot use stay DEFERRED. Go-Live is NOT performed and NOT authorized. Neither is touched by this merge.",
+  "what_this_merge_does_not_claim": "Functional completeness. T0175 states the remaining inventory and this merge does not shorten it: the voucher admin surface does not exist at all, reveal/export is unimplemented, forty Gate-P grant gaps remain enumerated, there is no guarded down-migration runner and no nightly-backup scheduler, payment.ReconcileEpoch has no production caller, multi-VLAN tagged guest networking is unproven on the current architecture, and the backup/restore, schema-rollback, reboot and Central-outage drills have not been run. Three items are genuine Product-Owner decisions rather than gaps: HA architecture (ARCH-04), payment-provider identity and commercial semantics, and the C35 external archival receipt authority.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "A merge of a correction lineage opens no phase and moves no appliance. The activity is where it was because nothing was deployed."
+  },
+  "authorization": "Product-Owner mission of 2026-09-22, which authorised commits, push, PR creation, fixing related CI failures and merge through the protected master path.",
+  "go_live": "NOT PERFORMED and NOT AUTHORIZED.",
+  "base": "44077fb88e25574476f54e213802c020d95225f5",
+  "head": "f04995dfd40a7f5bf3ff39dda4b36d47a351c73a"
+}
