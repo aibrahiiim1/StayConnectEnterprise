@@ -75,6 +75,29 @@ GRANT_RE = re.compile(
     r"(?P<object>[A-Za-z0-9_.\"]+(?:\s*\([^)]*\))?)\s+TO\s+(?P<roles>[A-Za-z0-9_, \"]+)",
     re.I | re.S)
 
+# REVOKE <privs> ON [TABLE|FUNCTION|...] <object> FROM <role>[, <role>]
+#
+# THIS CHECK WAS BLIND TO REVOKES, AND THE BLINDNESS WAS NOT ACADEMIC.
+#
+# It compared the GRANT statements in migrations against the GRANT statements in deploy/gatep/ and reported
+# anything missing from the second as a durability gap. A privilege that a migration grants and a LATER
+# migration deliberately takes away therefore looked exactly like a gap -- so mirroring "every grant a
+# migration makes" into Gate-P re-granted it, on every factory-clean install and every reconcile, and
+# Gate-P runs AFTER the migrations so nothing downstream could undo it.
+#
+# That is how increment 2 restored svc_scd's EXECUTE on iam_v2.p6_guest_release_device(uuid,uuid,int) --
+# the three-argument release primitive whose whole purpose is to be owner-only, because a caller that can
+# pass its own p_max_releases_per_hour can pass 2147483647 and walk through the approved throttle using the
+# approved function. 0033 granted it; 0034 revoked it and ASSERTS in the same file that svc_scd no longer
+# holds it. The assertion runs at migration time, before Gate-P, so it could not catch the reversal either.
+#
+# A check that compares only the statements it already knows about is a check that reports the shape of its
+# own parser. Revokes are now modelled, in file order, as the second half of the same timeline.
+REVOKE_RE = re.compile(
+    r"\bREVOKE\s+(?P<privs>.+?)\s+ON\s+(?P<kind>TABLE\s+|FUNCTION\s+|SCHEMA\s+|SEQUENCE\s+|ALL\s+TABLES\s+IN\s+SCHEMA\s+)?"
+    r"(?P<object>[A-Za-z0-9_.\"]+(?:\s*\([^)]*\))?)\s+FROM\s+(?P<roles>[A-Za-z0-9_, \"]+)",
+    re.I | re.S)
+
 SERVICE_ROLE_RE = re.compile(r"^svc_[a-z0-9_]+$", re.I)
 
 # THE DEBT THIS LIST HELD IS PAID. IT IS EMPTY, AND THE MECHANISM STAYS.
@@ -97,6 +120,11 @@ SERVICE_ROLE_RE = re.compile(r"^svc_[a-z0-9_]+$", re.I)
 PREDATING_THIS_CHECK = set()
 
 _failures = []
+
+# Grant and revoke statements in file order, per (role, kind, object). Filled by collect()/collect_revokes()
+# for MIGRATIONS only -- deploy/gatep/ is a set of grants with no ordering question.
+ORDERED = {}
+ORDERED_REV = {}
 
 
 def bad(msg, where=""):
@@ -147,8 +175,15 @@ def normalise_object(kind, obj):
     return ("TABLE", obj.lower(), cols)
 
 
-def collect(paths):
-    """{(role, kind, object): [(privs, columns, source)]}"""
+def collect(paths, record_order=False):
+    """{(role, kind, object): [(privs, columns, source)]}
+
+    record_order is for MIGRATIONS ONLY. It feeds the grant/revoke timeline, and feeding deploy/gatep/ into
+    that timeline silently cancels every revoke: Gate-P's paths sort after the migrations', so its grants
+    land last in the fold and every withdrawn privilege reads as still held. This check reported PASS with
+    three reversed security boundaries sitting in the tree until that was separated -- the fix for a blind
+    spot creating a new one in the same function.
+    """
     found = {}
     for path in paths:
         try:
@@ -172,7 +207,68 @@ def collect(paths):
                 if not SERVICE_ROLE_RE.match(role):
                     continue
                 found.setdefault((role.lower(), kind, obj), []).append((privs, cols, rel))
+                if record_order:
+                    ORDERED.setdefault((role.lower(), kind, obj), []).append(((rel, m.start()), "+" + privs))
     return found
+
+
+def collect_revokes(paths):
+    """{(role, kind, object): [(privs, source)]} -- every service-role REVOKE, in file order.
+
+    The privileges are kept because a REVOKE is not always total: 0034 revokes SELECT and INSERT on
+    guest_device_actions and leaves nothing, but a migration could revoke one privilege of several.
+    """
+    found = {}
+    for path in paths:
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                text = strip_sql_comments(fh.read())
+        except OSError:
+            continue
+        rel = os.path.relpath(path, ROOT).replace(os.sep, "/")
+        for m in REVOKE_RE.finditer(text):
+            privs = " ".join(m.group("privs").split()).upper()
+            kind, obj, _ = normalise_object(m.group("kind"), m.group("object"))
+            for role in m.group("roles").split(","):
+                role = role.strip().strip('"')
+                if not SERVICE_ROLE_RE.match(role):
+                    continue
+                found.setdefault((role.lower(), kind, obj), []).append((privs, rel))
+                ORDERED_REV.setdefault((role.lower(), kind, obj), []).append(((rel, m.start()), "-" + privs))
+    return found
+
+
+def priv_set(privs):
+    """'SELECT, INSERT' -> {'SELECT','INSERT'}. ALL PRIVILEGES is a wildcard and is kept as one token."""
+    text = privs.upper().replace("PRIVILEGES", "").strip()
+    if text.startswith("ALL"):
+        return {"ALL"}
+    return {p.strip() for p in text.split(",") if p.strip()}
+
+
+def withdrawn_privileges(grants, revokes):
+    """Privileges a migration granted that a LATER migration took away, for one (role, kind, object).
+
+    THE FOLD IS THE POINT, and a coarser check got this wrong in a way worth recording. The first version
+    compared (role, kind, object) membership only, and reported svc_edged's SELECT on
+    iam_v2.appliance_product_settings as a reversal -- 0034 revokes INSERT, UPDATE and DELETE there and
+    leaves SELECT deliberately in place, which the operator screen needs. A check that cannot tell a partial
+    revoke from a total one produces exactly the kind of confident false positive that gets a real finding
+    dismissed along with it.
+    """
+    held = set()
+    for order, privs in sorted(grants + revokes):
+        if privs[0] == "+":
+            held |= priv_set(privs[1:])
+        else:
+            held -= priv_set(privs[1:])
+            if "ALL" in held:
+                held.discard("ALL")
+    ever = set()
+    for _order, privs in grants:
+        if privs[0] == "+":
+            ever |= priv_set(privs[1:])
+    return ever - held
 
 
 def final_schema_objects():
@@ -202,8 +298,9 @@ def sql_files(directory, suffix):
 
 def main():
     print("== migration grant durability (migrations vs deploy/gatep) ==")
-    mig = collect(sql_files(MIGRATIONS, ".up.sql"))
+    mig = collect(sql_files(MIGRATIONS, ".up.sql"), record_order=True)
     gate = collect(sql_files(GATEP, ".sql"))
+    revoked = collect_revokes(sql_files(MIGRATIONS, ".up.sql"))
 
     if not mig:
         bad("no service-role GRANT was found in any migration; the check cannot be meaningful")
@@ -218,13 +315,46 @@ def main():
     elif not final:
         bad("the generated baseline names no objects, which cannot be right; refusing to excuse anything")
 
+    # WITHDRAWN: privileges granted by one migration and revoked by a LATER one, from the same role, on the
+    # same object. Folded in file order, exactly as the chain applies, and PER PRIVILEGE -- a partial revoke
+    # leaves the rest standing and must not be reported as a reversal.
+    withdrawn = {}
+    for key in ORDERED_REV:
+        if key not in ORDERED:
+            continue
+        gone = withdrawn_privileges(ORDERED[key], ORDERED_REV[key])
+        if gone:
+            granted_in = sorted({o[0] for o, _ in ORDERED[key]})[-1]
+            revoked_in = sorted({o[0] for o, _ in ORDERED_REV[key]})[-1]
+            withdrawn[key] = (sorted(gone), granted_in, revoked_in)
+
     checked = 0
     carried = []
     dead = []
+    reversed_in_gatep = []
+    withheld = []
     stale = set(PREDATING_THIS_CHECK)
     for key, entries in sorted(mig.items()):
         role, kind, obj = key
         checked += 1
+        # A WITHDRAWN privilege must NOT be in Gate-P. This is the opposite failure from a durability gap
+        # and strictly the more dangerous of the two: a gap removes a privilege something needs and the
+        # feature visibly breaks, while this silently restores one that was taken away on purpose, on every
+        # install, with nothing downstream to undo it.
+        if key in withdrawn:
+            gone, granted_in, revoked_in = withdrawn[key]
+            gate_privs = set()
+            for privs, _cols, _src in gate.get(key, []):
+                gate_privs |= priv_set(privs)
+            restored = sorted(gate_privs & set(gone))
+            if restored:
+                reversed_in_gatep.append((role, kind.lower(), obj, restored, granted_in, revoked_in))
+            else:
+                withheld.append((role, kind.lower(), obj, ", ".join(gone), revoked_in))
+            # Whatever the migrations LEFT in place still has to survive Gate-P, so fall through to the
+            # ordinary durability check when the revoke was partial.
+            if set(gone) == {p for privs, _c, _s in mig[key] for p in priv_set(privs)}:
+                continue
         if key in gate:
             continue
         # A grant on an object the chain does not end up with is DEAD, not missing.
@@ -256,6 +386,19 @@ def main():
         bad("(%s, %s, %s) is listed as predating this check but no migration grants it any more, or it is "
             "now mirrored in deploy/gatep/; remove it from PREDATING_THIS_CHECK" % (role, kind, obj))
 
+    for role, kind, obj, restored, granted_in, revoked_in in sorted(reversed_in_gatep):
+        bad(
+            "deploy/gatep/ grants %s %s on %s %s, which %s DELIBERATELY REVOKED. Gate-P runs AFTER the "
+            "migrations, so this restores a privilege that was taken away on purpose -- on every "
+            "factory-clean install and every reconcile, with nothing downstream to undo it."
+            % (role, "/".join(restored), kind, obj, revoked_in),
+            "granted in: %s, then revoked in: %s" % (granted_in, revoked_in),
+        )
+
+    for role, kind, obj, gone, revoked_in in sorted(withheld):
+        print("  ok: %s's %s %s on %s is WITHDRAWN by %s and is correctly absent from deploy/gatep/"
+              % (role, gone, kind, obj, revoked_in))
+
     for role, kind, obj in sorted(dead):
         print("  ok: %s's %s grant on %s is DEAD -- a later migration drops the object, so there is nothing "
               "for Gate-P to keep" % (role, kind, obj))
@@ -265,7 +408,8 @@ def main():
             ok("%d of %d service-role grants made by migrations are named in deploy/gatep/; %d listed as "
                "predating this check" % (checked - len(carried), checked, len(carried)))
         else:
-            ok("all %d service-role grants made by migrations are also named in deploy/gatep/" % checked)
+            ok("all %d service-role grants made by migrations are also named in deploy/gatep/, and the %d "
+               "a later migration withdrew are correctly absent from it" % (checked, len(withheld)))
 
     print("=" * 50)
     if _failures:

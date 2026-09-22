@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0085, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0086, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -16429,6 +16429,7 @@ REVOKE ALL ON FUNCTION iam_v2.p4_reconcile_financial_epoch(p_tenant uuid, p_site
 
 REVOKE ALL ON FUNCTION iam_v2.p4_reconcile_financial_epoch_v2(p_tenant uuid, p_site uuid, p_system_identity text, p_marker_generation bigint, p_marker_present boolean) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.p4_reconcile_financial_epoch_v2(p_tenant uuid, p_site uuid, p_system_identity text, p_marker_generation bigint, p_marker_present boolean) TO sc_payment_runtime;
+GRANT ALL ON FUNCTION iam_v2.p4_reconcile_financial_epoch_v2(p_tenant uuid, p_site uuid, p_system_identity text, p_marker_generation bigint, p_marker_present boolean) TO svc_edged;
 
 
 --
@@ -16586,7 +16587,6 @@ REVOKE ALL ON FUNCTION iam_v2.p6_guest_device_actions_append_only() FROM PUBLIC;
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p6_guest_release_device(p_entitlement uuid, p_device uuid, p_max_releases_per_hour integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION iam_v2.p6_guest_release_device(p_entitlement uuid, p_device uuid, p_max_releases_per_hour integer) TO svc_scd;
 
 
 --
@@ -16938,13 +16938,6 @@ GRANT SELECT ON TABLE iam_v2.active_operational_alerts TO svc_edged;
 
 
 --
--- Name: TABLE appliance_product_setting_changes; Type: ACL; Schema: iam_v2; Owner: -
---
-
-GRANT SELECT,INSERT ON TABLE iam_v2.appliance_product_setting_changes TO svc_edged;
-
-
---
 -- Name: TABLE appliance_product_settings; Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -17149,13 +17142,6 @@ GRANT SELECT,INSERT ON TABLE iam_v2.folios TO svc_pmsd;
 
 GRANT SELECT ON TABLE iam_v2.guest_access_accounts TO svc_scd;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE iam_v2.guest_access_accounts TO svc_edged;
-
-
---
--- Name: TABLE guest_device_actions; Type: ACL; Schema: iam_v2; Owner: -
---
-
-GRANT SELECT,INSERT ON TABLE iam_v2.guest_device_actions TO svc_scd;
 
 
 --
