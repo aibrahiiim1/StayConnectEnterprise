@@ -1,0 +1,4 @@
+commit cddca70f984f004c56e4894947add6bd1f9814b1
+Date:   Tue Sep 22 18:02:24 2026 +0300
+
+    Governance: delivery head moves to the receipt correction
