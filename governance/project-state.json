@@ -1677,8 +1677,8 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "bccedb896874e0f0a9a042871b338744cbe6347c",
     "base_note": "The master merge commit of PR #174, which recorded the merge of increment 1.",
-    "head": "a586bac75bf755246ae0ca56aafc4bd16aa28e44",
-    "head_note": "The last CONTENT commit of this increment. The governance receipt and the re-rendered blocks follow it and the manifest last of all, because the manifest must list itself.",
+    "head": "43a46f13e7aec7ac57e05408d38c51696da7d312",
+    "head_note": "The last CONTENT commit of this increment. It is the gate correction, not one of the four gaps: the governance gate refused the first head because the Zero-Stale allowlist did not recognise the next_authorized_action this increment wrote, and the local preflight ran neither the keyword validator nor the mutation baseline that reads it -- and the stage that closes that gap was measured and then corrected, because its first form paid for stage 1's slowest check twice. The governance receipt and the re-rendered blocks follow this commit, and the manifest last of all, because the manifest must list itself.",
     "transition": "T0177",
     "note": "T0177. Four development gaps closed, and one contradiction that had to go first: next_authorized_action said NONE is authorized -- explicitly including no deployment, no migration and no service restart -- while T0175 recorded the Product Owner's end-to-end authorisation for exactly those steps in the same file.\n\nCLOSED: the 40 Gate-P grant gaps (38 mirrored, 2 dead), each probed against PRE-LIVE first, which is how it was found that NINE are broken on the live appliance and not merely on a rebuild -- Guest Device Self-Service is unprivileged there today. The guarded down-migration runner, which the Phase-3 runbook had been printing as an executable command for months. The nightly backup timer, which was policy with no mechanism. And a caller for migration 0023's restore-rollback detector, which had none.\n\nNOTHING WAS DEPLOYED. The only PRE-LIVE access was a read-only privilege probe. Financial traffic remains ZERO and this increment only wires a detector that can cause more holding, never less. D41 remains in force and Go-Live is NOT authorised.\n\nSTILL OPEN: the voucher operator surface, reveal/export, the financial marker initialisation, and every live drill. Enumerated in current_state_facts.functional_completeness_remaining.",
     "previous_delivery": {
@@ -1725,7 +1725,9 @@
         "pre_merge_gates": "ALL_GREEN on 57b34f86, the exact head merged: governance, phase3-full-software-gate, phase4-financial-core-gate and phase5-post-stay-transfer-gate all success; mergeable_state clean.",
         "remote_branch_deleted": true
       }
-    }
+    },
+    "first_rejected_head": "aeab7ae3fda2268348f31319400d1f23021133ca",
+    "first_rejected_head_note": "RECORDED RATHER THAN ERASED. phase3-full-software-gate, phase4-financial-core-gate and phase5-post-stay-transfer-gate were ALL GREEN on it; governance failed on one regex alternative. The exact sha is read from the branch history, not from this note."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

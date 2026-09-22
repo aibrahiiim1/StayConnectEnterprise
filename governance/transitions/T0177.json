@@ -66,5 +66,12 @@
   },
   "go_live": "NOT PERFORMED and NOT AUTHORIZED.",
   "base": "bccedb896874e0f0a9a042871b338744cbe6347c",
-  "head": "a586bac75bf755246ae0ca56aafc4bd16aa28e44"
+  "head": "43a46f13e7aec7ac57e05408d38c51696da7d312",
+  "the_gate_correction_this_receipt_also_carries": {
+    "what_failed": "The governance gate refused the first head with 'BASELINE FAIL: structural=0 keyword=1'. The adversarial mutation suite will not mutate anything until BOTH validators pass on the good state, and the keyword half -- tools/validate-project-state.sh, the Zero-Stale rule -- did not.",
+    "why": "That validator keeps an allowlist of recognised next_authorized_action phrases and requires the generated packs to state one of them in at least two places. This increment replaced the action with the FUNCTIONAL-COMPLETENESS CLOSURE wording, which the allowlist had never heard of, so the only remaining match in the packs was a HISTORICAL Phase-1B line and the count fell to one. A state file that had just been made truthful therefore read as inconsistent.",
+    "the_fix_and_the_one_that_was_refused": "The allowlist gained the current phrase. The alternative -- rewording next_authorized_action back to something the list already knew -- would have meant restoring the contradiction this increment exists to remove in order to satisfy a check about staleness. The comment above that allowlist already says why that is the wrong way round; it was written the last time the list lagged, for the same reason.",
+    "the_second_defect_it_exposed": "THE PREFLIGHT COULD NOT SEE IT. tools/validate-project-state.sh runs in the governance gate and in the mutation suite's baseline, and tools/preflight.sh ran neither -- so a one-alternative regex lag could only be learned on a runner, twenty minutes in, after every other gate step had been paid for. Preflight stage 9 now runs it, and tools/validate-delivery-protocol.py requires that stage to exist: the fifth entry in a list where every other entry is also a failure this project already paid for.",
+    "what_it_cost": "One governance cycle. The other three gates were ALL GREEN on the rejected head, which is recorded in current_delivery.first_rejected_head rather than erased."
+  }
 }
