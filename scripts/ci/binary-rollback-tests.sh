@@ -17,8 +17,8 @@ newworld() {
   W="$(mktemp -d)"
   mkdir -p "$W/bin" "$W/stage" "$W/run"
   printf 'CURRENT-BUILD' > "$W/bin/scd"
-  printf 'OLD-BUILD'     > "$W/bin/scd.bak-inc9"
-  printf 'CURRENT-BUILD' > "$W/stage/scd"
+  printf 'OLD-BUILD stayconnect_production' > "$W/bin/scd.bak-inc9"
+  printf 'CURRENT-BUILD stayconnect_production' > "$W/stage/scd"
   cp "$W/bin/scd" "$W/run/scd.exe"   # the running process is backed by the current build
   export SC_ROLLBACK_RESTART_CMD="$W/restart.sh"
   export SC_ROLLBACK_RUNNING_EXE="$W/runexe.sh"
@@ -56,8 +56,8 @@ echo "== 1. happy path: rollback to the .bak build is verified end to end =="
 newworld
 out="$(run_tool --source-suffix .bak-inc9)"; rc=$?
 if [ $rc -eq 0 ] && echo "$out" | grep -q "BINARY_ROLLBACK = PASS"; then ok "verified rollback exits 0"; else bad "verified rollback did not pass: $out"; fi
-if [ "$(cat "$W/bin/scd")" = "OLD-BUILD" ]; then ok "the on-disk binary really was replaced"; else bad "the binary was not replaced"; fi
-if [ "$(cat "$W/run/scd.exe")" = "OLD-BUILD" ]; then ok "the running process is backed by the restored build"; else bad "the running process was not restarted onto the restored build"; fi
+if [ "$(cat "$W/bin/scd")" = "OLD-BUILD stayconnect_production" ]; then ok "the on-disk binary really was replaced"; else bad "the binary was not replaced"; fi
+if [ "$(cat "$W/run/scd.exe")" = "OLD-BUILD stayconnect_production" ]; then ok "the running process is backed by the restored build"; else bad "the running process was not restarted onto the restored build"; fi
 rm -rf "$W"
 
 echo "== 2. THE INCREMENT-9 DEFECT: a failed replacement must be fatal, immediately =="
@@ -105,7 +105,7 @@ echo "== 6. roll-forward from a staging dir is verified the same way =="
 newworld
 printf 'OLD-BUILD' > "$W/bin/scd"; cp "$W/bin/scd" "$W/run/scd.exe"
 out="$(run_tool --source-dir "$W/stage")"; rc=$?
-if [ $rc -eq 0 ] && [ "$(cat "$W/run/scd.exe")" = "CURRENT-BUILD" ]; then ok "roll-forward verified in the running process"; else bad "roll-forward not verified: $out"; fi
+if [ $rc -eq 0 ] && [ "$(cat "$W/run/scd.exe")" = "CURRENT-BUILD stayconnect_production" ]; then ok "roll-forward verified in the running process"; else bad "roll-forward not verified: $out"; fi
 rm -rf "$W"
 
 echo "== 7. THE PRE-nftconverge COMPATIBILITY BOUNDARY =="
@@ -117,10 +117,10 @@ newnetd() {
   W="$(mktemp -d)"
   mkdir -p "$W/bin" "$W/stage" "$W/run"
   # the "previous release" netd PREDATES convergence: no render marker anywhere in the binary
-  printf 'OLD-NETD-no-marker-here' > "$W/bin/netd.bak"
+  printf 'OLD-NETD-no-render-marker stayconnect_production' > "$W/bin/netd.bak"
   # the currently deployed netd IS convergence-capable
   printf 'NEW-NETD netd-render-fp= aware' > "$W/bin/netd"
-  printf 'NEW-NETD netd-render-fp= aware' > "$W/stage/netd"
+  printf 'NEW-NETD netd-render-fp= aware stayconnect_production' > "$W/stage/netd"
   cp "$W/bin/netd" "$W/run/netd.exe"
   cat > "$W/restart.sh" <<EOF
 #!/usr/bin/env bash
@@ -167,7 +167,7 @@ rm -rf "$W"
 
 newnetd; stub_nft "$EMPTY"
 out="$(bash "$TOOL" --bin-dir "$W/bin" --unit netd=stayconnect-netd --source-suffix .bak 2>&1)"; rc=$?
-if [ $rc -eq 0 ] && [ "$(cat "$W/run/netd.exe")" = "OLD-NETD-no-marker-here" ]; then ok "with an EMPTY legacy set the same rollback is allowed and verified"; else bad "empty-set rollback was blocked: $out"; fi
+if [ $rc -eq 0 ] && [ "$(cat "$W/run/netd.exe")" = "OLD-NETD-no-render-marker stayconnect_production" ]; then ok "with an EMPTY legacy set the same rollback is allowed and verified"; else bad "empty-set rollback was blocked: $out"; fi
 if echo "$out" | grep -q "EMPTY (0 elements)"; then ok "it states why it was allowed"; else bad "no reason given"; fi
 rm -rf "$W"
 
@@ -190,6 +190,40 @@ if grep -qiE -- '--force|SC_ROLLBACK_FORCE|FORCE=1|--yes-i-know' "$TOOL"; then
 else
   ok "no override flag exists on the ordinary rollback command"
 fi
+
+echo "== 7c. THE BUILD PROFILE OF THE ROLLBACK TARGET =="
+#
+# A Production appliance is built with -tags stayconnect_production, which selects the production build
+# profile; edged runs the guest-authority lock only on that profile. An audit of the appliance found 17 of 36
+# retained rollback artifacts without it -- four made by the mission that added this check and thirteen
+# older ones -- every one of them selectable by suffix and installable by this command, which would have verified
+# the digest and reported success while saying nothing about the profile.
+newworld
+printf 'OLD-BUILD-without-the-tag' > "$W/bin/scd.bak-inc9"
+before="$(cat "$W/bin/scd")"
+out="$(run_tool --source-suffix .bak-inc9)"; rc=$?
+if [ $rc -ne 0 ]; then ok "a rollback target without the production profile is refused"; else bad "a development-profile binary was installed"; fi
+if [ "$(cat "$W/bin/scd")" = "$before" ]; then ok "nothing was replaced before the refusal"; else bad "the target was modified despite the refusal"; fi
+case "$out" in
+  *stayconnect_production*) ok "the refusal names the tag the operator has to look for" ;;
+  *) bad "the refusal does not name the missing tag: $out" ;;
+esac
+case "$out" in
+  *build-appliance-binaries.sh*) ok "the refusal names the operator action" ;;
+  *) bad "the refusal offers no way forward: $out" ;;
+esac
+rm -rf "$W"
+
+newworld
+out="$(run_tool --source-suffix .bak-inc9)"; rc=$?
+if [ $rc -eq 0 ]; then ok "a target that DOES carry the profile is installed normally"; else bad "a profiled target was refused: $out"; fi
+rm -rf "$W"
+
+newworld
+printf 'OLD-BUILD-without-the-tag' > "$W/bin/scd.bak-inc9"
+out="$(run_tool --source-suffix .bak-inc9 --allow-unprofiled 2>&1)"; rc=$?
+if [ $rc -ne 0 ]; then ok "there is no override flag for the profile refusal either"; else bad "an override flag bypassed the profile check"; fi
+rm -rf "$W"
 
 echo "== 8. the tool never uses cp to replace a binary =="
 if grep -nE '^\s*cp\s' "$TOOL" | grep -v '^\s*#' | grep -q .; then

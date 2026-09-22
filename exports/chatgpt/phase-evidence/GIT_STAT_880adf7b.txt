@@ -1,0 +1,4 @@
+commit 880adf7bb0bdd45fba38bead6fda86e10c9c0b5c
+Date:   Tue Sep 22 09:41:27 2026 +0300
+
+    Governance: T0173 records two open decisions, a rollback path that could not tell good from defective, and the second consumer the gate found

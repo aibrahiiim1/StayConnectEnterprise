@@ -123,6 +123,46 @@ print(n)
 ' 2>/dev/null || return 1
 }
 
+# ---- THE BUILD PROFILE OF WHAT IS ABOUT TO BE INSTALLED -------------------------------------------------------
+#
+# A Production appliance is built with `-tags stayconnect_production`, and that tag is not decoration: it
+# selects the production build profile. edged loads the IAM-v2 configuration and therefore runs the
+# guest-authority lock, which on a production build forces the locked guest methods on and refuses to start on
+# a configuration that would select the removed authority. A binary built without the tag takes the
+# development branch and does not enforce it. The same binary also carries no vcs stamp when it was built
+# outside scripts/build-appliance-binaries.sh, so it cannot be identified from its own bytes afterwards.
+#
+# THIS IS NOT HYPOTHETICAL. An audit of /opt/stayconnect/bin on 2026-09-21 found 17 of 36 retained rollback
+# artifacts without the profile -- four produced by the mission that added this check, and thirteen older
+# ones predating the build script entirely. Every one of them was, until now, a rollback candidate an
+# operator could select by suffix and this command would have installed, verified by digest, and reported as
+# a success. It would have been telling the truth about identity and saying nothing about profile.
+#
+# So the artifact is asked, exactly as the convergence boundary below asks it, and for the same reason: a
+# filename is a claim and the bytes are the evidence.
+#
+# There is deliberately NO override flag, for the reason given at the compatibility boundary below: a force
+# switch on the ordinary rollback command is a force switch somebody uses at 3am during an incident. Choosing
+# to run an appliance on a development-profile binary has to be a separate, deliberate act, so this prints
+# the operator action instead of offering a way past itself.
+carries_production_profile() {
+  grep -qa 'stayconnect_production' "$1" 2>/dev/null
+}
+
+check_build_profile() { # $1 = binary name, $2 = source path
+  if carries_production_profile "$2"; then
+    printf '  %-18s rollback target carries the production build profile\n' "$1"
+    return 0
+  fi
+  die "$1: the rollback target $2 was NOT built with -tags stayconnect_production, so it carries the
+         DEVELOPMENT build profile. On this appliance that is not a cosmetic difference: edged would run with
+         the guest-authority lock unenforced, and a binary built outside scripts/build-appliance-binaries.sh
+         also carries no vcs stamp, so it could not be identified from its own bytes afterwards. Refusing to
+         install it. Operator action: choose a rollback target that carries the profile (check with
+         \`grep -ac stayconnect_production <file>\`, or read the stamp with \`go version -m <file>\` on a host
+         that has a Go toolchain), or rebuild the wanted commit with scripts/build-appliance-binaries.sh."
+}
+
 check_compat_boundary() { # $1 = binary name, $2 = source path
   [ "$1" = "netd" ] || return 0
   if converges "$2"; then
@@ -163,6 +203,17 @@ while [ $i -lt "${#UNIT_KEYS[@]}" ]; do
   [ -n "$s" ] || die "cannot hash source binary: $src"
   WANT_SHA+=("$s")
   printf '  %-18s unit=%-26s source=%s\n                     expect-sha256=%s\n' "$b" "$u" "$src" "$s"
+  i=$((i+1))
+done
+
+echo "== build profile =="
+# BEFORE the compatibility boundary, and before anything is replaced: a target that must not be installed at
+# all is cheaper to refuse here than after the live authorization state has been read.
+i=0
+while [ $i -lt "${#UNIT_KEYS[@]}" ]; do
+  b="${UNIT_KEYS[$i]}"
+  if [ -n "$SRC_SUFFIX" ]; then src="$BIN_DIR/$b$SRC_SUFFIX"; else src="$SRC_DIR/$b"; fi
+  check_build_profile "$b" "$src"
   i=$((i+1))
 done
 
