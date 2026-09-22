@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `44077fb88e25574476f54e213802c020d95225f5`
-- **HEAD commit:** `5ce8ac7c535e36780d883b6f17951728aad98a88`
-- **Provenance (generation HEAD = inventory_head):** `6ae565876670cd8f87def50ba9bd0ca36566d173`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `f1a353ce88d928aa7de6fb4d617833206796ea52`
+- **Provenance (generation HEAD = inventory_head):** `e37f59887a5b699e3e7b4f93e97a4deee5692a60`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/functional-completeness`
 - **Remote branch:** `origin/delivery/functional-completeness`
 - **Changed files:** 69
@@ -19,7 +19,7 @@
 | `data-plane/cmd/netd/apply.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Rollback on the configuration in force took the whole guest network down and reported success |
 | `data-plane/cmd/netd/apply_ops.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Two review findings, both correct, and the first was wider than the guard |
 | `data-plane/cmd/netd/main.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Rollback on the configuration in force took the whole guest network down and reported success |
-| `data-plane/cmd/netd/rollback_target_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Two review findings, both correct, and the first was wider than the guard |
+| `data-plane/cmd/netd/rollback_target_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | gofmt, and the sixty-five seconds that would have saved three gate runs |
 | `data-plane/cmd/netd/store.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Rollback on the configuration in force took the whole guest network down and reported success |
 | `data-plane/cmd/scd/voucher_code_format.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | The hotel decides what a voucher code looks like: digits or mixed, never more than eight |
 | `data-plane/cmd/scd/voucher_code_format_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | The hotel decides what a voucher code looks like: digits or mixed, never more than eight |
@@ -47,7 +47,7 @@
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt |
 | `exports/chatgpt/phase-evidence/GIT_STAT_03f83ed9.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Delivery: packs rebuilt for T0175 |
-| `exports/chatgpt/phase-evidence/GIT_STAT_4bc7096f.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: packs rebuilt |
+| `exports/chatgpt/phase-evidence/GIT_STAT_896fe6f4.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: packs rebuilt |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt |
 | `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0175 |
@@ -63,7 +63,7 @@
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0175 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0175 |
 | `governance/ci-reuse-policy.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | A grant only a migration makes is a grant that disappears, and forty of them do |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: delivery head moves to the review fixes |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: delivery head moves to the gofmt fix |
 | `governance/transitions/T0175.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0175 records the two review findings and the race that predated this delivery |
 | `iam_v2_scratch/phase7_ledger_material_effect.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Four harnesses that pointed at the retired appliance, one of which rebooted it |
 | `migrations/0081_the_service_may_read_the_trail_it_writes.down.sql -> data-plane/migrations/0081_the_service_may_read_the_trail_it_writes.down.sql` | RENAMED | `R100 (migrations/0081_the_service_may_read_the_trail_it_writes.down.sql -> data-plane/migrations/0081_the_service_may_read_the_trail_it_writes.down.sql)` | database | MIGRATIONS | rollback RESTORES prior content | Three migrations the runner could not see, and the check that would have said so |
@@ -91,7 +91,7 @@
  data-plane/cmd/netd/apply.go                       |  66 +++-
  data-plane/cmd/netd/apply_ops.go                   |  33 ++
  data-plane/cmd/netd/main.go                        |   8 +
- data-plane/cmd/netd/rollback_target_test.go        | 210 +++++++++++
+ data-plane/cmd/netd/rollback_target_test.go        | 209 +++++++++++
  data-plane/cmd/netd/store.go                       |  19 +
  data-plane/cmd/scd/voucher_code_format.go          | 103 ++++++
  data-plane/cmd/scd/voucher_code_format_test.go     | 130 +++++++
@@ -120,12 +120,12 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   4 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   4 +-
  docs/context/StayConnect-IAM-Handoff.md            |   4 +-
- docs/manifests/PostClosure-change-manifest.md      | 232 ++++++++----
+ docs/manifests/PostClosure-change-manifest.md      | 236 ++++++++----
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 344112 -> 344669 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 142143 -> 142959 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44184 -> 44260 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 142143 -> 142957 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44184 -> 44262 bytes
  .../chatgpt/phase-evidence/GIT_STAT_03f83ed9.txt   |   4 -
- .../chatgpt/phase-evidence/GIT_STAT_4bc7096f.txt   |   4 +
+ .../chatgpt/phase-evidence/GIT_STAT_896fe6f4.txt   |   4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   6 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
  .../chatgpt/phase-evidence/tools/project-state.py  |  37 +-
@@ -153,7 +153,7 @@
  tools/validate-migration-grant-durability.py       | 281 ++++++++++++++
  tools/validate-migration-location.py               | 271 ++++++++++++++
  tools/validate-standing-records.py                 | 412 +++++++++++++++++++++
- 69 files changed, 3888 insertions(+), 315 deletions(-)
+ 69 files changed, 3891 insertions(+), 315 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -164,6 +164,10 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: e37f5988 Delivery: packs rebuilt
+HISTORICAL: 896fe6f4 Governance: delivery head moves to the gofmt fix
+HISTORICAL: f1a353ce gofmt, and the sixty-five seconds that would have saved three gate runs
+HISTORICAL: 88476edd Delivery: manifest lists itself
 HISTORICAL: 6ae56587 Delivery: packs rebuilt
 HISTORICAL: 4bc7096f Governance: delivery head moves to the review fixes
 HISTORICAL: 5ce8ac7c Governance: T0175 records the two review findings and the race that predated this delivery
