@@ -32,7 +32,29 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 
 TARGET="${PHASE7_TARGET:-appliance}"
-APPLIANCE="${PHASE7_APPLIANCE:-172.21.60.23}"
+# THE TARGET IS DEMANDED, NOT ASSUMED.
+#
+# This used to read `APPLIANCE="${PHASE7_APPLIANCE:-172.21.60.23}"`. That address is the RETIRED development
+# appliance: it is not an operational target, must not be contacted, and must not be treated as a source of
+# anything. A harness that defaults to it sends whoever runs it with no environment variable at the one
+# machine the standing record forbids touching.
+#
+# So there is no default. The target is named explicitly or the script refuses, and the retired address is
+# refused outright even when it IS named -- an address is a property of the run, not of the script. The same
+# correction was already made to deploy/scripts/hotel-admin-mint-cert.sh for the same reason.
+RETIRED_APPLIANCE="172.21.60.23"
+APPLIANCE="${PHASE7_APPLIANCE:-}"
+if [ -z "$APPLIANCE" ]; then
+  echo "REFUSED: set PHASE7_APPLIANCE to the appliance this run targets." >&2
+  echo "         There is deliberately no default: this harness used to default to the RETIRED" >&2
+  echo "         development appliance $RETIRED_APPLIANCE, which must not be contacted." >&2
+  exit 2
+fi
+if [ "$APPLIANCE" = "$RETIRED_APPLIANCE" ]; then
+  echo "REFUSED: $RETIRED_APPLIANCE is the RETIRED development appliance. It is not an operational" >&2
+  echo "         target, and its accepted historical evidence stands without being re-run." >&2
+  exit 2
+fi
 LOCAL_C="${PHASE7_CONTAINER:-phase7-recon}"
 LOCAL_DB="${PHASE7_RECON_DB:-iam_recon}"
 

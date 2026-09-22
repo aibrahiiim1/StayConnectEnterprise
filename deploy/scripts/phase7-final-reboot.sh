@@ -14,7 +14,30 @@
 # capability still absent at the layer that decides it, no synthetic access left behind, and the appliance's
 # independence from Central.
 set -uo pipefail
-APPL="${PHASE7_APPLIANCE:-172.21.60.23}"
+# THE TARGET IS DEMANDED, NOT ASSUMED.
+#
+# This used to read `APPL="${PHASE7_APPLIANCE:-172.21.60.23}"`. That address is the RETIRED development
+# appliance: it is not an operational target, must not be contacted, and must not be treated as a source of
+# anything. A harness that defaults to it sends whoever runs it with no environment variable at the one
+# machine the standing record forbids touching -- and this script issues a REAL
+# REBOOT, so the default was one forgotten variable away from rebooting it.
+#
+# So there is no default. The target is named explicitly or the script refuses, and the retired address is
+# refused outright even when it IS named -- an address is a property of the run, not of the script. The same
+# correction was already made to deploy/scripts/hotel-admin-mint-cert.sh for the same reason.
+RETIRED_APPLIANCE="172.21.60.23"
+APPL="${PHASE7_APPLIANCE:-}"
+if [ -z "$APPL" ]; then
+  echo "REFUSED: set PHASE7_APPLIANCE to the appliance this run targets." >&2
+  echo "         There is deliberately no default: this harness used to default to the RETIRED" >&2
+  echo "         development appliance $RETIRED_APPLIANCE, which must not be contacted." >&2
+  exit 2
+fi
+if [ "$APPL" = "$RETIRED_APPLIANCE" ]; then
+  echo "REFUSED: $RETIRED_APPLIANCE is the RETIRED development appliance. It is not an operational" >&2
+  echo "         target, and its accepted historical evidence stands without being re-run." >&2
+  exit 2
+fi
 PGC="${PHASE7_PG_CONTAINER:-stayconnect-pg}"
 DB="${PHASE7_SITE_DB:-stayconnect_site}"
 WAIT_SECS="${PHASE7_REBOOT_WAIT:-300}"
