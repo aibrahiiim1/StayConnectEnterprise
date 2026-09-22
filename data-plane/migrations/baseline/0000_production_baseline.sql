@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0086, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0087, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -7528,6 +7528,42 @@ END; $$;
 
 
 --
+-- Name: voucher_code_generation_supersede(uuid, uuid, uuid, uuid, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.voucher_code_generation_supersede(p_tenant uuid, p_site uuid, p_generation uuid, p_operator uuid, p_reason text) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'public', 'pg_temp'
+    AS $$
+DECLARE v_n integer; v_no integer;
+BEGIN
+  IF p_operator IS NULL THEN
+    RAISE EXCEPTION 'VOUCHER_ROTATION_NEEDS_AN_OPERATOR' USING ERRCODE = 'check_violation';
+  END IF;
+  IF length(btrim(coalesce(p_reason, ''))) < 4 THEN
+    RAISE EXCEPTION 'VOUCHER_ROTATION_NEEDS_A_REASON' USING ERRCODE = 'check_violation';
+  END IF;
+  -- Serialise against a concurrent rotation of the same site, so two operators cannot retire two
+  -- generations and leave issuance choosing between them by ordering luck.
+  PERFORM pg_advisory_xact_lock(hashtext('voucher_code_generations'), hashtext(p_site::text));
+  UPDATE iam_v2.voucher_code_key_generations
+     SET superseded_at = now(), superseded_by = p_operator,
+         supersede_reason = btrim(p_reason)
+   WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_generation
+     AND superseded_at IS NULL
+  RETURNING generation_no INTO v_no;
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  -- Not a silent no-op: "there is no such active generation" and "it was already retired" are different
+  -- answers, and an operator who cannot tell them apart will rotate twice.
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION 'VOUCHER_GENERATION_NOT_ACTIVE: no active generation % for tenant %/site %',
+      p_generation, p_tenant, p_site USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN v_no;
+END $$;
+
+
+--
 -- Name: voucher_code_reveals_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -10517,8 +10553,17 @@ CREATE TABLE iam_v2.voucher_code_key_generations (
     hmac_key_ciphertext bytea NOT NULL,
     aead_params jsonb NOT NULL,
     encryption_key_id uuid NOT NULL,
-    superseded_at timestamp with time zone
+    superseded_at timestamp with time zone,
+    superseded_by uuid,
+    supersede_reason text
 );
+
+
+--
+-- Name: COLUMN voucher_code_key_generations.superseded_by; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.voucher_code_key_generations.superseded_by IS 'The authenticated operator who retired this generation, as the server resolved them from the session.';
 
 
 --
@@ -15700,6 +15745,14 @@ ALTER TABLE ONLY iam_v2.voucher_batches
 
 
 --
+-- Name: voucher_code_key_generations voucher_code_key_generations_superseded_by_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.voucher_code_key_generations
+    ADD CONSTRAINT voucher_code_key_generations_superseded_by_fkey FOREIGN KEY (superseded_by) REFERENCES public.operators(id);
+
+
+--
 -- Name: voucher_code_reveals voucher_code_reveals_operator_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -17041,6 +17094,14 @@ GRANT ALL ON FUNCTION iam_v2.sync_outbox_recover_exhausted(p_operator text, p_re
 REVOKE ALL ON FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at timestamp with time zone, p_reason text) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at timestamp with time zone, p_reason text) TO svc_acctd;
 GRANT ALL ON FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at timestamp with time zone, p_reason text) TO svc_pmsd;
+
+
+--
+-- Name: FUNCTION voucher_code_generation_supersede(p_tenant uuid, p_site uuid, p_generation uuid, p_operator uuid, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.voucher_code_generation_supersede(p_tenant uuid, p_site uuid, p_generation uuid, p_operator uuid, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.voucher_code_generation_supersede(p_tenant uuid, p_site uuid, p_generation uuid, p_operator uuid, p_reason text) TO svc_scd;
 
 
 --
