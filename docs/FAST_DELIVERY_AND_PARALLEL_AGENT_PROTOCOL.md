@@ -50,6 +50,10 @@ while it finished).
    sixteen failures were exactly this.
 2. **Run focused tests while implementing** — the file, the package, the one spec.
 3. **Run `bash tools/preflight.sh`** before pushing. It refuses locally what the gates would refuse remotely.
+   Stage 9 is the slow one and is the reason the list has nine rows rather than eight: the governance gate's
+   mutation suite will not mutate anything until BOTH validators pass on the good state, and the keyword
+   half ran nowhere local until T0177 paid a full governance cycle to learn that one regex alternative had
+   lagged the truth.
 4. **One stable full E2E pass**, once, when everything else is green.
 5. **Only then** generate the manifest, rebuild the packs and make the delivery-only commit. Generating them
    earlier guarantees regenerating them again, and a stale manifest is its own gate failure.
@@ -72,6 +76,7 @@ while it finished).
 | 6 | typecheck, unit tests, production build | — |
 | 7 | an E2E harness that cannot tell a dead server from a broken product | E2E-INFRASTRUCTURE |
 | 8 | the full browser suite (`--full`) | E2E-PRODUCT |
+| 9 | the Zero-Stale keyword validator — the governance gate's mutation suite refuses to run at all unless it passes on the good state | ZERO-STALE |
 
 Two details that look like pedantry and are not:
 

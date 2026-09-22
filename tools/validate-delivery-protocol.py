@@ -32,6 +32,7 @@ not, and that the local preflight and its documentation exist. It can refuse a d
 one that the gates would otherwise refuse.
 """
 import json
+import glob
 import os
 import re
 import sys
@@ -207,6 +208,26 @@ def check_preflight_covers_the_late_failures():
             ok("preflight actually runs the %s check" % label)
 
 
+def check_no_gate_skips_the_receipt_timing_rule():
+    """A RUNNER MUST NEVER TAKE A CALLER'S WORD FOR A CHECK.
+
+    ZERO_STALE_RECEIPT_TIMING_ALREADY_RUN=1 tells tools/validate-project-state.sh that its receipt-timing
+    invocation was already performed by the caller. That is true of tools/preflight.sh, which runs the same
+    authoritative script in stage 1 and would otherwise spend eight and a half minutes running it twice.
+
+    It is an assertion, not a check, so a gate workflow setting it would be a gate believing a claim about
+    work nobody can see it do -- the same shape as satisfying a required status context with a dispatched
+    run. Nothing in .github/ may set it, and this refuses the delivery if anything does.
+    """
+    for path in sorted(glob.glob(os.path.join(ROOT, ".github", "**", "*.yml"), recursive=True)):
+        text = read(os.path.relpath(path, ROOT).replace(os.sep, "/"))
+        if text and "ZERO_STALE_RECEIPT_TIMING_ALREADY_RUN" in text:
+            fail("%s sets ZERO_STALE_RECEIPT_TIMING_ALREADY_RUN; a gate must run the receipt-timing rule, "
+                 "not be told it was already run" % os.path.relpath(path, ROOT).replace(os.sep, "/"))
+            return
+    ok("no gate workflow skips the receipt-timing rule by assertion")
+
+
 def main():
     print("== delivery protocol: gate workflows ==")
     bindings = gate_workflows()
@@ -228,6 +249,7 @@ def main():
 
     print("== delivery protocol: preflight coverage ==")
     check_preflight_covers_the_late_failures()
+    check_no_gate_skips_the_receipt_timing_rule()
 
     print("=" * 50)
     if _failures:

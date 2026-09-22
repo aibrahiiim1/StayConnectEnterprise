@@ -303,7 +303,12 @@ stage7() {
 stage9() {
   begin "Stage 9 - PREFLIGHT_ZERO_STALE (keyword validator; the mutation suite's other baseline half)"
   local rc=0
-  bash tools/validate-project-state.sh || rc=1
+  # STAGE 1 ALREADY RAN THE RECEIPT-TIMING RULE, and it is the slowest check in this file: eight and a half
+  # minutes on a Windows workstation, because it asks git about every receipt. Running the identical script
+  # twice in one preflight would cost more than the gate cycle this stage exists to avoid, so the validator
+  # is told it was already done. It skips that one invocation and nothing else -- its self-test, which proves
+  # the rule still catches the T0054 defect, runs either way, and no gate workflow may set this variable.
+  ZERO_STALE_RECEIPT_TIMING_ALREADY_RUN=1 bash tools/validate-project-state.sh || rc=1
   record "Zero-Stale keyword validator" "$rc"
 }
 

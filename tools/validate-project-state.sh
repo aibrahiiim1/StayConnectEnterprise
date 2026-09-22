@@ -276,8 +276,19 @@ fi
 [ "$p3drift" = "0" ] && ok "no Phase-3 enforcement/evidence phrase drift" || fail "$p3drift Phase-3 phrase drift hit(s)"
 
 echo "== 1d. transition receipts cannot be dated after their introducing commit, nor before the merge they record =="
+# ZERO_STALE_RECEIPT_TIMING_ALREADY_RUN=1 skips the INVOCATION below and nothing else. It exists for one
+# caller: tools/preflight.sh, whose stage 1 runs validate-transition-times.sh directly -- the authoritative
+# rule, not a copy of it -- minutes before stage 9 runs this validator in the same process. On a Windows
+# workstation that script takes eight and a half minutes, because it asks git about every receipt, so
+# running it twice per preflight costs more than the gate cycle this stage exists to avoid.
+#
+# It can only ever skip a check a caller has ALREADY PERFORMED, and the self-test below still runs, so the
+# proof that the rule catches the T0054 defect is not skippable. tools/validate-delivery-protocol.py refuses
+# any gate workflow that sets this variable: a runner must never take a caller's word for it.
 if have_repo; then
-  if bash "$REPO_ROOT/tools/validate-transition-times.sh" >/dev/null 2>&1; then
+  if [ "${ZERO_STALE_RECEIPT_TIMING_ALREADY_RUN:-}" = "1" ]; then
+    ok "receipt timing: already checked by the caller in this run (tools/validate-transition-times.sh, the same authoritative rule)"
+  elif bash "$REPO_ROOT/tools/validate-transition-times.sh" >/dev/null 2>&1; then
     ok "no receipt is dated after its introducing commit, and no merge receipt pre-dates its own merge"
   else
     bash "$REPO_ROOT/tools/validate-transition-times.sh" 2>&1 | grep -E "^  (FAIL|grandfathered)" | sed 's/^/  /'
