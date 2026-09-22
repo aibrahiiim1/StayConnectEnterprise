@@ -156,6 +156,26 @@ jobs:
         if: steps.reuse.outputs.hit != 'true'
         run: python tools/tests/standing_records_negative.py
 
+      # A GRANT ONLY A MIGRATION MAKES IS A GRANT THAT DISAPPEARS.
+      #
+      # gatep-grants.sql opens by revoking ALL privileges on ALL tables, sequences and functions in public
+      # and iam_v2 from every service role, then re-grants exactly what the per-service Gate-P files name —
+      # and it runs AFTER the numbered migrations, in the reconstruction and in a real install. So a
+      # privilege that exists only in a migration is revoked moments after it is granted.
+      #
+      # Migrations 0080-0083 each added one operator read and none was mirrored in Gate-P. The generated
+      # factory-clean baseline, which is a dump of the end state of the whole install chain, contained ZERO
+      # of the four while PRE-LIVE had all four — there they were applied by hand after Gate-P last ran. So
+      # the appliance worked and a rebuilt appliance would not, and the four screens that would silently
+      # break are exactly the ones those migrations were written to fix.
+      #
+      # factory-clean-baseline-verify.sh could not see it: it compares the baseline path against the upgrade
+      # path and both end with the same revoke, so both were equally wrong and the comparison was IDENTICAL.
+      # A symmetric defect is invisible to a symmetry check. This one is asymmetric on purpose.
+      - name: Migration grant durability — a migration grant must also be named in Gate-P
+        if: steps.reuse.outputs.hit != 'true'
+        run: python tools/validate-migration-grant-durability.py
+
       # Does the enforcement above actually refuse the mistakes it exists to catch? A policy validator that
       # passes on a correct repository is indistinguishable from one that returns zero. This drives the real
       # validator against fixtures carrying each specific defect.

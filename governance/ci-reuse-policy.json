@@ -493,6 +493,11 @@
           "why": "it plants a defect into a copy of the tracked tree, runs the tracked validator, restores, and asserts the refusal. Every input is the tree; an identical tree gives an identical verdict."
         },
         {
+          "name": "Migration grant durability — a migration grant must also be named in Gate-P",
+          "reuse": "tree-pure",
+          "why": "it parses GRANT statements out of two sets of tracked SQL files -- data-plane/migrations/*.up.sql and deploy/gatep/*.sql -- and compares them. No database, no clock, no network, no git history, and it produces no artifact. An identical tree has the identical answer."
+        },
+        {
           "name": "CI reuse policy — negative tests",
           "reuse": "tree-pure"
         },

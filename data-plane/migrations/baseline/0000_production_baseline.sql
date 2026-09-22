@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0079, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0085, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -3222,6 +3222,7 @@ CREATE FUNCTION iam_v2.p4_entitlement_grant_kernel(p_tenant uuid, p_site uuid, p
 DECLARE
   v_subject_key text; v_existing uuid; v_superseded uuid; v_new uuid;
   v_time_mode text; v_end_mode text; v_window timestamptz; v_state text;
+  v_burned int;
 BEGIN
   IF p_voucher IS NULL AND p_account IS NULL AND p_principal IS NULL THEN
     RAISE EXCEPTION 'GRANT_SUBJECT_UNRESOLVED: an entitlement always belongs to exactly one subject'
@@ -3268,6 +3269,28 @@ BEGIN
   -- The row and its opening transition are inseparable: an ACTIVE entitlement whose status no transition
   -- backs cannot commit (Phase-3's deferred coherence constraint), and separating them is the T0037 defect.
   PERFORM iam_v2.apply_entitlement_transition(v_new, 'ACTIVE', now(), 'GRANTED');
+
+  -- SINGLE-USE: the voucher is spent here, inside the grant, or the grant does not happen.
+  --
+  -- This runs as the function owner, so it needs no privilege from the caller. It is inside the subject
+  -- advisory lock taken above, so two concurrent grants for one voucher cannot both burn it. And it is in
+  -- the transaction that creates the entitlement, so a grant can never commit with the voucher still
+  -- spendable -- which was the requirement the Go statement stated and could not keep.
+  IF p_voucher IS NOT NULL THEN
+    UPDATE iam_v2.vouchers
+       SET state = 'REDEEMED'
+     WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_voucher
+       AND state = 'UNUSED';
+    GET DIAGNOSTICS v_burned = ROW_COUNT;
+    IF v_burned <> 1 THEN
+      -- Nothing was burned, and the early return above means this is not an idempotent retry. Either the
+      -- voucher is already spent, revoked or expired, or it does not belong to this owner. A grant that
+      -- cannot spend its own credential must not commit.
+      RAISE EXCEPTION 'VOUCHER_NOT_REDEEMABLE: voucher % is not UNUSED for this owner; a grant cannot spend '
+                      'a voucher that is already spent, revoked or expired', p_voucher
+        USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
 
   SELECT state INTO v_state FROM iam_v2.purchases WHERE id = p_purchase FOR UPDATE;
   IF v_state NOT IN ('PENDING','AWAITING_SETTLEMENT') THEN
@@ -7504,6 +7527,103 @@ BEGIN
 END; $$;
 
 
+--
+-- Name: voucher_code_settings_changes_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.voucher_code_settings_changes_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'iam_v2.voucher_code_settings_changes is append-only: % refused', TG_OP
+    USING ERRCODE = 'restrict_violation';
+END $$;
+
+
+--
+-- Name: voucher_code_settings_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.voucher_code_settings_get(p_tenant uuid, p_site uuid) RETURNS TABLE(code_mode text, code_length integer, config_version bigint, updated_at timestamp with time zone)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE(s.code_mode, 'mixed'),
+         COALESCE(s.code_length, 8),
+         COALESCE(s.config_version, 0),
+         s.updated_at
+    FROM (SELECT 1) one
+    LEFT JOIN iam_v2.site_voucher_code_settings s
+      ON s.tenant_id = p_tenant AND s.site_id = p_site;
+$$;
+
+
+--
+-- Name: FUNCTION voucher_code_settings_get(p_tenant uuid, p_site uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.voucher_code_settings_get(p_tenant uuid, p_site uuid) IS 'The voucher code format in force for a site. config_version 0 with a null updated_at means no row exists and the answer is the defaults -- distinguishable from a site that deliberately saved the same values.';
+
+
+--
+-- Name: voucher_code_settings_set(uuid, uuid, text, integer, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.voucher_code_settings_set(p_tenant uuid, p_site uuid, p_mode text, p_length integer, p_operator text, p_reason text DEFAULT NULL::text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_version bigint; v_old_mode text; v_old_length int;
+BEGIN
+  IF p_operator IS NULL OR btrim(p_operator) = '' THEN
+    RAISE EXCEPTION 'an operator label is required: "somebody changed it" is not an audit record'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_mode IS NULL OR p_mode NOT IN ('numbers','mixed') THEN
+    RAISE EXCEPTION 'voucher code mode must be numbers or mixed (got %)', coalesce(p_mode,'null')
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_length IS NULL OR p_length < 6 OR p_length > 8 THEN
+    RAISE EXCEPTION 'voucher code length must be between 6 and 8 characters (got %)', p_length
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+
+  -- Serialise concurrent edits on this site, so two operators saving at once produce two ordered change
+  -- rows rather than one silently overwriting the other's audit.
+  PERFORM pg_advisory_xact_lock(hashtext('voucher_code_settings'), hashtext(p_site::text));
+
+  SELECT s.code_mode, s.code_length INTO v_old_mode, v_old_length
+    FROM iam_v2.site_voucher_code_settings s
+   WHERE s.tenant_id = p_tenant AND s.site_id = p_site
+     FOR UPDATE;
+
+  INSERT INTO iam_v2.site_voucher_code_settings AS s
+    (tenant_id, site_id, code_mode, code_length)
+  VALUES (p_tenant, p_site, p_mode, p_length)
+  ON CONFLICT (tenant_id, site_id) DO UPDATE
+     SET code_mode      = EXCLUDED.code_mode,
+         code_length    = EXCLUDED.code_length,
+         config_version = s.config_version + 1,
+         updated_at     = now()
+  RETURNING s.config_version INTO v_version;
+
+  INSERT INTO iam_v2.voucher_code_settings_changes
+    (tenant_id, site_id, changed_by, change_reason,
+     old_code_mode, old_code_length, new_code_mode, new_code_length, new_config_version)
+  VALUES (p_tenant, p_site, btrim(p_operator), NULLIF(btrim(COALESCE(p_reason,'')),''),
+          v_old_mode, v_old_length, p_mode, p_length, v_version);
+
+  RETURN v_version;
+END $$;
+
+
+--
+-- Name: FUNCTION voucher_code_settings_set(p_tenant uuid, p_site uuid, p_mode text, p_length integer, p_operator text, p_reason text); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.voucher_code_settings_set(p_tenant uuid, p_site uuid, p_mode text, p_length integer, p_operator text, p_reason text) IS 'Stores a validated voucher code format and returns its new config_version. Takes effect on the NEXT issuance -- the issuance path reads this table every time, so no restart, rebuild or deployment is involved. Codes already issued keep the format they were printed with; they remain redeemable, because redemption matches a stored blind index and never re-derives the format.';
+
+
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
@@ -10080,6 +10200,44 @@ COMMENT ON COLUMN iam_v2.site_guest_signin_protection.observation_window_seconds
 
 
 --
+-- Name: site_voucher_code_settings; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.site_voucher_code_settings (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    code_mode text DEFAULT 'mixed'::text NOT NULL,
+    code_length integer DEFAULT 8 NOT NULL,
+    config_version bigint DEFAULT 1 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT voucher_code_settings_length CHECK (((code_length >= 6) AND (code_length <= 8))),
+    CONSTRAINT voucher_code_settings_mode CHECK ((code_mode = ANY (ARRAY['numbers'::text, 'mixed'::text]))),
+    CONSTRAINT voucher_code_settings_version CHECK ((config_version >= 1))
+);
+
+
+--
+-- Name: TABLE site_voucher_code_settings; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.site_voucher_code_settings IS 'Per-site voucher code format: digits only or digits mixed with letters, and how many characters (6-8). Read at issuance by scd and nowhere else. This is the single source the issuance path, the operator API and the UI all read; it affects codes generated AFTER a change and never a code already printed.';
+
+
+--
+-- Name: COLUMN site_voucher_code_settings.code_mode; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.site_voucher_code_settings.code_mode IS 'numbers = digits only, for keypad entry. mixed = uppercase letters and digits, which reaches the same code space in fewer characters. Characters guests misread from a card are excluded from both.';
+
+
+--
+-- Name: COLUMN site_voucher_code_settings.code_length; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.site_voucher_code_settings.code_length IS 'Number of characters in the code, 6 to 8. Eight is the Product-Owner ceiling for both modes; six is the floor the issuance path already enforced. Shorter is easier to read aloud and easier to guess.';
+
+
+--
 -- Name: stay_folios; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -10315,6 +10473,26 @@ CREATE TABLE iam_v2.voucher_code_key_generations (
     aead_params jsonb NOT NULL,
     encryption_key_id uuid NOT NULL,
     superseded_at timestamp with time zone
+);
+
+
+--
+-- Name: voucher_code_settings_changes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.voucher_code_settings_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    changed_by text NOT NULL,
+    change_reason text,
+    old_code_mode text,
+    old_code_length integer,
+    new_code_mode text NOT NULL,
+    new_code_length integer NOT NULL,
+    new_config_version bigint NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT voucher_code_settings_changes_actor CHECK ((length(btrim(changed_by)) > 0))
 );
 
 
@@ -12417,6 +12595,14 @@ ALTER TABLE ONLY iam_v2.site_guest_signin_protection
 
 
 --
+-- Name: site_voucher_code_settings site_voucher_code_settings_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.site_voucher_code_settings
+    ADD CONSTRAINT site_voucher_code_settings_pkey PRIMARY KEY (tenant_id, site_id);
+
+
+--
 -- Name: stay_events stay_events_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -12558,6 +12744,14 @@ ALTER TABLE ONLY iam_v2.voucher_code_key_generations
 
 ALTER TABLE ONLY iam_v2.voucher_code_key_generations
     ADD CONSTRAINT voucher_code_key_generations_tenant_id_site_id_id_key UNIQUE (tenant_id, site_id, id);
+
+
+--
+-- Name: voucher_code_settings_changes voucher_code_settings_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.voucher_code_settings_changes
+    ADD CONSTRAINT voucher_code_settings_changes_pkey PRIMARY KEY (id);
 
 
 --
@@ -13382,6 +13576,13 @@ CREATE INDEX stays_effective_checkout ON iam_v2.stays USING btree (tenant_id, si
 --
 
 CREATE INDEX stays_room_lookup ON iam_v2.stays USING btree (tenant_id, site_id, pms_interface_id, normalized_room_number) WHERE (status = 'IN_HOUSE'::text);
+
+
+--
+-- Name: voucher_code_settings_changes_lookup; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX voucher_code_settings_changes_lookup ON iam_v2.voucher_code_settings_changes USING btree (tenant_id, site_id, changed_at DESC);
 
 
 --
@@ -14404,6 +14605,13 @@ CREATE TRIGGER sg_guard BEFORE DELETE OR UPDATE ON iam_v2.pms_interface_secret_g
 --
 
 CREATE TRIGGER sync_outbox_recovery_log_no_update BEFORE DELETE OR UPDATE ON iam_v2.sync_outbox_recovery_log FOR EACH ROW EXECUTE FUNCTION iam_v2.sync_outbox_recovery_log_append_only();
+
+
+--
+-- Name: voucher_code_settings_changes voucher_code_settings_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER voucher_code_settings_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.voucher_code_settings_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.voucher_code_settings_changes_append_only();
 
 
 --
@@ -16612,6 +16820,27 @@ GRANT ALL ON FUNCTION iam_v2.sync_outbox_recover_exhausted(p_operator text, p_re
 REVOKE ALL ON FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at timestamp with time zone, p_reason text) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at timestamp with time zone, p_reason text) TO svc_acctd;
 GRANT ALL ON FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at timestamp with time zone, p_reason text) TO svc_pmsd;
+
+
+--
+-- Name: FUNCTION voucher_code_settings_changes_append_only(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.voucher_code_settings_changes_append_only() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION voucher_code_settings_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.voucher_code_settings_get(p_tenant uuid, p_site uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION voucher_code_settings_set(p_tenant uuid, p_site uuid, p_mode text, p_length integer, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.voucher_code_settings_set(p_tenant uuid, p_site uuid, p_mode text, p_length integer, p_operator text, p_reason text) FROM PUBLIC;
 
 
 --

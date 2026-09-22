@@ -227,3 +227,72 @@ GRANT EXECUTE ON FUNCTION iam_v2.sync_outbox_accounting()                       
 -- deliberate act performed with the owner role, and the append-only change log records who did it.
 GRANT EXECUTE ON FUNCTION iam_v2.cloud_mode_get(uuid,uuid) TO svc_edged;
 GRANT SELECT  ON iam_v2.cloud_mode_changes                 TO svc_edged;
+
+-- ---------------------------------------------------------------------------------------------------------
+-- FOUR GRANTS THAT MIGRATIONS MADE AND A RECONCILE DELETED
+-- ---------------------------------------------------------------------------------------------------------
+-- Migrations 0080, 0081, 0082 and 0083 each added one operator read that a Hotel-Admin screen needs, and
+-- each was correct. None of them was mirrored here, and that is why all four disappear on a factory-clean
+-- install: gatep-grants.sql opens with
+--
+--     REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public  FROM <each service role>
+--     REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA iam_v2  FROM <each service role>
+--
+-- and then re-grants only what the Gate-P files name. Gate-P runs AFTER the numbered migrations in
+-- clean-install-reconstruction.sh and in a real install, so a table privilege that exists only in a
+-- migration is revoked moments after it is granted.
+--
+-- PROVEN, not inferred. The generated factory-clean baseline -- which is a dump of the end state of the
+-- whole install chain -- contains ZERO of these four grants, while the PRE-LIVE appliance has all four:
+-- there, the migrations were applied by hand AFTER Gate-P last ran. So the appliance works and a rebuilt
+-- appliance would not, and the four screens that would silently break are exactly the ones those four
+-- migrations were written to fix:
+--
+--     0080  Policy History        cannot read the Checkout-Grace publication ledger
+--     0081  Audit log             cannot read public.audit_log -- the screen that said "No audit entries"
+--                                 while 379 rows existed, which is the defect 0081 exists to fix
+--     0082  Usage Explorer        cannot read the accounting samples or name the device
+--     0083  Guest Activity        cannot resolve an untaken offer to a stay
+--
+-- The baseline-vs-upgrade gate cannot see this, and that is worth stating: it compares the two paths against
+-- each other, and both end with the same revoke. A defect that is symmetric is invisible to a symmetry
+-- check. The guard that does catch it is tools/validate-migration-grant-durability.py, which asserts that
+-- every service-role grant a migration makes is also named here.
+--
+-- The established rule this restores is the one the Room-Login privilege chain already followed: a privilege
+-- is "fixed at its authoritative source -- migrations plus the per-service Gate-P files, SO A RECONCILE
+-- KEEPS THEM". Migrations 0057 and 0058 are mirrored in the acctd and netd Gate-P files for this reason.
+-- These four were not.
+
+-- 0081: the service may read the trail it writes. edged has INSERT on audit_log above; without SELECT the
+-- Audit log screen reports that nothing has ever happened, because pgx surfaces a permission failure on the
+-- first Next() and the handler read it as an empty result.
+GRANT SELECT ON public.audit_log TO svc_edged;
+
+-- 0082: the service may read the usage it reports. The per-session samples behind a disputed figure, and the
+-- device record that lets an operator name the handset.
+GRANT SELECT ON iam_v2.accounting_records TO svc_edged;
+GRANT SELECT ON iam_v2.devices            TO svc_edged;
+
+-- 0080: the service may read the ledger it writes. Append-only and enforced so by trigger; the only
+-- legitimate writer is the controlled publication operation, which carries its own privilege.
+GRANT SELECT ON iam_v2.checkout_grace_policy_publications TO svc_edged;
+
+-- 0083: an offer nobody took still belongs to a stay. FIVE COLUMNS, NOT THE TABLE -- deliberately, and this
+-- is the one grant here where the narrowing is the point. A table-level SELECT on auth_contexts would hand
+-- the operator API the voucher, guest-account and guest-principal linkage for every authentication this
+-- appliance has ever performed, plus the device and network each came from. That is the authentication
+-- record itself, not attribution, and edged has never held it.
+GRANT SELECT (id, tenant_id, site_id, stay_id, pms_interface_id) ON iam_v2.auth_contexts TO svc_edged;
+
+-- ---- the per-site voucher code format (migration 0085) ----------------------------------------------
+-- Digits-only or mixed, and how many characters. edged reads it and writes it THROUGH THE TWO FUNCTIONS:
+-- neither table is granted, because a role that could write site_voucher_code_settings directly could
+-- change the format without leaving a change row, which is the one thing the audit exists to prevent.
+--
+-- Mirrored here and not left in the migration alone, for the reason written at length above: gatep-grants.sql
+-- revokes all privileges from the service roles and runs after the migrations, so a privilege that lives only
+-- in a migration is revoked moments after it is granted.
+GRANT EXECUTE ON FUNCTION iam_v2.voucher_code_settings_get(uuid,uuid)                            TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.voucher_code_settings_set(uuid,uuid,text,integer,text,text)     TO svc_edged;
+GRANT SELECT  ON iam_v2.voucher_code_settings_changes                                            TO svc_edged;

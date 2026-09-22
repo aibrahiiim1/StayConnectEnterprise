@@ -26,3 +26,14 @@ GRANT SELECT, INSERT ON iam_v2.vouchers                     TO svc_scd;
 --   * DELETE on vouchers -- an issued voucher is revoked by state, never erased;
 --   * any read of the DEK itself, which lives in the appliance secret store and never in the database. The
 --     database holds only material sealed UNDER that key, so a database compromise alone yields no code.
+
+-- ---- the code format issuance reads (migration 0085) ------------------------------------------------
+-- scd reads the site's voucher code format at issuance, through the reader function and nothing else. It
+-- holds no privilege on either settings table: the format is chosen by an operator through edged, and
+-- issuance only needs to be told what was chosen.
+--
+-- Mirrored here rather than left in 0085 alone. gatep-grants.sql revokes all privileges from the service
+-- roles and runs AFTER the numbered migrations, so a grant that exists only in a migration does not survive
+-- a factory-clean install -- and issuance is written to REFUSE rather than guess a format, so losing this
+-- grant does not produce a default, it produces a refusal to issue.
+GRANT EXECUTE ON FUNCTION iam_v2.voucher_code_settings_get(uuid,uuid) TO svc_scd;
