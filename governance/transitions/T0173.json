@@ -1,7 +1,7 @@
 {
   "transition_id": "T0173",
   "seq": 173,
-  "timestamp": "2026-09-22T05:40:00Z",
+  "timestamp": "2026-09-22T06:00:00Z",
   "timestamp_derivation": "After the 17 defective rollback artifacts were quarantined on the appliance and the remaining 19 confirmed to carry the production build profile, and after the rollback guard and its six cases were proven locally. Before the author timestamp of the commit that introduces this receipt.",
   "record_type": "CLOSURE_CORRECTION_OPEN_DECISIONS_AND_ROLLBACK_PROVENANCE",
   "what_was_authorised": "Two closure corrections. Reconcile next_authorized_action and the open-decision state with current truth, recording the open decisions accurately WITHOUT authorising either. Review the retained defective rollback artifacts so the operational rollback path points only to known-good production-tagged binaries and defective ones cannot be restored as a supported rollback, preserving evidence. Explicitly NOT authorised: product behaviour change, commerce enablement, deployment beyond what rollback safety strictly requires, and any change to 172.21.60.23, PMS, financial, networking, schema, security boundary or Go-Live.",
@@ -21,6 +21,7 @@
     "supported_candidates_remaining": "19, all carrying the production profile: scd 5, edged 4, pmsd 3, portald 3, netd 3, acctd 1. Every service retains at least one supported rollback candidate, which was checked rather than assumed -- a quarantine that left a service with none would have traded one unsafe state for another.",
     "no_deployment": "No binary was installed, replaced or restarted. The running services are untouched and remain the production-tagged builds recorded in T0172. Only retained artifacts were moved."
   },
+  "a_second_consumer_found_by_the_gate": "The profile guard broke the kernel rollback suite as well as the shell one. Only the shell suite was searched for and fixed; data-plane/internal/kerneltest drives the same script against a real kernel with its own fixture binaries, which did not carry the tag either, so three cases failed -- all about the pre-convergence boundary, none about the build profile, each for a reason unrelated to what it tests. The gate caught it. The fixtures now carry the tag, and every EXECUTING consumer was enumerated rather than assumed: the shell suite and the kernel suite. phase3-preflight.sh only reads the script's text and never runs it, and its assertion that no force path exists still holds because the guard deliberately adds none. This is the second time in this mission that a change with more than one consumer was made after searching for one of them.",
   "a_count_corrected_before_it_was_published": "The audit was first reported as 16 of 36 and the number reached two source comments before the quarantine run returned 17. The rows were miscounted by hand. Both comments were corrected to 17 and thirteen, and the figure is now derived from the quarantine manifest rather than from counting a terminal listing.",
   "verification": {
     "governance": "PROJECT_STATE_GOVERNANCE = PASS.",
@@ -44,5 +45,5 @@
   "authorization": "Closure corrections only: open-decision reconciliation and rollback-artifact provenance. No product capability was enabled, no decision was taken on the Product Owner's behalf, and no binary was deployed or restarted.",
   "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE. 172.21.60.23 was not contacted.",
   "base": "225edbf24f8b5abc8c46ad0a6a849bb8abde5685",
-  "head": "663cd21b89bfce8145c9e9181d48fef1b5f9109a"
+  "head": "65705e38d9eec10a9cf9f7cadf8c7971aa8c2803"
 }

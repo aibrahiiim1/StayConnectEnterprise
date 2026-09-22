@@ -1601,7 +1601,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "225edbf24f8b5abc8c46ad0a6a849bb8abde5685",
     "base_note": "The master merge commit of PR #170, the provenance reconciliation.",
-    "head": "663cd21b89bfce8145c9e9181d48fef1b5f9109a",
+    "head": "65705e38d9eec10a9cf9f7cadf8c7971aa8c2803",
     "head_note": "The last content commit of this delivery. The governance receipt and generated blocks follow it and the manifest last of all -- the manifest must list itself.",
     "note": "T0173. Two closure corrections. next_authorized_action said the approving-review question was THE ONLY open Product-Owner item, while the guest-access record had carried the unresolved voucher and commerce decision since T0170. Both are now recorded in open_product_owner_decisions and neither is authorised by being recorded. AND the rollback path: 17 of 36 retained artifacts in the appliance's bin directory were built without -tags stayconnect_production -- four from this mission, thirteen predating it -- and every one was selectable by suffix, installable, and would have been verified by digest and reported as a successful rollback while saying nothing about the build profile that decides whether edged enforces the guest-authority lock. All 17 are quarantined out of the rollback directory with their digests preserved, and binary-rollback.sh now refuses any target lacking the profile, reading the artifact rather than the filename, with no override flag. 19 supported candidates remain and every service still has at least one. No binary was installed or restarted."
   },
