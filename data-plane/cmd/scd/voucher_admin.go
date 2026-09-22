@@ -408,3 +408,92 @@ func (s *server) revokeVoucher(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"voucher_id": id, "state": "REVOKED"})
 }
+
+// ----- key-generation rotation -----------------------------------------------------------------------
+
+// listVoucherKeyGenerations answers which code key generations exist and which one is active.
+//
+// No key material leaves this handler. hmac_key_ciphertext is the sealed blind-index key and the sealed
+// form is no more publishable than the clear one; what an operator needs is the generation number, when it
+// was created, whether it is active, and who retired it.
+func (s *server) listVoucherKeyGenerations(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.db.Query(r.Context(), `
+	    SELECT g.id::text, g.generation_no,
+	           to_char(g.superseded_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+	           g.supersede_reason,
+	           (SELECT count(*) FROM iam_v2.vouchers v
+	             WHERE v.tenant_id = g.tenant_id AND v.site_id = g.site_id
+	               AND v.code_key_generation_id = g.id)                          AS vouchers,
+	           (SELECT count(*) FROM iam_v2.vouchers v
+	             WHERE v.tenant_id = g.tenant_id AND v.site_id = g.site_id
+	               AND v.code_key_generation_id = g.id AND v.state = 'UNUSED')   AS unused
+	      FROM iam_v2.voucher_code_key_generations g
+	     WHERE g.tenant_id = $1 AND g.site_id = $2
+	     ORDER BY g.generation_no DESC`, s.tenID, s.siteID)
+	if err != nil {
+		httpErr(w, http.StatusInternalServerError, "generation list failed")
+		return
+	}
+	defer rows.Close()
+	type gen struct {
+		ID           string  `json:"id"`
+		GenerationNo int     `json:"generation_no"`
+		SupersededAt *string `json:"superseded_at"`
+		Reason       *string `json:"supersede_reason"`
+		Vouchers     int64   `json:"vouchers"`
+		Unused       int64   `json:"unused_vouchers"`
+		Active       bool    `json:"active"`
+	}
+	out := []gen{}
+	for rows.Next() {
+		var g gen
+		if err := rows.Scan(&g.ID, &g.GenerationNo, &g.SupersededAt, &g.Reason, &g.Vouchers, &g.Unused); err != nil {
+			httpErr(w, http.StatusInternalServerError, "generation list failed")
+			return
+		}
+		g.Active = g.SupersededAt == nil
+		out = append(out, g)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"generations": out})
+}
+
+// rotateVoucherKeyGeneration retires one generation. The NEXT issuance mints its successor.
+//
+// It does not create the replacement itself, and that is deliberate rather than lazy:
+// ensureVoucherKeyGeneration already mints max(generation_no)+1 when a site has no active generation, and
+// it does so inside the issuance path where the DEK is already open and the keyring already loaded. Minting
+// here as well would be a second place that creates key material, which is one more than a system should
+// have.
+func (s *server) rotateVoucherKeyGeneration(w http.ResponseWriter, r *http.Request) {
+	var in voucherActor
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		httpErr(w, http.StatusBadRequest, "bad body")
+		return
+	}
+	if err := in.validate(true); err != nil {
+		httpErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	id := chi.URLParam(r, "id")
+	var genNo int
+	if err := s.db.QueryRow(r.Context(),
+		`SELECT iam_v2.voucher_code_generation_supersede($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5)`,
+		s.tenID, s.siteID, id, in.OperatorID, strings.TrimSpace(in.Reason)).Scan(&genNo); err != nil {
+		if strings.Contains(err.Error(), "VOUCHER_GENERATION_NOT_ACTIVE") {
+			httpErr(w, http.StatusConflict,
+				"no ACTIVE code key generation with that id: it may already have been retired")
+			return
+		}
+		httpErr(w, http.StatusInternalServerError, "rotation failed")
+		return
+	}
+	// The authenticator's cached key set no longer describes this site.
+	invalidateVoucherKeyCache(s.tenID, s.siteID)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"generation_no": genNo, "state": "SUPERSEDED",
+		"notice": "Codes already printed under this generation remain redeemable -- each voucher pins the " +
+			"generation that indexed it. The next batch you print will mint a new generation.",
+	})
+}

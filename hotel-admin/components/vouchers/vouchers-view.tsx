@@ -27,6 +27,18 @@ import type { Voucher, VoucherCodeFormat, VoucherReveal, VoucherState } from "@/
 // The one-time response of a print run. It exists only here: nothing stores a plaintext code.
 type IssuedBatch = { batch_id: string; count: number; codes: string[] };
 
+// A code key generation. No key material is ever returned -- the sealed blind-index key is no more
+// publishable than the clear one -- so this is the number, the lifecycle and what it still indexes.
+type KeyGeneration = {
+  id: string;
+  generation_no: number;
+  superseded_at: string | null;
+  supersede_reason: string | null;
+  vouchers: number;
+  unused_vouchers: number;
+  active: boolean;
+};
+
 const STATE_WORDS: Record<VoucherState, string> = {
   UNUSED: "Not used yet",
   REDEEMED: "Redeemed",
@@ -44,6 +56,7 @@ export function VouchersView(props: {
   const [rows, setRows] = useState<Voucher[] | null>(null);
   const [reveals, setReveals] = useState<VoucherReveal[] | null>(null);
   const [format, setFormat] = useState<VoucherCodeFormat | null>(null);
+  const [gens, setGens] = useState<KeyGeneration[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [stateFilter, setStateFilter] = useState("");
@@ -60,6 +73,7 @@ export function VouchersView(props: {
     | { kind: "reveal"; row: Voucher }
     | { kind: "revoke"; row: Voucher }
     | { kind: "export"; batch: string; size: number }
+    | { kind: "rotate"; gen: KeyGeneration }
     | null
   >(null);
   const [password, setPassword] = useState("");
@@ -88,9 +102,18 @@ export function VouchersView(props: {
 
   useEffect(load, [load]);
   useEffect(loadReveals, [loadReveals]);
+  const loadGenerations = useCallback(() => {
+    if (!canEditFormat) return;
+    api
+      .get<{ generations?: KeyGeneration[] }>("/voucher-code-settings/key-generations")
+      .then((m) => setGens(m.generations ?? []))
+      .catch(() => setGens(null));
+  }, [canEditFormat]);
+
   useEffect(() => {
     api.get<VoucherCodeFormat>("/voucher-code-settings/").then(setFormat).catch(() => setFormat(null));
   }, []);
+  useEffect(loadGenerations, [loadGenerations]);
 
   // Batches, derived from the rows rather than fetched: a batch is a grouping of vouchers, not a record of
   // its own, and inventing a second source for it is how the two disagree.
@@ -122,6 +145,12 @@ export function VouchersView(props: {
       } else if (dialog.kind === "revoke") {
         await api.post(`/vouchers/${dialog.row.id}/revoke`, { password, reason: reason.trim() });
         load();
+      } else if (dialog.kind === "rotate") {
+        await api.post(`/voucher-code-settings/key-generations/${dialog.gen.id}/supersede`, {
+          password,
+          reason: reason.trim(),
+        });
+        loadGenerations();
       } else {
         const out = await api.post<{ batch_id: string; vouchers: { id: string; code: string }[] }>(
           "/voucher-codes/export",
@@ -257,6 +286,62 @@ export function VouchersView(props: {
           </>
         )}
       </section>
+
+      {/* ---- code key generations ---- */}
+      {canEditFormat && gens !== null && (
+        <section className="rounded-md border p-4 space-y-2">
+          <h2 className="font-semibold">Code keys</h2>
+          <p className="text-sm text-muted-foreground">
+            Every code is indexed under a key, and each card stays tied to the key that made it. Retiring a
+            key means new batches use a fresh one; cards already printed keep working. Until now this could
+            be described and not done — the key a property started with was its key forever.
+          </p>
+          <table className="w-full text-sm">
+            <thead className="text-left text-muted-foreground">
+              <tr>
+                <th className="py-2">Key</th>
+                <th>State</th>
+                <th>Cards made with it</th>
+                <th>Still unused</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {gens.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="py-3 text-muted-foreground">
+                    No key yet — the first batch you print creates one.
+                  </td>
+                </tr>
+              )}
+              {gens.map((g) => (
+                <tr key={g.id} className="border-t">
+                  <td className="py-2">Generation {g.generation_no}</td>
+                  <td>
+                    {g.active ? (
+                      "In use"
+                    ) : (
+                      <span title={g.supersede_reason ?? undefined}>Retired {g.superseded_at}</span>
+                    )}
+                  </td>
+                  <td>{g.vouchers.toLocaleString()}</td>
+                  <td>{g.unused_vouchers.toLocaleString()}</td>
+                  <td className="text-right">
+                    <button
+                      type="button"
+                      disabled={!g.active || busy}
+                      className="rounded border px-2 py-1 disabled:opacity-40"
+                      onClick={() => setDialog({ kind: "rotate", gen: g })}
+                    >
+                      Retire
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
 
       {/* ---- issue ---- */}
       {canIssue && (
@@ -483,7 +568,9 @@ export function VouchersView(props: {
               ? "Show this code"
               : dialog.kind === "revoke"
                 ? "Cancel this card"
-                : "Export a batch of codes"}
+                : dialog.kind === "rotate"
+                  ? `Retire code key generation ${dialog.gen.generation_no}`
+                  : "Export a batch of codes"}
           </h2>
           <p className="text-sm text-muted-foreground">
             {dialog.kind === "reveal" ? (
@@ -497,6 +584,14 @@ export function VouchersView(props: {
                 This card stops working. It cannot be un-cancelled. A card that has already been redeemed
                 cannot be cancelled here at all: that guest has access, and ending it is done from their
                 session.
+              </>
+            ) : dialog.kind === "rotate" ? (
+              <>
+                New batches will be printed under a fresh key. The{" "}
+                <strong>{dialog.gen.unused_vouchers.toLocaleString()} unused cards</strong> printed under
+                generation {dialog.gen.generation_no} keep working — each card is tied to the key that
+                made it — so nothing in circulation stops. This cannot be undone: a retired generation is
+                not brought back.
               </>
             ) : (
               <>
@@ -536,7 +631,13 @@ export function VouchersView(props: {
               }
               onClick={submit}
             >
-              {dialog.kind === "reveal" ? "Show it" : dialog.kind === "revoke" ? "Cancel the card" : "Export"}
+              {dialog.kind === "reveal"
+                ? "Show it"
+                : dialog.kind === "revoke"
+                  ? "Cancel the card"
+                  : dialog.kind === "rotate"
+                    ? "Retire this generation"
+                    : "Export"}
             </button>
             <button type="button" className="rounded border px-3 py-1" onClick={closeDialog}>
               Cancel

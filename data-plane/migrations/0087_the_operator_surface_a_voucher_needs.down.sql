@@ -26,6 +26,7 @@
 BEGIN;
 
 DROP FUNCTION IF EXISTS iam_v2.voucher_revoke(uuid, uuid, uuid, uuid, text);
+DROP FUNCTION IF EXISTS iam_v2.voucher_code_generation_supersede(uuid, uuid, uuid, uuid, text);
 
 DROP TRIGGER IF EXISTS voucher_code_reveals_append_only ON iam_v2.voucher_code_reveals;
 DROP TABLE IF EXISTS iam_v2.voucher_code_reveals;
@@ -37,5 +38,12 @@ DROP INDEX IF EXISTS iam_v2.vouchers_created_lookup;
 ALTER TABLE iam_v2.vouchers
   DROP COLUMN IF EXISTS issued_by,
   DROP COLUMN IF EXISTS created_at;
+
+-- Rotation becomes impossible again, and superseded_at reverts to a column nothing writes. Generations
+-- ALREADY retired stay retired: superseded_at is in the row, not in the function. Who retired them and why
+-- is lost with these two columns, which is the cost of this direction.
+ALTER TABLE iam_v2.voucher_code_key_generations
+  DROP COLUMN IF EXISTS supersede_reason,
+  DROP COLUMN IF EXISTS superseded_by;
 
 COMMIT;

@@ -338,7 +338,67 @@ func (s *server) voucherCodeSettingsRoutes() http.Handler {
 	r.Get("/", s.getVoucherCodeSettings)
 	r.Put("/", s.setVoucherCodeSettings)
 	r.Get("/changes", s.listVoucherCodeSettingChanges)
+	// KEY ROTATION SITS HERE, not under `vouchers` and not under `voucher-codes`.
+	//
+	// It is key-lifecycle management, so it belongs to the role that already owns what a code looks like --
+	// the same reasoning that puts the format itself here. It is deliberately NOT under `voucher-codes`:
+	// retiring a generation reads no code and reveals nothing, and a desk role that may read one card's
+	// code has no business retiring the key that indexes every card in the building.
+	r.Get("/key-generations", s.listVoucherKeyGenerations)
+	r.Post("/key-generations/{id}/supersede", s.rotateVoucherKeyGeneration)
 	return r
+}
+
+// listVoucherKeyGenerations proxies to scd, which owns the generations table. No key material is returned
+// by that route -- the sealed blind-index key is no more publishable than the clear one.
+func (s *server) listVoucherKeyGenerations(w http.ResponseWriter, r *http.Request) {
+	s.scd.proxy(w, r, http.MethodGet, "/v1/voucher-key-generations", nil)
+}
+
+// rotateVoucherKeyGeneration retires a generation under a password step-up and a bounded reason.
+//
+// Step-up because of what it is, not because of what it reads: rotation is a key-lifecycle action on the
+// material that indexes every voucher this property has ever issued, and "who retired generation 3, and
+// why" is a question somebody will ask. Codes already printed keep working -- each voucher pins the
+// generation that indexed it -- which is exactly why this is safe to offer at all.
+func (s *server) rotateVoucherKeyGeneration(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Password string `json:"password"`
+		Reason   string `json:"reason"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid", "malformed request")
+		return
+	}
+	if !validReason(in.Reason) {
+		jsonErr(w, http.StatusBadRequest, "reason_required",
+			"a bounded reason (4-500 characters) is required")
+		return
+	}
+	actor, ok := s.stepUpActor(w, r, in.Password)
+	if !ok {
+		return
+	}
+	sess := sessFrom(r.Context())
+	label := actor
+	if sess != nil && sess.Email != "" {
+		label = sess.Email
+	}
+	id := chi.URLParam(r, "id")
+	st, resp, err := s.scd.call(r.Context(), http.MethodPost,
+		"/v1/voucher-key-generations/"+id+"/supersede",
+		map[string]any{"operator_id": actor, "operator_label": label, "reason": in.Reason})
+	if err != nil {
+		jsonErr(w, http.StatusBadGateway, "scd_unreachable", err.Error())
+		return
+	}
+	if st == http.StatusOK {
+		s.audit(r, "voucher.code_key_rotated", "voucher_code_key_generation", id,
+			map[string]any{"reason": in.Reason})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(st)
+	_, _ = w.Write(resp)
 }
 
 // getVoucherCodeSettings answers what a code looks like at this property. It always answers: a site with no

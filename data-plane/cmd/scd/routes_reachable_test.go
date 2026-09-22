@@ -43,6 +43,8 @@ var edgedDependsOn = []struct{ method, path string }{
 	{"Post", "/v1/vouchers/export"},
 	{"Post", "/v1/vouchers/{id}/reveal"},
 	{"Post", "/v1/vouchers/{id}/revoke"},
+	{"Get", "/v1/voucher-key-generations"},
+	{"Post", "/v1/voucher-key-generations/{id}/supersede"},
 }
 
 func TestEveryPathEdgedCallsIsRoutedOnSCD(t *testing.T) {

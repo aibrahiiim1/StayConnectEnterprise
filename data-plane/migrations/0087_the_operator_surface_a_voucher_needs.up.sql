@@ -39,8 +39,7 @@
 --     (internal/iamv2/repo_pg.go: UNUSED and now inside [valid_from, valid_until)), so a stored
 --     REDEMPTION_EXPIRED would be a denormalisation of a computed fact -- two answers to one question, and
 --     the stored one always the staler.
---   * No generation rotation. superseded_at is still written by nothing. The grant file states that
---     superseding is its own deliberate audited action, and no guest capability degrades without it.
+--   * No REDEMPTION_EXPIRED writer, for the reason above.
 
 BEGIN;
 
@@ -171,7 +170,72 @@ END $ownfn$;
 REVOKE EXECUTE ON FUNCTION iam_v2.voucher_revoke(uuid, uuid, uuid, uuid, text) FROM PUBLIC;
 
 -- ---------------------------------------------------------------------------------------------------------
--- 4. Grants. MIRRORED INTO deploy/gatep/svc-voucher-iamv2-grants.sql in the same commit.
+-- 4. ROTATION, which the design expressed and nothing could perform
+-- ---------------------------------------------------------------------------------------------------------
+-- iam_v2.voucher_code_key_generations carries superseded_at, issuance reads it to find the ACTIVE
+-- generation, and no code path had ever written it. So rotation was expressible in the schema and
+-- impossible in the product: a per-generation blind-index key, once created, was the key forever.
+--
+-- WHY THE SCHEMA BOTHERS. A voucher pins the generation that indexed it, which is what makes rotation
+-- meaningful at all: superseding a generation leaves every unredeemed voucher still redeemable under the
+-- key it was sealed with, while every NEW code is drawn under a fresh one. A single raw key could not
+-- express that -- rotating it would invalidate every printed card in the building.
+--
+-- A KERNEL, NOT A GRANT, and deploy/gatep/svc-voucher-iamv2-grants.sql already said why before this
+-- existed: "UPDATE/DELETE on voucher_code_key_generations to anyone" is withheld because "superseding is a
+-- lifecycle action that sets superseded_at and belongs to a deliberate rotation path, not to routine
+-- issuance, and deleting one would orphan every voucher that pins it". This is that deliberate path.
+ALTER TABLE iam_v2.voucher_code_key_generations
+  ADD COLUMN superseded_by uuid REFERENCES public.operators (id),
+  ADD COLUMN supersede_reason text;
+
+COMMENT ON COLUMN iam_v2.voucher_code_key_generations.superseded_by IS
+  'The authenticated operator who retired this generation, as the server resolved them from the session.';
+
+CREATE OR REPLACE FUNCTION iam_v2.voucher_code_generation_supersede(
+    p_tenant uuid, p_site uuid, p_generation uuid, p_operator uuid, p_reason text)
+  RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, public, pg_temp AS $$
+DECLARE v_n integer; v_no integer;
+BEGIN
+  IF p_operator IS NULL THEN
+    RAISE EXCEPTION 'VOUCHER_ROTATION_NEEDS_AN_OPERATOR' USING ERRCODE = 'check_violation';
+  END IF;
+  IF length(btrim(coalesce(p_reason, ''))) < 4 THEN
+    RAISE EXCEPTION 'VOUCHER_ROTATION_NEEDS_A_REASON' USING ERRCODE = 'check_violation';
+  END IF;
+  -- Serialise against a concurrent rotation of the same site, so two operators cannot retire two
+  -- generations and leave issuance choosing between them by ordering luck.
+  PERFORM pg_advisory_xact_lock(hashtext('voucher_code_generations'), hashtext(p_site::text));
+  UPDATE iam_v2.voucher_code_key_generations
+     SET superseded_at = now(), superseded_by = p_operator,
+         supersede_reason = btrim(p_reason)
+   WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_generation
+     AND superseded_at IS NULL
+  RETURNING generation_no INTO v_no;
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  -- Not a silent no-op: "there is no such active generation" and "it was already retired" are different
+  -- answers, and an operator who cannot tell them apart will rotate twice.
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION 'VOUCHER_GENERATION_NOT_ACTIVE: no active generation % for tenant %/site %',
+      p_generation, p_tenant, p_site USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN v_no;
+END $$;
+
+DO $rotfn$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'iam_v2_owner') THEN
+    EXECUTE 'ALTER FUNCTION iam_v2.voucher_code_generation_supersede(uuid, uuid, uuid, uuid, text) '
+            'OWNER TO iam_v2_owner';
+  END IF;
+END $rotfn$;
+
+REVOKE EXECUTE ON FUNCTION
+  iam_v2.voucher_code_generation_supersede(uuid, uuid, uuid, uuid, text) FROM PUBLIC;
+
+-- ---------------------------------------------------------------------------------------------------------
+-- 5. Grants. MIRRORED INTO deploy/gatep/svc-voucher-iamv2-grants.sql in the same commit.
 --
 -- gatep-grants.sql revokes all privileges from the service roles and runs AFTER the numbered migrations, so
 -- a grant that exists only here does not survive a factory-clean install. Forty grants were lost that way
@@ -183,6 +247,8 @@ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_scd') THEN
     GRANT SELECT, INSERT ON iam_v2.voucher_code_reveals TO svc_scd;
     GRANT EXECUTE ON FUNCTION iam_v2.voucher_revoke(uuid, uuid, uuid, uuid, text) TO svc_scd;
+    GRANT EXECUTE ON FUNCTION
+      iam_v2.voucher_code_generation_supersede(uuid, uuid, uuid, uuid, text) TO svc_scd;
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_edged') THEN
     -- READ ONLY, and nothing else. edged must be able to SHOW the reveal history on the screen that
@@ -191,6 +257,18 @@ BEGIN
     -- gains no privilege on vouchers themselves: it still proxies every code-touching operation to scd,
     -- because scd owns the DEK.
     GRANT SELECT ON iam_v2.voucher_code_reveals TO svc_edged;
+  END IF;
+END $$;
+
+-- The boundary the grant file withheld, re-asserted: rotation goes through the kernel, so no role may
+-- UPDATE the generations table directly. A grant here would let any statement in the process retire any
+-- generation, including a race that retires two.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_scd')
+     AND has_table_privilege('svc_scd', 'iam_v2.voucher_code_key_generations', 'UPDATE') THEN
+    RAISE EXCEPTION 'svc_scd must not hold UPDATE on iam_v2.voucher_code_key_generations: rotation is '
+                    'iam_v2.voucher_code_generation_supersede';
   END IF;
 END $$;
 

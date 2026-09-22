@@ -187,6 +187,11 @@ internet access.
   now, and ending it is done from their session.
 - **Who has read a code** lists every reveal and export. Nothing on it can be
   edited or removed by anyone, including a site admin.
+- **Code keys** (IT manager or site admin): every code is indexed under a key, and
+  each card stays tied to the key that made it. **Retire** a key and new batches
+  use a fresh one while cards already printed keep working — so rotating is safe
+  for a property with thousands of unused cards in a drawer. It asks for your
+  password and a reason, and cannot be undone.
 
 > **A voucher code is recoverable, and that is why the record matters.** A
 > post-stay PIN and a guest-account password are stored hashed, so "shown once"

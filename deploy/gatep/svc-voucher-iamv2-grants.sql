@@ -60,3 +60,14 @@ GRANT SELECT ON iam_v2.voucher_code_reveals TO svc_edged;
 --   * UPDATE or DELETE on iam_v2.voucher_code_reveals to anyone. The append-only trigger refuses both, and
 --     a privilege that is only ever refused is a privilege waiting for the trigger to be dropped.
 --   * anything on iam_v2.vouchers to svc_edged -- including SELECT. The list it shows comes from scd.
+
+-- ---- rotation (migration 0087) ----------------------------------------------------------------------
+-- The comment at the top of this file has always said that superseding a generation "belongs to a
+-- deliberate rotation path, not to routine issuance". Until 0087 there WAS no such path: superseded_at was
+-- read by issuance to find the active generation and written by nothing, so a per-generation key was the
+-- key forever. This is that path, and it is a kernel for the reason the withheld UPDATE explains -- a
+-- blanket UPDATE would let any statement retire any generation, including two at once.
+GRANT EXECUTE ON FUNCTION
+  iam_v2.voucher_code_generation_supersede(uuid, uuid, uuid, uuid, text) TO svc_scd;
+
+-- STILL NOT granted: UPDATE or DELETE on iam_v2.voucher_code_key_generations, to anyone. 0087 asserts it.

@@ -122,7 +122,11 @@ clear** for a card that is already in circulation, which additionally requires
 the operator's password and a bounded reason at the route and writes an
 append-only row naming them. `voucher-code-settings` chooses what a code looks
 like — digits for a numeric keypad, digits and letters for a printed card, never
-more than eight characters.
+more than eight characters — and retires a code key generation, because key
+lifecycle belongs with whoever owns the format. Retiring a key reads no code and
+reveals nothing, which is why it is here rather than under `voucher-codes`: a desk
+role that may read one card's code has no business retiring the key that indexes
+every card in the building.
 
 Issuing already returns plaintext, so it is worth being precise about what the
 second key protects: issuing creates codes **nobody holds yet**, while revealing
