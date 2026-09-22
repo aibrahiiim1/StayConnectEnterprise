@@ -21,6 +21,7 @@
 # Usage:
 #   bash tools/preflight.sh              # everything except the full browser suite
 #   bash tools/preflight.sh --fast       # stages 1-4 only (seconds; the pre-commit sweep)
+#                                       # --fast SKIPS stage 9 (Zero-Stale), which walks git history
 #   bash tools/preflight.sh --full       # adds the full Playwright suite (slow, once, before pushing)
 #   bash tools/preflight.sh --stage N    # a single stage
 #
@@ -285,6 +286,28 @@ stage7() {
 }
 
 # ---------------------------------------------------------------------------------------------------------
+# STAGE 9 - PREFLIGHT_ZERO_STALE
+# The Zero-Stale keyword validator. It is the OTHER half of the governance gate's baseline: the mutation
+# suite requires both the structural validators (stage 1) and this one to pass on the good state before it
+# will mutate anything, and it reports "BASELINE FAIL: structural=0 keyword=1" and stops -- 20 minutes in,
+# with every other gate step already paid for.
+#
+# That is exactly how T0177 failed. The delivery had made project-state.json truthful by replacing a
+# next_authorized_action that contradicted the mission authorisation recorded in the same file. The
+# validator's allowlist did not recognise the new phrase, the packs are generated from it, and nothing local
+# ran this check. The fix was one alternative in a regex; learning it cost a full governance cycle.
+#
+# It is slower than every other non-browser stage because its receipt-timing block walks git history, so it
+# runs in the default mode and not in --fast.
+# ---------------------------------------------------------------------------------------------------------
+stage9() {
+  begin "Stage 9 - PREFLIGHT_ZERO_STALE (keyword validator; the mutation suite's other baseline half)"
+  local rc=0
+  bash tools/validate-project-state.sh || rc=1
+  record "Zero-Stale keyword validator" "$rc"
+}
+
+# ---------------------------------------------------------------------------------------------------------
 # STAGE 8 - the full browser suite. Slow; run ONCE, when everything above is green.
 # ---------------------------------------------------------------------------------------------------------
 stage8() {
@@ -304,6 +327,9 @@ main() {
   want 3 && stage3
   want 4 && stage4
   if [ "$MODE" != "fast" ]; then
+    # Before the compile/build stages: it is slow, but it is the one whose failure mode is a gate that
+    # refuses the delivery before it has run a single mutation case.
+    want 9 && stage9
     want 5 && stage5
     want 6 && stage6
     want 7 && stage7

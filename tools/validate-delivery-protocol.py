@@ -162,7 +162,7 @@ def check_protocol_registered():
 
 
 def check_preflight_covers_the_late_failures():
-    """The preflight must actually RUN the four things that were caught late, not merely mention them.
+    """The preflight must actually RUN the things that were caught late, not merely mention them.
 
     Each entry names a real failure this project paid for. A marker alone is too weak: the marker string
     appears more than once in the script, so deleting the stage that does the work can leave the marker
@@ -186,6 +186,12 @@ def check_preflight_covers_the_late_failures():
         "PREFLIGHT_E2E_INFRA": (
             "the end-to-end server-lifecycle check",
             ("e2e-infra-reporter",)),
+        # The fifth, added after T0177 paid for it: the governance gate's mutation suite refuses to run at
+        # all unless BOTH validators pass on the good state, and the keyword half ran nowhere local. A
+        # one-alternative regex lag in an allowlist therefore cost a full governance cycle to discover.
+        "PREFLIGHT_ZERO_STALE": (
+            "the Zero-Stale keyword validator, the other half of the mutation suite's baseline",
+            ("tools/validate-project-state.sh",)),
     }
     for token, (why, commands) in required.items():
         label = token.replace("PREFLIGHT_", "").lower().replace("_", " ")
