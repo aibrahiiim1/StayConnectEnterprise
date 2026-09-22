@@ -364,39 +364,50 @@ nft list set inet stayconnect phase3_auth_ipv4       # expect: No such file or d
 
 **5b. Remove the schema** — only if a clean slate is required.
 
-> **⚠ THIS STEP HAS NO TOOLED COMMAND, AND THE COMMAND THIS RUNBOOK USED TO PRINT NEVER EXISTED.** It read:
->
-> ```bash
-> bash scripts/edge-migrate.sh --down --only 0010_phase3_stay_resolution \
->   --expect-db <site-db> --target-kind <kind> --ack-target <ack>
-> ```
->
-> `scripts/edge-migrate.sh` has no `--down` flag — the string "down" does not appear in it — so that line
-> terminates immediately with `REFUSED: unknown arg: --down` and exit 2. It also omitted `--expect-sha256`,
-> which that runner requires for any single-migration apply. An operator reaching this step during an
-> incident would have found the documented command broken and would have had to improvise, which is the one
-> thing a rollback runbook must not cause.
->
-> Two further facts make improvising unsafe, and they are why this is a warning rather than a corrected
-> command. First, the live-site apply role is deliberately FORBIDDEN `UPDATE`, `DELETE`, `TRUNCATE`,
-> `REFERENCES` and `TRIGGER` on `public.schema_migrations` (`scripts/edge-migrate.sh:184-192`) — a down
-> migration must remove its ledger row, so it cannot be run by the role the forward apply uses. Second,
-> `deploy/scripts/central-migrate.sh:26-27` states the project's position on the other database in so many
-> words: *"It does not invent a rollback story: .down.sql files exist and are the operator's tool, not this
-> script's. An automatic down-migration is a good way to lose a customer's data during an incident."*
->
-> **So the current, honest position is: a schema down-migration on a live site is NOT a tooled operation.**
-> The `.down.sql` files are correct and are exercised on every change (below), but running one against a
-> live appliance is a hand-run `psql` by an admin role, outside every guard in the forward runner. Closing
-> that gap — a guarded down runner with the same positive-identity gate, a mandatory `--expect-sha256` of
-> the down file, a distinct acknowledgement, and a refusal to roll back anything that is not the current
-> head of the ledger — is recorded as outstanding work rather than described here as if it existed.
+```bash
+bash scripts/edge-migrate.sh --down --only 0010_phase3_stay_resolution \
+  --apply-role <rollback/admin role> \
+  --expect-db <site-db> --target-kind <disposable|live-site> \
+  --ack-target <ack> --ack-down <down-ack> \
+  --expect-sha256 "$(sha256sum data-plane/migrations/0010_phase3_stay_resolution.down.sql | awk '{print $1}')"
+```
+
+> **THIS COMMAND NOW EXISTS. It did not when this runbook first printed it.** The earlier version of this
+> step omitted `--apply-role`, `--ack-down` and `--expect-sha256` and named a `--down` flag the runner did
+> not have: the string "down" did not appear in `scripts/edge-migrate.sh`, so the line terminated with
+> `REFUSED: unknown arg: --down` and exit 2. An operator reaching this step during an incident would have
+> found the documented command broken and improvised, which is the one thing a rollback runbook must not
+> cause. The mode was added with the guards below.
+
+**Four guards a forward apply does not have, and why each is there:**
+
+| Guard | Why |
+|---|---|
+| `--ack-down`, a **second** acknowledgement | `--ack-target` says which database you mean. `--ack-down` says you mean to REMOVE schema from it. `disposable` ⇒ `I_UNDERSTAND_DISPOSABLE_DOWN_MIGRATION`, `live-site` ⇒ `I_UNDERSTAND_LIVE_SITE_DOWN_MIGRATION`. One flag cannot carry both meanings: an operator who has typed the apply acknowledgement a hundred times must not be one `--down` away from dropping a schema. |
+| **Head of ledger** | The version must be the highest applied numbered migration. Rolling back 0060 while 0085 is applied would leave everything between standing on objects that no longer exist, and a down script only knows how to undo itself. The refusal names the head. |
+| **The opposite ledger privilege** | A down needs `SELECT` + `DELETE` on `public.schema_migrations`. The forward path REFUSES `DELETE` on a live site, so **the role that migrates forward cannot roll back, by construction**. Use the rollback/admin role. |
+| **`--all` is refused** | A down sweep is a schema deletion with a loop around it. |
+
+The checksum is mandatory and binds the `.down.sql` file, exactly as it binds the `.up.sql` on an apply. The
+command prints the file it is about to run before running it.
+
+> **Take a backup first.** The runner does not take one and does not claim to have verified one — an
+> acknowledgement flag it could not check would be theatre rather than a guard. That makes the backup a
+> runbook step: see [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md).
 
 The down script itself is sound: it drops every table, trigger and controlled function 0010 created and
 removes its ledger row, and the preflight asserts that coverage on every build, so a rollback cannot
 silently leave executable functions behind. **The lifecycle gate proves apply → behaviour → down → re-apply
-on a disposable PostgreSQL 16 on every change** — note *disposable*: that is where the rehearsal happens,
-and it is not the same as a live rollback being available.
+on a disposable PostgreSQL 16 on every change**, and `scripts/edge-migrate-selftest.sh` now proves the
+RUNNER itself the same way: twenty-eight cases, fourteen of them for down mode — the rollback, the
+re-apply after it, and eleven refusals including a non-head rollback, a wrong or missing checksum, the
+forward apply role attempting it, and a failing down that must leave both the object and its ledger row
+intact.
+
+An earlier version of this paragraph ended "it is not the same as a live rollback being available",
+which was true when the flag did not exist. A live rollback is now available and guarded; what is still
+true is that the *rehearsal* happens on a disposable database, and that a backup before a live down is a
+runbook step rather than something the runner verifies.
 
 Afterwards, confirm the schema is gone:
 

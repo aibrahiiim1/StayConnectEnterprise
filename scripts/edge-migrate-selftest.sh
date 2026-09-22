@@ -260,6 +260,161 @@ Q "DELETE FROM public.schema_migrations WHERE version='0098_selftest_fails';" >/
 rm -f "$MIGDIR/0098_selftest_fails.up.sql"
 undo
 
+# =========================================================================================================
+# DOWN MODE. There was no --down: the Phase-3 rollback runbook printed the command and the runner answered
+# `REFUSED: unknown arg: --down`, so the documented live rollback was unexecutable and the real one was a
+# hand-run psql outside every guard in this file. These cases pin the mode AND pin that it did not buy its
+# existence by weakening anything.
+# =========================================================================================================
+echo "== 7. down mode =="
+ledger_reset; mk_commerce
+cat > "$MIGDIR/0099_selftest_noop.down.sql" <<'SQL'
+BEGIN;
+DROP TABLE IF EXISTS iam_v2.edge_selftest_marker;
+COMMIT;
+SQL
+DSHA="$(sha256sum "$MIGDIR/0099_selftest_noop.down.sql" | awk '{print $1}')"
+ZEROSHA="0000000000000000000000000000000000000000000000000000000000000000"
+
+# The rollback/admin role is a DIFFERENT role from the forward apply role, which is exactly the point: the
+# forward path REFUSES DELETE on the ledger for a live site, so it cannot roll back.
+Q "DO \$r\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='edge_rollback') THEN
+     CREATE ROLE edge_rollback NOLOGIN; END IF; END \$r\$;" >/dev/null
+Q "REVOKE CREATE ON SCHEMA public FROM edge_rollback;
+   GRANT USAGE ON SCHEMA public, iam_v2 TO edge_rollback;
+   GRANT CREATE ON SCHEMA iam_v2 TO edge_rollback;
+   GRANT SELECT, DELETE ON public.schema_migrations TO edge_rollback;" >/dev/null
+# THE ROLLBACK ROLE MUST BE ABLE TO ADMINISTER WHAT THE APPLY ROLE CREATED, and modelling that is part of
+# modelling the operation. The forward apply creates its objects under SET ROLE edge_apply, so they are
+# owned by edge_apply; a DROP by a non-owner fails with 'must be owner of table'. On the appliance the
+# equivalent is that the rollback/admin role is the iam_v2 owner or a member of it.
+#
+# THIS WAS FOUND BY THIS SUITE FAILING, and the failure was worth having: the runner refused, reported
+# psql exit 3, and left BOTH the object and the ledger row intact -- which is case 7j's property arriving
+# unprompted in case 7a.
+Q "GRANT edge_apply TO edge_rollback;" >/dev/null
+
+run_down(){ # run_down <extra args...> ; always live-site, always the disposable migration
+  EDGE_PSQL="$PSQL" bash "$RUN" --down --apply-role edge_rollback --only 0099_selftest_noop \
+    --expect-db "$DB" --target-kind live-site --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION \
+    --expect-sha256 "$DSHA" "$@" 2>&1
+}
+marker(){ Q "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='iam_v2' AND c.relname='edge_selftest_marker'"; }
+
+# 7a. The happy path: apply, then roll back, and BOTH the object and the ledger row must go.
+out="$(run_apply)"
+if applied && [ "$(marker)" = "1" ]; then ok "down fixture: the migration applied and its object exists"
+else no "down fixture did not apply" "$out"; fi
+out="$(run_down --ack-down I_UNDERSTAND_LIVE_SITE_DOWN_MIGRATION)"
+if echo "$out" | grep -q "EDGE_MIGRATE_DOWN_OK reverted=1" && ! applied && [ "$(marker)" = "0" ]; then
+  ok "a down migration removes BOTH its object and its ledger row"
+else no "the down did not complete (ledger/object still present)" "$out"; fi
+
+# 7b. FORWARD RECOVERY. A rollback that cannot be re-applied is a one-way door.
+out="$(run_apply)"
+if applied && [ "$(marker)" = "1" ]; then ok "...and the same migration re-applies afterwards"
+else no "the migration did not re-apply after its down" "$out"; fi
+
+# 7c. The down-specific acknowledgement is REQUIRED; --ack-target alone must not be enough.
+out="$(run_down)"
+case "$out" in
+  *"requires --ack-down I_UNDERSTAND_LIVE_SITE_DOWN_MIGRATION"*) ok "a down without --ack-down is refused" ;;
+  *) no "a down without --ack-down was not refused for the right reason" "$out" ;;
+esac
+out="$(run_down --ack-down I_UNDERSTAND_DISPOSABLE_DOWN_MIGRATION)"
+case "$out" in
+  *"requires --ack-down I_UNDERSTAND_LIVE_SITE_DOWN_MIGRATION"*) ok "the disposable ack does not satisfy a live-site down" ;;
+  *) no "the wrong-kind ack was accepted or refused wrongly" "$out" ;;
+esac
+
+# 7d. HEAD OF LEDGER. Rolling back out of order leaves later migrations standing on dropped objects.
+ledger_add 0100_selftest_later
+out="$(run_down --ack-down I_UNDERSTAND_LIVE_SITE_DOWN_MIGRATION)"
+case "$out" in
+  *"is not the head of the ledger"*) ok "a non-head down is refused, and the message names the head" ;;
+  *) no "a non-head down was not refused for the right reason" "$out" ;;
+esac
+Q "DELETE FROM public.schema_migrations WHERE version='0100_selftest_later';" >/dev/null
+
+# 7e. The checksum is mandatory and binding for the DOWN file too.
+out="$(EDGE_PSQL="$PSQL" bash "$RUN" --down --apply-role edge_rollback --only 0099_selftest_noop \
+  --expect-db "$DB" --target-kind live-site --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION \
+  --ack-down I_UNDERSTAND_LIVE_SITE_DOWN_MIGRATION 2>&1)"
+case "$out" in
+  *"--expect-sha256 is mandatory for a down-migration"*) ok "a down without --expect-sha256 is refused" ;;
+  *) no "a down without a checksum was not refused" "$out" ;;
+esac
+out="$(EDGE_PSQL="$PSQL" bash "$RUN" --down --apply-role edge_rollback --only 0099_selftest_noop \
+  --expect-db "$DB" --target-kind live-site --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION \
+  --ack-down I_UNDERSTAND_LIVE_SITE_DOWN_MIGRATION --expect-sha256 "$ZEROSHA" 2>&1)"
+case "$out" in
+  *"checksum mismatch"*) ok "a down with the wrong checksum is refused" ;;
+  *) no "a wrong down checksum was accepted" "$out" ;;
+esac
+
+# 7f. THE PRIVILEGE MIRROR. The forward apply role is refused DELETE on the ledger for a live site, so it
+# must be unable to roll back -- and the refusal has to name the remedy and say it is not the same role.
+out="$(EDGE_PSQL="$PSQL" bash "$RUN" --down --apply-role edge_apply --only 0099_selftest_noop \
+  --expect-db "$DB" --target-kind live-site --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION \
+  --ack-down I_UNDERSTAND_LIVE_SITE_DOWN_MIGRATION --expect-sha256 "$DSHA" 2>&1)"
+case "$out" in
+  *"lacks required DELETE on public.schema_migrations"*)
+    case "$out" in
+      *"NOT the forward apply role"*) ok "the forward apply role cannot roll back, and the refusal says so" ;;
+      *) no "refused for DELETE but did not explain it is the wrong role" "$out" ;;
+    esac ;;
+  *) no "the forward apply role was allowed to roll back, or refused wrongly" "$out" ;;
+esac
+
+# 7g. A down for a migration that is NOT applied has nothing to undo.
+Q "DELETE FROM public.schema_migrations WHERE version='0099_selftest_noop';" >/dev/null
+out="$(run_down --ack-down I_UNDERSTAND_LIVE_SITE_DOWN_MIGRATION)"
+case "$out" in
+  *"is not applied to this database"*) ok "a down for an unapplied migration is refused" ;;
+  *) no "a down for an unapplied migration was not refused" "$out" ;;
+esac
+
+# 7h. --all and --down cannot be combined: a down sweep is a schema deletion with a loop around it.
+out="$(EDGE_PSQL="$PSQL" bash "$RUN" --down --all --apply-role edge_rollback \
+  --expect-db "$DB" --target-kind live-site --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION \
+  --ack-down I_UNDERSTAND_LIVE_SITE_DOWN_MIGRATION 2>&1)"
+case "$out" in
+  *"--all cannot be combined with --down"*) ok "a down sweep is refused" ;;
+  *) no "--down --all was not refused" "$out" ;;
+esac
+
+# 7i. --ack-down is meaningless without --down. Accepting and discarding a flag is the defect this project
+# keeps finding, so it is refused rather than ignored.
+out="$(run_apply --ack-down I_UNDERSTAND_LIVE_SITE_DOWN_MIGRATION)"
+case "$out" in
+  *"--ack-down is only meaningful with --down"*) ok "--ack-down without --down is refused, not ignored" ;;
+  *) no "--ack-down was accepted on a forward apply" "$out" ;;
+esac
+
+# 7j. A FAILING down must not remove the ledger row. Without forced ON_ERROR_STOP the body's COMMIT degrades
+# to ROLLBACK -- the objects survive -- and the appended DELETE then commits on its own, leaving a database
+# whose objects the ledger denies. The next forward apply would try to create what is already there.
+ledger_reset; mk_commerce
+out="$(run_apply)"
+cat > "$MIGDIR/0099_selftest_noop.down.sql" <<'SQL'
+BEGIN;
+DROP TABLE IF EXISTS iam_v2.edge_selftest_marker;
+SELECT 1 FROM this_relation_does_not_exist;
+COMMIT;
+SQL
+BADDSHA="$(sha256sum "$MIGDIR/0099_selftest_noop.down.sql" | awk '{print $1}')"
+out="$(EDGE_PSQL="$PSQL" bash "$RUN" --down --apply-role edge_rollback --only 0099_selftest_noop \
+  --expect-db "$DB" --target-kind live-site --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION \
+  --ack-down I_UNDERSTAND_LIVE_SITE_DOWN_MIGRATION --expect-sha256 "$BADDSHA" 2>&1)"; drc=$?
+if [ "$drc" != "0" ] && ! echo "$out" | grep -q "EDGE_MIGRATE_DOWN_OK"; then
+  ok "a failing down is refused, not reported as reverted"
+else no "a failing down was reported as reverted (rc=$drc)" "$out"; fi
+if applied && [ "$(marker)" = "1" ]; then
+  ok "...and it left the ledger row AND the object intact"
+else no "a failed down removed the ledger row or the object" "$out"; fi
+rm -f "$MIGDIR/0099_selftest_noop.down.sql"
+undo
+
 echo "============================================================"
 if [ "$fail" = "0" ]; then echo "EDGE_MIGRATE_SELFTEST = PASS ($pass cases)"; exit 0; fi
 echo "EDGE_MIGRATE_SELFTEST = FAIL"; exit 1
