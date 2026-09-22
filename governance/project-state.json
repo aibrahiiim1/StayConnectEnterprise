@@ -1147,12 +1147,12 @@
       "_note": "THE WORK D41's DEFERRAL IS WAITING ON, enumerated so 'functionally complete' is a checkable claim rather than a judgement. Built at T0175 from current master and live PRE-LIVE evidence. An item leaves this list only when it is CLOSED with evidence, and the list existing is what stops completeness being declared by assertion.",
       "authorisation": "Product-Owner closure mission, recorded at T0175. Controlled PRE-LIVE work included.",
       "development_gaps": {
-        "gatep_grant_gaps": "OPEN. 40 service-role grants made by migrations are not named in deploy/gatep/, so they do not survive a factory-clean install. Enumerated in tools/validate-migration-grant-durability.py.",
+        "gatep_grant_gaps": "CLOSED in increment 2. All 40 resolved: 38 mirrored into the per-service Gate-P files and 2 identified as DEAD (0069 granted on iam_v2.pms_reoffer_stay_event and iam_v2.stay_event_reoffers; 0070 drops both). Each was verified against PRE-LIVE first: 29 were present there and 9 were ABSENT WITH THEIR OBJECTS PRESENT -- Guest Device Self-Service and the Phase-6 aggregate-time reads are unprivileged on the live appliance today, unnoticed because the capability is DARK by flag and default-OFF by setting. Proven empirically: the regenerated baseline goes from 323 GRANT lines to 373, and both install paths still agree at 9590 catalog facts. The validator's exception list is now EMPTY and it tells a dead grant from a durability gap by reading the baseline. RESTORING THE NINE ON THE APPLIANCE requires the authoritative Gate-P reconcile there, which belongs to the deployment step.",
         "voucher_operator_surface": "OPEN. Nothing in the product can issue a voucher: scd registers POST /v1/vouchers/issue and no caller exists anywhere -- no edged route, no UI, no CLI. The 0085 code-format setting has no operator route either, so the format is whatever the column defaults are.",
         "voucher_reveal_and_export": "OPEN. OpenVoucherCode exists with zero callers. A voucher code is encrypted and RECOVERABLE, unlike the hashed post-stay PIN and guest-account password, so single-use and audit must be enforced rather than inherited from the crypto.",
-        "guarded_down_migration_runner": "OPEN. scripts/edge-migrate.sh has no --down flag; the Phase-3 runbook printed that command and it exits 2. A live schema rollback is currently a hand-run psql outside every guard.",
-        "nightly_backup_scheduler": "OPEN. deploy/scripts/stayconnect-site-backup.sh is installed and proven in manual use, and nothing runs it without a human. No systemd timer, no cron.",
-        "financial_rollback_detector_unwired": "OPEN. payment.ReconcileEpoch has no production caller, and the management marker it reads is uninitialised, so both halves of restore-rollback detection are inert."
+        "guarded_down_migration_runner": "CLOSED in increment 2. scripts/edge-migrate.sh --down carries every guard the forward path has plus four it does not: a SECOND acknowledgement (--ack-down, separate vocabulary per kind, so muscle memory for the apply ack cannot satisfy it), head-of-ledger (refusing an out-of-order rollback and naming the head), the OPPOSITE ledger privilege (SELECT + DELETE, which the forward path refuses on a live site -- so the role that migrates forward cannot roll back, by construction), and a refusal of --all. Fourteen cases added to the disposable self-test, which the phase3 gate already runs: the rollback, the re-apply after it, and eleven refusals. The Phase-3 runbook now prints the command that exists.",
+        "nightly_backup_scheduler": "CLOSED in increment 2. stayconnect-site-backup.{service,timer}: 02:10 LOCAL (the policy is a low-traffic hour in the site's timezone, and a hotel's quiet hour is a property of where the hotel is), before the 03:30 retention cleanup so the newest backup it protects is the one just taken; Persistent=true; Type=oneshot with no Restart, because a retry loop on a full disk makes the disk worse. The script remains the guard. install-service-units.sh derives the helper from the unit and would refuse the whole install if it had no source -- the rule that exists because a hand-written list once omitted the cleanup unit and the root filesystem filled.",
+        "financial_rollback_detector_unwired": "PARTLY CLOSED in increment 2. payment.ReconcileEpoch now has a caller: edged runs it at startup, after the flags are loaded and before any route is mounted, which satisfies the detector's own ordering rule. The failure posture mirrors the Phase-3 controlled-writer precedent -- loud while Phase 4 is DARK, fatal once transmission is on -- and a test pins the ordering against main.go. STILL OPEN: the management marker is uninitialised, which is a PRE-FINANCIAL-ENABLE PREREQUISITE and needs the supported restore process on the appliance, so it belongs with the live drills."
       },
       "pre_live_operational_gaps": {
         "tagged_multi_vlan_acceptance": "OPEN. Multiple independent tagged guest VLANs sharing the one LAN NIC as an 802.1Q trunk is not proven on the current architecture. The only end-to-end harness could not run on this appliance until T0175 made it appliance-independent, and has not yet been run on it.",
@@ -1169,10 +1169,15 @@
         "ha_architecture": "ARCH-04 is ACTIVE: HA failover is not designed, implemented or accepted. The approved two-NIC rule removed the third NIC the old design assumed, so the sync transport is an open architecture decision, quorum is unresolved, and the recommended cloud-heartbeat witness now collides with the licensing-only decision because 0071 retains no heartbeat endpoint.",
         "payment_provider": "The settlement model, ledger, currency rules and Provider abstraction are specified and implemented with one designated insertion point. No decision record selects a provider, its credentials or its commercial semantics.",
         "c35_archival_receipt_authority": "The fail-closed purge gate is specified and implemented. The external receipt authority is a recorded, accepted absence, classified in governance as not a software task."
+      },
+      "increment_2": {
+        "what": "Four development gaps closed, plus the authorisation contradiction that blocked the closure from being recognisable in the record at all.",
+        "authorisation_contradiction": "next_authorized_action read 'NONE is authorized ... no deployment, no migration, no service restart and no Go-Live' while T0175 recorded the Product Owner's end-to-end authorisation for exactly those steps, in the same file. Both cannot be true. The mission authorisation is the later and more specific statement and now stands, with blockers, allowed_actions and prohibited_actions reconciled to match. The D35-era prohibition on 'deploying to any new server before the Product Owner provides that server' is recorded as SATISFIED rather than lifted: the server was provided and commissioned as PRE-LIVE under D37/T0087.",
+        "still_deferred_or_prohibited": "Real Guest activation and Guest pilot use (D41). Real PMS financial posting, real payment-provider traffic, real settlement, real reversal, paid Guest activation. Go-Live. Contacting 172.21.60.23."
       }
     }
   },
-  "latest_transition_id": "T0176",
+  "latest_transition_id": "T0177",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1666,48 +1671,60 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "MERGE_RECEIPT_FOR_FUNCTIONAL_COMPLETENESS_CLOSURE_INCREMENT_1",
+    "kind": "FUNCTIONAL_COMPLETENESS_CLOSURE_INCREMENT_2",
     "decision": "D41",
-    "decision_note": "Still D41: this records the merge of the delivery that answered it. It introduces no decision.",
+    "decision_note": "Still D41: this is the closure that deferral is waiting on. It introduces no decision.",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "f04995dfd40a7f5bf3ff39dda4b36d47a351c73a",
-    "base_note": "The master merge commit of PR #173 -- the delivery this receipt records. A merge receipt's own lineage begins AT the merge, which is why the base moves here rather than staying at the merged delivery's base.",
-    "head": "77110f6a82f04bcad66a688d667ce298ee98c4e2",
-    "head_note": "The last content commit of this receipt delivery. The generated blocks follow it and the manifest last of all -- the manifest must list itself.",
-    "transition": "T0176",
-    "records_the_merge_of": {
-      "pr": 173,
-      "branch": "delivery/functional-completeness (deleted after merge)",
-      "delivery_receipt": "T0175",
-      "delivery_base": "44077fb88e25574476f54e213802c020d95225f5",
-      "pr_head": "57b34f86ca8b2232179b0d8099eb0c1d1b42b157",
-      "merge_commit": "f04995dfd40a7f5bf3ff39dda4b36d47a351c73a",
-      "merge_method": "MERGE COMMIT, two parents, no squash and no rebase",
-      "pre_merge_gates": "ALL_GREEN on 57b34f86, the exact head merged: governance, phase3-full-software-gate, phase4-financial-core-gate and phase5-post-stay-transfer-gate all success; mergeable_state clean.",
-      "merge_introduced_no_content": "PROVEN BY TREE IDENTITY. The master tree at f04995df and the PR head tree at 57b34f86 are the same object, 1b78ba79317d5553cd6de005307666fc637b1f81.",
-      "remote_branch_deleted": true
-    },
-    "note": "T0176. Records the merge and nothing else. NOTHING CHANGED OPERATIONALLY: no binary was built for an appliance, no service restarted, no migration applied live. PRE-LIVE remains at schema head 0083 with all services active, confirmed after the merge; migrations 0084 and 0085 are committed and verified on a disposable database only. Financial traffic remains ZERO on all five counters. D41 remains in force -- real Guest activation and Guest pilot use stay DEFERRED -- and Go-Live is NOT authorized.\n\nTHE MERGED DELIVERY IS NOT A CLAIM OF FUNCTIONAL COMPLETENESS, and T0175 names what remains: the voucher admin surface does not exist at all, reveal/export is unimplemented, forty Gate-P grant gaps are enumerated, there is no guarded down-migration runner and no nightly-backup scheduler, payment.ReconcileEpoch has no production caller, multi-VLAN tagged guest networking is unproven on the current architecture, and the recovery, rollback, reboot and Central-outage drills have not been run. Three further items are genuine Product-Owner decisions rather than gaps: HA architecture (ARCH-04), payment-provider identity and commercial semantics, and the C35 external archival receipt authority.",
+    "base": "bccedb896874e0f0a9a042871b338744cbe6347c",
+    "base_note": "The master merge commit of PR #174, which recorded the merge of increment 1.",
+    "head": "a586bac75bf755246ae0ca56aafc4bd16aa28e44",
+    "head_note": "The last CONTENT commit of this increment. The governance receipt and the re-rendered blocks follow it and the manifest last of all, because the manifest must list itself.",
+    "transition": "T0177",
+    "note": "T0177. Four development gaps closed, and one contradiction that had to go first: next_authorized_action said NONE is authorized -- explicitly including no deployment, no migration and no service restart -- while T0175 recorded the Product Owner's end-to-end authorisation for exactly those steps in the same file.\n\nCLOSED: the 40 Gate-P grant gaps (38 mirrored, 2 dead), each probed against PRE-LIVE first, which is how it was found that NINE are broken on the live appliance and not merely on a rebuild -- Guest Device Self-Service is unprivileged there today. The guarded down-migration runner, which the Phase-3 runbook had been printing as an executable command for months. The nightly backup timer, which was policy with no mechanism. And a caller for migration 0023's restore-rollback detector, which had none.\n\nNOTHING WAS DEPLOYED. The only PRE-LIVE access was a read-only privilege probe. Financial traffic remains ZERO and this increment only wires a detector that can cause more holding, never less. D41 remains in force and Go-Live is NOT authorised.\n\nSTILL OPEN: the voucher operator surface, reveal/export, the financial marker initialisation, and every live drill. Enumerated in current_state_facts.functional_completeness_remaining.",
     "previous_delivery": {
-      "kind": "FUNCTIONAL_COMPLETENESS_CLOSURE_INCREMENT_1",
+      "kind": "MERGE_RECEIPT_FOR_FUNCTIONAL_COMPLETENESS_CLOSURE_INCREMENT_1",
       "decision": "D41",
-      "decision_note": "D41 is the authority this delivery answers: it deferred all real Guest activation until StayConnect is functionally complete and no known development gap required for Guest operation remains, and it deliberately did NOT define what completeness consists of. This delivery builds the gap inventory and closes the first set of defects in it. It introduces no new decision.",
+      "decision_note": "Still D41: this records the merge of the delivery that answered it. It introduces no decision.",
       "manifest": "docs/manifests/PostClosure-change-manifest.md",
-      "base": "44077fb88e25574476f54e213802c020d95225f5",
-      "base_note": "The master merge commit of PR #172, D41/T0174 -- the deferral this closure answers.",
-      "head": "f1a353ce88d928aa7de6fb4d617833206796ea52",
-      "head_note": "The last CONTENT commit of this delivery. The governance receipt and the re-rendered blocks follow it and the manifest comes last of all, because the manifest must list itself.",
-      "transition": "T0175",
-      "note": "T0175. Fourteen content commits closing the defects the gap inventory found first: three migrations no runner could see (which broke a factory-clean rebuild three privilege grants short of the appliance); a voucher single-use burn that could not execute, so a voucher could not be redeemed ONCE; the Product-Owner voucher code format as a bounded audited setting; a guest-network update that answered 'updated' to a change it dropped and silently cleared a stored DNS list; an operator rollback that destroyed the guest network in force and reported success; four harnesses aimed at the RETIRED appliance, one of which reboots it; and the governance reconciliation, with a whole-tree validator and its negative tests so the class cannot return.\n\nNOTHING WAS DEPLOYED. The only appliance access was read-only -- SELECT count(*), a privilege probe, the nft set listing and netd's shaping epochs -- and it produced the live_counters read that the previous snapshot said it was not authorised to take. Financial counters re-verified ZERO.\n\nTHIS IS NOT A CLAIM OF FUNCTIONAL COMPLETENESS, and the receipt says so explicitly. Multi-VLAN tagged guest networking is not yet proven on the current architecture, the voucher admin surface does not exist at all (issuance has one route in scd and no caller anywhere), reveal/export is unimplemented, and the recovery, rollback, reboot and Central-outage drills have not been run.\n\nMERGED 2026-09-22 as f04995df under T0176. The merge changes nothing operationally: no binary was built for an appliance, no service restarted, no migration applied live. PRE-LIVE remains at schema head 0083 with all services active, confirmed after the merge. D41 remains in force and Go-Live is NOT authorized.",
-      "merged": true,
-      "merged_pr": 173,
-      "merged_on": "2026-09-22",
-      "merge_commit": "f04995dfd40a7f5bf3ff39dda4b36d47a351c73a",
-      "merge_method": "MERGE COMMIT, two parents, no squash and no rebase",
-      "merge_transition": "T0176",
-      "merge_introduced_no_content": "PROVEN BY TREE IDENTITY. The master tree at f04995df and the PR head tree at 57b34f86 are the same object, 1b78ba79317d5553cd6de005307666fc637b1f81.",
-      "pre_merge_gates": "ALL_GREEN on 57b34f86, the exact head merged: governance, phase3-full-software-gate, phase4-financial-core-gate and phase5-post-stay-transfer-gate all success; mergeable_state clean.",
-      "remote_branch_deleted": true
+      "base": "f04995dfd40a7f5bf3ff39dda4b36d47a351c73a",
+      "base_note": "The master merge commit of PR #173 -- the delivery this receipt records. A merge receipt's own lineage begins AT the merge, which is why the base moves here rather than staying at the merged delivery's base.",
+      "head": "77110f6a82f04bcad66a688d667ce298ee98c4e2",
+      "head_note": "The last content commit of this receipt delivery. The generated blocks follow it and the manifest last of all -- the manifest must list itself.",
+      "transition": "T0176",
+      "records_the_merge_of": {
+        "pr": 173,
+        "branch": "delivery/functional-completeness (deleted after merge)",
+        "delivery_receipt": "T0175",
+        "delivery_base": "44077fb88e25574476f54e213802c020d95225f5",
+        "pr_head": "57b34f86ca8b2232179b0d8099eb0c1d1b42b157",
+        "merge_commit": "f04995dfd40a7f5bf3ff39dda4b36d47a351c73a",
+        "merge_method": "MERGE COMMIT, two parents, no squash and no rebase",
+        "pre_merge_gates": "ALL_GREEN on 57b34f86, the exact head merged: governance, phase3-full-software-gate, phase4-financial-core-gate and phase5-post-stay-transfer-gate all success; mergeable_state clean.",
+        "merge_introduced_no_content": "PROVEN BY TREE IDENTITY. The master tree at f04995df and the PR head tree at 57b34f86 are the same object, 1b78ba79317d5553cd6de005307666fc637b1f81.",
+        "remote_branch_deleted": true
+      },
+      "note": "T0176. Records the merge and nothing else. NOTHING CHANGED OPERATIONALLY: no binary was built for an appliance, no service restarted, no migration applied live. PRE-LIVE remains at schema head 0083 with all services active, confirmed after the merge; migrations 0084 and 0085 are committed and verified on a disposable database only. Financial traffic remains ZERO on all five counters. D41 remains in force -- real Guest activation and Guest pilot use stay DEFERRED -- and Go-Live is NOT authorized.\n\nTHE MERGED DELIVERY IS NOT A CLAIM OF FUNCTIONAL COMPLETENESS, and T0175 names what remains: the voucher admin surface does not exist at all, reveal/export is unimplemented, forty Gate-P grant gaps are enumerated, there is no guarded down-migration runner and no nightly-backup scheduler, payment.ReconcileEpoch has no production caller, multi-VLAN tagged guest networking is unproven on the current architecture, and the recovery, rollback, reboot and Central-outage drills have not been run. Three further items are genuine Product-Owner decisions rather than gaps: HA architecture (ARCH-04), payment-provider identity and commercial semantics, and the C35 external archival receipt authority.",
+      "previous_delivery": {
+        "kind": "FUNCTIONAL_COMPLETENESS_CLOSURE_INCREMENT_1",
+        "decision": "D41",
+        "decision_note": "D41 is the authority this delivery answers: it deferred all real Guest activation until StayConnect is functionally complete and no known development gap required for Guest operation remains, and it deliberately did NOT define what completeness consists of. This delivery builds the gap inventory and closes the first set of defects in it. It introduces no new decision.",
+        "manifest": "docs/manifests/PostClosure-change-manifest.md",
+        "base": "44077fb88e25574476f54e213802c020d95225f5",
+        "base_note": "The master merge commit of PR #172, D41/T0174 -- the deferral this closure answers.",
+        "head": "f1a353ce88d928aa7de6fb4d617833206796ea52",
+        "head_note": "The last CONTENT commit of this delivery. The governance receipt and the re-rendered blocks follow it and the manifest comes last of all, because the manifest must list itself.",
+        "transition": "T0175",
+        "note": "T0175. Fourteen content commits closing the defects the gap inventory found first: three migrations no runner could see (which broke a factory-clean rebuild three privilege grants short of the appliance); a voucher single-use burn that could not execute, so a voucher could not be redeemed ONCE; the Product-Owner voucher code format as a bounded audited setting; a guest-network update that answered 'updated' to a change it dropped and silently cleared a stored DNS list; an operator rollback that destroyed the guest network in force and reported success; four harnesses aimed at the RETIRED appliance, one of which reboots it; and the governance reconciliation, with a whole-tree validator and its negative tests so the class cannot return.\n\nNOTHING WAS DEPLOYED. The only appliance access was read-only -- SELECT count(*), a privilege probe, the nft set listing and netd's shaping epochs -- and it produced the live_counters read that the previous snapshot said it was not authorised to take. Financial counters re-verified ZERO.\n\nTHIS IS NOT A CLAIM OF FUNCTIONAL COMPLETENESS, and the receipt says so explicitly. Multi-VLAN tagged guest networking is not yet proven on the current architecture, the voucher admin surface does not exist at all (issuance has one route in scd and no caller anywhere), reveal/export is unimplemented, and the recovery, rollback, reboot and Central-outage drills have not been run.\n\nMERGED 2026-09-22 as f04995df under T0176. The merge changes nothing operationally: no binary was built for an appliance, no service restarted, no migration applied live. PRE-LIVE remains at schema head 0083 with all services active, confirmed after the merge. D41 remains in force and Go-Live is NOT authorized.",
+        "merged": true,
+        "merged_pr": 173,
+        "merged_on": "2026-09-22",
+        "merge_commit": "f04995dfd40a7f5bf3ff39dda4b36d47a351c73a",
+        "merge_method": "MERGE COMMIT, two parents, no squash and no rebase",
+        "merge_transition": "T0176",
+        "merge_introduced_no_content": "PROVEN BY TREE IDENTITY. The master tree at f04995df and the PR head tree at 57b34f86 are the same object, 1b78ba79317d5553cd6de005307666fc637b1f81.",
+        "pre_merge_gates": "ALL_GREEN on 57b34f86, the exact head merged: governance, phase3-full-software-gate, phase4-financial-core-gate and phase5-post-stay-transfer-gate all success; mergeable_state clean.",
+        "remote_branch_deleted": true
+      }
     }
   },
   "onboarding_reconciliation": {
