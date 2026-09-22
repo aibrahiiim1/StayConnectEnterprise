@@ -1,4 +1,0 @@
-commit 37d43927a54eb3be41f2084abadd1ba228be1084
-Date:   Tue Sep 22 09:07:37 2026 +0300
-
-    Governance: T0173 records two open decisions, not one, and a rollback path that could not tell good from defective
