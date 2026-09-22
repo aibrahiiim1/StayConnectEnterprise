@@ -1,0 +1,4 @@
+commit 03f83ed9626522556a0ba2a4a1f71b8ab771f729
+Date:   Tue Sep 22 11:35:01 2026 +0300
+
+    Governance: T0174 records the deferral and what it resolved
