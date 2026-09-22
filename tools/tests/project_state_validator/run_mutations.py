@@ -583,9 +583,27 @@ MUTATIONS = [
   "governance/project-state.json",
    ("json_set", [(["current_state_facts", "deployed_runtime_head"],
                   "29a6b21fcf69f216e90630d427b64ad956f3c6b9")])),
- ("M58 runtime provenance denies a recorded runtime head", "governance/project-state.json",
-   ("replace", [("SINGLE-COMMIT for every service binary, and stated as one.",
-                 "MIXED, and deliberately not stated as a single SHA.")])),
+ # M58 IS INVERTED FROM WHAT IT WAS, because what it used to assert was the defect.
+ #
+ # It used to take a tree whose runtime_provenance said "SINGLE-COMMIT for every service binary, and stated
+ # as one", rewrite it to say MIXED, and require validation to fail. Both halves were wrong. The appliance
+ # ran binaries from FIVE commits the whole time -- so the tree this mutation started from carried a false
+ # sentence, and the mutation "broke" it into the true one.
+ #
+ # The rule behind it was wrong in the same direction: it guarded on `len(head) >= 8`, and
+ # deployed_head_on_appliance is legitimately allowed to hold the sentence "MIXED -- see
+ # deployed_runtime_services; there is no single deployed head". That sentence is longer than eight
+ # characters, so the rule read it as a recorded head and demanded the summary NOT say mixed -- requiring a
+ # single-commit claim precisely when there was not one. It passed for months on the false wording and
+ # failed the moment the wording was corrected to the truth.
+ #
+ # The rule now applies only when a head is actually a commit sha, and its real point is unchanged: if a
+ # single deployed head IS recorded, the appliance summary may not go on denying that one exists. So the
+ # mutation is the other way round -- record a real single head beside a provenance that says MIXED.
+ ("M58 a single runtime head is recorded while the appliance summary still says MIXED",
+  "governance/project-state.json",
+   ("json_set", [(["current_state_facts", "deployed_head_on_appliance"],
+                  "a4124ce595b8bc590f1eb5708bd75cc8a3579587")])),
 
  # ---- delivery protocol (tools/validate-delivery-protocol.py) --------------------------------------------
  # Each of these is a condition the repository was ACTUALLY IN before this rule existed, and each cost
