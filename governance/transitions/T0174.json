@@ -1,0 +1,60 @@
+{
+  "transition_id": "T0174",
+  "seq": 174,
+  "timestamp": "2026-09-22T07:30:00Z",
+  "timestamp_derivation": "After the Product-Owner instruction of 2026-09-22 to record the deferral, and after the register entry, the state reconciliation and the generated blocks were written and validated. Before the author timestamp of the commit that introduces this receipt.",
+  "record_type": "PRODUCT_OWNER_DECISION_GUEST_ACTIVATION_DEFERRED",
+  "the_decision": {
+    "id": "D41",
+    "decided_on": "2026-09-22",
+    "what": "All real Guest activation and all Guest pilot use are deferred until StayConnect is functionally complete and no known development gap required for Guest operation remains.",
+    "what_it_resolves": "The open PRE-LIVE guest sign-in question raised at T0170 and carried by T0171 and T0172: the appliance offers two guest sign-in methods, voucher and PMS room, and voucher cannot put a guest online while the Phase-2 portal commerce surface is dark.",
+    "how_it_resolves_it": "Not by choosing among the three options that were put. The question was about which method to present to guests who are being served. No guests are to be served until completeness, so the question is deferred together with the activation it was about. The options are kept in the resolved entry rather than deleted -- if the deferral is lifted they are still the shape of the choice, and they should be re-read from T0170.",
+    "what_it_is_not": "Not a finding that anything is broken. The guest path was walked end to end on PRE-LIVE during the guest pilot and is healthy on every layer that does not depend on the dark commerce surface. Not an acceptance of functional completeness, and it does not define what completeness consists of -- it states that guest activation waits for it.",
+    "behaviour_unchanged": "Voucher continues to refuse honestly and direct the guest to reception, which is the behaviour accepted at T0171 and needs no further change. Commerce remains dark and nothing here enables it."
+  },
+  "records_changed": {
+    "decision_register": "D41 added, accepted, with its authorization evidence and an explicit does_not_authorize covering PRE-LIVE, commerce, deployment, service restarts, 172.21.60.23, PMS, financial, networking, schema, security boundary and Go-Live.",
+    "latest_accepted_po_decision": "D40 -> D41. Every generated current-state block prints this pointer, so leaving it would have made the blocks announce D41 and cite D40 in the same paragraph -- the exact defect the latest-decision-pointer parity rule exists to catch.",
+    "next_authorized_action": "Now records the deferral and states that ONE Product-Owner decision remains open, the approving-review question, which is not authorized by being recorded. It still names a single action (none), as the structural validator requires.",
+    "open_product_owner_decisions": "The guest entry is marked RESOLVED as DEFERRED against D41, keeping the question as raised, how it was resolved, what the resolution does not mean, and what happens if the deferral is lifted. The approving-review entry is unchanged and still OPEN.",
+    "current_state_facts": "guest_activation_deferred and its note added."
+  },
+  "conflicting_wording_removed": {
+    "_note": "Three current fields carried wording that the deferral contradicts. Each was already wrong before the deferral, which is why they are quoted rather than silently overwritten: a field that has been wrong for weeks is worth knowing about.",
+    "first_room_login_blocked_reason": "Said 'The first real guest Room Login has NOT been performed and requires its own Product-Owner authorization', while first_room_login_performed_note records two real Room Logins on 2026-08-26 and guest_signin_end_to_end_proven_note records a third on 2026-08-27 carrying real guest traffic. It was written before those logins and never revisited. It now states that no technical blocker remains, points at the logins that did happen, and records the deferral.",
+    "first_room_login_blocked_fix_status": "Ended 'What remains is the Product Owner's Room Login retry, which has NOT been performed.' That retry is no longer pending work. The sentence now says so and names the deferral.",
+    "environment_scoped_iam_state.production.routing": "Gave the reason no guest traffic is served as the appliance 'awaiting assignment'. The signed assignment is signed and pinned, as the generated block itself states, so the field gave a stale reason for a true fact. The reason is now the decision.",
+    "next_step": "Named the post-roadmap IAM-v2 trial on 172.21.60.23 as THE CURRENT ACTIVITY. That appliance is RETIRED and is not an operational target, so the field described an activity that could not be happening. It now carries the deferral and says what the sentence used to claim.",
+    "verification": "A sweep for pending-guest-action wording across every string in the state file returns zero fields. One near neighbour was deliberately left alone: a historical note about a Kea bootstrap defect uses the word 'retrying' about that defect, not about a guest action."
+  },
+  "a_dangling_decision_reference_i_created": {
+    "what": "current_delivery.decision read D87, which is not in the decision register. It read D86 before the guest-pilot mission -- also absent -- and I incremented it to D87 in the first governance commit of that mission without checking whether either existed. Receipts T0169 through T0173 each cite D87.",
+    "why_it_went_unnoticed": "No validator compares current_delivery.decision against the register. The pointer that IS checked is latest_accepted_po_decision, which was correct throughout.",
+    "what_was_done": "The five receipts are left as written: they are records of what was believed at the time, and rewriting them would destroy the trail rather than correct it. current_delivery.decision now names D41, which exists, because this delivery carries a real Product-Owner decision."
+  },
+  "what_was_not_done": {
+    "pre_live": "Unchanged. No deployment, no service restart, no configuration change.",
+    "commerce": "Still dark. The deferral enables nothing.",
+    "guest_behaviour": "Unchanged. Voucher refuses honestly exactly as accepted at T0171.",
+    "retired_appliance": "172.21.60.23 was not contacted.",
+    "other_boundaries": "No PMS, financial, networking, schema, security-boundary or Go-Live change. Repository and governance documentation only, as the instruction scoped it."
+  },
+  "remaining_open_product_owner_decisions": "ONE. Whether master protection should additionally require one approving review, which is blocked on a second reviewing account because GitHub will not let a pull request's author approve it. Not authorized and not declined.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Product-Owner instruction of 2026-09-22, scoped to repository and governance documentation only.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE.",
+  "base": "aaab267713e6f766190b7866b00e9d1375359a31",
+  "head": "b68c073533af7989acb8d8a3612bad6fcbd9aba8"
+}
