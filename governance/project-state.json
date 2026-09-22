@@ -1642,7 +1642,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "f04995dfd40a7f5bf3ff39dda4b36d47a351c73a",
     "base_note": "The master merge commit of PR #173 -- the delivery this receipt records. A merge receipt's own lineage begins AT the merge, which is why the base moves here rather than staying at the merged delivery's base.",
-    "head": "11431da09f7b96f43e4cb3ba3f60ce37b5590f95",
+    "head": "77110f6a82f04bcad66a688d667ce298ee98c4e2",
     "head_note": "The last content commit of this receipt delivery. The generated blocks follow it and the manifest last of all -- the manifest must list itself.",
     "transition": "T0176",
     "records_the_merge_of": {
