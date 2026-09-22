@@ -1147,9 +1147,9 @@
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
   },
-  "acceptance_candidate_head": "50d7d70acdd90ff4d641269c0e57a812f9e158ab",
+  "acceptance_candidate_head": "7d208bda6e9077f2ebe746cfb32a91799cd5fb4b",
   "acceptance_candidate_head_note": "The committed HEAD immediately before this delivery's final delivery-only commit -- the manifest's generation/provenance HEAD under the self-reference protocol of docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md section 4.1. It is NOT an acceptance candidate in the phase-closure sense: no phase is open, and T0175 does not claim functional completeness.",
-  "inventory_head": "50d7d70acdd90ff4d641269c0e57a812f9e158ab",
+  "inventory_head": "7d208bda6e9077f2ebe746cfb32a91799cd5fb4b",
   "delivery_head_note": "delivery_head (the Phase-6 PR HEAD) = inventory_head + one delivery-only commit. Its exact 40-character SHA is recorded in the PR body and verified to resolve on the authoritative remote before the delivery is reported.",
   "roadmap_exhaustion": {
     "recorded_by": "D28 / T0065 (2026-08-17)",
