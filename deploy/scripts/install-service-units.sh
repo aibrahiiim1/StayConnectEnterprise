@@ -274,4 +274,42 @@ else
   say "daemon-reload done (units changed: $changed)"
 fi
 
+# ---- 6. TIMERS ARE ENABLED HERE, BECAUSE WantedBy DOES NOTHING ON ITS OWN ---
+#
+# `WantedBy=timers.target` in a unit file is an INSTRUCTION FOR `systemctl enable`, not an effect. A timer
+# that is installed and reloaded and never enabled has no symlink in timers.target.wants, never starts at
+# boot, and never fires. Nothing fails; the schedule simply does not exist.
+#
+# This script copied units and reloaded, and enabling was left to whoever deployed. It was remembered twice
+# -- stayconnect-backup-cleanup.timer and stayconnect-hotel-admin-cert-renew.timer are both enabled on the
+# appliance -- and the third would have been the one that was not. The nightly BACKUP timer was added with
+# its WantedBy line and no way for it to take effect, so an appliance would have carried documentation
+# promising a nightly backup and a restore drill would have restored whatever the last manual run produced.
+#
+# Enabling is idempotent, so this runs on every install and re-asserts the schedule after any hand edit.
+# ONLY TIMERS. Services are started by their own deployment steps, which know about ordering, health checks
+# and rollback; a blanket enable here would start daemons this script has no business starting.
+if [ "$SKIP_SYSTEMD" != "1" ]; then
+  for u in "$SRC"/systemd/stayconnect-*.timer; do
+    [ -f "$u" ] || continue
+    b="$(basename "$u")"
+    if systemctl enable --now "$b" >/dev/null 2>&1; then
+      say "enabled $b"
+    else
+      die "could not enable $b; the unit is installed but its schedule would not exist"
+    fi
+  done
+  # Enabled is a claim; a listed next-elapse is the evidence. A timer can be enabled and still inert if its
+  # OnCalendar never matches, which is silent in exactly the same way.
+  for u in "$SRC"/systemd/stayconnect-*.timer; do
+    [ -f "$u" ] || continue
+    b="$(basename "$u")"
+    if systemctl list-timers --all --no-legend "$b" 2>/dev/null | grep -q .; then
+      say "  $b is scheduled: $(systemctl list-timers --all --no-legend "$b" 2>/dev/null | head -1 | awk '{print $1, $2, $3}')"
+    else
+      die "$b is enabled but systemd lists no next elapse for it; its schedule would never fire"
+    fi
+  done
+fi
+
 say "install complete"

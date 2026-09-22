@@ -1,4 +1,0 @@
-commit 8cd3cfccec83a21e35f8c17aaec5e12f626f8cbb
-Date:   Wed Sep 23 00:00:22 2026 +0300
-
-    Governance: T0177 records the gate correction and the head it moved to

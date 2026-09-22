@@ -213,6 +213,22 @@ verify_ledger_structural_down(){ # read-only, BEFORE lock; fail closed. The priv
   done
 }
 
+# THE LEDGER LOCK. Every mutation of public.schema_migrations takes this ONE key before it takes its own
+# per-version key, and the reason is a race a per-version lock cannot close.
+#
+# The down path refuses to roll back anything but the head of the ledger. That check ran before the lock was
+# taken, and the lock key was derived from the version being reverted -- so a forward apply of a HIGHER
+# version took a DIFFERENT key, was not blocked by it, and could commit in the window between the head
+# check and the revert. The revert then removed a migration that was no longer the head, leaving the newer
+# one standing on objects that had just been dropped. The under-lock recheck could not catch it either: it
+# asked only whether the row still existed, which it did.
+#
+# Serialising every ledger mutation on one key is the honest fix. Migrations are inherently sequential, so
+# there is nothing to lose: two runners racing to change the schema of one database is not a case worth
+# preserving concurrency for. The per-version key is KEPT as well, because it is what makes a repeated apply
+# of the SAME migration a clean SKIP_AFTER_LOCK rather than a wait-then-redo.
+ledger_lock_key(){ q "SELECT hashtextextended('stayconnect_edge_migrate:ledger', 0)"; }
+
 verify_head_of_ledger(){ # $1=version ; refuse to roll back anything but the highest applied version
   local ver="$1" head applied
   applied="$(q "SELECT count(*) FROM public.schema_migrations WHERE version='$ver'")"
@@ -246,19 +262,31 @@ revert_one(){ # $1=down-file  atomic lock-then-ledger, mirrored from apply_one
   fi
   verify_head_of_ledger "$ver"
   key="$(q "SELECT hashtextextended('stayconnect_edge_migrate:'||'$ver', 0)")"
-  echo "  revert $ver  file=$base  sha256=$sha  lock_key=$key  db=$EXPECT_DB  kind=$TARGET_KIND"
+  lkey="$(ledger_lock_key)"
+  echo "  revert $ver  file=$base  sha256=$sha  lock_key=$key  ledger_lock=$lkey  db=$EXPECT_DB  kind=$TARGET_KIND"
   out="$(
     { [ -n "$APPLY_ROLE" ] && printf "SET ROLE %s;\n" "$APPLY_ROLE"
-      printf "SET statement_timeout='60s';\nSELECT pg_advisory_lock(%s);\nSET statement_timeout=0;\n" "$key"
-      printf "SELECT EXISTS(SELECT 1 FROM public.schema_migrations WHERE version='%s') AS need \\\\gset\n" "$ver"
-      printf "\\\\if :need\n\\\\echo REVERTING_UNDER_LOCK\n"
+      printf "SET statement_timeout='60s';\nSELECT pg_advisory_lock(%s);\n" "$lkey"
+      printf "SELECT pg_advisory_lock(%s);\nSET statement_timeout=0;\n" "$key"
+      # HEAD IS RE-ESTABLISHED UNDER THE LOCK, not merely existence. The check before the lock is what
+      # gives the operator a readable refusal; this one is what makes it true at the moment it matters.
+      printf "SELECT EXISTS(SELECT 1 FROM public.schema_migrations WHERE version='%s') AS present,\n" "$ver"
+      printf "       (coalesce((SELECT max(version) FROM public.schema_migrations WHERE version ~ '^[0-9]{4}_'),'') = '%s') AS is_head \\\\gset\n" "$ver"
+      printf "\\\\if :present\n\\\\if :is_head\n\\\\echo REVERTING_UNDER_LOCK\n"
       cat "$f"
       printf "\nDELETE FROM public.schema_migrations WHERE version='%s';\n" "$ver"
+      printf "\\\\else\n\\\\echo NOT_HEAD_AFTER_LOCK\n\\\\endif\n"
       printf "\\\\else\n\\\\echo SKIP_AFTER_LOCK\n\\\\endif\n"
-      printf "SELECT pg_advisory_unlock(%s);\n" "$key"
+      printf "SELECT pg_advisory_unlock(%s);\nSELECT pg_advisory_unlock(%s);\n" "$key" "$lkey"
     } | $EDGE_PSQL -v ON_ERROR_STOP=1 2>&1
   )"
   rc=$?
+  if echo "$out" | grep -q "NOT_HEAD_AFTER_LOCK"; then
+    echo "REFUSED: $ver was the head when this runner checked and is NOT the head now -- another runner" >&2
+    echo "         applied a higher migration while this one was starting. Nothing was reverted." >&2
+    echo "         Re-read the ledger and roll back from the new head downwards." >&2
+    exit 3
+  fi
   if echo "$out" | grep -q "REVERTING_UNDER_LOCK"; then
     # TWO INDEPENDENT PROOFS, and for a down the second one matters more than for an apply. Without
     # ON_ERROR_STOP a failed down still reaches the appended DELETE: the body's COMMIT degrades to ROLLBACK
@@ -411,16 +439,20 @@ apply_one(){ # $1=file  atomic lock-then-ledger
   fi
   verify_baseline_for "$ver"
   key="$(q "SELECT hashtextextended('stayconnect_edge_migrate:'||'$ver', 0)")"
-  echo "  select $ver  file=$base  sha256=$sha  lock_key=$key  db=$EXPECT_DB  kind=$TARGET_KIND"
+  lkey="$(ledger_lock_key)"
+  echo "  select $ver  file=$base  sha256=$sha  lock_key=$key  ledger_lock=$lkey  db=$EXPECT_DB  kind=$TARGET_KIND"
   out="$(
     { [ -n "$APPLY_ROLE" ] && printf "SET ROLE %s;\n" "$APPLY_ROLE"
-      printf "SET statement_timeout='60s';\nSELECT pg_advisory_lock(%s);\nSET statement_timeout=0;\n" "$key"
+      # The ledger lock FIRST, then the per-version lock -- the same order in both directions, because two
+      # locks taken in two orders is a deadlock waiting for the first concurrent run.
+      printf "SET statement_timeout='60s';\nSELECT pg_advisory_lock(%s);\n" "$lkey"
+      printf "SELECT pg_advisory_lock(%s);\nSET statement_timeout=0;\n" "$key"
       printf "SELECT (NOT EXISTS(SELECT 1 FROM public.schema_migrations WHERE version='%s')) AS need \\\\gset\n" "$ver"
       printf "\\\\if :need\n\\\\echo APPLYING_UNDER_LOCK\n"
       cat "$f"
       printf "\nINSERT INTO public.schema_migrations(version) VALUES ('%s') ON CONFLICT DO NOTHING;\n" "$ver"
       printf "\\\\else\n\\\\echo SKIP_AFTER_LOCK\n\\\\endif\n"
-      printf "SELECT pg_advisory_unlock(%s);\n" "$key"
+      printf "SELECT pg_advisory_unlock(%s);\nSELECT pg_advisory_unlock(%s);\n" "$key" "$lkey"
     } | $EDGE_PSQL -v ON_ERROR_STOP=1 2>&1
   )"
   rc=$?
