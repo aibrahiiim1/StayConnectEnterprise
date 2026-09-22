@@ -122,8 +122,8 @@ func TestAnUnreadableRevisionStateRefusesWithoutTouchingTheKernel(t *testing.T) 
 //
 // Both callers decide to roll back before a.rollback looks for a target:
 //
-//   applier.Rollback   reads the state, sees pending_confirmation, calls a.rollback;
-//   watchdogLoop       reads PendingRevision(), sees it overdue, calls a.rollback.
+//	applier.Rollback   reads the state, sees pending_confirmation, calls a.rollback;
+//	watchdogLoop       reads PendingRevision(), sees it overdue, calls a.rollback.
 //
 // If /confirm commits in that gap the revision becomes ACTIVE and its predecessor becomes SUPERSEDED, so
 // ActiveBundlePath finds no other active revision, prevBundle is empty, and the factory-clean branch
@@ -196,7 +196,6 @@ func TestAFirstApplyThatExpiresStillComesBackFactoryClean(t *testing.T) {
 	a := newTestApplier(t, k)
 	a.revStateFn = func(context.Context, string) (string, error) { return "pending_confirmation", nil }
 	a.prevBundleFn = func(context.Context, string) (string, error) { return "", nil }
-	a.markRolledFn = func(context.Context, string, string) error { return nil }
 	marked := false
 	a.markRolledFn = func(context.Context, string, string) error { marked = true; return nil }
 	a.eventFn = func(context.Context, string, string, bool, map[string]any) {}
