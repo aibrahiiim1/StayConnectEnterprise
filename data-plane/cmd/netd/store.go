@@ -209,6 +209,25 @@ func (s *store) CreateRevision(ctx context.Context, summary string, intent []net
 	return id, seq, err
 }
 
+// RevisionState is the current state of one revision, or "" when no such revision exists.
+//
+// It exists for the operator rollback guard: whether a rollback has a target depends entirely on whether the
+// revision is still mid-flight (applying / pending_confirmation, where the PREVIOUS revision is still the
+// active one) or has been confirmed (active, where the previous revision has become superseded and there is
+// no stored target left). See applier.Rollback.
+func (s *store) RevisionState(ctx context.Context, id string) (string, error) {
+	var state string
+	err := s.db.QueryRow(ctx,
+		`SELECT state FROM network_config_revisions WHERE id=$1`, id).Scan(&state)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
+	}
+	return state, nil
+}
+
 func (s *store) SetRevisionState(ctx context.Context, id, state string) error {
 	_, err := s.db.Exec(ctx, `UPDATE network_config_revisions SET state=$2 WHERE id=$1`, id, state)
 	return err
