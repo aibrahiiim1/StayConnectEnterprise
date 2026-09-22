@@ -12,8 +12,12 @@
     "merge_commit": "f04995dfd40a7f5bf3ff39dda4b36d47a351c73a",
     "merge_method": "MERGE COMMIT, two parents, no squash and no rebase",
     "delivery_receipt": "T0175",
-    "content_commits": 14,
-    "changed_files": 70
+    "content_commits": 12,
+    "changed_files": 69,
+    "total_commits": 30,
+    "commit_split_note": "30 commits in 44077fb8..57b34f86: 12 content commits and 18 delivery/governance bookkeeping commits (head moves, pack rebuilds and the manifest, which must be regenerated after each of them because it lists itself). COUNTED FROM GIT, not from memory -- see the correction below.",
+    "changed_files_note": "69, and the authority for it is docs/manifests/PostClosure-change-manifest.md, which derives the set from git rather than restating it. A receipt should point at the generated artifact instead of duplicating a number by hand.",
+    "a_correction_before_this_receipt_landed": "This receipt first said 70 changed files and 14 content commits. Both were typed from memory and both were wrong: git gives 69 and 12, and the delivery's own manifest already said 69. An automated reviewer caught it on PR #174 before the receipt reached master, so it is corrected in place rather than by a later correcting receipt -- it had not yet become part of the permanent record. Recorded here because a receipt whose numbers disagree with git is worse than no receipt: it is the artifact everything else is checked against."
   },
   "merge_introduced_no_content": "PROVEN BY TREE IDENTITY, not asserted. The master tree at f04995df and the PR head tree at 57b34f86 are the same object, 1b78ba79317d5553cd6de005307666fc637b1f81. A merge introduces a commit, not content.",
   "gates": {
