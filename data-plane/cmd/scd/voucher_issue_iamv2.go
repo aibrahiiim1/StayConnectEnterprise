@@ -33,15 +33,14 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"log/slog"
-	"math/big"
 	"net/http"
 	"os"
 	"path/filepath"
 
+	"github.com/stayconnect/enterprise/data-plane/internal/codegen"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/localkeys"
 )
@@ -54,10 +53,6 @@ const (
 	voucherDEKID = "0a5c1e00-0000-4000-8000-0000000000d1"
 )
 
-// voucherAlphabet excludes I, L, O, 0, 1 and U: the characters guests misread aloud or mistype from a
-// printed card. It is the same readability rule the legacy voucher generator applies.
-const voucherAlphabet = "ABCDEFGHJKMNPQRSTVWXYZ23456789"
-
 func (s *server) voucherKeyring() (iamv2.VoucherKeyring, error) {
 	dir := os.Getenv("SCD_SECRETS_DIR")
 	if dir == "" {
@@ -68,19 +63,6 @@ func (s *server) voucherKeyring() (iamv2.VoucherKeyring, error) {
 		return nil, err
 	}
 	return iamv2.MapVoucherKeyring{voucherDEKID: dek}, nil
-}
-
-func randomVoucherCode(n int) (string, error) {
-	out := make([]byte, n)
-	max := big.NewInt(int64(len(voucherAlphabet)))
-	for i := range out {
-		k, err := rand.Int(rand.Reader, max)
-		if err != nil {
-			return "", err
-		}
-		out[i] = voucherAlphabet[k.Int64()]
-	}
-	return string(out), nil
 }
 
 // ensureVoucherKeyGeneration returns the active generation and its clear HMAC key, creating generation 1 if
@@ -154,11 +136,20 @@ func (s *server) issueVouchersIAMv2(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		PackageRevisionID string `json:"package_revision_id"`
 		Count             int    `json:"count"`
-		Length            int    `json:"length,omitempty"`
 		Note              string `json:"note,omitempty"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		httpErr(w, http.StatusBadRequest, "bad body")
+	// DisallowUnknownFields, and specifically so that `length` is REFUSED rather than ignored.
+	//
+	// This request used to carry its own length. The format is now the site setting from 0085, and a caller
+	// that still sends a length is a caller working from the old contract -- one whose vouchers would come
+	// out in a format it did not choose while the response said 201. Accepting and discarding a field is the
+	// same defect as the guest-network update path that answered "updated" to a VLAN change it dropped, so
+	// this refuses and says where the format lives instead.
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		httpErr(w, http.StatusBadRequest,
+			"bad body (the code format is the site setting iam_v2.site_voucher_code_settings, not a field on this request)")
 		return
 	}
 	if in.PackageRevisionID == "" {
@@ -169,11 +160,18 @@ func (s *server) issueVouchersIAMv2(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "count must be between 1 and 500")
 		return
 	}
-	if in.Length == 0 {
-		in.Length = 8
+	// THE FORMAT COMES FROM THE SITE SETTING, and a site that has never opened the screen gets the defaults
+	// the column carries. A read failure is fatal on purpose: see voucherCodeFormatFor.
+	format, ferr := s.voucherCodeFormatFor(r.Context())
+	if ferr != nil {
+		httpErr(w, http.StatusServiceUnavailable,
+			"the voucher code format for this site could not be read; issuance will not guess one")
+		return
 	}
-	if in.Length < 6 || in.Length > 24 {
-		httpErr(w, http.StatusBadRequest, "length must be between 6 and 24")
+	opts, oerr := format.voucherCodeOptions()
+	if oerr != nil {
+		httpErr(w, http.StatusUnprocessableEntity,
+			"the stored voucher code format is not usable: "+oerr.Error())
 		return
 	}
 	kr, err := s.voucherKeyring()
@@ -190,13 +188,20 @@ func (s *server) issueVouchersIAMv2(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	codes := make([]string, 0, in.Count)
-	for i := 0; i < in.Count; i++ {
-		code, cerr := randomVoucherCode(in.Length)
-		if cerr != nil {
-			httpErr(w, http.StatusInternalServerError, "code generation failed")
-			return
-		}
+	// GENERATED AS A BATCH, not one at a time, and that is a correctness change rather than a tidy-up.
+	//
+	// codegen.GenerateN guarantees the batch is internally unique and REFUSES a batch too large for its own
+	// code space (count must be at most a quarter of it). The per-code loop this replaced had neither
+	// property: it leaned entirely on UNIQUE (code_hmac) to catch a collision, which surfaces as
+	// "voucher insert failed" after some of the batch has already committed. That matters much more now
+	// that the ceiling is eight characters and digits-only is offered: 500 codes out of 7^6 is fine, and the
+	// guard is what keeps a future shorter floor from being quietly unsafe.
+	codes, gerr := codegen.GenerateN(in.Count, opts)
+	if gerr != nil {
+		httpErr(w, http.StatusUnprocessableEntity, "code generation refused: "+gerr.Error())
+		return
+	}
+	for _, code := range codes {
 		// The row id is generated up front because the code ciphertext's AAD binds it: the ciphertext
 		// cannot be moved to another voucher row and still open.
 		var vid string
@@ -220,13 +225,14 @@ func (s *server) issueVouchersIAMv2(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, http.StatusInternalServerError, "voucher insert failed")
 			return
 		}
-		codes = append(codes, code)
 	}
-	// The audit records how many were issued against which revision -- NEVER a code, not even its last4 in
-	// bulk, because a batch audit line is not the audited reveal action.
-	// Count and revision only -- never a code, not even in bulk: a batch log line is not the audited reveal.
+	// The audit records how many were issued, against which revision, and in which format -- NEVER a code,
+	// not even its last4 in bulk, because a batch log line is not the audited reveal action. The format is
+	// recorded because "these cards will not scan" is answered by knowing what format they were printed in,
+	// and config_version says whether that came from a saved setting or from the defaults.
 	slog.Info("iamv2 vouchers issued", "count", in.Count,
-		"package_revision_id", in.PackageRevisionID, "generation", genID)
+		"package_revision_id", in.PackageRevisionID, "generation", genID,
+		"code_mode", format.Mode, "code_length", format.Length, "format_version", format.Version)
 	// ONE-TIME return of the plaintext codes. This is the only moment they exist outside memory.
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"authority":           "iam_v2",

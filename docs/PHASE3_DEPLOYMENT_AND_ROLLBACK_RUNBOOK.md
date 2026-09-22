@@ -362,17 +362,41 @@ nft list set inet stayconnect auth_ipv4 | head -40   # unchanged, same guests
 nft list set inet stayconnect phase3_auth_ipv4       # expect: No such file or directory
 ```
 
-**5b. Remove the schema** — only if a clean slate is required:
+**5b. Remove the schema** — only if a clean slate is required.
 
-```bash
-bash scripts/edge-migrate.sh --down --only 0010_phase3_stay_resolution \
-  --expect-db <site-db> --target-kind <kind> --ack-target <ack>
-```
+> **⚠ THIS STEP HAS NO TOOLED COMMAND, AND THE COMMAND THIS RUNBOOK USED TO PRINT NEVER EXISTED.** It read:
+>
+> ```bash
+> bash scripts/edge-migrate.sh --down --only 0010_phase3_stay_resolution \
+>   --expect-db <site-db> --target-kind <kind> --ack-target <ack>
+> ```
+>
+> `scripts/edge-migrate.sh` has no `--down` flag — the string "down" does not appear in it — so that line
+> terminates immediately with `REFUSED: unknown arg: --down` and exit 2. It also omitted `--expect-sha256`,
+> which that runner requires for any single-migration apply. An operator reaching this step during an
+> incident would have found the documented command broken and would have had to improvise, which is the one
+> thing a rollback runbook must not cause.
+>
+> Two further facts make improvising unsafe, and they are why this is a warning rather than a corrected
+> command. First, the live-site apply role is deliberately FORBIDDEN `UPDATE`, `DELETE`, `TRUNCATE`,
+> `REFERENCES` and `TRIGGER` on `public.schema_migrations` (`scripts/edge-migrate.sh:184-192`) — a down
+> migration must remove its ledger row, so it cannot be run by the role the forward apply uses. Second,
+> `deploy/scripts/central-migrate.sh:26-27` states the project's position on the other database in so many
+> words: *"It does not invent a rollback story: .down.sql files exist and are the operator's tool, not this
+> script's. An automatic down-migration is a good way to lose a customer's data during an incident."*
+>
+> **So the current, honest position is: a schema down-migration on a live site is NOT a tooled operation.**
+> The `.down.sql` files are correct and are exercised on every change (below), but running one against a
+> live appliance is a hand-run `psql` by an admin role, outside every guard in the forward runner. Closing
+> that gap — a guarded down runner with the same positive-identity gate, a mandatory `--expect-sha256` of
+> the down file, a distinct acknowledgement, and a refusal to roll back anything that is not the current
+> head of the ledger — is recorded as outstanding work rather than described here as if it existed.
 
-The down script drops every table, trigger and controlled function 0010 created and removes its ledger row;
-the preflight asserts that coverage on every build, so a rollback cannot silently leave executable functions
-behind. **The lifecycle gate proves apply → behaviour → down → re-apply on a disposable PostgreSQL 16 on
-every change**, which is why this step is rehearsed rather than hoped for.
+The down script itself is sound: it drops every table, trigger and controlled function 0010 created and
+removes its ledger row, and the preflight asserts that coverage on every build, so a rollback cannot
+silently leave executable functions behind. **The lifecycle gate proves apply → behaviour → down → re-apply
+on a disposable PostgreSQL 16 on every change** — note *disposable*: that is where the rehearsal happens,
+and it is not the same as a live rollback being available.
 
 Afterwards, confirm the schema is gone:
 

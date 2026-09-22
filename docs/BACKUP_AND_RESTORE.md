@@ -29,13 +29,28 @@ the last active revision's bundle on hand ([EDGE_NETWORKING.md](EDGE_NETWORKING.
 
 ### How
 
-A backup agent (cron/systemd timer on the appliance) runs:
+`deploy/scripts/stayconnect-site-backup.sh` is the supported backup script, and it is run **by hand**:
 
 ```sh
 deploy/scripts/stayconnect-site-backup.sh
 ```
 
-which is the two commands this section always described, implemented, plus the one exclusion that only
+> **⚠ THERE IS NO BACKUP AGENT.** This section used to open "A backup agent (cron/systemd timer on the
+> appliance) runs", and there is none. Nothing in `deploy/systemd/` and no cron entry invokes this script;
+> the only backup-related unit in the tree is `stayconnect-backup-cleanup.{service,timer}`, which *prunes*
+> artefacts and creates none. Grepping the repository for this script's name finds it referenced only by
+> itself, by `stayconnect-financial-restore.sh` and by this document.
+>
+> **A nightly backup is therefore documented policy with no implementing mechanism.** Installing the timer
+> is outstanding work; until it exists, treat every statement in the Policy block below as intent, and take
+> the backup manually before any operation that needs one.
+>
+> To be fair to the script: it is **installed on the appliance and proven in manual use** — T0040 delivered
+> it, T0043 fixed its pg-version and role defects and used it to take that milestone's backup, and the
+> Phase-6 appliance evidence records another. The tool works and its guards are active. What has never
+> existed is the thing that runs it without a human.
+
+The script is the two commands this section always described, implemented, plus the one exclusion that only
 matters once Phase 4 exists:
 
 ```sh
@@ -56,11 +71,21 @@ tar czf "${OUT%.dump}-etc.tgz" --exclude=financial-restore-generation.json /etc/
 > restored, the marker will be BEHIND the database, the two records will disagree about this appliance's
 > restore history, and money movement is held until an operator establishes which is right.
 
-Every run is recorded in the site DB's **`backup_records`** table
-(`status running→ok/failed`, `kind scheduled|manual|pre_migration`, path,
-size, error) — which is what Hotel Admin's backups page and the `backup`
-telemetry kind report, so both hotel staff and cloud fleet view can see a
-site whose backups are failing. Manual runs: `POST /edge/v1/backups`.
+**`backup_records` is written by the OTHER backup path, not by this script.** The table exists (migration
+0001) and `POST /edge/v1/backups` — the Hotel-Admin path, which produces `db-<stamp>.sql.gz` through scd —
+records every run in it with `status running→ok/failed` and `kind scheduled|manual|pre_migration`. That is
+what the backups page shows.
+
+`stayconnect-site-backup.sh` never touches the database, so **a run of the sanctioned shell backup leaves no
+`backup_records` row and does not appear on the backups page.** This section previously said "Every run is
+recorded", which was true of one path and not of the one it was describing. The two paths are genuinely
+different artefacts: the shell script produces `site-<stamp>.dump` (pg_dump custom format) plus an `/etc`
+archive and a metadata file, which is what `stayconnect-financial-restore.sh` consumes; the API path
+produces a gzipped SQL dump that only the scd restore endpoint accepts. Neither tool accepts the other's
+output.
+
+The reference to a `backup` telemetry kind is also historical: Central is licensing-only and the telemetry
+tables were dropped by migration 0045, so no fleet view reports backup health from telemetry.
 
 ### Policy
 
@@ -70,8 +95,12 @@ site whose backups are failing. Manual runs: `POST /edge/v1/backups`.
 - Off-box copies go to **hotel-controlled** storage (NAS/SFTP on the hotel
   network) — never to StayConnect cloud storage (PII boundary,
   [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md)).
-- HA pairs: back up on the current primary only (replication covers the
-  secondary); the agent checks VRRP state before running.
+- ~~HA pairs: back up on the current primary only (replication covers the secondary); the agent checks VRRP
+  state before running.~~ **NOT APPLICABLE AND NOT IMPLEMENTABLE TODAY.** There is no HA: decision ARCH-04
+  is ACTIVE and records that HA failover under the approved two-NIC architecture is not designed,
+  implemented or accepted, and the HA-sync transport is an open architecture decision. There is no
+  keepalived, no VRRP and no agent anywhere in the tree, so there is no VRRP state to check and no secondary
+  to skip.
 
 ### Three public tables no migration creates — expected, and what a restore must know
 
@@ -184,12 +213,26 @@ systemctl start stayconnect-ctrlapi
 ```
 
 Post-restore checks: `readyz`; `GET /cloud/v1/licenses/` lists envelopes; an
-appliance license fetch succeeds; telemetry ingest resumes — appliances will
-re-drain anything unacked and `fleet_telemetry_dedupe` (restored with the
-dump) drops what already landed. If the dedupe table was restored *older*
-than `fleet_telemetry`, some duplicates may land; dedupe rows can be rebuilt:
-`INSERT INTO fleet_telemetry_dedupe SELECT appliance_id, seq, now() FROM
-fleet_telemetry ON CONFLICT DO NOTHING`.
+appliance license fetch succeeds. That is the whole list — Central serves the
+appliance for **licensing only**.
+
+> **HISTORICAL — do not perform.** This step used to continue: "telemetry
+> ingest resumes — appliances will re-drain anything unacked and
+> `fleet_telemetry_dedupe` (restored with the dump) drops what already landed",
+> and it offered a rebuild statement `INSERT INTO fleet_telemetry_dedupe SELECT
+> appliance_id, seq, now() FROM fleet_telemetry ON CONFLICT DO NOTHING`.
+>
+> Both tables are **gone**. Migration `0045_central_is_licensing_only_remove_telemetry`
+> dropped them, `control-plane/internal/fleet` was deleted, the telemetry
+> endpoints answer 404 and there are no NATS containers on Central. The
+> statement would fail on a table that does not exist, and an operator following
+> it after a restore would reasonably conclude the restore was incomplete.
+>
+> The telemetry link was built, verified and **switched off by decision** —
+> 87 000 records were delivered and both sides reconciled first. A static
+> outbox, a closed transport and a missing fleet view are that decision, not a
+> fault, and reconnecting telemetry is **not** a repair for anything. See
+> `current_state_facts.central_scope` in `governance/project-state.json`.
 
 **Key property of the architecture: a cloud restore never interrupts hotels.**
 Appliances keep serving guests on their persisted licenses throughout

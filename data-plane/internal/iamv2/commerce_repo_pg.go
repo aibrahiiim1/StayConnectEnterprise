@@ -448,30 +448,30 @@ func (t *pgCommerceTx) GrantQuotedEntitlement(ctx context.Context, tenantID, sit
 	if err != nil {
 		return "", "", err
 	}
-	// SINGLE-USE: burn the voucher in the SAME transaction that grants the entitlement.
+	// SINGLE-USE IS ENFORCED INSIDE p4_entitlement_grant_kernel, NOT HERE.
 	//
-	// The Phase-1B credential rule treats only an UNUSED voucher as redeemable, and the canonical states are
-	// UNUSED | REDEEMED | REVOKED | REDEMPTION_EXPIRED -- but nothing ever performed the transition. Measured
-	// on the DEVELOPMENT appliance: vouchers that had been authenticated, quoted, confirmed and turned into a
-	// live entitlement were all still UNUSED, so the same code could be redeemed again and again, each time
-	// producing a fresh auth context and a fresh entitlement. The contract requires single-use redemption.
+	// It used to be this statement:
 	//
-	// The burn belongs HERE, at the grant, not at authentication: a guest who authenticates and never buys
-	// anything must not lose their voucher. And it belongs in this transaction so a grant can never commit
-	// with the voucher still spendable.
+	//     UPDATE iam_v2.vouchers v SET state = 'REDEEMED' FROM iam_v2.entitlements e
+	//      WHERE e.id = $1 AND v.id = e.voucher_id AND ... AND v.state = 'UNUSED'
 	//
-	// already_granted is the idempotent retry of a grant that already happened, so the UPDATE is written to
-	// be a no-op in that case (the voucher is already REDEEMED and the WHERE clause will not match).
-	if _, err := t.tx.Exec(ctx, `
-	    UPDATE iam_v2.vouchers v
-	       SET state = 'REDEEMED'
-	      FROM iam_v2.entitlements e
-	     WHERE e.id = $1::uuid
-	       AND v.id = e.voucher_id
-	       AND v.tenant_id = $2::uuid AND v.site_id = $3::uuid
-	       AND v.state = 'UNUSED'`, eid, tenantID, siteID); err != nil {
-		return "", "", err
-	}
+	// and it could never have run. This transaction is svc_scd, and svc_scd holds SELECT and INSERT on
+	// iam_v2.vouchers and NOT UPDATE -- read off PRE-LIVE, and declined on purpose by
+	// deploy/gatep/svc-scd-iamv2-guest-auth-grants.sql:225-228, which says redemption is a write "the
+	// accepted domain performs through its own guarded paths". So the statement raised permission denied,
+	// and because it shared this transaction with the grant it took the grant down with it: not a voucher
+	// redeemed twice, but a voucher that could not be redeemed once. Nothing met it because the portal
+	// commerce surface is dark, so nothing reaches this function.
+	//
+	// Migration 0084 moves the burn into the SECURITY DEFINER kernel the call above enters. That kernel is
+	// owned by iam_v2_owner, which does hold UPDATE; it is the one kernel BOTH the free and the paid grant
+	// paths funnel through, so the paid path is now covered too, which this statement never was; and it
+	// already holds the per-subject advisory lock, so the burn serializes against concurrent grants without
+	// a second locking scheme. svc_scd gained no privilege -- the fix removed the need for one.
+	//
+	// A fresh grant against a voucher that is not UNUSED now raises VOUCHER_NOT_REDEEMABLE from the kernel
+	// and arrives here as an error from the call above. An idempotent retry returns already_granted before
+	// the burn is reached, so it is unaffected.
 	_ = already
 
 	if superseded == nil {

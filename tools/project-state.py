@@ -183,10 +183,24 @@ def render_block(st):
         f"Go-Live: {prod['go_live'].split('.')[0].lower()}. "
         f"Hotel Admin: {prod['hotel_admin'].split(' ')[0]}",
     ] if prod else []) + [
-        f"**Development reference appliance ({dev['host']}):** UNTOUCHED by this work and NOT cut over. "
-        f"Retains the historical live-dark runtime its accepted evidence records, including its superseded "
-        f"guest-IAM schema ({dev['iam_v2_tables_live']} iam_v2 tables live). Reference and evidence only, "
-        f"never an installation source.",
+        # THE RETIREMENT HAS TO REACH THE RENDER, or the block keeps publishing a retired host as a current
+        # reference. governance/project-state.json has said `"status": "RETIRED"` here since 2026-09-12 and
+        # this line ignored the field: it read "UNTOUCHED by this work and NOT cut over ... Reference and
+        # evidence only", present tense, with no retirement anywhere in it -- and it is rendered into four
+        # repository documents and six pack copies, so one unread field became ten stale surfaces.
+        f"**{'RETIRED development reference appliance' if dev.get('status') == 'RETIRED' else 'Development reference appliance'} "
+        f"({dev['host']}):** "
+        + (f"RETIRED {dev.get('retired_on', '')} and NOT an operational target: not to be contacted, not "
+           f"diagnosed against, and not a source of anything. Its accepted evidence is HISTORICAL and "
+           f"preserved exactly as recorded -- retiring a target does not falsify what it proved. It held "
+           f"the live-dark runtime that evidence describes, including its superseded guest-IAM schema "
+           f"({dev['iam_v2_tables_live']} iam_v2 tables live at its last read). Never an installation "
+           f"source."
+           if dev.get("status") == "RETIRED" else
+           f"UNTOUCHED by this work and NOT cut over. Retains the historical live-dark runtime its accepted "
+           f"evidence records, including its superseded guest-IAM schema "
+           f"({dev['iam_v2_tables_live']} iam_v2 tables live). Reference and evidence only, never an "
+           f"installation source."),
         f"**Lifecycle:** PRE-LIVE (D24): no real hotel guest or staff depends on StayConnect for live "
         f"service yet.",
         f"**Single next authorized action:** {st['next_authorized_action']}",
@@ -1436,7 +1450,20 @@ def check_appliance_facts_agree(st):
     # 5. The renderer must be able to state the runtime identity once it is recorded, and the appliance
     #    summary must not go on denying that such a head exists.
     head = str(f.get("deployed_head_on_appliance") or "").strip()
-    if len(head) >= 8:
+    # A HEAD IS A COMMIT, NOT ANY STRING EIGHT CHARACTERS LONG.
+    #
+    # This read `if len(head) >= 8`, and deployed_head_on_appliance is legitimately allowed to hold the
+    # sentence "MIXED -- see deployed_runtime_services; there is no single deployed head" when the appliance
+    # genuinely runs binaries from several commits. That sentence is longer than eight characters, so the
+    # rule treated it as a recorded head and then demanded that runtime_provenance NOT say "mixed" -- i.e.
+    # it required the appliance summary to claim a single commit precisely when there was not one. It was
+    # satisfied for months by a runtime_provenance that asserted "SINGLE-COMMIT for every service binary"
+    # while the appliance ran five, and it failed the moment that was corrected to the truth.
+    #
+    # So the rule now applies only when a head really is a commit sha. Its actual point is intact and
+    # unweakened: if a single deployed head IS recorded, the summary may not go on denying one exists.
+    looks_like_sha = 7 <= len(head) <= 40 and all(c in "0123456789abcdefABCDEF" for c in head)
+    if looks_like_sha:
         # THE FIRST SENTENCE ONLY. This field states its verdict up front and then narrates the history that
         # led there, and that history legitimately contains the words the verdict must no longer use — so a
         # rule that scanned the whole value could only be satisfied by deleting the history, and one that

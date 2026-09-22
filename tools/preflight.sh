@@ -115,6 +115,18 @@ BINARY_PY
   python tools/project-state.py validate            || rc=1
   python tools/project-state.py check-generated     || rc=1
   python tools/validate-delivery-protocol.py        || rc=1
+  # Cheapest possible answer to "can the runner see this migration at all". Three migrations once sat in a
+  # directory no runner reads, through four green gates, and a rebuild from the repository would have come
+  # up three privilege grants short of the appliance.
+  python tools/validate-migration-location.py       || rc=1
+  # The standing records -- the retired host, the onboarding milestones, Central's licensing-only scope and
+  # any stated master head -- checked over the WHOLE tree, including the shell scripts no other validator
+  # reads. Two of those scripts defaulted to the retired appliance and one of them reboots it.
+  python tools/validate-standing-records.py         || rc=1
+  # A grant only a migration makes is a grant that disappears: gatep-grants.sql revokes all privileges from
+  # the service roles and runs AFTER the migrations. Four operator reads (0080-0083) were lost this way and
+  # the factory-clean baseline proves it -- it contained none of them while the appliance had all four.
+  python tools/validate-migration-grant-durability.py || rc=1
 
   # The governance gate's LAST step fails if anything is left in the tree, including untracked build output.
   # Discovering that after everything else has passed is the most annoying possible way to fail.

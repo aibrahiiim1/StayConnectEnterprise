@@ -478,6 +478,26 @@
           "why": "its entire verdict is a function of tracked files -- the four gate workflows' triggers and concurrency blocks, and the presence and content of the preflight, its protocol document and the PR template. It reads no clock, no live API and no git history, so an identical tree cannot produce a different answer."
         },
         {
+          "name": "Migration location — every numbered migration is where a runner can see it",
+          "reuse": "tree-pure",
+          "why": "it reads only the NAMES and LOCATIONS of files in the tree: which directory each NNNN_*.{up,down}.sql sits in, whether both halves are present, whether a number is used twice, and whether the sequence has a gap. No git history, no clock, no network, no database, and it produces no artifact. An identical tree has the identical answer."
+        },
+        {
+          "name": "Standing records — retired hosts, onboarding milestones, Central scope, stated master head",
+          "reuse": "tree-pure",
+          "why": "every rule reads tracked file CONTENT and compares it against facts in governance/project-state.json, which is also tracked. The one external call is `git rev-parse master`, and it only WIDENS the set of accepted master heads (the recorded delivery base is always accepted), so it can never turn a pass into a fail on an unchanged tree. No clock, no network, no database, no artifact."
+        },
+        {
+          "name": "Standing records — negative tests",
+          "reuse": "tree-pure",
+          "why": "it plants a defect into a copy of the tracked tree, runs the tracked validator, restores, and asserts the refusal. Every input is the tree; an identical tree gives an identical verdict."
+        },
+        {
+          "name": "Migration grant durability — a migration grant must also be named in Gate-P",
+          "reuse": "tree-pure",
+          "why": "it parses GRANT statements out of two sets of tracked SQL files -- data-plane/migrations/*.up.sql and deploy/gatep/*.sql -- and compares them. No database, no clock, no network, no git history, and it produces no artifact. An identical tree has the identical answer."
+        },
+        {
           "name": "CI reuse policy — negative tests",
           "reuse": "tree-pure"
         },

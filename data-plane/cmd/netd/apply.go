@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -60,6 +61,17 @@ type applier struct {
 	eventFn        func(ctx context.Context, revID, kind string, ok bool, detail map[string]any)
 	prevBundleFn   func(ctx context.Context, exceptID string) (string, error)
 	markRolledFn   func(ctx context.Context, id, reason string) error
+	// revStateFn answers "what state is this revision in", which is what decides whether an
+	// OPERATOR-requested rollback has a target at all. See Rollback.
+	revStateFn func(ctx context.Context, id string) (string, error)
+}
+
+// revisionState is the state seam for the operator rollback guard.
+func (a *applier) revisionState(ctx context.Context, id string) (string, error) {
+	if a.revStateFn != nil {
+		return a.revStateFn(ctx, id)
+	}
+	return a.st.RevisionState(ctx, id)
 }
 
 // currentActiveIntent returns the confirmed active revision's id, bundle and immutable intent snapshot.
@@ -231,9 +243,59 @@ func (a *applier) Confirm(ctx context.Context, id, actor string) error {
 }
 
 // Rollback restores the previous active revision on operator request.
+// errRollbackRefused marks a rollback the appliance declined on purpose, so the transport can distinguish it
+// from an infrastructure failure and answer 409 instead of 500.
+var errRollbackRefused = errors.New("rollback refused")
+
+// Rollback is the OPERATOR-requested rollback. It is not the same operation as the automatic one.
+//
+// WHAT IT USED TO DO, AND WHY THAT WAS DANGEROUS. It called a.rollback directly, which looks for a target
+// with store.ActiveBundlePath(ctx, exceptID) -- `WHERE state='active' AND id<>$1`. That works while a
+// revision is PENDING CONFIRMATION, because the previous revision is then still the active one. Once a
+// revision is CONFIRMED there is exactly one active row and it is the revision itself, so the query returns
+// nothing, prevBundle is empty, and a.rollback takes its factory-clean branch: every guest bridge
+// destroyed, the netplan and unbound fragment deleted, Kea restored to stopped and disabled.
+//
+// So an operator pressing Rollback on the configuration currently in force took the entire guest network
+// down -- every guest offline, DHCP stopped -- and the endpoint answered {"state":"rolled_back"}. The
+// factory-clean branch is correct for what it was written for: the FIRST apply failing or expiring, where
+// coming back clean is the only right answer. It is not an answer to "undo the change I confirmed".
+//
+// This file already states the rule for this situation: "A rollback that cannot be done safely must stay
+// unfinished and say so." A confirmed revision has no stored predecessor to return to -- the previous one is
+// superseded, and network_config_revisions.previous_seq is never written -- so there is nothing to apply, and
+// the honest outcome is a refusal that names the supported path.
+//
+// The automatic rollback (a failed apply, a failed health check, an elapsed confirmation window) is
+// untouched: it calls a.rollback directly and always runs against a revision that is still mid-flight.
 func (a *applier) Rollback(ctx context.Context, id, actor string) error {
-	a.rollback(ctx, id, "operator requested rollback")
-	return nil
+	state, err := a.revisionState(ctx, id)
+	if err != nil {
+		// Fail closed. Not knowing the state is not a reason to run the branch that destroys everything.
+		return fmt.Errorf("cannot determine the state of revision %s, so cannot determine whether a "+
+			"rollback has a target: %w -- refusing rather than guessing", id, err)
+	}
+	// Every refusal below wraps errRollbackRefused, so the transport can answer 409 rather than 500. A
+	// deliberate refusal reported as an internal error tells the operator the appliance is broken when what
+	// actually happened is that it protected their guest network.
+	switch state {
+	case "applying", "pending_confirmation":
+		// The real rollback window. The previous revision is still active and is a genuine target; if there
+		// is none, this is the first apply and coming back factory-clean is correct.
+		a.rollback(ctx, id, "operator requested rollback")
+		return nil
+	case "":
+		return fmt.Errorf("%w: revision %s does not exist", errRollbackRefused, id)
+	case "active":
+		return fmt.Errorf("%w: revision %s is the CONFIRMED active configuration and cannot be rolled back: "+
+			"its predecessor is superseded, so there is no stored configuration to return to, and the only "+
+			"code path left would tear down every guest network and stop DHCP. Edit the networks to the "+
+			"state you want and apply that as a new revision", errRollbackRefused, id)
+	default:
+		// failed, rolled_back, superseded, draft, validated: not in force, so there is nothing to undo.
+		return fmt.Errorf("%w: revision %s is %s and is not in force; there is nothing to roll back",
+			errRollbackRefused, id, state)
+	}
 }
 
 func (a *applier) fail(ctx context.Context, id string, out *applyResult, reason string) {

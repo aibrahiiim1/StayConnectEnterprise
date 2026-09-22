@@ -113,12 +113,55 @@ def check_pms(state):
 
 
 def check_counters(state):
-    lc = state["current_state_facts"].get("live_counters", {})
+    facts = state["current_state_facts"]
+    lc = facts.get("live_counters", {})
     as_at = str(lc.get("as_at", ""))
     note = str(lc.get("_note", ""))
-    superseded = bool(lc.get("superseded_by")) or "supersed" in note.lower()
+
+    # IS *THIS* BLOCK SUPERSEDED -- not, does the word appear in it.
+    #
+    # This read `"supersed" in note.lower()`, which was right while live_counters could only ever be a stale
+    # snapshot: any mention of supersession was a mention of its own. It stopped being right the moment a
+    # CURRENT block could legitimately describe its predecessor -- a note reading "the superseded snapshot is
+    # kept below as live_counters_historical_20260906" is a correctly-labelled current reading, and the
+    # substring test called it stale and demanded it date itself as historical.
+    #
+    # The authoritative signal is the `superseded_by` FIELD, which says so as data. The prose fallback stays,
+    # because a block could be superseded without the field being set, but it now has to be a statement about
+    # THIS block rather than any occurrence of the stem.
+    self_superseded = re.search(
+        r"\b(this|these)\b[^.]{0,80}\bsupersed|"          # "this snapshot is superseded"
+        r"\bis\s+(?:now\s+)?superseded\b|"                # "... is superseded"
+        r"\bsuperseded\s+by\b(?![^.]{0,40}\bpredecessor)",  # "SUPERSEDED by two later grants"
+        note, re.I)
+    superseded = bool(lc.get("superseded_by")) or bool(self_superseded)
     notes.append(f"live_counters superseded={superseded}")
+
+    # A PRESERVED PREDECESSOR MUST KEEP SAYING WHAT IT IS.
+    #
+    # Replacing a stale snapshot with a fresh reading is correct, and keeping the old one beside it is better
+    # than deleting it. But the protection has to follow the data: a block moved to live_counters_historical_*
+    # and then quietly stripped of its labels would be a dated snapshot with nothing marking it as one, which
+    # is the exact defect this file exists for.
+    for key, block in sorted(facts.items()):
+        if not key.startswith("live_counters_historical"):
+            continue
+        blob = " ".join(str(block.get(f, "")) for f in ("as_at", "_note", "superseded_by"))
+        if not re.search(r"historical|snapshot|superseded", blob, re.I):
+            fails.append(
+                "%s is a preserved counter snapshot but nothing in its as_at, _note or superseded_by marks "
+                "it as historical" % key)
+        else:
+            notes.append("%s still marks itself historical" % key)
+
     if not superseded:
+        # A CURRENT block still has to be dated. An undated "current" counter block is how a reading becomes
+        # a stale snapshot without anybody deciding that it should.
+        if not re.match(r"^\d{4}-\d{2}-\d{2}", as_at):
+            fails.append(
+                "live_counters is presented as current but as_at is not a date: %r -- a counter block that "
+                "does not say when it was read cannot be told apart from one that has gone stale"
+                % as_at[:120])
         return
     # Once superseded, the snapshot may still be published -- but never undated and never as "in total".
     if not re.search(r"historical|snapshot|superseded", as_at, re.I):

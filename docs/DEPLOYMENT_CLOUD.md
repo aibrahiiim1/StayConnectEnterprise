@@ -135,7 +135,7 @@ change. All §2 exposure rules still apply on the VM — see the open items in
 | Failure | Effect on hotels | Effect on cloud users | Recovery |
 |---|---|---|---|
 | ctrlapi down | none (license fetch retries with backoff) | cloud-admin unusable | redeploy — stateless |
-| NATS cluster degraded | none guest-facing; telemetry queues in outboxes | fleet view goes stale | restore quorum; edges re-drain, dedupe absorbs replays |
+| ~~NATS cluster degraded~~ | — | — | **NOT A FAILURE MODE ANY MORE.** There is no NATS cluster on Central and no telemetry to queue: migration `0045_central_is_licensing_only_remove_telemetry` dropped the tables, `internal/fleet` was deleted and `nats-authz` is inactive and disabled. This row used to read "restore quorum; edges re-drain, dedupe absorbs replays", which is an instruction to restore something that was **removed on purpose**. Central serves the appliance for licensing only; see `current_state_facts.central_scope`. |
 | Postgres down | none | everything cloud down | restore/replica failover; [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md) §2 |
 | Redis down | none | operators logged out | restart — sessions are re-creatable |
 | Vendor key lost | none until renewals are due | cannot issue licenses | restore from escrow, or rotate: ship new public key to appliances, re-issue |

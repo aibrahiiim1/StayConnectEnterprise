@@ -440,6 +440,14 @@ func (s *server) rollback(w http.ResponseWriter, r *http.Request) {
 	var req idReq
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	if err := s.ap.Rollback(r.Context(), req.RevisionID, req.Actor); err != nil {
+		// A DELIBERATE REFUSAL IS NOT AN INTERNAL ERROR. Rollback declines when the revision is not in a
+		// state that has a rollback target -- most importantly when it is the CONFIRMED active
+		// configuration, where the only remaining code path would tear down every guest network. Reporting
+		// that as 500 tells the operator the appliance is broken when what it did was protect their guests.
+		if errors.Is(err, errRollbackRefused) {
+			writeJSON(w, 409, map[string]string{"error": err.Error()})
+			return
+		}
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
