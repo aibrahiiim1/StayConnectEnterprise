@@ -338,7 +338,7 @@
     "Any Production contact or mutation.",
     "Re-executing, reopening or extending Phase 7, which is ACCEPTED_AND_CLOSED, and implementing any numbered development phase: none is open or authorized, and no Phase 8 exists."
   ],
-  "next_authorized_action": "NONE is authorized. Master protection is hardened and verified: a repository ruleset with no bypass actors enforces all four mandatory gates (pinned to the GitHub Actions app), a required pull request, strict branch currency, conversation resolution, merge-commits-only, no force pushes and no deletion, against everyone including the repository owner, with the live configuration re-checked by CI on every governance run and the check itself watched failing on 14 weakening scenarios. The only open item is a PRODUCT-OWNER DECISION on whether to require one approving review, which needs a second reviewing account. No further action follows: no Room Login, no PMS configuration change, no Full Resync, no financial traffic, no deployment, no migration, no service restart and no Go-Live is authorized. PRE-LIVE remains PRE-LIVE.",
+  "next_authorized_action": "NONE is authorized. Master protection is hardened and verified: a repository ruleset with no bypass actors enforces all four mandatory gates (pinned to the GitHub Actions app), a required pull request, strict branch currency, conversation resolution, merge-commits-only, no force pushes and no deletion, against everyone including the repository owner, with the live configuration re-checked by CI on every governance run and the check itself watched failing on 14 weakening scenarios. TWO PRODUCT-OWNER DECISIONS ARE OPEN and neither is authorized by being recorded. Both are set out in open_product_owner_decisions. One asks whether master should require an approving review. The other asks what to do about guest sign-in on PRE-LIVE, where the appliance offers two methods and voucher cannot put a guest online while the Phase-2 portal commerce surface is dark. No further action follows from either. No Room Login, no PMS configuration change, no Full Resync, no financial traffic, no deployment, no migration, no service restart and no Go-Live is authorized. PRE-LIVE remains PRE-LIVE.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
   "latest_accepted_po_decision": "D40",
@@ -1093,9 +1093,16 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     },
     "deployed_runtime_provenance_verified_at": "2026-09-21",
-    "deployed_runtime_provenance_verification": "Each installed binary was copied off the appliance and its embedded metadata read with the pinned toolchain. All six: vcs.modified=false, -tags=stayconnect_production. Three distinct vcs.revision values, recorded per service rather than averaged. The appliance manifest was rewritten from the same reading and verifies with sha256sum -c against the installed bytes."
+    "deployed_runtime_provenance_verification": "Each installed binary was copied off the appliance and its embedded metadata read with the pinned toolchain. All six: vcs.modified=false, -tags=stayconnect_production. Three distinct vcs.revision values, recorded per service rather than averaged. The appliance manifest was rewritten from the same reading and verifies with sha256sum -c against the installed bytes.",
+    "rollback_artifact_provenance": {
+      "audited_at": "2026-09-21",
+      "finding": "17 of the 36 retained rollback artifacts in /opt/stayconnect/bin were built WITHOUT -tags stayconnect_production and so carry the development build profile; most carry no vcs stamp either. Four were produced by the guest-pilot mission (the *.bak-untagged files and portald.bak-landingerror) and thirteen predate it, from before scripts/build-appliance-binaries.sh existed. Until this closure every one of them was selectable by an operator typing a suffix, and binary-rollback.sh would have installed it, verified the digest and reported success -- truthfully about identity, and silent about profile.",
+      "action": "All 17 were moved to /opt/stayconnect/quarantine/defective-build-profile/, stripped of the execute bit, and listed with their digests in QUARANTINE.txt. They are kept, not deleted: several are the only surviving record of what a deployment replaced. They are out of the directory the rollback command searches, so they are no longer supported rollback candidates.",
+      "durable_guard": "binary-rollback.sh now refuses any target that does not carry the production build profile, reading the artifact rather than trusting its filename, with NO override flag -- the same reasoning the pre-convergence boundary in that file already used: a force switch on the ordinary rollback command is one somebody uses at 3am during an incident. Six cases in scripts/ci/binary-rollback-tests.sh cover the refusal, that nothing is replaced before it, that the message names both the missing tag and the operator action, that a profiled target still installs, and that no override flag exists.",
+      "remaining_candidates": "19, all carrying the production profile: scd 5, edged 4, pmsd 3, portald 3, netd 3, acctd 1. Every service retains at least one supported rollback candidate."
+    }
   },
-  "latest_transition_id": "T0172",
+  "latest_transition_id": "T0173",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1589,14 +1596,14 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "ADMINISTRATIVE_CLOSURE_AND_DEPLOYED_PROVENANCE_RECONCILIATION",
+    "kind": "CLOSURE_CORRECTION_OPEN_DECISIONS_AND_ROLLBACK_PROVENANCE",
     "decision": "D87",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "a4124ce595b8bc590f1eb5708bd75cc8a3579587",
-    "base_note": "The master merge commit of PR #169, the last delivery of the guest-pilot mission.",
-    "head": "1e24e9852637f1c021e161ddbe71f792cbaaa3b6",
+    "base": "225edbf24f8b5abc8c46ad0a6a849bb8abde5685",
+    "base_note": "The master merge commit of PR #170, the provenance reconciliation.",
+    "head": "663cd21b89bfce8145c9e9181d48fef1b5f9109a",
     "head_note": "The last content commit of this delivery. The governance receipt and generated blocks follow it and the manifest last of all -- the manifest must list itself.",
-    "note": "T0172. Administrative closure of the guest-pilot mission, and the reconciliation it required. The register said every service binary on PRE-LIVE came from 94c25c20; not one did. Read off the installed bytes: scd 759286af, pmsd and acctd 305587b6, and edged, portald and netd from builds this mission made OUTSIDE the documented recipe -- no vcs stamp and no stayconnect_production tag, the tag that selects the production build profile, so edged ran with the guest-authority lock unenforced. All three were rebuilt with scripts/build-appliance-binaries.sh from a4124ce5 and reinstalled; all six now read back vcs.modified=false with the production tag, and the guest path re-verified 11/11. The deployed head is now recorded PER SERVICE, because the appliance genuinely runs three commits and naming one would be false for four binaries. The renderer and the parity validator were taught the same thing -- the renderer had turned a sentinel into the head 'MIXED --' by truncating it, and the validator would have read every real commit as a contradiction -- with two negative cases added to the suite the gate runs. PR #169's body carried a changed-file count of 29 against a real 28 and two empty head fields; corrected in place with a dated note."
+    "note": "T0173. Two closure corrections. next_authorized_action said the approving-review question was THE ONLY open Product-Owner item, while the guest-access record had carried the unresolved voucher and commerce decision since T0170. Both are now recorded in open_product_owner_decisions and neither is authorised by being recorded. AND the rollback path: 17 of 36 retained artifacts in the appliance's bin directory were built without -tags stayconnect_production -- four from this mission, thirteen predating it -- and every one was selectable by suffix, installable, and would have been verified by digest and reported as a successful rollback while saying nothing about the build profile that decides whether edged enforces the guest-authority lock. All 17 are quarantined out of the rollback directory with their digests preserved, and binary-rollback.sh now refuses any target lacking the profile, reading the artifact rather than the filename, with no override flag. 19 supported candidates remain and every service still has at least one. No binary was installed or restarted."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
@@ -1712,5 +1719,23 @@
     "non_licensing_functionality": "PERMANENTLY REMOVED from the product, not disabled. internal/{fleet,commands,updates,configpush,heartbeat,transport}; the fleet, usage, sessions, pms_admin, commands and updates APIs; cmd/nats-authz and cmd/nats-acctest; the cloud-admin fleet page. github.com/nats-io/* is no longer a control-plane dependency. Central migration 0045 dropped fleet_telemetry (251166 rows), fleet_telemetry_dedupe (251286), usage_counters, appliance_commands and appliance_update_assignments.",
     "nats_surface": "NONE. stayconnect-nats-authz stopped and disabled; sc-central-nats and sc-central-nats-mtls stopped.",
     "deliberately_kept": "internal/metrics (payments, router, licensing paths) and internal/stripe (commercial billing for licences). A shared package is not removed because its name appears in a removal list."
+  },
+  "open_product_owner_decisions": {
+    "_note": "Every decision awaiting the Product Owner, in one place. Recording a decision here does not authorize any of its options; the options are written down so the choice can be made, not so it can be assumed. This list exists because next_authorized_action described one of them as 'the only open item' after a second had already been raised and recorded elsewhere.",
+    "master_approving_review": {
+      "question": "Whether master protection should additionally require one approving review.",
+      "blocked_on": "A second reviewing account. GitHub will not let the author of a pull request approve it, so with a single account the requirement would block every merge.",
+      "status": "OPEN. Not authorized, not declined.",
+      "recorded_in": "next_authorized_action, where it has been carried since master protection was hardened."
+    },
+    "guest_sign_in_methods_on_pre_live": {
+      "question": "The appliance offers two guest sign-in methods, voucher and PMS room. Voucher authenticates correctly and then cannot put a guest online, because the Phase-2 portal commerce surface is dark and the package it would grant cannot be acquired. Since T0171 it refuses honestly and directs the guest to reception rather than stranding them.",
+      "options": "(a) leave voucher visible, now that it fails honestly, and record PMS room sign-in as the working path on this appliance; (b) authorise enabling the Phase-2 portal commerce surface so voucher can complete; or (c) authorise showing guests only the method that works.",
+      "why_it_is_not_decided_by_the_agent": "All three are product decisions. Enabling the commerce surface is a capability that Phase 7 accepted as OFF everywhere, and hiding a method changes what the portal offers. Neither belongs inside a stabilisation or closure mission.",
+      "evidence": "Every session this appliance has recorded used the PMS room method. No voucher or account entitlement has ever existed here.",
+      "status": "OPEN. Commerce remains dark; nothing in T0170, T0171 or T0172 enables it.",
+      "recorded_in": "T0170 and T0171 raised it; T0172 carried it forward unchanged.",
+      "related_advisory": "The portal carries a notice for exactly this situation -- that a guest can sign in but there is nothing to connect them to, and to let reception know. It stays silent because it is gated on the package catalogue being non-empty, which it is, rather than on the appliance being able to grant one, which it cannot. Left unchanged deliberately: all three options above resolve it without touching that flag."
+    }
   }
 }

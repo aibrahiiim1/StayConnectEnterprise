@@ -1,0 +1,48 @@
+{
+  "transition_id": "T0173",
+  "seq": 173,
+  "timestamp": "2026-09-22T05:40:00Z",
+  "timestamp_derivation": "After the 17 defective rollback artifacts were quarantined on the appliance and the remaining 19 confirmed to carry the production build profile, and after the rollback guard and its six cases were proven locally. Before the author timestamp of the commit that introduces this receipt.",
+  "record_type": "CLOSURE_CORRECTION_OPEN_DECISIONS_AND_ROLLBACK_PROVENANCE",
+  "what_was_authorised": "Two closure corrections. Reconcile next_authorized_action and the open-decision state with current truth, recording the open decisions accurately WITHOUT authorising either. Review the retained defective rollback artifacts so the operational rollback path points only to known-good production-tagged binaries and defective ones cannot be restored as a supported rollback, preserving evidence. Explicitly NOT authorised: product behaviour change, commerce enablement, deployment beyond what rollback safety strictly requires, and any change to 172.21.60.23, PMS, financial, networking, schema, security boundary or Go-Live.",
+  "open_decisions_corrected": {
+    "what_was_wrong": "next_authorized_action said the approving-review question was THE ONLY open Product-Owner item. That was true when written and stopped being true when the guest pilot raised the voucher and commerce question and left it for the Product Owner in T0170, carried forward by T0171 and T0172. The register went on asserting singularity while a second decision sat open in the same repository.",
+    "what_was_done": "next_authorized_action now states that two decisions are open, names both in one sentence each, and says plainly that neither is authorised by being recorded. A new open_product_owner_decisions block carries each in full: the question, its options where they exist, what it is blocked on, where it was recorded and its status.",
+    "neither_is_authorised": "Recording a decision does not choose it. The approving-review requirement is not enabled and is still blocked on a second reviewing account. Phase-2 portal commerce remains dark, voucher still cannot put a guest online, and nothing here changes what the portal offers.",
+    "a_rule_respected_rather_than_worked_around": "The structural validator requires next_authorized_action to name a SINGLE action, and the first rewrite tripped it by listing both decisions with a semicolon. The rule is right -- that field is where an operator looks for what to do next, and a list belongs somewhere a list can be read. The field states the single action (none) and points at the block that holds the decisions."
+  },
+  "rollback_provenance_corrected": {
+    "audit": "Every retained rollback artifact in /opt/stayconnect/bin was checked for the production build profile by reading the artifact, after the method was validated against a known-good and a known-defective binary whose profiles had already been established with the Go toolchain. 17 of 36 lacked it.",
+    "scope_was_wider_than_the_four": "Four were produced by the guest-pilot mission -- the three *.bak-untagged files and portald.bak-landingerror, which is an untagged build retained under a name that says nothing about its profile. THIRTEEN predate the mission entirely, from before scripts/build-appliance-binaries.sh existed, which is the same condition that script's own header records finding on five of six live binaries. Treating only the mission's own four would have left the larger half of the problem in place.",
+    "what_was_at_risk": "binary-rollback.sh resolves a target as <bin-dir>/<binary>.<suffix>, so every one of the 17 was selectable by an operator typing a suffix. The command would have installed it, verified the digest, confirmed the running process was backed by it and reported success -- all true, and all silent about the build profile, which is what decides whether edged enforces the guest-authority lock.",
+    "quarantine": "All 17 moved to /opt/stayconnect/quarantine/defective-build-profile/, stripped of the execute bit, and listed with their digests in QUARANTINE.txt alongside an explanation of what they are and why they are kept. They are NOT deleted: several are the only surviving record of what a deployment replaced, and deleting evidence to tidy a directory is the wrong trade. They are simply no longer in the directory the rollback command searches.",
+    "durable_guard": "Quarantine alone would not stop the next defective artifact appearing, so binary-rollback.sh now refuses any target lacking the production profile, reading the artifact rather than trusting the filename. There is NO override flag, following the reasoning the pre-convergence boundary in that same file already gives about itself: a force switch on the ordinary rollback command is one somebody uses at 3am during an incident. The refusal names the tag to check for and the command that rebuilds a wanted commit properly.",
+    "tests": "Six cases: an unprofiled target is refused, nothing is replaced before the refusal, the message names the missing tag, the message names the operator action, a profiled target still installs normally, and no override flag exists. The four fixtures that stand in for SOURCE binaries now carry the marker, because they are what gets installed and the guard applies to them too. 35 passing.",
+    "supported_candidates_remaining": "19, all carrying the production profile: scd 5, edged 4, pmsd 3, portald 3, netd 3, acctd 1. Every service retains at least one supported rollback candidate, which was checked rather than assumed -- a quarantine that left a service with none would have traded one unsafe state for another.",
+    "no_deployment": "No binary was installed, replaced or restarted. The running services are untouched and remain the production-tagged builds recorded in T0172. Only retained artifacts were moved."
+  },
+  "a_count_corrected_before_it_was_published": "The audit was first reported as 16 of 36 and the number reached two source comments before the quarantine run returned 17. The rows were miscounted by hand. Both comments were corrected to 17 and thirteen, and the figure is now derived from the quarantine manifest rather than from counting a terminal listing.",
+  "verification": {
+    "governance": "PROJECT_STATE_GOVERNANCE = PASS.",
+    "parity": "CURRENT_STATE_PARITY = PASS (51/0).",
+    "timestamps": "TRANSITION_TIMESTAMPS = PASS.",
+    "rollback_tests": "BINARY_ROLLBACK_TESTS = 35 passed, 0 failed.",
+    "runtime_untouched": "The six running binaries and their digests are unchanged from T0172 and still match the authoritative record."
+  },
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "authorization": "Closure corrections only: open-decision reconciliation and rollback-artifact provenance. No product capability was enabled, no decision was taken on the Product Owner's behalf, and no binary was deployed or restarted.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE. 172.21.60.23 was not contacted.",
+  "base": "225edbf24f8b5abc8c46ad0a6a849bb8abde5685",
+  "head": "663cd21b89bfce8145c9e9181d48fef1b5f9109a"
+}
