@@ -24,11 +24,60 @@
 #     No public business/IAM table or public-schema business structure is changed. Ledger bootstrap, if ever
 #     required, is a SEPARATE standalone administrative operation (--bootstrap-ledger) — never part of a
 #     normal migration run, and it applies no migration.
+#
+# ---------------------------------------------------------------------------------------------------------
+# DOWN MODE (--down): the same gate, inverted, plus three guards a forward apply does not need.
+# ---------------------------------------------------------------------------------------------------------
+# There was no --down. docs/PHASE3_DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md printed
+#
+#     bash scripts/edge-migrate.sh --down --only 0010_phase3_stay_resolution --expect-db <db> ...
+#
+# and this runner answered `REFUSED: unknown arg: --down` and exit 2 — the string "down" did not appear in
+# the file. So the documented live rollback was unexecutable, and the real one was a hand-run psql outside
+# every control here. That is the gap this mode closes.
+#
+#   usage: --down --only <version> --expect-db <db> --target-kind <kind> --ack-target <ack>
+#          --ack-down <ack> --expect-sha256 <sha of the .down.sql>
+#
+# WHAT IS THE SAME: exact single version, canonical directory, symlink/duplicate rejection, positive target
+# identity, structural ledger verification, the bounded advisory lock on the same key, forced
+# ON_ERROR_STOP, and two independent proofs of the outcome.
+#
+# WHAT IS DIFFERENT, and why each is necessary:
+#
+#   1. A SECOND, DOWN-SPECIFIC ACKNOWLEDGEMENT (--ack-down). --ack-target says which database you mean;
+#      --ack-down says you mean to REMOVE schema from it. disposable => I_UNDERSTAND_DISPOSABLE_DOWN_MIGRATION,
+#      live-site => I_UNDERSTAND_LIVE_SITE_DOWN_MIGRATION. One flag cannot carry both meanings: an operator
+#      who has typed the live-site apply acknowledgement a hundred times must not be one --down away from
+#      dropping a schema.
+#
+#   2. HEAD-OF-LEDGER. The version being rolled back must be the HIGHEST applied version. Rolling back 0060
+#      while 0085 is applied would leave every migration in between standing on objects that no longer
+#      exist, and nothing in a down script checks that — each one only knows how to undo itself. Refusing is
+#      the only safe answer, and the message names the head so the operator knows what to do first.
+#
+#   3. THE LEDGER PRIVILEGE IS THE OPPOSITE ONE. A forward apply needs SELECT + INSERT and is REFUSED on a
+#      live site if it holds DELETE (line ~186). A down needs SELECT + DELETE, because removing the version
+#      row is what makes the rollback re-appliable. So a down CANNOT be run by the forward apply role, by
+#      construction, and this mode demands the privilege the forward mode forbids. That asymmetry is the
+#      point: the role that routinely migrates forward cannot roll back.
+#
+# THE ON_ERROR_STOP REASONING INVERTS TOO, and the inverted form is worse. Without it a FAILED down
+# migration still reaches the appended ledger DELETE: the down body's COMMIT degrades to ROLLBACK so the
+# objects survive, and then the DELETE commits in its own implicit transaction. The result is a database
+# whose objects are present and whose ledger says they are not — so the next forward apply would try to
+# create what already exists, and fail. Both proofs below are therefore required: psql's exit status, and
+# the ledger row actually being GONE.
+#
+# WHAT THIS MODE DOES NOT DO. It does not take a backup, and it does not pretend to have verified one. A
+# backup before a live down-migration is policy, it belongs in the runbook, and an acknowledgement flag this
+# script could not check would be theatre rather than a guard.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd -P)"
 CANON_MIG_DIR="$HERE/data-plane/migrations"
 ONLY=""; ALL=0; EXPECT_DB=""; TARGET_KIND=""; ACK=""; EXPECT_SHA=""; DIR_OVERRIDE=""; ACK_DIR=""
 BOOTSTRAP=0; BOOTSTRAP_OWNER=""; APPLY_ROLE=""
+DOWN=0; ACK_DOWN=""
 LEDGER_OWNER_ALLOWLIST="${LEDGER_OWNER_ALLOWLIST:-iam_v2_owner postgres}"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -41,6 +90,8 @@ while [ $# -gt 0 ]; do
     --expect-sha256) EXPECT_SHA="$2"; shift 2;;
     --dir) DIR_OVERRIDE="$2"; shift 2;;
     --ack-noncanonical-dir) ACK_DIR="$2"; shift 2;;
+    --down) DOWN=1; shift;;
+    --ack-down) ACK_DOWN="$2"; shift 2;;
     --bootstrap-ledger) BOOTSTRAP=1; shift;;
     --bootstrap-owner) BOOTSTRAP_OWNER="$2"; shift 2;;
     *) echo "REFUSED: unknown arg: $1" >&2; exit 2;;
@@ -71,6 +122,9 @@ q(){ $EDGE_PSQL -tAqc "${ROLE_PREFIX}$1"; }
 NAME_RE='^[0-9]{4}_[a-z0-9_]+$'
 
 ack_for_kind(){ case "$1" in disposable) echo "I_UNDERSTAND_DISPOSABLE_DATABASE";; live-site) echo "I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION";; *) echo "";; esac; }
+# A SEPARATE VOCABULARY FOR REMOVING SCHEMA. Deliberately not derived from the apply acknowledgement, so
+# muscle memory for one cannot satisfy the other.
+ack_down_for_kind(){ case "$1" in disposable) echo "I_UNDERSTAND_DISPOSABLE_DOWN_MIGRATION";; live-site) echo "I_UNDERSTAND_LIVE_SITE_DOWN_MIGRATION";; *) echo "";; esac; }
 
 verify_target_identity(){ # $1=mode-label
   [ -n "$EXPECT_DB" ]     || { echo "REFUSED: --expect-db is mandatory" >&2; exit 3; }
@@ -128,6 +182,130 @@ select_file(){ # $1=dir  -> echoes exactly one file path for $ONLY, guarded
   local dup; dup="$(ls "$d" 2>/dev/null | grep -iE "^${ONLY}\.up\.sql$" | wc -l | tr -d ' ')"
   [ "$dup" = "1" ] || { echo "REFUSED: duplicate migration filenames for '$ONLY' ($dup)" >&2; exit 3; }
   echo "$hit"
+}
+
+select_down_file(){ # $1=dir -> echoes exactly one .down.sql path for $ONLY, guarded like the up half
+  local d="$1" n=0 hit=""
+  for g in "$d/$ONLY".down.sql; do [ -e "$g" ] && { n=$((n+1)); hit="$g"; }; done
+  [ "$n" -eq 1 ] || { echo "REFUSED: --only '$ONLY' resolves to $n down-migration files (need exactly 1)" >&2; exit 2; }
+  [ -L "$hit" ] && { echo "REFUSED: down-migration file is a symlink (rejected): $hit" >&2; exit 3; }
+  [ -f "$hit" ] || { echo "REFUSED: down-migration file not a regular file: $hit" >&2; exit 3; }
+  local dup; dup="$(ls "$d" 2>/dev/null | grep -iE "^${ONLY}\.down\.sql$" | wc -l | tr -d ' ')"
+  [ "$dup" = "1" ] || { echo "REFUSED: duplicate down-migration filenames for '$ONLY' ($dup)" >&2; exit 3; }
+  echo "$hit"
+}
+
+verify_ledger_structural_down(){ # read-only, BEFORE lock; fail closed. The privilege mirror of the up half.
+  [ "$(q "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='schema_migrations'")" = 1 ]     || { echo "REFUSED: public.schema_migrations ledger absent; there is nothing to roll back" >&2; exit 3; }
+  local who; who="$(q "SELECT current_user")"
+  # A DOWN NEEDS THE PRIVILEGE A FORWARD APPLY IS FORBIDDEN. Removing the version row is what makes the
+  # rollback re-appliable, so SELECT + DELETE, and the forward path refuses DELETE on a live site -- which
+  # means the routine migrating role cannot roll back, by construction.
+  for p in SELECT DELETE; do
+    if [ "$(q "SELECT has_table_privilege(current_user,'public.schema_migrations','$p')")" != t ]; then
+      echo "REFUSED: down role '$who' lacks required $p on public.schema_migrations." >&2
+      echo "         A down-migration removes its own ledger row, so it needs exactly:" >&2
+      echo "           GRANT SELECT, DELETE ON public.schema_migrations TO $who;" >&2
+      echo "         This is NOT the forward apply role: that one is refused DELETE on a live site by" >&2
+      echo "         design, and this mode demands it. Use the rollback/admin role." >&2
+      exit 3
+    fi
+  done
+}
+
+# THE LEDGER LOCK. Every mutation of public.schema_migrations takes this ONE key before it takes its own
+# per-version key, and the reason is a race a per-version lock cannot close.
+#
+# The down path refuses to roll back anything but the head of the ledger. That check ran before the lock was
+# taken, and the lock key was derived from the version being reverted -- so a forward apply of a HIGHER
+# version took a DIFFERENT key, was not blocked by it, and could commit in the window between the head
+# check and the revert. The revert then removed a migration that was no longer the head, leaving the newer
+# one standing on objects that had just been dropped. The under-lock recheck could not catch it either: it
+# asked only whether the row still existed, which it did.
+#
+# Serialising every ledger mutation on one key is the honest fix. Migrations are inherently sequential, so
+# there is nothing to lose: two runners racing to change the schema of one database is not a case worth
+# preserving concurrency for. The per-version key is KEPT as well, because it is what makes a repeated apply
+# of the SAME migration a clean SKIP_AFTER_LOCK rather than a wait-then-redo.
+ledger_lock_key(){ q "SELECT hashtextextended('stayconnect_edge_migrate:ledger', 0)"; }
+
+verify_head_of_ledger(){ # $1=version ; refuse to roll back anything but the highest applied version
+  local ver="$1" head applied
+  applied="$(q "SELECT count(*) FROM public.schema_migrations WHERE version='$ver'")"
+  [ "$applied" = "1" ] || {
+    echo "REFUSED: $ver is not applied to this database, so there is nothing to roll back." >&2
+    echo "         A down-migration whose up never ran would drop objects another migration owns." >&2
+    exit 3; }
+  # The numbered head only. iam_base/* rows are applied by name rather than in sequence and are not part of
+  # the numbered ordering a rollback walks backwards through.
+  head="$(q "SELECT coalesce(max(version),'') FROM public.schema_migrations WHERE version ~ '^[0-9]{4}_'")"
+  [ "$head" = "$ver" ] || {
+    echo "REFUSED: $ver is not the head of the ledger -- the highest applied numbered migration is $head." >&2
+    echo "         Rolling back out of order would leave every migration between $ver and $head standing" >&2
+    echo "         on objects that no longer exist, and a down script only knows how to undo itself." >&2
+    echo "         Roll back from the head downwards, one migration at a time." >&2
+    exit 3; }
+  echo "  head-of-ledger confirmed: $ver is the highest applied numbered migration"
+}
+
+revert_one(){ # $1=down-file  atomic lock-then-ledger, mirrored from apply_one
+  local f="$1" base ver sha key out rc
+  base="$(basename "$f")"; ver="${base%.down.sql}"
+  echo "$ver" | grep -Eq "$NAME_RE" || { echo "REFUSED: version '$ver' does not match $NAME_RE" >&2; exit 2; }
+  sha="$(sha256sum "$f" | awk '{print $1}')"
+  [ -n "$EXPECT_SHA" ] || { echo "REFUSED: --expect-sha256 is mandatory for a down-migration" >&2; exit 3; }
+  if [ "$sha" != "$EXPECT_SHA" ]; then
+    echo "REFUSED: checksum mismatch for $ver (down)" >&2
+    echo "  expected(--expect-sha256): $EXPECT_SHA" >&2
+    echo "  actual(sha256 of file):    $sha" >&2
+    exit 3
+  fi
+  verify_head_of_ledger "$ver"
+  key="$(q "SELECT hashtextextended('stayconnect_edge_migrate:'||'$ver', 0)")"
+  lkey="$(ledger_lock_key)"
+  echo "  revert $ver  file=$base  sha256=$sha  lock_key=$key  ledger_lock=$lkey  db=$EXPECT_DB  kind=$TARGET_KIND"
+  out="$(
+    { [ -n "$APPLY_ROLE" ] && printf "SET ROLE %s;\n" "$APPLY_ROLE"
+      printf "SET statement_timeout='60s';\nSELECT pg_advisory_lock(%s);\n" "$lkey"
+      printf "SELECT pg_advisory_lock(%s);\nSET statement_timeout=0;\n" "$key"
+      # HEAD IS RE-ESTABLISHED UNDER THE LOCK, not merely existence. The check before the lock is what
+      # gives the operator a readable refusal; this one is what makes it true at the moment it matters.
+      printf "SELECT EXISTS(SELECT 1 FROM public.schema_migrations WHERE version='%s') AS present,\n" "$ver"
+      printf "       (coalesce((SELECT max(version) FROM public.schema_migrations WHERE version ~ '^[0-9]{4}_'),'') = '%s') AS is_head \\\\gset\n" "$ver"
+      printf "\\\\if :present\n\\\\if :is_head\n\\\\echo REVERTING_UNDER_LOCK\n"
+      cat "$f"
+      printf "\nDELETE FROM public.schema_migrations WHERE version='%s';\n" "$ver"
+      printf "\\\\else\n\\\\echo NOT_HEAD_AFTER_LOCK\n\\\\endif\n"
+      printf "\\\\else\n\\\\echo SKIP_AFTER_LOCK\n\\\\endif\n"
+      printf "SELECT pg_advisory_unlock(%s);\nSELECT pg_advisory_unlock(%s);\n" "$key" "$lkey"
+    } | $EDGE_PSQL -v ON_ERROR_STOP=1 2>&1
+  )"
+  rc=$?
+  if echo "$out" | grep -q "NOT_HEAD_AFTER_LOCK"; then
+    echo "REFUSED: $ver was the head when this runner checked and is NOT the head now -- another runner" >&2
+    echo "         applied a higher migration while this one was starting. Nothing was reverted." >&2
+    echo "         Re-read the ledger and roll back from the new head downwards." >&2
+    exit 3
+  fi
+  if echo "$out" | grep -q "REVERTING_UNDER_LOCK"; then
+    # TWO INDEPENDENT PROOFS, and for a down the second one matters more than for an apply. Without
+    # ON_ERROR_STOP a failed down still reaches the appended DELETE: the body's COMMIT degrades to ROLLBACK
+    # so the objects SURVIVE, and the DELETE then commits on its own. The database would hold objects the
+    # ledger denies, and the next forward apply would try to create what is already there.
+    if [ "$rc" != "0" ]; then
+      echo "RUNNER ERROR: $ver down FAILED (psql exit $rc) -- nothing was reverted" >&2
+      echo "$out" | grep -iE "^(ERROR|FATAL|psql:)" | head -5 >&2
+      exit 4
+    fi
+    if [ "$(q "SELECT count(*) FROM public.schema_migrations WHERE version='$ver'")" != "0" ]; then
+      echo "RUNNER ERROR: $ver was reverted but its ledger row REMAINS -- the down FAILED and rolled back" >&2
+      echo "$out" | grep -iE "^(ERROR|FATAL|psql:)" | head -5 >&2
+      exit 4
+    fi
+    echo "  revert $ver (under lock)"; return 10
+  elif echo "$out" | grep -q "SKIP_AFTER_LOCK"; then
+    echo "  skip-after-lock $ver (not applied)"; return 11
+  else echo "RUNNER ERROR for $ver (down):"; echo "$out" | tail -5 >&2; exit 4; fi
 }
 
 verify_ledger_structural(){ # read-only, BEFORE lock; fail closed
@@ -261,16 +439,20 @@ apply_one(){ # $1=file  atomic lock-then-ledger
   fi
   verify_baseline_for "$ver"
   key="$(q "SELECT hashtextextended('stayconnect_edge_migrate:'||'$ver', 0)")"
-  echo "  select $ver  file=$base  sha256=$sha  lock_key=$key  db=$EXPECT_DB  kind=$TARGET_KIND"
+  lkey="$(ledger_lock_key)"
+  echo "  select $ver  file=$base  sha256=$sha  lock_key=$key  ledger_lock=$lkey  db=$EXPECT_DB  kind=$TARGET_KIND"
   out="$(
     { [ -n "$APPLY_ROLE" ] && printf "SET ROLE %s;\n" "$APPLY_ROLE"
-      printf "SET statement_timeout='60s';\nSELECT pg_advisory_lock(%s);\nSET statement_timeout=0;\n" "$key"
+      # The ledger lock FIRST, then the per-version lock -- the same order in both directions, because two
+      # locks taken in two orders is a deadlock waiting for the first concurrent run.
+      printf "SET statement_timeout='60s';\nSELECT pg_advisory_lock(%s);\n" "$lkey"
+      printf "SELECT pg_advisory_lock(%s);\nSET statement_timeout=0;\n" "$key"
       printf "SELECT (NOT EXISTS(SELECT 1 FROM public.schema_migrations WHERE version='%s')) AS need \\\\gset\n" "$ver"
       printf "\\\\if :need\n\\\\echo APPLYING_UNDER_LOCK\n"
       cat "$f"
       printf "\nINSERT INTO public.schema_migrations(version) VALUES ('%s') ON CONFLICT DO NOTHING;\n" "$ver"
       printf "\\\\else\n\\\\echo SKIP_AFTER_LOCK\n\\\\endif\n"
-      printf "SELECT pg_advisory_unlock(%s);\n" "$key"
+      printf "SELECT pg_advisory_unlock(%s);\nSELECT pg_advisory_unlock(%s);\n" "$key" "$lkey"
     } | $EDGE_PSQL -v ON_ERROR_STOP=1 2>&1
   )"
   rc=$?
@@ -356,6 +538,36 @@ fi
 if [ -z "$ONLY" ] && [ "$ALL" -ne 1 ]; then echo "REFUSED: specify --only <exact-version> (or --all in disposable mode)" >&2; exit 2; fi
 [ -z "$ONLY" ] || echo "$ONLY" | grep -Eq "$NAME_RE" || { echo "REFUSED: --only '$ONLY' does not match $NAME_RE" >&2; exit 2; }
 verify_target_identity "normal"
+
+# ---- DOWN MODE -------------------------------------------------------------------------------------------
+if [ "$DOWN" -eq 1 ]; then
+  # ONE MIGRATION, NEVER A SWEEP. A down sweep is a schema deletion with a loop around it.
+  [ "$ALL" -ne 1 ] || { echo "REFUSED: --all cannot be combined with --down; roll back one migration at a time" >&2; exit 3; }
+  [ -n "$ONLY" ] || { echo "REFUSED: --down requires --only <version>" >&2; exit 3; }
+  want_down="$(ack_down_for_kind "$TARGET_KIND")"
+  [ -n "$want_down" ] || { echo "REFUSED: --target-kind must be disposable or live-site" >&2; exit 3; }
+  if [ "$ACK_DOWN" != "$want_down" ]; then
+    echo "REFUSED: --down on a $TARGET_KIND target requires --ack-down $want_down" >&2
+    echo "         --ack-target says WHICH database you mean. --ack-down says you mean to REMOVE schema" >&2
+    echo "         from it. They are separate on purpose: an operator who has typed the apply" >&2
+    echo "         acknowledgement a hundred times must not be one flag away from dropping a schema." >&2
+    exit 3
+  fi
+  MIG_DIR="$(resolve_mig_dir)"
+  verify_ledger_structural_down
+  f="$(select_down_file "$MIG_DIR")"
+  echo "== DOWN MIGRATION: this REMOVES schema. What follows is the exact file that will run =="
+  sed -n '1,200p' "$f" | grep -vE '^\s*--' | grep -vE '^\s*$' | sed 's/^/    /'
+  echo "== end of down file =="
+  reverted=0; skipped=0
+  set +e; revert_one "$f"; rc=$?; set -e
+  [ "$rc" = 10 ] && reverted=$((reverted+1)); [ "$rc" = 11 ] && skipped=$((skipped+1))
+  { [ "$rc" = 10 ] || [ "$rc" = 11 ]; } || exit "$rc"
+  echo "EDGE_MIGRATE_DOWN_OK reverted=$reverted skipped=$skipped"
+  exit 0
+fi
+
+[ -z "$ACK_DOWN" ] || { echo "REFUSED: --ack-down is only meaningful with --down" >&2; exit 2; }
 if [ "$ALL" -eq 1 ] && [ "$TARGET_KIND" != "disposable" ]; then
   echo "REFUSED: --all is a disposable-test convenience; live/single apply must use --only" >&2; exit 3
 fi

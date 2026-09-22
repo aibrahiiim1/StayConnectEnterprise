@@ -29,26 +29,39 @@ the last active revision's bundle on hand ([EDGE_NETWORKING.md](EDGE_NETWORKING.
 
 ### How
 
-`deploy/scripts/stayconnect-site-backup.sh` is the supported backup script, and it is run **by hand**:
+`deploy/scripts/stayconnect-site-backup.sh` is the supported backup script. It runs nightly from
+`stayconnect-site-backup.timer`, and can be run by hand at any time:
 
 ```sh
 deploy/scripts/stayconnect-site-backup.sh
 ```
 
-> **⚠ THERE IS NO BACKUP AGENT.** This section used to open "A backup agent (cron/systemd timer on the
-> appliance) runs", and there is none. Nothing in `deploy/systemd/` and no cron entry invokes this script;
-> the only backup-related unit in the tree is `stayconnect-backup-cleanup.{service,timer}`, which *prunes*
-> artefacts and creates none. Grepping the repository for this script's name finds it referenced only by
-> itself, by `stayconnect-financial-restore.sh` and by this document.
+> **THE NIGHTLY TIMER NOW EXISTS. It did not when this section first described it.** This text used to
+> open "A backup agent (cron/systemd timer on the appliance) runs", and there was none: nothing under
+> `deploy/` invoked the script and no cron entry existed. The only backup-related unit was
+> `stayconnect-backup-cleanup`, which *prunes* artefacts and creates none. So every backup the appliance
+> had ever had was taken by a human typing the command, while the Policy block below stated a nightly
+> schedule.
 >
-> **A nightly backup is therefore documented policy with no implementing mechanism.** Installing the timer
-> is outstanding work; until it exists, treat every statement in the Policy block below as intent, and take
-> the backup manually before any operation that needs one.
+> `deploy/systemd/stayconnect-site-backup.{service,timer}` closes that. **02:10 local time**, not UTC,
+> because the policy is "a low-traffic hour in the site's timezone" and a hotel's quiet hour is a property
+> of where the hotel is. That is comfortably before the 03:30 retention cleanup, so a night's backup exists
+> before retention runs and the newest full backup the cleanup protects is the one just taken.
+> `Persistent=true`, so an appliance powered off overnight takes its backup when it returns rather than
+> skipping a day in silence.
 >
-> To be fair to the script: it is **installed on the appliance and proven in manual use** — T0040 delivered
-> it, T0043 fixed its pg-version and role defects and used it to take that milestone's backup, and the
-> Phase-6 appliance evidence records another. The tool works and its guards are active. What has never
-> existed is the thing that runs it without a human.
+> **The script remains the guard, not the unit.** It refuses on its own -- no resolvable role, a client
+> older than the server, an empty dump, and an `/etc` archive containing the financial restore marker, which
+> it verifies by listing the archive rather than trusting the `--exclude`. `Type=oneshot` with no `Restart=`:
+> a failed backup is a fact for an operator to see in the journal, and a retry loop on a full disk makes the
+> disk worse.
+>
+> **Installation needs no list.** `install-service-units.sh` derives every `/opt/stayconnect/bin` helper from
+> the units being installed and REFUSES the whole install if one has no source -- a rule that exists because
+> `stayconnect-backup-cleanup.service` was once absent from a hand-written list, failed `203/EXEC` nightly
+> for weeks, and filled the root filesystem until PostgreSQL could not write `postmaster.pid` and the site
+> went down. The new unit is picked up by that same mechanism, which
+> `install-service-units-selftest.sh` asserts.
 
 The script is the two commands this section always described, implemented, plus the one exclusion that only
 matters once Phase 4 exists:
@@ -89,7 +102,8 @@ tables were dropped by migration 0045, so no fleet view reports backup health fr
 
 ### Policy
 
-- Schedule: nightly, low-traffic hour in the site's timezone.
+- Schedule: nightly, low-traffic hour in the site's timezone. **IMPLEMENTED** by
+  `stayconnect-site-backup.timer` at 02:10 local, `Persistent=true`.
 - Retention: keep 7 daily + 4 weekly on the appliance; prune by age and by
   the license's retention limits for the underlying data.
 - Off-box copies go to **hotel-controlled** storage (NAS/SFTP on the hotel

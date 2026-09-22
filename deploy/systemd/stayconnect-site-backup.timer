@@ -1,0 +1,26 @@
+# Nightly, at a low-traffic hour, which is the schedule docs/BACKUP_AND_RESTORE.md has always stated as
+# policy and which nothing implemented.
+#
+# 02:10 LOCAL, not UTC. systemd's OnCalendar is local time by default, and the policy is "a low-traffic hour
+# in the site's timezone" -- a hotel's quiet hour is a property of where the hotel is, not of UTC. That also
+# puts it comfortably before stayconnect-backup-cleanup.timer at 03:30, so a night's backup exists before
+# retention runs and the newest full backup the cleanup protects is the one just taken.
+#
+# Persistent=true so an appliance that was powered off overnight takes its backup when it comes back rather
+# than skipping a day in silence.
+#
+# RandomizedDelaySec is deliberately SMALL here, unlike the cleanup's 15m. There is one appliance per site
+# and nothing to spread load across; the jitter exists only so a backup and an unrelated 02:10 job do not
+# start in lockstep.
+[Unit]
+Description=Nightly StayConnect site backup
+Documentation=file:///opt/stayconnect/docs/BACKUP_AND_RESTORE.md
+
+[Timer]
+OnCalendar=*-*-* 02:10:00
+RandomizedDelaySec=5m
+Persistent=true
+Unit=stayconnect-site-backup.service
+
+[Install]
+WantedBy=timers.target

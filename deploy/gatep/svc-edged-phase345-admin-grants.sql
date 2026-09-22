@@ -296,3 +296,88 @@ GRANT SELECT (id, tenant_id, site_id, stay_id, pms_interface_id) ON iam_v2.auth_
 GRANT EXECUTE ON FUNCTION iam_v2.voucher_code_settings_get(uuid,uuid)                            TO svc_edged;
 GRANT EXECUTE ON FUNCTION iam_v2.voucher_code_settings_set(uuid,uuid,text,integer,text,text)     TO svc_edged;
 GRANT SELECT  ON iam_v2.voucher_code_settings_changes                                            TO svc_edged;
+
+-- ---------------------------------------------------------------------------------------------------------
+-- THE PMS OPERATOR SURFACE: twenty-three privileges migrations 0069-0079 granted and Gate-P did not keep
+-- ---------------------------------------------------------------------------------------------------------
+-- Same mechanism as the four screens above: gatep-grants.sql revokes ALL privileges from the service roles
+-- and runs AFTER the numbered migrations, so a privilege that exists only in a migration is revoked moments
+-- after it is granted. Twenty-one of these are VERIFIED PRESENT on PRE-LIVE 172.21.60.25 -- so mirroring
+-- them here reproduces the live appliance rather than guessing at it -- and two are verified ABSENT with
+-- their objects present, which means they are broken live today.
+--
+-- WHAT WOULD BREAK ON A REBUILT APPLIANCE: the whole PMS operator surface. Roster reconciliation, the
+-- connection-retry and reconciliation settings with their change history, the room inventory and its
+-- history, the coverage evidence, the unanswered-review queue and the case resolutions. Every one of those
+-- screens reads through edged.
+--
+-- TWO OMISSIONS ARE DELIBERATE and are recorded so the absence is not mistaken for an oversight:
+-- iam_v2.pms_reoffer_stay_event and iam_v2.stay_event_reoffers were granted by 0069 and DROPPED by 0070,
+-- which supersedes the reoffer design and refuses to drop the audit log if it holds rows. Granting on either
+-- would fail the install, and tools/validate-migration-grant-durability.py reports them as DEAD rather than
+-- missing by reading the generated baseline.
+
+-- ---- the reconciliation operations. p_apply is ALWAYS false from edged ------------------------------------
+-- edged has two pms_roster_reconcile call sites and both pass false, and there is deliberately no apply
+-- route: "a departure the engine could not place is resolved by the PMS sending one it CAN place". The only
+-- apply=true caller is pmsd, automatically, on a complete published generation.
+GRANT EXECUTE ON FUNCTION iam_v2.pms_roster_reconcile(uuid, uuid, uuid, bigint, text, boolean, text)     TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_roster_of_generation(uuid, uuid, uuid, bigint)                      TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_known_room_inventory(uuid, uuid, uuid, bigint, integer)             TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_rebaseline_room_inventory(uuid, uuid, uuid, bigint, text, text)     TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_dispose_snapshot_cases(uuid, uuid, uuid, text, text)                TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_accept_startup_data_gap(uuid, uuid, uuid, text, text)               TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_integration_blockers(uuid, uuid)                                    TO svc_edged;
+
+-- ---- the two settings groups, read and write through their functions --------------------------------------
+-- The _set functions are the only writers: they re-check their own bounds and append the change row in the
+-- same transaction, so a setting cannot move without its audit. edged holds no write on either table.
+GRANT EXECUTE ON FUNCTION iam_v2.pms_connection_settings_get(uuid, uuid, uuid)                           TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_connection_settings_set(uuid, uuid, uuid, text, text, integer, integer, integer, integer, integer) TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_reconciliation_settings_get(uuid, uuid)                             TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_reconciliation_settings_set(uuid, uuid, integer, integer, text, text, integer, integer) TO svc_edged;
+
+-- ---- the reads the screens do directly. SELECT only, table by table --------------------------------------
+GRANT SELECT ON iam_v2.pms_connection_settings              TO svc_edged;
+GRANT SELECT ON iam_v2.pms_connection_settings_changes      TO svc_edged;
+GRANT SELECT ON iam_v2.pms_reconciliation_settings          TO svc_edged;
+GRANT SELECT ON iam_v2.pms_reconciliation_settings_changes  TO svc_edged;
+GRANT SELECT ON iam_v2.pms_room_inventory                   TO svc_edged;
+GRANT SELECT ON iam_v2.pms_room_inventory_changes           TO svc_edged;
+GRANT SELECT ON iam_v2.pms_resync_coverage                  TO svc_edged;
+GRANT SELECT ON iam_v2.pms_roster_reconciliation_runs       TO svc_edged;
+GRANT SELECT ON iam_v2.pms_unanswered_review_events         TO svc_edged;
+GRANT SELECT ON iam_v2.pms_case_resolutions                 TO svc_edged;
+
+-- ---- Phase-6: the setting WRITE, through the operation and only through it -------------------------------
+-- VERIFIED ABSENT ON PRE-LIVE with the object present, so this is broken live today: the Guest Device
+-- Self-Service screen cannot save. The operation is SECURITY DEFINER and writes the setting and its change
+-- row TOGETHER, which is what makes the audit unskippable -- edged holds no direct write on
+-- appliance_product_settings (SELECT only, above) and none at all on the change table.
+--
+-- A GRANT OF SELECT, INSERT ON THE CHANGE TABLE WAS HERE AND IS GONE. It was justified by two claims, and
+-- both were wrong: that "the operation runs as the caller for the audit insert" -- it is SECURITY DEFINER,
+-- so it runs as its OWNER and needs no privilege from svc_edged at all -- and that "the operator screen
+-- reads the history back", which no Go source does. 0034 revokes both privileges from svc_edged by name,
+-- and Gate-P runs after the migrations, so re-granting them here restored a write path around the audit on
+-- every install. tools/validate-migration-grant-durability.py now refuses that.
+GRANT EXECUTE ON FUNCTION iam_v2.p6_set_guest_device_self_service(uuid, uuid, uuid, boolean, uuid, text, text) TO svc_edged;
+
+-- ---- Phase-4 (DARK): the restore-rollback detector edged runs at startup -----------------------------
+-- MIGRATION 0086, MIRRORED HERE, because Gate-P revokes everything from the service roles and runs after
+-- the migrations: a grant that lives only in a migration does not survive a factory-clean install or a
+-- reconcile.
+--
+-- iam_v2.p4_reconcile_financial_epoch_v2 is migration 0023's detector: it decides whether this database is
+-- OLDER than the appliance knows it should be, and therefore restored. It was granted only to
+-- sc_payment_runtime, edged connects as svc_edged, and svc_edged is not a member of that role -- verified
+-- live on PRE-LIVE, where the privilege and the membership both read false. So the caller edged gained at
+-- startup could never have succeeded.
+--
+-- ONE FUNCTION, NOT A FINANCIAL ROLE. svc_edged gains no table privilege on any financial table and no
+-- membership in sc_payment_runtime; 0086 asserts both. The function is SECURITY DEFINER with a pinned
+-- search_path, and its only outcomes are INITIALIZED, UNCHANGED, RECOVERY_ACTIVE and RECOVERY_ENTERED --
+-- every one of which either holds money movement or changes nothing. Releasing a hold is a different
+-- operation on the operator surface.
+GRANT EXECUTE ON FUNCTION
+  iam_v2.p4_reconcile_financial_epoch_v2(uuid, uuid, text, bigint, boolean) TO svc_edged;

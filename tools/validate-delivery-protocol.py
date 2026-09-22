@@ -32,6 +32,7 @@ not, and that the local preflight and its documentation exist. It can refuse a d
 one that the gates would otherwise refuse.
 """
 import json
+import glob
 import os
 import re
 import sys
@@ -162,7 +163,7 @@ def check_protocol_registered():
 
 
 def check_preflight_covers_the_late_failures():
-    """The preflight must actually RUN the four things that were caught late, not merely mention them.
+    """The preflight must actually RUN the things that were caught late, not merely mention them.
 
     Each entry names a real failure this project paid for. A marker alone is too weak: the marker string
     appears more than once in the script, so deleting the stage that does the work can leave the marker
@@ -186,6 +187,12 @@ def check_preflight_covers_the_late_failures():
         "PREFLIGHT_E2E_INFRA": (
             "the end-to-end server-lifecycle check",
             ("e2e-infra-reporter",)),
+        # The fifth, added after T0177 paid for it: the governance gate's mutation suite refuses to run at
+        # all unless BOTH validators pass on the good state, and the keyword half ran nowhere local. A
+        # one-alternative regex lag in an allowlist therefore cost a full governance cycle to discover.
+        "PREFLIGHT_ZERO_STALE": (
+            "the Zero-Stale keyword validator, the other half of the mutation suite's baseline",
+            ("tools/validate-project-state.sh",)),
     }
     for token, (why, commands) in required.items():
         label = token.replace("PREFLIGHT_", "").lower().replace("_", " ")
@@ -199,6 +206,26 @@ def check_preflight_covers_the_late_failures():
                  % (PREFLIGHT, token, " / ".join(repr(m) for m in missing)))
         else:
             ok("preflight actually runs the %s check" % label)
+
+
+def check_no_gate_skips_the_receipt_timing_rule():
+    """A RUNNER MUST NEVER TAKE A CALLER'S WORD FOR A CHECK.
+
+    ZERO_STALE_RECEIPT_TIMING_ALREADY_RUN=1 tells tools/validate-project-state.sh that its receipt-timing
+    invocation was already performed by the caller. That is true of tools/preflight.sh, which runs the same
+    authoritative script in stage 1 and would otherwise spend eight and a half minutes running it twice.
+
+    It is an assertion, not a check, so a gate workflow setting it would be a gate believing a claim about
+    work nobody can see it do -- the same shape as satisfying a required status context with a dispatched
+    run. Nothing in .github/ may set it, and this refuses the delivery if anything does.
+    """
+    for path in sorted(glob.glob(os.path.join(ROOT, ".github", "**", "*.yml"), recursive=True)):
+        text = read(os.path.relpath(path, ROOT).replace(os.sep, "/"))
+        if text and "ZERO_STALE_RECEIPT_TIMING_ALREADY_RUN" in text:
+            fail("%s sets ZERO_STALE_RECEIPT_TIMING_ALREADY_RUN; a gate must run the receipt-timing rule, "
+                 "not be told it was already run" % os.path.relpath(path, ROOT).replace(os.sep, "/"))
+            return
+    ok("no gate workflow skips the receipt-timing rule by assertion")
 
 
 def main():
@@ -222,6 +249,7 @@ def main():
 
     print("== delivery protocol: preflight coverage ==")
     check_preflight_covers_the_late_failures()
+    check_no_gate_skips_the_receipt_timing_rule()
 
     print("=" * 50)
     if _failures:

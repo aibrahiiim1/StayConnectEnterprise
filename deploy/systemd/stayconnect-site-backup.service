@@ -1,0 +1,40 @@
+# THE NIGHTLY SITE BACKUP, WHICH WAS POLICY WITHOUT A MECHANISM.
+#
+# docs/BACKUP_AND_RESTORE.md said "A backup agent (cron/systemd timer on the appliance) runs
+# deploy/scripts/stayconnect-site-backup.sh" and set a policy of "nightly, low-traffic hour in the site's
+# timezone". There was no such agent. Nothing under deploy/ invoked the script and no cron entry existed:
+# the only backup-related unit was stayconnect-backup-cleanup, which PRUNES artefacts and creates none.
+#
+# So every backup the appliance has ever had was taken by a human typing the command. The script itself is
+# sound and proven in manual use -- T0040 delivered it, T0043 fixed its pg-version and role defects and used
+# it to take that milestone's backup -- and what was missing was the thing that runs it unattended. This
+# unit is that thing.
+#
+# THE SCRIPT IS THE GUARD, NOT THIS UNIT. It refuses on its own: no resolvable role, a client older than the
+# server, an empty dump, and -- the one that matters most -- an /etc archive that contains the financial
+# restore marker, which it verifies by listing the archive rather than trusting the --exclude. A timer that
+# tried to second-guess any of that would be a second, unreviewed backup path.
+#
+# WHY Type=oneshot AND NOT A DAEMON: a backup either completes or fails, and systemd should record which.
+# The journal entry is the operational record of a scheduled run; the .dump, the -etc.tgz and the
+# .meta.json beside them are the artefacts.
+[Unit]
+Description=StayConnect nightly site backup (site DB dump + /etc/stayconnect archive)
+Documentation=file:///opt/stayconnect/docs/BACKUP_AND_RESTORE.md
+After=network.target docker.service
+# The site database lives in a container on this appliance. Wants rather than Requires: if docker is not up
+# the script fails honestly and says so, which is a better record than the unit being skipped.
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/stayconnect/bin/stayconnect-site-backup
+# Backing up must never compete with guest traffic or with the PMS feed for IO. The retention cleanup uses
+# the same posture for the same reason.
+Nice=10
+IOSchedulingClass=idle
+# A backup that hangs must not hold the timer's next run open forever. Generous, because a large site dump on
+# a slow disk is not a fault -- but bounded, because an indefinite one is.
+TimeoutStartSec=2h
+# NO Restart=. A failed backup is a fact for an operator to see in the journal, not something to retry
+# silently until it happens to succeed -- and a retry loop on a full disk makes the disk worse.

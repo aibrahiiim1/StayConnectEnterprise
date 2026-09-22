@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0085, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0086, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -16429,6 +16429,7 @@ REVOKE ALL ON FUNCTION iam_v2.p4_reconcile_financial_epoch(p_tenant uuid, p_site
 
 REVOKE ALL ON FUNCTION iam_v2.p4_reconcile_financial_epoch_v2(p_tenant uuid, p_site uuid, p_system_identity text, p_marker_generation bigint, p_marker_present boolean) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.p4_reconcile_financial_epoch_v2(p_tenant uuid, p_site uuid, p_system_identity text, p_marker_generation bigint, p_marker_present boolean) TO sc_payment_runtime;
+GRANT ALL ON FUNCTION iam_v2.p4_reconcile_financial_epoch_v2(p_tenant uuid, p_site uuid, p_system_identity text, p_marker_generation bigint, p_marker_present boolean) TO svc_edged;
 
 
 --
@@ -16593,6 +16594,7 @@ REVOKE ALL ON FUNCTION iam_v2.p6_guest_release_device(p_entitlement uuid, p_devi
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p6_guest_release_device_policy(p_entitlement uuid, p_device uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p6_guest_release_device_policy(p_entitlement uuid, p_device uuid) TO svc_scd;
 
 
 --
@@ -16628,6 +16630,7 @@ REVOKE ALL ON FUNCTION iam_v2.p6_session_requires_authorized_binding() FROM PUBL
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p6_set_guest_device_self_service(p_tenant uuid, p_site uuid, p_appliance uuid, p_on boolean, p_operator uuid, p_operator_label text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p6_set_guest_device_self_service(p_tenant uuid, p_site uuid, p_appliance uuid, p_on boolean, p_operator uuid, p_operator_label text, p_reason text) TO svc_edged;
 
 
 --
@@ -16679,6 +16682,29 @@ GRANT ALL ON FUNCTION iam_v2.p6_tick_online_time(p_tenant uuid, p_site uuid, p_n
 --
 
 REVOKE ALL ON FUNCTION iam_v2.pms_accept_startup_data_gap(p_tenant uuid, p_site uuid, p_event uuid, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_accept_startup_data_gap(p_tenant uuid, p_site uuid, p_event uuid, p_operator text, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION pms_connection_settings_get(p_tenant uuid, p_site uuid, p_interface uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site uuid, p_interface uuid) TO svc_edged;
+GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site uuid, p_interface uuid) TO svc_pmsd;
+
+
+--
+-- Name: FUNCTION pms_connection_settings_set(p_tenant uuid, p_site uuid, p_interface uuid, p_operator text, p_reason text, p_backoff_min_ms integer, p_backoff_max_ms integer, p_stable_reset_seconds integer, p_link_down_alert_seconds integer, p_blocked_after_refusals integer); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_set(p_tenant uuid, p_site uuid, p_interface uuid, p_operator text, p_reason text, p_backoff_min_ms integer, p_backoff_max_ms integer, p_stable_reset_seconds integer, p_link_down_alert_seconds integer, p_blocked_after_refusals integer) TO svc_edged;
+
+
+--
+-- Name: FUNCTION pms_dispose_snapshot_cases(p_tenant uuid, p_site uuid, p_iface uuid, p_operator text, p_note text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT ALL ON FUNCTION iam_v2.pms_dispose_snapshot_cases(p_tenant uuid, p_site uuid, p_iface uuid, p_operator text, p_note text) TO svc_edged;
 
 
 --
@@ -16686,6 +16712,7 @@ REVOKE ALL ON FUNCTION iam_v2.pms_accept_startup_data_gap(p_tenant uuid, p_site 
 --
 
 REVOKE ALL ON FUNCTION iam_v2.pms_integration_blockers(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_integration_blockers(p_tenant uuid, p_site uuid) TO svc_edged;
 
 
 --
@@ -16693,6 +16720,8 @@ REVOKE ALL ON FUNCTION iam_v2.pms_integration_blockers(p_tenant uuid, p_site uui
 --
 
 REVOKE ALL ON FUNCTION iam_v2.pms_known_room_inventory(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_lookback integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_known_room_inventory(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_lookback integer) TO svc_edged;
+GRANT ALL ON FUNCTION iam_v2.pms_known_room_inventory(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_lookback integer) TO svc_pmsd;
 
 
 --
@@ -16700,6 +16729,37 @@ REVOKE ALL ON FUNCTION iam_v2.pms_known_room_inventory(p_tenant uuid, p_site uui
 --
 
 REVOKE ALL ON FUNCTION iam_v2.pms_rebaseline_room_inventory(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_rebaseline_room_inventory(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_operator text, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION pms_reconciliation_settings_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_get(p_tenant uuid, p_site uuid) TO svc_edged;
+GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_get(p_tenant uuid, p_site uuid) TO svc_pmsd;
+
+
+--
+-- Name: FUNCTION pms_reconciliation_settings_set(p_tenant uuid, p_site uuid, p_floor integer, p_cap integer, p_operator text, p_reason text, p_tolerance integer, p_lookback integer); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_set(p_tenant uuid, p_site uuid, p_floor integer, p_cap integer, p_operator text, p_reason text, p_tolerance integer, p_lookback integer) TO svc_edged;
+
+
+--
+-- Name: FUNCTION pms_record_resync_coverage(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_rooms text[], p_roster integer, p_vacant integer, p_conflicts integer); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT ALL ON FUNCTION iam_v2.pms_record_resync_coverage(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_rooms text[], p_roster integer, p_vacant integer, p_conflicts integer) TO svc_pmsd;
+
+
+--
+-- Name: FUNCTION pms_roster_of_generation(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT ALL ON FUNCTION iam_v2.pms_roster_of_generation(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint) TO svc_edged;
+GRANT ALL ON FUNCTION iam_v2.pms_roster_of_generation(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint) TO svc_pmsd;
 
 
 --
@@ -16707,6 +16767,8 @@ REVOKE ALL ON FUNCTION iam_v2.pms_rebaseline_room_inventory(p_tenant uuid, p_sit
 --
 
 REVOKE ALL ON FUNCTION iam_v2.pms_roster_reconcile(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_operator text, p_apply boolean, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_roster_reconcile(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_operator text, p_apply boolean, p_reason text) TO svc_edged;
+GRANT ALL ON FUNCTION iam_v2.pms_roster_reconcile(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_operator text, p_apply boolean, p_reason text) TO svc_pmsd;
 
 
 --
@@ -16834,6 +16896,8 @@ REVOKE ALL ON FUNCTION iam_v2.voucher_code_settings_changes_append_only() FROM P
 --
 
 REVOKE ALL ON FUNCTION iam_v2.voucher_code_settings_get(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.voucher_code_settings_get(p_tenant uuid, p_site uuid) TO svc_scd;
+GRANT ALL ON FUNCTION iam_v2.voucher_code_settings_get(p_tenant uuid, p_site uuid) TO svc_edged;
 
 
 --
@@ -16841,6 +16905,7 @@ REVOKE ALL ON FUNCTION iam_v2.voucher_code_settings_get(p_tenant uuid, p_site uu
 --
 
 REVOKE ALL ON FUNCTION iam_v2.voucher_code_settings_set(p_tenant uuid, p_site uuid, p_mode text, p_length integer, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.voucher_code_settings_set(p_tenant uuid, p_site uuid, p_mode text, p_length integer, p_operator text, p_reason text) TO svc_edged;
 
 
 --
@@ -16855,6 +16920,7 @@ GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.accounting_checkpoints TO svc_acctd;
 --
 
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.accounting_records TO svc_acctd;
+GRANT SELECT ON TABLE iam_v2.accounting_records TO svc_edged;
 
 
 --
@@ -16875,6 +16941,7 @@ GRANT SELECT ON TABLE iam_v2.active_operational_alerts TO svc_edged;
 -- Name: TABLE appliance_product_settings; Type: ACL; Schema: iam_v2; Owner: -
 --
 
+GRANT SELECT ON TABLE iam_v2.appliance_product_settings TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.appliance_product_settings TO svc_edged;
 
 
@@ -16894,11 +16961,53 @@ GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.auth_contexts TO svc_scd;
 
 
 --
+-- Name: COLUMN auth_contexts.id; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT(id) ON TABLE iam_v2.auth_contexts TO svc_edged;
+
+
+--
+-- Name: COLUMN auth_contexts.tenant_id; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT(tenant_id) ON TABLE iam_v2.auth_contexts TO svc_edged;
+
+
+--
+-- Name: COLUMN auth_contexts.site_id; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT(site_id) ON TABLE iam_v2.auth_contexts TO svc_edged;
+
+
+--
+-- Name: COLUMN auth_contexts.stay_id; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT(stay_id) ON TABLE iam_v2.auth_contexts TO svc_edged;
+
+
+--
+-- Name: COLUMN auth_contexts.pms_interface_id; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT(pms_interface_id) ON TABLE iam_v2.auth_contexts TO svc_edged;
+
+
+--
 -- Name: TABLE auth_resolutions; Type: ACL; Schema: iam_v2; Owner: -
 --
 
 GRANT SELECT,INSERT ON TABLE iam_v2.auth_resolutions TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.auth_resolutions TO svc_edged;
+
+
+--
+-- Name: TABLE checkout_grace_policy_publications; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.checkout_grace_policy_publications TO svc_edged;
 
 
 --
@@ -16936,6 +17045,7 @@ GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.device_network_appearances TO svc_scd
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.devices TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.devices TO svc_netd;
 GRANT SELECT ON TABLE iam_v2.devices TO svc_acctd;
+GRANT SELECT ON TABLE iam_v2.devices TO svc_edged;
 
 
 --
@@ -16958,6 +17068,7 @@ GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.entitlement_device_authorizations TO 
 --
 
 GRANT SELECT ON TABLE iam_v2.entitlement_devices TO svc_scd;
+GRANT SELECT ON TABLE iam_v2.entitlement_devices TO svc_acctd;
 GRANT SELECT ON TABLE iam_v2.entitlement_devices TO svc_edged;
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.entitlement_devices TO svc_pmsd;
 
@@ -16974,6 +17085,7 @@ GRANT SELECT ON TABLE iam_v2.entitlement_state_transitions TO svc_pmsd;
 -- Name: TABLE entitlement_termination_evidence; Type: ACL; Schema: iam_v2; Owner: -
 --
 
+GRANT SELECT ON TABLE iam_v2.entitlement_termination_evidence TO svc_acctd;
 GRANT SELECT ON TABLE iam_v2.entitlement_termination_evidence TO svc_edged;
 
 
@@ -17139,6 +17251,27 @@ GRANT SELECT ON TABLE iam_v2.payment_transactions TO sc_payment_outcome;
 
 
 --
+-- Name: TABLE pms_case_resolutions; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.pms_case_resolutions TO svc_edged;
+
+
+--
+-- Name: TABLE pms_connection_settings; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.pms_connection_settings TO svc_edged;
+
+
+--
+-- Name: TABLE pms_connection_settings_changes; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.pms_connection_settings_changes TO svc_edged;
+
+
+--
 -- Name: TABLE pms_interface_revisions; Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -17207,10 +17340,54 @@ GRANT SELECT ON TABLE iam_v2.pms_reconciliation_cases TO svc_edged;
 
 
 --
+-- Name: TABLE pms_reconciliation_settings; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.pms_reconciliation_settings TO svc_edged;
+
+
+--
+-- Name: TABLE pms_reconciliation_settings_changes; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.pms_reconciliation_settings_changes TO svc_edged;
+
+
+--
+-- Name: TABLE pms_resync_coverage; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.pms_resync_coverage TO svc_edged;
+GRANT SELECT ON TABLE iam_v2.pms_resync_coverage TO svc_pmsd;
+
+
+--
+-- Name: TABLE pms_room_inventory; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.pms_room_inventory TO svc_edged;
+GRANT SELECT ON TABLE iam_v2.pms_room_inventory TO svc_pmsd;
+
+
+--
+-- Name: TABLE pms_room_inventory_changes; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.pms_room_inventory_changes TO svc_edged;
+
+
+--
 -- Name: TABLE pms_rooms_multi_occupancy; Type: ACL; Schema: iam_v2; Owner: -
 --
 
 GRANT SELECT ON TABLE iam_v2.pms_rooms_multi_occupancy TO svc_edged;
+
+
+--
+-- Name: TABLE pms_roster_reconciliation_runs; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.pms_roster_reconciliation_runs TO svc_edged;
 
 
 --
@@ -17225,6 +17402,13 @@ GRANT SELECT ON TABLE iam_v2.pms_source_conflicts TO svc_edged;
 --
 
 GRANT SELECT ON TABLE iam_v2.pms_stays_past_departure TO svc_edged;
+
+
+--
+-- Name: TABLE pms_unanswered_review_events; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.pms_unanswered_review_events TO svc_edged;
 
 
 --
@@ -17308,6 +17492,13 @@ GRANT SELECT ON TABLE iam_v2.service_plans TO svc_pmsd;
 --
 
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.session_entitlement_bindings TO svc_acctd;
+
+
+--
+-- Name: TABLE session_online_watermarks; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.session_online_watermarks TO svc_acctd;
 
 
 --
@@ -17422,6 +17613,13 @@ GRANT SELECT,INSERT ON TABLE iam_v2.voucher_code_key_generations TO svc_scd;
 
 
 --
+-- Name: TABLE voucher_code_settings_changes; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.voucher_code_settings_changes TO svc_edged;
+
+
+--
 -- Name: TABLE vouchers; Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -17479,7 +17677,7 @@ GRANT SELECT,INSERT,UPDATE ON TABLE public.appliances TO svc_scd;
 --
 
 GRANT INSERT ON TABLE public.audit_log TO svc_scd;
-GRANT INSERT ON TABLE public.audit_log TO svc_edged;
+GRANT SELECT,INSERT ON TABLE public.audit_log TO svc_edged;
 
 
 --

@@ -88,3 +88,23 @@ GRANT EXECUTE ON FUNCTION iam_v2.p6_tick_online_time(
 
 -- NOT granted: DELETE on anything, and no write to packages, plans or their revisions. Metering must never
 -- be able to change what was sold.
+
+-- ---------------------------------------------------------------------------------------------------------
+-- PHASE-6 AGGREGATE ONLINE TIME: three reads migration 0036 granted and Gate-P did not keep
+-- ---------------------------------------------------------------------------------------------------------
+-- Mirrored here because gatep-grants.sql revokes ALL privileges from the service roles and runs AFTER the
+-- numbered migrations, so a privilege that lives only in a migration is revoked moments after it is granted.
+-- VERIFIED ABSENT ON PRE-LIVE 172.21.60.25: has_table_privilege(svc_acctd, <each>, SELECT) = false on all
+-- three, while the tables exist. So this is not a rebuild hypothetical -- the aggregate-online-time reads
+-- are unprivileged on the live appliance today, and the reconcile that installs this file is what restores
+-- them.
+--
+-- SELECT only, on three tables acctd already accounts against:
+--   session_online_watermarks        the durable charged-through instant; without it a replayed or delayed
+--                                   tick cannot be told from a new one, which is the whole point of 0036.
+--   entitlement_devices             which device a session belongs to, for the per-device attribution.
+--   entitlement_termination_evidence why an entitlement ended, so accrual stops at the right instant rather
+--                                   than at the next tick.
+GRANT SELECT ON iam_v2.session_online_watermarks        TO svc_acctd;
+GRANT SELECT ON iam_v2.entitlement_devices              TO svc_acctd;
+GRANT SELECT ON iam_v2.entitlement_termination_evidence TO svc_acctd;

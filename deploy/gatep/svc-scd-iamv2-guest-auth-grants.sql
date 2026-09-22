@@ -248,3 +248,52 @@ GRANT EXECUTE ON FUNCTION iam_v2.sync_outbox_accounting()                  TO sv
 -- transport at all. READ ONLY, and there is no write grant anywhere for scd: a daemon that could rewrite the
 -- rule it is subject to is not subject to it.
 GRANT EXECUTE ON FUNCTION iam_v2.cloud_mode_get(uuid,uuid) TO svc_scd;
+
+-- ---------------------------------------------------------------------------------------------------------
+-- PHASE-6 GUEST DEVICE SELF-SERVICE: the two privileges the runtime actually needs
+-- ---------------------------------------------------------------------------------------------------------
+-- gatep-grants.sql revokes ALL privileges from the service roles and runs AFTER the numbered migrations, so
+-- a privilege that lives only in a migration does not survive a reconcile.
+--
+-- VERIFIED ABSENT ON PRE-LIVE 172.21.60.25, with the objects present: has_function_privilege(svc_scd,
+-- p6_guest_release_device_policy, EXECUTE) = false and has_table_privilege(svc_scd,
+-- appliance_product_settings, SELECT) = false. So Guest Device Self-Service is unprivileged on the live
+-- appliance TODAY -- a guest release would fail at the database, not at the policy -- and the reconcile
+-- that installs this file is what restores it. It has not been noticed because the capability is DARK by
+-- deployment flag and default-OFF by setting, so nothing has called it.
+--
+-- The three-argument primitive was ALSO absent there, and that absence was CORRECT: see below.
+--
+-- WHAT EACH IS FOR, and why none of them is a wider grant than the operation needs:
+--   p6_guest_release_device_policy  the ONLY release entry point a runtime role may hold. Its throttle is
+--                                  derived server-side: the entry point takes no limit parameter, so a
+--                                  caller cannot widen its own rate. This is what the runtime calls --
+--                                  internal/deviceselfservice/deviceselfservice.go:198, and nothing else.
+--   appliance_product_settings      SELECT. Whether the capability is offered at all. Read-only on purpose:
+--                                  enabling it is a Product-Owner decision and no runtime privilege should
+--                                  be able to anticipate one.
+--
+-- THREE GRANTS THAT WERE HERE ARE GONE, AND THEIR ABSENCE IS THE POINT.
+--
+-- An earlier version of this block mirrored every privilege 0033 granted, including three that 0034
+-- DELIBERATELY TOOK BACK. Gate-P runs after the migrations, so mirroring them restored, on every
+-- factory-clean install and every reconcile, exactly what 0034 exists to remove:
+--
+--   p6_guest_release_device(uuid,uuid,int)  the parameterized primitive. A caller that can pass its own
+--                                           p_max_releases_per_hour can pass 2147483647 and walk through
+--                                           the approved throttle using the approved function. 0034
+--                                           revokes it from svc_scd and ASSERTS in the same file that
+--                                           svc_scd no longer holds it -- an assertion that runs at
+--                                           migration time, before Gate-P, and so could not catch this.
+--   guest_device_actions (SELECT, INSERT)   0034 calls this a "speculative grant" and refuses it by name.
+--                                           The audit row is written by the SECURITY DEFINER release
+--                                           function, not by scd, which is why scd needs no privilege on
+--                                           the table at all.
+--   appliance_product_setting_changes       the same shape, in svc-edged-phase345-admin-grants.sql.
+--
+-- Nothing in the runtime used any of them: a grep of the Go sources for the three-argument release, for
+-- guest_device_actions and for appliance_product_setting_changes returns comments and tests only.
+-- tools/validate-migration-grant-durability.py now folds grants and revokes in file order and refuses a
+-- Gate-P entry for a privilege the chain withdrew, so this cannot come back as a mirroring accident.
+GRANT EXECUTE ON FUNCTION iam_v2.p6_guest_release_device_policy(uuid, uuid)   TO svc_scd;
+GRANT SELECT          ON iam_v2.appliance_product_settings                    TO svc_scd;

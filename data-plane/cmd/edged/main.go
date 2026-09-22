@@ -111,6 +111,9 @@ type server struct {
 	// all; while dark they do not exist, so an unmounted route cannot leak a financial schema that is not
 	// live yet. It carries NO transport and constructs no engine — edged is an operator API, not a sender.
 	financialCfg posting.Config
+	// The outcome of migration 0023 reconcile at startup, so the financial surface can report what the
+	// detector said rather than re-deriving it per request. Empty when it could not be established.
+	financialEpoch string
 }
 
 func main() {
@@ -294,6 +297,14 @@ func main() {
 		os.Exit(2)
 	}
 	s.financialCfg = finCfg
+
+	// MIGRATION 0023's RESTORE-ROLLBACK DETECTOR, WHICH HAD NO CALLER UNTIL NOW.
+	//
+	// Its own contract says it runs BEFORE any financial worker starts, and edged is the only process that
+	// constructs a financial engine, so this is that point: after the flags are loaded, before any route is
+	// mounted. See financial_epoch_reconcile.go for the failure posture, which mirrors the Phase-3
+	// controlled-writer precedent -- loud while Phase 4 is dark, fatal once money can move.
+	s.financialEpoch = s.reconcileFinancialEpochAtStartup(rootCtx)
 
 	pmsCfg, err := iamv2.LoadPMSConfigFromEnv(os.Getenv)
 	if err != nil {
