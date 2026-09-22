@@ -1,4 +1,0 @@
-commit 73d196b6c3fdd95ca9382d8c46a1a693918c47bd
-Date:   Tue Sep 22 16:16:38 2026 +0300
-
-    Governance: delivery head moves to the staleness-rule correction
