@@ -334,10 +334,58 @@ func (s *server) updateGuestNetwork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
-	// Update mutable fields (not type/vlan/parent/bridge — those are immutable
-	// once created; delete + recreate to change topology).
+
+	// THE TOPOLOGY FIELDS ARE IMMUTABLE, AND SAYING SO IS PART OF BEING IMMUTABLE.
+	//
+	// network_type, vlan_id, parent_interface and bridge_name are decided at create and cannot be changed:
+	// delete and recreate is the supported lifecycle, the UI says so in prose, and the comment that used to
+	// sit here said so too. What the comment did NOT do was tell the CALLER. The request struct accepts all
+	// four, the UPDATE statement below names none of them, and the handler answered
+	// 200 {"status":"updated"}. A client that PUT {"vlan_id": 30} against a VLAN-20 network was told its
+	// change had been applied, and nothing anywhere had changed.
+	//
+	// Worse than the lie is what a client would do next. A hand-edited row would not take effect either: the
+	// apply diff is keyed on bridge_name (apply_ops.go), bridge_name is computed once at create, and so the
+	// existing bridge is found present, createNetwork is never called, the VLAN sub-interface for the new id
+	// is never made -- while the rendered netplan and nft DESCRIBE the new id. The nft fingerprint would then
+	// report "converged" against a kernel whose bridge carries the wrong tag.
+	//
+	// So a change to any of the four is REFUSED, with the supported lifecycle named in the message. An
+	// unchanged echo is accepted: a client that GETs the object, edits one field and PUTs the whole thing
+	// back is doing nothing wrong, and refusing it would break the honest case to punish the dishonest one.
+	// The comparison is therefore against what is stored, not against presence in the body.
+	var curType, curParent string
+	var curVLAN *int
+	if err := tx.QueryRow(ctx,
+		`SELECT network_type, parent_interface, vlan_id FROM guest_networks WHERE id=$1`, id).
+		Scan(&curType, &curParent, &curVLAN); err != nil {
+		jsonErr(w, http.StatusNotFound, "not_found", "guest network not found")
+		return
+	}
+	if immutable := immutableTopologyChange(in, curType, curParent, curVLAN); immutable != "" {
+		jsonErr(w, http.StatusConflict, "immutable_topology", immutable)
+		return
+	}
+
 	portalURL := netcfg.PortalURLFor(in.GatewayIP, 8380)
-	dnsRaw, _ := json.Marshal(in.DNSServers)
+	// dns_servers: SQL NULL when the caller did not supply the field, so COALESCE preserves what is stored.
+	//
+	// It used to be `string(json.Marshal(in.DNSServers))`, which for a nil slice is the four bytes `null` --
+	// JSON null, not SQL NULL. COALESCE does not fall through a JSON null, so every PUT that omitted
+	// dns_servers OVERWROTE the column with JSON null. A custom resolver list survived exactly until the
+	// next unrelated edit of the same network, and then the render had nothing to write.
+	//
+	// nil means "not supplied, keep it"; an empty array means "clear it", which is a real instruction and is
+	// passed through as `[]`.
+	var dnsArg any
+	if in.DNSServers != nil {
+		raw, merr := json.Marshal(in.DNSServers)
+		if merr != nil {
+			jsonErr(w, http.StatusBadRequest, "bad_request", "dns_servers is not encodable")
+			return
+		}
+		dnsArg = string(raw)
+	}
 	tag, err := tx.Exec(ctx, `
         UPDATE guest_networks SET
           name=COALESCE(NULLIF($2,''),name), description=NULLIF($3,''), ssid_label=NULLIF($4,''),
@@ -358,7 +406,7 @@ func (s *server) updateGuestNetwork(w http.ResponseWriter, r *http.Request) {
           updated_at=now()
         WHERE id=$1`,
 		id, in.Name, in.Description, in.SSIDLabel, in.GatewayIP, in.SubnetCIDR,
-		in.DHCPMode, in.DNSMode, string(dnsRaw), in.DomainName, in.LeaseDefault, in.LeaseMin,
+		in.DHCPMode, in.DNSMode, dnsArg, in.DomainName, in.LeaseDefault, in.LeaseMin,
 		in.LeaseMax, in.CaptiveEnabled, in.InternetEnabled, in.NATEnabled, in.ClientIsolation, portalURL,
 		in.Enabled)
 	if err != nil {
@@ -756,4 +804,34 @@ func pgErr(err error) string {
 		return "that IP is already reserved on this network"
 	}
 	return msg
+}
+
+// immutableTopologyChange returns a message describing the refusal, or "" when the request asks for no
+// topology change at all.
+//
+// It compares against what is STORED rather than against presence in the body, so a client that GETs the
+// object, edits one setting and PUTs the whole thing back is accepted. Only an actual change is refused.
+//
+// bridge_name is not in guestNetworkInput and so cannot be asked for; it is derived from the other three at
+// create and is named in the message because an operator reading it needs to know it moves too.
+func immutableTopologyChange(in guestNetworkInput, curType, curParent string, curVLAN *int) string {
+	const lifecycle = " Topology is fixed at creation: disable the network, apply, delete it, and create a " +
+		"new one with the topology you want. Changing it in place would leave the rendered configuration " +
+		"describing one VLAN while the live bridge still carries another."
+
+	if in.NetworkType != "" && in.NetworkType != curType {
+		return "network_type cannot be changed (this network is " + curType + ")." + lifecycle
+	}
+	if in.ParentInterface != "" && in.ParentInterface != curParent {
+		return "parent_interface cannot be changed (this network is on " + curParent + ")." + lifecycle
+	}
+	if in.VLANID != nil {
+		switch {
+		case curVLAN == nil:
+			return "vlan_id cannot be set on an untagged network." + lifecycle
+		case *in.VLANID != *curVLAN:
+			return fmt.Sprintf("vlan_id cannot be changed (this network is VLAN %d).%s", *curVLAN, lifecycle)
+		}
+	}
+	return ""
 }
