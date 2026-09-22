@@ -247,3 +247,34 @@ BEGIN
     RAISE EXCEPTION 'GATE-P BLOCKER: svc_pmsd holds prohibited financial/authoring privilege: %', bad;
   END IF;
 END $$;
+
+-- ---------------------------------------------------------------------------------------------------------
+-- THE ROSTER-RECONCILIATION RUNTIME: eight privileges migrations 0072-0076 granted and Gate-P did not keep
+-- ---------------------------------------------------------------------------------------------------------
+-- gatep-grants.sql revokes ALL privileges on ALL tables and functions in iam_v2 from every service role and
+-- runs AFTER the numbered migrations, so a privilege that exists only in a migration is revoked moments
+-- after it is granted. These eight were never mirrored here.
+--
+-- WHAT THAT COSTS ON A REBUILT APPLIANCE: the whole subsystem PRs #121-#124 built. Reconciliation proves a
+-- roster complete from what a sweep OBSERVED rather than from what it admitted, which is what stopped
+-- pms_roster_reconcile refusing forever with REFUSED_ROSTER_INCOMPLETE. Without these, pmsd cannot record
+-- coverage, cannot read the room inventory, and cannot run the reconcile at all -- so the same feature would
+-- be dead again, this time for a privilege reason rather than an evidence one.
+--
+-- VERIFIED PRESENT ON PRE-LIVE 172.21.60.25 for all eight, which is why mirroring them here is provably
+-- correct rather than a guess: this file now reproduces the live appliance's privilege state instead of
+-- diverging from it.
+--
+-- pmsd is the ONLY automatic caller of pms_roster_reconcile with p_apply => true, on a complete published
+-- generation. edged's two call sites both pass false and there is deliberately no apply route.
+GRANT EXECUTE ON FUNCTION iam_v2.pms_roster_reconcile(uuid, uuid, uuid, bigint, text, boolean, text)            TO svc_pmsd;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_record_resync_coverage(uuid, uuid, uuid, bigint, text[], integer, integer, integer) TO svc_pmsd;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_roster_of_generation(uuid, uuid, uuid, bigint)                             TO svc_pmsd;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_known_room_inventory(uuid, uuid, uuid, bigint, integer)                    TO svc_pmsd;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_connection_settings_get(uuid, uuid, uuid)                                  TO svc_pmsd;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_reconciliation_settings_get(uuid, uuid)                                    TO svc_pmsd;
+
+-- The two reads behind the coverage evidence. SELECT only: the coverage rows are written through
+-- pms_record_resync_coverage above, never by a direct INSERT, so the connector needs no write here.
+GRANT SELECT ON iam_v2.pms_resync_coverage TO svc_pmsd;
+GRANT SELECT ON iam_v2.pms_room_inventory  TO svc_pmsd;

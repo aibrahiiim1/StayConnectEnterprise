@@ -248,3 +248,37 @@ GRANT EXECUTE ON FUNCTION iam_v2.sync_outbox_accounting()                  TO sv
 -- transport at all. READ ONLY, and there is no write grant anywhere for scd: a daemon that could rewrite the
 -- rule it is subject to is not subject to it.
 GRANT EXECUTE ON FUNCTION iam_v2.cloud_mode_get(uuid,uuid) TO svc_scd;
+
+-- ---------------------------------------------------------------------------------------------------------
+-- PHASE-6 GUEST DEVICE SELF-SERVICE: four privileges migrations 0033/0034 granted and Gate-P did not keep
+-- ---------------------------------------------------------------------------------------------------------
+-- gatep-grants.sql revokes ALL privileges from the service roles and runs AFTER the numbered migrations, so
+-- a privilege that lives only in a migration does not survive a reconcile.
+--
+-- VERIFIED ABSENT ON PRE-LIVE 172.21.60.25, with the objects present: has_function_privilege(svc_scd,
+-- p6_guest_release_device, EXECUTE) = false, likewise the policy function, and
+-- has_table_privilege(svc_scd, appliance_product_settings, SELECT) = false. So Guest Device Self-Service is
+-- unprivileged on the live appliance TODAY -- a guest release would fail at the database, not at the policy
+-- -- and the reconcile that installs this file is what restores it. It has not been noticed because the
+-- capability is DARK by deployment flag and default-OFF by setting, so nothing has called it.
+--
+-- WHAT EACH IS FOR, and why none of them is a wider grant than the operation needs:
+--   p6_guest_release_device         the release operation itself. It is SECURITY DEFINER and takes the L3
+--                                  entitlement lock, reads the offline condition inside it, calls the
+--                                  approved deauthorize primitive and writes the action audit. scd needs
+--                                  EXECUTE and nothing else -- it holds no write on the tables the
+--                                  operation touches.
+--   p6_guest_release_device_policy  the bounded-rate policy in front of it. Separate function, separate
+--                                  grant, because 0034 moved the limit out of the caller: the entry point
+--                                  takes no limit parameter, so a caller cannot widen its own rate.
+--   appliance_product_settings      SELECT. Whether the capability is offered at all. Read-only on purpose:
+--                                  enabling it is a Product-Owner decision and no runtime privilege should
+--                                  be able to anticipate one.
+--   guest_device_actions            SELECT, INSERT. The append-only record of every attempt INCLUDING the
+--                                  refusals, which is where "the operator sees each one in the durable
+--                                  audit" actually happens. No UPDATE and no DELETE: the table is
+--                                  append-only and enforced so by trigger.
+GRANT EXECUTE ON FUNCTION iam_v2.p6_guest_release_device(uuid, uuid, integer) TO svc_scd;
+GRANT EXECUTE ON FUNCTION iam_v2.p6_guest_release_device_policy(uuid, uuid)   TO svc_scd;
+GRANT SELECT          ON iam_v2.appliance_product_settings                    TO svc_scd;
+GRANT SELECT, INSERT  ON iam_v2.guest_device_actions                          TO svc_scd;
