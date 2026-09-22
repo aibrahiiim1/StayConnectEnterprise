@@ -284,6 +284,39 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) {
 	prevBundle, _ := a.previousBundle(ctx, failedID)
 
 	if prevBundle == "" {
+		// THE TEAR-DOWN IS ONLY CORRECT FOR A REVISION THAT IS NOT ACTIVE, AND THAT IS RE-CHECKED HERE.
+		//
+		// Both callers decide to roll back BEFORE this function looks for a target, and a confirmation can
+		// land in the gap:
+		//
+		//   applier.Rollback   reads the state, sees pending_confirmation, calls us;
+		//   watchdogLoop       reads PendingRevision(), sees it overdue, calls us.
+		//
+		// If /confirm commits in between, the revision becomes ACTIVE and its predecessor becomes
+		// SUPERSEDED. ActiveBundlePath then finds no OTHER active revision, prevBundle is empty, and we
+		// would take the branch below -- destroying every guest bridge and stopping DHCP for a
+		// configuration an operator had just confirmed. That is the precise failure the operator guard was
+		// written to prevent, arriving through a window the guard could not close from outside.
+		//
+		// The check belongs here rather than in either caller, because there are two callers and the
+		// watchdog's race predates the operator guard entirely. A revision that is ACTIVE has, by
+		// definition, been confirmed, and the factory-clean path is for a first apply that never was.
+		if state, err := a.revisionState(ctx, failedID); err != nil {
+			// Fail closed: not knowing is not permission to destroy the guest network.
+			a.event(ctx, failedID, "rollback", false, map[string]any{
+				"refused": "the revision state could not be re-read before the factory-clean tear-down",
+				"error":   err.Error(),
+			})
+			return
+		} else if state == "active" {
+			a.event(ctx, failedID, "rollback", false, map[string]any{
+				"refused": "the revision was CONFIRMED between the decision to roll back and this point; " +
+					"tearing down every guest network is not the correct answer to a confirmed revision",
+				"state": state,
+			})
+			return
+		}
+
 		// No prior good revision: tear down everything managed and clear.
 		//
 		// A FACTORY-CLEAN APPLIANCE HAS TO COME BACK FACTORY-CLEAN. This is the path the very first guest

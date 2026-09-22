@@ -117,3 +117,94 @@ func TestAnUnreadableRevisionStateRefusesWithoutTouchingTheKernel(t *testing.T) 
 		t.Errorf("a failed state read issued %d kernel mutation(s): %v", len(got), got)
 	}
 }
+
+// THE RACE THE REVIEWER FOUND, AND IT WAS WIDER THAN THE GUARD.
+//
+// Both callers decide to roll back before a.rollback looks for a target:
+//
+//   applier.Rollback   reads the state, sees pending_confirmation, calls a.rollback;
+//   watchdogLoop       reads PendingRevision(), sees it overdue, calls a.rollback.
+//
+// If /confirm commits in that gap the revision becomes ACTIVE and its predecessor becomes SUPERSEDED, so
+// ActiveBundlePath finds no other active revision, prevBundle is empty, and the factory-clean branch
+// destroys every guest bridge and stops DHCP -- for a configuration an operator had just confirmed.
+//
+// The watchdog's half of this predates the operator guard, so the fix is at the decision point inside
+// a.rollback rather than in either caller.
+func TestAConfirmationLandingMidRollbackDoesNotTearDownTheGuestNetwork(t *testing.T) {
+	k := newFakeKernel(t)
+	a := newTestApplier(t, k)
+
+	// The state read that the CALLER made: still mid-flight. The state read a.rollback makes at the
+	// decision point: confirmed in between.
+	calls := 0
+	a.revStateFn = func(context.Context, string) (string, error) {
+		calls++
+		if calls == 1 {
+			return "pending_confirmation", nil
+		}
+		return "active", nil
+	}
+	// No previous active bundle -- exactly what a confirmation leaves behind.
+	a.prevBundleFn = func(context.Context, string) (string, error) { return "", nil }
+	a.markRolledFn = func(context.Context, string, string) error { return nil }
+	var events []string
+	a.eventFn = func(_ context.Context, _ string, kind string, ok bool, detail map[string]any) {
+		events = append(events, fmt.Sprintf("%s ok=%v %v", kind, ok, detail["refused"]))
+	}
+
+	if err := a.Rollback(context.Background(), "rev-confirmed-mid-flight", "operator@example.test"); err != nil {
+		t.Fatalf("the caller's guard should have admitted this: %v", err)
+	}
+	if got := k.mutations(); len(got) != 0 {
+		t.Fatalf("a confirmation landing mid-rollback destroyed %d kernel object(s): %v", len(got), got)
+	}
+	joined := strings.Join(events, " | ")
+	if !strings.Contains(joined, "CONFIRMED") {
+		t.Errorf("the refusal was not recorded as an event an operator can find: %s", joined)
+	}
+}
+
+// Fail closed: a state that cannot be re-read at the decision point is not permission to destroy anything.
+func TestAnUnreadableStateAtTheDecisionPointDoesNotTearDownTheGuestNetwork(t *testing.T) {
+	k := newFakeKernel(t)
+	a := newTestApplier(t, k)
+	calls := 0
+	a.revStateFn = func(context.Context, string) (string, error) {
+		calls++
+		if calls == 1 {
+			return "pending_confirmation", nil
+		}
+		return "", fmt.Errorf("connection reset")
+	}
+	a.prevBundleFn = func(context.Context, string) (string, error) { return "", nil }
+	a.markRolledFn = func(context.Context, string, string) error { return nil }
+	a.eventFn = func(context.Context, string, string, bool, map[string]any) {}
+
+	if err := a.Rollback(context.Background(), "rev-unreadable", "operator@example.test"); err != nil {
+		t.Fatalf("the caller's guard should have admitted this: %v", err)
+	}
+	if got := k.mutations(); len(got) != 0 {
+		t.Fatalf("an unreadable state destroyed %d kernel object(s): %v", len(got), got)
+	}
+}
+
+// AND THE FACTORY-CLEAN PATH MUST STILL WORK. It is the correct answer for a first apply that fails or
+// expires, and narrowing the branch must not have taken that away.
+func TestAFirstApplyThatExpiresStillComesBackFactoryClean(t *testing.T) {
+	k := newFakeKernel(t)
+	a := newTestApplier(t, k)
+	a.revStateFn = func(context.Context, string) (string, error) { return "pending_confirmation", nil }
+	a.prevBundleFn = func(context.Context, string) (string, error) { return "", nil }
+	a.markRolledFn = func(context.Context, string, string) error { return nil }
+	marked := false
+	a.markRolledFn = func(context.Context, string, string) error { marked = true; return nil }
+	a.eventFn = func(context.Context, string, string, bool, map[string]any) {}
+
+	if err := a.Rollback(context.Background(), "rev-first-apply", "operator@example.test"); err != nil {
+		t.Fatalf("a first apply that expired must still roll back: %v", err)
+	}
+	if !marked {
+		t.Error("the revision was not marked rolled back, so the factory-clean path did not complete")
+	}
+}

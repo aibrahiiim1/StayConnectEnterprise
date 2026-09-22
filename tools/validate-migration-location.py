@@ -145,7 +145,15 @@ def scan():
                 continue
             number, _, kind = m.group(1), m.group(2), m.group(3)
             if d in CANONICAL:
-                found.setdefault(d, {}).setdefault(number, {})[kind] = fn
+                # A LIST, NOT AN ASSIGNMENT, AND THAT IS THE WHOLE POINT OF THE UNIQUENESS CHECK.
+                #
+                # This was `[kind] = fn`, which silently dropped the first filename whenever two migrations
+                # in one directory shared a number AND a direction -- 0084_foo.up.sql and 0084_bar.up.sql.
+                # If each duplicate carried its own pair, the map kept only the later pair, so the
+                # uniqueness check below saw ONE stem per number and passed, while the runner had two
+                # migrations numbered the same and would apply whichever the sort put second. The scan
+                # defeated the check it exists to feed.
+                found.setdefault(d, {}).setdefault(number, {}).setdefault(kind, []).append(fn)
             else:
                 strays.append((d or "<repository root>", fn))
     return found, strays
@@ -183,11 +191,12 @@ def check_directory(d, by_number):
         kinds = by_number[n]
         if "up" not in kinds:
             # A down with no up is never excused: it is a rollback for a migration that does not exist.
-            unpaired.append("%s has a down and no up" % kinds.get("down", n))
+            downs = kinds.get("down") or [n]
+            unpaired.append("%s has a down and no up" % downs[0])
             continue
         if "down" in kinds:
             continue
-        stem = kinds["up"][: -len(".up.sql")]
+        stem = kinds["up"][0][: -len(".up.sql")]
         if stem in known_unpaired:
             carried.append(stem)
             stale_exception.discard(stem)
@@ -215,17 +224,19 @@ def check_directory(d, by_number):
 
     # 3. UNIQUENESS is structural in this shape -- two files with the same number and kind cannot coexist in
     # one directory -- so what is left to check is that the SAME number is not used by two different names.
-    seen_names = {}
+    # UNIQUENESS, over EVERY filename the scan saw rather than one survivor per (number, kind).
     for n in sorted(by_number):
-        for kind, fn in by_number[n].items():
-            stem = fn[: -len(".%s.sql" % kind)]
-            prev = seen_names.setdefault(n, stem)
-            if prev != stem:
-                bad(
-                    "migration-uniqueness",
-                    "number %s is used by two different migrations (%s and %s)" % (n, prev, stem),
-                    d,
-                )
+        stems = set()
+        for kind, filenames in by_number[n].items():
+            for fn in filenames:
+                stems.add(fn[: -len(".%s.sql" % kind)])
+        if len(stems) > 1:
+            bad(
+                "migration-uniqueness",
+                "number %s is used by %d different migrations (%s); the runner would apply whichever its "
+                "sort puts last" % (n, len(stems), ", ".join(sorted(stems))),
+                d,
+            )
 
     # 4. CONTIGUITY
     lo, hi = min(numbers), max(numbers)
