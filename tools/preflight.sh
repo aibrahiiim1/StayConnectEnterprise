@@ -115,6 +115,10 @@ BINARY_PY
   python tools/project-state.py validate            || rc=1
   python tools/project-state.py check-generated     || rc=1
   python tools/validate-delivery-protocol.py        || rc=1
+  # Cheapest possible answer to "can the runner see this migration at all". Three migrations once sat in a
+  # directory no runner reads, through four green gates, and a rebuild from the repository would have come
+  # up three privilege grants short of the appliance.
+  python tools/validate-migration-location.py       || rc=1
 
   # The governance gate's LAST step fails if anything is left in the tree, including untracked build output.
   # Discovering that after everything else has passed is the most annoying possible way to fail.

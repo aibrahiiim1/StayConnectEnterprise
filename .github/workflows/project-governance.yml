@@ -121,6 +121,19 @@ jobs:
         if: steps.reuse.outputs.hit != 'true'
         run: python tools/validate-delivery-protocol.py
 
+      # A MIGRATION THE RUNNER CANNOT SEE IS NOT A MIGRATION.
+      #
+      # 0081, 0082 and 0083 were committed to a `migrations/` directory at the repository root. Every tool
+      # that applies a migration reads `data-plane/migrations`, and a grep of tools/, scripts/ and .github/
+      # for the root path returned zero references — so all three were invisible to the live runner, to the
+      # factory-clean reconstruction, to the baseline generator, to the fixture-parity check and to all four
+      # of these gates, which stayed green throughout. All three are least-privilege GRANTs, so a rebuild
+      # from the repository would have produced an appliance three grants short of PRE-LIVE, silently
+      # reopening the three screens those migrations were written to fix.
+      - name: Migration location — every numbered migration is where a runner can see it
+        if: steps.reuse.outputs.hit != 'true'
+        run: python tools/validate-migration-location.py
+
       # Does the enforcement above actually refuse the mistakes it exists to catch? A policy validator that
       # passes on a correct repository is indistinguishable from one that returns zero. This drives the real
       # validator against fixtures carrying each specific defect.
