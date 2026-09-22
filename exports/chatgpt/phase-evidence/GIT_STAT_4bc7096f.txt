@@ -1,4 +1,0 @@
-commit 4bc7096f17da74bc278fbb95456d67bc8e9da8d4
-Date:   Tue Sep 22 16:50:31 2026 +0300
-
-    Governance: delivery head moves to the review fixes
