@@ -493,6 +493,20 @@ func main() {
 				// financial surface appears and disappears together.
 				mountResource(r, s, "financial-ops", s.financialOpsRoutes)
 			}
+			// THE VOUCHER SURFACE, and it is mounted UNCONDITIONALLY on purpose.
+			//
+			// Issuance needs an existing package revision, and authoring packages lives behind the Phase-2
+			// commerce admin flag. It would have been easy to hang the whole voucher surface off that flag
+			// too -- and wrong: issuing against a revision somebody already published is not the same power
+			// as publishing one, and a property that is not authoring packages today still has cards to
+			// print and cards to cancel. A surface that appears and disappears with an unrelated flag is
+			// also how an operator loses a destination without anything failing.
+			//
+			// Three keys, three powers. `voucher-codes` is the narrow one: recovering a guest credential in
+			// the clear, which additionally requires a password step-up and a bounded reason at the route.
+			mountResource(r, s, "vouchers", s.vouchersRoutes)
+			mountResource(r, s, "voucher-codes", s.voucherCodesRoutes)
+			mountResource(r, s, "voucher-code-settings", s.voucherCodeSettingsRoutes)
 			mountResource(r, s, "audit", s.auditRoutes)
 			mountResource(r, s, "reports", s.reportsRoutes)
 			mountResource(r, s, "backups", s.backupsRoutes)

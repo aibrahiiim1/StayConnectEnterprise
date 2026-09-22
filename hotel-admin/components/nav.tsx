@@ -10,7 +10,7 @@ import {
   LayoutDashboard, Users, LogOut, Monitor, Shield, ScrollText, Hotel, Send, KeyRound,
   Wallet, BadgeCheck, Paintbrush, Archive, Network, Wifi, History, Router, Cloud,
   ServerCog, Lock, Activity, Package, Gauge, Smartphone, LogIn, Search, X,
-  PanelLeftClose, PanelLeftOpen, ClipboardCheck,
+  PanelLeftClose, PanelLeftOpen, ClipboardCheck, Ticket,
 } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 
@@ -82,6 +82,8 @@ const SECTIONS: Section[] = [
       { href: "/internet-packages", label: "Internet packages", icon: Package, resource: "commercial-packages", keywords: "offer tariff price free paid" },
       { href: "/service-plans",     label: "Service plans",     icon: Gauge,   resource: "commercial-packages", keywords: "speed bandwidth quota devices mbps" },
       { href: "/checkout-grace",    label: "Checkout grace",    icon: Shield,  resource: "checkout-grace", keywords: "after checkout late departure" },
+      // Vouchers sit with the offer rather than with the guest: a voucher IS an internet package, printed.
+      { href: "/vouchers",          label: "Vouchers",          icon: Ticket,  resource: "vouchers", keywords: "code card print batch redeem scratch prepaid" },
     ],
   },
   {

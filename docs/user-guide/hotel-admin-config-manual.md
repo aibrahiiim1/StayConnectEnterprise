@@ -131,7 +131,7 @@ Guests can authenticate by **voucher**, **OTP** (email/SMS), **PMS** (room + nam
 **social login**, or **payment** — depending on what you configure and what your
 license entitles (see the Entitlements table on the License page).
 
-- **Vouchers** need Access plans + Voucher batches (below).
+- **Vouchers** need an internet package to grant, then a printed batch (below).
 - **OTP** needs a **Notifications** provider (§8).
 - **PMS** needs a **PMS provider** (§7).
 - **Social** needs **Social login** OAuth apps (§9).
@@ -142,7 +142,7 @@ Make sure the portal endpoints are reachable pre-login via the **Walled garden**
 
 ---
 
-## 6. Create Access plans and Voucher batches
+## 6. Create Access plans and print vouchers
 
 **Access plan** (**Guest access plans** → **New plan**):
 - Code, Name, Description, **Duration (s)** (blank = unlimited time), **Data cap
@@ -158,26 +158,42 @@ Make sure the portal endpoints are reachable pre-login via the **Walled garden**
 > credential does not consume a second slot; freeing a device (disconnect/expiry)
 > frees its slot.
 
-**Voucher batch** (**Voucher batches** → **New batch**):
-- **Plan** (an active plan), **Count** (1–10000), **Label**, and generation
-  options: **Code length** (6–10, the **random portion** only), **Character
-  mode**, optional **Prefix** (A–Z/0–9, *additional* to the random portion), and
-  **Exclude ambiguous** (default on: 0/O, 1/I/L, 5/S; I/L/O/U are always excluded
-  so a printed code matches exactly what the guest types). Character modes:
-  **Numbers**, **Uppercase letters**, **Uppercase letters and numbers**,
-  **Uppercase/lowercase letters and numbers**. The form shows a live **example**
-  and the exact **character set** before you generate.
-- Open the batch to **view/search/copy/print** codes or **download the CSV**;
-  click a code for its **details** (state, plan, duration, speed, data cap, max
-  devices, active devices, dates). **Revoke** an unused code, or **Revoke
-  unused** for the batch. Legacy 12-char batches remain usable.
-- **Change a voucher's plan** from a dropdown of active plans — for one voucher
-  (its Details panel) or for the batch (**Change plan…** → *Unused only* or *All
-  eligible*). Unused vouchers change immediately; a voucher with a **live
-  session** is never repointed (disconnect it first); revoked/expired/exhausted
-  vouchers can't be changed. The code, usage history and audit trail are
-  preserved, and the change is recorded (previous plan, new plan, operator,
-  reason). Plans are chosen from the list only — you never type a plan id/name.
+**Vouchers** (**Vouchers** in the sidebar) — printed cards a guest redeems for
+internet access.
+
+- **Code format** (top of the screen, set once by the IT manager or site admin):
+  **Digits only** for a property whose guests type on a numeric keypad, or
+  **Digits and letters** for a printed card, and a **length of 6, 7 or 8
+  characters**. Eight is the maximum, for both. Characters guests misread from a
+  card — I, L, O, U and the ambiguous 0/O, 1/I/L, 5/S — are always excluded and
+  are not a setting. A change applies to the **next** batch you print; cards
+  already issued keep the format they were printed with and stay redeemable, and
+  nothing is restarted or redeployed.
+- **Print a batch**: choose the **internet package revision** the cards grant,
+  **how many** (1–500), an optional **valid until**, and an optional **note**.
+  The codes appear once, on the screen, ready to print. A *valid until* already
+  in the past is refused — cards printed from it could never be redeemed. Leave
+  it empty for cards that never expire.
+- **What a batch is**: every print run gets a batch id, which is how a run of
+  cards is exported or traced later. The list shows each card's last four
+  characters, its state (*not used yet*, *redeemed*, *cancelled*, *expired
+  unused*), its batch, when it was printed and when it expires.
+- **Show code** recovers ONE code for a card already in circulation — the guest
+  at the desk whose card is smudged. It asks for your password and a reason, and
+  records both permanently, with your name. **Export codes** does the same for a
+  whole batch and writes one record naming how many you took.
+- **Cancel card** stops an unused card working. It cannot be undone. A card that
+  has already been **redeemed** cannot be cancelled here: that guest has access
+  now, and ending it is done from their session.
+- **Who has read a code** lists every reveal and export. Nothing on it can be
+  edited or removed by anyone, including a site admin.
+
+> **A voucher code is recoverable, and that is why the record matters.** A
+> post-stay PIN and a guest-account password are stored hashed, so "shown once"
+> is enforced by arithmetic — nobody can produce them again. A voucher code is
+> stored encrypted, so it **can** be read again. What protects it is not secrecy
+> from the hotel but visibility: no one can read a code without leaving a row
+> saying who they are and why.
 
 **Guest accounts** (**Guest accounts** → **New account**) — username/password
 sign-in, an alternative to vouchers:
@@ -273,12 +289,21 @@ and **Save** (it validates the JSON first).
 | Role | Can do |
 |---|---|
 | `site_viewer` | Read-only across the appliance |
-| `voucher_operator` | Create voucher batches + read plans/sessions |
-| `guest_relations_operator` | Vouchers + sessions + read integrations |
-| `front_office_operator` | Vouchers + sessions + read integrations/reports |
+| `voucher_operator` | Print, cancel and reveal voucher codes + read sessions/reports |
+| `guest_relations_operator` | Vouchers (incl. reveal) + sessions + read integrations |
+| `front_office_operator` | Vouchers (incl. reveal) + sessions + read integrations/reports |
 | `payments_operator` | Manage payments/Stripe |
 | `hotel_it_manager` | Networking, PMS, integrations, certificate, diagnostics-restart |
 | `site_admin` | Everything |
+
+> **Reading a printed code is its own permission.** Printing and cancelling cards
+> is one power (`vouchers`); recovering a code **in the clear** for a card already
+> in a guest's hand is another (`voucher-codes`), and it asks for the operator's
+> password and a reason every time, then records both permanently. The hotel IT
+> manager chooses what codes look like and cannot read one — configuring is not
+> reading. Unlike a post-stay PIN, a voucher code is recoverable, so what protects
+> it is that it cannot be read unseen.
+
 
 Use **Set password** to reset, **+ role** / remove role to adjust access,
 **Disable** to revoke a login. You can't remove your own `site_admin` role or
@@ -313,7 +338,7 @@ a service.
 | Change WAN or LAN IP | WAN / LAN settings |
 | Add a new guest VLAN | Guest networks → New |
 | Pin a device to a fixed IP | DHCP & leases → Reservations |
-| Issue guest WiFi codes | Guest access plans → Voucher batches |
+| Issue guest WiFi codes | Vouchers → Print a batch |
 | Room-number login | PMS providers |
 | Email/SMS OTP | Notifications |
 | Google/Apple sign-in | Social login |

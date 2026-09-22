@@ -383,7 +383,7 @@ func (s *server) reportsRoutes() http.Handler {
 		// COUNTED FROM THE SINGLE SESSION AUTHORITY. These read iam_v2.sessions; they used to read
 		// public.sessions and public.vouchers, which is why an operator watching this page during the
 		// IAM-v2 trial saw zero activity while guests were online.
-		var active, today, sess7d, vUnused, vActive int64
+		var active, today, sess7d, vUnused, vRedeemed int64
 		var upToday, downToday int64
 		_ = s.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.sessions
 		     WHERE tenant_id=$1 AND state = 'active'`, s.tenantID).Scan(&active)
@@ -394,13 +394,30 @@ func (s *server) reportsRoutes() http.Handler {
 		_ = s.db.QueryRow(ctx,
 			`SELECT count(*) FROM iam_v2.sessions
 			  WHERE tenant_id=$1 AND started >= now() - interval '7 days'`, s.tenantID).Scan(&sess7d)
-		// iam_v2 vouchers carry a status rather than the legacy state vocabulary: an unredeemed voucher is
-		// ISSUED, and one that has been redeemed is REDEEMED. "active" in the old sense -- a voucher with a
-		// live session -- is a property of the entitlement now, not of the voucher.
-		_ = s.db.QueryRow(ctx, `
-		    SELECT count(*) FILTER (WHERE status = 'ISSUED'),
-		           count(*) FILTER (WHERE status = 'REDEEMED')
-		      FROM iam_v2.vouchers WHERE tenant_id=$1`, s.tenantID).Scan(&vUnused, &vActive)
+		// THE VOUCHER TILES CAME FROM scd, BECAUSE EVERY PART OF THE QUERY THAT WAS HERE WAS WRONG.
+		//
+		// It read `count(*) FILTER (WHERE status = 'ISSUED')` from iam_v2.vouchers. Three independent
+		// reasons it could never return anything, each sufficient on its own:
+		//
+		//   * the column is `state`, not `status`;
+		//   * the vocabulary is UNUSED / REDEEMED / REVOKED / REDEMPTION_EXPIRED, and ISSUED is not a value
+		//     iam_v2 has ever had -- the comment that used to sit here asserted otherwise;
+		//   * svc_edged holds no privilege on iam_v2.vouchers AT ALL, deliberately, because scd owns the
+		//     voucher key material and edged proxies everything that touches it.
+		//
+		// The error was swallowed by `_ =`, so both tiles read 0 permanently and looked like a property
+		// that had not printed any cards. Asking scd is not a workaround for the missing privilege; it is
+		// the same arrangement the rest of this surface uses, and it means the tile counts what the voucher
+		// screen counts rather than a second query that can drift from it.
+		if st, raw, err := s.scd.call(ctx, http.MethodGet, "/v1/vouchers/summary", nil); err == nil && st == http.StatusOK {
+			var sum struct {
+				Unused   int64 `json:"unused"`
+				Redeemed int64 `json:"redeemed"`
+			}
+			if json.Unmarshal(raw, &sum) == nil {
+				vUnused, vRedeemed = sum.Unused, sum.Redeemed
+			}
+		}
 
 		out["active_sessions"] = active
 		out["sessions_today"] = today
@@ -408,7 +425,12 @@ func (s *server) reportsRoutes() http.Handler {
 		out["bytes_down_today"] = downToday
 		out["sessions_7d"] = sess7d
 		out["vouchers_unused"] = vUnused
-		out["vouchers_active"] = vActive
+		// NAMED FOR WHAT IT COUNTS. The old key was `vouchers_active`, which under iam_v2 means nothing a
+		// voucher can be: "active" was the legacy state of a voucher with a live session, and that is a
+		// property of the entitlement now. Nothing in the repository read the old key -- the tile it fed
+		// was permanently 0 -- so renaming it breaks no consumer and stops the next reader inferring a
+		// state the schema does not have.
+		out["vouchers_redeemed"] = vRedeemed
 
 		// TOP PACKAGES, not top legacy plans. The name kept its wire key so the dashboard card does not
 		// break, but the thing being counted is the internet package an entitlement was granted from --

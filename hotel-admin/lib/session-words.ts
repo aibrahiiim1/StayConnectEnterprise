@@ -59,9 +59,15 @@ export function identifySession(s: Session): SessionIdentity {
   if (kind === "voucher") {
     return {
       title: "Voucher",
-      // Stated rather than left blank: an operator who sees no code needs to know that is by design, not a bug
-      // they should report.
-      subtitle: "Code not shown — the admin service cannot read voucher codes",
+      // Stated rather than left blank: an operator who sees no code needs to know that is by design, not a
+      // bug they should report.
+      //
+      // THE OLD WORDING WAS "the admin service cannot read voucher codes", and it stopped being true when
+      // the audited reveal shipped. It is still true that no code appears HERE -- a session list is a screen
+      // people leave open, and a code on it would be a reveal with no password, no reason and no record.
+      // What changed is that there is now a place to go, which is worth saying, because an operator told
+      // "impossible" stops looking.
+      subtitle: "Code not shown here — use Show code on the Vouchers screen, which records who looked",
       kind, kindLabel, anonymous: false,
     };
   }
