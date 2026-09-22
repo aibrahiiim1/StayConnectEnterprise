@@ -27,6 +27,17 @@ import type { Voucher, VoucherCodeFormat, VoucherReveal, VoucherState } from "@/
 // The one-time response of a print run. It exists only here: nothing stores a plaintext code.
 type IssuedBatch = { batch_id: string; count: number; codes: string[] };
 
+// What a batch can grant. The screen offers these rather than asking for a UUID nobody can see.
+type Grantable = {
+  id: string;
+  package_code: string;
+  revision_no: number;
+  package_type: string;
+  name: string;
+  price_minor: number;
+  currency: string;
+};
+
 // A code key generation. No key material is ever returned -- the sealed blind-index key is no more
 // publishable than the clear one -- so this is the number, the lifecycle and what it still indexes.
 type KeyGeneration = {
@@ -57,6 +68,7 @@ export function VouchersView(props: {
   const [reveals, setReveals] = useState<VoucherReveal[] | null>(null);
   const [format, setFormat] = useState<VoucherCodeFormat | null>(null);
   const [gens, setGens] = useState<KeyGeneration[] | null>(null);
+  const [grantable, setGrantable] = useState<Grantable[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [stateFilter, setStateFilter] = useState("");
@@ -114,6 +126,13 @@ export function VouchersView(props: {
     api.get<VoucherCodeFormat>("/voucher-code-settings/").then(setFormat).catch(() => setFormat(null));
   }, []);
   useEffect(loadGenerations, [loadGenerations]);
+  useEffect(() => {
+    if (!canIssue) return;
+    api
+      .get<{ revisions?: Grantable[] }>("/vouchers/grantable")
+      .then((m) => setGrantable(m.revisions ?? []))
+      .catch(() => setGrantable(null));
+  }, [canIssue]);
 
   // Batches, derived from the rows rather than fetched: a batch is a grouping of vouchers, not a record of
   // its own, and inventing a second source for it is how the two disagree.
@@ -349,13 +368,31 @@ export function VouchersView(props: {
           <h2 className="font-semibold">Print a batch</h2>
           <div className="flex flex-wrap items-end gap-3 text-sm">
             <label className="block">
-              Internet package revision
-              <input
-                className="mt-1 block w-80 rounded border px-2 py-1"
-                value={revisionId}
-                onChange={(e) => setRevisionId(e.target.value)}
-                placeholder="the revision these cards grant"
-              />
+              What these cards grant
+              {grantable === null ? (
+                <input
+                  className="mt-1 block w-80 rounded border px-2 py-1"
+                  value={revisionId}
+                  onChange={(e) => setRevisionId(e.target.value)}
+                  placeholder="internet package revision id"
+                />
+              ) : (
+                <select
+                  className="mt-1 block w-80 rounded border px-2 py-1"
+                  value={revisionId}
+                  onChange={(e) => setRevisionId(e.target.value)}
+                >
+                  <option value="">Choose an internet package…</option>
+                  {grantable.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name} — {g.package_code} r{g.revision_no}
+                      {g.price_minor > 0 && g.currency
+                        ? ` — ${(g.price_minor / 100).toFixed(2)} ${g.currency}`
+                        : " — free"}
+                    </option>
+                  ))}
+                </select>
+              )}
             </label>
             <label className="block">
               How many
@@ -399,6 +436,12 @@ export function VouchersView(props: {
             Leave <em>Valid until</em> empty for cards that never expire. A date already past is refused —
             cards printed from it could never be redeemed.
           </p>
+          {grantable !== null && grantable.length === 0 && (
+            <p className="text-xs text-muted-foreground">
+              No internet package is published yet, so there is nothing for a card to grant. Publish one
+              under <strong>Internet packages</strong> first.
+            </p>
+          )}
         </section>
       )}
 

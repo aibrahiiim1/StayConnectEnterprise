@@ -37,9 +37,65 @@ func (s *server) vouchersRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", s.listVouchers)
 	r.Get("/summary", s.voucherSummary)
+	// WHAT A BATCH CAN GRANT. Without this the screen would have to ask an operator to paste the UUID of a
+	// package revision -- a value that appears nowhere they can see, because package authoring lives behind
+	// the Phase-2 commerce admin flag and this surface is deliberately not behind it. A form that demands
+	// an identifier the product never shows is a form nobody can complete, which is its own kind of
+	// unreachable feature.
+	r.Get("/grantable", s.listGrantablePackageRevisions)
 	r.Post("/issue", s.issueVouchers)
 	r.Post("/{id}/revoke", s.revokeVoucher)
 	return r
+}
+
+// listGrantablePackageRevisions lists the package revisions a batch can be printed against.
+//
+// edged reads this itself: svc_edged already holds SELECT on iam_v2.internet_packages and
+// internet_package_revisions (Phase-2 commerce grants), and a package revision is not voucher material --
+// no key, no code, nothing sealed. Proxying it to scd would have been ceremony.
+//
+// PUBLISHED REVISIONS ONLY, meaning the one each package currently points at. An arbitrary historical
+// revision is still a legal target for the issuance path -- a voucher pins whatever revision it was issued
+// against, on purpose, so republishing cannot retroactively change what a printed card is worth -- but
+// offering a list of superseded revisions to choose from would invite printing cards against one by
+// accident.
+func (s *server) listGrantablePackageRevisions(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	rows, err := s.db.Query(ctx, `
+	    SELECT r.id::text, p.code, r.revision_no, r.package_type,
+	           COALESCE(r.display->>'name', p.code) AS name,
+	           r.price_minor, COALESCE(r.currency, '') AS currency
+	      FROM iam_v2.internet_packages p
+	      JOIN iam_v2.internet_package_revisions r
+	        ON r.tenant_id = p.tenant_id AND r.site_id = p.site_id AND r.id = p.current_revision_id
+	     WHERE p.tenant_id = $1 AND p.site_id = $2
+	     ORDER BY p.code`, s.tenantID, s.siteID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "query_failed", "the package list could not be read")
+		return
+	}
+	defer rows.Close()
+	type rev struct {
+		ID          string `json:"id"`
+		PackageCode string `json:"package_code"`
+		RevisionNo  int    `json:"revision_no"`
+		PackageType string `json:"package_type"`
+		Name        string `json:"name"`
+		PriceMinor  int64  `json:"price_minor"`
+		Currency    string `json:"currency"`
+	}
+	out := []rev{}
+	for rows.Next() {
+		var v rev
+		if err := rows.Scan(&v.ID, &v.PackageCode, &v.RevisionNo, &v.PackageType, &v.Name,
+			&v.PriceMinor, &v.Currency); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "query_failed", "the package list could not be read")
+			return
+		}
+		out = append(out, v)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"revisions": out})
 }
 
 func (s *server) listVouchers(w http.ResponseWriter, r *http.Request) {
