@@ -58,9 +58,17 @@ func newRollbackWorld(t *testing.T, targetConverges bool) *rollbackWorld {
 	}
 	// The rollback TARGET. "netd-render-fp=" is the string a convergence-capable netd carries; its absence is
 	// what marks a pre-ADR-0003 binary. This asks the artifact itself rather than trusting a version string.
-	target := "OLD-NETD-without-the-marker"
+	//
+	// EVERY FIXTURE ALSO CARRIES "stayconnect_production". binary-rollback.sh refuses any target built
+	// without that tag, because it selects the production build profile and edged enforces the
+	// guest-authority lock only on that profile. These cases are about the pre-convergence boundary, not
+	// about the build profile, so their fixtures have to satisfy the profile check in order to reach the
+	// behaviour they actually test -- otherwise all three fail for a reason that has nothing to do with
+	// convergence, which is exactly what happened when the profile guard was first added.
+	const prodTag = " stayconnect_production"
+	target := "OLD-NETD-without-the-render-marker" + prodTag
 	if targetConverges {
-		target = "NEW-NETD carrying netd-render-fp= in its binary"
+		target = "NEW-NETD carrying netd-render-fp= in its binary" + prodTag
 	}
 	write := func(p, s string, mode os.FileMode) {
 		if err := os.WriteFile(p, []byte(s), mode); err != nil {
@@ -68,8 +76,8 @@ func newRollbackWorld(t *testing.T, targetConverges bool) *rollbackWorld {
 		}
 	}
 	write(filepath.Join(binDir, "netd.bak"), target, 0o755)
-	write(filepath.Join(binDir, "netd"), "CURRENT-NETD carrying netd-render-fp= in its binary", 0o755)
-	write(filepath.Join(runDir, "netd.exe"), "CURRENT-NETD carrying netd-render-fp= in its binary", 0o755)
+	write(filepath.Join(binDir, "netd"), "CURRENT-NETD carrying netd-render-fp= in its binary"+prodTag, 0o755)
+	write(filepath.Join(runDir, "netd.exe"), "CURRENT-NETD carrying netd-render-fp= in its binary"+prodTag, 0o755)
 
 	restarts := filepath.Join(d, "restarts.log")
 	write(filepath.Join(d, "restart.sh"), "#!/usr/bin/env bash\necho \"$1\" >> "+restarts+"\ncp "+
