@@ -2,7 +2,7 @@
 
 - **Base commit:** `44077fb88e25574476f54e213802c020d95225f5`
 - **HEAD commit:** `717c059bce982481be4f967b59a37f8695c7de39`
-- **Provenance (generation HEAD = inventory_head):** `ffc57e8fb47f8ac9d433876d61779585c800d4c7`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `b2fe8d6491b2b7623b51e3c4c6f0a91332c5264c`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/functional-completeness`
 - **Remote branch:** `origin/delivery/functional-completeness`
 - **Changed files:** 67
@@ -42,27 +42,27 @@
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0175 records the first functional-completeness closure increment |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0175 records the first functional-completeness closure increment |
 | `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: manifest lists itself |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0175 |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0175 |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0175 |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at the final content head |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at the final content head |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at the final content head |
 | `exports/chatgpt/phase-evidence/GIT_STAT_03f83ed9.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Delivery: packs rebuilt for T0175 |
-| `exports/chatgpt/phase-evidence/GIT_STAT_c7880819.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: packs rebuilt for T0175 |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0175 |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0175 |
+| `exports/chatgpt/phase-evidence/GIT_STAT_94172467.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: packs rebuilt at the final content head |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at the final content head |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at the final content head |
 | `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0175 |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0175 |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0175 |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0175 |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at the final content head |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at the final content head |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at the final content head |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0175 |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0175 records the first functional-completeness closure increment |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0175 |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at the final content head |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0175 records the first functional-completeness closure increment |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0175 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0175 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0175 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt for T0175 |
 | `governance/ci-reuse-policy.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | A grant only a migration makes is a grant that disappears, and forty of them do |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: packs rebuilt and pointers moved for T0175 |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: manifest lists itself |
 | `governance/transitions/T0175.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0175 records the grant-durability finding and the two impossible runbook steps |
 | `iam_v2_scratch/phase7_ledger_material_effect.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Four harnesses that pointed at the retired appliance, one of which rebooted it |
 | `migrations/0081_the_service_may_read_the_trail_it_writes.down.sql -> data-plane/migrations/0081_the_service_may_read_the_trail_it_writes.down.sql` | RENAMED | `R100 (migrations/0081_the_service_may_read_the_trail_it_writes.down.sql -> data-plane/migrations/0081_the_service_may_read_the_trail_it_writes.down.sql)` | database | MIGRATIONS | rollback RESTORES prior content | Three migrations the runner could not see, and the check that would have said so |
@@ -117,12 +117,12 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   4 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   4 +-
  docs/context/StayConnect-IAM-Handoff.md            |   4 +-
- docs/manifests/PostClosure-change-manifest.md      | 217 +++++++----
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 344112 -> 344670 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 142143 -> 142974 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44184 -> 44260 bytes
+ docs/manifests/PostClosure-change-manifest.md      | 219 +++++++----
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 344112 -> 344669 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 142143 -> 142945 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44184 -> 44262 bytes
  .../chatgpt/phase-evidence/GIT_STAT_03f83ed9.txt   |   4 -
- .../chatgpt/phase-evidence/GIT_STAT_c7880819.txt   |   4 +
+ .../chatgpt/phase-evidence/GIT_STAT_94172467.txt   |   4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   6 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
  .../chatgpt/phase-evidence/tools/project-state.py  |  37 +-
@@ -149,7 +149,7 @@
  tools/validate-migration-grant-durability.py       | 281 ++++++++++++++
  tools/validate-migration-location.py               | 260 +++++++++++++
  tools/validate-standing-records.py                 | 412 +++++++++++++++++++++
- 67 files changed, 3687 insertions(+), 313 deletions(-)
+ 67 files changed, 3689 insertions(+), 313 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -160,6 +160,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: b2fe8d64 Delivery: packs rebuilt at the final content head
+HISTORICAL: 94172467 Delivery: manifest lists itself
 HISTORICAL: ffc57e8f Delivery: packs rebuilt and pointers moved for T0175
 HISTORICAL: 717c059b Governance: T0175 records the grant-durability finding and the two impossible runbook steps
 HISTORICAL: d59d7226 A grant only a migration makes is a grant that disappears, and forty of them do
