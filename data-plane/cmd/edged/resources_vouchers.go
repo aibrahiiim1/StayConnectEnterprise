@@ -59,6 +59,12 @@ func (s *server) vouchersRoutes() http.Handler {
 // against, on purpose, so republishing cannot retroactively change what a printed card is worth -- but
 // offering a list of superseded revisions to choose from would invite printing cards against one by
 // accident.
+//
+// AND ACTIVE PACKAGES ONLY. `active` is the operator's own deactivation switch, and a first version of this
+// query ignored it: a package retired months ago still published a current revision, so it stayed in the
+// dropdown and an operator could print a hundred cards against something the property had deliberately
+// withdrawn. "Has a current revision" is a fact about history; "is active" is the fact an operator changed
+// on purpose, and this list has to represent the second.
 func (s *server) listGrantablePackageRevisions(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -69,7 +75,7 @@ func (s *server) listGrantablePackageRevisions(w http.ResponseWriter, r *http.Re
 	      FROM iam_v2.internet_packages p
 	      JOIN iam_v2.internet_package_revisions r
 	        ON r.tenant_id = p.tenant_id AND r.site_id = p.site_id AND r.id = p.current_revision_id
-	     WHERE p.tenant_id = $1 AND p.site_id = $2
+	     WHERE p.tenant_id = $1 AND p.site_id = $2 AND p.active
 	     ORDER BY p.code`, s.tenantID, s.siteID)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "query_failed", "the package list could not be read")

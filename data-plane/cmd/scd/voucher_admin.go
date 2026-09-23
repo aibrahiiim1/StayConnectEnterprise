@@ -207,6 +207,12 @@ func nullIfEmptyBytes(b []byte) any {
 
 // revealVoucherCode returns ONE code, audited. edged has already taken the password and the reason.
 func (s *server) revealVoucherCode(w http.ResponseWriter, r *http.Request) {
+	// WHO IS CALLING. This route returns a guest credential in the clear, and the authorization and
+	// password step-up that permit that happen in edged -- so a caller that is not edged has not passed
+	// them. portald runs as the same user and is network-facing; it must not reach this.
+	if !requireEdgedPeer(w, r) {
+		return
+	}
 	var in voucherActor
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
@@ -257,6 +263,12 @@ func (s *server) revealVoucherCode(w http.ResponseWriter, r *http.Request) {
 
 // exportVoucherCodes returns a selection of codes, with ONE audit row naming the count and the selection.
 func (s *server) exportVoucherCodes(w http.ResponseWriter, r *http.Request) {
+	// WHO IS CALLING. This route returns a guest credential in the clear, and the authorization and
+	// password step-up that permit that happen in edged -- so a caller that is not edged has not passed
+	// them. portald runs as the same user and is network-facing; it must not reach this.
+	if !requireEdgedPeer(w, r) {
+		return
+	}
 	var in struct {
 		voucherActor
 		BatchID string `json:"batch_id,omitempty"`

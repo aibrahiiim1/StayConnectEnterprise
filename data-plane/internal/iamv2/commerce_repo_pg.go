@@ -8,6 +8,8 @@ import (
 	"hash/fnv"
 	"time"
 
+	"errors"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -227,6 +229,27 @@ func (t *pgCommerceTx) LoadPlanRevision(ctx context.Context, tenantID, siteID, i
 		row.DataQuotaBytes = *dq
 	}
 	return row, nil
+}
+
+// VoucherPinnedPackageRevision reads the revision the card was printed against.
+//
+// It returns ("", nil) when the voucher does not belong to this owner, so the caller treats an unknown
+// voucher as "grants nothing" rather than as a repository failure -- the same shape every other
+// eligibility gate in this package uses, and the safe direction: an unresolvable card offers no package
+// instead of offering all of them.
+func (t *pgCommerceTx) VoucherPinnedPackageRevision(ctx context.Context, tenantID, siteID, voucherID string) (string, error) {
+	var rev string
+	err := t.tx.QueryRow(ctx, `
+	    SELECT package_revision_id::text FROM iam_v2.vouchers
+	     WHERE tenant_id = $1 AND site_id = $2 AND id = $3`,
+		tenantID, siteID, voucherID).Scan(&rev)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
+	}
+	return rev, nil
 }
 
 func (t *pgCommerceTx) LoadEligibilityRules(ctx context.Context, packageRevisionID string) ([]EligibilityRule, error) {

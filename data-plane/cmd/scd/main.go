@@ -913,7 +913,10 @@ func main() {
 		}
 	}
 
-	srv := &http.Server{Handler: r, ReadHeaderTimeout: 5 * time.Second}
+	// ConnContext reads the peer credentials ONCE, at accept time, so the code-recovery routes can
+	// refuse a caller that is not edged. See peer_identity_linux.go for what that does and does not
+	// prove: portald shares edged's uid, so this stops a mistake and not a compromise.
+	srv := &http.Server{Handler: r, ReadHeaderTimeout: 5 * time.Second, ConnContext: withPeerCred}
 	go func() {
 		slog.Info("scd listening", "socket", c.SocketPath)
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {

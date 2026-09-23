@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0087, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0088, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -3222,7 +3222,7 @@ CREATE FUNCTION iam_v2.p4_entitlement_grant_kernel(p_tenant uuid, p_site uuid, p
 DECLARE
   v_subject_key text; v_existing uuid; v_superseded uuid; v_new uuid;
   v_time_mode text; v_end_mode text; v_window timestamptz; v_state text;
-  v_burned int;
+  v_burned int; v_voucher_pkg uuid;
 BEGIN
   IF p_voucher IS NULL AND p_account IS NULL AND p_principal IS NULL THEN
     RAISE EXCEPTION 'GRANT_SUBJECT_UNRESOLVED: an entitlement always belongs to exactly one subject'
@@ -3230,6 +3230,41 @@ BEGIN
   END IF;
   IF p_snapshot IS NULL OR p_snapshot->>'service_plan_revision_id' IS NULL THEN
     RAISE EXCEPTION 'GRANT_SNAPSHOT_UNREADABLE' USING ERRCODE = 'check_violation';
+  END IF;
+
+  -- A VOUCHER GRANTS WHAT IT WAS PRINTED FOR, AND NOTHING ELSE.
+  --
+  -- iam_v2.vouchers.package_revision_id is NOT NULL and has been pinned at issuance since mg3, and the
+  -- issuance path's own comment states why: "what a voucher grants is fixed at issuance by an immutable
+  -- revision, so republishing a package later cannot retroactively change what an already-printed card is
+  -- worth". NOTHING ENFORCED IT. The auth context carries voucher_id and no package pin, so the offer and
+  -- quote path was free to select any package the subject was eligible for -- and at a property with two
+  -- voucher-eligible free tiers, a card printed for the lower one could be redeemed against the higher.
+  --
+  -- Checked HERE because this is the one kernel both grant entry points funnel through, it already receives
+  -- both the voucher and the package revision, and it runs as its owner -- so no caller can route around
+  -- it. Checked BEFORE the subject lock and before any write, so a grant that will be refused does not
+  -- first terminate the guest's previous entitlement.
+  --
+  -- The offer path narrows to the pinned revision as well, so an operator never sees a choice this refuses;
+  -- that is the product behaviour, and this is the invariant. A caller that disagrees with the card gets an
+  -- error rather than a better package.
+  IF p_voucher IS NOT NULL THEN
+    IF p_pkg_rev IS NULL THEN
+      RAISE EXCEPTION 'VOUCHER_PACKAGE_UNPINNED: a voucher grant must name the package revision it grants'
+        USING ERRCODE = 'check_violation';
+    END IF;
+    SELECT package_revision_id INTO v_voucher_pkg FROM iam_v2.vouchers
+     WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_voucher;
+    IF v_voucher_pkg IS NULL THEN
+      RAISE EXCEPTION 'VOUCHER_NOT_FOUND: voucher % does not belong to this owner', p_voucher
+        USING ERRCODE = 'check_violation';
+    END IF;
+    IF v_voucher_pkg <> p_pkg_rev THEN
+      RAISE EXCEPTION 'VOUCHER_PACKAGE_MISMATCH: voucher % was printed against package revision %, and this '
+                      'grant is for %; a card grants what it was printed for', p_voucher, v_voucher_pkg, p_pkg_rev
+        USING ERRCODE = 'check_violation';
+    END IF;
   END IF;
   v_time_mode := coalesce(p_snapshot->>'time_accounting_mode', 'VALIDITY_WINDOW');
   v_end_mode  := coalesce(nullif(p_snapshot->>'end_mode',''), 'MANUAL_END');

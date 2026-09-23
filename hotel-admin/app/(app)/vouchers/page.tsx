@@ -11,7 +11,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { canWrite } from "@/lib/roles";
+import { canRead, canWrite } from "@/lib/roles";
 import { VouchersView } from "@/components/vouchers/vouchers-view";
 
 export default function VouchersPage() {
@@ -27,6 +27,9 @@ export default function VouchersPage() {
     <VouchersView
       canIssue={roles === null ? false : canWrite("vouchers", r)}
       canRevealCodes={roles === null ? false : canWrite("voucher-codes", r)}
+      // READ and WRITE are separate here: the desk roles see the format and cannot change it, and
+      // payments_operator has neither -- so the panel must not even be requested for that role.
+      canReadFormat={roles === null ? false : canRead("voucher-code-settings", r)}
       canEditFormat={roles === null ? false : canWrite("voucher-code-settings", r)}
     />
   );

@@ -77,6 +77,15 @@ type CommerceTx interface {
 	ListActivePackageRevisions(ctx context.Context, tenantID, siteID string) ([]PackageRevisionRow, error)
 	LoadPlanRevision(ctx context.Context, tenantID, siteID, planRevisionID string) (PlanRevisionRow, error)
 	LoadEligibilityRules(ctx context.Context, packageRevisionID string) ([]EligibilityRule, error)
+	// VoucherPinnedPackageRevision returns the package revision a voucher was PRINTED against.
+	//
+	// iam_v2.vouchers.package_revision_id has been NOT NULL and pinned at issuance since mg3, and the
+	// issuance path states why: republishing a package must not retroactively change what an
+	// already-printed card is worth. Nothing read it back. So the offer path had nothing to narrow itself
+	// with, and a card printed for one free tier could be redeemed against another. Migration 0088 makes
+	// that refusal an invariant in the grant kernel; this read is what stops a guest ever being offered
+	// the choice that would be refused.
+	VoucherPinnedPackageRevision(ctx context.Context, tenantID, siteID, voucherID string) (string, error)
 	LoadGrantTiers(ctx context.Context, packageRevisionID string) ([]GrantTier, error)
 	HasPriorPurchase(ctx context.Context, tenantID, siteID, packageRevisionID string, subj CommerceSubject) (bool, error)
 	InsertOfferQuote(ctx context.Context, q OfferQuoteSpec) (string, error)

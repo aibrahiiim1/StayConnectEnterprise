@@ -60,9 +60,10 @@ const STATE_WORDS: Record<VoucherState, string> = {
 export function VouchersView(props: {
   canIssue: boolean;
   canRevealCodes: boolean;
+  canReadFormat: boolean;
   canEditFormat: boolean;
 }) {
-  const { canIssue, canRevealCodes, canEditFormat } = props;
+  const { canIssue, canRevealCodes, canReadFormat, canEditFormat } = props;
 
   const [rows, setRows] = useState<Voucher[] | null>(null);
   const [reveals, setReveals] = useState<VoucherReveal[] | null>(null);
@@ -72,6 +73,15 @@ export function VouchersView(props: {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [stateFilter, setStateFilter] = useState("");
+  // PAGINATION, because a batch can be 500 and the endpoint's default page is 100.
+  //
+  // Without this the screen showed the first hundred cards and silently presented them as the inventory:
+  // print five hundred and four hundred of them cannot be revealed or cancelled, because they are not on
+  // the screen at all. A list that quietly truncates is worse than one that says there is more, so this
+  // requests an explicit page and offers to fetch the next.
+  const [pageSize] = useState(200);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
 
   // Issue form
   const [revisionId, setRevisionId] = useState("");
@@ -93,16 +103,25 @@ export function VouchersView(props: {
   const [revealed, setRevealed] = useState<{ id: string; code: string } | null>(null);
   const [exported, setExported] = useState<{ batch: string; rows: { id: string; code: string }[] } | null>(null);
 
-  const load = useCallback(() => {
-    const q = stateFilter ? `?state=${encodeURIComponent(stateFilter)}` : "";
-    api
-      .get<{ vouchers?: Voucher[] }>(`/vouchers/${q}`)
-      .then((m) => {
-        setRows(m.vouchers ?? []);
-        setError(null);
-      })
-      .catch((e) => setError(String(e?.message ?? e)));
-  }, [stateFilter]);
+  const load = useCallback(
+    (nextOffset = 0, append = false) => {
+      const p = new URLSearchParams({ limit: String(pageSize), offset: String(nextOffset) });
+      if (stateFilter) p.set("state", stateFilter);
+      api
+        .get<{ vouchers?: Voucher[] }>(`/vouchers/?${p.toString()}`)
+        .then((m) => {
+          const got = m.vouchers ?? [];
+          setRows((prev) => (append ? [...(prev ?? []), ...got] : got));
+          // A full page means there may be another. An empty or short page is the end, stated rather
+          // than guessed at by the operator.
+          setHasMore(got.length === pageSize);
+          setOffset(nextOffset);
+          setError(null);
+        })
+        .catch((e) => setError(String(e?.message ?? e)));
+    },
+    [stateFilter, pageSize],
+  );
 
   const loadReveals = useCallback(() => {
     if (!canRevealCodes) return;
@@ -112,7 +131,7 @@ export function VouchersView(props: {
       .catch(() => setReveals(null));
   }, [canRevealCodes]);
 
-  useEffect(load, [load]);
+  useEffect(() => load(0, false), [load]);
   useEffect(loadReveals, [loadReveals]);
   const loadGenerations = useCallback(() => {
     if (!canEditFormat) return;
@@ -122,9 +141,20 @@ export function VouchersView(props: {
       .catch(() => setGens(null));
   }, [canEditFormat]);
 
+  // GATED ON THE PERMISSION, not attempted and swallowed.
+  //
+  // payments_operator holds `vouchers: read` and NO voucher-code-settings permission -- deliberately, in
+  // both matrices. It is offered the Vouchers destination and can read the card list, so an unconditional
+  // request here was refused by RBAC, the catch reset format to null, and the Code format panel said
+  // "Loading..." forever. A screen that waits for something it will never be given is worse than a screen
+  // that does not show it.
   useEffect(() => {
+    if (!canReadFormat) {
+      setFormat(null);
+      return;
+    }
     api.get<VoucherCodeFormat>("/voucher-code-settings/").then(setFormat).catch(() => setFormat(null));
-  }, []);
+  }, [canReadFormat]);
   useEffect(loadGenerations, [loadGenerations]);
   useEffect(() => {
     if (!canIssue) return;
@@ -163,7 +193,7 @@ export function VouchersView(props: {
         setRevealed({ id: out.voucher_id, code: out.code });
       } else if (dialog.kind === "revoke") {
         await api.post(`/vouchers/${dialog.row.id}/revoke`, { password, reason: reason.trim() });
-        load();
+        load(0, false);
       } else if (dialog.kind === "rotate") {
         await api.post(`/voucher-code-settings/key-generations/${dialog.gen.id}/supersede`, {
           password,
@@ -198,7 +228,7 @@ export function VouchersView(props: {
       if (validUntil) body.valid_until = new Date(validUntil).toISOString();
       const out = await api.post<IssuedBatch>("/vouchers/issue", body);
       setIssued(out);
-      load();
+      load(0, false);
     } catch (e: any) {
       setError(String(e?.message ?? e));
     } finally {
@@ -254,6 +284,7 @@ export function VouchersView(props: {
       )}
 
       {/* ---- the code format (migration 0085) ---- */}
+      {canReadFormat && (
       <section className="rounded-md border p-4 space-y-3">
         <h2 className="font-semibold">Code format</h2>
         {format === null ? (
@@ -305,6 +336,7 @@ export function VouchersView(props: {
           </>
         )}
       </section>
+      )}
 
       {/* ---- code key generations ---- */}
       {canEditFormat && gens !== null && (
@@ -601,6 +633,23 @@ export function VouchersView(props: {
             ))}
           </tbody>
         </table>
+        {rows !== null && (
+          <div className="flex items-center gap-3 text-sm text-muted-foreground">
+            <span>
+              Showing {rows.length.toLocaleString()} card{rows.length === 1 ? "" : "s"}
+              {hasMore ? " so far" : ""}
+            </span>
+            {hasMore && (
+              <button
+                type="button"
+                className="rounded border px-2 py-1"
+                onClick={() => load(offset + pageSize, true)}
+              >
+                Load more
+              </button>
+            )}
+          </div>
+        )}
       </section>
 
       {/* ---- the step-up dialog ---- */}
