@@ -135,19 +135,56 @@ say(){ printf '\n== %s ==\n' "$1"; }
 # lets psql swallow the rest of the file being read. That is not theoretical: the writer-boundary grant looped
 # over two roles, granted svc_scd, and never saw the svc_acctd line -- so acctd spent the entire aggregate
 # section refusing to start while everything else looked configured.
-q(){ docker exec -i "$PG" psql -U "$DBUSER" -d "$DB" -tAqc "$1" </dev/null 2>&1; }
+# q asks the site database one question. IT DISTINGUISHES "no rows" FROM "could not ask", which it did not.
+#
+# It used to be `docker exec ... 2>&1`, so a failure printed the ERROR TEXT ON STDOUT and every caller took
+# that text as the answer. With the database unreachable this produced lines like
+#   [PASS] corrected Error response from daemon: No such container: ... appliance setting(s) left enabled
+# -- a PASS, quoting a docker error, asserting a correction that never happened. That was harmless only
+# while an unreachable database also meant the script had already refused to start; now that `restore` runs
+# without one (see guard_environment), a caller must be able to tell the two apart.
+#
+# On failure: nothing on stdout, the first line of the error on STDERR so it still reaches the run log, and
+# a non-zero status. An empty answer therefore means "no rows OR no answer", and any caller that treats
+# empty as reassurance has to say so explicitly.
+q(){
+  local out rc
+  out="$(docker exec -i "$PG" psql -U "$DBUSER" -d "$DB" -tAqc "$1" </dev/null 2>&1)"; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf 'DB QUERY FAILED (rc=%d): %s\n' "$rc" "$(printf '%s' "$out" | head -1)" >&2
+    return 1
+  fi
+  printf '%s' "$out"
+}
+
+# guard_host is the ONE check every mode must pass, restore included: this machine must be named in the
+# compiled allow-list. It reads nothing but the hostname, so nothing it depends on can be missing.
+guard_host() {
+  local host; host="$(hostname)"
+  case " $AUTHORIZED_HOSTS " in
+    *" $host "*) : ;;
+    *) echo "REFUSED: host '$host' is not in the compiled allow-list ($AUTHORIZED_HOSTS)" >&2; exit 2 ;;
+  esac
+}
 
 # guard_environment refuses to run anywhere it was not compiled to run, on FOUR independent grounds. Every
 # one of them fails closed: a missing file, an unreadable field, a mismatch or an absent entry all refuse.
+#
+# IT GUARDS THE MODES THAT ENABLE SOMETHING, AND ONLY THOSE. It used to run before the mode dispatch, which
+# made it a precondition of `restore` as well -- and restore is the DISABLE-ONLY recovery path, the thing you
+# reach for after a run was interrupted. So the two failures it is built to refuse on (an assignment file
+# that cannot be read, a database that cannot be reached) would also have refused to TURN THE CAPABILITY
+# OFF, leaving the appliance partially enabled precisely when nobody could clear it. Refusing to enable on
+# doubt is fail-closed; refusing to disable on doubt is fail-OPEN wearing the same clothes.
+#
+# Nothing is weakened by the split: restore still passes guard_host, so it cannot run on an unlisted machine,
+# and it only ever moves flags and settings toward OFF.
 guard_environment() {
   local host want_appl want_serial got_appl got_serial db_appl
   host="$(hostname)"
 
   # 1. the host must be named.
-  case " $AUTHORIZED_HOSTS " in
-    *" $host "*) : ;;
-    *) echo "REFUSED: host '$host' is not in the compiled allow-list ($AUTHORIZED_HOSTS)" >&2; exit 2 ;;
-  esac
+  guard_host
 
   # 2. and it must have a compiled appliance identity. A host in the list with no entry is a mistake, and the
   #    safe reading of a mistake here is "do not enable a guest capability".
@@ -263,8 +300,11 @@ restore_settings() {
   # THE SANCTIONED AUDITED WRITER, per appliance, back to the captured value. The writer serializes on the
   # appliance and records the change; that is the whole point of it existing.
   local op t s a v
-  op="$(q "SELECT id FROM public.operators ORDER BY created_at LIMIT 1")"
-  [ -n "$op" ] || return 0
+  # A DATABASE THAT DID NOT ANSWER IS REPORTED, NOT SKIPPED. This returned 0 either way, so the caller's
+  # `ok` announced a restoration through the audited writer that had not happened -- the same false
+  # reassurance the verification checks below were corrected for.
+  op="$(q "SELECT id FROM public.operators ORDER BY created_at LIMIT 1")" || return 1
+  [ -n "$op" ] || return 1
   while read -r t s a v; do
     [ -n "${t:-}" ] || continue
     q "SELECT iam_v2.p6_set_guest_device_self_service('$t','$s','$a', $v, '$op',
@@ -299,15 +339,42 @@ restore_settings() {
 # pinned rather than merely restored, through the same audited writer, with a reason that says why. It is
 # reported as a correction, not done quietly: if this fires, something left the appliance wrong.
 enforce_dark_setting() {
-  local on op t s a
-  on="$(q "SELECT count(*) FROM iam_v2.appliance_product_settings WHERE guest_device_self_service")"
+  local on op left
+  # AN UNANSWERABLE QUESTION IS NOT AN ANSWER OF ZERO. If the database cannot be reached, this cannot say
+  # whether any appliance is left enabled, and saying nothing is enabled would be the most dangerous
+  # sentence in the file.
+  if ! on="$(q "SELECT count(*) FROM iam_v2.appliance_product_settings WHERE guest_device_self_service")"; then
+    no "the per-appliance capability state is UNKNOWN" \
+       "the site database did not answer; darkness of the setting could not be established"
+    return 1
+  fi
   [ "$on" = "0" ] && { ok "no appliance is left with the capability enabled"; return 0; }
-  op="$(q "SELECT id FROM public.operators ORDER BY created_at LIMIT 1")"
+
+  op="$(q "SELECT id FROM public.operators ORDER BY created_at LIMIT 1")" || op=""
+  if [ -z "$op" ]; then
+    no "$on appliance setting(s) are left enabled and could not be corrected" \
+       "the audited writer needs an operator id and none could be read"
+    return 1
+  fi
   q "SELECT iam_v2.p6_set_guest_device_self_service(tenant_id, site_id, appliance_id, false, '$op',
        'phase6-controlled-validation',
        'Phase 6 is dark on this appliance; the per-appliance capability must not be left enabled')
-       FROM iam_v2.appliance_product_settings WHERE guest_device_self_service" >/dev/null
-  ok "corrected $on appliance setting(s) left enabled, through the audited writer"
+       FROM iam_v2.appliance_product_settings WHERE guest_device_self_service" >/dev/null 2>&1 || true
+
+  # THE CLAIM IS RE-READ RATHER THAN ASSUMED. This used to `ok` unconditionally, so it reported a correction
+  # whether or not the writer had run.
+  if ! left="$(q "SELECT count(*) FROM iam_v2.appliance_product_settings WHERE guest_device_self_service")"; then
+    no "a correction was attempted for $on setting(s) but could not be confirmed" \
+       "the site database stopped answering before the result could be re-read"
+    return 1
+  fi
+  if [ "$left" = "0" ]; then
+    ok "corrected $on appliance setting(s) left enabled, through the audited writer"
+    return 0
+  fi
+  no "$left of $on appliance setting(s) are STILL enabled after the correction" \
+     "the audited writer did not take effect"
+  return 1
 }
 
 teardown_scope() {
@@ -373,12 +440,15 @@ grant_writer_prereq() {
 }
 
 restore_writer_prereq() {
-  local r v
+  local r v rc=0
   while read -r r v; do
     [ -n "${r:-}" ] || continue
     [ "$v" = "f" ] || continue
-    q "REVOKE EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) FROM $r" >/dev/null
+    # A REVOKE THAT NEVER REACHED THE DATABASE IS NOT A REVOKE. This discarded the status, so the caller
+    # reported the grant as back at its captured value while it could still be in force.
+    q "REVOKE EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) FROM $r" >/dev/null || rc=1
   done < "$STATE_DIR/writer_prereq" 2>/dev/null
+  return $rc
 }
 
 restore_network() {
@@ -392,10 +462,20 @@ restore_network() {
 restore() {
   say "restoration (runs on success, failure and interruption)"
   restore_network;  ok "no blackhole route left behind by the local-first proof"
-  restore_writer_prereq; ok "the Phase-3 writer-boundary grant is back to its captured value"
+  if restore_writer_prereq; then
+    ok "the Phase-3 writer-boundary grant is back to its captured value"
+  else
+    no "the Phase-3 writer-boundary grant could NOT be returned to its captured value" \
+       "a REVOKE did not reach the database; the grant may still be in force"
+  fi
   restore_flags;    ok "Phase-6 flag files restored to the captured baseline; services restarted"
   restore_hotel_admin; ok "Hotel Admin pointed at the captured DARK release"
-  restore_settings; ok "per-appliance product settings restored through the audited writer"
+  if restore_settings; then
+    ok "per-appliance product settings restored through the audited writer"
+  else
+    no "the per-appliance product settings were NOT restored" \
+       "the audited writer could not be used; the setting state is whatever the run left it as"
+  fi
   enforce_dark_setting
   teardown_scope
   case "$TEARDOWN_OUT" in
@@ -469,8 +549,14 @@ verify_dark() {
     + (SELECT count(*) FROM iam_v2.entitlement_devices
         WHERE entitlement_id IN (SELECT id FROM iam_v2.entitlements WHERE stay_id='$SYN_STAY')
           AND status='AUTHORIZED')")"
-  [ "$live" = "0" ] && ok "no live synthetic entitlement, session or device binding remains at the reserved ids" \
-    || { no "synthetic state is still live" "$live row(s)"; bad=1; }
+  if [ -z "$live" ]; then
+    no "the reserved synthetic ids could not be checked" \
+       "the site database did not answer; whether any synthetic state is still live is UNKNOWN"; bad=1
+  elif [ "$live" = "0" ]; then
+    ok "no live synthetic entitlement, session or device binding remains at the reserved ids"
+  else
+    no "synthetic state is still live" "$live row(s)"; bad=1
+  fi
 
   # THE SETTINGS TABLE: the same appliances as before the run, and none of them enabled.
   #
@@ -478,19 +564,29 @@ verify_dark() {
   # passed happily while the appliance sat enabled, because enabled was what had been captured. The two
   # things actually worth asserting are that this run created no settings row of its own and left none
   # behind, and that nothing is switched on while the phase is dark.
-  local nowkeys basekeys onnow
+  local nowkeys basekeys onnow dbdown=0
   nowkeys="$(q "SELECT tenant_id||' '||site_id||' '||appliance_id FROM iam_v2.appliance_product_settings
-                 ORDER BY tenant_id, site_id, appliance_id")"
+                 ORDER BY tenant_id, site_id, appliance_id")" || dbdown=1
   basekeys="$(awk '{print $1" "$2" "$3}' "$STATE_DIR/settings" 2>/dev/null)"
-  if [ "$nowkeys" = "$basekeys" ]; then
+  # AN EMPTY ANSWER FROM AN UNREACHABLE DATABASE IS NOT AN EMPTY TABLE. When the baseline happened to be
+  # empty as well, the comparison below read as agreement and printed a PASS about a table it never saw.
+  if [ "$dbdown" = "1" ]; then
+    no "the settings table could not be compared with the baseline" \
+       "the site database did not answer, so 'unchanged' cannot be told from 'unknown'"; bad=1
+  elif [ "$nowkeys" = "$basekeys" ]; then
     ok "the settings table covers exactly the appliances it did before the run"
   else
     no "the settings table gained or lost a row" "$(printf '%s' "$nowkeys" | tr '\n' ';')"; bad=1
   fi
   onnow="$(q "SELECT count(*) FROM iam_v2.appliance_product_settings WHERE guest_device_self_service")"
-  [ "$onnow" = "0" ] \
-    && ok "no appliance is left with guest device self-service enabled" \
-    || { no "an appliance is left with the capability enabled" "$onnow row(s)"; bad=1; }
+  if [ -z "$onnow" ]; then
+    no "whether the capability is left enabled is UNKNOWN" \
+       "the site database did not answer, and that must not be read as nothing being enabled"; bad=1
+  elif [ "$onnow" = "0" ]; then
+    ok "no appliance is left with guest device self-service enabled"
+  else
+    no "an appliance is left with the capability enabled" "$onnow row(s)"; bad=1
+  fi
 
   return $bad
 }
@@ -654,16 +750,23 @@ wait_for_scd() {
   return 1
 }
 
-guard_environment
+# Every mode must be on a listed machine. The full identity check is applied per mode below, because only
+# the modes that ENABLE a capability may be blocked by a source of identity being unavailable.
+guard_host
 
 case "${1:-run}" in
   restore)
-    say "restore-only run on $(hostname)"
+    # DISABLE-ONLY, and deliberately NOT behind guard_environment: see the comment on that function. This is
+    # the path that recovers an interrupted run, so it has to work when the signed assignment is unreadable
+    # or PostgreSQL is down. Each restore step is individually tolerant of a source it cannot reach; what it
+    # must never do is decline to turn something off.
+    say "restore-only run on $(hostname) (disable-only; no identity source is required to turn a flag OFF)"
     trap finish EXIT INT TERM
     exit 0
     ;;
 
   selftest)
+    guard_environment
     # FAULT INJECTION, RUN BEFORE THE REAL BODY IS EVER TRUSTED. Each case enables a capability and then
     # abandons the run in a different way. The run is judged only by whether the appliance comes back dark --
     # which is the property the real validation depends on and the one that cannot be established by reading
@@ -714,6 +817,7 @@ case "${1:-run}" in
     ;;
 
   run|run-device-selfservice)
+    guard_environment
     # SCOPE IS ASSIGNED HERE, from the positional mode, unconditionally -- so an exported P6_SCOPE cannot
     # choose one. `run` is the full validation; `run-device-selfservice` stops at the boundary of what the
     # Product Owner authorised for the PRE-LIVE acceptance run, which is the Guest Device Self-Service

@@ -328,12 +328,26 @@ else
   else
     bad "the boundary closed the guest's own captive portal; guest sign-in would be impossible"
   fi
-  if ip netns exec gv221 timeout 3 nslookup -timeout=2 example.com 10.221.0.1 >/dev/null 2>&1 \
-     || ip netns exec gv221 timeout 3 getent hosts example.com >/dev/null 2>&1; then
-    ok "...and DNS on its own gateway still answers"
-  else
-    echo "       note: DNS on the own gateway did not answer in this rig (no resolver tool in the netns)"
+  # DNS ON THE OWN GATEWAY, ASSERTED AND ADDRESSED EXPLICITLY.
+  #
+  # This was written as a soft note with a `getent hosts` fallback, and both halves were wrong. The note left
+  # FAIL untouched, so the drill could report ALL GREEN with guest DNS broken by the very rule this section
+  # exists to check -- and `getent` consults whatever resolver the namespace inherits, so it could have
+  # printed the success line after an answer that never came from 10.221.0.1 at all. A check that can pass on
+  # someone else's answer is not a check of this gateway.
+  #
+  # `dig @10.221.0.1` names the server and nothing else can satisfy it, and an ANSWER section with at least
+  # one record is required: a reply with rcode SERVFAIL is a reply, and it is not DNS working.
+  dns_answer=""
+  if ip netns exec gv221 timeout 4 dig +time=2 +tries=1 +short @10.221.0.1 example.com A >/tmp/gv221.dns 2>/dev/null; then
+    dns_answer="$(grep -cE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' /tmp/gv221.dns 2>/dev/null || echo 0)"
   fi
+  if [ "${dns_answer:-0}" -ge 1 ]; then
+    ok "...and DNS on its own gateway still answers (A record from 10.221.0.1)"
+  else
+    bad "DNS on the guest's OWN gateway 10.221.0.1 returned no A record; the boundary broke guest name resolution"
+  fi
+  rm -f /tmp/gv221.dns
 fi
 
 for v in 221 222; do ip netns exec gv$v dhclient -r -lf /tmp/gv$v.leases -pf /tmp/gv$v.pid gv${v}c 2>/dev/null; done
