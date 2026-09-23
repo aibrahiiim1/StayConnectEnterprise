@@ -134,15 +134,40 @@ export type GuestAccessPlan = {
   price_cents?: number | null; currency?: string | null;
 };
 
-export type VoucherTotals = {
-  unused: number; active: number; exhausted: number; expired: number; revoked: number;
+// THE VOUCHER TYPES, AS THE PRODUCT ACTUALLY SHIPS THEM.
+//
+// What was here described the legacy surface: a batch row of its own, a template_id, a code_prefix, a
+// char_mode with four values, and `totals` counting an "exhausted" state. None of it matched iam_v2, and
+// nothing imported either type -- they were the last trace of a screen that no longer exists, kept alive by
+// the fact that dead types compile.
+//
+// Under iam_v2 a BATCH IS NOT A ROW. It is the set of vouchers sharing a batch_id, minted per print run, so
+// it is derived rather than fetched -- which is why there is no VoucherBatch type here any more.
+export type VoucherState = "UNUSED" | "REDEEMED" | "REVOKED" | "REDEMPTION_EXPIRED";
+
+export type VoucherSummary = {
+  unused: number; redeemed: number; revoked: number; redemption_expired: number;
 };
-export type VoucherBatch = {
-  id: string; tenant_id: string; template_id: string; name?: string | null;
-  count: number; created_by?: string | null; created_at: string;
-  code_length?: number | null; char_mode?: string | null;
-  code_prefix?: string | null; exclude_ambiguous?: boolean | null;
-  totals?: VoucherTotals | null;
+
+// The code FORMAT the property chose (migration 0085). config_version 0 means nobody has chosen and these
+// are the defaults -- distinguishable from a property that deliberately saved the same values.
+export type VoucherCodeFormat = {
+  code_mode: "numbers" | "mixed";
+  code_length: 6 | 7 | 8;
+  config_version: number;
+  updated_at?: string;
+};
+
+// One entry in the append-only record of who recovered a code in the clear. There is deliberately no field
+// that could carry a code: this records THAT one was read, never which.
+export type VoucherReveal = {
+  revealed_at: string;
+  action: "REVEAL" | "EXPORT";
+  voucher_id: string | null;
+  voucher_count: number;
+  operator_label: string;
+  reason: string;
+  selection: string | null;
 };
 
 // Guest Username/Password account (password is never returned).
@@ -163,21 +188,21 @@ export type GuestAccount = {
 export type GuestAccountCreateResp = { account: GuestAccount; generated_password?: string };
 export type GuestAccountPasswordResp = { status: string; disconnected_sessions?: number; generated_password?: string };
 
+// NOTE THE ABSENCE OF `code`. The old type had one, and a `code_display` beside it, from a surface where
+// the list carried the plaintext. A list is a screen an operator leaves open; a code on it would be a
+// reveal with no password, no reason and no record. The only thing a list shows is the last four
+// characters, which is enough to match a card in somebody's hand and not enough to be one.
 export type Voucher = {
-  id: string; tenant_id: string; template_id: string; batch_id?: string | null;
-  code: string; code_display: string; state: string; issued_at: string;
-  activated_at?: string; expires_at?: string;
-  bytes_used: number; seconds_used: number;
-  // Enriched on the detail view (GET /vouchers/{id}).
-  plan_name?: string | null; plan_code?: string | null;
-  duration_seconds?: number | null; data_cap_bytes?: number | null;
-  down_kbps?: number | null; up_kbps?: number | null;
-  max_devices?: number | null; active_devices?: number | null;
-  // Derived usage under the validity-window model.
-  first_activated_at?: string | null; valid_until?: string | null;
-  time_remaining_seconds?: number | null;
-  data_used_bytes?: number | null; data_remaining_bytes?: number | null;
-  effective_state?: string; exhaustion_reason?: string;
+  id: string;
+  code_last4: string;
+  state: VoucherState;
+  package_revision_id: string;
+  batch_id: string | null;
+  created_at: string;
+  redemption_valid_from: string | null;
+  redemption_valid_until: string | null;
+  notes: string | null;
+  issued_by: string | null;
 };
 
 // SubjectKind — the four things an Entitlement can belong to, which is therefore the four things a session can

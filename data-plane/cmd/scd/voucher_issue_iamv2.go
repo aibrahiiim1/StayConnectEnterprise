@@ -35,10 +35,13 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/codegen"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
@@ -137,6 +140,14 @@ func (s *server) issueVouchersIAMv2(w http.ResponseWriter, r *http.Request) {
 		PackageRevisionID string `json:"package_revision_id"`
 		Count             int    `json:"count"`
 		Note              string `json:"note,omitempty"`
+		// The operator edged resolved from the SESSION. Required: "somebody printed these" is not a record,
+		// and the column exists so that a batch found in a drawer can be traced to whoever made it.
+		IssuedBy string `json:"issued_by"`
+		// The optional redemption window. The authenticator has always enforced [from, until) with NULL
+		// meaning unbounded (internal/iamv2/repo_pg.go), and nothing ever wrote these columns -- so every
+		// voucher this system could issue was valid forever. These are the columns, not a new rule.
+		ValidFrom  string `json:"valid_from,omitempty"`
+		ValidUntil string `json:"valid_until,omitempty"`
 	}
 	// DisallowUnknownFields, and specifically so that `length` is REFUSED rather than ignored.
 	//
@@ -158,6 +169,17 @@ func (s *server) issueVouchersIAMv2(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.Count < 1 || in.Count > 500 {
 		httpErr(w, http.StatusBadRequest, "count must be between 1 and 500")
+		return
+	}
+	if strings.TrimSpace(in.IssuedBy) == "" {
+		httpErr(w, http.StatusBadRequest,
+			"issued_by is required: it is the operator edged resolved from the session, and a batch with no "+
+				"author is a batch nobody can be asked about")
+		return
+	}
+	validFrom, validUntil, werr := parseRedemptionWindow(in.ValidFrom, in.ValidUntil)
+	if werr != nil {
+		httpErr(w, http.StatusBadRequest, werr.Error())
 		return
 	}
 	// THE FORMAT COMES FROM THE SITE SETTING, and a site that has never opened the screen gets the defaults
@@ -201,6 +223,15 @@ func (s *server) issueVouchersIAMv2(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusUnprocessableEntity, "code generation refused: "+gerr.Error())
 		return
 	}
+	// ONE BATCH PER CALL. batch_id has existed since mg3 and has never been written, so every voucher this
+	// system could issue was an orphan: there was no way to say "cancel the cards we printed on Tuesday" or
+	// "export that batch", because there were no batches -- only rows. An export selection and a bulk recall
+	// both need this, so issuance mints it here rather than leaving the column to a later feature.
+	var batchID string
+	if err := s.db.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&batchID); err != nil {
+		httpErr(w, http.StatusInternalServerError, "batch id allocation failed")
+		return
+	}
 	for _, code := range codes {
 		// The row id is generated up front because the code ciphertext's AAD binds it: the ciphertext
 		// cannot be moved to another voucher row and still open.
@@ -218,10 +249,12 @@ func (s *server) issueVouchersIAMv2(w http.ResponseWriter, r *http.Request) {
 		if _, err := s.db.Exec(ctx, `
 		    INSERT INTO iam_v2.vouchers
 		           (id, tenant_id, site_id, package_revision_id, code_hmac, code_ciphertext, code_nonce,
-		            code_key_generation_id, code_last4, notes)
-		    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		            code_key_generation_id, code_last4, notes, batch_id, issued_by,
+		            redemption_valid_from, redemption_valid_until)
+		    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 			vid, s.tenID, s.siteID, in.PackageRevisionID, idx, ct, nonce, genID,
-			iamv2.Last4(code), nullIfEmpty(in.Note)); err != nil {
+			iamv2.Last4(code), nullIfEmpty(in.Note), batchID, strings.TrimSpace(in.IssuedBy),
+			validFrom, validUntil); err != nil {
 			httpErr(w, http.StatusInternalServerError, "voucher insert failed")
 			return
 		}
@@ -230,16 +263,48 @@ func (s *server) issueVouchersIAMv2(w http.ResponseWriter, r *http.Request) {
 	// not even its last4 in bulk, because a batch log line is not the audited reveal action. The format is
 	// recorded because "these cards will not scan" is answered by knowing what format they were printed in,
 	// and config_version says whether that came from a saved setting or from the defaults.
-	slog.Info("iamv2 vouchers issued", "count", in.Count,
+	slog.Info("iamv2 vouchers issued", "count", in.Count, "batch_id", batchID,
 		"package_revision_id", in.PackageRevisionID, "generation", genID,
 		"code_mode", format.Mode, "code_length", format.Length, "format_version", format.Version)
 	// ONE-TIME return of the plaintext codes. This is the only moment they exist outside memory.
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"authority":           "iam_v2",
 		"count":               len(codes),
+		"batch_id":            batchID,
 		"package_revision_id": in.PackageRevisionID,
 		"codes":               codes,
 	})
+}
+
+// parseRedemptionWindow validates the optional validity window and returns the two column values.
+//
+// It REFUSES a window that can never open rather than storing it. The failure it exists to prevent is
+// physical: an operator prints two hundred cards, hands them out, and learns from a guest that they expired
+// before they were printed. Nothing downstream would have said anything -- voucherRedeemable simply returns
+// false, and the guest sees "that code is not valid", which is what a wrong code looks like too.
+func parseRedemptionWindow(from, until string) (any, any, error) {
+	var vf, vu any
+	var fromT, untilT time.Time
+	var err error
+	if strings.TrimSpace(from) != "" {
+		if fromT, err = time.Parse(time.RFC3339, strings.TrimSpace(from)); err != nil {
+			return nil, nil, errors.New("valid_from must be an RFC3339 timestamp")
+		}
+		vf = fromT
+	}
+	if strings.TrimSpace(until) != "" {
+		if untilT, err = time.Parse(time.RFC3339, strings.TrimSpace(until)); err != nil {
+			return nil, nil, errors.New("valid_until must be an RFC3339 timestamp")
+		}
+		if !untilT.After(time.Now()) {
+			return nil, nil, errors.New("valid_until is already in the past: these vouchers could never be redeemed")
+		}
+		vu = untilT
+	}
+	if !fromT.IsZero() && !untilT.IsZero() && !untilT.After(fromT) {
+		return nil, nil, errors.New("valid_until must be after valid_from")
+	}
+	return vf, vu, nil
 }
 
 func nullIfEmpty(s string) any {

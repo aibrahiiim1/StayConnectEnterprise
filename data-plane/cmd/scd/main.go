@@ -749,9 +749,24 @@ func main() {
 	r.Use(middleware.Timeout(10 * time.Second))
 	r.Get("/v1/health", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	r.Method("GET", "/metrics", s.met.Handler())
-	// Voucher issuance lives here because the DEK does: scd is root and unix-socket only, edged is the
-	// unprivileged HTTP service. edged proxies to this route.
+	// The voucher surface lives here because the DEK does: scd is root and unix-socket only, edged is the
+	// unprivileged HTTP service. edged proxies to these routes -- which, until the operator surface existed,
+	// this comment claimed and no caller did.
+	//
+	// Reveal and export recover a code in the clear. edged has already authenticated the operator, checked
+	// the permission, re-verified the password and taken a bounded reason before anything reaches here;
+	// this socket is not reachable from the network. What these handlers own is the part edged cannot do:
+	// opening the ciphertext, and writing the append-only record in the same transaction.
 	r.Post("/v1/vouchers/issue", s.issueVouchersIAMv2)
+	r.Get("/v1/vouchers", s.listVouchers)
+	r.Get("/v1/vouchers/summary", s.voucherSummary)
+	r.Post("/v1/vouchers/export", s.exportVoucherCodes)
+	r.Post("/v1/vouchers/{id}/reveal", s.revealVoucherCode)
+	r.Post("/v1/vouchers/{id}/revoke", s.revokeVoucher)
+	// Key rotation. superseded_at was read by issuance and written by nothing, so a per-generation blind
+	// index key was the key forever; this is the deliberate audited path the grant file always described.
+	r.Get("/v1/voucher-key-generations", s.listVoucherKeyGenerations)
+	r.Post("/v1/voucher-key-generations/{id}/supersede", s.rotateVoucherKeyGeneration)
 	// Entitlement -> session. Authentication and commerce both land in iam_v2; this is what turns the
 	// resulting entitlement into something the enforcement plane can act on.
 	r.Post("/v1/sessions/activate", s.activateIAMv2Session)
@@ -898,7 +913,10 @@ func main() {
 		}
 	}
 
-	srv := &http.Server{Handler: r, ReadHeaderTimeout: 5 * time.Second}
+	// ConnContext reads the peer credentials ONCE, at accept time, so the code-recovery routes can
+	// refuse a caller that is not edged. See peer_identity_linux.go for what that does and does not
+	// prove: portald shares edged's uid, so this stops a mistake and not a compromise.
+	srv := &http.Server{Handler: r, ReadHeaderTimeout: 5 * time.Second, ConnContext: withPeerCred}
 	go func() {
 		slog.Info("scd listening", "socket", c.SocketPath)
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {

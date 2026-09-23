@@ -80,6 +80,10 @@ const MATRIX: Matrix = {
     "social-providers": "write", "stripe-accounts": "write",
     network: "write",
     "financial-review": "read", "financial-ops": "read",
+    // Vouchers: prints and cancels cards, and CHOOSES THE FORMAT -- which is a property configuration
+    // decision, the same reasoning that puts auth-methods here. Not "voucher-codes": this role owns
+    // configuration and the PMS integration, and neither job requires reading a guest's credential.
+    vouchers: "write", "voucher-code-settings": "write",
     operators: "read", audit: "read",
     reports: "read", backups: "read", license: "read", diagnostics: "write",
   },
@@ -101,6 +105,7 @@ const MATRIX: Matrix = {
     "post-stay-profiles": "write", "stay-transfers": "write",
     "financial-review": "read", "financial-ops": "read",
     "guest-accounts": "write", sessions: "write", usage: "read",
+    vouchers: "write", "voucher-codes": "write", "voucher-code-settings": "read",
     "auth-methods": "read", "walled-garden": "read", reports: "read", audit: "read", license: "read", backups: "read", diagnostics: "read",
   },
   guest_relations_operator: {
@@ -113,12 +118,17 @@ const MATRIX: Matrix = {
     "pms-reconciliation": "read",
     "post-stay-profiles": "write", "stay-transfers": "write",
     "guest-accounts": "write", sessions: "write", usage: "read",
+    vouchers: "write", "voucher-codes": "write", "voucher-code-settings": "read",
     "auth-methods": "read", reports: "read",
     audit: "read", license: "read", backups: "read", "walled-garden": "read", diagnostics: "read",
   },
   voucher_operator: {
-    "guest-accounts": "write", sessions: "read", usage: "read", reports: "read",
+    // THE DRIFT THIS FILE CARRIED: `usage: "read"` was here and is not in edged's matrix, so the sidebar
+    // offered a kiosk account a destination the appliance refuses. Removed rather than added to auth.go --
+    // a print station has no business reading guests' consumption.
+    "guest-accounts": "write", sessions: "read", reports: "read",
     license: "read", diagnostics: "read",
+    vouchers: "write", "voucher-codes": "write", "voucher-code-settings": "read",
   },
   payments_operator: {
     "guest-device-self-service": "read",
@@ -127,6 +137,8 @@ const MATRIX: Matrix = {
     // re-authentication at the route.
     "financial-review": "write", "financial-ops": "write",
     sessions: "read", usage: "read", reports: "read", audit: "read", license: "read", diagnostics: "read",
+    // A voucher is a commercial instrument, so this role reads the list -- and reads no code.
+    vouchers: "read",
   },
   site_viewer: {
     // The list only. A read-only observer has no reason to hold thirty days of what guests typed, so the
@@ -148,6 +160,9 @@ const MATRIX: Matrix = {
     "walled-garden": "read", "portal-branding": "read", "notification-providers": "read", "social-providers": "read",
     "stripe-accounts": "read", audit: "read", reports: "read",
     backups: "read", license: "read", network: "read", diagnostics: "read",
+    // Sees which cards exist and in what state; reads no code, for the same reason
+    // guest-signin-credentials is absent from this role.
+    vouchers: "read", "voucher-code-settings": "read",
   },
 };
 

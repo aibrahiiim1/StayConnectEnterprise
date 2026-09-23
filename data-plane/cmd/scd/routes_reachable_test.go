@@ -34,6 +34,17 @@ var edgedDependsOn = []struct{ method, path string }{
 	{"Get", "/v1/license/status"},
 	{"Post", "/v1/license/refresh"},
 	{"Get", "/v1/setup/status"},
+	// The voucher operator surface. Issuance was routed here for a whole delivery with no caller anywhere
+	// -- the inverse of the defect this file exists for, and just as invisible: a reachable route nothing
+	// reaches is as useless as an unreachable handler. edged now proxies all six.
+	{"Post", "/v1/vouchers/issue"},
+	{"Get", "/v1/vouchers"},
+	{"Get", "/v1/vouchers/summary"},
+	{"Post", "/v1/vouchers/export"},
+	{"Post", "/v1/vouchers/{id}/reveal"},
+	{"Post", "/v1/vouchers/{id}/revoke"},
+	{"Get", "/v1/voucher-key-generations"},
+	{"Post", "/v1/voucher-key-generations/{id}/supersede"},
 }
 
 func TestEveryPathEdgedCallsIsRoutedOnSCD(t *testing.T) {

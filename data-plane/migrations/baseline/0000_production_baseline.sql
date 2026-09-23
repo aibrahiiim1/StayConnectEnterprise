@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0086, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0088, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -3222,7 +3222,7 @@ CREATE FUNCTION iam_v2.p4_entitlement_grant_kernel(p_tenant uuid, p_site uuid, p
 DECLARE
   v_subject_key text; v_existing uuid; v_superseded uuid; v_new uuid;
   v_time_mode text; v_end_mode text; v_window timestamptz; v_state text;
-  v_burned int;
+  v_burned int; v_voucher_pkg uuid;
 BEGIN
   IF p_voucher IS NULL AND p_account IS NULL AND p_principal IS NULL THEN
     RAISE EXCEPTION 'GRANT_SUBJECT_UNRESOLVED: an entitlement always belongs to exactly one subject'
@@ -3230,6 +3230,41 @@ BEGIN
   END IF;
   IF p_snapshot IS NULL OR p_snapshot->>'service_plan_revision_id' IS NULL THEN
     RAISE EXCEPTION 'GRANT_SNAPSHOT_UNREADABLE' USING ERRCODE = 'check_violation';
+  END IF;
+
+  -- A VOUCHER GRANTS WHAT IT WAS PRINTED FOR, AND NOTHING ELSE.
+  --
+  -- iam_v2.vouchers.package_revision_id is NOT NULL and has been pinned at issuance since mg3, and the
+  -- issuance path's own comment states why: "what a voucher grants is fixed at issuance by an immutable
+  -- revision, so republishing a package later cannot retroactively change what an already-printed card is
+  -- worth". NOTHING ENFORCED IT. The auth context carries voucher_id and no package pin, so the offer and
+  -- quote path was free to select any package the subject was eligible for -- and at a property with two
+  -- voucher-eligible free tiers, a card printed for the lower one could be redeemed against the higher.
+  --
+  -- Checked HERE because this is the one kernel both grant entry points funnel through, it already receives
+  -- both the voucher and the package revision, and it runs as its owner -- so no caller can route around
+  -- it. Checked BEFORE the subject lock and before any write, so a grant that will be refused does not
+  -- first terminate the guest's previous entitlement.
+  --
+  -- The offer path narrows to the pinned revision as well, so an operator never sees a choice this refuses;
+  -- that is the product behaviour, and this is the invariant. A caller that disagrees with the card gets an
+  -- error rather than a better package.
+  IF p_voucher IS NOT NULL THEN
+    IF p_pkg_rev IS NULL THEN
+      RAISE EXCEPTION 'VOUCHER_PACKAGE_UNPINNED: a voucher grant must name the package revision it grants'
+        USING ERRCODE = 'check_violation';
+    END IF;
+    SELECT package_revision_id INTO v_voucher_pkg FROM iam_v2.vouchers
+     WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_voucher;
+    IF v_voucher_pkg IS NULL THEN
+      RAISE EXCEPTION 'VOUCHER_NOT_FOUND: voucher % does not belong to this owner', p_voucher
+        USING ERRCODE = 'check_violation';
+    END IF;
+    IF v_voucher_pkg <> p_pkg_rev THEN
+      RAISE EXCEPTION 'VOUCHER_PACKAGE_MISMATCH: voucher % was printed against package revision %, and this '
+                      'grant is for %; a card grants what it was printed for', p_voucher, v_voucher_pkg, p_pkg_rev
+        USING ERRCODE = 'check_violation';
+    END IF;
   END IF;
   v_time_mode := coalesce(p_snapshot->>'time_accounting_mode', 'VALIDITY_WINDOW');
   v_end_mode  := coalesce(nullif(p_snapshot->>'end_mode',''), 'MANUAL_END');
@@ -7528,6 +7563,55 @@ END; $$;
 
 
 --
+-- Name: voucher_code_generation_supersede(uuid, uuid, uuid, uuid, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.voucher_code_generation_supersede(p_tenant uuid, p_site uuid, p_generation uuid, p_operator uuid, p_reason text) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'public', 'pg_temp'
+    AS $$
+DECLARE v_n integer; v_no integer;
+BEGIN
+  IF p_operator IS NULL THEN
+    RAISE EXCEPTION 'VOUCHER_ROTATION_NEEDS_AN_OPERATOR' USING ERRCODE = 'check_violation';
+  END IF;
+  IF length(btrim(coalesce(p_reason, ''))) < 4 THEN
+    RAISE EXCEPTION 'VOUCHER_ROTATION_NEEDS_A_REASON' USING ERRCODE = 'check_violation';
+  END IF;
+  -- Serialise against a concurrent rotation of the same site, so two operators cannot retire two
+  -- generations and leave issuance choosing between them by ordering luck.
+  PERFORM pg_advisory_xact_lock(hashtext('voucher_code_generations'), hashtext(p_site::text));
+  UPDATE iam_v2.voucher_code_key_generations
+     SET superseded_at = now(), superseded_by = p_operator,
+         supersede_reason = btrim(p_reason)
+   WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_generation
+     AND superseded_at IS NULL
+  RETURNING generation_no INTO v_no;
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  -- Not a silent no-op: "there is no such active generation" and "it was already retired" are different
+  -- answers, and an operator who cannot tell them apart will rotate twice.
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION 'VOUCHER_GENERATION_NOT_ACTIVE: no active generation % for tenant %/site %',
+      p_generation, p_tenant, p_site USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN v_no;
+END $$;
+
+
+--
+-- Name: voucher_code_reveals_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.voucher_code_reveals_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'iam_v2.voucher_code_reveals is append-only: % refused', TG_OP
+    USING ERRCODE = 'restrict_violation';
+END $$;
+
+
+--
 -- Name: voucher_code_settings_changes_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -7622,6 +7706,38 @@ END $$;
 --
 
 COMMENT ON FUNCTION iam_v2.voucher_code_settings_set(p_tenant uuid, p_site uuid, p_mode text, p_length integer, p_operator text, p_reason text) IS 'Stores a validated voucher code format and returns its new config_version. Takes effect on the NEXT issuance -- the issuance path reads this table every time, so no restart, rebuild or deployment is involved. Codes already issued keep the format they were printed with; they remain redeemable, because redemption matches a stored blind index and never re-derives the format.';
+
+
+--
+-- Name: voucher_revoke(uuid, uuid, uuid, uuid, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.voucher_revoke(p_tenant uuid, p_site uuid, p_voucher uuid, p_operator uuid, p_reason text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'public', 'pg_temp'
+    AS $$
+DECLARE v_n integer;
+BEGIN
+  IF p_operator IS NULL THEN
+    RAISE EXCEPTION 'VOUCHER_REVOKE_NEEDS_AN_OPERATOR' USING ERRCODE = 'check_violation';
+  END IF;
+  IF length(btrim(coalesce(p_reason, ''))) < 4 THEN
+    RAISE EXCEPTION 'VOUCHER_REVOKE_NEEDS_A_REASON' USING ERRCODE = 'check_violation';
+  END IF;
+  -- UNUSED only. A REDEEMED voucher has already granted an entitlement, and revoking the card would not
+  -- take that entitlement back -- so answering "revoked" would be a false statement about access. The
+  -- entitlement is ended through the session/entitlement surface, which is a different action.
+  UPDATE iam_v2.vouchers
+     SET state = 'REVOKED'
+   WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_voucher AND state = 'UNUSED';
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  -- Not a silent no-op: the same reasoning as 0084's burn. "Nothing happened" and "it was already spent"
+  -- are different answers and the caller must be able to tell them apart.
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION 'VOUCHER_NOT_REVOCABLE: no UNUSED voucher % for tenant %/site %', p_voucher, p_tenant, p_site
+      USING ERRCODE = 'check_violation';
+  END IF;
+END $$;
 
 
 SET default_tablespace = '';
@@ -10472,8 +10588,48 @@ CREATE TABLE iam_v2.voucher_code_key_generations (
     hmac_key_ciphertext bytea NOT NULL,
     aead_params jsonb NOT NULL,
     encryption_key_id uuid NOT NULL,
-    superseded_at timestamp with time zone
+    superseded_at timestamp with time zone,
+    superseded_by uuid,
+    supersede_reason text
 );
+
+
+--
+-- Name: COLUMN voucher_code_key_generations.superseded_by; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.voucher_code_key_generations.superseded_by IS 'The authenticated operator who retired this generation, as the server resolved them from the session.';
+
+
+--
+-- Name: voucher_code_reveals; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.voucher_code_reveals (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    voucher_id uuid,
+    action text NOT NULL,
+    voucher_count integer NOT NULL,
+    selection jsonb,
+    revealed_at timestamp with time zone DEFAULT now() NOT NULL,
+    operator_id uuid NOT NULL,
+    operator_label text NOT NULL,
+    reason text NOT NULL,
+    CONSTRAINT vcr_reveal_names_one_voucher CHECK ((((action = 'REVEAL'::text) AND (voucher_id IS NOT NULL) AND (voucher_count = 1)) OR (action = 'EXPORT'::text))),
+    CONSTRAINT voucher_code_reveals_action_check CHECK ((action = ANY (ARRAY['REVEAL'::text, 'EXPORT'::text]))),
+    CONSTRAINT voucher_code_reveals_operator_label_check CHECK ((length(btrim(operator_label)) > 0)),
+    CONSTRAINT voucher_code_reveals_reason_check CHECK (((length(btrim(reason)) >= 4) AND (length(btrim(reason)) <= 500))),
+    CONSTRAINT voucher_code_reveals_voucher_count_check CHECK ((voucher_count >= 1))
+);
+
+
+--
+-- Name: TABLE voucher_code_reveals; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.voucher_code_reveals IS 'Append-only record of every recovery of a voucher code in the clear. A voucher code is encrypted and RECOVERABLE, unlike the hashed post-stay PIN and guest-account password, so "shown once" cannot be enforced by the crypto and is enforced by visibility instead. There is deliberately no column that could hold a code.';
 
 
 --
@@ -10515,8 +10671,24 @@ CREATE TABLE iam_v2.vouchers (
     redemption_valid_from timestamp with time zone,
     redemption_valid_until timestamp with time zone,
     notes text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    issued_by uuid,
     CONSTRAINT vouchers_state_check CHECK ((state = ANY (ARRAY['UNUSED'::text, 'REDEEMED'::text, 'REVOKED'::text, 'REDEMPTION_EXPIRED'::text])))
 );
+
+
+--
+-- Name: COLUMN vouchers.created_at; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.vouchers.created_at IS 'When this voucher was minted. Not the redemption window: see redemption_valid_from/_until, which are the credential-validity bounds the authenticator enforces.';
+
+
+--
+-- Name: COLUMN vouchers.issued_by; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.vouchers.issued_by IS 'The authenticated operator who issued it, as the server resolved them from the session.';
 
 
 --
@@ -12747,6 +12919,14 @@ ALTER TABLE ONLY iam_v2.voucher_code_key_generations
 
 
 --
+-- Name: voucher_code_reveals voucher_code_reveals_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.voucher_code_reveals
+    ADD CONSTRAINT voucher_code_reveals_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: voucher_code_settings_changes voucher_code_settings_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -13579,10 +13759,38 @@ CREATE INDEX stays_room_lookup ON iam_v2.stays USING btree (tenant_id, site_id, 
 
 
 --
+-- Name: vcr_by_voucher; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX vcr_by_voucher ON iam_v2.voucher_code_reveals USING btree (tenant_id, site_id, voucher_id) WHERE (voucher_id IS NOT NULL);
+
+
+--
+-- Name: vcr_lookup; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX vcr_lookup ON iam_v2.voucher_code_reveals USING btree (tenant_id, site_id, revealed_at DESC);
+
+
+--
 -- Name: voucher_code_settings_changes_lookup; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
 CREATE INDEX voucher_code_settings_changes_lookup ON iam_v2.voucher_code_settings_changes USING btree (tenant_id, site_id, changed_at DESC);
+
+
+--
+-- Name: vouchers_batch_lookup; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX vouchers_batch_lookup ON iam_v2.vouchers USING btree (tenant_id, site_id, batch_id) WHERE (batch_id IS NOT NULL);
+
+
+--
+-- Name: vouchers_created_lookup; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX vouchers_created_lookup ON iam_v2.vouchers USING btree (tenant_id, site_id, created_at DESC);
 
 
 --
@@ -14608,6 +14816,13 @@ CREATE TRIGGER sync_outbox_recovery_log_no_update BEFORE DELETE OR UPDATE ON iam
 
 
 --
+-- Name: voucher_code_reveals voucher_code_reveals_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER voucher_code_reveals_append_only BEFORE DELETE OR UPDATE ON iam_v2.voucher_code_reveals FOR EACH ROW EXECUTE FUNCTION iam_v2.voucher_code_reveals_append_only();
+
+
+--
 -- Name: voucher_code_settings_changes voucher_code_settings_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
@@ -15562,6 +15777,38 @@ ALTER TABLE ONLY iam_v2.stays
 
 ALTER TABLE ONLY iam_v2.voucher_batches
     ADD CONSTRAINT voucher_batches_tenant_id_site_id_package_revision_id_fkey FOREIGN KEY (tenant_id, site_id, package_revision_id) REFERENCES iam_v2.internet_package_revisions(tenant_id, site_id, id);
+
+
+--
+-- Name: voucher_code_key_generations voucher_code_key_generations_superseded_by_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.voucher_code_key_generations
+    ADD CONSTRAINT voucher_code_key_generations_superseded_by_fkey FOREIGN KEY (superseded_by) REFERENCES public.operators(id);
+
+
+--
+-- Name: voucher_code_reveals voucher_code_reveals_operator_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.voucher_code_reveals
+    ADD CONSTRAINT voucher_code_reveals_operator_id_fkey FOREIGN KEY (operator_id) REFERENCES public.operators(id);
+
+
+--
+-- Name: voucher_code_reveals voucher_code_reveals_tenant_id_site_id_voucher_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.voucher_code_reveals
+    ADD CONSTRAINT voucher_code_reveals_tenant_id_site_id_voucher_id_fkey FOREIGN KEY (tenant_id, site_id, voucher_id) REFERENCES iam_v2.vouchers(tenant_id, site_id, id);
+
+
+--
+-- Name: vouchers vouchers_issued_by_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.vouchers
+    ADD CONSTRAINT vouchers_issued_by_fkey FOREIGN KEY (issued_by) REFERENCES public.operators(id);
 
 
 --
@@ -16885,6 +17132,21 @@ GRANT ALL ON FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at 
 
 
 --
+-- Name: FUNCTION voucher_code_generation_supersede(p_tenant uuid, p_site uuid, p_generation uuid, p_operator uuid, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.voucher_code_generation_supersede(p_tenant uuid, p_site uuid, p_generation uuid, p_operator uuid, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.voucher_code_generation_supersede(p_tenant uuid, p_site uuid, p_generation uuid, p_operator uuid, p_reason text) TO svc_scd;
+
+
+--
+-- Name: FUNCTION voucher_code_reveals_append_only(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.voucher_code_reveals_append_only() FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION voucher_code_settings_changes_append_only(); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -16906,6 +17168,14 @@ GRANT ALL ON FUNCTION iam_v2.voucher_code_settings_get(p_tenant uuid, p_site uui
 
 REVOKE ALL ON FUNCTION iam_v2.voucher_code_settings_set(p_tenant uuid, p_site uuid, p_mode text, p_length integer, p_operator text, p_reason text) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.voucher_code_settings_set(p_tenant uuid, p_site uuid, p_mode text, p_length integer, p_operator text, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION voucher_revoke(p_tenant uuid, p_site uuid, p_voucher uuid, p_operator uuid, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.voucher_revoke(p_tenant uuid, p_site uuid, p_voucher uuid, p_operator uuid, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.voucher_revoke(p_tenant uuid, p_site uuid, p_voucher uuid, p_operator uuid, p_reason text) TO svc_scd;
 
 
 --
@@ -17610,6 +17880,14 @@ GRANT SELECT ON TABLE iam_v2.v_zero_attempt_recovery_queue TO svc_edged;
 --
 
 GRANT SELECT,INSERT ON TABLE iam_v2.voucher_code_key_generations TO svc_scd;
+
+
+--
+-- Name: TABLE voucher_code_reveals; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT,INSERT ON TABLE iam_v2.voucher_code_reveals TO svc_scd;
+GRANT SELECT ON TABLE iam_v2.voucher_code_reveals TO svc_edged;
 
 
 --

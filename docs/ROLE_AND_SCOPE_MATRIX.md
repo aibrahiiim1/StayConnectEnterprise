@@ -41,7 +41,9 @@ Seven roles, enforced by edged per `/edge/v1` resource. Legend:
 | operators (staff) | W | **–** | – | – | – | – | – |
 | license (view/upload) | W | W | R | R | – | R | R |
 | guest-access-plans | W | W | R | R | – | R | R |
-| voucher-batches / vouchers | W | W | **W** | **W** | **W** | R | R |
+| vouchers | W | W | **W** | **W** | **W** | R | R |
+| voucher-codes | W | **–** | **W** | **W** | **W** | – | **–** |
+| voucher-code-settings | W | **W** | R | R | R | – | R |
 | sessions (incl. disconnect) | W | W | **W** | **W** | – | R | R |
 | guests | W | W | **W** | **W** | – | R | R |
 | pms-providers (+test/cache/health) | W | W | R | R | – | R | R |
@@ -105,10 +107,40 @@ Summary of intent:
   permissions today; kept as two roles for audit attribution and future
   divergence.)
 - **voucher_operator** — vouchers only (kiosk/print station accounts). No other
-  read access.
+  read access. *(Until the voucher resource keys existed, this role held no
+  voucher permission at all and this line described a capability the code did
+  not implement — the row above was decorative because `auth.go` had no
+  `vouchers` key to enforce it against.)*
 - **payments_operator** — payments read-write (incl. refunds), read-only on
   everything else.
 - **site_viewer** — read-only everywhere.
+
+**The three voucher rows are three different powers**, and splitting them is the
+whole point. `vouchers` is the daily job: print a batch, look at the list,
+cancel a card that was lost. `voucher-codes` is recovering a code **in the
+clear** for a card that is already in circulation, which additionally requires
+the operator's password and a bounded reason at the route and writes an
+append-only row naming them. `voucher-code-settings` chooses what a code looks
+like — digits for a numeric keypad, digits and letters for a printed card, never
+more than eight characters — and retires a code key generation, because key
+lifecycle belongs with whoever owns the format. Retiring a key reads no code and
+reveals nothing, which is why it is here rather than under `voucher-codes`: a desk
+role that may read one card's code has no business retiring the key that indexes
+every card in the building.
+
+Issuing already returns plaintext, so it is worth being precise about what the
+second key protects: issuing creates codes **nobody holds yet**, while revealing
+reads a code somebody may already be carrying — possibly from a batch another
+operator printed. That is why `hotel_it_manager` is **–** on `voucher-codes`
+while holding **W** on `vouchers`: that role owns configuration and the PMS
+integration, and neither job requires reading a guest's credential. `site_viewer`
+is **–** for the same reason it is **–** on `guest-signin-credentials`: a
+read-only observer has no business holding guest secrets.
+
+Unlike a post-stay PIN or a guest-account password, **a voucher code is
+encrypted and recoverable**, so "shown once" is not enforced by arithmetic here
+and is not claimed to be. What constrains a reveal is that it cannot happen
+unseen.
 
 **guest-device-self-service** (Phase 6, DARK) is the per-appliance product
 setting that decides whether this property offers guests the ability to remove

@@ -240,6 +240,16 @@ var rolePerms = map[string]map[string]perm{
 		// stay separate: a retention period is a policy, and releasing nine thousand abandoned records onto
 		// the wire is an action with a far end that has to absorb it.
 		"cloud-sync-settings": permWrite, "cloud-sync-recovery": permWrite,
+		// VOUCHERS. The row in docs/ROLE_AND_SCOPE_MATRIX.md 3 has said W for this role since before the
+		// resource key existed, which is why it was never enforced: there was no `vouchers` key at all, so
+		// the documented boundary was decorative. It is the document's row, not a new decision.
+		"vouchers": permWrite,
+		// The code FORMAT is a property configuration decision -- digits for a keypad, mixed for a printed
+		// card -- which is the same reasoning that puts auth-methods and checkout-grace here.
+		"voucher-code-settings": permWrite,
+		// NOT voucher-codes. This role owns configuration and the PMS integration; neither job requires
+		// reading a guest's credential in the clear, and issuing a NEW card is a different act from reading
+		// one already in a guest's hand.
 	},
 	"front_office_operator": {
 		// THE RECEPTION DESK, and the role this feature was asked for. They already hold the guest's room,
@@ -276,6 +286,12 @@ var rolePerms = map[string]map[string]perm{
 		// desk action.
 		"guest-device-self-service": permRead,
 		"diagnostics":               permRead,
+		// The desk prints cards and hands them over, which is what the documented matrix row has always
+		// said. Reading a code already issued comes with it: the guest standing at the desk with a smudged
+		// card is exactly the case, and it is gated by the password step-up and an audit row either way.
+		"vouchers": permWrite, "voucher-codes": permWrite,
+		// The format is set once, by the role that owns configuration. The desk sees what it is.
+		"voucher-code-settings": permRead,
 	},
 	"guest_relations_operator": {
 		// Same desk, same conversation with the guest, same need.
@@ -296,10 +312,18 @@ var rolePerms = map[string]map[string]perm{
 		// the same question and changes no property capability.
 		"guest-device-self-service": permRead,
 		"diagnostics":               permRead,
+		// Same desk, same conversation with the guest, same need.
+		"vouchers": permWrite, "voucher-codes": permWrite, "voucher-code-settings": permRead,
 	},
 	"voucher_operator": {
 		"guest-accounts": permWrite, "sessions": permRead, "reports": permRead,
 		"license": permRead, "diagnostics": permRead,
+		// THE ROLE IS NAMED FOR THIS AND DID NOT HAVE IT. Until the resource key existed, voucher_operator
+		// -- the kiosk and print-station account -- held guest-accounts and four read-only keys, and no
+		// voucher permission at all, while two documents said otherwise.
+		"vouchers": permWrite, "voucher-codes": permWrite,
+		// Reads the format so the print station knows what it is printing; does not set it.
+		"voucher-code-settings": permRead,
 	},
 	"payments_operator": {
 		"stripe-accounts": permRead,
@@ -313,6 +337,9 @@ var rolePerms = map[string]map[string]perm{
 		"financial-ops":    permWrite,
 		"sessions":         permRead, "reports": permRead, "audit": permRead, "license": permRead,
 		"diagnostics": permRead,
+		// A voucher is a commercial instrument, so this role reads the list -- and reads no code and
+		// cancels nothing, which is its established relationship with everything that is not money.
+		"vouchers": permRead,
 	},
 	"site_viewer": {
 		// THE ATTEMPTS LIST, AND NOT THE CREDENTIALS. A viewer may see that sign-in is failing and for which
@@ -347,6 +374,9 @@ var rolePerms = map[string]map[string]perm{
 		// financial-ops mirrors financial-review deliberately: it is the same readership looking at the
 		// same money from a different angle, and two permissions for one boundary is how they drift apart.
 		"financial-ops": permRead,
+		// A viewer sees which cards exist and in what state, and reads no code -- the same shape as
+		// guest-signin-credentials, which is deliberately absent from this role for the same reason.
+		"vouchers": permRead, "voucher-code-settings": permRead,
 	},
 	// Legacy tenant roles accepted for migrated operators.
 	"tenant_admin":    nil, // treated like site_admin below

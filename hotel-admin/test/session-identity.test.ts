@@ -45,13 +45,21 @@ describe("identifySession", () => {
     expect(id.subtitle).toBe("Conference desk");
   });
 
-  // THE CONSTRAINT, NOT A GAP. svc_edged holds no privilege on iam_v2.vouchers, so the admin service genuinely
-  // cannot read a voucher code. The screen must say that rather than leaving a blank an operator reads as a bug —
-  // and it must never invent or echo a code from anywhere else.
-  it("names a voucher session without ever claiming a code", () => {
+  // THE CONSTRAINT, NOT A GAP — and the wording moved when the constraint did.
+  //
+  // svc_edged still holds no privilege on iam_v2.vouchers, so this service still cannot read a code, and
+  // this list still shows none: a session list is a screen people leave open, and a code on it would be a
+  // reveal with no password, no reason and no record. What changed is that a voucher code CAN now be
+  // recovered, through the audited reveal on the Vouchers screen. The old sentence said "the admin service
+  // cannot read voucher codes", which after that became false in a way that matters: an operator told a
+  // thing is impossible stops looking for the place it is possible.
+  //
+  // The invariant that must NEVER move is the last assertion.
+  it("names a voucher session without ever showing a code, and points at where one can be recovered", () => {
     const id = identifySession({ ...base, subject_kind: "voucher" });
     expect(id.title).toBe("Voucher");
-    expect(id.subtitle).toMatch(/cannot read voucher codes/i);
+    expect(id.subtitle).toMatch(/not shown here/i);
+    expect(id.subtitle).toMatch(/records who looked/i);
     expect(id.anonymous).toBe(false);
     expect(JSON.stringify(id)).not.toMatch(/code_last4|code_hmac/);
   });

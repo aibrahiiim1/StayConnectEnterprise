@@ -36,6 +36,7 @@
       "/stay-events",
       "/stays",
       "/usage",
+      "/vouchers",
       "/walled-garden"
     ]
   },
@@ -171,6 +172,11 @@
         "label": "Dashboard",
         "route": "/dashboard",
         "surface": "reports"
+      },
+      {
+        "label": "Vouchers",
+        "route": "/vouchers",
+        "surface": "vouchers"
       }
     ]
   },

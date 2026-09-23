@@ -121,3 +121,89 @@ func TestPhase6DocumentedRowCoversEveryRole(t *testing.T) {
 		t.Error("the documented row omits site_admin, which holds write implicitly")
 	}
 }
+
+// THE VOUCHER ROWS, held to the same standard -- and they are the reason this generalisation exists.
+//
+// docs/ROLE_AND_SCOPE_MATRIX.md has carried a "voucher-batches / vouchers" row since long before this
+// delivery, stating W for the two desk roles and for voucher_operator. NONE OF IT WAS ENFORCED, because
+// `auth.go` had no voucher resource key at all: the document described a boundary the code could not have
+// applied if it wanted to. voucher_operator -- the role NAMED for this capability -- held guest-accounts and
+// four read-only keys and nothing else.
+//
+// A documented matrix that only one resource is checked against is a document that is right by coincidence
+// everywhere else. These run the same two assertions over the three voucher resources, so the rows above
+// are now enforceable statements rather than intentions.
+func TestVoucherResourcesMatchTheDocumentedRoleMatrix(t *testing.T) {
+	for _, resource := range []string{"vouchers", "voucher-codes", "voucher-code-settings"} {
+		row := docMatrixRow(t, resource)
+		if len(row) == 0 {
+			t.Fatalf("%s: empty row", resource)
+		}
+		for role, cell := range row {
+			read := permFor([]string{role}, resource, permRead)
+			write := permFor([]string{role}, resource, permWrite)
+			switch cell {
+			case "W":
+				if !write {
+					t.Errorf("%s is documented W on %s but the code refuses the write", role, resource)
+				}
+			case "R":
+				if !read {
+					t.Errorf("%s is documented R on %s but the code refuses the read", role, resource)
+				}
+				if write {
+					t.Errorf("%s is documented R on %s but the code ALLOWS the write", role, resource)
+				}
+			case "–", "-", "—":
+				if read || write {
+					t.Errorf("%s is documented as having no access to %s but the code grants read=%v write=%v",
+						role, resource, read, write)
+				}
+			default:
+				t.Errorf("unrecognised permission cell %q for %s on %s", cell, role, resource)
+			}
+		}
+	}
+}
+
+func TestVoucherDocumentedRowsCoverEveryRole(t *testing.T) {
+	for _, resource := range []string{"vouchers", "voucher-codes", "voucher-code-settings"} {
+		row := docMatrixRow(t, resource)
+		for role := range rolePerms {
+			if role == "tenant_admin" || role == "tenant_operator" {
+				continue
+			}
+			if _, ok := row[role]; !ok {
+				t.Errorf("the documented %s row says nothing about %s", resource, role)
+			}
+		}
+		if _, ok := row["site_admin"]; !ok {
+			t.Errorf("the documented %s row omits site_admin, which holds write implicitly", resource)
+		}
+	}
+}
+
+// THE NARROW KEY MUST STAY NARROWER THAN THE WIDE ONE. voucher-codes recovers a guest credential in the
+// clear; vouchers prints and cancels cards. A role that can read codes but cannot see the list it is
+// reading them from would be an accident, and -- much more importantly -- a role that gains voucher-codes
+// by inheriting it from vouchers would be a boundary that had quietly stopped existing.
+func TestRevealIsNarrowerThanIssue(t *testing.T) {
+	narrower := false
+	for role := range rolePerms {
+		if role == "tenant_admin" || role == "tenant_operator" {
+			continue
+		}
+		if permFor([]string{role}, "voucher-codes", permWrite) &&
+			!permFor([]string{role}, "vouchers", permRead) {
+			t.Errorf("%s may reveal voucher codes but may not read the voucher list", role)
+		}
+		if permFor([]string{role}, "vouchers", permWrite) &&
+			!permFor([]string{role}, "voucher-codes", permWrite) {
+			narrower = true
+		}
+	}
+	if !narrower {
+		t.Error("no role holds vouchers WRITE without voucher-codes WRITE, so the two keys describe the " +
+			"same power and one of them is decorative")
+	}
+}

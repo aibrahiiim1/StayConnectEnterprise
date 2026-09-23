@@ -1,0 +1,4 @@
+commit 5f854a390b1d0323ff941b92d323378e2a39f1dc
+Date:   Wed Sep 23 03:47:26 2026 +0300
+
+    Governance: T0178 records the review round, and one new operational gap

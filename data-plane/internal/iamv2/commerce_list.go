@@ -23,6 +23,22 @@ type PackageListItem struct {
 	Display   map[string]any `json:"display"`
 }
 
+// voucherMayHavePackage answers whether this package revision is the one the voucher was printed against.
+//
+// Non-voucher subjects are unaffected: an account or a guest principal has no printed card and no pin, so
+// this returns true and the remaining gates decide. A voucher whose row cannot be resolved offers NOTHING
+// -- the safe direction, and the same convention every other gate here uses for an unresolvable input.
+func (e *CommerceEngine) voucherMayHavePackage(ctx context.Context, tx CommerceTx, req PackageListRequest, ac AuthContextRow, pkg PackageRevisionRow) (bool, error) {
+	if ac.Subject.Kind != SubjectVoucher || ac.Subject.VoucherID == "" {
+		return true, nil
+	}
+	pinned, err := tx.VoucherPinnedPackageRevision(ctx, req.TenantID, req.SiteID, ac.Subject.VoucherID)
+	if err != nil {
+		return false, err
+	}
+	return pinned != "" && pinned == pkg.ID, nil
+}
+
 // PackageListResult is the result of ListEligiblePackages.
 type PackageListResult struct {
 	Disabled bool
@@ -96,6 +112,16 @@ func (e *CommerceEngine) ListEligiblePackages(ctx context.Context, req PackageLi
 func (e *CommerceEngine) evalPackageForSubject(ctx context.Context, tx CommerceTx, now time.Time, req PackageListRequest, ac AuthContextRow, pkg PackageRevisionRow) (GrantSnapshot, map[string]any, bool, error) {
 	if !pkg.PackageActive || !pkg.IsCurrent {
 		return GrantSnapshot{}, nil, false, nil
+	}
+	// A VOUCHER IS OFFERED WHAT IT WAS PRINTED FOR, AND NOTHING ELSE.
+	//
+	// This gate is first among the subject gates because it is the narrowest: for a voucher subject there
+	// is exactly one answer, and evaluating price, visibility and eligibility rules for packages the card
+	// can never grant is work whose only possible product is a wrong offer. Migration 0088 refuses the
+	// mismatch in the grant kernel regardless; this is what keeps a guest from being shown a choice that
+	// would then fail, and an operator from believing a card grants something it does not.
+	if ok, err := e.voucherMayHavePackage(ctx, tx, req, ac, pkg); err != nil || !ok {
+		return GrantSnapshot{}, nil, false, err
 	}
 	if pkg.VisibleFrom != nil && now.Before(*pkg.VisibleFrom) {
 		return GrantSnapshot{}, nil, false, nil
