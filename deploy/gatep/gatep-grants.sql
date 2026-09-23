@@ -106,6 +106,19 @@ GRANT SELECT,DELETE               ON public.stripe_events           TO svc_scd; 
 GRANT SELECT,DELETE               ON public.stripe_accounts         TO svc_scd; -- cross-tenant detect + purge
 GRANT SELECT,DELETE               ON public.operator_roles          TO svc_scd; -- cross-tenant detect + purge
 GRANT SELECT,DELETE               ON public.operators               TO svc_scd; -- cross-tenant detect + purge
+-- ONE COLUMN, NOT THE TABLE. scd binds the appliance's local operators to the tenant its SIGNED assignment
+-- names (cmd/scd/assignment.go, seedTenantSiteMirror), because iam_v2.p4_assert_financial_actor decides who
+-- may act on financial recovery by reading operators.tenant_id -- and on an appliance that column was NULL,
+-- so all four actor-gated kernels were unperformable. Measured during this closure's restore drill: a
+-- supported restore entered FINANCIAL_RECOVERY_MODE and nobody could release it.
+--
+-- A plain `GRANT UPDATE ON public.operators` would let scd rewrite password_hash and status -- it could
+-- disable an administrator or replace their credential. Column-level UPDATE is exactly the authority the
+-- binding needs and nothing more: PostgreSQL refuses an UPDATE that touches any other column, and
+-- has_table_privilege('svc_scd','public.operators','UPDATE') stays FALSE, because a column grant is not a
+-- table grant. Verified on PRE-LIVE after applying this: the column UPDATE succeeds and the table-level
+-- privilege still reads false.
+GRANT UPDATE (tenant_id)          ON public.operators               TO svc_scd; -- assignment tenant binding
 GRANT DELETE                      ON public.pms_attempts            TO svc_scd; -- cross-tenant purge (already had S/I)
 GRANT DELETE                      ON public.walled_garden_rules     TO svc_scd; -- cross-tenant purge (already had S)
 GRANT DELETE                      ON public.notification_providers  TO svc_scd; -- cross-tenant purge (already had S/U)

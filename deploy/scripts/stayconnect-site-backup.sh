@@ -61,48 +61,36 @@ MARKER_NAME="financial-restore-generation.json"
 # THE SERVICE ROLES ARE NOW REFUSED BY NAME rather than attempted. A dump as svc_* cannot succeed, and
 # failing on the first line with a sentence an operator can act on is better than failing three minutes
 # later with a list of every table in the database.
-PGUSER_SITE="${STAYCONNECT_PGUSER:-}"
-if [ -z "$PGUSER_SITE" ]; then
-  # ADMINISTRATIVE ENTRIES ONLY. ctrlapi.env is the administrative DSN where a Central-hosting appliance has
-  # one; the service envs are deliberately NOT consulted, because a role that can read everything is the
-  # whole requirement and no svc_* role satisfies it.
-  for envf in /etc/stayconnect/ctrlapi.env /etc/stayconnect/backup.env; do
-    [ -f "$envf" ] || continue
-    dsn="$(grep -oE "postgres://[^ ]*/$PGDB_SITE(\?[^ ]*)?" "$envf" | head -1)" || true
-    [ -n "${dsn:-}" ] || continue
-    PGUSER_SITE="$(printf '%s' "$dsn" | sed -E 's#postgres://([^:]+):.*#\1#')"
-    [ -n "${PGPASSWORD:-}" ] || PGPASSWORD="$(printf '%s' "$dsn" | sed -E 's#postgres://[^:]+:([^@]*)@.*#\1#')"
-    export PGPASSWORD
-    break
+# The role, the container and the client all come from lib-site-db.sh, which exists because the RESTORE
+# half of this procedure had none of this and could not run on a containerised appliance at all. The
+# reasoning that used to be written out here -- the client must be the server's own, the database name is
+# not a role, a svc_* role cannot read every schema -- now lives there, once, for both scripts.
+# WHERE THE LIBRARY IS, WHICHEVER WAY THIS SCRIPT WAS INVOKED.
+#
+# NOT just "next to me". install-service-units.sh installs this script as /opt/stayconnect/bin/<name>
+# WITHOUT its extension, and until now it installed no libraries at all -- which is why
+# lib-hotel-admin-contract.sh is sitting in /opt/stayconnect/bin on the appliance with nothing in the
+# repository putting it there. Someone copied it by hand, exactly like the service accounts that no
+# install path created. The installer now carries lib-*.sh too, and this resolver means the script works
+# from the repository, from /opt/stayconnect/deploy/scripts, and from $BIN, rather than only from wherever
+# it happened to be tested.
+_sc_lib() {
+  local name="$1" here d
+  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  for d in "${SC_LIB_DIR:-}" "$here" /opt/stayconnect/bin /opt/stayconnect/deploy/scripts; do
+    [ -n "$d" ] && [ -f "$d/$name" ] && { echo "$d/$name"; return 0; }
   done
-fi
+  echo "FATAL: $name was not found (looked in \$SC_LIB_DIR, $here, /opt/stayconnect/bin," >&2
+  echo "       /opt/stayconnect/deploy/scripts). This script cannot reach the database without it." >&2
+  return 1
+}
+# shellcheck source=lib-site-db.sh
+. "$(_sc_lib lib-site-db.sh)" || exit 1
 
-# IN CONTAINER MODE, ASK THE CONTAINER WHO ITS OWNER IS rather than guessing a name. POSTGRES_USER is the
-# role the image initialised the cluster as, so it is the superuser, and inside the container it needs no
-# password (local peer/trust). This is discovery, not a hardcoded assumption: an appliance whose container
-# was initialised as something else resolves to that instead.
-if [ -z "$PGUSER_SITE" ] && command -v docker >/dev/null 2>&1 \
-   && docker inspect "$PG_CONTAINER" >/dev/null 2>&1; then
-  PGUSER_SITE="$(docker exec "$PG_CONTAINER" printenv POSTGRES_USER </dev/null 2>/dev/null | tr -d '\r')"
-  [ -n "$PGUSER_SITE" ] && echo "backup: dumping as the container's own superuser ($PGUSER_SITE)"
-fi
-# Off the appliance -- a CI runner, a workstation, a restore-drill fixture -- there are no StayConnect env
-# files to read, and the standard PostgreSQL conventions are the honest fallback. What is NOT a fallback is
-# the database name: the previous version defaulted PGUSER to `stayconnect_site`, which is the database, and
-# it produced an authentication failure that read like a password problem.
-[ -n "$PGUSER_SITE" ] || PGUSER_SITE="${PGUSER:-}"
-[ -n "$PGUSER_SITE" ] || PGUSER_SITE="$(id -un 2>/dev/null || true)"
-[ -n "$PGUSER_SITE" ] || { echo "backup: FAILED — no database role to dump as (set STAYCONNECT_PGUSER)" >&2; exit 1; }
-
-# A svc_* ROLE CANNOT DUMP THIS DATABASE, so say so here instead of letting pg_dump discover it.
-case "$PGUSER_SITE" in
-  svc_*)
-    echo "backup: FAILED — refusing to dump as the least-privilege service role '$PGUSER_SITE'." >&2
-    echo "backup: a full backup must read every schema, and the service roles are deliberately scoped so" >&2
-    echo "backup: that they cannot. Set STAYCONNECT_PGUSER to an administrative role, or provide" >&2
-    echo "backup: /etc/stayconnect/backup.env with a DSN for one." >&2
-    exit 1 ;;
-esac
+sitedb_resolve backup || exit 1
+sitedb_require_client pg_dump backup || exit 1
+PGUSER_SITE="$SITEDB_ROLE"
+PGDB_SITE="$SITEDB_DB"
 
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
 DUMP="$OUT_DIR/site-$STAMP.dump"
@@ -134,58 +122,24 @@ cleanup_partial() {
 }
 trap cleanup_partial EXIT
 
-USE_CONTAINER=0
-if command -v docker >/dev/null 2>&1 && docker inspect "$PG_CONTAINER" >/dev/null 2>&1; then
-  USE_CONTAINER=1
-fi
-
-if [ "$USE_CONTAINER" = 1 ]; then
-  SRV_MAJOR="$(docker exec "$PG_CONTAINER" psql -U "$PGUSER_SITE" -d "$PGDB_SITE" -qAt                  -c 'SHOW server_version' </dev/null 2>/dev/null | cut -d. -f1)"
-  CLI_MAJOR="$(docker exec "$PG_CONTAINER" pg_dump --version </dev/null 2>/dev/null                  | grep -oE '[0-9]+' | head -1)"
-else
-  SRV_MAJOR="$(psql -U "$PGUSER_SITE" -d "$PGDB_SITE" -qAt -c 'SHOW server_version' 2>/dev/null | cut -d. -f1)"
-  CLI_MAJOR="$(pg_dump --version 2>/dev/null | grep -oE '[0-9]+' | head -1)"
-fi
-if [ -z "$SRV_MAJOR" ] || [ -z "$CLI_MAJOR" ]; then
-  echo "backup: FAILED — could not establish the server and client versions" >&2; exit 1
-fi
-if [ "$CLI_MAJOR" -lt "$SRV_MAJOR" ]; then
-  echo "backup: FAILED — pg_dump $CLI_MAJOR cannot dump a PostgreSQL $SRV_MAJOR server." >&2
-  echo "backup: run this where the server's own client is available, or set STAYCONNECT_PG_CONTAINER." >&2
-  exit 1
-fi
-echo "backup: pg_dump $CLI_MAJOR -> server $SRV_MAJOR (container=$USE_CONTAINER) -> $DUMP"
+echo "backup: dumping $PGDB_SITE as $PGUSER_SITE -> $DUMP"
 
 # CAN THIS ROLE ACTUALLY READ EVERYTHING? Asked before the dump, because pg_dump answers the same question
 # by locking every table and printing the whole list -- a four-kilobyte error whose cause is one word in it.
 # The probe counts tables the role cannot SELECT, across every non-system schema, so it also catches the
 # next table a migration adds without granting: the failure mode this backup already had once.
-if [ "$USE_CONTAINER" = 1 ]; then
-  UNREADABLE="$(docker exec "$PG_CONTAINER" psql -U "$PGUSER_SITE" -d "$PGDB_SITE" -qAt </dev/null 2>/dev/null -c "
-    SELECT count(*) FROM information_schema.tables t
-     WHERE t.table_type = 'BASE TABLE'
-       AND t.table_schema NOT IN ('pg_catalog','information_schema')
-       AND NOT has_table_privilege(quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'SELECT')")"
-else
-  UNREADABLE="$(psql -U "$PGUSER_SITE" -d "$PGDB_SITE" -qAt 2>/dev/null -c "
-    SELECT count(*) FROM information_schema.tables t
-     WHERE t.table_type = 'BASE TABLE'
-       AND t.table_schema NOT IN ('pg_catalog','information_schema')
-       AND NOT has_table_privilege(quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'SELECT')")"
-fi
+UNREADABLE="$(sitedb_psql -qAt 2>/dev/null -c "
+  SELECT count(*) FROM information_schema.tables t
+   WHERE t.table_type = 'BASE TABLE'
+     AND t.table_schema NOT IN ('pg_catalog','information_schema')
+     AND NOT has_table_privilege(quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'SELECT')")"
 if [ -n "${UNREADABLE:-}" ] && [ "$UNREADABLE" != "0" ]; then
   echo "backup: FAILED — '$PGUSER_SITE' cannot SELECT $UNREADABLE table(s) in this database, so the dump" >&2
   echo "backup: would be refused partway through. A backup that cannot read everything is not a backup." >&2
   exit 1
 fi
 
-if [ "$USE_CONTAINER" = 1 ]; then
-  # Streamed to the host over stdout so the artefact lands in OUT_DIR and nothing is left inside the
-  # container to be forgotten about.
-  docker exec -e PGPASSWORD="${PGPASSWORD:-}" "$PG_CONTAINER"     pg_dump -Fc -U "$PGUSER_SITE" "$PGDB_SITE" </dev/null > "$DUMP"
-else
-  pg_dump -Fc -U "$PGUSER_SITE" "$PGDB_SITE" -f "$DUMP"
-fi
+sitedb_pg_dump "$DUMP"
 [ -s "$DUMP" ] || { echo "backup: FAILED — the dump is empty" >&2; rm -f "$DUMP"; exit 1; }
 
 echo "backup: tar $ETC_DIR -> $ETC_TAR (EXCLUDING $MARKER_NAME)"

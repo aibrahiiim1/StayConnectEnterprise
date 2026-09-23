@@ -280,6 +280,25 @@ for u in "$SRC"/systemd/stayconnect-*.service; do
 done
 [ "$missing" = "0" ] || die "one or more units reference a helper that is missing or not executable; those services would fail with status=203/EXEC"
 
+# ---- 3a. THE SHELL LIBRARIES THE HELPERS SOURCE ----------------------------
+#
+# A helper installed into $BIN loses its directory: deploy/scripts/stayconnect-site-backup.sh becomes
+# /opt/stayconnect/bin/stayconnect-site-backup, so anything it sources from "next to me" must be next to it
+# THERE. Nothing installed those, and the evidence is on the appliance: lib-hotel-admin-contract.sh is in
+# /opt/stayconnect/bin with no line in this repository putting it there. Someone copied it by hand, like the
+# service accounts below.
+#
+# Copied wholesale rather than derived from source lines, unlike the helpers. A `.` line can be spelled in
+# more ways than a regexp should be trusted to recognise, and the libraries are small; installing all of
+# them costs nothing and cannot miss one. They are NOT executable: they are sourced, never run.
+for l in "$SRC"/scripts/lib-*.sh; do
+  [ -f "$l" ] || continue
+  lb="$(basename "$l")"
+  if [ -f "$BIN/$lb" ] && cmp -s "$l" "$BIN/$lb"; then continue; fi
+  install -m 0644 "$l" "$BIN/$lb" || die "cannot install $BIN/$lb, which a helper needs in order to run"
+  say "installed library $lb"
+done
+
 # ---- 3b. SERVICE ACCOUNTS, DERIVED FROM THE UNITS THAT NAME THEM -----------
 #
 # THE SAME DEFECT AS THE HELPER LIST, ONE FIELD ACROSS. A unit whose User= names an account that does not

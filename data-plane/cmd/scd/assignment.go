@@ -450,6 +450,41 @@ func (s *server) seedTenantSiteMirror(ctx context.Context, tenantID, siteID, ten
 			return
 		}
 	}
+	// THE LOCAL OPERATORS BELONG TO THE ASSIGNED TENANT, AND SOMETHING HAS TO SAY SO.
+	//
+	// cmd/edged/resources_operators.go states the appliance's convention: "every operator on the appliance
+	// belongs to this site, and roles live in operator_roles with tenant_id NULL." That is true and it is
+	// deliberate -- edged resolves roles by operator_id and never by tenant -- but "belongs to this site"
+	// was a fact the database did not record anywhere.
+	//
+	// IT IS RECORDED BECAUSE THE FINANCIAL KERNELS ASK. iam_v2.p4_assert_financial_actor requires
+	// `o.tenant_id = p_tenant AND o.status = 'active'`, and four SECURITY DEFINER functions are gated on
+	// it: p4_release_financial_recovery, p4_resolve_recovery_hold, p4_declare_financial_recovery and
+	// p4_authorize_zero_attempt_retry. Those functions came from the control plane, where operators DO
+	// carry a tenant_id (control-plane/internal/api/operators.go inserts one). On the appliance the column
+	// was NULL, so the assertion could never pass and none of the four could be performed here at all.
+	//
+	// MEASURED ON PRE-LIVE during the restore drill of this closure: a supported restore correctly entered
+	// FINANCIAL_RECOVERY_MODE, and the recovery could not then be released by anybody, because the only
+	// operator on the appliance was not an operator of any tenant as far as the kernel could tell.
+	//
+	// THE VALUE COMES FROM THE SIGNED ASSIGNMENT, not from a request or a config file. This function is
+	// called with the tenant from a verified assignment document (or, on boot, from the assignment the
+	// process already validated), which is the same source the tenants/sites/appliances mirror rows above
+	// come from. So this is not a new trust decision; it writes down, in the place the kernels look, the
+	// binding that the assignment already establishes.
+	//
+	// AND IT FOLLOWS A CROSS-TENANT MOVE. The predicate is `IS DISTINCT FROM`, so a reassigned appliance
+	// restamps its operators to the new owner on the next boot or adoption -- the same repointing the
+	// appliance and guest-network rows get, for the same reason.
+	if _, err := tx.Exec(ctx, `
+        UPDATE operators SET tenant_id = $1, updated_at = now()
+         WHERE tenant_id IS DISTINCT FROM $1
+    `, tenantID); err != nil {
+		slog.Warn("assignment: operator tenant binding failed", "err", err)
+		return
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		slog.Warn("assignment: tenant/site mirror commit failed", "err", err)
 		return

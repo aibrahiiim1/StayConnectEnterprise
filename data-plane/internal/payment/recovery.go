@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 
 	"github.com/jackc/pgx/v5"
@@ -79,22 +81,47 @@ type restoreMarker struct {
 // case. It is reported as absent, and the database decides what absence means -- which is "nothing" for a
 // site at generation zero, and "this data may have been moved" for one that has a generation recorded.
 //
-// An UNREADABLE or malformed marker is treated as absent for the same reason: the only thing absence can
-// cause is more holding, so failing towards the hold is the safe direction.
-func ReadRestoreMarker() (generation int64, present bool) {
+// AN UNREADABLE MARKER IS A DIFFERENT THING FROM A MISSING ONE, and conflating them hid a real defect for
+// a whole delivery.
+//
+// This function used to return (0, false) for ANY error -- not found, permission denied, malformed JSON --
+// and justified it like this: "the only thing absence can cause is more holding, so failing towards the
+// hold is the safe direction." THAT CLAIM IS FALSE AT GENERATION ZERO, which is the state every appliance
+// starts in. Read iam_v2.p4_reconcile_financial_epoch_v2: absence only holds when the database already
+// records a generation above zero (`cur.restore_generation > 0 AND NOT p_marker_present`). At generation
+// zero, absence means nothing at all.
+//
+// MEASURED ON PRE-LIVE, during the restore drill this closure ran. A supported restore was performed. The
+// marker was advanced to 1 by stayconnect-financial-restore.sh, which wrote it `chmod 0600` and root-owned.
+// edged, the only process that reads it, runs as uid 998. It got EACCES, reported "absent", and the
+// database -- restored from a dump taken at generation 0 -- concluded UNCHANGED. A real restore of a real
+// appliance produced no detection, no hold and no record, and every layer behaved exactly as written.
+//
+// The file mode is fixed where it is written. This is the other half: an error that is not "does not
+// exist" is now RETURNED, so the caller can refuse to draw a conclusion instead of drawing the wrong one.
+// The marker is the only signal that can catch a supported restore -- a pg_restore into the existing
+// cluster leaves system_identifier untouched -- so failing to read it is not a detail to swallow.
+func ReadRestoreMarker() (generation int64, present bool, err error) {
 	path := os.Getenv(EnvMarkerPath)
 	if path == "" {
 		path = MarkerPath
 	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return 0, false
+	b, rerr := os.ReadFile(path)
+	if rerr != nil {
+		if errors.Is(rerr, fs.ErrNotExist) {
+			return 0, false, nil // never restored: the normal case
+		}
+		return 0, false, fmt.Errorf("the restore marker at %s exists but could not be read: %w", path, rerr)
 	}
 	var m restoreMarker
-	if err := json.Unmarshal(b, &m); err != nil || m.RestoreGeneration < 0 {
-		return 0, false
+	if jerr := json.Unmarshal(b, &m); jerr != nil {
+		return 0, false, fmt.Errorf("the restore marker at %s is not readable JSON: %w", path, jerr)
 	}
-	return m.RestoreGeneration, true
+	if m.RestoreGeneration < 0 {
+		return 0, false, fmt.Errorf("the restore marker at %s reports a negative generation (%d)",
+			path, m.RestoreGeneration)
+	}
+	return m.RestoreGeneration, true, nil
 }
 
 // ReconcileEpoch is called at startup, per site, BEFORE any financial worker runs.
@@ -119,7 +146,15 @@ func (e *Engine) ReconcileEpoch(ctx context.Context, tenantID, siteID string) (s
 	if err != nil {
 		return "", err
 	}
-	gen, present := ReadRestoreMarker()
+	gen, present, merr := ReadRestoreMarker()
+	if merr != nil {
+		// REFUSE TO CONCLUDE. Reporting "no marker" here would mean reporting "nothing was restored", and
+		// that is a claim this function cannot support when it could not read the file. The caller's
+		// failure posture already distinguishes the two cases that matter: while Phase 4 is dark this is
+		// logged loudly and startup continues, and once transmission is enabled it exits rather than move
+		// money on data it cannot vouch for (cmd/edged/financial_epoch_reconcile.go).
+		return "", fail(ErrRepo, merr.Error())
+	}
 	var out string
 	if err := e.pool.QueryRow(ctx,
 		`SELECT iam_v2.p4_reconcile_financial_epoch_v2($1,$2,$3,$4,$5)`,
