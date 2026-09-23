@@ -2,7 +2,7 @@
 
 - **Base commit:** `1898c127257a328756fbb83ac63294075c2ce26c`
 - **HEAD commit:** `008b872f`
-- **Provenance (generation HEAD = inventory_head):** `008b872f0b465e3705f5aebe710972d5c467412c`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `2e3cf67ff51e7bb4259297bfce6f741e182e061c`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/fc-mission-closure`
 - **Remote branch:** `origin/delivery/fc-mission-closure`
 - **Changed files:** 32
@@ -17,29 +17,29 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Zero-stale: register the CLOSED next-action state in the allow-list |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Zero-stale: register the CLOSED next-action state in the allow-list |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Zero-stale: register the CLOSED next-action state in the allow-list |
-| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: the manifest lists itself |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
-| `exports/chatgpt/phase-evidence/GIT_STAT_5372a992.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs: rebuild at the delivery head |
+| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: the delivery head is the review round |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the review round |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the review round |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the review round |
+| `exports/chatgpt/phase-evidence/GIT_STAT_1a3aa969.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs: rebuild after the review round |
 | `exports/chatgpt/phase-evidence/GIT_STAT_96c9ce02.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Packs: rebuild at the T0181 governance commit |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
-| `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the T0181 governance commit |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the review round |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the review round |
+| `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the review round |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the allow-list registration |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the review round |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the review round |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the review round |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the allow-list registration |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Zero-stale: register the CLOSED next-action state in the allow-list |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the review round |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Zero-stale: register the CLOSED next-action state in the allow-list |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the allow-list registration |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the allow-list registration |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the allow-list registration |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the allow-list registration |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: the manifest lists itself, and the head is the allow-list commit |
-| `governance/transitions/T0181.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Delivery: the manifest lists itself, and the head is the allow-list commit |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: the delivery head is the review round |
+| `governance/transitions/T0181.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: the delivery head is the review round |
 | `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Three review findings, two of them holes in my own rule |
 | `tools/tests/closure_coherence/run_negative.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Three review findings, two of them holes in my own rule |
 | `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Three review findings, two of them holes in my own rule |
@@ -52,15 +52,15 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   4 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   4 +-
  docs/context/StayConnect-IAM-Handoff.md            |   4 +-
- docs/manifests/PostClosure-change-manifest.md      | 134 ++++++------
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343812 -> 343521 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 143872 -> 146899 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44156 -> 44106 bytes
- .../chatgpt/phase-evidence/GIT_STAT_5372a992.txt   |   4 +
+ docs/manifests/PostClosure-change-manifest.md      | 142 ++++++-------
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343812 -> 343522 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 143872 -> 148701 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44156 -> 44108 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_1a3aa969.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_96c9ce02.txt   |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   8 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
- .../chatgpt/phase-evidence/tools/project-state.py  | 152 ++++++++++++++
+ .../chatgpt/phase-evidence/tools/project-state.py  | 232 +++++++++++++++++++++
  .../phase-evidence/tools/validate-project-state.sh |   2 +-
  exports/chatgpt/phase1b-planning/MANIFEST.md       |   2 +-
  .../chatgpt/phase1b-planning/PACK_SHA256SUMS.txt   |   6 +-
@@ -74,21 +74,23 @@
  .../StayConnect-IAM-Phase1A-Plan.md                |   4 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |   4 +-
  governance/project-state.json                      |  49 +++--
- governance/transitions/T0181.json                  |  42 ++++
+ governance/transitions/T0181.json                  |  43 ++++
  tools/project-state.py                             | 232 +++++++++++++++++++++
  tools/tests/closure_coherence/run_negative.py      | 183 ++++++++++++++++
  .../tests/project_state_validator/run_mutations.py |  58 ++++++
  tools/validate-project-state.sh                    |   2 +-
- 32 files changed, 835 insertions(+), 166 deletions(-)
+ 32 files changed, 924 insertions(+), 166 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-(clean)
+M  docs/manifests/PostClosure-change-manifest.md
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 2e3cf67f Packs: rebuild after the review round
+HISTORICAL: 1a3aa969 Governance: the delivery head is the review round
 HISTORICAL: 008b872f Three review findings, two of them holes in my own rule
 HISTORICAL: ea6a481b Delivery: the manifest lists itself
 HISTORICAL: fbdb0325 Packs: rebuild at the delivery head
