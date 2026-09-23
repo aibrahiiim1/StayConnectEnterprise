@@ -1,4 +1,0 @@
-commit 1a3aa9694a8f48c6cf3a95c7cbfd50f111959975
-Date:   Wed Sep 23 20:10:27 2026 +0300
-
-    Governance: the delivery head is the review round

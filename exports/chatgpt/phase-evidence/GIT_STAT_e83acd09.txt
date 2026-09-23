@@ -1,0 +1,4 @@
+commit e83acd09408cf1984aabf65858a0b4b214ef7591
+Date:   Wed Sep 23 20:27:14 2026 +0300
+
+    Governance: the delivery head is the step classification
