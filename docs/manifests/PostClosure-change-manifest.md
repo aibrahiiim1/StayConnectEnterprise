@@ -2,7 +2,7 @@
 
 - **Base commit:** `8aba71025c3a0b2ba39b4d4f62153d22b124302c`
 - **HEAD commit:** `6c59b267b788de7605a601ddc791eb332b8f89b3`
-- **Provenance (generation HEAD = inventory_head):** `e4cf5b994245bb50f5961b962d87e9798e69d690`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `be56510969b874af9b2dbb8554d1cfd66a5c6c8a`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/fc-increment-5`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 30
@@ -16,31 +16,31 @@
 | `data-plane/internal/netcfg/render_nft_guest_input_boundary_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | A guest network may address the appliance only on its own gateway |
 | `deploy/scripts/phase6-controlled-validation-body.sh` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | A guest network may address the appliance only on its own gateway |
 | `deploy/scripts/phase6-controlled-validation.sh` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | The validation harness could not run on PRE-LIVE, and a hostname was not an identity |
-| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0180, the last two technical items |
-| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0180, the last two technical items |
-| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0180, the last two technical items |
-| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0180, the last two technical items |
-| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the increment-5 governance commit |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the increment-5 governance commit |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the increment-5 governance commit |
-| `exports/chatgpt/phase-evidence/GIT_STAT_8bb7416b.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs: rebuild at the increment-5 governance commit |
+| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Generated blocks: re-render after the provenance correction |
+| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Generated blocks: re-render after the provenance correction |
+| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Generated blocks: re-render after the provenance correction |
+| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Generated blocks: re-render after the provenance correction |
+| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: the manifest lists itself |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the provenance correction |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the provenance correction |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the provenance correction |
+| `exports/chatgpt/phase-evidence/GIT_STAT_6a9263f7.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs: rebuild after the provenance correction |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f3bcbb19.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Packs: rebuild at the increment-5 governance commit |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the increment-5 governance commit |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the increment-5 governance commit |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the increment-5 governance commit |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the increment-5 governance commit |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the increment-5 governance commit |
-| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the increment-5 governance commit |
-| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0180, the last two technical items |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the increment-5 governance commit |
-| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0180, the last two technical items |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the increment-5 governance commit |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the increment-5 governance commit |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the increment-5 governance commit |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the increment-5 governance commit |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0180, the last two technical items |
-| `governance/transitions/T0180.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0180, the last two technical items |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the provenance correction |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the provenance correction |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the provenance correction |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the provenance correction |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the provenance correction |
+| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the provenance correction |
+| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Generated blocks: re-render after the provenance correction |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the provenance correction |
+| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Generated blocks: re-render after the provenance correction |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the provenance correction |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the provenance correction |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the provenance correction |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the provenance correction |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Provenance: the record was two deployments stale, and its self-check never ran |
+| `governance/transitions/T0180.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Provenance: the record was two deployments stale, and its self-check never ran |
 | `scripts/phase19-multi-vlan-test.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | A guest network may address the appliance only on its own gateway |
 
 ## Total diff statistics (`git diff --stat`)
@@ -49,33 +49,33 @@
  .../netcfg/render_nft_guest_input_boundary_test.go | 176 ++++++++++++++++
  .../scripts/phase6-controlled-validation-body.sh   | 150 ++++++++------
  deploy/scripts/phase6-controlled-validation.sh     | 229 +++++++++++++++++++--
- .../StayConnect-IAM-Phase0-Contract.md             |   2 +-
- docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   2 +-
- docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   2 +-
- docs/context/StayConnect-IAM-Handoff.md            |   2 +-
- docs/manifests/PostClosure-change-manifest.md      | 195 +++++-------------
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343815 -> 343819 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 143868 -> 143856 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44160 -> 44164 bytes
- .../chatgpt/phase-evidence/GIT_STAT_8bb7416b.txt   |   4 +
+ .../StayConnect-IAM-Phase0-Contract.md             |   4 +-
+ docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   4 +-
+ docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   4 +-
+ docs/context/StayConnect-IAM-Handoff.md            |   4 +-
+ docs/manifests/PostClosure-change-manifest.md      | 221 +++++++-------------
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343815 -> 343812 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 143868 -> 143862 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44160 -> 44157 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_6a9263f7.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_f3bcbb19.txt   |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   4 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
  exports/chatgpt/phase1b-planning/MANIFEST.md       |   2 +-
  .../chatgpt/phase1b-planning/PACK_SHA256SUMS.txt   |   6 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
- .../StayConnect-IAM-Phase1B-Plan.md                |   2 +-
- .../chatgpt/stayconnectenterprise/00-START-HERE.md |   2 +-
- exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  60 +++---
- .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   2 +-
- .../StayConnect-IAM-Handoff.md                     |   2 +-
- .../StayConnect-IAM-Phase0-Contract.md             |   2 +-
- .../StayConnect-IAM-Phase1A-Plan.md                |   2 +-
- .../StayConnect-IAM-Phase1B-Plan.md                |   2 +-
- governance/project-state.json                      |  43 ++--
- governance/transitions/T0180.json                  |  58 ++++++
+ .../StayConnect-IAM-Phase1B-Plan.md                |   4 +-
+ .../chatgpt/stayconnectenterprise/00-START-HERE.md |   4 +-
+ exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  62 +++---
+ .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   4 +-
+ .../StayConnect-IAM-Handoff.md                     |   4 +-
+ .../StayConnect-IAM-Phase0-Contract.md             |   4 +-
+ .../StayConnect-IAM-Phase1A-Plan.md                |   4 +-
+ .../StayConnect-IAM-Phase1B-Plan.md                |   4 +-
+ governance/project-state.json                      |  65 +++---
+ governance/transitions/T0180.json                  |  59 ++++++
  scripts/phase19-multi-vlan-test.sh                 |  67 ++++--
- 30 files changed, 764 insertions(+), 322 deletions(-)
+ 30 files changed, 804 insertions(+), 355 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -85,6 +85,10 @@ M  docs/manifests/PostClosure-change-manifest.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: be565109 Packs: rebuild after the provenance correction
+HISTORICAL: 6a9263f7 Generated blocks: re-render after the provenance correction
+HISTORICAL: 9ff1c2e9 Provenance: the record was two deployments stale, and its self-check never ran
+HISTORICAL: f4ba57d8 Delivery: the manifest lists itself
 HISTORICAL: e4cf5b99 Packs: rebuild at the increment-5 governance commit
 HISTORICAL: 8bb7416b Governance: T0180, the last two technical items
 HISTORICAL: 6c59b267 The validation harness could not run on PRE-LIVE, and a hostname was not an identity
