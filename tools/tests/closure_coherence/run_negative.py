@@ -150,6 +150,35 @@ check("an in-progress activity tied to the CLOSED mission is refused", st, "caug
 print()
 print("== the coverage the non-blocking classification leans on is checked, not trusted ==")
 orig = io.open(RECON, encoding="utf-8", newline="").read()
+
+# THERE ARE TWO LEDGER LOOPS, and removing ONE is the case that got through. Mutation M73 deleted only the
+# per-migration loop; the guard asked whether "a" ledger assertion existed, the surviving base-step loop
+# answered yes, and the miss was reported by the gate as [MISS] M73 -> fails: NONE (BAD). Every numbered
+# migration would have been unchecked while the base steps went on being checked. Each loop is asserted
+# separately here so that cannot come back.
+_LEDGER_Q = (
+    '  [ "$(psql_q -c "SELECT count(*) FROM schema_migrations WHERE version=\'$n\'")" = "1" ] || {\n'
+)
+_MIG = _LEDGER_Q + (
+    '    bad "migration $n is not recorded in schema_migrations"; unrecorded=$((unrecorded+1)); }'
+)
+_BASE = _LEDGER_Q + (
+    '    bad "base step $n is not recorded in schema_migrations"; unrecorded=$((unrecorded+1)); }'
+)
+for _label, _frag, _needle in (("only the per-migration ledger loop (exactly mutation M73)", _MIG,
+                                "numbered migrations"),
+                               ("only the iam_base ledger loop", _BASE, "iam_base steps")):
+    if _frag not in orig:
+        fails.append("fixture drift: %s anchor not found in %s" % (_label, RECON))
+        continue
+    io.open(RECON, "w", encoding="utf-8", newline="").write(orig.replace(_frag, "  : # assertion removed"))
+    try:
+        check("deleting %s is refused" % _label, copy.deepcopy(base), "caught", _needle)
+    finally:
+        io.open(RECON, "w", encoding="utf-8", newline="").write(orig)
+    if io.open(RECON, encoding="utf-8", newline="").read() != orig:
+        fails.append("the runner did not restore %s byte-exact" % RECON)
+
 gutted = orig
 for tail in ("migration $n", "base step $n"):
     gutted = gutted.replace(

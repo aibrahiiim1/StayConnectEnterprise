@@ -1390,9 +1390,20 @@ def check_closure_coherence(st):
                        "migration; the ledger-completeness heading may still be present, but the assertion "
                        "that every migration was recorded is gone -- and apply_one swallows the ledger "
                        "insert with `|| true`, so a migration can apply unrecorded with nothing to notice")
-        if "is not recorded in schema_migrations" not in rtext:
-            bad.append("scripts/clean-install-reconstruction.sh no longer FAILS on an unrecorded migration; "
-                       "querying the ledger without acting on the answer is not an assertion")
+        # THERE ARE TWO LEDGER LOOPS -- one over the numbered migrations, one over the iam_base steps -- and
+        # asking whether "a" ledger assertion exists let either one vouch for the other. Mutation M73 deleted
+        # only the per-migration loop and this guard stayed quiet, because the surviving base-step loop still
+        # contained both the query and the words "is not recorded in schema_migrations". Every numbered
+        # migration would have been unchecked while the base steps went on being checked. So each loop is now
+        # required by ITS OWN failure message, which is the only part of it that is unambiguous.
+        for what, frag in (("numbered migrations",
+                            'bad "migration $n is not recorded in schema_migrations"'),
+                           ("iam_base steps",
+                            'bad "base step $n is not recorded in schema_migrations"')):
+            if frag not in rtext:
+                bad.append("scripts/clean-install-reconstruction.sh no longer FAILS on an unrecorded entry "
+                           "for the %s; the other ledger loop surviving does not cover this one, and "
+                           "querying the ledger without acting on the answer is not an assertion" % what)
     else:
         bad.append("scripts/clean-install-reconstruction.sh is missing; the full-chain coverage that makes "
                    "increment_3's migration-suite limitation non-blocking no longer exists")
