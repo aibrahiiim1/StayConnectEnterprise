@@ -1,0 +1,4 @@
+commit cec008dbf0a632f1699560827f94f99564cf5f9e
+Date:   Wed Sep 23 08:23:38 2026 +0300
+
+    Governance: T0179 and the delivery head follow the fixture correction
