@@ -1221,6 +1221,48 @@ def check_closure_coherence(st):
     # The rules apply only once closure is DECLARED. Before that, an execution authorisation is correct and
     # an open gap is honest; a rule that fired then would demand the register lie about work in flight.
     declared = mission == "CLOSED" or verdict == "PASS"
+
+    # BUT A CONDITIONAL RULE MUST NOT BE SWITCHABLE BY DELETING ITS CONDITION, which is how the first
+    # version of this check failed open: nothing else in the repository required either sentinel field, so
+    # removing both made `declared` false and every rule below silently stopped running -- and the state
+    # still reported PROJECT_STATE_GOVERNANCE = PASS. A safeguard that two deleted keys can disable is not
+    # a safeguard.
+    #
+    # So the condition is anchored to something that cannot be edited away in the same breath: the MISSION
+    # CLOSURE RECEIPT. A transition recording FUNCTIONAL_COMPLETENESS_MISSION_CLOSURE is a permanent
+    # historical fact; once one exists, the sentinels MUST exist and MUST read closed, or this fails.
+    closure_receipt = ""
+    for _p in sorted(glob.glob(os.path.join(TRANSITIONS, "*.json"))):
+        try:
+            with open(_p, encoding="utf-8") as _fh:
+                _rec = json.load(_fh)
+        except Exception:                                        # noqa: BLE001
+            continue
+        if str(_rec.get("record_type") or "") == "FUNCTIONAL_COMPLETENESS_MISSION_CLOSURE":
+            closure_receipt = str(_rec.get("transition_id") or os.path.basename(_p))
+            break
+
+    if closure_receipt and not declared:
+        bad.append(
+            "%s records FUNCTIONAL_COMPLETENESS_MISSION_CLOSURE, so the mission is closed as a matter of "
+            "history, but current_state_facts declares neither functional_completeness_mission_status = "
+            "CLOSED nor functional_completeness_verdict = PASS (read %r / %r). Those two fields are the "
+            "condition every closure rule below depends on: without them the whole check silently stops "
+            "running, so deleting them would disable the safeguard"
+            % (closure_receipt, mission or "<missing>", verdict or "<missing>"))
+        # ...and the rules are evaluated anyway, so deleting the sentinels does not also buy a free pass on
+        # a retained authorisation.
+        declared = True
+
+    if declared and closure_receipt:
+        # BOTH must be present and well-formed, not just whichever one survived an edit.
+        if mission != "CLOSED":
+            bad.append("functional_completeness_mission_status reads %r; %s records the mission CLOSED"
+                       % (mission or "<missing>", closure_receipt))
+        if verdict != "PASS":
+            bad.append("functional_completeness_verdict reads %r; %s records the mission closed at a PASS "
+                       "verdict" % (verdict or "<missing>", closure_receipt))
+
     if not declared:
         return bad
 
@@ -1263,12 +1305,41 @@ def check_closure_coherence(st):
             bad.append(f"allowed_actions[{i}] still authorises closure execution or controlled PRE-LIVE "
                        f"work while the state declares the closure complete")
 
-    # An activity left AUTHORIZED_IN_PROGRESS is an open licence to act, whatever it names.
+    # AN ACTIVITY LEFT IN PROGRESS IS AN OPEN LICENCE TO ACT -- but only two kinds of entry are this rule
+    # business, and the first version banned ALL of them. That was too broad, and it would have been felt
+    # later rather than now: with the closure permanently recorded, any FUTURE Product-Owner-authorised
+    # activity, under a new decision and nothing to do with this mission, would have failed validation
+    # simply for being in progress. A register that cannot state what is authorised is the defect this file
+    # exists to prevent, so the ban is scoped to what it is actually about:
+    #
+    #   (a) an activity tied to the mission that has just closed, still marked in progress; and
+    #   (b) an activity whose target is an appliance this same state records as RETIRED -- which is what the
+    #       real contradiction was: the DEVELOPMENT trial sat AUTHORIZED_IN_PROGRESS from D29/T0066 against
+    #       172.21.60.23 while prohibited_actions forbade contacting it. An authorisation whose target may
+    #       not be touched is not in progress.
+    #
+    # The retired addresses are READ FROM THE RECORD rather than hardcoded, so this stays true when the
+    # record changes. If the record names none, (b) does not apply and (a) still does.
+    retired = set(re.findall(r"RETIRED\s+(\d{1,3}(?:\.\d{1,3}){3})",
+                             " ".join(str(x) for x in (st.get("prohibited_actions") or []))))
+    MISSION_MARKS = ("functional-completeness", "functional completeness", "t0175")
+
     for act in st.get("authorized_activities") or []:
-        if str(act.get("status") or "").strip().upper() in ("AUTHORIZED_IN_PROGRESS", "IN_PROGRESS",
-                                                            "AUTHORIZED"):
-            bad.append("authorized_activities entry %r is still %s while the state declares the "
-                       "functional-completeness mission CLOSED" % (act.get("name"), act.get("status")))
+        if str(act.get("status") or "").strip().upper() not in ("AUTHORIZED_IN_PROGRESS", "IN_PROGRESS",
+                                                                "AUTHORIZED"):
+            continue
+        blob = " ".join(str(act.get(k) or "") for k in ("name", "authorization", "scope")).lower()
+        if any(m in blob for m in MISSION_MARKS):
+            bad.append("authorized_activities entry %r belongs to the functional-completeness mission and is "
+                       "still %s while the state declares that mission CLOSED"
+                       % (act.get("name"), act.get("status")))
+            continue
+        hit = [a for a in retired if a in blob]
+        if hit:
+            bad.append("authorized_activities entry %r is still %s, and its scope names %s, which this same "
+                       "state records as RETIRED and forbids contacting; an authorisation whose target may "
+                       "not be touched is not in progress"
+                       % (act.get("name"), act.get("status"), ", ".join(sorted(hit))))
 
     # ---- 2. NO EXPLICITLY NAMED UNCLOSED REQUIRED GAP ----------------------------------------------------
     #
@@ -1309,10 +1380,19 @@ def check_closure_coherence(st):
                        "pmsd-pg-integration.sh's curated list, and it is the stated justification for "
                        "classifying increment_3's migration-suite scope as a non-blocking limitation rather "
                        "than a gap. Restore the glob, or reclassify that entry as a real coverage gap")
-        if "ledger completeness" not in rtext:
-            bad.append("scripts/clean-install-reconstruction.sh no longer asserts ledger completeness; a "
-                       "migration could apply as a no-op and go unrecorded, which is the failure the "
-                       "non-blocking classification of increment_3 relies on being closed")
+        # THE HEADING IS NOT THE CHECK. The first version matched the words "ledger completeness", which
+        # live in an `echo "== ledger completeness =="` banner -- so deleting the loop underneath it left
+        # the banner, the match, and a PASS. That matters more than it sounds: apply_one swallows the ledger
+        # INSERT with `|| true`, so a migration really can apply without being recorded, and this loop is
+        # the only thing that notices. What is required now is the executable assertion itself.
+        if "SELECT count(*) FROM schema_migrations WHERE version=" not in rtext:
+            bad.append("scripts/clean-install-reconstruction.sh no longer QUERIES schema_migrations per "
+                       "migration; the ledger-completeness heading may still be present, but the assertion "
+                       "that every migration was recorded is gone -- and apply_one swallows the ledger "
+                       "insert with `|| true`, so a migration can apply unrecorded with nothing to notice")
+        if "is not recorded in schema_migrations" not in rtext:
+            bad.append("scripts/clean-install-reconstruction.sh no longer FAILS on an unrecorded migration; "
+                       "querying the ledger without acting on the answer is not an assertion")
     else:
         bad.append("scripts/clean-install-reconstruction.sh is missing; the full-chain coverage that makes "
                    "increment_3's migration-suite limitation non-blocking no longer exists")

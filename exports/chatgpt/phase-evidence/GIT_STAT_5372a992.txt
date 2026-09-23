@@ -1,4 +1,0 @@
-commit 5372a992d763e1cc357517916a614ed478073f62
-Date:   Wed Sep 23 19:30:00 2026 +0300
-
-    Delivery: the manifest lists itself, and the head is the allow-list commit
