@@ -124,6 +124,11 @@ BASELINE="$SC/data-plane/migrations/baseline/0000_production_baseline.sql"
 $PGX -d stayconnect -tAc "SELECT 1 FROM pg_database WHERE datname='stayconnect_site'" | grep -q 1 \
   || $PGX -d stayconnect -c "CREATE DATABASE stayconnect_site" >/dev/null
 SITE="$PGX -d stayconnect_site"
+# Removed first: `docker cp <dir> <container>:<path>` copies INTO <path> when it already exists, so a
+# re-run would nest the files at /tmp/gatep/gatep/... and leave the previous run's copy at the path the
+# lines below read. This script is meant to be re-runnable, and a re-run applying the PREVIOUS Gate-P was
+# measured happening on PRE-LIVE: the run reported success and the new grant was absent.
+docker exec stayconnect-pg rm -rf /tmp/gatep >/dev/null 2>&1 || true
 docker cp "$DEPLOY/gatep" stayconnect-pg:/tmp/gatep >/dev/null
 $SITE -f /tmp/gatep/gatep-roles.sql >/dev/null
 # The IAM roles run BEFORE the baseline (its privileges name them) and again AFTER (its guarded REFERENCES

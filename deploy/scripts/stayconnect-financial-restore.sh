@@ -315,6 +315,14 @@ done
 if [ -n "$GATEP" ]; then
   note "re-applying Gate-P from $GATEP (database-level grants are not in the dump)"
   if [ "$SITEDB_USE_CONTAINER" = 1 ]; then
+    # THE TARGET IS REMOVED FIRST, AND THIS IS NOT DEFENSIVE TIDYING.
+    #
+    # `docker cp <dir> <container>:<path>` copies the directory INTO <path> when <path> already exists, so
+    # a second run puts the files at /tmp/gatep-restore/gatep/... and leaves the FIRST run's copy at the
+    # path this script then reads. Measured on PRE-LIVE while applying this very grant: a Gate-P run
+    # reported success having applied a stale file, and the new grant was simply absent afterwards. A
+    # deployment that silently applies the previous version of a file is worse than one that fails.
+    docker exec "$SITEDB_CONTAINER" rm -rf /tmp/gatep-restore >/dev/null 2>&1 || true
     docker cp "$GATEP" "$SITEDB_CONTAINER:/tmp/gatep-restore" >/dev/null
     for f in gatep-roles.sql gatep-iam-roles.sql gatep-iam-ownership.sql gatep-grants.sql; do
       [ -f "$GATEP/$f" ] || continue

@@ -118,7 +118,11 @@ GRANT SELECT,DELETE               ON public.operators               TO svc_scd; 
 -- has_table_privilege('svc_scd','public.operators','UPDATE') stays FALSE, because a column grant is not a
 -- table grant. Verified on PRE-LIVE after applying this: the column UPDATE succeeds and the table-level
 -- privilege still reads false.
-GRANT UPDATE (tenant_id)          ON public.operators               TO svc_scd; -- assignment tenant binding
+-- TWO COLUMNS, because the statement sets two. Column-level UPDATE covers exactly the columns named, and
+-- an UPDATE that touches one ungranted column is refused for the whole table: measured here, `SET
+-- tenant_id` succeeded as svc_scd and `SET tenant_id, updated_at = now()` failed with "permission denied
+-- for table operators". updated_at is a timestamp the write should keep honest, not a privilege question.
+GRANT UPDATE (tenant_id, updated_at) ON public.operators            TO svc_scd; -- assignment tenant binding
 GRANT DELETE                      ON public.pms_attempts            TO svc_scd; -- cross-tenant purge (already had S/I)
 GRANT DELETE                      ON public.walled_garden_rules     TO svc_scd; -- cross-tenant purge (already had S)
 GRANT DELETE                      ON public.notification_providers  TO svc_scd; -- cross-tenant purge (already had S/U)
