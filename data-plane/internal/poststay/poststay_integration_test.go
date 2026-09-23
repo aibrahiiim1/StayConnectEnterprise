@@ -102,6 +102,31 @@ func store(t *testing.T, p *pgxpool.Pool) *Store {
 	return New(p, thr)
 }
 
+// storeAtFixedTime is the store a LOCKOUT test must use, because the throttle counts attempts inside a
+// FIXED window and a moving clock can roll that window over in the middle of the loop.
+//
+// THIS COST A GATE CYCLE, so it is written down. TestIntegration_ThrottledIsDistinctInternallyAndIdentical-
+// Outside drives 15 wrong PINs against a device limit of 10. Each attempt pays for an argon2 hash, so the
+// loop spans about 1.4s -- and the window is one minute, truncated to the minute. A run that begins within
+// ~1.4s of a minute boundary therefore charges some attempts to one window and the rest to the next: 6 then
+// 9, neither above 10, and the lockout correctly never engages. The test then reports "the device lockout
+// never engaged", which reads like a security regression and is a clock artefact. It failed in CI at
+// 12:58:00.8Z after 1.42s, i.e. a loop that began at 12:57:59.4Z, and passed everywhere else.
+//
+// Pinning the clock removes the boundary, NOT the assertion: the lockout must still engage on the same
+// durable counter, in the same table, through the same code path. Each caller passes its OWN instant so its
+// buckets -- including the shared post-stay ENDPOINT bucket, which every attempt in the package charges --
+// cannot be reached by any other test.
+func storeAtFixedTime(t *testing.T, p *pgxpool.Pool, at time.Time) *Store {
+	t.Helper()
+	thr, err := throttle.New(p, []byte("post-stay-test-key-0123456789abcd"), time.Minute)
+	if err != nil {
+		t.Fatalf("throttle: %v", err)
+	}
+	thr.SetClock(func() time.Time { return at })
+	return New(p, thr)
+}
+
 func issue(t *testing.T, s *Store, f fx) Issued {
 	t.Helper()
 	out, err := s.Issue(context.Background(), IssueRequest{
@@ -247,7 +272,12 @@ func TestIntegration_F8_ThrottleLocksOutAndPersists(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
 	f := seed(t, p)
-	s := store(t, p)
+	// A PINNED throttle clock, on this test's own window, for the same reason as the uniformity lockout
+	// test: 8 attempts against an identity limit of 5 need 6 of them inside ONE fixed window, and a real
+	// clock that rolls the minute over mid-loop splits the count so the lockout never engages. This test has
+	// not failed that way yet; it is the identical defect and one line from being immune to it.
+	at := time.Date(2030, 1, 1, 0, 22, 30, 0, time.UTC)
+	s := storeAtFixedTime(t, p, at)
 	got := issue(t, s, f)
 
 	ctx := context.Background()
@@ -267,8 +297,10 @@ func TestIntegration_F8_ThrottleLocksOutAndPersists(t *testing.T) {
 		t.Fatalf("the throttle never engaged after 8 wrong PINs")
 	}
 	// A NEW store — a different process, as far as the counter is concerned — must still be locked out, and
-	// the CORRECT PIN must not get through it either.
-	s2 := store(t, p)
+	// the CORRECT PIN must not get through it either. It shares the pinned instant so that it also shares
+	// the window; what is being proved is that the counter lives in the DATABASE and not in the process, and
+	// a second store reading a different window would be testing the clock instead.
+	s2 := storeAtFixedTime(t, p, at)
 	if _, err := s2.Verify(ctx, VerifyRequest{Tenant: f.tenant, Site: f.site, Profile: got.Profile,
 		PIN: got.PIN, Device: f.device}); !errors.Is(err, ErrThrottled) {
 		t.Fatalf("a fresh store bypassed the lockout: err = %v", err)
