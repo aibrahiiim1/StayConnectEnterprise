@@ -1703,11 +1703,11 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "1898c127257a328756fbb83ac63294075c2ce26c",
     "base_note": "The master merge commit of PR #178, which recorded T0180.",
-    "head": "008b872f",
+    "head": "f7ebfefd",
     "transition": "T0181",
     "previous_delivery": "T0180",
     "note": "T0181. REPOSITORY/GOVERNANCE ONLY -- no PRE-LIVE contact, no deployment, no restart, no migration, no networking change, no Guest activation, no PMS/financial/provider traffic, no Go-Live.\n\nThe technical acceptance finished at T0180 and the register did not follow it. Master declared every gap closed while still presenting the closure as the CURRENT WORK and retaining an executable authorisation to act on PRE-LIVE 172.21.60.25. Five contradictions stood and each is retired; the mirror image of the contradiction increment 2 fixed, which is why the fix is a VALIDATOR rather than an edit.\n\ncheck_closure_coherence refuses, once closure is declared, an execution authorisation in next_authorized_action / blockers / allowed_actions, an activity left AUTHORIZED_IN_PROGRESS, a key whose NAME says a required gap is not closed, and a gap entry that does not open by stating it is closed. Six adversarial mutations (M66-M71) reintroduce each contradiction and the suite requires every one detected.\n\nincrement_3's 'known_gap_not_closed' was RE-DETERMINED, not argued: pmsd-pg-integration.sh does still stop at 0079, but the conclusion that post-0079 migrations have no gate-enforced coverage is FALSE -- the same required gate applies every migration by GLOB from a blank cluster and asserts ledger completeness (CLEAN_INSTALL_RECONSTRUCTION = PASS, 0080-0090 all ok, re-verified for this reclassification). Recorded as a DOCUMENTED NON-BLOCKING LIMITATION with what is NOT covered stated exactly -- structural and privilege coverage, not behavioural suite coverage -- and the coverage it leans on is now itself gate-protected.\n\nFUNCTIONAL COMPLETENESS: PASS. Development gaps: NONE. PRE-LIVE operational gaps: NONE. Guest activation: STILL DEFERRED BY D41. Go-Live: NOT AUTHORIZED. MISSION CLOSED. Remaining mission blocker: NONE.",
-    "head_note": "The last CONTENT commit of this delivery: the three review findings on PR #179, two of which were holes in the closure rule itself -- a safeguard two deleted keys could switch off, and a ban so broad it would have refused any future authorised activity."
+    "head_note": "The last CONTENT commit of this delivery: classifying the new closure-coherence gate step in ci-reuse-policy.json. The review round is 008b872f and the closure reconciliation is bdaf4e56."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
