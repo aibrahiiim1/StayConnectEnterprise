@@ -38,14 +38,14 @@ GRANT SELECT, INSERT ON iam_v2.vouchers                     TO svc_scd;
 -- grant does not produce a default, it produces a refusal to issue.
 GRANT EXECUTE ON FUNCTION iam_v2.voucher_code_settings_get(uuid,uuid) TO svc_scd;
 
--- ---- the operator surface (migration 0086) ----------------------------------------------------------
+-- ---- the operator surface (migration 0087) ----------------------------------------------------------
 -- REVEAL AND EXPORT RUN IN scd, for the same reason issuance does: the DEK is there. The audit row and the
 -- code recovery are written in ONE transaction, so scd needs INSERT as well as SELECT -- a reveal that
 -- could succeed while its record failed is the one outcome this table exists to prevent.
 GRANT SELECT, INSERT ON iam_v2.voucher_code_reveals TO svc_scd;
 
 -- REVOCATION IS A KERNEL, NOT A GRANT. svc_scd still holds no UPDATE on iam_v2.vouchers: 0084 moved the
--- redemption burn into the entitlement kernel rather than widen that privilege, and 0086 does the same for
+-- redemption burn into the entitlement kernel rather than widen that privilege, and 0087 does the same for
 -- revocation. One narrow transition, needed by one code path, expressed as a SECURITY DEFINER function
 -- instead of a blanket UPDATE that would let any statement in the process set any voucher to any state.
 GRANT EXECUTE ON FUNCTION iam_v2.voucher_revoke(uuid, uuid, uuid, uuid, text) TO svc_scd;
@@ -61,7 +61,7 @@ GRANT SELECT ON iam_v2.voucher_code_reveals TO svc_edged;
 --     a privilege that is only ever refused is a privilege waiting for the trigger to be dropped.
 --   * anything on iam_v2.vouchers to svc_edged -- including SELECT. The list it shows comes from scd.
 
--- ---- rotation (migration 0087) ----------------------------------------------------------------------
+-- ---- rotation (migration 0087, the same migration as the block above) -------------------------------
 -- The comment at the top of this file has always said that superseding a generation "belongs to a
 -- deliberate rotation path, not to routine issuance". Until 0087 there WAS no such path: superseded_at was
 -- read by issuance to find the active generation and written by nothing, so a per-generation key was the
