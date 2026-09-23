@@ -496,8 +496,8 @@
     "phase4_dependency_gate_model": "TRIAGED (investigated, written up) is NOT ACCEPTED. Acceptance lives only in governance/dependency-acceptances.json, names GHSA ids rather than packages, and requires decided_by, decision_ref, decided_on and expires_on; an expired or stale acceptance fails. The gate previously carried ACCEPTED='next postcss' inside the script, which let the delivery agent grant itself an exception. scripts/ci/phase4-dependency-gate-selftest.sh runs the same judgement file CI runs against synthetic audits, 7/7.",
     "phase4_authoritative_ci_artifact_id": 9177140558,
     "phase4_authoritative_ci_artifact_digest": "sha256:aacb6e9f687f872632b36a1dfe5c4598340d2108d1e70f31ee6c48cae93ba52d",
-    "acceptance_candidate_head": "4dcefe825bfd62c91e2229c873f43749390da75a",
-    "inventory_head": "4dcefe825bfd62c91e2229c873f43749390da75a",
+    "acceptance_candidate_head": "4f72ff53e3e5bb4109a910b79f916633b129bf97",
+    "inventory_head": "4f72ff53e3e5bb4109a910b79f916633b129bf97",
     "phase4_delivery_head_ci_run_id": 31658169886,
     "phase4_delivery_head_ci_head": "b895f412d67c9c177b2f00cfd5c14baf6c73383d",
     "phase4_delivery_head_ci_conclusion": "success",
@@ -1203,9 +1203,9 @@
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
   },
-  "acceptance_candidate_head": "4dcefe825bfd62c91e2229c873f43749390da75a",
+  "acceptance_candidate_head": "4f72ff53e3e5bb4109a910b79f916633b129bf97",
   "acceptance_candidate_head_note": "The committed HEAD immediately before this delivery's final delivery-only commit -- the manifest's generation/provenance HEAD under the self-reference protocol of docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md section 4.1. It is NOT an acceptance candidate in the phase-closure sense: no phase is open, and T0175 does not claim functional completeness.",
-  "inventory_head": "4dcefe825bfd62c91e2229c873f43749390da75a",
+  "inventory_head": "4f72ff53e3e5bb4109a910b79f916633b129bf97",
   "delivery_head_note": "delivery_head (the Phase-6 PR HEAD) = inventory_head + one delivery-only commit. Its exact 40-character SHA is recorded in the PR body and verified to resolve on the authoritative remote before the delivery is reported.",
   "roadmap_exhaustion": {
     "recorded_by": "D28 / T0065 (2026-08-17)",
@@ -1698,8 +1698,8 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "8aba71025c3a0b2ba39b4d4f62153d22b124302c",
     "base_note": "The master merge commit of PR #177, which recorded increment 4.",
-    "head": "4dcefe825bfd62c91e2229c873f43749390da75a",
-    "head_note": "The last CONTENT commit of this increment: the fix to a lockout test that measured a FIXED throttle window with a MOVING clock. It failed the phase5 gate on this delivery and was not caused by it -- 15 attempts against a limit of 10 span ~1.4s, the window is one minute, and a loop crossing the boundary splits the count so the lockout correctly never engages. Reproduced deliberately against a real PostgreSQL before it was fixed. The earlier content head was 6c59b267 (the validation-harness fixes).",
+    "head": "4f72ff53e3e5bb4109a910b79f916633b129bf97",
+    "head_note": "The last CONTENT commit of this increment: the two automated-review findings on PR #178, and the worse defect that proving the first one exposed. Earlier content heads were 6c59b267 (validation harness) and 4dcefe82 (a lockout test that measured a fixed window with a moving clock).",
     "transition": "T0180",
     "previous_delivery": "T0179",
     "note": "T0180. THE LAST TWO TECHNICAL ITEMS, both authorised explicitly and both closed with live evidence.\n\nGUEST DEVICE SELF-SERVICE: pass=36 fail=0, exit 0, appliance verified DARK and restored, capability back to default OFF. Getting there needed three fixes to the harness, because it could not run here at all: its allow-list was a HOSTNAME naming the retired development appliance; `systemctl restart` never returns on this appliance, because StartLimitIntervalSec=0 with Restart=always means a refused start is retried forever and the job never settles -- which hung a run for 3h12m and left edged and acctd down; and the full body enables a second Phase-6 capability the authorisation did not cover. The harness was HARDENED, never weakened: the allow-list is now a compiled host -> (appliance_id, serial) map confirmed against the SIGNED assignment and the site database, proven to fail closed five ways, and two environment-variable bypasses were removed -- one mine, one pre-existing on the very gate that proves darkness.\n\nGUEST LOCAL-ADDRESS ISOLATION: the INPUT chain's accepts named no destination, so a guest reached the appliance on any local address. The forward chain was never the problem, which is why guest-to-guest isolation held while a neighbouring gateway did not. Every accept now names that network's own gateway, DHCP keeps the broadcast it cannot work without, and the boundary is stated as a rule. Accepted live: multi-VLAN ALL GREEN at 26 checks with the three previously-MEASURED results now asserted, captive detection proven on three external addresses, DHCP/DNS/portal/walled-garden all working, management address unchanged, and the boundary surviving a real reboot.\n\nWHAT REMAINS IS NOT TECHNICAL: HA architecture, payment-provider selection, the C35 external archival receipt authority, and the master approving-review policy. D41 remains in force and Go-Live is NOT authorised."
