@@ -496,8 +496,8 @@
     "phase4_dependency_gate_model": "TRIAGED (investigated, written up) is NOT ACCEPTED. Acceptance lives only in governance/dependency-acceptances.json, names GHSA ids rather than packages, and requires decided_by, decision_ref, decided_on and expires_on; an expired or stale acceptance fails. The gate previously carried ACCEPTED='next postcss' inside the script, which let the delivery agent grant itself an exception. scripts/ci/phase4-dependency-gate-selftest.sh runs the same judgement file CI runs against synthetic audits, 7/7.",
     "phase4_authoritative_ci_artifact_id": 9177140558,
     "phase4_authoritative_ci_artifact_digest": "sha256:aacb6e9f687f872632b36a1dfe5c4598340d2108d1e70f31ee6c48cae93ba52d",
-    "acceptance_candidate_head": "dbb287c91985e4aa7312caba9278f259aad67949",
-    "inventory_head": "dbb287c91985e4aa7312caba9278f259aad67949",
+    "acceptance_candidate_head": "d92128dcce86b8a2495679ba6a95ef490656af6a",
+    "inventory_head": "d92128dcce86b8a2495679ba6a95ef490656af6a",
     "phase4_delivery_head_ci_run_id": 31658169886,
     "phase4_delivery_head_ci_head": "b895f412d67c9c177b2f00cfd5c14baf6c73383d",
     "phase4_delivery_head_ci_conclusion": "success",
@@ -1198,9 +1198,9 @@
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
   },
-  "acceptance_candidate_head": "dbb287c91985e4aa7312caba9278f259aad67949",
+  "acceptance_candidate_head": "d92128dcce86b8a2495679ba6a95ef490656af6a",
   "acceptance_candidate_head_note": "The committed HEAD immediately before this delivery's final delivery-only commit -- the manifest's generation/provenance HEAD under the self-reference protocol of docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md section 4.1. It is NOT an acceptance candidate in the phase-closure sense: no phase is open, and T0175 does not claim functional completeness.",
-  "inventory_head": "dbb287c91985e4aa7312caba9278f259aad67949",
+  "inventory_head": "d92128dcce86b8a2495679ba6a95ef490656af6a",
   "delivery_head_note": "delivery_head (the Phase-6 PR HEAD) = inventory_head + one delivery-only commit. Its exact 40-character SHA is recorded in the PR body and verified to resolve on the authoritative remote before the delivery is reported.",
   "roadmap_exhaustion": {
     "recorded_by": "D28 / T0065 (2026-08-17)",
@@ -1693,8 +1693,8 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "7ea36cfd019fb2921e97890f73c71bccfd34083d",
     "base_note": "The master merge commit of PR #176, which recorded increment 3.",
-    "head": "dbb287c91985e4aa7312caba9278f259aad67949",
-    "head_note": "The last CONTENT commit of this increment: the 0090 fix and the security round that found it. The governance receipt and the re-rendered blocks follow this commit, and the manifest last of all.",
+    "head": "d92128dcce86b8a2495679ba6a95ef490656af6a",
+    "head_note": "The last CONTENT commit of this increment: the restore-drill fixture correction that phase4-financial-core-gate found on PR #177. The governance receipt and the re-rendered blocks follow this commit, and the manifest last of all.",
     "transition": "T0179",
     "previous_delivery": "T0178",
     "note": "T0179. THE PRE-LIVE OPERATIONAL DRILLS, and unlike increments 2 and 3 this one took the controlled actions T0175 authorised. Every drill found something.\n\nThe restore drill found four defects and the first of them was that the supported restore could not run on this appliance at all -- host pg_restore and a role that does not exist -- while its --dry-run passed, because the dry run stops before any database call and the marker is advanced and five writers stopped after it. Then that `--clean --if-exists` destroys a TimescaleDB database. Then that the restore marker was written unreadable to the only process that reads it, so a REAL supported restore reported UNCHANGED with no hold and no record. Then that no operator could release the recovery it entered, because the financial actor assertion reads a column the appliance leaves NULL by documented convention.\n\nThe multi-VLAN drill proved the plural the gap named. The Central-outage drill proved the licence, the operator surface and guest voucher AUTHENTICATION all survive Central being unreachable. The reboot verified itself. And the security round found that migration 0090 broke the factory-clean install, and that the scd I had deployed earlier that night was not a production build -- which had silently disabled guest vouchers.\n\nTHE APPLIANCE IS PRE-LIVE AND CLEAN: 24 vouchers all REVOKED, no drill interfaces, no drill guest networks, no blackhole route, every service up. D41 remains in force and Go-Live is NOT authorised.\n\nSTILL OPEN: two items that are decisions rather than gaps, in open_product_owner_decisions, plus one new low-severity hardening item the multi-VLAN drill measured and prints on every run."
