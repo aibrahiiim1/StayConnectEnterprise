@@ -628,6 +628,64 @@ MUTATIONS = [
   "governance/artifact-registry.json",
    ("replace", [('"path": "docs/FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md"',
                  '"path": "docs/MISSING_PROTOCOL.md"')])),
+
+ # ---- A CLOSED MISSION THAT KEEPS THE MEANS TO ACT ON ITSELF ------------------------------------------
+ #
+ # All six recreate the contradiction that stood on master after the functional-completeness closure had
+ # actually finished: the state declared it complete while still carrying an executable authorisation for
+ # it, and still naming an unclosed required gap. Each mutation reintroduces exactly one of those.
+ ("M66 closure declared while next_authorized_action still authorises executing it",
+  "governance/project-state.json",
+   ("json_set", [(["next_authorized_action"],
+                  "Execute to DONE the Product-Owner-authorised FUNCTIONAL-COMPLETENESS CLOSURE that D41 "
+                  "asks for, including the controlled PRE-LIVE work on 172.21.60.25 the mission names.")])),
+ ("M67 closure declared while blockers still present it as the current work",
+  "governance/project-state.json",
+   ("json_set", [(["blockers"],
+                  ["THE CURRENT WORK IS THE FUNCTIONAL-COMPLETENESS CLOSURE D41 ASKS FOR. It is not "
+                   "blocked. What remains is execution."])])),
+ ("M68 closure declared while allowed_actions still authorises controlled PRE-LIVE work",
+  "governance/project-state.json",
+   ("json_set", [(["allowed_actions"],
+                  ["Execute the authorised functional-completeness closure to DONE, including controlled "
+                   "work on PRE-LIVE 172.21.60.25 as the mission authorises it."])])),
+ # The whole list is replaced rather than one element's status, because json_set's drift message joins the
+ # path with "/" and an integer index would raise a TypeError there instead of reporting drift.
+ ("M69 closure declared while an activity is still AUTHORIZED_IN_PROGRESS",
+  "governance/project-state.json",
+   ("json_set", [(["authorized_activities"],
+                  [{"name": "post-roadmap DEVELOPMENT appliance IAM-v2 operational trial",
+                    "authorization": "D29/T0066, re-scoped by D31/T0068",
+                    "status": "AUTHORIZED_IN_PROGRESS",
+                    "scope": "DEVELOPMENT appliance 172.21.60.23 only."}])])),
+ ("M70 closure declared while a key name still asserts an unclosed required gap",
+  "governance/project-state.json",
+   ("json_set", [(["current_state_facts", "functional_completeness_remaining", "increment_3",
+                   "known_gap_not_closed"],
+                  "scripts/pmsd-pg-integration.sh applies a curated migration list ending at 0079, so "
+                  "0080-0087 have no gate-enforced integration coverage.")])),
+ # And the coverage the NON-BLOCKING classification leans on: take away the glob and the limitation is a gap
+ # again, so the classification must stop being accepted.
+ ("M71 the factory-clean reconstruction stops applying migrations by glob",
+  "scripts/clean-install-reconstruction.sh",
+   ("replace", [('for f in $(ls "$MIG"/*.up.sql | sort); do',
+                 'for f in "$MIG"/0010_phase3_stay_resolution.up.sql; do')])),
+
+ # Both raised by review on PR #179, and both were real holes in the rule as first written.
+ #
+ # M72: the closure rules were CONDITIONAL on two sentinel fields that nothing else in the repository
+ # required, so deleting both switched the entire safeguard off and the state still reported PASS.
+ ("M72 both closure sentinels removed, switching the safeguard off",
+  "governance/project-state.json",
+   ("json_set", [(["current_state_facts", "functional_completeness_mission_status"], "REMOVED"),
+                 (["current_state_facts", "functional_completeness_verdict"], "REMOVED")])),
+ # M73: the ledger check matched the words "ledger completeness", which live in an echo banner -- so
+ # the loop underneath could be deleted while the heading, the match and the PASS all survived.
+ # apply_one swallows the ledger insert with `|| true`, so a migration really can apply unrecorded.
+ ("M73 the ledger-completeness loop deleted while its heading survives",
+  "scripts/clean-install-reconstruction.sh",
+   ("replace", [('  [ "$(psql_q -c "SELECT count(*) FROM schema_migrations WHERE version=\'$n\'")" = "1" ] || {\n    bad "migration $n is not recorded in schema_migrations"; unrecorded=$((unrecorded+1)); }',
+                 '  : # assertion removed; the heading above is untouched')])),
 ]
 
 def apply(relpath, op):
