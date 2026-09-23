@@ -1,0 +1,4 @@
+commit 39b79f790e45022c9a8904628b0d24d67ba21b62
+Date:   Wed Sep 23 20:54:45 2026 +0300
+
+    Governance: the delivery head is the ledger-guard strengthening
