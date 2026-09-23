@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `8aba71025c3a0b2ba39b4d4f62153d22b124302c`
-- **HEAD commit:** `4dcefe825bfd62c91e2229c873f43749390da75a`
-- **Provenance (generation HEAD = inventory_head):** `93c1b1132c35b19c8ffcb5f0ec73034aa1278aab`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `4f72ff53`
+- **Provenance (generation HEAD = inventory_head):** `a03c4e92c9405d2886de74aad10e93762b49c931`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/fc-increment-5`
 - **Remote branch:** `origin/delivery/fc-increment-5`
 - **Changed files:** 32
@@ -17,51 +17,51 @@
 | `data-plane/internal/poststay/poststay_integration_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | A lockout test cannot measure a fixed window with a moving clock |
 | `data-plane/internal/poststay/uniformity_integration_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | A lockout test cannot measure a fixed window with a moving clock |
 | `deploy/scripts/phase6-controlled-validation-body.sh` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | A guest network may address the appliance only on its own gateway |
-| `deploy/scripts/phase6-controlled-validation.sh` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | The validation harness could not run on PRE-LIVE, and a hostname was not an identity |
+| `deploy/scripts/phase6-controlled-validation.sh` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | Two review findings, and refusing to disable is not fail-closed |
 | `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Generated blocks: re-render after the provenance correction |
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Generated blocks: re-render after the provenance correction |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Generated blocks: re-render after the provenance correction |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Generated blocks: re-render after the provenance correction |
 | `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: the manifest lists itself |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the test-fix head |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the test-fix head |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the test-fix head |
-| `exports/chatgpt/phase-evidence/GIT_STAT_60f4dc98.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs: rebuild at the test-fix head |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the review-fix head |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the review-fix head |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the review-fix head |
+| `exports/chatgpt/phase-evidence/GIT_STAT_96c9ce02.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs: rebuild at the review-fix head |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f3bcbb19.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Packs: rebuild at the increment-5 governance commit |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the test-fix head |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the test-fix head |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the test-fix head |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the test-fix head |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the test-fix head |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the review-fix head |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the review-fix head |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the review-fix head |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the review-fix head |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the review-fix head |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the provenance correction |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Generated blocks: re-render after the provenance correction |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the test-fix head |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the review-fix head |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Generated blocks: re-render after the provenance correction |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the provenance correction |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the provenance correction |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the provenance correction |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the provenance correction |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: the delivery head is the test fix |
-| `governance/transitions/T0180.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: the delivery head is the test fix |
-| `scripts/phase19-multi-vlan-test.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | A guest network may address the appliance only on its own gateway |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: the review findings, and the false PASS behind the first one |
+| `governance/transitions/T0180.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: the review findings, and the false PASS behind the first one |
+| `scripts/phase19-multi-vlan-test.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Two review findings, and refusing to disable is not fail-closed |
 
 ## Total diff statistics (`git diff --stat`)
 ```text
- data-plane/internal/netcfg/render_nft.go           |  58 +++++-
- .../netcfg/render_nft_guest_input_boundary_test.go | 176 ++++++++++++++++
- .../internal/poststay/poststay_integration_test.go |  38 +++-
+ data-plane/internal/netcfg/render_nft.go           |  58 +++-
+ .../netcfg/render_nft_guest_input_boundary_test.go | 176 ++++++++++
+ .../internal/poststay/poststay_integration_test.go |  38 ++-
  .../poststay/uniformity_integration_test.go        |   5 +-
- .../scripts/phase6-controlled-validation-body.sh   | 150 ++++++++------
- deploy/scripts/phase6-controlled-validation.sh     | 229 +++++++++++++++++++--
+ .../scripts/phase6-controlled-validation-body.sh   | 150 ++++----
+ deploy/scripts/phase6-controlled-validation.sh     | 377 ++++++++++++++++++---
  .../StayConnect-IAM-Phase0-Contract.md             |   4 +-
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   4 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   4 +-
  docs/context/StayConnect-IAM-Handoff.md            |   4 +-
- docs/manifests/PostClosure-change-manifest.md      | 229 +++++++--------------
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343815 -> 343811 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 143868 -> 143854 bytes
+ docs/manifests/PostClosure-change-manifest.md      | 233 +++++--------
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343815 -> 343812 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 143868 -> 143872 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44160 -> 44156 bytes
- .../chatgpt/phase-evidence/GIT_STAT_60f4dc98.txt   |   4 +
+ .../chatgpt/phase-evidence/GIT_STAT_96c9ce02.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_f3bcbb19.txt   |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   4 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
@@ -70,16 +70,16 @@
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |   4 +-
  .../chatgpt/stayconnectenterprise/00-START-HERE.md |   4 +-
- exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  62 +++---
+ exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  62 ++--
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   4 +-
  .../StayConnect-IAM-Handoff.md                     |   4 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   4 +-
  .../StayConnect-IAM-Phase1A-Plan.md                |   4 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |   4 +-
- governance/project-state.json                      |  65 +++---
- governance/transitions/T0180.json                  |  60 ++++++
- scripts/phase19-multi-vlan-test.sh                 |  67 ++++--
- 32 files changed, 852 insertions(+), 359 deletions(-)
+ governance/project-state.json                      |  65 ++--
+ governance/transitions/T0180.json                  |  61 ++++
+ scripts/phase19-multi-vlan-test.sh                 |  81 +++--
+ 32 files changed, 997 insertions(+), 381 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -89,6 +89,10 @@ M  docs/manifests/PostClosure-change-manifest.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: a03c4e92 Packs: rebuild at the review-fix head
+HISTORICAL: 96c9ce02 Governance: the review findings, and the false PASS behind the first one
+HISTORICAL: 4f72ff53 Two review findings, and refusing to disable is not fail-closed
+HISTORICAL: b244fb80 Delivery: the manifest lists itself
 HISTORICAL: 93c1b113 Packs: rebuild at the test-fix head
 HISTORICAL: 60f4dc98 Governance: the delivery head is the test fix
 HISTORICAL: 4dcefe82 A lockout test cannot measure a fixed window with a moving clock
