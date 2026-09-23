@@ -897,6 +897,12 @@ def cmd_validate(deep=True, manifest_equality=True):
     for why in check_appliance_facts_agree(st):
         fail(f"state contradiction: {why}")
 
+    # ...and a DECLARED closure may not keep the means to act on itself. Same class of defect, opposite
+    # direction from the T0175 contradiction increment 2 had to reconcile: there the register forbade what
+    # the Product Owner had authorised; here it went on authorising what had already finished.
+    for why in check_closure_coherence(st):
+        fail(f"closure incoherence: {why}")
+
     ok = len(fails) == 0
     for m in fails: print(f"  FAIL: {m}")
     print("PROJECT_STATE_GOVERNANCE =", "PASS" if ok else f"FAIL ({len(fails)})")
@@ -1185,6 +1191,152 @@ def cmd_build_packs(allow_dirty=False):
     print(json.dumps({"SOURCE_COMMIT":src_commit,"transition_id":st["latest_transition_id"],"schema_version":st["schema_version"],"build_timestamp":ts}))
     print("BUILD-PACKS = PASS (deterministic; SOURCE_COMMIT recorded; export commit is external)")
     return 0
+
+def check_closure_coherence(st):
+    """A CLOSED MISSION MAY NOT KEEP ITS OWN EXECUTION AUTHORISATION OR NAME AN UNCLOSED REQUIRED GAP.
+
+    THIS EXISTS BECAUSE IT HAPPENED, AND IT IS THE SAME SHAPE AS THE CONTRADICTION INCREMENT 2 HAD TO FIX
+    FROM THE OTHER DIRECTION. At T0175 the state said "NONE is authorized ... no deployment, no migration,
+    no service restart" while the same file recorded the Product Owner's end-to-end authorisation for exactly
+    those steps. That was reconciled forward. The mirror image then survived every gate: after the closure
+    had actually completed, `next_authorized_action` still said "Execute to DONE the ... FUNCTIONAL-
+    COMPLETENESS CLOSURE ... including the controlled PRE-LIVE work on 172.21.60.25 the mission names",
+    `blockers` still said "THE CURRENT WORK IS THE FUNCTIONAL-COMPLETENESS CLOSURE", `allowed_actions` still
+    authorised "controlled work on PRE-LIVE 172.21.60.25", and functional_completeness_remaining still
+    carried a key literally named `known_gap_not_closed` -- all while `_state` in the same object declared
+    every gap closed.
+
+    Why that is not cosmetic: a spent authorisation left in the register is indistinguishable, to the next
+    reader, from a live one. It is the field an agent reads to decide what it may do to a PRE-LIVE appliance.
+
+    So the rules below are conditional on the state DECLARING closure, and each one refuses a specific way of
+    declaring it while keeping the means to act on it.
+    """
+    bad = []
+    f = st.get("current_state_facts") or {}
+    fc = f.get("functional_completeness_remaining") or {}
+    mission = str(f.get("functional_completeness_mission_status") or "").strip().upper()
+    verdict = str(f.get("functional_completeness_verdict") or "").strip().upper()
+
+    # The rules apply only once closure is DECLARED. Before that, an execution authorisation is correct and
+    # an open gap is honest; a rule that fired then would demand the register lie about work in flight.
+    declared = mission == "CLOSED" or verdict == "PASS"
+    if not declared:
+        return bad
+
+    # ---- 1. NO RETAINED EXECUTABLE CLOSURE AUTHORISATION -------------------------------------------------
+    #
+    # Matched on MEANING rather than on one sentence: an execution verb together with a closure/PRE-LIVE
+    # object. Rewording the sentence does not evade it, and a field that merely REPORTS the completed mission
+    # in the past tense ("completed", "no further", "is closed") is not an authorisation.
+    # "execut" rather than "execute", because the sentence that actually had to be caught here read "What
+    # remains is EXECUTION" -- and a first version of this rule, matching the verb only, let the blockers
+    # entry through while catching the other four. Presenting the closure as the CURRENT WORK is the same
+    # claim as authorising it, so that phrasing counts too.
+    EXEC_VERBS = ("execut", "continue the", "carry out", "perform the controlled", "resume",
+                  "current work is", "is the current work", "remains to be done")
+    CLOSURE_OBJ = ("functional-completeness closure", "functional completeness closure",
+                   "closure d41 asks for", "controlled pre-live work", "controlled work on pre-live")
+    PAST = ("completed", "complete.", "is closed", "no further", "spent", "no longer", "concluded",
+            "closed at", "was authorised", "mission closed")
+
+    def authorises_execution(text):
+        t = str(text or "").lower()
+        if not any(v in t for v in EXEC_VERBS):
+            return False
+        if not any(o in t for o in CLOSURE_OBJ):
+            return False
+        return not any(p in t for p in PAST)
+
+    if authorises_execution(st.get("next_authorized_action")):
+        bad.append("next_authorized_action still authorises EXECUTING the functional-completeness closure "
+                   "while the state declares that closure complete; a spent authorisation left in the "
+                   "register is indistinguishable from a live one")
+
+    for i, b in enumerate(st.get("blockers") or []):
+        if authorises_execution(b):
+            bad.append(f"blockers[{i}] still presents the functional-completeness closure as the CURRENT "
+                       f"WORK while the state declares it complete")
+
+    for i, a in enumerate(st.get("allowed_actions") or []):
+        if authorises_execution(a):
+            bad.append(f"allowed_actions[{i}] still authorises closure execution or controlled PRE-LIVE "
+                       f"work while the state declares the closure complete")
+
+    # An activity left AUTHORIZED_IN_PROGRESS is an open licence to act, whatever it names.
+    for act in st.get("authorized_activities") or []:
+        if str(act.get("status") or "").strip().upper() in ("AUTHORIZED_IN_PROGRESS", "IN_PROGRESS",
+                                                            "AUTHORIZED"):
+            bad.append("authorized_activities entry %r is still %s while the state declares the "
+                       "functional-completeness mission CLOSED" % (act.get("name"), act.get("status")))
+
+    # ---- 2. NO EXPLICITLY NAMED UNCLOSED REQUIRED GAP ----------------------------------------------------
+    #
+    # A key whose NAME says a required gap is not closed cannot coexist with a declaration that none remains.
+    # Name-based on purpose: this is the form the real contradiction took (`known_gap_not_closed`), and a key
+    # name is not something prose can soften.
+    def walk(node, path):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                kl = str(k).lower()
+                if ("not_closed" in kl or "unclosed" in kl or "gap_remaining" in kl
+                        or "still_open" in kl or "outstanding_gap" in kl):
+                    bad.append("current_state_facts.functional_completeness_remaining%s.%s names an "
+                               "UNCLOSED required gap while the same object declares every gap closed; "
+                               "classify it truthfully (closed, or a documented non-blocking limitation) "
+                               "instead of carrying both statements" % (path, k))
+                walk(v, path + "." + str(k))
+        elif isinstance(node, list):
+            for i, v in enumerate(node):
+                walk(v, path + "[%d]" % i)
+
+    walk(fc, "")
+
+    # ---- 3. THE COVERAGE A "NON-BLOCKING LIMITATION" LEANS ON MUST STILL EXIST -------------------------
+    #
+    # increment_3's migration-suite scope limitation is classified NON-BLOCKING for one concrete reason: the
+    # factory-clean reconstruction applies migrations by GLOB, so a migration outside any curated gate list
+    # still runs, in order, from a blank cluster, on every delivery -- and its absence from the ledger fails
+    # the step. Convert that script to a curated list and the limitation silently becomes the real gap it was
+    # first recorded as. So the justification is checked, not trusted.
+    recon = os.path.join(ROOT, "scripts", "clean-install-reconstruction.sh")
+    if os.path.exists(recon):
+        with open(recon, encoding="utf-8", errors="replace") as fh:
+            rtext = fh.read()
+        if "*.up.sql" not in rtext:
+            bad.append("scripts/clean-install-reconstruction.sh no longer applies migrations by glob "
+                       "(*.up.sql). That glob is the ONLY gate-enforced path covering migrations outside "
+                       "pmsd-pg-integration.sh's curated list, and it is the stated justification for "
+                       "classifying increment_3's migration-suite scope as a non-blocking limitation rather "
+                       "than a gap. Restore the glob, or reclassify that entry as a real coverage gap")
+        if "ledger completeness" not in rtext:
+            bad.append("scripts/clean-install-reconstruction.sh no longer asserts ledger completeness; a "
+                       "migration could apply as a no-op and go unrecorded, which is the failure the "
+                       "non-blocking classification of increment_3 relies on being closed")
+    else:
+        bad.append("scripts/clean-install-reconstruction.sh is missing; the full-chain coverage that makes "
+                   "increment_3's migration-suite limitation non-blocking no longer exists")
+
+    # And the two gap registers must actually read as closed, entry by entry. A register that declares
+    # "NONE remaining" in its summary while an entry still describes work is the same defect one level down.
+    for reg in ("development_gaps", "pre_live_operational_gaps"):
+        entries = fc.get(reg) or {}
+        if not isinstance(entries, dict):
+            continue
+        for k, v in entries.items():
+            if k.startswith("_"):
+                continue
+            t = str(v or "")
+            head = t.strip()[:64].upper()
+            if not any(head.startswith(p) for p in ("CLOSED", "NOT A GAP", "RESOLVED", "SUPERSEDED",
+                                                     "DOCUMENTED NON-BLOCKING", "NON-BLOCKING")):
+                bad.append("current_state_facts.functional_completeness_remaining.%s.%s does not open by "
+                           "stating it is closed (or a documented non-blocking limitation), yet the state "
+                           "declares no required gap remains; it begins %r"
+                           % (reg, k, t.strip()[:60]))
+
+    return bad
+
 
 def check_appliance_facts_agree(st):
     """The generated blocks must not contradict current_state_facts.
