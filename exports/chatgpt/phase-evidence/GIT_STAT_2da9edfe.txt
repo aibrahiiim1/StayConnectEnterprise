@@ -1,0 +1,4 @@
+commit 2da9edfe61e3223af095796e5a358b51defb6620
+Date:   Thu Sep 24 02:47:00 2026 +0300
+
+    Governance: T0182 records the nightly delivery model and the standing PRE-LIVE decision
