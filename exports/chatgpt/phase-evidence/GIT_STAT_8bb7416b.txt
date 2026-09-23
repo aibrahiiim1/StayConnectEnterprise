@@ -1,4 +1,0 @@
-commit 8bb7416b2d69a8c6aa618e28a4561ab933549a98
-Date:   Wed Sep 23 15:16:45 2026 +0300
-
-    Governance: T0180, the last two technical items
