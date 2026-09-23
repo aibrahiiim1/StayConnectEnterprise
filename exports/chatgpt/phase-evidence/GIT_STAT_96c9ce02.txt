@@ -1,0 +1,4 @@
+commit 96c9ce026616c2fd72a434cc5f4c3749aaf6cad3
+Date:   Wed Sep 23 17:06:07 2026 +0300
+
+    Governance: the review findings, and the false PASS behind the first one

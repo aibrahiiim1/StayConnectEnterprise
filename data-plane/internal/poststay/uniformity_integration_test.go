@@ -209,7 +209,10 @@ func TestIntegration_ThrottledIsDistinctInternallyAndIdenticalOutside(t *testing
 	p := pool(t)
 	defer p.Close()
 	f := seed(t, p)
-	s := store(t, p)
+	// A PINNED throttle clock, on this test's own window. 15 attempts against a device limit of 10 take
+	// about 1.4s, and the window is one minute: a real clock crossing a minute boundary mid-loop splits the
+	// count and the lockout correctly never engages. See storeAtFixedTime.
+	s := storeAtFixedTime(t, p, time.Date(2030, 1, 1, 0, 11, 30, 0, time.UTC))
 	authorizeDevice(t, p, f)
 	got := issue(t, s, f)
 	ctx := context.Background()

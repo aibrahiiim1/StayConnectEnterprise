@@ -146,22 +146,66 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 		fmt.Fprintf(&b, "\t\tiifname \"%s\" tcp dport 443 accept comment \"Caddy TLS (admin)\"\n", topo.MgmtInterface)
 	}
 	fmt.Fprintf(&b, "\t\tiifname \"%s\" icmp type echo-request accept\n", topo.MgmtInterface)
-	// per-network guest host services (DHCP/DNS/portal/ICMP) on each bridge
+	// PER-NETWORK GUEST HOST SERVICES, PINNED TO EACH NETWORK'S OWN GATEWAY ADDRESS.
+	//
+	// THE DESTINATION USED TO BE UNCONSTRAINED, and that was the hole. These accepts were keyed on the
+	// INGRESS INTERFACE alone -- `iifname "br-g221" tcp dport 8380 accept` -- and the input hook fires for
+	// every packet addressed to ANY local address. So a guest on one network could reach the appliance on
+	// another network's gateway, and on the management address, simply by addressing it: the packet arrived
+	// on a guest bridge, matched the interface, and was accepted whatever it was aimed at.
+	//
+	// MEASURED ON PRE-LIVE before this change, from a client on VLAN 221:
+	//
+	//	the other guest network's gateway (10.222.0.1)   REACHABLE   (icmp, and the portal on :8380)
+	//	the management address (172.21.60.25) by ICMP     REACHABLE
+	//	the Hotel Admin UI, PostgreSQL, SSH               already blocked
+	//
+	// The FORWARD chain was never the problem -- it drops guest -> mgmt CIDRs and guest -> @guest_subnets
+	// already, which is why guest-to-guest client isolation held. This is the INPUT path to the appliance
+	// itself, which those rules never see.
+	//
+	// Every accept below now carries `ip daddr <that network's gateway>`, so a guest may reach the services
+	// on ITS OWN gateway and nothing else. That preserves every required same-network path: DHCP, DNS,
+	// captive detection, the captive portal (each network's portal_url and DHCP option 114 already name its
+	// own gateway), the walled garden, NAT, enforcement and accounting, all of which are either same-network
+	// or live in the forward/nat chains.
+	//
+	// DHCP KEEPS THE BROADCAST DESTINATION, and it has to: a client with no address yet sends DISCOVER and
+	// REQUEST to 255.255.255.255, so a gateway-only rule would break address assignment entirely -- the one
+	// mistake here that would take guest networking down rather than merely harden it.
 	for _, n := range enabled {
 		br := n.BridgeName
 		fmt.Fprintf(&b, "\t\tiifname \"%s\" meta nfproto ipv6 drop comment \"no IPv6 guest services\"\n", br)
-		fmt.Fprintf(&b, "\t\tiifname \"%s\" udp dport { 67, 68 } accept\n", br)
-		fmt.Fprintf(&b, "\t\tiifname \"%s\" udp dport 53 accept\n", br)
-		fmt.Fprintf(&b, "\t\tiifname \"%s\" tcp dport 53 accept\n", br)
+		// FAIL SAFE ON A MISSING GATEWAY. An empty GatewayIP would render `ip daddr  udp dport ...`, which is
+		// a syntax error -- and because this ruleset is applied as one atomic `nft -f`, a single malformed
+		// line does not break one network, it breaks the WHOLE table and takes every guest network with it.
+		// So a network without a gateway gets no accepts at all: it cannot serve, which is the safe reading
+		// of an incomplete configuration, and the comment says so in the installed ruleset.
+		if n.GatewayIP == "" {
+			fmt.Fprintf(&b, "\t\t# %s has no gateway address: no guest services are opened on it\n", br)
+			continue
+		}
+		gw := n.GatewayIP
+		fmt.Fprintf(&b, "\t\tiifname \"%s\" ip daddr { %s, 255.255.255.255 } udp dport { 67, 68 } accept comment \"DHCP (own gateway or broadcast)\"\n", br, gw)
+		fmt.Fprintf(&b, "\t\tiifname \"%s\" ip daddr %s udp dport 53 accept comment \"DNS (own gateway)\"\n", br, gw)
+		fmt.Fprintf(&b, "\t\tiifname \"%s\" ip daddr %s tcp dport 53 accept comment \"DNS (own gateway)\"\n", br, gw)
 		// The TLS portal port is opened only when there IS one. Accepting traffic to a port nothing listens
 		// on is not harmful in itself, but it advertises a service the appliance does not run.
 		if topo.PortalTLSPort > 0 {
-			fmt.Fprintf(&b, "\t\tiifname \"%s\" tcp dport { %d, %d } accept comment \"portal\"\n", br, topo.PortalHTTPPort, topo.PortalTLSPort)
+			fmt.Fprintf(&b, "\t\tiifname \"%s\" ip daddr %s tcp dport { %d, %d } accept comment \"portal (own gateway)\"\n", br, gw, topo.PortalHTTPPort, topo.PortalTLSPort)
 		} else {
-			fmt.Fprintf(&b, "\t\tiifname \"%s\" tcp dport %d accept comment \"portal\"\n", br, topo.PortalHTTPPort)
+			fmt.Fprintf(&b, "\t\tiifname \"%s\" ip daddr %s tcp dport %d accept comment \"portal (own gateway)\"\n", br, gw, topo.PortalHTTPPort)
 		}
-		fmt.Fprintf(&b, "\t\tiifname \"%s\" icmp type echo-request accept\n", br)
+		fmt.Fprintf(&b, "\t\tiifname \"%s\" ip daddr %s icmp type echo-request accept comment \"ping own gateway\"\n", br, gw)
 	}
+	// AND THE BOUNDARY, STATED RATHER THAN IMPLIED BY THE POLICY.
+	//
+	// The chain's policy is already drop, so this changes no packet's fate today. It is here because the
+	// policy is a default and this is a decision: a guest network may not address the appliance anywhere but
+	// its own gateway. Written as a rule, it also means a future accept appended after it cannot widen the
+	// guest input surface by accident -- an unconstrained accept added below this line is simply unreachable
+	// for guest traffic, which is the safe direction for a mistake to fail in.
+	b.WriteString("\t\tiifname @guest_interfaces drop comment \"guest input is limited to its own gateway\"\n")
 	b.WriteString("\t}\n\n")
 
 	// --- forward ---

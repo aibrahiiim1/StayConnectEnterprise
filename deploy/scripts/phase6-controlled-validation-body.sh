@@ -162,74 +162,102 @@ else
   ok "no Central address is configured on this appliance; the read path has nothing to call"
 fi
 
-# ---- 5. accrual, safe-disable, exhaustion and termination -- all by the real accounting daemon ----------------
-say "5. aggregate online time, accounted by the running acctd"
+# ---- 5. AGGREGATE ONLINE TIME -- A DIFFERENT CAPABILITY, RUN ONLY IN FULL SCOPE --------------------------
+#
+# Sections 0-4 validate Guest Device Self-Service. This section validates AGGREGATE ONLINE TIME: accrual by
+# the running acctd, the safe-disable invariant, exhaustion and termination. It is a separate Phase-6 child
+# with its own flag, and running it means ENABLING that flag.
+#
+# WHY IT CAN BE SKIPPED, AND WHY THAT IS NOT A WEAKENING. The Product-Owner authorisation for the PRE-LIVE
+# acceptance run permits temporarily enabling "only the Phase-6 Guest Device Self-Service capability
+# required for the controlled test". Enabling the aggregate capability as well would exceed that, so the
+# runner offers an explicitly NAMED mode that stops at the authorisation boundary rather than quietly
+# enabling more than was authorised.
+#
+# P6_SCOPE IS SET BY THE RUNNER, NOT BY THE CALLER. phase6-controlled-validation.sh assigns it
+# unconditionally from its positional mode before sourcing this file, so an exported value cannot select a
+# scope; and the DEFAULT is full, so a caller that forgets the mode runs everything rather than silently
+# less.
+if [ "${P6_SCOPE:-full}" = "device-selfservice" ]; then
+  say "5. aggregate online time -- NOT RUN in device-selfservice scope"
+  ok "the aggregate capability was never enabled: this run is authorised for Device Self-Service only"
+  acc="$(q "SELECT COALESCE(consumed_online_seconds,0) FROM iam_v2.entitlements WHERE id='$SYN_ENT'")"
+  if [ "${acc:-0}" = "0" ]; then
+    ok "and no online time was accrued against the fixture, as expected with that flag off"
+  else
+    ok "fixture accrual with the flag off: ${acc}s (data-driven accounting, which is the documented behaviour)"
+  fi
+else
+  # ---- 5. accrual, safe-disable, exhaustion and termination -- all by the real accounting daemon ----------------
+  say "5. aggregate online time, accounted by the running acctd"
 
-set_flags STAYCONNECT_PHASE3_MASTER STAYCONNECT_PHASE3_PMS_AUTH           STAYCONNECT_PHASE6_MASTER STAYCONNECT_PHASE6_DEVICE_SELFSERVICE_GUEST           STAYCONNECT_PHASE6_AGGREGATE_ONLINE_TIME
+  set_flags STAYCONNECT_PHASE3_MASTER STAYCONNECT_PHASE3_PMS_AUTH           STAYCONNECT_PHASE6_MASTER STAYCONNECT_PHASE6_DEVICE_SELFSERVICE_GUEST           STAYCONNECT_PHASE6_AGGREGATE_ONLINE_TIME
 
-# accrued <before> -> waits for the entitlement's consumption to advance, and prints where it got to
-accrued() {
-  local before after n=0
-  before="$(q "SELECT COALESCE(consumed_online_seconds,0) FROM iam_v2.entitlements WHERE id='$SYN_ENT'")"
-  after="$before"
+  # accrued <before> -> waits for the entitlement's consumption to advance, and prints where it got to
+  accrued() {
+    local before after n=0
+    before="$(q "SELECT COALESCE(consumed_online_seconds,0) FROM iam_v2.entitlements WHERE id='$SYN_ENT'")"
+    after="$before"
+    while [ "$n" -lt 24 ]; do
+      after="$(q "SELECT COALESCE(consumed_online_seconds,0) FROM iam_v2.entitlements WHERE id='$SYN_ENT'")"
+      [ "${after:-0}" -gt "${before:-0}" ] 2>/dev/null && break
+      n=$((n+1)); sleep 5
+    done
+    printf '%s -> %s' "$before" "$after"
+    [ "${after:-0}" -gt "${before:-0}" ] 2>/dev/null
+  }
+
+  progress="$(accrued)"   && ok "the running acctd charged online time ($progress seconds)"   || no "no online time was accrued in two minutes" "$progress"
+
+  # ---- THE SAFE-DISABLE INVARIANT, proven on the SAME live entitlement -------------------------------------------
+  # Turning the capability off must never make finite access unlimited. This is checked here, before exhaustion,
+  # on an entitlement that is simply running: the first version proved it by resurrecting a TERMINATED
+  # entitlement with a raw UPDATE, which is not a state the product can reach and therefore not evidence about
+  # the product. Accrual is data-driven precisely so that an entitlement which already exists keeps being
+  # accounted whatever the flag says.
+  set_flags STAYCONNECT_PHASE3_MASTER STAYCONNECT_PHASE3_PMS_AUTH STAYCONNECT_PHASE6_MASTER
+  progress="$(accrued)"   && ok "with the aggregate capability DISABLED, the durable budget is still accounted ($progress)"   || no "disabling the flag stopped accounting" "a finite budget would become unlimited on rollback: $progress"
+
+  [ "$(route_code /v1/phase6/devices/list)" = "404" ]   && ok "and the guest surface is gone again the moment its own gate is off"   || no "the guest route survived its flag being cleared" ""
+
+  set_flags STAYCONNECT_PHASE3_MASTER STAYCONNECT_PHASE3_PMS_AUTH           STAYCONNECT_PHASE6_MASTER STAYCONNECT_PHASE6_DEVICE_SELFSERVICE_GUEST           STAYCONNECT_PHASE6_AGGREGATE_ONLINE_TIME
+
+  # ---- EXHAUSTION, WITH THE CROSSING LEFT TO THE REAL TICK -------------------------------------------------------
+  # The first attempt moved the watermark twenty minutes back, expecting the next sweep to charge the difference.
+  # It does not, and it is right not to: the per-tick charge is bounded (four ticks, floor of a minute), and a
+  # gap longer than that means the service was NOT watching, so those seconds are recorded as a skipped interval
+  # rather than billed to a guest who may have been offline for all of them. Fighting that would have meant
+  # proving exhaustion against arithmetic the product deliberately refuses to do.
+  #
+  # So the fixture is put just short of its 600-second budget and the running daemon crosses the boundary itself,
+  # on real observed time. The instant, the evidence and the termination are the product's work; only the
+  # starting position is the fixture's.
+  q "UPDATE iam_v2.entitlements
+        SET consumed_online_seconds = GREATEST(COALESCE(consumed_online_seconds,0), 594)
+      WHERE id='$SYN_ENT'" >/dev/null
+
+  n=0; st=""
   while [ "$n" -lt 24 ]; do
-    after="$(q "SELECT COALESCE(consumed_online_seconds,0) FROM iam_v2.entitlements WHERE id='$SYN_ENT'")"
-    [ "${after:-0}" -gt "${before:-0}" ] 2>/dev/null && break
+    st="$(q "SELECT status FROM iam_v2.entitlements WHERE id='$SYN_ENT'")"
+    [ "$st" = "TERMINATED" ] && break
     n=$((n+1)); sleep 5
   done
-  printf '%s -> %s' "$before" "$after"
-  [ "${after:-0}" -gt "${before:-0}" ] 2>/dev/null
-}
+  [ "$st" = "TERMINATED" ]   && ok "the budget ran out and the entitlement terminated through the sweep"   || no "an over-budget entitlement is still $st" "finite access did not end"
 
-progress="$(accrued)"   && ok "the running acctd charged online time ($progress seconds)"   || no "no online time was accrued in two minutes" "$progress"
+  [ "$(q "SELECT terminal_reason FROM iam_v2.entitlements WHERE id='$SYN_ENT'")" = "TIME" ]   && ok "it ended for TIME, the one terminal path for this mode"   || no "terminal reason" "$(q "SELECT terminal_reason FROM iam_v2.entitlements WHERE id='$SYN_ENT'")"
 
-# ---- THE SAFE-DISABLE INVARIANT, proven on the SAME live entitlement -------------------------------------------
-# Turning the capability off must never make finite access unlimited. This is checked here, before exhaustion,
-# on an entitlement that is simply running: the first version proved it by resurrecting a TERMINATED
-# entitlement with a raw UPDATE, which is not a state the product can reach and therefore not evidence about
-# the product. Accrual is data-driven precisely so that an entitlement which already exists keeps being
-# accounted whatever the flag says.
-set_flags STAYCONNECT_PHASE3_MASTER STAYCONNECT_PHASE3_PMS_AUTH STAYCONNECT_PHASE6_MASTER
-progress="$(accrued)"   && ok "with the aggregate capability DISABLED, the durable budget is still accounted ($progress)"   || no "disabling the flag stopped accounting" "a finite budget would become unlimited on rollback: $progress"
+  [ "$(q "SELECT cause_detail FROM iam_v2.entitlement_termination_evidence WHERE entitlement_id='$SYN_ENT'")"   = "AGGREGATE_ONLINE_TIME_EXHAUSTED" ]   && ok "the durable evidence names the cause"   || no "termination evidence" "$(q "SELECT cause_detail FROM iam_v2.entitlement_termination_evidence WHERE entitlement_id='$SYN_ENT'")"
 
-[ "$(route_code /v1/phase6/devices/list)" = "404" ]   && ok "and the guest surface is gone again the moment its own gate is off"   || no "the guest route survived its flag being cleared" ""
+  # The consequence, not just the row: access is gone from the guest's point of view.
+  case "$(list)" in
+    *UNAVAILABLE*) ok "the guest surface stops answering for an ended entitlement" ;;
+    *)             no "an ended entitlement still has a working device surface" "$(list)" ;;
+  esac
+  [ "$(q "SELECT count(*) FROM iam_v2.sessions WHERE entitlement_id='$SYN_ENT'
+            AND state IN ('active','PENDING_ENFORCEMENT')")" = "0" ]   && ok "its session is closed, so netd forwards nothing for it"   || no "a live session survived termination" ""
 
-set_flags STAYCONNECT_PHASE3_MASTER STAYCONNECT_PHASE3_PMS_AUTH           STAYCONNECT_PHASE6_MASTER STAYCONNECT_PHASE6_DEVICE_SELFSERVICE_GUEST           STAYCONNECT_PHASE6_AGGREGATE_ONLINE_TIME
 
-# ---- EXHAUSTION, WITH THE CROSSING LEFT TO THE REAL TICK -------------------------------------------------------
-# The first attempt moved the watermark twenty minutes back, expecting the next sweep to charge the difference.
-# It does not, and it is right not to: the per-tick charge is bounded (four ticks, floor of a minute), and a
-# gap longer than that means the service was NOT watching, so those seconds are recorded as a skipped interval
-# rather than billed to a guest who may have been offline for all of them. Fighting that would have meant
-# proving exhaustion against arithmetic the product deliberately refuses to do.
-#
-# So the fixture is put just short of its 600-second budget and the running daemon crosses the boundary itself,
-# on real observed time. The instant, the evidence and the termination are the product's work; only the
-# starting position is the fixture's.
-q "UPDATE iam_v2.entitlements
-      SET consumed_online_seconds = GREATEST(COALESCE(consumed_online_seconds,0), 594)
-    WHERE id='$SYN_ENT'" >/dev/null
-
-n=0; st=""
-while [ "$n" -lt 24 ]; do
-  st="$(q "SELECT status FROM iam_v2.entitlements WHERE id='$SYN_ENT'")"
-  [ "$st" = "TERMINATED" ] && break
-  n=$((n+1)); sleep 5
-done
-[ "$st" = "TERMINATED" ]   && ok "the budget ran out and the entitlement terminated through the sweep"   || no "an over-budget entitlement is still $st" "finite access did not end"
-
-[ "$(q "SELECT terminal_reason FROM iam_v2.entitlements WHERE id='$SYN_ENT'")" = "TIME" ]   && ok "it ended for TIME, the one terminal path for this mode"   || no "terminal reason" "$(q "SELECT terminal_reason FROM iam_v2.entitlements WHERE id='$SYN_ENT'")"
-
-[ "$(q "SELECT cause_detail FROM iam_v2.entitlement_termination_evidence WHERE entitlement_id='$SYN_ENT'")"   = "AGGREGATE_ONLINE_TIME_EXHAUSTED" ]   && ok "the durable evidence names the cause"   || no "termination evidence" "$(q "SELECT cause_detail FROM iam_v2.entitlement_termination_evidence WHERE entitlement_id='$SYN_ENT'")"
-
-# The consequence, not just the row: access is gone from the guest's point of view.
-case "$(list)" in
-  *UNAVAILABLE*) ok "the guest surface stops answering for an ended entitlement" ;;
-  *)             no "an ended entitlement still has a working device surface" "$(list)" ;;
-esac
-[ "$(q "SELECT count(*) FROM iam_v2.sessions WHERE entitlement_id='$SYN_ENT'
-          AND state IN ('active','PENDING_ENFORCEMENT')")" = "0" ]   && ok "its session is closed, so netd forwards nothing for it"   || no "a live session survived termination" ""
-
+fi
 
 # ---- 7. nothing else on the appliance moved --------------------------------------------------------------------
 say "7. no collateral effect"

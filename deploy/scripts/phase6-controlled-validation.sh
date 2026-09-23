@@ -22,20 +22,67 @@
 #     business vocabulary to make test rows findable.
 #   * and the runtime proven dark afterwards: routes ABSENT, services healthy, accounting owner present.
 #
-# It refuses to run anywhere but the authorized development appliance, and that refusal is NOT overridable by
-# an environment variable. The allow-list is compiled into this file, because a feature-enabling runner that
-# can be pointed at another host by exporting one variable is not protected, it is merely inconvenienced.
+# It refuses to run anywhere but an appliance it was COMPILED to run on, and that refusal is NOT overridable
+# by an environment variable -- not the allow-list, and not the path it reads the appliance's identity from.
+# A feature-enabling runner that can be pointed at another host by exporting one variable is not protected,
+# it is merely inconvenienced.
+#
+# The check is no longer a hostname. It is a compiled host -> (appliance_id, serial) map, confirmed against
+# the appliance's own SIGNED assignment document and then again against its row in the site database, and it
+# fails closed on a missing entry, a missing file, an unreadable field or any disagreement. See
+# guard_environment.
 #
 #   usage:  phase6-controlled-validation.sh              full run: capture, enable, validate, restore, verify
+#           phase6-controlled-validation.sh run-device-selfservice
+#                                                        the same run, stopping at the boundary of what was
+#                                                        authorised for PRE-LIVE: Guest Device Self-Service
+#                                                        only, without enabling the aggregate capability
 #           phase6-controlled-validation.sh restore      restore + verify only (safe at any time, idempotent)
 #           phase6-controlled-validation.sh selftest CASE
 #                                                        fault injection -- enables a flag and then abandons
-#                                                        the run (body-failure | signal | partial)
+#                                                        the run (body-failure | signal | partial |
+#                                                        partial-device-selfservice | double-restore)
 set -uo pipefail
 
 # ---- identity: compiled in, not configurable ---------------------------------------------------------------
-readonly AUTHORIZED_HOSTS="radius"
+#
+# A HOSTNAME WAS THE WHOLE CHECK, AND A HOSTNAME IS NOT AN IDENTITY. This allow-list named `radius`, the
+# DEVELOPMENT appliance, which CLAUDE.md 0D has since RETIRED: "not an operational target. Do not contact it".
+# So the only thing in Phase 6 that can turn a guest capability on was admitted by a string any host can be
+# given, and the one host it named must never be reached again. Both halves of that are now fixed.
+#
+# THE ALLOW-LIST IS A MAP, NOT A LIST. A host is admitted only when the appliance's OWN identity matches the
+# value compiled here for that host, and that identity is read from the SIGNED assignment document -- the
+# same file scd verifies against the pinned registry root -- and then confirmed a second time against the
+# appliance's own row in the site database. A host with no entry is refused. An entry that does not match is
+# refused. An unreadable identity is refused. There is no environment variable that changes any of it: a
+# feature-enabling runner that can be redirected by exporting one name is not protected, it is inconvenienced.
+#
+# PRE-LIVE IS ADMITTED BY EXPLICIT PRODUCT-OWNER AUTHORISATION, for ONE controlled acceptance run of Guest
+# Device Self-Service, after which the capability returns to its approved default-OFF state. That is
+# controlled acceptance, not Guest activation and not a Guest pilot: D41 remains in force.
+readonly AUTHORIZED_HOSTS="sce"
 readonly AUTHORIZED_DB="stayconnect_site"
+
+# authorized_appliance_for <hostname> -> "<appliance_id> <serial>", or non-zero when the host has no entry.
+#
+# Compiled in, one line per authorised appliance, and deliberately verbose: reading this file must tell you
+# exactly which physical appliance may be enabled, not merely which name may be.
+authorized_appliance_for() {
+  case "$1" in
+    # PRE-LIVE 172.21.60.25 -- the only appliance (CLAUDE.md 0D). Authorised for the controlled Guest Device
+    # Self-Service acceptance run.
+    sce) printf '%s %s' 'c6faf4eb-33e4-41b3-9fcb-d902568cc1c9' 'SC-7A8M-WM9R-KMAZ' ;;
+    # `radius` is deliberately ABSENT. It was the only entry here and it is retired; leaving a retired host in
+    # an enabling allow-list is a standing permission to enable a guest capability on a machine nobody is
+    # supposed to touch.
+    *) return 1 ;;
+  esac
+}
+# THE PATH IS NOT OVERRIDABLE EITHER, and the first draft of this line made it so
+# (PHASE6_ASSIGNMENT_DOC:-...). That would have been the bypass this file exists to refuse: an identity check
+# whose SOURCE can be redirected by an environment variable checks whatever the caller points it at.
+readonly ASSIGNMENT_DOC="/etc/stayconnect/assignment/assignment.json"
 
 ENV_DIR="/etc/stayconnect"
 UNITS="stayconnect-scd stayconnect-acctd stayconnect-edged"
@@ -43,7 +90,22 @@ ALL_UNITS="$UNITS stayconnect-portald stayconnect-netd stayconnect-hotel-admin"
 PG="stayconnect-pg"
 DBUSER="${PHASE6_DB_USER:-stayconnect}"
 DB="$AUTHORIZED_DB"
-COHERENCE="${PHASE6_COHERENCE:-/root/phase6-flag-coherence.sh}"
+# THE GATE THAT PROVES DARKNESS IS NOT REDIRECTABLE EITHER. This was
+# PHASE6_COHERENCE:-/root/phase6-flag-coherence.sh, and $COHERENCE is what the restoration verification runs
+# to establish that every Phase-6 flag is off: an environment variable that chooses WHICH script answers that
+# question can choose one that always exits 0. Same class of hole as an overridable identity source, in the
+# step whose entire purpose is proving the capability went back off.
+#
+# Two FIXED locations, tried in order, neither caller-chosen: the validation directory this harness is
+# installed into, and the path the accepted development-appliance layout used.
+coherence_path() {
+  local p
+  for p in /opt/stayconnect/validation/phase6-flag-coherence.sh /root/phase6-flag-coherence.sh; do
+    [ -f "$p" ] && { printf '%s' "$p"; return 0; }
+  done
+  printf '%s' /opt/stayconnect/validation/phase6-flag-coherence.sh
+}
+COHERENCE="$(coherence_path)"
 VALIDATION_DIR="/opt/stayconnect/validation"
 HA_CURRENT="/opt/stayconnect/hotel-admin"
 STATE_DIR="/var/lib/stayconnect/phase6-validation"
@@ -73,17 +135,107 @@ say(){ printf '\n== %s ==\n' "$1"; }
 # lets psql swallow the rest of the file being read. That is not theoretical: the writer-boundary grant looped
 # over two roles, granted svc_scd, and never saw the svc_acctd line -- so acctd spent the entire aggregate
 # section refusing to start while everything else looked configured.
-q(){ docker exec -i "$PG" psql -U "$DBUSER" -d "$DB" -tAqc "$1" </dev/null 2>&1; }
+# q asks the site database one question. IT DISTINGUISHES "no rows" FROM "could not ask", which it did not.
+#
+# It used to be `docker exec ... 2>&1`, so a failure printed the ERROR TEXT ON STDOUT and every caller took
+# that text as the answer. With the database unreachable this produced lines like
+#   [PASS] corrected Error response from daemon: No such container: ... appliance setting(s) left enabled
+# -- a PASS, quoting a docker error, asserting a correction that never happened. That was harmless only
+# while an unreachable database also meant the script had already refused to start; now that `restore` runs
+# without one (see guard_environment), a caller must be able to tell the two apart.
+#
+# On failure: nothing on stdout, the first line of the error on STDERR so it still reaches the run log, and
+# a non-zero status. An empty answer therefore means "no rows OR no answer", and any caller that treats
+# empty as reassurance has to say so explicitly.
+q(){
+  local out rc
+  out="$(docker exec -i "$PG" psql -U "$DBUSER" -d "$DB" -tAqc "$1" </dev/null 2>&1)"; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf 'DB QUERY FAILED (rc=%d): %s\n' "$rc" "$(printf '%s' "$out" | head -1)" >&2
+    return 1
+  fi
+  printf '%s' "$out"
+}
 
-guard_environment() {
+# guard_host is the ONE check every mode must pass, restore included: this machine must be named in the
+# compiled allow-list. It reads nothing but the hostname, so nothing it depends on can be missing.
+guard_host() {
   local host; host="$(hostname)"
   case " $AUTHORIZED_HOSTS " in
     *" $host "*) : ;;
     *) echo "REFUSED: host '$host' is not in the compiled allow-list ($AUTHORIZED_HOSTS)" >&2; exit 2 ;;
   esac
+}
+
+# guard_environment refuses to run anywhere it was not compiled to run, on FOUR independent grounds. Every
+# one of them fails closed: a missing file, an unreadable field, a mismatch or an absent entry all refuse.
+#
+# IT GUARDS THE MODES THAT ENABLE SOMETHING, AND ONLY THOSE. It used to run before the mode dispatch, which
+# made it a precondition of `restore` as well -- and restore is the DISABLE-ONLY recovery path, the thing you
+# reach for after a run was interrupted. So the two failures it is built to refuse on (an assignment file
+# that cannot be read, a database that cannot be reached) would also have refused to TURN THE CAPABILITY
+# OFF, leaving the appliance partially enabled precisely when nobody could clear it. Refusing to enable on
+# doubt is fail-closed; refusing to disable on doubt is fail-OPEN wearing the same clothes.
+#
+# Nothing is weakened by the split: restore still passes guard_host, so it cannot run on an unlisted machine,
+# and it only ever moves flags and settings toward OFF.
+guard_environment() {
+  local host want_appl want_serial got_appl got_serial db_appl
+  host="$(hostname)"
+
+  # 1. the host must be named.
+  guard_host
+
+  # 2. and it must have a compiled appliance identity. A host in the list with no entry is a mistake, and the
+  #    safe reading of a mistake here is "do not enable a guest capability".
+  if ! set -- $(authorized_appliance_for "$host"); then
+    echo "REFUSED: host '$host' is listed but has no compiled appliance identity" >&2; exit 2
+  fi
+  want_appl="${1:-}"; want_serial="${2:-}"
+  [ -n "$want_appl" ] && [ -n "$want_serial" ] || {
+    echo "REFUSED: the compiled entry for '$host' is incomplete" >&2; exit 2; }
+
+  # 3. THE APPLIANCE'S OWN SIGNED ASSIGNMENT must agree. This is the document scd verifies against the pinned
+  #    registry root anchor, so it is the appliance's strongest statement of who it is. Read with python3
+  #    rather than grep, because a field that happens to appear in a comment or another object is not the
+  #    field being asked for.
+  [ -r "$ASSIGNMENT_DOC" ] || {
+    echo "REFUSED: cannot read the signed assignment at $ASSIGNMENT_DOC, so this appliance cannot be identified" >&2
+    exit 2; }
+  got_appl="$(python3 -c 'import json,sys
+try:
+    d=json.load(open(sys.argv[1]))["current"]
+    print(d.get("appliance_id") or "")
+except Exception:
+    print("")' "$ASSIGNMENT_DOC" 2>/dev/null)"
+  got_serial="$(python3 -c 'import json,sys
+try:
+    d=json.load(open(sys.argv[1]))["current"]
+    print(d.get("serial") or "")
+except Exception:
+    print("")' "$ASSIGNMENT_DOC" 2>/dev/null)"
+  [ "$got_appl" = "$want_appl" ] || {
+    echo "REFUSED: this appliance reports id '${got_appl:-<unreadable>}'; '$host' is compiled as '$want_appl'" >&2
+    exit 2; }
+  [ "$got_serial" = "$want_serial" ] || {
+    echo "REFUSED: this appliance reports serial '${got_serial:-<unreadable>}'; '$host' is compiled as '$want_serial'" >&2
+    exit 2; }
+
+  # 4. AND A SECOND, INDEPENDENT SOURCE. The site database's own appliances row must carry the same id. Two
+  #    sources that have to agree is what makes this an identity check rather than a file read: a stale or
+  #    hand-edited assignment does not by itself admit the run.
+  db_appl="$(q "SELECT id FROM public.appliances WHERE id = '$want_appl'")"
+  [ "$db_appl" = "$want_appl" ] || {
+    echo "REFUSED: the site database does not hold appliance '$want_appl' (got '${db_appl:-<none>}')" >&2
+    echo "         The signed assignment and the database disagree about which appliance this is." >&2
+    exit 2; }
+
   case "$DB" in
     *prod*|*production*) echo "REFUSED: database '$DB' looks like Production" >&2; exit 2 ;;
   esac
+
+  printf 'identity: %s / appliance %s / serial %s -- authorised, from the signed assignment and the site DB\n' \
+    "$host" "$want_appl" "$want_serial"
 }
 
 # ---- baseline capture ---------------------------------------------------------------------------------------
@@ -127,8 +279,8 @@ restore_flags() {
       sed -i '/^STAYCONNECT_PHASE6_/d' "$f" 2>/dev/null || true
     fi
   done
-  systemctl reset-failed $UNITS >/dev/null 2>&1
-  systemctl restart $UNITS >/dev/null 2>&1 || true
+  restart_units
+  settle_units 30 >/dev/null 2>&1 || true
   wait_for_scd || true
 }
 
@@ -139,15 +291,20 @@ restore_hotel_admin() {
   now="$(readlink -f "$HA_CURRENT" 2>/dev/null || true)"
   [ "$now" = "$want" ] && return 0
   ln -sfn "$want" "$HA_CURRENT.tmp" && mv -Tf "$HA_CURRENT.tmp" "$HA_CURRENT"
-  systemctl restart stayconnect-hotel-admin >/dev/null 2>&1 || true
+  # Bounded for the same reason as restart_units: hotel-admin is also Restart=always with the start limiter
+  # disabled, so a synchronous restart of a unit that will not come up would block here instead.
+  restart_units stayconnect-hotel-admin
 }
 
 restore_settings() {
   # THE SANCTIONED AUDITED WRITER, per appliance, back to the captured value. The writer serializes on the
   # appliance and records the change; that is the whole point of it existing.
   local op t s a v
-  op="$(q "SELECT id FROM public.operators ORDER BY created_at LIMIT 1")"
-  [ -n "$op" ] || return 0
+  # A DATABASE THAT DID NOT ANSWER IS REPORTED, NOT SKIPPED. This returned 0 either way, so the caller's
+  # `ok` announced a restoration through the audited writer that had not happened -- the same false
+  # reassurance the verification checks below were corrected for.
+  op="$(q "SELECT id FROM public.operators ORDER BY created_at LIMIT 1")" || return 1
+  [ -n "$op" ] || return 1
   while read -r t s a v; do
     [ -n "${t:-}" ] || continue
     q "SELECT iam_v2.p6_set_guest_device_self_service('$t','$s','$a', $v, '$op',
@@ -182,15 +339,42 @@ restore_settings() {
 # pinned rather than merely restored, through the same audited writer, with a reason that says why. It is
 # reported as a correction, not done quietly: if this fires, something left the appliance wrong.
 enforce_dark_setting() {
-  local on op t s a
-  on="$(q "SELECT count(*) FROM iam_v2.appliance_product_settings WHERE guest_device_self_service")"
+  local on op left
+  # AN UNANSWERABLE QUESTION IS NOT AN ANSWER OF ZERO. If the database cannot be reached, this cannot say
+  # whether any appliance is left enabled, and saying nothing is enabled would be the most dangerous
+  # sentence in the file.
+  if ! on="$(q "SELECT count(*) FROM iam_v2.appliance_product_settings WHERE guest_device_self_service")"; then
+    no "the per-appliance capability state is UNKNOWN" \
+       "the site database did not answer; darkness of the setting could not be established"
+    return 1
+  fi
   [ "$on" = "0" ] && { ok "no appliance is left with the capability enabled"; return 0; }
-  op="$(q "SELECT id FROM public.operators ORDER BY created_at LIMIT 1")"
+
+  op="$(q "SELECT id FROM public.operators ORDER BY created_at LIMIT 1")" || op=""
+  if [ -z "$op" ]; then
+    no "$on appliance setting(s) are left enabled and could not be corrected" \
+       "the audited writer needs an operator id and none could be read"
+    return 1
+  fi
   q "SELECT iam_v2.p6_set_guest_device_self_service(tenant_id, site_id, appliance_id, false, '$op',
        'phase6-controlled-validation',
        'Phase 6 is dark on this appliance; the per-appliance capability must not be left enabled')
-       FROM iam_v2.appliance_product_settings WHERE guest_device_self_service" >/dev/null
-  ok "corrected $on appliance setting(s) left enabled, through the audited writer"
+       FROM iam_v2.appliance_product_settings WHERE guest_device_self_service" >/dev/null 2>&1 || true
+
+  # THE CLAIM IS RE-READ RATHER THAN ASSUMED. This used to `ok` unconditionally, so it reported a correction
+  # whether or not the writer had run.
+  if ! left="$(q "SELECT count(*) FROM iam_v2.appliance_product_settings WHERE guest_device_self_service")"; then
+    no "a correction was attempted for $on setting(s) but could not be confirmed" \
+       "the site database stopped answering before the result could be re-read"
+    return 1
+  fi
+  if [ "$left" = "0" ]; then
+    ok "corrected $on appliance setting(s) left enabled, through the audited writer"
+    return 0
+  fi
+  no "$left of $on appliance setting(s) are STILL enabled after the correction" \
+     "the audited writer did not take effect"
+  return 1
 }
 
 teardown_scope() {
@@ -256,12 +440,15 @@ grant_writer_prereq() {
 }
 
 restore_writer_prereq() {
-  local r v
+  local r v rc=0
   while read -r r v; do
     [ -n "${r:-}" ] || continue
     [ "$v" = "f" ] || continue
-    q "REVOKE EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) FROM $r" >/dev/null
+    # A REVOKE THAT NEVER REACHED THE DATABASE IS NOT A REVOKE. This discarded the status, so the caller
+    # reported the grant as back at its captured value while it could still be in force.
+    q "REVOKE EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) FROM $r" >/dev/null || rc=1
   done < "$STATE_DIR/writer_prereq" 2>/dev/null
+  return $rc
 }
 
 restore_network() {
@@ -275,10 +462,20 @@ restore_network() {
 restore() {
   say "restoration (runs on success, failure and interruption)"
   restore_network;  ok "no blackhole route left behind by the local-first proof"
-  restore_writer_prereq; ok "the Phase-3 writer-boundary grant is back to its captured value"
+  if restore_writer_prereq; then
+    ok "the Phase-3 writer-boundary grant is back to its captured value"
+  else
+    no "the Phase-3 writer-boundary grant could NOT be returned to its captured value" \
+       "a REVOKE did not reach the database; the grant may still be in force"
+  fi
   restore_flags;    ok "Phase-6 flag files restored to the captured baseline; services restarted"
   restore_hotel_admin; ok "Hotel Admin pointed at the captured DARK release"
-  restore_settings; ok "per-appliance product settings restored through the audited writer"
+  if restore_settings; then
+    ok "per-appliance product settings restored through the audited writer"
+  else
+    no "the per-appliance product settings were NOT restored" \
+       "the audited writer could not be used; the setting state is whatever the run left it as"
+  fi
   enforce_dark_setting
   teardown_scope
   case "$TEARDOWN_OUT" in
@@ -352,8 +549,14 @@ verify_dark() {
     + (SELECT count(*) FROM iam_v2.entitlement_devices
         WHERE entitlement_id IN (SELECT id FROM iam_v2.entitlements WHERE stay_id='$SYN_STAY')
           AND status='AUTHORIZED')")"
-  [ "$live" = "0" ] && ok "no live synthetic entitlement, session or device binding remains at the reserved ids" \
-    || { no "synthetic state is still live" "$live row(s)"; bad=1; }
+  if [ -z "$live" ]; then
+    no "the reserved synthetic ids could not be checked" \
+       "the site database did not answer; whether any synthetic state is still live is UNKNOWN"; bad=1
+  elif [ "$live" = "0" ]; then
+    ok "no live synthetic entitlement, session or device binding remains at the reserved ids"
+  else
+    no "synthetic state is still live" "$live row(s)"; bad=1
+  fi
 
   # THE SETTINGS TABLE: the same appliances as before the run, and none of them enabled.
   #
@@ -361,19 +564,29 @@ verify_dark() {
   # passed happily while the appliance sat enabled, because enabled was what had been captured. The two
   # things actually worth asserting are that this run created no settings row of its own and left none
   # behind, and that nothing is switched on while the phase is dark.
-  local nowkeys basekeys onnow
+  local nowkeys basekeys onnow dbdown=0
   nowkeys="$(q "SELECT tenant_id||' '||site_id||' '||appliance_id FROM iam_v2.appliance_product_settings
-                 ORDER BY tenant_id, site_id, appliance_id")"
+                 ORDER BY tenant_id, site_id, appliance_id")" || dbdown=1
   basekeys="$(awk '{print $1" "$2" "$3}' "$STATE_DIR/settings" 2>/dev/null)"
-  if [ "$nowkeys" = "$basekeys" ]; then
+  # AN EMPTY ANSWER FROM AN UNREACHABLE DATABASE IS NOT AN EMPTY TABLE. When the baseline happened to be
+  # empty as well, the comparison below read as agreement and printed a PASS about a table it never saw.
+  if [ "$dbdown" = "1" ]; then
+    no "the settings table could not be compared with the baseline" \
+       "the site database did not answer, so 'unchanged' cannot be told from 'unknown'"; bad=1
+  elif [ "$nowkeys" = "$basekeys" ]; then
     ok "the settings table covers exactly the appliances it did before the run"
   else
     no "the settings table gained or lost a row" "$(printf '%s' "$nowkeys" | tr '\n' ';')"; bad=1
   fi
   onnow="$(q "SELECT count(*) FROM iam_v2.appliance_product_settings WHERE guest_device_self_service")"
-  [ "$onnow" = "0" ] \
-    && ok "no appliance is left with guest device self-service enabled" \
-    || { no "an appliance is left with the capability enabled" "$onnow row(s)"; bad=1; }
+  if [ -z "$onnow" ]; then
+    no "whether the capability is left enabled is UNKNOWN" \
+       "the site database did not answer, and that must not be read as nothing being enabled"; bad=1
+  elif [ "$onnow" = "0" ]; then
+    ok "no appliance is left with guest device self-service enabled"
+  else
+    no "an appliance is left with the capability enabled" "$onnow row(s)"; bad=1
+  fi
 
   return $bad
 }
@@ -395,6 +608,56 @@ finish() {
 }
 
 # ---- enabling -------------------------------------------------------------------------------------------------
+# restart_units -- STOP, THEN START WITHOUT BLOCKING, BOTH BOUNDED.
+#
+# `systemctl restart` NEVER RETURNS on this appliance when the configuration is one the service refuses.
+# MEASURED ON PRE-LIVE: a controlled run sat in do_wait on
+#
+#     systemctl restart stayconnect-scd stayconnect-acctd stayconnect-edged
+#
+# for 3 hours 12 minutes during the step that DELIBERATELY configures a refusal, and it left edged and acctd
+# down for all of it. The cause is in the unit and it is intentional there:
+#
+#     Restart=always   RestartSec=2   StartLimitIntervalSec=0
+#
+# With the start limiter disabled, systemd retries the refused start forever, the restart job never settles
+# into active or failed, and a synchronous restart waits for a job that cannot finish. The appliance
+# disables the limiter on purpose, so that a transient database outage cannot leave a service permanently
+# down -- that policy is right and is not what changes here.
+#
+# This harness's own comment shows what it assumed instead: "systemd's start limiter then remembers those
+# rapid failures: the NEXT restart is refused outright with 'start request repeated too quickly'". That is
+# the behaviour of an appliance WITH the limiter, which the retired development appliance had and PRE-LIVE
+# does not. Admitting PRE-LIVE is what surfaced it.
+#
+# So: stop first (which completes even on a looping unit, because it cancels the loop), clear the counter,
+# then start WITHOUT blocking and let the callers settle on evidence -- wait_for_scd for the route, and the
+# bounded settle below for the units. A step that expects a refusal now observes it in a bounded time
+# instead of hanging on it.
+restart_units() {   # restart_units [unit ...]  -- defaults to $UNITS
+  local set_="${*:-$UNITS}"
+  timeout 45 systemctl stop $set_ >/dev/null 2>&1
+  systemctl reset-failed $set_ >/dev/null 2>&1
+  timeout 45 systemctl start --no-block $set_ >/dev/null 2>&1
+}
+
+# settle_units waits, bounded, for every named unit to be active. It REPORTS rather than judges: one step
+# deliberately produces a configuration scd must refuse, and a helper that called that a failure would turn
+# the fail-closed proof upside down.
+settle_units() {    # settle_units <seconds> [unit ...]
+  local budget="$1"; shift
+  local set_="${*:-$UNITS}" i=0 u all
+  while [ "$i" -lt "$budget" ]; do
+    all=1
+    for u in $set_; do
+      [ "$(systemctl is-active "$u" 2>/dev/null)" = "active" ] || all=0
+    done
+    [ "$all" = "1" ] && return 0
+    i=$((i+1)); sleep 1
+  done
+  return 1
+}
+
 set_flags() {   # set_flags FLAG [FLAG ...]  -- exactly this set, on every unit; anything else removed
   # EVERY TOKEN IS CHECKED BEFORE IT IS WRITTEN. Not defensive habit: the first version of the caller wrapped
   # its flag list across two lines with a backslash INSIDE double quotes, where a backslash-newline is not a
@@ -420,12 +683,12 @@ set_flags() {   # set_flags FLAG [FLAG ...]  -- exactly this set, on every unit;
     sed -i '/^STAYCONNECT_PHASE6_/d; /^STAYCONNECT_PHASE3_MASTER=/d; /^STAYCONNECT_PHASE3_PMS_AUTH=/d' "$f"
     for n in "$@"; do printf '%s=true\n' "$n" >> "$f"; done
   done
-  # reset-failed FIRST. One step here deliberately produces a configuration scd refuses to start on, and
-  # systemd's start limiter then remembers those rapid failures: the NEXT restart is refused outright with
-  # "start request repeated too quickly", the unit stays down, and every later step fails for a reason that
-  # has nothing to do with the product. Clearing the counter is what makes the fail-closed proof survivable.
-  systemctl reset-failed $UNITS >/dev/null 2>&1
-  systemctl restart $UNITS >/dev/null 2>&1
+  # The restart is bounded and non-blocking: see restart_units, which exists because the synchronous form
+  # hung for three hours on PRE-LIVE during the very step below that deliberately configures a refusal.
+  # Clearing the failure counter is part of it, for the reason this comment used to give on its own -- a
+  # remembered burst of rapid failures would otherwise make a LATER restart refuse outright, and every step
+  # after it would fail for a reason that has nothing to do with the product.
+  restart_units
   # It REPORTS rather than judges. One step deliberately configures a combination the appliance must refuse to
   # start on, and a helper that recorded that refusal as a failure would turn the fail-closed proof upside
   # down. The callers that need scd up notice through the route they then ask for.
@@ -487,16 +750,23 @@ wait_for_scd() {
   return 1
 }
 
-guard_environment
+# Every mode must be on a listed machine. The full identity check is applied per mode below, because only
+# the modes that ENABLE a capability may be blocked by a source of identity being unavailable.
+guard_host
 
 case "${1:-run}" in
   restore)
-    say "restore-only run on $(hostname)"
+    # DISABLE-ONLY, and deliberately NOT behind guard_environment: see the comment on that function. This is
+    # the path that recovers an interrupted run, so it has to work when the signed assignment is unreadable
+    # or PostgreSQL is down. Each restore step is individually tolerant of a source it cannot reach; what it
+    # must never do is decline to turn something off.
+    say "restore-only run on $(hostname) (disable-only; no identity source is required to turn a flag OFF)"
     trap finish EXIT INT TERM
     exit 0
     ;;
 
   selftest)
+    guard_environment
     # FAULT INJECTION, RUN BEFORE THE REAL BODY IS EVER TRUSTED. Each case enables a capability and then
     # abandons the run in a different way. The run is judged only by whether the appliance comes back dark --
     # which is the property the real validation depends on and the one that cannot be established by reading
@@ -522,6 +792,21 @@ case "${1:-run}" in
         appliance_identity && seed_scope >/dev/null 2>&1
         ok "every flag on, the product setting on, and synthetic state seeded; abandoning mid-way"
         exit 3 ;;
+      partial-device-selfservice)
+        # THE SAME ABANDONMENT AS `partial`, WITHIN THE AUTHORISED CAPABILITY. The existing injection cases
+        # enable STAYCONNECT_PHASE6_AGGREGATE_ONLINE_TIME, which the PRE-LIVE authorisation does not cover, so
+        # proving restoration on this appliance needed a case that turns on only what was authorised: the
+        # master gate, the Guest Device Self-Service children, and the Phase-3 arm the surface fails closed
+        # without. It then abandons the run with the capability on, the product setting on and synthetic state
+        # seeded -- which is the state restoration actually has to recover from.
+        trap finish EXIT INT TERM
+        set_flags STAYCONNECT_PHASE3_MASTER STAYCONNECT_PHASE3_PMS_AUTH                   STAYCONNECT_PHASE6_MASTER STAYCONNECT_PHASE6_DEVICE_SELFSERVICE_GUEST                   STAYCONNECT_PHASE6_DEVICE_SELFSERVICE_ADMIN
+        grant_writer_prereq
+        setting_on true
+        appliance_identity && seed_scope >/dev/null 2>&1
+        ok "device self-service enabled, the setting on and synthetic state seeded; abandoning mid-way"
+        exit 3 ;;
+
       double-restore)
         # Idempotence: restoring an already-restored appliance must be a no-op that still verifies.
         trap finish EXIT INT TERM
@@ -531,8 +816,18 @@ case "${1:-run}" in
     esac
     ;;
 
-  run)
-    say "Phase-6 controlled validation on $(hostname)"
+  run|run-device-selfservice)
+    guard_environment
+    # SCOPE IS ASSIGNED HERE, from the positional mode, unconditionally -- so an exported P6_SCOPE cannot
+    # choose one. `run` is the full validation; `run-device-selfservice` stops at the boundary of what the
+    # Product Owner authorised for the PRE-LIVE acceptance run, which is the Guest Device Self-Service
+    # capability and nothing else. Sections 0-4 and 7 run either way; section 5 enables a DIFFERENT Phase-6
+    # child (aggregate online time) and is skipped in the narrow scope.
+    case "${1:-run}" in
+      run-device-selfservice) P6_SCOPE=device-selfservice ;;
+      *)                      P6_SCOPE=full ;;
+    esac
+    say "Phase-6 controlled validation on $(hostname) [scope: $P6_SCOPE]"
     trap finish EXIT INT TERM
     capture_baseline
     # SOURCED, not executed: the body must run inside this shell so that its failures, its counters and any
@@ -541,5 +836,5 @@ case "${1:-run}" in
     . "$(dirname "$0")/phase6-controlled-validation-body.sh"
     ;;
 
-  *) echo "usage: $0 [run|restore|selftest CASE]" >&2; exit 2 ;;
+  *) echo "usage: $0 [run|run-device-selfservice|restore|selftest CASE]" >&2; exit 2 ;;
 esac
