@@ -167,16 +167,52 @@ It does what the raw commands below do, plus the three things that make a financ
 After it completes, guest internet access runs normally and **money movement is held** until an operator
 reconciles every item that was in flight when the backup was taken. Nothing is replayed automatically.
 
-The underlying commands, for reference and for a pre-Phase-4 appliance:
+The underlying commands, for reference and for a pre-Phase-4 appliance. **These were corrected after being
+run**: the previous version of this block named a role that does not exist, used host binaries this
+appliance does not have, and omitted the three TimescaleDB steps without which the restore destroys the
+extension. Every line below has been executed on PRE-LIVE.
 
 ```sh
-systemctl stop stayconnect-edged stayconnect-pmsd stayconnect-acctd stayconnect-portald stayconnect-scd
-dropdb  -U postgres stayconnect_site
-createdb -U postgres -O stayconnect_site stayconnect_site
-pg_restore -U stayconnect_site -d stayconnect_site /var/backups/stayconnect/site-<stamp>.dump
+# The database runs in a container and the host carries NO psql/pg_restore. `stayconnect_site` is the
+# DATABASE; the role is the container's own superuser (POSTGRES_USER), which is `stayconnect` here.
+PGX="docker exec -i stayconnect-pg psql -v ON_ERROR_STOP=1 -U stayconnect"
+
+systemctl stop stayconnect-edged stayconnect-pmsd stayconnect-acctd stayconnect-portald stayconnect-scd               stayconnect-netd
+$PGX -d postgres -tAc "SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+                        WHERE datname='stayconnect_site' AND pid<>pg_backend_pid()"
+$PGX -d postgres -c 'DROP DATABASE stayconnect_site'
+$PGX -d postgres -c 'CREATE DATABASE stayconnect_site'
+
+# TIMESCALEDB, IN THIS ORDER. The extension must exist BEFORE the restore, be suspended ACROSS it, and be
+# restored AFTERWARDS. Skipping this -- or using `pg_restore --clean --if-exists`, which drops the
+# extension and its schemas -- produces "schema _timescaledb_functions does not exist", 72 ignored errors,
+# and a database with its relational tables intact and both hypertables empty.
+$PGX -d stayconnect_site -c 'CREATE EXTENSION IF NOT EXISTS timescaledb'
+$PGX -d stayconnect_site -tAc 'SELECT timescaledb_pre_restore()'
+docker exec -i stayconnect-pg pg_restore -U stayconnect -d stayconnect_site   < /var/backups/stayconnect/site-<stamp>.dump
+$PGX -d stayconnect_site -tAc 'SELECT timescaledb_post_restore()'
+
+# PRIVILEGES THE DUMP DOES NOT CARRY. pg_dump captures grants on OBJECTS, not on the DATABASE, and
+# gatep-iam-roles.sql grants CREATE ON DATABASE to iam_v2_owner. Recreating the database revokes it
+# silently, and the symptom is the NEXT migration failing on an appliance whose restore reported success.
+docker cp /opt/stayconnect/deploy/gatep stayconnect-pg:/tmp/gatep
+for f in gatep-roles.sql gatep-iam-roles.sql gatep-iam-ownership.sql gatep-grants.sql; do
+  $PGX -d stayconnect_site -f "/tmp/gatep/$f"
+done
+
+# Registered, not merely shaped: an unregistered hypertable refuses every write while looking correct.
+$PGX -d stayconnect_site -tAc 'SELECT count(*) FROM timescaledb_information.hypertables'   # expect >= 2
+
 tar xzf site-<stamp>-etc.tgz -C /            # identity + license + env; contains NO financial marker
-systemctl start stayconnect-scd stayconnect-portald stayconnect-acctd stayconnect-pmsd stayconnect-edged
+systemctl start stayconnect-netd stayconnect-scd stayconnect-portald stayconnect-acctd                stayconnect-pmsd stayconnect-edged
 ```
+
+> **The marker must be readable by edged.** `financial-restore-generation.json` is written `0644` and
+> root-owned: root-owned so only root can advance it, world-readable because edged runs unprivileged and is
+> the only process that evaluates it. It was briefly written `0600`, and the effect was measured on
+> PRE-LIVE: a real supported restore produced `outcome=UNCHANGED`, no hold and no restore event, because
+> the reader got `EACCES` and the code treated unreadable as "never restored". An unreadable marker is now
+> an error rather than an assumption of innocence.
 
 > Restoring the `/etc` archive never rewrites `financial-restore-generation.json`, because the backup
 > excludes it. If an older archive that predates that exclusion is restored, the marker ends up BEHIND the

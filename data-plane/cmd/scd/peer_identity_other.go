@@ -29,4 +29,9 @@ func withPeerCred(ctx context.Context, _ net.Conn) context.Context { return ctx 
 
 func requireEdgedPeer(_ http.ResponseWriter, _ *http.Request) bool { return true }
 
+// requireAdminPeer allows here for the same reason, and the admin surface is the one where that matters
+// most: a workstation build can call /v1/backup/restore over a socket it created itself. It is not the
+// appliance, and the appliance is Linux.
+func requireAdminPeer(_ http.ResponseWriter, _ *http.Request) bool { return true }
+
 func slogWarnPeerRefused(_ peerCred, _ string) {}

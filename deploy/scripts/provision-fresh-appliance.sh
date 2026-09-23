@@ -63,8 +63,44 @@ say "packages ok"
 say "layout"
 mkdir -p "$SC"/{bin,releases} "$ETC"/{identity,license,assignment,certs,secrets} /var/log/stayconnect /run/kea /var/lib/kea
 chmod 700 "$ETC/secrets"
+# THE SERVICE ACCOUNTS, ALL OF THEM.
+#
+# This script created exactly one -- stayconnect -- and two units in deploy/systemd name accounts it never
+# made: stayconnect-pmsd (since Phase 3) and now stayconnect-portald. On this appliance both exist because
+# somebody ran useradd by hand, so the omission was invisible; a factory-clean provision would install the
+# units and then fail to start those services with "Failed to determine user credentials". That is the same
+# class of defect as a grant only a migration performs: a live-only artefact that no install path recreates.
+#
+# WHY EACH ONE IS SEPARATE, rather than one account for the whole product:
+#
+#	stayconnect           edged, and the OWNER of /run/stayconnect/scd.sock's group. Reaching that socket
+#	                      is what the group means, and scd's administrative routes now additionally
+#	                      require the peer to be THIS uid (cmd/scd/admin_surface.go).
+#	stayconnect-portald   the captive portal. It listens on *:8380 -- on every guest VLAN -- so it is the
+#	                      process most likely to be attacked and the one that must own the least. It keeps
+#	                      the stayconnect SUPPLEMENTARY group because guest authentication runs through
+#	                      scd's socket, and gets nothing else.
+#	stayconnect-pmsd      the PMS interface, which holds the credentials for the hotel's Protel connection.
+#
+# Sharing a uid makes the separation cosmetic: a process can ptrace another running under the same uid, so
+# a compromised portal reaches edged's memory whatever any in-process check does. That is why this is a
+# provisioning change and not only a code change.
 id stayconnect >/dev/null 2>&1 || useradd --system --home "$SC" --shell /usr/sbin/nologin stayconnect
+for svcuser in stayconnect-portald stayconnect-pmsd; do
+  id "$svcuser" >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin "$svcuser"
+done
+# NO usermod HERE, DELIBERATELY. portald needs the stayconnect group to open scd's socket, and its unit
+# says so with SupplementaryGroups=stayconnect -- which systemd applies to the process at start time. It
+# does not need, and does not get, a persistent membership in /etc/group: a permanent grant would also
+# apply to anything else ever run as that account, while the unit's grant applies to that service only.
+# Verified on the appliance: `id stayconnect-portald` shows its own group alone, and portald reaches the
+# socket regardless.
+
 chown -R stayconnect:stayconnect /var/log/stayconnect
+# GROUP-WRITABLE, because more than one account writes here now. portald's unit lists
+# /var/log/stayconnect in ReadWritePaths, and under its own uid a 0755 directory owned by stayconnect
+# refuses it -- systemd would grant the mount and the kernel would still deny the write.
+chmod 775 /var/log/stayconnect
 # CADDY'S LOG DIRECTORY *AND ITS FILES*. Caddy runs unprivileged; a root-owned log file inside a
 # caddy-owned directory still fails to open, and Caddy then refuses the whole config on start AND on reload.
 mkdir -p /var/log/caddy && chown -R caddy:caddy /var/log/caddy && chmod 755 /var/log/caddy
@@ -88,6 +124,11 @@ BASELINE="$SC/data-plane/migrations/baseline/0000_production_baseline.sql"
 $PGX -d stayconnect -tAc "SELECT 1 FROM pg_database WHERE datname='stayconnect_site'" | grep -q 1 \
   || $PGX -d stayconnect -c "CREATE DATABASE stayconnect_site" >/dev/null
 SITE="$PGX -d stayconnect_site"
+# Removed first: `docker cp <dir> <container>:<path>` copies INTO <path> when it already exists, so a
+# re-run would nest the files at /tmp/gatep/gatep/... and leave the previous run's copy at the path the
+# lines below read. This script is meant to be re-runnable, and a re-run applying the PREVIOUS Gate-P was
+# measured happening on PRE-LIVE: the run reported success and the new grant was absent.
+docker exec stayconnect-pg rm -rf /tmp/gatep >/dev/null 2>&1 || true
 docker cp "$DEPLOY/gatep" stayconnect-pg:/tmp/gatep >/dev/null
 $SITE -f /tmp/gatep/gatep-roles.sql >/dev/null
 # The IAM roles run BEFORE the baseline (its privileges name them) and again AFTER (its guarded REFERENCES

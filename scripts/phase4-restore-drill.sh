@@ -363,7 +363,21 @@ chmod +x "$W/stub/systemctl"
 # install -d -m 0700 cannot set POSIX permissions on a Windows filesystem, so the directory is created
 # up front. The tool still runs its own permission call; it simply finds the directory already there.
 mkdir -p "$W/etc2"
+# THE TOOL NOW ESTABLISHES ITS DATABASE ACCESS BEFORE IT TOUCHES ANYTHING, so this case points it at the
+# disposable cluster this drill already runs.
+#
+# The restore resolves the role, the client and the server version FIRST, and refuses if it cannot -- BEFORE
+# advancing the marker and before stopping a single writer. That ordering exists because of a measured
+# failure on PRE-LIVE: the tool called a host pg_restore that does not exist there, as a role that does not
+# exist either, and discovered it only AFTER the marker had been advanced and all five financial writers
+# stopped. The --dry-run passed on that machine, because it returns before any database call.
+#
+# So a fixture with no database now aborts at that check and never reaches the quiesce, which is exactly
+# what the two assertions below started reporting. They are about what happens when a WRITER WILL NOT STOP,
+# and that is downstream of being able to restore at all -- so the fixture supplies the cluster rather than
+# the check being relaxed to keep an old fixture working.
 out="$(PATH="$W/stub:$W/bin:$PATH" SCD_ASSIGNMENT_REGISTRY_ROOT="$W/anchor.pub" STAYCONNECT_MARKER_DIR="$W/etc2" \
+  STAYCONNECT_PG_CONTAINER="$C" STAYCONNECT_PGDB="$DB" STAYCONNECT_PGUSER=postgres \
   bash "$TOOL" --dump "$W/site.dump" --manifest "$W/m.json" \
   --tenant 11111111-1111-1111-1111-111111111111 \
   --site 22222222-2222-2222-2222-222222222222 2>&1 || true)"

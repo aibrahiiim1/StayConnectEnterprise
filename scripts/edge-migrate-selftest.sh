@@ -423,6 +423,141 @@ undo
 # was never blocked, and could commit in between. The rollback then removed a migration that was no longer
 # the head. Both directions now take one ledger-wide key first.
 
+# ---------------------------------------------------------------------------------------------------------
+# 7k. THE RUNNER MUST EXECUTE THE FILE IT VERIFIED, even when that file is not the last one in the directory
+# ---------------------------------------------------------------------------------------------------------
+# This suite could not have caught the bug it now tests for. Every apply case above names 0099_selftest_noop,
+# which is the alphabetically LAST .up.sql in the fixture directory -- so a runner that executed "the last
+# file" instead of "the selected file" would pass all of them.
+#
+# The bug was real and it reached a live appliance: a helper function iterated `for f in ...` without
+# declaring f, bash is dynamically scoped, and the caller's f was overwritten -- so an apply of 0087 read
+# 0088's file, which was already applied and whose body is CREATE OR REPLACE. psql succeeded, the ledger row
+# for 0087 was written, and none of 0087's objects existed. The checksum guard did not help, because the sha
+# was compared BEFORE the helper ran: the runner verified one file and executed another.
+#
+# So this case applies a migration that is NOT the last file, and asserts the object THAT migration creates
+# is the one that appears.
+echo "== 7k. the selected file is the one that runs, even when a higher-numbered file exists =="
+ledger_reset; mk_commerce; undo
+cat > "$MIGDIR/0097_selftest_lower.up.sql" <<'SQL'
+BEGIN;
+CREATE TABLE IF NOT EXISTS iam_v2.edge_selftest_lower_marker (id int PRIMARY KEY);
+COMMIT;
+SQL
+LOWSHA="$(sha256sum "$MIGDIR/0097_selftest_lower.up.sql" | awk '{print $1}')"
+out="$(EDGE_PSQL="$PSQL" bash "$RUN" --apply-role edge_apply --only 0097_selftest_lower   --expect-db "$DB" --target-kind live-site --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION   --expect-sha256 "$LOWSHA" 2>&1)"; lrc=$?
+lowmark="$(Q "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='iam_v2' AND c.relname='edge_selftest_lower_marker'")"
+highmark="$(marker)"
+lowrow="$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0097_selftest_lower'")"
+if [ "$lrc" = "0" ] && [ "$lowmark" = "1" ] && [ "$lowrow" = "1" ]; then
+  ok "applying a NON-last migration created ITS object and recorded ITS ledger row"
+else no "the runner did not apply the file it selected (rc=$lrc lower_marker=$lowmark ledger=$lowrow)" "$out"; fi
+if [ "$highmark" = "0" ]; then
+  ok "...and it did NOT run the last file in the directory"
+else no "the runner executed 0099's body while applying 0097 -- the dynamic-scoping clobber is back" "$out"; fi
+Q "DROP TABLE IF EXISTS iam_v2.edge_selftest_lower_marker" >/dev/null
+rm -f "$MIGDIR/0097_selftest_lower.up.sql"
+ledger_reset
+
+echo "== 7l. an EMPTY ledger is a factory-clean appliance, not a hundred gaps =="
+# CAUGHT BY REVIEW, and it would have refused the first apply on every newly provisioned appliance.
+#
+# migrations/baseline/0000_production_baseline.sql is "the CURRENT schema and only the current schema" and
+# contains no INSERT INTO schema_migrations at all, so a freshly provisioned appliance has a current schema
+# and an EMPTY ledger. The gap check derives its baseline floor from min(version) in the ledger; with no
+# rows that floor is empty, the exclusion below it stops excluding anything, and every historical file in
+# the directory is reported missing.
+#
+# The synthetic directory the earlier lock cases use has no files below its target, so it could not have
+# shown this. This case puts a lower file there on purpose.
+ledger_reset; mk_commerce; undo
+Q "DELETE FROM public.schema_migrations" >/dev/null
+cat > "$MIGDIR/0002_selftest_historical.up.sql" <<'SQL'
+BEGIN;
+SELECT 1;  -- stands in for a migration the baseline already covered
+COMMIT;
+SQL
+out="$(EDGE_PSQL="$PSQL" bash "$RUN" --apply-role edge_apply --only 0099_selftest_noop \
+  --expect-db "$DB" --target-kind live-site --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION \
+  --expect-sha256 "$SHA" 2>&1)"; erc=$?
+erow="$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0099_selftest_noop'")"
+if [ "$erc" = "0" ] && [ "$erow" = "1" ]; then
+  ok "an empty ledger did not turn baseline-covered migrations into gaps"
+else
+  no "the first apply on a factory-clean appliance was refused (rc=$erc ledger=$erow)" "$out"
+fi
+if printf '%s' "$out" | grep -q "gap check SKIPPED"; then
+  ok "...and it said WHY it skipped the check rather than skipping silently"
+else
+  no "the skip was silent; an operator cannot tell a skipped check from a passed one" "$out"
+fi
+rm -f "$MIGDIR/0002_selftest_historical.up.sql"
+ledger_reset
+
+echo "== 7m. a gap that appears AFTER the check, while the lock is held, is refused =="
+# CAUGHT BY REVIEW. verify_no_gap_below runs BEFORE the session takes the ledger lock, so its answer is true
+# when computed and not necessarily when the row is written: an apply validates while its predecessor is
+# present, a concurrent DOWN runner takes the lock first and removes that predecessor, and the apply --
+# which only rechecked ITSELF under the lock -- commits, recreating the gap the guard exists to prevent.
+#
+# DETERMINISTIC, NOT A RACE. The first version of this case slept and hoped, and reported "the ordering this
+# case targets did not occur" -- an honest non-result, but the guard went unexercised, which is the same
+# half-proof this suite exists to avoid. Instead the ledger lock is HELD while the runner does its pre-lock
+# check and blocks; the predecessor is deleted during that window; then the lock is released. The runner
+# then acquires the lock and evaluates the invariant with the row already gone, every time.
+LKEY7M="$(Q "SELECT hashtextextended('stayconnect_edge_migrate:ledger', 0)")"
+ledger_reset; mk_commerce; undo
+cat > "$MIGDIR/0096_selftest_predecessor.up.sql" <<'SQL'
+BEGIN;
+SELECT 1;
+COMMIT;
+SQL
+# EVERY lower file needs a row, or the PRE-lock check refuses first and the under-lock path is never
+# reached: 0098_selftest_fails.up.sql is still in this directory from an earlier case and is also below the
+# target. The ledger keeps a row for it throughout, so that when 0003 is removed the only thing that has
+# changed is the predecessor this case is about.
+# 0009 IS RECORDED TOO, and the predecessor is numbered ABOVE 0010 on purpose. A ledger row below 0010
+# makes the runner treat the database as an upgrade-path install and demand 0009_phase2_commerce -- which
+# it refused with, when this case first used 0003. That refusal is correct behaviour and belongs to a
+# different case; here it would simply prevent the under-lock path from ever being reached.
+ledger_add 0009_phase2_commerce
+ledger_add 0096_selftest_predecessor
+ledger_add 0098_selftest_fails
+
+# Hold the ledger lock, delete the predecessor while STILL HOLDING it, then let go. The runner's pre-lock
+# check therefore sees the row and its under-lock re-assertion does not.
+#
+# THE WINDOW IS 25s, NOT 6s. At 6s the runner's pre-lock structural checks -- a dozen round trips, each a
+# separate `docker exec psql` in this fixture -- had not finished, so the DELETE landed BEFORE the gap
+# check and the case reported "gap check SKIPPED: empty" instead of exercising the guard. The window has
+# to outlast the pre-lock phase, not merely overlap it.
+docker exec -d "$C" psql -U postgres -d "$DB" -c \
+  "SELECT pg_advisory_lock($LKEY7M); SELECT pg_sleep(25); DELETE FROM public.schema_migrations WHERE version='0096_selftest_predecessor'; SELECT pg_advisory_unlock($LKEY7M);" >/dev/null 2>&1
+sleep 1
+
+out="$(EDGE_PSQL="$PSQL" bash "$RUN" --apply-role edge_apply --only 0099_selftest_noop \
+  --expect-db "$DB" --target-kind live-site --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION \
+  --expect-sha256 "$SHA" 2>&1)"; grc=$?
+grow="$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0099_selftest_noop'")"
+prow="$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0096_selftest_predecessor'")"
+
+if [ "$prow" != "0" ]; then
+  no "the fixture did not remove the predecessor, so nothing was tested" "$out"
+elif printf '%s' "$out" | grep -qE "GAP_APPEARED_UNDER_LOCK|a concurrent rollback removed it"; then
+  ok "a gap that appeared under the lock was detected"
+  if [ "$grow" = "0" ]; then
+    ok "...and the migration was NOT recorded, so the ledger has no hole"
+  else
+    no "GAP_APPEARED_UNDER_LOCK was reported and the row was written anyway" "$out"
+  fi
+else
+  no "the predecessor vanished under the lock and the apply committed regardless (rc=$grc ledger=$grow)" "$out"
+fi
+Q "DELETE FROM public.schema_migrations WHERE version IN ('0096_selftest_predecessor','0098_selftest_fails','0009_phase2_commerce')" >/dev/null
+rm -f "$MIGDIR/0096_selftest_predecessor.up.sql"
+ledger_reset
+
 echo "== 8. concurrent ledger mutation is serialised =="
 
 # 8a. A HELD LEDGER LOCK BLOCKS AN APPLY. This is the property the whole fix rests on: if the ledger lock

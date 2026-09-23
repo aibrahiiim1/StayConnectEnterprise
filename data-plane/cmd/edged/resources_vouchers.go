@@ -65,6 +65,13 @@ func (s *server) vouchersRoutes() http.Handler {
 // dropdown and an operator could print a hundred cards against something the property had deliberately
 // withdrawn. "Has a current revision" is a fact about history; "is active" is the fact an operator changed
 // on purpose, and this list has to represent the second.
+//
+// AND NOT THE SYSTEM PACKAGES. Read off PRE-LIVE, where this list returned five packages and two of them
+// were `__system_checkout_grace` and `__sys_emergency_grace_pkg__` -- is_system=true, active=true, both
+// with a published revision, both therefore offered to an operator as something to print guest cards
+// against. They are internal mechanisms: the grace a departing guest gets and the emergency grant, granted
+// by the engine on its own initiative. A voucher printed against one would be a card that hands out an
+// internal grace allocation, and the operator choosing it from a dropdown has no way to know that.
 func (s *server) listGrantablePackageRevisions(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -75,7 +82,7 @@ func (s *server) listGrantablePackageRevisions(w http.ResponseWriter, r *http.Re
 	      FROM iam_v2.internet_packages p
 	      JOIN iam_v2.internet_package_revisions r
 	        ON r.tenant_id = p.tenant_id AND r.site_id = p.site_id AND r.id = p.current_revision_id
-	     WHERE p.tenant_id = $1 AND p.site_id = $2 AND p.active
+	     WHERE p.tenant_id = $1 AND p.site_id = $2 AND p.active AND NOT p.is_system
 	     ORDER BY p.code`, s.tenantID, s.siteID)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "query_failed", "the package list could not be read")

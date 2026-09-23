@@ -24,8 +24,25 @@ Environment=NODE_ENV=production
 Environment=PORT=3100
 Environment=HOSTNAME=127.0.0.1
 EnvironmentFile=-/etc/stayconnect/hotel-admin.env
-User=stayconnect
-Group=stayconnect
+# ITS OWN USER, AND NO ACCESS TO scd's SOCKET.
+#
+# This ran as User=stayconnect -- edged's account -- so `/usr/bin/node server.js`, the process that renders
+# the admin web UI, held edged's uid (998) and a primary group that opens /run/stayconnect/scd.sock. scd's
+# administrative gate was checking the uid, so it admitted this process to /v1/backup/restore,
+# /v1/license/install and /v1/setup/enroll with none of edged's operator authentication, permission check or
+# step-up. Found by review, after portald had been separated for exactly the same reason.
+#
+# NO SupplementaryGroups, unlike portald. portald keeps the stayconnect group because guest authentication
+# genuinely runs through that socket; hotel-admin talks to edged over HTTP on 127.0.0.1 and never opens the
+# socket at all -- there is no scd reference anywhere in the Next application or its env file. So it gets no
+# group, and the socket is simply not reachable from it.
+#
+# scd additionally requires the peer's EXECUTABLE to be edged for the administrative surface, which refuses
+# this process even while it shares an account. That check landed with this change and takes effect on an
+# scd restart; this unit removes the shared account the check exists to compensate for, because a process
+# holding edged's uid can ptrace edged whatever scd checks.
+User=stayconnect-hotel-admin
+Group=stayconnect-hotel-admin
 Restart=always
 RestartSec=3
 MemoryMax=768M

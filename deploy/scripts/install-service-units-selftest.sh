@@ -252,6 +252,46 @@ else
   sed 's/^/      /' "$d/out" | head -8
 fi
 
+# ---------------------------------------------------------------- service accounts
+#
+# A unit whose User= names an account that does not exist installs cleanly, reloads cleanly, and then
+# refuses to start with "Failed to determine user credentials". stayconnect-pmsd.service had named
+# User=stayconnect-pmsd since Phase 3 with no install path creating it -- invisible only because somebody
+# had run useradd by hand on the one appliance that exists.
+#
+# THE INSTALLER IS ASKED, not re-implemented. Step 3b creates the accounts and is skipped under
+# SC_SKIP_SYSTEMD=1 (this self-test must not add users to the machine it runs on), so the derivation would
+# otherwise go unexercised. SC_LIST_SERVICE_ACCOUNTS=1 prints what it would create, from the same code.
+echo "== the service accounts the units require are derived from the units =="
+accts="$(SC_LIST_SERVICE_ACCOUNTS=1 bash "$INSTALLER" "$DEPLOY" 2>/dev/null)"
+for want in stayconnect stayconnect-portald stayconnect-pmsd; do
+  if printf '%s
+' "$accts" | grep -qx "$want"; then
+    ok "$want is derived from the units that name it"
+  else
+    bad "$want is NOT derived; its service would install and fail to start"
+    printf '%s
+' "$accts" | sed 's/^/      derived: /'
+  fi
+done
+# root must NOT appear: it needs no account, and useradd root would fail and abort the whole install.
+if printf '%s
+' "$accts" | grep -qx root; then
+  bad "root appears in the derived account list; creating it would fail and abort the install"
+else
+  ok "root is excluded, as are units that leave User= unset"
+fi
+# A specifier such as User=%i cannot be resolved without systemd and must be skipped rather than guessed.
+d="$(new_tree acct_specifier)"
+sed 's/^User=.*/User=%i/' "$DEPLOY/systemd/stayconnect-portald.service" > "$d/src/systemd/stayconnect-portald.service"
+spec="$(SC_LIST_SERVICE_ACCOUNTS=1 bash "$INSTALLER" "$d/src" 2>/dev/null)"
+if printf '%s
+' "$spec" | grep -q '%'; then
+  bad "a systemd specifier was emitted as an account name: useradd would be called with '%i'"
+else
+  ok "a systemd specifier in User= is skipped, not turned into an account name"
+fi
+
 if [ "$fail" = "0" ]; then
   echo "INSTALL_SERVICE_UNITS_SELFTEST = PASS"
   exit 0

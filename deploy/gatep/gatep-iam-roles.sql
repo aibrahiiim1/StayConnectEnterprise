@@ -58,3 +58,100 @@ DO $$ BEGIN
     RAISE NOTICE 'public.guest_networks does not exist yet; re-run this file after the schema is built';
   END IF;
 END $$;
+
+-- AND public.operators, FOR THE SAME REASON AND BY THE SAME PATTERN.
+--
+-- iam_v2 tables declare FOREIGN KEYs to public.operators so that a request body cannot invent an operator:
+-- migration 0030 did it for appliance_product_setting_changes, and the voucher reveal audit does it for
+-- operator_id. Creating such a constraint needs REFERENCES on the TARGET table, which the cluster's
+-- administrative role owns.
+--
+-- BOTH INSTALL PATHS HID THE OMISSION, in opposite ways. A factory-clean reconstruction runs the numbered
+-- migrations as a SUPERUSER -- the platform migrations create extensions -- so REFERENCES is never checked.
+-- The appliance's UPGRADE path runs them through scripts/edge-migrate.sh with a least-privilege
+-- --apply-role, which is the entire point of that runner, and there the same migration fails with
+-- "permission denied for table operators". Measured on PRE-LIVE: migration 0087 was refused for exactly
+-- this, and the runner correctly left nothing applied.
+--
+-- It is granted HERE rather than in gatep-grants.sql because this file runs BEFORE the numbered migrations
+-- on both paths and that one runs after. A privilege a migration needs is useless if it arrives later.
+--
+-- REFERENCES IS NARROW: it permits a constraint pointing AT the table and nothing else. Not SELECT (which
+-- gatep-grants.sql grants separately, for the actor check), not INSERT, not UPDATE, not DELETE.
+DO $$ BEGIN
+  IF to_regclass('public.operators') IS NOT NULL THEN
+    EXECUTE 'GRANT REFERENCES ON public.operators TO iam_v2_owner';
+  ELSE
+    RAISE NOTICE 'public.operators does not exist yet; re-run this file after the schema is built';
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------------------------------------
+-- EVERY iam_v2 TABLE BELONGS TO iam_v2_owner, AND ONLY THIS FILE CAN MAKE THAT TRUE
+-- ---------------------------------------------------------------------------------------------------------
+-- ALTER TABLE ... OWNER TO requires the executing role to be a member of BOTH the current owner and the
+-- new one, so a table that ended up belonging to the administrative role can be reassigned only by the
+-- administrative role. A migration cannot do it, which is why migration 0090 asserts the invariant and this
+-- file establishes it.
+--
+-- FOUR TABLES ON PRE-LIVE NEEDED IT, from two causes, neither visible to a table count:
+--   * three created by a migration running as the applying role instead of the owner (0085, 0087), and
+--   * iam_v2.backfill_0066_identity_text, owned by the administrative role because migration 0066 was
+--     applied BY HAND rather than through scripts/edge-migrate.sh -- the same event that left 0066 with no
+--     ledger row.
+--
+-- It matters because iam_v2_rollback is a member of iam_v2_owner and of nothing else: a table owned by
+-- anybody else cannot be dropped by the guarded rollback path, so a rollback would work for most of the
+-- schema and fail on exactly the newest part of it.
+--
+-- WRITTEN AS A SWEEP, not a list of names, because the next one will have a name nobody has written yet.
+-- It is idempotent and it reports what it moved.
+DO $ownsweep$
+DECLARE r record; n int := 0;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'iam_v2_owner') THEN RETURN; END IF;
+  IF to_regnamespace('iam_v2') IS NULL THEN RETURN; END IF;
+  FOR r IN
+    SELECT c.relname
+      FROM pg_class c JOIN pg_namespace n2 ON n2.oid = c.relnamespace
+     WHERE n2.nspname = 'iam_v2' AND c.relkind = 'r'
+       AND pg_get_userbyid(c.relowner) <> 'iam_v2_owner'
+  LOOP
+    EXECUTE format('ALTER TABLE iam_v2.%I OWNER TO iam_v2_owner', r.relname);
+    RAISE NOTICE 'reassigned iam_v2.% to iam_v2_owner', r.relname;
+    n := n + 1;
+  END LOOP;
+  IF n = 0 THEN RAISE NOTICE 'every iam_v2 table already belongs to iam_v2_owner'; END IF;
+END $ownsweep$;
+
+-- ---------------------------------------------------------------------------------------------------------
+-- THE ROLLBACK ROLE, WHICH THE DOWN-MIGRATION RUNNER REQUIRES AND NOTHING CREATED
+-- ---------------------------------------------------------------------------------------------------------
+-- scripts/edge-migrate.sh --down requires the OPPOSITE ledger privilege from the forward path: SELECT and
+-- DELETE on public.schema_migrations, where the forward path refuses DELETE on a live site. That is
+-- deliberate and it is the strongest guard the runner has -- the role that migrates forward structurally
+-- cannot roll back -- but it only works if a role with that privilege EXISTS.
+--
+-- On PRE-LIVE it did not. Measured: neither iam_v2_migrator nor iam_v2_owner holds DELETE on the ledger, so
+-- the guarded rollback path delivered in increment 2 could not be run on the appliance at all. A mechanism
+-- with no provisioning is the same defect as a policy with no mechanism, one layer down.
+--
+-- NOLOGIN, like the others: it is reached by SET ROLE from an administrative connection, never connected as.
+--
+-- IT IS A MEMBER OF iam_v2_owner because a down migration DROPS objects the owner owns, and only the owner
+-- (or a member) may drop them. That is the same reason the down self-test's fixture grants the apply role to
+-- the rollback role -- a gap that self-test found the hard way, by refusing a legitimate rollback with
+-- "must be owner of table".
+DO $$ BEGIN CREATE ROLE iam_v2_rollback NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER ROLE iam_v2_rollback NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+GRANT iam_v2_owner TO iam_v2_rollback;
+
+-- The ledger privileges that define it. DELETE is the one that matters: it is what the down runner verifies
+-- it has, and what the forward runner verifies it does NOT have.
+DO $$ BEGIN
+  IF to_regclass('public.schema_migrations') IS NOT NULL THEN
+    EXECUTE 'GRANT SELECT, DELETE ON public.schema_migrations TO iam_v2_rollback';
+  ELSE
+    RAISE NOTICE 'public.schema_migrations does not exist yet; re-run this file after the schema is built';
+  END IF;
+END $$;

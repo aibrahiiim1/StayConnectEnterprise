@@ -46,27 +46,51 @@ MARKER_NAME="financial-restore-generation.json"
 # WHICH ROLE. A full backup has to read every schema, so a least-privilege SERVICE role is the wrong
 # credential: measured on the development appliance, dumping as svc_edged fails with
 # "permission denied for table schema_migrations" -- correctly, because that role is not supposed to read
-# the whole database. The DSN is therefore taken from the administrative entry that already points at the
-# site database, and an explicit STAYCONNECT_PGUSER always wins.
-PGUSER_SITE="${STAYCONNECT_PGUSER:-}"
-if [ -z "$PGUSER_SITE" ]; then
-  for envf in /etc/stayconnect/ctrlapi.env /etc/stayconnect/edged.env /etc/stayconnect/scd.env; do
-    [ -f "$envf" ] || continue
-    dsn="$(grep -oE "postgres://[^ ]*/$PGDB_SITE(\?[^ ]*)?" "$envf" | head -1)" || true
-    [ -n "${dsn:-}" ] || continue
-    PGUSER_SITE="$(printf '%s' "$dsn" | sed -E 's#postgres://([^:]+):.*#\1#')"
-    [ -n "${PGPASSWORD:-}" ] || PGPASSWORD="$(printf '%s' "$dsn" | sed -E 's#postgres://[^:]+:([^@]*)@.*#\1#')"
-    export PGPASSWORD
-    break
+# the whole database.
+#
+# THAT WAS WRITTEN HERE AND NOT ENFORCED, AND THE FALLTHROUGH FOUND IT. The resolution order was
+# ctrlapi.env, then edged.env, then scd.env. On THIS appliance ctrlapi is disabled -- Central moved to its
+# own host and the appliance is edge-only -- so there is no ctrlapi.env, and the loop fell through to
+# edged.env and resolved svc_edged: precisely the credential the paragraph above says cannot work. Measured
+# on PRE-LIVE: `pg_dump: error: query failed: ERROR: permission denied for table accounting_checkpoints`.
+#
+# So every scheduled backup would have failed, nightly, with a four-kilobyte LOCK TABLE error -- and the
+# timer that runs it had just been installed, which is how a mechanism with no scheduler became a scheduler
+# with a broken mechanism.
+#
+# THE SERVICE ROLES ARE NOW REFUSED BY NAME rather than attempted. A dump as svc_* cannot succeed, and
+# failing on the first line with a sentence an operator can act on is better than failing three minutes
+# later with a list of every table in the database.
+# The role, the container and the client all come from lib-site-db.sh, which exists because the RESTORE
+# half of this procedure had none of this and could not run on a containerised appliance at all. The
+# reasoning that used to be written out here -- the client must be the server's own, the database name is
+# not a role, a svc_* role cannot read every schema -- now lives there, once, for both scripts.
+# WHERE THE LIBRARY IS, WHICHEVER WAY THIS SCRIPT WAS INVOKED.
+#
+# NOT just "next to me". install-service-units.sh installs this script as /opt/stayconnect/bin/<name>
+# WITHOUT its extension, and until now it installed no libraries at all -- which is why
+# lib-hotel-admin-contract.sh is sitting in /opt/stayconnect/bin on the appliance with nothing in the
+# repository putting it there. Someone copied it by hand, exactly like the service accounts that no
+# install path created. The installer now carries lib-*.sh too, and this resolver means the script works
+# from the repository, from /opt/stayconnect/deploy/scripts, and from $BIN, rather than only from wherever
+# it happened to be tested.
+_sc_lib() {
+  local name="$1" here d
+  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  for d in "${SC_LIB_DIR:-}" "$here" /opt/stayconnect/bin /opt/stayconnect/deploy/scripts; do
+    [ -n "$d" ] && [ -f "$d/$name" ] && { echo "$d/$name"; return 0; }
   done
-fi
-# Off the appliance -- a CI runner, a workstation, a restore-drill fixture -- there are no StayConnect env
-# files to read, and the standard PostgreSQL conventions are the honest fallback. What is NOT a fallback is
-# the database name: the previous version defaulted PGUSER to `stayconnect_site`, which is the database, and
-# it produced an authentication failure that read like a password problem.
-[ -n "$PGUSER_SITE" ] || PGUSER_SITE="${PGUSER:-}"
-[ -n "$PGUSER_SITE" ] || PGUSER_SITE="$(id -un 2>/dev/null || true)"
-[ -n "$PGUSER_SITE" ] || { echo "backup: FAILED — no database role to dump as (set STAYCONNECT_PGUSER)" >&2; exit 1; }
+  echo "FATAL: $name was not found (looked in \$SC_LIB_DIR, $here, /opt/stayconnect/bin," >&2
+  echo "       /opt/stayconnect/deploy/scripts). This script cannot reach the database without it." >&2
+  return 1
+}
+# shellcheck source=lib-site-db.sh
+. "$(_sc_lib lib-site-db.sh)" || exit 1
+
+sitedb_resolve backup || exit 1
+sitedb_require_client pg_dump backup || exit 1
+PGUSER_SITE="$SITEDB_ROLE"
+PGDB_SITE="$SITEDB_DB"
 
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
 DUMP="$OUT_DIR/site-$STAMP.dump"
@@ -74,35 +98,48 @@ ETC_TAR="$OUT_DIR/site-$STAMP-etc.tgz"
 
 mkdir -p "$OUT_DIR"
 
-USE_CONTAINER=0
-if command -v docker >/dev/null 2>&1 && docker inspect "$PG_CONTAINER" >/dev/null 2>&1; then
-  USE_CONTAINER=1
-fi
+# A FAILED BACKUP MUST NOT LEAVE SOMETHING THAT LOOKS LIKE A BACKUP.
+#
+# The dump is written with `> "$DUMP"`, which CREATES the file before pg_dump runs. When pg_dump then fails,
+# `set -e` exits the script immediately -- before the `[ -s "$DUMP" ]` check below that was supposed to
+# remove it. Measured: the first run on PRE-LIVE left site-20260923-014058.dump at zero bytes in the backup
+# directory, beside a real one.
+#
+# That is worse than it looks. The retention cleanup reasons about the NEWEST artefact, a restore tool is
+# pointed at a directory listing, and an operator reading `ls` sees a .dump with a plausible timestamp. So
+# the partial artefacts are removed on ANY non-zero exit, by a trap, which is the only thing that runs when
+# `set -e` takes the script down mid-command.
+BACKUP_OK=0
+cleanup_partial() {
+  [ "$BACKUP_OK" = 1 ] && return 0
+  for f in "${DUMP:-}" "${ETC_TAR:-}"; do
+    [ -n "$f" ] || continue
+    # Only a file this run created, and only when it is empty or the run did not finish. A complete
+    # artefact is never removed: BACKUP_OK is set once everything is written and verified.
+    [ -f "$f" ] && { rm -f "$f"; echo "backup: removed the partial artefact $f" >&2; }
+  done
+  return 0
+}
+trap cleanup_partial EXIT
 
-if [ "$USE_CONTAINER" = 1 ]; then
-  SRV_MAJOR="$(docker exec "$PG_CONTAINER" psql -U "$PGUSER_SITE" -d "$PGDB_SITE" -qAt                  -c 'SHOW server_version' </dev/null 2>/dev/null | cut -d. -f1)"
-  CLI_MAJOR="$(docker exec "$PG_CONTAINER" pg_dump --version </dev/null 2>/dev/null                  | grep -oE '[0-9]+' | head -1)"
-else
-  SRV_MAJOR="$(psql -U "$PGUSER_SITE" -d "$PGDB_SITE" -qAt -c 'SHOW server_version' 2>/dev/null | cut -d. -f1)"
-  CLI_MAJOR="$(pg_dump --version 2>/dev/null | grep -oE '[0-9]+' | head -1)"
-fi
-if [ -z "$SRV_MAJOR" ] || [ -z "$CLI_MAJOR" ]; then
-  echo "backup: FAILED — could not establish the server and client versions" >&2; exit 1
-fi
-if [ "$CLI_MAJOR" -lt "$SRV_MAJOR" ]; then
-  echo "backup: FAILED — pg_dump $CLI_MAJOR cannot dump a PostgreSQL $SRV_MAJOR server." >&2
-  echo "backup: run this where the server's own client is available, or set STAYCONNECT_PG_CONTAINER." >&2
+echo "backup: dumping $PGDB_SITE as $PGUSER_SITE -> $DUMP"
+
+# CAN THIS ROLE ACTUALLY READ EVERYTHING? Asked before the dump, because pg_dump answers the same question
+# by locking every table and printing the whole list -- a four-kilobyte error whose cause is one word in it.
+# The probe counts tables the role cannot SELECT, across every non-system schema, so it also catches the
+# next table a migration adds without granting: the failure mode this backup already had once.
+UNREADABLE="$(sitedb_psql -qAt 2>/dev/null -c "
+  SELECT count(*) FROM information_schema.tables t
+   WHERE t.table_type = 'BASE TABLE'
+     AND t.table_schema NOT IN ('pg_catalog','information_schema')
+     AND NOT has_table_privilege(quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'SELECT')")"
+if [ -n "${UNREADABLE:-}" ] && [ "$UNREADABLE" != "0" ]; then
+  echo "backup: FAILED — '$PGUSER_SITE' cannot SELECT $UNREADABLE table(s) in this database, so the dump" >&2
+  echo "backup: would be refused partway through. A backup that cannot read everything is not a backup." >&2
   exit 1
 fi
-echo "backup: pg_dump $CLI_MAJOR -> server $SRV_MAJOR (container=$USE_CONTAINER) -> $DUMP"
 
-if [ "$USE_CONTAINER" = 1 ]; then
-  # Streamed to the host over stdout so the artefact lands in OUT_DIR and nothing is left inside the
-  # container to be forgotten about.
-  docker exec -e PGPASSWORD="${PGPASSWORD:-}" "$PG_CONTAINER"     pg_dump -Fc -U "$PGUSER_SITE" "$PGDB_SITE" </dev/null > "$DUMP"
-else
-  pg_dump -Fc -U "$PGUSER_SITE" "$PGDB_SITE" -f "$DUMP"
-fi
+sitedb_pg_dump "$DUMP"
 [ -s "$DUMP" ] || { echo "backup: FAILED — the dump is empty" >&2; rm -f "$DUMP"; exit 1; }
 
 echo "backup: tar $ETC_DIR -> $ETC_TAR (EXCLUDING $MARKER_NAME)"
@@ -117,6 +154,9 @@ if tar tzf "$ETC_TAR" | grep -q "$MARKER_NAME"; then
   exit 1
 fi
 echo "backup: verified — the financial restore marker is not in the archive"
+
+# From here the artefacts are complete, so the trap must not delete them.
+BACKUP_OK=1
 
 DUMP_SHA="$(sha256sum "$DUMP" | awk '{print $1}')"
 cat > "$DUMP.meta.json" <<JSON

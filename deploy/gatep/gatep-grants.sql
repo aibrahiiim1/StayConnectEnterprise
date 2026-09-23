@@ -106,6 +106,23 @@ GRANT SELECT,DELETE               ON public.stripe_events           TO svc_scd; 
 GRANT SELECT,DELETE               ON public.stripe_accounts         TO svc_scd; -- cross-tenant detect + purge
 GRANT SELECT,DELETE               ON public.operator_roles          TO svc_scd; -- cross-tenant detect + purge
 GRANT SELECT,DELETE               ON public.operators               TO svc_scd; -- cross-tenant detect + purge
+-- ONE COLUMN, NOT THE TABLE. scd binds the appliance's local operators to the tenant its SIGNED assignment
+-- names (cmd/scd/assignment.go, seedTenantSiteMirror), because iam_v2.p4_assert_financial_actor decides who
+-- may act on financial recovery by reading operators.tenant_id -- and on an appliance that column was NULL,
+-- so all four actor-gated kernels were unperformable. Measured during this closure's restore drill: a
+-- supported restore entered FINANCIAL_RECOVERY_MODE and nobody could release it.
+--
+-- A plain `GRANT UPDATE ON public.operators` would let scd rewrite password_hash and status -- it could
+-- disable an administrator or replace their credential. Column-level UPDATE is exactly the authority the
+-- binding needs and nothing more: PostgreSQL refuses an UPDATE that touches any other column, and
+-- has_table_privilege('svc_scd','public.operators','UPDATE') stays FALSE, because a column grant is not a
+-- table grant. Verified on PRE-LIVE after applying this: the column UPDATE succeeds and the table-level
+-- privilege still reads false.
+-- TWO COLUMNS, because the statement sets two. Column-level UPDATE covers exactly the columns named, and
+-- an UPDATE that touches one ungranted column is refused for the whole table: measured here, `SET
+-- tenant_id` succeeded as svc_scd and `SET tenant_id, updated_at = now()` failed with "permission denied
+-- for table operators". updated_at is a timestamp the write should keep honest, not a privilege question.
+GRANT UPDATE (tenant_id, updated_at) ON public.operators            TO svc_scd; -- assignment tenant binding
 GRANT DELETE                      ON public.pms_attempts            TO svc_scd; -- cross-tenant purge (already had S/I)
 GRANT DELETE                      ON public.walled_garden_rules     TO svc_scd; -- cross-tenant purge (already had S)
 GRANT DELETE                      ON public.notification_providers  TO svc_scd; -- cross-tenant purge (already had S/U)
@@ -333,8 +350,42 @@ DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'iam_v2_owner') THEN
     EXECUTE 'GRANT SELECT ON public.operators TO iam_v2_owner';
+    -- REFERENCES on public.operators is granted in gatep-iam-roles.sql, NOT here, and the difference
+    -- matters: this file runs AFTER the numbered migrations, and the privilege is needed BY one of them.
+    -- Granting it here would be granting it too late to be used.
   END IF;
 END $$;
+
+-- ===========================================================================================================
+-- OWNERSHIP ASSERTION -- every iam_v2 table belongs to iam_v2_owner, re-checked on every reconcile.
+--
+-- Ownership in this schema is load-bearing: the boundary functions are SECURITY DEFINER and execute as their
+-- OWNER, and iam_v2_rollback is a member of iam_v2_owner and of nothing else -- so a table owned by anybody
+-- else cannot be dropped by the guarded rollback path.
+--
+-- FOUR TABLES ON PRE-LIVE WERE WRONG, from two different causes, and neither was visible to anything that
+-- counted tables: three were created by a migration running under the applying role rather than the owner,
+-- and one belonged to the administrative role because its migration was applied by hand. Migrations 0089
+-- and 0090 corrected them. This assertion is what stops the next one landing quietly -- a correction fixes
+-- what happened, an assertion fixes the class.
+--
+-- Guarded, because iam_v2_owner exists only where the IAM-v2 domain has been created.
+DO $ownassert$
+DECLARE bad text;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'iam_v2_owner') THEN RETURN; END IF;
+  IF to_regnamespace('iam_v2') IS NULL THEN RETURN; END IF;
+  SELECT string_agg(c.relname || ' (' || pg_get_userbyid(c.relowner) || ')', ', ' ORDER BY c.relname)
+    INTO bad
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = 'iam_v2' AND c.relkind = 'r'
+     AND pg_get_userbyid(c.relowner) <> 'iam_v2_owner';
+  IF bad IS NOT NULL THEN
+    RAISE EXCEPTION 'iam_v2 tables not owned by iam_v2_owner: %', bad
+      USING HINT = 'apply iam_v2 migrations with --apply-role iam_v2_owner, or have the migration declare '
+                   'its own ALTER TABLE ... OWNER TO iam_v2_owner';
+  END IF;
+END $ownassert$;
 
 -- ===========================================================================================================
 -- D32 CLOSING ASSERTION -- no runtime role, and not PUBLIC, may reach grace policy any way but the audited one.
