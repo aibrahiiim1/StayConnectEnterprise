@@ -1,0 +1,4 @@
+commit a15f293a671fad43dfdabbd866d81e76b47fa60f
+Date:   Wed Sep 23 08:45:47 2026 +0300
+
+    A receipt may not claim to have been written after itself
