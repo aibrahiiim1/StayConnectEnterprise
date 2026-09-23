@@ -1,0 +1,4 @@
+commit 91c094ec14adbec5454e3e3a21cb524be7bc826d
+Date:   Wed Sep 23 07:58:33 2026 +0300
+
+    Governance: the financial-marker prerequisite was a wrong conclusion
