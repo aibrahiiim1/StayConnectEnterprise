@@ -2,7 +2,7 @@
 
 - **Base commit:** `7ea36cfd019fb2921e97890f73c71bccfd34083d`
 - **HEAD commit:** `d92128dcce86b8a2495679ba6a95ef490656af6a`
-- **Provenance (generation HEAD = inventory_head):** `a9dd24ccbf353e043047df168bd06f2d9e3b29db`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `a9689412f56332b05e2a559fd54b07666f16d185`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/fc-increment-4`
 - **Remote branch:** `origin/delivery/fc-increment-4`
 - **Changed files:** 58
@@ -43,27 +43,27 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: re-render the generated blocks against T0179 |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: re-render the generated blocks against T0179 |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: re-render the generated blocks against T0179 |
-| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: the manifest lists itself, after the last commit |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the fixture correction |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the fixture correction |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the fixture correction |
+| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: the manifest lists itself |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the receipt-timestamp correction |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the receipt-timestamp correction |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the receipt-timestamp correction |
 | `exports/chatgpt/phase-evidence/GIT_STAT_5f854a39.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Packs: rebuild against T0179 |
-| `exports/chatgpt/phase-evidence/GIT_STAT_cec008db.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs: rebuild after the fixture correction |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the fixture correction |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the fixture correction |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the fixture correction |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the fixture correction |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the fixture correction |
+| `exports/chatgpt/phase-evidence/GIT_STAT_a15f293a.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs: rebuild after the receipt-timestamp correction |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the receipt-timestamp correction |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the receipt-timestamp correction |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the receipt-timestamp correction |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the receipt-timestamp correction |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the receipt-timestamp correction |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild against T0179 |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: re-render the generated blocks against T0179 |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the fixture correction |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the receipt-timestamp correction |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: re-render the generated blocks against T0179 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild against T0179 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild against T0179 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild against T0179 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild against T0179 |
 | `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0179 and the delivery head follow the fixture correction |
-| `governance/transitions/T0179.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0179 and the delivery head follow the fixture correction |
+| `governance/transitions/T0179.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | A receipt may not claim to have been written after itself |
 | `hotel-admin/test/verify-vouchers-ui.mjs` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | The deployed scd was not a production build, and that disabled guest vouchers |
 | `scripts/central-outage-local-first-test.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | The deployed scd was not a production build, and that disabled guest vouchers |
 | `scripts/edge-migrate-selftest.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Live deployment round 1: five defects the appliance found, and a runner bug of mine |
@@ -104,12 +104,12 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   2 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   2 +-
  docs/context/StayConnect-IAM-Handoff.md            |   2 +-
- docs/manifests/PostClosure-change-manifest.md      | 250 +++++++--------
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343816 -> 343817 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 143871 -> 143872 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44161 -> 44157 bytes
+ docs/manifests/PostClosure-change-manifest.md      | 251 +++++++--------
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343816 -> 343813 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 143871 -> 143862 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44161 -> 44159 bytes
  .../chatgpt/phase-evidence/GIT_STAT_5f854a39.txt   |   4 -
- .../chatgpt/phase-evidence/GIT_STAT_cec008db.txt   |   4 +
+ .../chatgpt/phase-evidence/GIT_STAT_a15f293a.txt   |   4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   4 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
  exports/chatgpt/phase1b-planning/MANIFEST.md       |   2 +-
@@ -131,7 +131,7 @@
  scripts/edge-migrate.sh                            |  99 +++++-
  scripts/phase19-multi-vlan-test.sh                 | 339 +++++++++++++++++++++
  scripts/phase4-restore-drill.sh                    |  14 +
- 58 files changed, 2999 insertions(+), 363 deletions(-)
+ 58 files changed, 3001 insertions(+), 362 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -141,6 +141,9 @@ M  docs/manifests/PostClosure-change-manifest.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: a9689412 Packs: rebuild after the receipt-timestamp correction
+HISTORICAL: a15f293a A receipt may not claim to have been written after itself
+HISTORICAL: 0f0dee80 Delivery: the manifest lists itself
 HISTORICAL: a9dd24cc Packs: rebuild after the fixture correction
 HISTORICAL: cec008db Governance: T0179 and the delivery head follow the fixture correction
 HISTORICAL: d92128dc The restore drill's fixture had no database, and the tool now needs one first
