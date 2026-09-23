@@ -1,0 +1,4 @@
+commit 60f4dc98b117ff7a4985fd1ebf9ef6be71da1149
+Date:   Wed Sep 23 16:32:21 2026 +0300
+
+    Governance: the delivery head is the test fix
