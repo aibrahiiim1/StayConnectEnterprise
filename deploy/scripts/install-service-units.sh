@@ -334,6 +334,32 @@ else
   done
 fi
 
+# ---- 3c. TMPFILES, WHICH ONLY THE FRESH-INSTALL PATH HAD EVER APPLIED ------
+#
+# deploy/tmpfiles/*.conf declares the directories and files the services need to exist, and with which
+# ownership, before a sandboxed unit starts -- scd and portald run under ProtectSystem with an explicit
+# ReadWritePaths allowlist that systemd resolves AT UNIT START, so a path that does not exist then is not
+# writable afterwards however the service tries.
+#
+# Only provision-fresh-appliance.sh copied these. An appliance that already exists -- the only kind there
+# is -- never received a change to them, so a tmpfiles declaration was effectively fresh-install-only: the
+# same shape of defect as the helper list and the service accounts above, one directory across.
+if [ "$SKIP_SYSTEMD" = "1" ]; then
+  say "SC_SKIP_SYSTEMD=1: not applying tmpfiles"
+elif [ -d "$SRC/tmpfiles" ]; then
+  for f in "$SRC"/tmpfiles/*.conf; do
+    [ -f "$f" ] || continue
+    b="$(basename "$f")"
+    if [ -f "/etc/tmpfiles.d/$b" ] && cmp -s "$f" "/etc/tmpfiles.d/$b"; then continue; fi
+    install -m 0644 "$f" "/etc/tmpfiles.d/$b" || die "cannot install /etc/tmpfiles.d/$b"
+    say "updated tmpfiles.d/$b"
+  done
+  # --create only creates and adjusts what the files declare; it removes nothing. Failure is reported and
+  # not fatal: a single malformed line must not block a deployment, and the units' own start-time checks
+  # remain the backstop.
+  systemd-tmpfiles --create >/dev/null 2>&1 || say "NOTE: systemd-tmpfiles --create reported a problem"
+fi
+
 # ---- 4. units --------------------------------------------------------------
 changed=0
 for u in "$SRC"/systemd/stayconnect-*.service "$SRC"/systemd/stayconnect-*.timer; do

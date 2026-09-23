@@ -89,9 +89,12 @@ id stayconnect >/dev/null 2>&1 || useradd --system --home "$SC" --shell /usr/sbi
 for svcuser in stayconnect-portald stayconnect-pmsd; do
   id "$svcuser" >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin "$svcuser"
 done
-# portald needs the socket group, and NOT as its primary group -- its primary group is its own, so files it
-# creates are not group-readable by edged by default.
-id -nG stayconnect-portald | tr ' ' '\n' | grep -qx stayconnect || usermod -aG stayconnect stayconnect-portald
+# NO usermod HERE, DELIBERATELY. portald needs the stayconnect group to open scd's socket, and its unit
+# says so with SupplementaryGroups=stayconnect -- which systemd applies to the process at start time. It
+# does not need, and does not get, a persistent membership in /etc/group: a permanent grant would also
+# apply to anything else ever run as that account, while the unit's grant applies to that service only.
+# Verified on the appliance: `id stayconnect-portald` shows its own group alone, and portald reaches the
+# socket regardless.
 
 chown -R stayconnect:stayconnect /var/log/stayconnect
 # GROUP-WRITABLE, because more than one account writes here now. portald's unit lists
