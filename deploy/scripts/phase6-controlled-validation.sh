@@ -242,8 +242,8 @@ restore_flags() {
       sed -i '/^STAYCONNECT_PHASE6_/d' "$f" 2>/dev/null || true
     fi
   done
-  systemctl reset-failed $UNITS >/dev/null 2>&1
-  systemctl restart $UNITS >/dev/null 2>&1 || true
+  restart_units
+  settle_units 30 >/dev/null 2>&1 || true
   wait_for_scd || true
 }
 
@@ -254,7 +254,9 @@ restore_hotel_admin() {
   now="$(readlink -f "$HA_CURRENT" 2>/dev/null || true)"
   [ "$now" = "$want" ] && return 0
   ln -sfn "$want" "$HA_CURRENT.tmp" && mv -Tf "$HA_CURRENT.tmp" "$HA_CURRENT"
-  systemctl restart stayconnect-hotel-admin >/dev/null 2>&1 || true
+  # Bounded for the same reason as restart_units: hotel-admin is also Restart=always with the start limiter
+  # disabled, so a synchronous restart of a unit that will not come up would block here instead.
+  restart_units stayconnect-hotel-admin
 }
 
 restore_settings() {
@@ -510,6 +512,56 @@ finish() {
 }
 
 # ---- enabling -------------------------------------------------------------------------------------------------
+# restart_units -- STOP, THEN START WITHOUT BLOCKING, BOTH BOUNDED.
+#
+# `systemctl restart` NEVER RETURNS on this appliance when the configuration is one the service refuses.
+# MEASURED ON PRE-LIVE: a controlled run sat in do_wait on
+#
+#     systemctl restart stayconnect-scd stayconnect-acctd stayconnect-edged
+#
+# for 3 hours 12 minutes during the step that DELIBERATELY configures a refusal, and it left edged and acctd
+# down for all of it. The cause is in the unit and it is intentional there:
+#
+#     Restart=always   RestartSec=2   StartLimitIntervalSec=0
+#
+# With the start limiter disabled, systemd retries the refused start forever, the restart job never settles
+# into active or failed, and a synchronous restart waits for a job that cannot finish. The appliance
+# disables the limiter on purpose, so that a transient database outage cannot leave a service permanently
+# down -- that policy is right and is not what changes here.
+#
+# This harness's own comment shows what it assumed instead: "systemd's start limiter then remembers those
+# rapid failures: the NEXT restart is refused outright with 'start request repeated too quickly'". That is
+# the behaviour of an appliance WITH the limiter, which the retired development appliance had and PRE-LIVE
+# does not. Admitting PRE-LIVE is what surfaced it.
+#
+# So: stop first (which completes even on a looping unit, because it cancels the loop), clear the counter,
+# then start WITHOUT blocking and let the callers settle on evidence -- wait_for_scd for the route, and the
+# bounded settle below for the units. A step that expects a refusal now observes it in a bounded time
+# instead of hanging on it.
+restart_units() {   # restart_units [unit ...]  -- defaults to $UNITS
+  local set_="${*:-$UNITS}"
+  timeout 45 systemctl stop $set_ >/dev/null 2>&1
+  systemctl reset-failed $set_ >/dev/null 2>&1
+  timeout 45 systemctl start --no-block $set_ >/dev/null 2>&1
+}
+
+# settle_units waits, bounded, for every named unit to be active. It REPORTS rather than judges: one step
+# deliberately produces a configuration scd must refuse, and a helper that called that a failure would turn
+# the fail-closed proof upside down.
+settle_units() {    # settle_units <seconds> [unit ...]
+  local budget="$1"; shift
+  local set_="${*:-$UNITS}" i=0 u all
+  while [ "$i" -lt "$budget" ]; do
+    all=1
+    for u in $set_; do
+      [ "$(systemctl is-active "$u" 2>/dev/null)" = "active" ] || all=0
+    done
+    [ "$all" = "1" ] && return 0
+    i=$((i+1)); sleep 1
+  done
+  return 1
+}
+
 set_flags() {   # set_flags FLAG [FLAG ...]  -- exactly this set, on every unit; anything else removed
   # EVERY TOKEN IS CHECKED BEFORE IT IS WRITTEN. Not defensive habit: the first version of the caller wrapped
   # its flag list across two lines with a backslash INSIDE double quotes, where a backslash-newline is not a
@@ -535,12 +587,12 @@ set_flags() {   # set_flags FLAG [FLAG ...]  -- exactly this set, on every unit;
     sed -i '/^STAYCONNECT_PHASE6_/d; /^STAYCONNECT_PHASE3_MASTER=/d; /^STAYCONNECT_PHASE3_PMS_AUTH=/d' "$f"
     for n in "$@"; do printf '%s=true\n' "$n" >> "$f"; done
   done
-  # reset-failed FIRST. One step here deliberately produces a configuration scd refuses to start on, and
-  # systemd's start limiter then remembers those rapid failures: the NEXT restart is refused outright with
-  # "start request repeated too quickly", the unit stays down, and every later step fails for a reason that
-  # has nothing to do with the product. Clearing the counter is what makes the fail-closed proof survivable.
-  systemctl reset-failed $UNITS >/dev/null 2>&1
-  systemctl restart $UNITS >/dev/null 2>&1
+  # The restart is bounded and non-blocking: see restart_units, which exists because the synchronous form
+  # hung for three hours on PRE-LIVE during the very step below that deliberately configures a refusal.
+  # Clearing the failure counter is part of it, for the reason this comment used to give on its own -- a
+  # remembered burst of rapid failures would otherwise make a LATER restart refuse outright, and every step
+  # after it would fail for a reason that has nothing to do with the product.
+  restart_units
   # It REPORTS rather than judges. One step deliberately configures a combination the appliance must refuse to
   # start on, and a helper that recorded that refusal as a failure would turn the fail-closed proof upside
   # down. The callers that need scd up notice through the route they then ask for.
