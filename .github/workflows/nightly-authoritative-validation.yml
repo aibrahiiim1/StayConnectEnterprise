@@ -1,0 +1,75 @@
+name: Nightly Authoritative Validation
+
+# ---------------------------------------------------------------------------------------------------------
+# ONE COMPLETE AUTHORITATIVE VALIDATION PER NIGHT, AT 03:10 Africa/Cairo, AGAINST THE EXACT DELIVERY HEAD.
+#
+# Normal development is no longer interrupted: the four gate workflows do not run on `pull_request` at all.
+# They are dispatched here, once a night, at the exact head of the single active delivery candidate, and an
+# all-green result on that exact head is merged automatically.
+#
+# WHY TWO CRONS. GitHub cron is UTC-only and has no timezone support, and Egypt observes DST -- UTC+2 in
+# winter, UTC+3 from late April to late October. A single hard-coded UTC cron would therefore be an hour wrong
+# for half the year. So the workflow fires at BOTH 00:10Z and 01:10Z, and tools/nightly_delivery.py decides
+# which firing is tonight's real one by converting 03:10 Africa/Cairo (read from the tz database) back to UTC:
+#
+#     winter  target 01:10Z  -> the 00:10Z firing skips as TOO_EARLY, the 01:10Z firing runs
+#     summer  target 00:10Z  -> the 00:10Z firing runs, the 01:10Z firing skips as TOO_LATE
+#
+# Exactly one firing is admitted on each of 366 nights, asserted across both DST transitions by
+# tools/tests/nightly_delivery/run_negative.py. No UTC offset is written down anywhere.
+# ---------------------------------------------------------------------------------------------------------
+on:
+  schedule:
+    - cron: '10 0 * * *'     # 03:10 Africa/Cairo while Egypt is on EEST (UTC+3)
+    - cron: '10 1 * * *'     # 03:10 Africa/Cairo while Egypt is on EET  (UTC+2)
+  workflow_dispatch:
+    inputs:
+      ignore_schedule_window:
+        description: 'Run now instead of waiting for 03:10 Africa/Cairo. Changes only WHEN, never WHAT.'
+        type: boolean
+        default: false
+      dry_run:
+        description: 'Run the full four-gate validation and report the decision, but do not merge.'
+        type: boolean
+        default: false
+
+# Never cancel a nightly run: it may already have dispatched the gates, and a cancelled orchestrator would
+# leave four runs in flight with nothing to read their verdict or merge on it.
+concurrency:
+  group: nightly-authoritative-validation
+  cancel-in-progress: false
+
+permissions:
+  contents: write            # the protected merge
+  pull-requests: write       # reading the candidate and merging it
+  actions: write             # dispatching the four gates
+
+jobs:
+  nightly:
+    name: nightly-authoritative-validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      # The decision module and its tests are read from the DEFAULT BRANCH, not from the candidate. The
+      # candidate is the thing under judgement; the judge must not be supplied by it.
+      - name: Check out master (the judge, not the candidate)
+        uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The rules that can refuse a merge are proven before any of them is used tonight. If this fails,
+      # nothing is dispatched and nothing is merged.
+      - name: Fail-closed proofs for tonight's decision rules
+        run: python tools/tests/nightly_delivery/run_negative.py
+
+      - name: Validate, and merge if all four gates freshly pass the exact head
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NIGHTLY_IGNORE_SCHEDULE_WINDOW: ${{ inputs.ignore_schedule_window }}
+          NIGHTLY_DRY_RUN: ${{ inputs.dry_run }}
+        run: python scripts/ci/nightly-orchestrate.py

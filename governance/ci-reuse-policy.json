@@ -498,6 +498,11 @@
           "why": "it builds in-process variations of the tracked governance/project-state.json and runs the tracked rule against them, asserting both that each contradiction is refused AND that legitimate future authorised work is allowed. One case gutters scripts/clean-install-reconstruction.sh to prove the ledger guard checks the assertion rather than its heading, then restores it byte-exact and verifies that it did. Every input is the tree; an identical tree gives an identical verdict. No clock, no network, no database, no artifact."
         },
         {
+          "name": "Nightly delivery decision — fail-closed proofs",
+          "reuse": "tree-pure",
+          "why": "it drives the tracked decision module through constructed in-memory states -- candidate lists, gate-run lists, pull-request snapshots and fixed UTC instants -- and asserts each verdict. The schedule cases are computed from the tz database against pinned datetimes, not against the wall clock, so the verdict does not move with the time of day. Every input is the tree; an identical tree gives an identical verdict. No clock dependence, no network, no database, no artifact."
+        },
+        {
           "name": "Migration grant durability — a migration grant must also be named in Gate-P",
           "reuse": "tree-pure",
           "why": "it parses GRANT statements out of two sets of tracked SQL files -- data-plane/migrations/*.up.sql and deploy/gatep/*.sql -- and compares them. No database, no clock, no network, no git history, and it produces no artifact. An identical tree has the identical answer."
@@ -582,6 +587,30 @@
           "name": "Working tree must remain clean",
           "reuse": "always",
           "why": "NOT TREE-PURE — runner state after this run's steps. The always-run checks above still execute on a hit, so it still has something to assert."
+        }
+      ]
+    },
+    "nightly-authoritative-validation.yml": {
+      "steps": [
+        {
+          "name": "Check out master (the judge, not the candidate)",
+          "reuse": "always",
+          "why": "it fetches the decision module and its proofs from the DEFAULT BRANCH. The candidate is the thing under judgement, so the judge must never be supplied by it. Nothing here is skippable: there is no evidence-reuse step in this workflow at all."
+        },
+        {
+          "name": "Set up Python",
+          "reuse": "always",
+          "why": "the toolchain the decision module runs on. This workflow has no reuse lookup, so no step in it is ever skipped."
+        },
+        {
+          "name": "Fail-closed proofs for tonight's decision rules",
+          "reuse": "always",
+          "why": "the rules that can refuse a merge are proven on the night they are used, before anything is dispatched or merged. Skipping this would mean deciding a merge with unproven rules, which is the one thing this workflow must never do."
+        },
+        {
+          "name": "Validate, and merge if all four gates freshly pass the exact head",
+          "reuse": "always",
+          "why": "it reads the live pull-request list, dispatches the four gates, waits for their verdicts and performs the protected merge. Every input is live GitHub state and wall-clock time, so it is inherently unreusable and must run in full every night."
         }
       ]
     }

@@ -1,4 +1,5 @@
 name: Phase 5 Post-Stay and Transfer CI
+run-name: ${{ inputs.correlation_id && format('nightly {0} · {1}', inputs.correlation_id, inputs.expected_sha) || github.workflow }}
 
 # The authoritative automated gate for Phase 5 (Post-Stay PIN re-authentication and the Cross-PMS Transfer
 # workflow). It runs on the exact HEAD under test and produces machine-verifiable evidence — never a
@@ -33,15 +34,45 @@ on:
     branches: [ master ]
   push:
     branches: [ master, 'phase/**' ]
-  # workflow_dispatch is DELIBERATELY ABSENT from this gate.
+  # workflow_dispatch IS HOW THIS GATE IS NOW EARNED, and the reasoning that once forbade it is recorded
+  # here with what closed each hazard, because it was correct at the time.
   #
-  # A dispatched run reports a check with the SAME NAME as the pull_request run, because a required status
-  # context IS the job name. That has two consequences, both of which cost this project real delivery time:
-  # a dispatched run in progress blocks the merge of a PR whose own checks are already green, and a
-  # dispatched SUCCESS is a candidate the evidence-reuse lookup can inherit -- so a required check could be
-  # satisfied by a run that never evaluated a pull request. The gate must be earned on the event that
-  # actually proposes the change. To re-run after a genuine correction, re-run the FAILED JOBS of the
-  # pull_request run; do not dispatch a fresh one.
+  # IT USED TO BE FORBIDDEN because a dispatched run reports a check with the SAME NAME as the pull_request
+  # run -- a required status context IS the job name -- and that had two consequences that cost real delivery
+  # time: a dispatched run in progress could block the merge of a PR whose own checks were already green, and
+  # a dispatched SUCCESS was a candidate the evidence-reuse lookup could inherit, so a required check could be
+  # satisfied by a run that never evaluated a pull request.
+  #
+  # UNDER THE NIGHTLY DELIVERY MODEL the dispatch is not a second opinion beside the PR's own checks -- it is
+  # the ONLY source of them, by Product-Owner decision, so normal daytime pushes are not interrupted by the
+  # full four-gate cycle. Both old hazards are closed, and not by assertion:
+  #
+  #   blocking a green PR   there is no other run to be blocked. These contexts report only from the nightly
+  #                         dispatch, so "in progress" is the PR simply not being ready to merge yet.
+  #   inherited evidence    the nightly run DECLINES evidence reuse outright (scripts/ci/evidence-reuse.sh
+  #                         refuses while NIGHTLY_VALIDATION=true), and the orchestrator only counts runs that
+  #                         carry TONIGHT'S correlation id. A previous dispatch cannot stand in for tonight.
+  #   the wrong commit      a dispatch names a ref, not a commit, so the branch can move between the decision
+  #                         and the checkout. scripts/ci/assert-dispatch-head.sh fails the gate unless the
+  #                         head it is validating is exactly the sha the orchestrator decided on.
+  #
+  # This gate must therefore never be dispatched by hand as a way of producing a green context. The inputs are
+  # required, and a dispatch without them fails closed.
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: 'The full 40-character commit the orchestrator decided to validate. Required.'
+        required: true
+        type: string
+      correlation_id:
+        description: "Tonight's correlation id. Required, and proves the run is not an earlier night's."
+        required: true
+        type: string
+      nightly:
+        description: 'true when this is the nightly authoritative validation, which forbids evidence reuse.'
+        required: false
+        default: 'true'
+        type: string
 
 # ---------------------------------------------------------------------------------------------------------
 # ONE RUN PER REF, AND A SUPERSEDED RUN IS CANCELLED INSTEAD OF BEING LEFT TO FINISH.
@@ -55,7 +86,7 @@ on:
 # master's green record is the thing the protection rule reads, and cancelling it would leave the default
 # branch with a check that is neither passing nor failing.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ inputs.expected_sha || github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:

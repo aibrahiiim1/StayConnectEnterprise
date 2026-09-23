@@ -97,6 +97,25 @@ PY=python3; python3 --version >/dev/null 2>&1 || PY=python
 
 echo "== evidence reuse: same gate + identical tree + ancestry + identical environment, bounded by age =="
 
+# THE NIGHTLY AUTHORITATIVE VALIDATION IS NEVER SATISFIED BY EARLIER EVIDENCE, BY DEFINITION.
+#
+# Reuse exists to stop the SAME content being re-derived twice on the delivery path. The nightly run is the
+# opposite case: the Product Owner asked for ONE COMPLETE FRESH EXECUTION of all four gates against the exact
+# head that is about to be merged, precisely so that no earlier verdict -- daytime, pull-request, master, or
+# a previous night on a tree that has not changed since -- can stand in for it.
+#
+# Without this, a nightly run after a failed night would be the easiest case for reuse to hit: same gate,
+# identical tree for the three gates that passed, ancestry trivially satisfied, same environment, well under
+# 24 hours. It would then skip the very steps the run exists to execute, and the merge would rest on
+# yesterday's evidence while reporting as tonight's.
+#
+# So when the gate is invoked as the nightly authoritative validation, reuse declines before it looks at
+# anything. This is the fail-closed direction: it can only ever cause MORE work to run.
+if [ "${NIGHTLY_VALIDATION:-}" = "true" ]; then
+  echo "  this run is the NIGHTLY AUTHORITATIVE VALIDATION (correlation ${NIGHTLY_CORRELATION_ID:-unset})."
+  no_hit "the nightly authoritative validation must execute every gate step freshly; earlier evidence -- including a previous night's -- may never substitute for it"
+fi
+
 TREE="$(git rev-parse "$SHA^{tree}" 2>/dev/null)"
 [ -n "$TREE" ] || no_hit "this commit's tree could not be resolved"
 echo "  this commit: $SHA"
