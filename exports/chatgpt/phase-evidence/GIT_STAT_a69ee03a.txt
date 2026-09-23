@@ -1,4 +1,0 @@
-commit a69ee03ad7470867ba837ccd07f7b286f0173b69
-Date:   Wed Sep 23 19:29:09 2026 +0300
-
-    Zero-stale: register the CLOSED next-action state in the allow-list
