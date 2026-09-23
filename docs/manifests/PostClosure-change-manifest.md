@@ -2,7 +2,7 @@
 
 - **Base commit:** `1898c127257a328756fbb83ac63294075c2ce26c`
 - **HEAD commit:** `a69ee03a`
-- **Provenance (generation HEAD = inventory_head):** `5305fe9eec809dc6ccca9d5b1473bcba9753beb5`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `fbdb03256219b01391628d0da27c99a4b03c4593`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/fc-mission-closure`
 - **Remote branch:** `origin/delivery/fc-mission-closure`
 - **Changed files:** 30
@@ -16,29 +16,29 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Zero-stale: register the CLOSED next-action state in the allow-list |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Zero-stale: register the CLOSED next-action state in the allow-list |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Zero-stale: register the CLOSED next-action state in the allow-list |
-| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: the manifest lists itself |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the allow-list registration |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the allow-list registration |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the allow-list registration |
+| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: the manifest lists itself, and the head is the allow-list commit |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
+| `exports/chatgpt/phase-evidence/GIT_STAT_5372a992.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs: rebuild at the delivery head |
 | `exports/chatgpt/phase-evidence/GIT_STAT_96c9ce02.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Packs: rebuild at the T0181 governance commit |
-| `exports/chatgpt/phase-evidence/GIT_STAT_a69ee03a.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs: rebuild after the allow-list registration |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the allow-list registration |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the allow-list registration |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
 | `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the T0181 governance commit |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the allow-list registration |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the allow-list registration |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the allow-list registration |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the allow-list registration |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the allow-list registration |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Zero-stale: register the CLOSED next-action state in the allow-list |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the allow-list registration |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Zero-stale: register the CLOSED next-action state in the allow-list |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the allow-list registration |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the allow-list registration |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the allow-list registration |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the allow-list registration |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Zero-stale: register the CLOSED next-action state in the allow-list |
-| `governance/transitions/T0181.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0181 records the mission closure |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: the manifest lists itself, and the head is the allow-list commit |
+| `governance/transitions/T0181.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Delivery: the manifest lists itself, and the head is the allow-list commit |
 | `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | A closed mission may not keep the means to act on itself |
 | `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | A closed mission may not keep the means to act on itself |
 | `tools/validate-project-state.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Zero-stale: register the CLOSED next-action state in the allow-list |
@@ -49,12 +49,12 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   4 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   4 +-
  docs/context/StayConnect-IAM-Handoff.md            |   4 +-
- docs/manifests/PostClosure-change-manifest.md      | 132 ++++++++----------
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343812 -> 343520 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 143872 -> 146902 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44156 -> 44107 bytes
+ docs/manifests/PostClosure-change-manifest.md      | 136 +++++++++---------
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343812 -> 343521 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 143872 -> 146899 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44156 -> 44106 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_5372a992.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_96c9ce02.txt   |   4 -
- .../chatgpt/phase-evidence/GIT_STAT_a69ee03a.txt   |   4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   8 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
  .../chatgpt/phase-evidence/tools/project-state.py  | 152 +++++++++++++++++++++
@@ -70,12 +70,12 @@
  .../StayConnect-IAM-Phase0-Contract.md             |   4 +-
  .../StayConnect-IAM-Phase1A-Plan.md                |   4 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |   4 +-
- governance/project-state.json                      |  48 ++++---
- governance/transitions/T0181.json                  |  41 ++++++
+ governance/project-state.json                      |  49 ++++---
+ governance/transitions/T0181.json                  |  42 ++++++
  tools/project-state.py                             | 152 +++++++++++++++++++++
  .../tests/project_state_validator/run_mutations.py |  42 ++++++
  tools/validate-project-state.sh                    |   2 +-
- 30 files changed, 543 insertions(+), 166 deletions(-)
+ 30 files changed, 548 insertions(+), 167 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -85,6 +85,8 @@ M  docs/manifests/PostClosure-change-manifest.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: fbdb0325 Packs: rebuild at the delivery head
+HISTORICAL: 5372a992 Delivery: the manifest lists itself, and the head is the allow-list commit
 HISTORICAL: 5305fe9e Packs: rebuild after the allow-list registration
 HISTORICAL: a69ee03a Zero-stale: register the CLOSED next-action state in the allow-list
 HISTORICAL: 5aa8b5d6 Delivery: the manifest lists itself
