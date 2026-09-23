@@ -493,6 +493,11 @@
           "why": "it plants a defect into a copy of the tracked tree, runs the tracked validator, restores, and asserts the refusal. Every input is the tree; an identical tree gives an identical verdict."
         },
         {
+          "name": "Closure coherence — negative and positive tests",
+          "reuse": "tree-pure",
+          "why": "it builds in-process variations of the tracked governance/project-state.json and runs the tracked rule against them, asserting both that each contradiction is refused AND that legitimate future authorised work is allowed. One case gutters scripts/clean-install-reconstruction.sh to prove the ledger guard checks the assertion rather than its heading, then restores it byte-exact and verifies that it did. Every input is the tree; an identical tree gives an identical verdict. No clock, no network, no database, no artifact."
+        },
+        {
           "name": "Migration grant durability — a migration grant must also be named in Gate-P",
           "reuse": "tree-pure",
           "why": "it parses GRANT statements out of two sets of tracked SQL files -- data-plane/migrations/*.up.sql and deploy/gatep/*.sql -- and compares them. No database, no clock, no network, no git history, and it produces no artifact. An identical tree has the identical answer."
