@@ -2,7 +2,7 @@
 
 - **Base commit:** `7ea36cfd019fb2921e97890f73c71bccfd34083d`
 - **HEAD commit:** `dbb287c91985e4aa7312caba9278f259aad67949`
-- **Provenance (generation HEAD = inventory_head):** `86ef855b79a021e0533e58e940a92776a96875ee`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `43e8745cf79e13d773556fd6476d96f1b6f74b8f`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/fc-increment-4`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 57
@@ -43,26 +43,26 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: re-render the generated blocks against T0179 |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: re-render the generated blocks against T0179 |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: re-render the generated blocks against T0179 |
-| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild against T0179 |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild against T0179 |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild against T0179 |
+| `docs/manifests/PostClosure-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: the manifest lists itself |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the marker correction |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the marker correction |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the marker correction |
 | `exports/chatgpt/phase-evidence/GIT_STAT_5f854a39.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Packs: rebuild against T0179 |
-| `exports/chatgpt/phase-evidence/GIT_STAT_6f9c9afb.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs: rebuild against T0179 |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild against T0179 |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild against T0179 |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild against T0179 |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild against T0179 |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild against T0179 |
+| `exports/chatgpt/phase-evidence/GIT_STAT_91c094ec.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs: rebuild after the marker correction |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the marker correction |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the marker correction |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the marker correction |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the marker correction |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the marker correction |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild against T0179 |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: re-render the generated blocks against T0179 |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild against T0179 |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild after the marker correction |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: re-render the generated blocks against T0179 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild against T0179 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild against T0179 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild against T0179 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild against T0179 |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | T0179: the governance receipt for increment 4 |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: the financial-marker prerequisite was a wrong conclusion |
 | `governance/transitions/T0179.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | T0179: the governance receipt for increment 4 |
 | `hotel-admin/test/verify-vouchers-ui.mjs` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | The deployed scd was not a production build, and that disabled guest vouchers |
 | `scripts/central-outage-local-first-test.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | The deployed scd was not a production build, and that disabled guest vouchers |
@@ -103,12 +103,12 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   2 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   2 +-
  docs/context/StayConnect-IAM-Handoff.md            |   2 +-
- docs/manifests/PostClosure-change-manifest.md      | 241 ++++++++-------
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343816 -> 343815 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 143871 -> 143865 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44161 -> 44159 bytes
+ docs/manifests/PostClosure-change-manifest.md      | 244 +++++++--------
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343816 -> 343816 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 143871 -> 143871 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44161 -> 44158 bytes
  .../chatgpt/phase-evidence/GIT_STAT_5f854a39.txt   |   4 -
- .../chatgpt/phase-evidence/GIT_STAT_6f9c9afb.txt   |   4 +
+ .../chatgpt/phase-evidence/GIT_STAT_91c094ec.txt   |   4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   4 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
  exports/chatgpt/phase1b-planning/MANIFEST.md       |   2 +-
@@ -122,14 +122,14 @@
  .../StayConnect-IAM-Phase0-Contract.md             |   2 +-
  .../StayConnect-IAM-Phase1A-Plan.md                |   2 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |   2 +-
- governance/project-state.json                      | 122 +++-----
+ governance/project-state.json                      | 124 +++-----
  governance/transitions/T0179.json                  |  57 ++++
  hotel-admin/test/verify-vouchers-ui.mjs            | 112 +++++++
  scripts/central-outage-local-first-test.sh         | 123 ++++++++
  scripts/edge-migrate-selftest.sh                   |  37 +++
  scripts/edge-migrate.sh                            |  99 +++++-
  scripts/phase19-multi-vlan-test.sh                 | 339 +++++++++++++++++++++
- 57 files changed, 2973 insertions(+), 363 deletions(-)
+ 57 files changed, 2978 insertions(+), 363 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -139,6 +139,9 @@ M  docs/manifests/PostClosure-change-manifest.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 43e8745c Packs: rebuild after the marker correction
+HISTORICAL: 91c094ec Governance: the financial-marker prerequisite was a wrong conclusion
+HISTORICAL: a5703349 Delivery: the manifest lists itself
 HISTORICAL: 86ef855b Packs: rebuild against T0179
 HISTORICAL: 6f9c9afb Governance: re-render the generated blocks against T0179
 HISTORICAL: 66fff1e8 T0179: the governance receipt for increment 4
