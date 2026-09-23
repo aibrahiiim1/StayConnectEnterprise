@@ -118,7 +118,16 @@ if [ -n "$APPLY_ROLE" ]; then
   echo "$APPLY_ROLE" | grep -Eq '^[a-z_][a-z0-9_]*$' || { echo "REFUSED: --apply-role '$APPLY_ROLE' is not a plain role name" >&2; exit 2; }
   ROLE_PREFIX="SET ROLE $APPLY_ROLE; "
 fi
-q(){ $EDGE_PSQL -tAqc "${ROLE_PREFIX}$1"; }
+# THE RUNNER MUST NOT EAT ITS CALLER'S STDIN.
+#
+# EDGE_PSQL on an appliance is `docker exec -i ... psql`, and `docker exec -i` ATTACHES stdin whether the
+# command reads it or not. So every one of these little query calls consumes whatever the caller's stdin
+# happens to be -- and a caller driving the runner from `while read m sha; do ... done < list.txt` loses the
+# rest of its list to the first query. Measured: a four-migration rollback loop performed exactly one
+# rollback and then ended, silently, with no error anywhere.
+#
+# </dev/null is the whole fix: a query that reads nothing should be given nothing.
+q(){ $EDGE_PSQL -tAqc "${ROLE_PREFIX}$1" </dev/null; }
 NAME_RE='^[0-9]{4}_[a-z0-9_]+$'
 
 ack_for_kind(){ case "$1" in disposable) echo "I_UNDERSTAND_DISPOSABLE_DATABASE";; live-site) echo "I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION";; *) echo "";; esac; }
@@ -228,6 +237,67 @@ verify_ledger_structural_down(){ # read-only, BEFORE lock; fail closed. The priv
 # preserving concurrency for. The per-version key is KEPT as well, because it is what makes a repeated apply
 # of the SAME migration a clean SKIP_AFTER_LOCK rather than a wait-then-redo.
 ledger_lock_key(){ q "SELECT hashtextextended('stayconnect_edge_migrate:ledger', 0)"; }
+
+# NO GAPS BELOW THE ONE BEING APPLIED, and this check exists because the absence of it was paid for.
+#
+# The down path has refused an out-of-order rollback since it was written (verify_head_of_ledger). The
+# FORWARD path had no equivalent, and that asymmetry is not defensible: a migration applied while a lower
+# one is missing stands on objects that were never created, and the ledger then claims a schema the database
+# does not have.
+#
+# It happened during increment 4's live deployment. 0087 was REFUSED for a privilege reason -- correctly,
+# and the runner left nothing applied -- and the loop driving it carried on and applied 0088, which does not
+# depend on 0087 and so succeeded. The result was a ledger holding 0084, 0085, 0086 and 0088 with a hole
+# where 0087 should be. Nothing broke, this time, because the two are independent. The next pair might not
+# be, and "it happened to be safe" is not a property of the runner.
+#
+# Applies to a SINGLE --only apply. A --all sweep walks the directory in order and cannot skip, and the
+# curated clean-install path is a different install path with its own ordering.
+# THE LOOP VARIABLE IS LOCAL, AND THE REASON IS WRITTEN HERE BECAUSE THE OMISSION EXECUTED THE WRONG FILE.
+#
+# The first version of this function iterated `for f in ...` without declaring f. bash is DYNAMICALLY
+# scoped: apply_one's `local f="$1"` is visible to everything it calls, so this loop reassigned the CALLER'S
+# f, and on return apply_one's `cat "$f"` emitted the LAST file in the directory instead of the one it had
+# just verified.
+#
+# What that produced on a live appliance: an apply of 0087 read 0088's file, which was already applied and
+# whose body is CREATE OR REPLACE, so psql succeeded, the ledger row for 0087 was written, and not one of
+# 0087's objects existed. Both of the runner's proofs passed -- psql exit 0, ledger row present -- because
+# both are true statements about the wrong file.
+#
+# THE CHECKSUM GUARD DID NOT CATCH IT, and that is the part worth keeping in mind: the sha was computed and
+# compared BEFORE this function ran, so the runner verified one file and executed another. A verify-then-use
+# pair with anything in between is not a guarantee. apply_one now re-verifies immediately before the cat.
+verify_no_gap_below(){ # $1 = version being applied, $2 = the directory it came from
+  local ver="$1" dir="$2" missing="" floor="" gapf=""
+  [ -d "$dir" ] || { echo "REFUSED: cannot check for gaps: '$dir' is not a directory" >&2; exit 2; }
+  # THE BASELINE FLOOR. A factory-clean appliance is built from migrations/baseline/, which creates the end
+  # state directly, so the migrations the baseline covered have NO ledger rows and never will. Treating
+  # their absence as a gap is how the first version of this check refused a correct apply and listed 0046,
+  # 0047, 0048, 0049 -- every one of them installed by the baseline dump, exactly as designed.
+  #
+  # The floor is the LOWEST numbered version the ledger holds: per-migration application began there, and
+  # everything below it came from the baseline. That is the database's own evidence rather than a constant
+  # this script would have to be told.
+  floor="$(q "SELECT coalesce(min(version),'') FROM public.schema_migrations WHERE version ~ '^[0-9]{4}_'")"
+  for gapf in "$dir"/[0-9][0-9][0-9][0-9]_*.up.sql; do
+    [ -f "$gapf" ] || continue
+    local n; n="$(basename "$gapf" .up.sql)"
+    # Strictly lower than the target, and at or above the floor. Lexical order on a four-digit prefix is
+    # numeric order.
+    [ "$n" \< "$ver" ] || continue
+    [ -z "$floor" ] || [ ! "$n" \< "$floor" ] || continue
+    local applied; applied="$(q "SELECT count(*) FROM public.schema_migrations WHERE version='$n'")"
+    [ "$applied" = "1" ] || missing="$missing $n"
+  done
+  [ -z "$missing" ] && { echo "  no gap below $ver: every lower numbered migration is applied"; return 0; }
+  echo "REFUSED: $ver cannot be applied while a LOWER migration is unapplied:" >&2
+  for m in $missing; do echo "           $m" >&2; done
+  echo "         Applying out of order leaves the ledger claiming a schema the database does not have," >&2
+  echo "         and a later migration standing on objects that were never created. Apply the missing" >&2
+  echo "         one(s) first, or use --all to walk the directory in order." >&2
+  exit 3
+}
 
 verify_head_of_ledger(){ # $1=version ; refuse to roll back anything but the highest applied version
   local ver="$1" head applied
@@ -438,8 +508,30 @@ apply_one(){ # $1=file  atomic lock-then-ledger
     echo "REFUSED: --expect-sha256 is mandatory for a single-migration apply" >&2; exit 3
   fi
   verify_baseline_for "$ver"
+  # Only for a single named apply: --all is ordered by construction.
+  [ "$ALL" -eq 1 ] || verify_no_gap_below "$ver" "$(dirname "$f")"
   key="$(q "SELECT hashtextextended('stayconnect_edge_migrate:'||'$ver', 0)")"
   lkey="$(ledger_lock_key)"
+
+  # VERIFY AGAIN, HERE, WITH NOTHING BETWEEN THIS AND THE cat THAT EXECUTES IT.
+  #
+  # Everything above -- the baseline check, the gap check, two database round trips for lock keys -- runs
+  # between the first checksum comparison and the execution, and one of those calls reassigned $f through
+  # dynamic scoping and made the runner execute a different migration than it had verified. The bug is
+  # fixed; this check is what makes the class of bug survivable, because it re-establishes the identity of
+  # the file at the last possible moment and compares it against BOTH the expected sha and the version the
+  # runner believes it is applying.
+  local nowsha nowver
+  nowsha="$(sha256sum "$f" | awk '{print $1}')"
+  nowver="$(basename "$f" .up.sql)"
+  if [ "$nowver" != "$ver" ] || { [ -n "$EXPECT_SHA" ] && [ "$nowsha" != "$EXPECT_SHA" ]; }; then
+    echo "RUNNER ERROR: the file about to be executed is not the file that was verified." >&2
+    echo "  verified: version=$ver sha256=$sha" >&2
+    echo "  about to run: version=$nowver sha256=$nowsha  path=$f" >&2
+    echo "  Nothing was applied. This is a runner defect, not a migration problem: report it." >&2
+    exit 4
+  fi
+
   echo "  select $ver  file=$base  sha256=$sha  lock_key=$key  ledger_lock=$lkey  db=$EXPECT_DB  kind=$TARGET_KIND"
   out="$(
     { [ -n "$APPLY_ROLE" ] && printf "SET ROLE %s;\n" "$APPLY_ROLE"
@@ -456,6 +548,11 @@ apply_one(){ # $1=file  atomic lock-then-ledger
     } | $EDGE_PSQL -v ON_ERROR_STOP=1 2>&1
   )"
   rc=$?
+  # EDGE_MIGRATE_DEBUG=1 dumps exactly what psql said. A runner whose only visible output on success is
+  # "applied=1" is a runner you cannot diagnose when "applied" turns out to be untrue, and that is not a
+  # hypothetical: see the note on the two proofs below.
+  [ "${EDGE_MIGRATE_DEBUG:-0}" = "1" ] && { echo "---- psql output (rc=$rc) ----"; printf '%s
+' "$out"; echo "---- end ----"; }
   # ON_ERROR_STOP IS FORCED HERE AND NOT LEFT TO THE CALLER, because without it a FAILED migration is
   # recorded as APPLIED and can never be retried.
   #

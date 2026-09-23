@@ -46,11 +46,27 @@ MARKER_NAME="financial-restore-generation.json"
 # WHICH ROLE. A full backup has to read every schema, so a least-privilege SERVICE role is the wrong
 # credential: measured on the development appliance, dumping as svc_edged fails with
 # "permission denied for table schema_migrations" -- correctly, because that role is not supposed to read
-# the whole database. The DSN is therefore taken from the administrative entry that already points at the
-# site database, and an explicit STAYCONNECT_PGUSER always wins.
+# the whole database.
+#
+# THAT WAS WRITTEN HERE AND NOT ENFORCED, AND THE FALLTHROUGH FOUND IT. The resolution order was
+# ctrlapi.env, then edged.env, then scd.env. On THIS appliance ctrlapi is disabled -- Central moved to its
+# own host and the appliance is edge-only -- so there is no ctrlapi.env, and the loop fell through to
+# edged.env and resolved svc_edged: precisely the credential the paragraph above says cannot work. Measured
+# on PRE-LIVE: `pg_dump: error: query failed: ERROR: permission denied for table accounting_checkpoints`.
+#
+# So every scheduled backup would have failed, nightly, with a four-kilobyte LOCK TABLE error -- and the
+# timer that runs it had just been installed, which is how a mechanism with no scheduler became a scheduler
+# with a broken mechanism.
+#
+# THE SERVICE ROLES ARE NOW REFUSED BY NAME rather than attempted. A dump as svc_* cannot succeed, and
+# failing on the first line with a sentence an operator can act on is better than failing three minutes
+# later with a list of every table in the database.
 PGUSER_SITE="${STAYCONNECT_PGUSER:-}"
 if [ -z "$PGUSER_SITE" ]; then
-  for envf in /etc/stayconnect/ctrlapi.env /etc/stayconnect/edged.env /etc/stayconnect/scd.env; do
+  # ADMINISTRATIVE ENTRIES ONLY. ctrlapi.env is the administrative DSN where a Central-hosting appliance has
+  # one; the service envs are deliberately NOT consulted, because a role that can read everything is the
+  # whole requirement and no svc_* role satisfies it.
+  for envf in /etc/stayconnect/ctrlapi.env /etc/stayconnect/backup.env; do
     [ -f "$envf" ] || continue
     dsn="$(grep -oE "postgres://[^ ]*/$PGDB_SITE(\?[^ ]*)?" "$envf" | head -1)" || true
     [ -n "${dsn:-}" ] || continue
@@ -60,6 +76,16 @@ if [ -z "$PGUSER_SITE" ]; then
     break
   done
 fi
+
+# IN CONTAINER MODE, ASK THE CONTAINER WHO ITS OWNER IS rather than guessing a name. POSTGRES_USER is the
+# role the image initialised the cluster as, so it is the superuser, and inside the container it needs no
+# password (local peer/trust). This is discovery, not a hardcoded assumption: an appliance whose container
+# was initialised as something else resolves to that instead.
+if [ -z "$PGUSER_SITE" ] && command -v docker >/dev/null 2>&1 \
+   && docker inspect "$PG_CONTAINER" >/dev/null 2>&1; then
+  PGUSER_SITE="$(docker exec "$PG_CONTAINER" printenv POSTGRES_USER </dev/null 2>/dev/null | tr -d '\r')"
+  [ -n "$PGUSER_SITE" ] && echo "backup: dumping as the container's own superuser ($PGUSER_SITE)"
+fi
 # Off the appliance -- a CI runner, a workstation, a restore-drill fixture -- there are no StayConnect env
 # files to read, and the standard PostgreSQL conventions are the honest fallback. What is NOT a fallback is
 # the database name: the previous version defaulted PGUSER to `stayconnect_site`, which is the database, and
@@ -68,11 +94,45 @@ fi
 [ -n "$PGUSER_SITE" ] || PGUSER_SITE="$(id -un 2>/dev/null || true)"
 [ -n "$PGUSER_SITE" ] || { echo "backup: FAILED — no database role to dump as (set STAYCONNECT_PGUSER)" >&2; exit 1; }
 
+# A svc_* ROLE CANNOT DUMP THIS DATABASE, so say so here instead of letting pg_dump discover it.
+case "$PGUSER_SITE" in
+  svc_*)
+    echo "backup: FAILED — refusing to dump as the least-privilege service role '$PGUSER_SITE'." >&2
+    echo "backup: a full backup must read every schema, and the service roles are deliberately scoped so" >&2
+    echo "backup: that they cannot. Set STAYCONNECT_PGUSER to an administrative role, or provide" >&2
+    echo "backup: /etc/stayconnect/backup.env with a DSN for one." >&2
+    exit 1 ;;
+esac
+
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
 DUMP="$OUT_DIR/site-$STAMP.dump"
 ETC_TAR="$OUT_DIR/site-$STAMP-etc.tgz"
 
 mkdir -p "$OUT_DIR"
+
+# A FAILED BACKUP MUST NOT LEAVE SOMETHING THAT LOOKS LIKE A BACKUP.
+#
+# The dump is written with `> "$DUMP"`, which CREATES the file before pg_dump runs. When pg_dump then fails,
+# `set -e` exits the script immediately -- before the `[ -s "$DUMP" ]` check below that was supposed to
+# remove it. Measured: the first run on PRE-LIVE left site-20260923-014058.dump at zero bytes in the backup
+# directory, beside a real one.
+#
+# That is worse than it looks. The retention cleanup reasons about the NEWEST artefact, a restore tool is
+# pointed at a directory listing, and an operator reading `ls` sees a .dump with a plausible timestamp. So
+# the partial artefacts are removed on ANY non-zero exit, by a trap, which is the only thing that runs when
+# `set -e` takes the script down mid-command.
+BACKUP_OK=0
+cleanup_partial() {
+  [ "$BACKUP_OK" = 1 ] && return 0
+  for f in "${DUMP:-}" "${ETC_TAR:-}"; do
+    [ -n "$f" ] || continue
+    # Only a file this run created, and only when it is empty or the run did not finish. A complete
+    # artefact is never removed: BACKUP_OK is set once everything is written and verified.
+    [ -f "$f" ] && { rm -f "$f"; echo "backup: removed the partial artefact $f" >&2; }
+  done
+  return 0
+}
+trap cleanup_partial EXIT
 
 USE_CONTAINER=0
 if command -v docker >/dev/null 2>&1 && docker inspect "$PG_CONTAINER" >/dev/null 2>&1; then
@@ -96,6 +156,29 @@ if [ "$CLI_MAJOR" -lt "$SRV_MAJOR" ]; then
 fi
 echo "backup: pg_dump $CLI_MAJOR -> server $SRV_MAJOR (container=$USE_CONTAINER) -> $DUMP"
 
+# CAN THIS ROLE ACTUALLY READ EVERYTHING? Asked before the dump, because pg_dump answers the same question
+# by locking every table and printing the whole list -- a four-kilobyte error whose cause is one word in it.
+# The probe counts tables the role cannot SELECT, across every non-system schema, so it also catches the
+# next table a migration adds without granting: the failure mode this backup already had once.
+if [ "$USE_CONTAINER" = 1 ]; then
+  UNREADABLE="$(docker exec "$PG_CONTAINER" psql -U "$PGUSER_SITE" -d "$PGDB_SITE" -qAt </dev/null 2>/dev/null -c "
+    SELECT count(*) FROM information_schema.tables t
+     WHERE t.table_type = 'BASE TABLE'
+       AND t.table_schema NOT IN ('pg_catalog','information_schema')
+       AND NOT has_table_privilege(quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'SELECT')")"
+else
+  UNREADABLE="$(psql -U "$PGUSER_SITE" -d "$PGDB_SITE" -qAt 2>/dev/null -c "
+    SELECT count(*) FROM information_schema.tables t
+     WHERE t.table_type = 'BASE TABLE'
+       AND t.table_schema NOT IN ('pg_catalog','information_schema')
+       AND NOT has_table_privilege(quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'SELECT')")"
+fi
+if [ -n "${UNREADABLE:-}" ] && [ "$UNREADABLE" != "0" ]; then
+  echo "backup: FAILED — '$PGUSER_SITE' cannot SELECT $UNREADABLE table(s) in this database, so the dump" >&2
+  echo "backup: would be refused partway through. A backup that cannot read everything is not a backup." >&2
+  exit 1
+fi
+
 if [ "$USE_CONTAINER" = 1 ]; then
   # Streamed to the host over stdout so the artefact lands in OUT_DIR and nothing is left inside the
   # container to be forgotten about.
@@ -117,6 +200,9 @@ if tar tzf "$ETC_TAR" | grep -q "$MARKER_NAME"; then
   exit 1
 fi
 echo "backup: verified — the financial restore marker is not in the archive"
+
+# From here the artefacts are complete, so the trap must not delete them.
+BACKUP_OK=1
 
 DUMP_SHA="$(sha256sum "$DUMP" | awk '{print $1}')"
 cat > "$DUMP.meta.json" <<JSON

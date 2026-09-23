@@ -423,6 +423,43 @@ undo
 # was never blocked, and could commit in between. The rollback then removed a migration that was no longer
 # the head. Both directions now take one ledger-wide key first.
 
+# ---------------------------------------------------------------------------------------------------------
+# 7k. THE RUNNER MUST EXECUTE THE FILE IT VERIFIED, even when that file is not the last one in the directory
+# ---------------------------------------------------------------------------------------------------------
+# This suite could not have caught the bug it now tests for. Every apply case above names 0099_selftest_noop,
+# which is the alphabetically LAST .up.sql in the fixture directory -- so a runner that executed "the last
+# file" instead of "the selected file" would pass all of them.
+#
+# The bug was real and it reached a live appliance: a helper function iterated `for f in ...` without
+# declaring f, bash is dynamically scoped, and the caller's f was overwritten -- so an apply of 0087 read
+# 0088's file, which was already applied and whose body is CREATE OR REPLACE. psql succeeded, the ledger row
+# for 0087 was written, and none of 0087's objects existed. The checksum guard did not help, because the sha
+# was compared BEFORE the helper ran: the runner verified one file and executed another.
+#
+# So this case applies a migration that is NOT the last file, and asserts the object THAT migration creates
+# is the one that appears.
+echo "== 7k. the selected file is the one that runs, even when a higher-numbered file exists =="
+ledger_reset; mk_commerce; undo
+cat > "$MIGDIR/0097_selftest_lower.up.sql" <<'SQL'
+BEGIN;
+CREATE TABLE IF NOT EXISTS iam_v2.edge_selftest_lower_marker (id int PRIMARY KEY);
+COMMIT;
+SQL
+LOWSHA="$(sha256sum "$MIGDIR/0097_selftest_lower.up.sql" | awk '{print $1}')"
+out="$(EDGE_PSQL="$PSQL" bash "$RUN" --apply-role edge_apply --only 0097_selftest_lower   --expect-db "$DB" --target-kind live-site --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION   --expect-sha256 "$LOWSHA" 2>&1)"; lrc=$?
+lowmark="$(Q "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='iam_v2' AND c.relname='edge_selftest_lower_marker'")"
+highmark="$(marker)"
+lowrow="$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0097_selftest_lower'")"
+if [ "$lrc" = "0" ] && [ "$lowmark" = "1" ] && [ "$lowrow" = "1" ]; then
+  ok "applying a NON-last migration created ITS object and recorded ITS ledger row"
+else no "the runner did not apply the file it selected (rc=$lrc lower_marker=$lowmark ledger=$lowrow)" "$out"; fi
+if [ "$highmark" = "0" ]; then
+  ok "...and it did NOT run the last file in the directory"
+else no "the runner executed 0099's body while applying 0097 -- the dynamic-scoping clobber is back" "$out"; fi
+Q "DROP TABLE IF EXISTS iam_v2.edge_selftest_lower_marker" >/dev/null
+rm -f "$MIGDIR/0097_selftest_lower.up.sql"
+ledger_reset
+
 echo "== 8. concurrent ledger mutation is serialised =="
 
 # 8a. A HELD LEDGER LOCK BLOCKS AN APPLY. This is the property the whole fix rests on: if the ledger lock
