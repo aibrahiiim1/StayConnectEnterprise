@@ -238,14 +238,15 @@ for v in 221 222; do
   fi
 done
 
-echo "== 19M.8 what one guest network can reach, measured =="
+echo "== 19M.8 what one guest network can reach, asserted =="
 # THE PROPERTY THAT ONLY EXISTS IN THE PLURAL. Two guest networks must be two networks, not one flat
 # network with two names -- and the appliance's own surfaces must not become reachable because a second
 # guest network exists.
 #
-# THE ASSERTIONS BELOW ARE THE ONES THAT MATTER, and one MEASURED RESULT is reported rather than asserted,
-# because it is a real finding that this drill produced and weakening the test to hide it would be worse
-# than either fixing or recording it. See the note at the end of this section.
+# EVERY RESULT BELOW IS NOW ASSERTED. An earlier round of this drill reported three of them as measurements
+# rather than pass/fail, because a guest could reach the appliance on another network's gateway and on the
+# management address. That was a real finding, it was recorded rather than hidden, and it has since been
+# fixed in the authoritative generated ruleset -- so the measurements became assertions.
 L222=$(ip netns exec gv222 ip -4 -br addr show gv222c 2>/dev/null | grep -oE "10\.222\.0\.[0-9]+")
 L221=$(ip netns exec gv221 ip -4 -br addr show gv221c 2>/dev/null | grep -oE "10\.221\.0\.[0-9]+")
 
@@ -292,27 +293,49 @@ else
     fi
   fi
 
-  # 3. MEASURED AND REPORTED: the appliance's OTHER guest-facing addresses.
+  # 3. THE APPLIANCE'S OTHER GUEST-FACING ADDRESSES -- NOW ASSERTED, NOT MEASURED.
   #
-  # A guest on VLAN 221 CAN reach 10.222.0.1 and the production guest gateway, and the captive portal on
-  # them, and can ICMP the management address. That is not routing between guest networks -- the
-  # guest-to-guest check above is what proves that, and it passes. It is the Linux weak host model: every
-  # local address answers on every interface unless something forbids it, and portald binds *:8380.
+  # This block used to print three results and judge none of them, because a guest on VLAN 221 COULD reach
+  # 10.222.0.1, the captive portal on it, and the management address by ICMP. That was the Linux weak host
+  # model meeting an input chain whose per-bridge accepts named no destination: the packet arrived on a guest
+  # bridge, matched `iifname "br-g221" ...`, and was accepted whatever it was aimed at.
   #
-  # WHY IT IS REPORTED RATHER THAN ASSERTED. Forbidding it means adding rules to netd's generated ruleset
-  # that drop guest traffic aimed at the appliance's addresses other than that network's own gateway. That
-  # is a change to the enforcement plane with real regression risk to DNS, the walled garden and the portal
-  # redirect -- the paths guest internet depends on -- so it is not something to slip in beside a drill.
-  # The consequence is bounded: the same captive portal on a different address, and the knowledge that the
-  # appliance has other interfaces. No guest data, no admin surface, no other guest.
-  echo "  -- measured (not a pass/fail): what a guest can reach on the appliance itself"
-  m(){ printf '       %-44s ' "$1"; shift; if ip netns exec gv221 "$@" >/dev/null 2>&1; then echo REACHABLE; else echo blocked; fi; }
-  m "the OTHER guest network's gateway (10.222.0.1)" ping -c1 -W2 10.222.0.1
-  m "the captive portal on that other gateway"       timeout 3 curl -s -o /dev/null http://10.222.0.1:8380/
-  [ -n "${MGMT_IP:-}" ] && m "the management address by ICMP ($MGMT_IP)" ping -c1 -W2 "$MGMT_IP"
-  echo "       ^ recorded as a hardening item: guest networks can reach the appliance's other"
-  echo "         guest-facing addresses. Guest-to-guest, admin, database and SSH are all closed."
+  # The boundary now lives in the authoritative generated model -- every per-network accept in
+  # internal/netcfg/render_nft.go carries `ip daddr <that network's own gateway>`, with DHCP additionally
+  # permitting the broadcast address it cannot work without -- so these are assertions.
+  if ip netns exec gv221 ping -c1 -W2 10.222.0.1 >/dev/null 2>&1; then
+    bad "a client on VLAN 221 reached VLAN 222's gateway; the guest input boundary is not in force"
+  else
+    ok "a client on VLAN 221 cannot reach VLAN 222's gateway"
+  fi
+  if ip netns exec gv221 timeout 3 curl -s -o /dev/null http://10.222.0.1:8380/ 2>/dev/null; then
+    bad "a client on VLAN 221 reached the captive portal on VLAN 222's gateway"
+  else
+    ok "a client on VLAN 221 cannot reach the portal on another network's gateway"
+  fi
+  if [ -n "${MGMT_IP:-}" ]; then
+    if ip netns exec gv221 ping -c1 -W2 "$MGMT_IP" >/dev/null 2>&1; then
+      bad "a client on VLAN 221 reached the management address $MGMT_IP"
+    else
+      ok "a client on VLAN 221 cannot reach the management address"
+    fi
+  fi
+  # AND THE PAIRED HALF, because every refusal above would also be satisfied by a dead network: the guest
+  # must still reach the services on ITS OWN gateway. The own-gateway ICMP control is asserted at the top of
+  # this section; these are the two that guest internet actually depends on.
+  if ip netns exec gv221 timeout 3 curl -s -o /dev/null http://10.221.0.1:8380/ 2>/dev/null; then
+    ok "...while the portal on its OWN gateway is still reachable"
+  else
+    bad "the boundary closed the guest's own captive portal; guest sign-in would be impossible"
+  fi
+  if ip netns exec gv221 timeout 3 nslookup -timeout=2 example.com 10.221.0.1 >/dev/null 2>&1 \
+     || ip netns exec gv221 timeout 3 getent hosts example.com >/dev/null 2>&1; then
+    ok "...and DNS on its own gateway still answers"
+  else
+    echo "       note: DNS on the own gateway did not answer in this rig (no resolver tool in the netns)"
+  fi
 fi
+
 for v in 221 222; do ip netns exec gv$v dhclient -r -lf /tmp/gv$v.leases -pf /tmp/gv$v.pid gv${v}c 2>/dev/null; done
 
 echo "== 19M.9 per-network enforcement state, not per-appliance =="

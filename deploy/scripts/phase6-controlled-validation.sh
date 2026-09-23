@@ -22,20 +22,67 @@
 #     business vocabulary to make test rows findable.
 #   * and the runtime proven dark afterwards: routes ABSENT, services healthy, accounting owner present.
 #
-# It refuses to run anywhere but the authorized development appliance, and that refusal is NOT overridable by
-# an environment variable. The allow-list is compiled into this file, because a feature-enabling runner that
-# can be pointed at another host by exporting one variable is not protected, it is merely inconvenienced.
+# It refuses to run anywhere but an appliance it was COMPILED to run on, and that refusal is NOT overridable
+# by an environment variable -- not the allow-list, and not the path it reads the appliance's identity from.
+# A feature-enabling runner that can be pointed at another host by exporting one variable is not protected,
+# it is merely inconvenienced.
+#
+# The check is no longer a hostname. It is a compiled host -> (appliance_id, serial) map, confirmed against
+# the appliance's own SIGNED assignment document and then again against its row in the site database, and it
+# fails closed on a missing entry, a missing file, an unreadable field or any disagreement. See
+# guard_environment.
 #
 #   usage:  phase6-controlled-validation.sh              full run: capture, enable, validate, restore, verify
+#           phase6-controlled-validation.sh run-device-selfservice
+#                                                        the same run, stopping at the boundary of what was
+#                                                        authorised for PRE-LIVE: Guest Device Self-Service
+#                                                        only, without enabling the aggregate capability
 #           phase6-controlled-validation.sh restore      restore + verify only (safe at any time, idempotent)
 #           phase6-controlled-validation.sh selftest CASE
 #                                                        fault injection -- enables a flag and then abandons
-#                                                        the run (body-failure | signal | partial)
+#                                                        the run (body-failure | signal | partial |
+#                                                        partial-device-selfservice | double-restore)
 set -uo pipefail
 
 # ---- identity: compiled in, not configurable ---------------------------------------------------------------
-readonly AUTHORIZED_HOSTS="radius"
+#
+# A HOSTNAME WAS THE WHOLE CHECK, AND A HOSTNAME IS NOT AN IDENTITY. This allow-list named `radius`, the
+# DEVELOPMENT appliance, which CLAUDE.md 0D has since RETIRED: "not an operational target. Do not contact it".
+# So the only thing in Phase 6 that can turn a guest capability on was admitted by a string any host can be
+# given, and the one host it named must never be reached again. Both halves of that are now fixed.
+#
+# THE ALLOW-LIST IS A MAP, NOT A LIST. A host is admitted only when the appliance's OWN identity matches the
+# value compiled here for that host, and that identity is read from the SIGNED assignment document -- the
+# same file scd verifies against the pinned registry root -- and then confirmed a second time against the
+# appliance's own row in the site database. A host with no entry is refused. An entry that does not match is
+# refused. An unreadable identity is refused. There is no environment variable that changes any of it: a
+# feature-enabling runner that can be redirected by exporting one name is not protected, it is inconvenienced.
+#
+# PRE-LIVE IS ADMITTED BY EXPLICIT PRODUCT-OWNER AUTHORISATION, for ONE controlled acceptance run of Guest
+# Device Self-Service, after which the capability returns to its approved default-OFF state. That is
+# controlled acceptance, not Guest activation and not a Guest pilot: D41 remains in force.
+readonly AUTHORIZED_HOSTS="sce"
 readonly AUTHORIZED_DB="stayconnect_site"
+
+# authorized_appliance_for <hostname> -> "<appliance_id> <serial>", or non-zero when the host has no entry.
+#
+# Compiled in, one line per authorised appliance, and deliberately verbose: reading this file must tell you
+# exactly which physical appliance may be enabled, not merely which name may be.
+authorized_appliance_for() {
+  case "$1" in
+    # PRE-LIVE 172.21.60.25 -- the only appliance (CLAUDE.md 0D). Authorised for the controlled Guest Device
+    # Self-Service acceptance run.
+    sce) printf '%s %s' 'c6faf4eb-33e4-41b3-9fcb-d902568cc1c9' 'SC-7A8M-WM9R-KMAZ' ;;
+    # `radius` is deliberately ABSENT. It was the only entry here and it is retired; leaving a retired host in
+    # an enabling allow-list is a standing permission to enable a guest capability on a machine nobody is
+    # supposed to touch.
+    *) return 1 ;;
+  esac
+}
+# THE PATH IS NOT OVERRIDABLE EITHER, and the first draft of this line made it so
+# (PHASE6_ASSIGNMENT_DOC:-...). That would have been the bypass this file exists to refuse: an identity check
+# whose SOURCE can be redirected by an environment variable checks whatever the caller points it at.
+readonly ASSIGNMENT_DOC="/etc/stayconnect/assignment/assignment.json"
 
 ENV_DIR="/etc/stayconnect"
 UNITS="stayconnect-scd stayconnect-acctd stayconnect-edged"
@@ -43,7 +90,22 @@ ALL_UNITS="$UNITS stayconnect-portald stayconnect-netd stayconnect-hotel-admin"
 PG="stayconnect-pg"
 DBUSER="${PHASE6_DB_USER:-stayconnect}"
 DB="$AUTHORIZED_DB"
-COHERENCE="${PHASE6_COHERENCE:-/root/phase6-flag-coherence.sh}"
+# THE GATE THAT PROVES DARKNESS IS NOT REDIRECTABLE EITHER. This was
+# PHASE6_COHERENCE:-/root/phase6-flag-coherence.sh, and $COHERENCE is what the restoration verification runs
+# to establish that every Phase-6 flag is off: an environment variable that chooses WHICH script answers that
+# question can choose one that always exits 0. Same class of hole as an overridable identity source, in the
+# step whose entire purpose is proving the capability went back off.
+#
+# Two FIXED locations, tried in order, neither caller-chosen: the validation directory this harness is
+# installed into, and the path the accepted development-appliance layout used.
+coherence_path() {
+  local p
+  for p in /opt/stayconnect/validation/phase6-flag-coherence.sh /root/phase6-flag-coherence.sh; do
+    [ -f "$p" ] && { printf '%s' "$p"; return 0; }
+  done
+  printf '%s' /opt/stayconnect/validation/phase6-flag-coherence.sh
+}
+COHERENCE="$(coherence_path)"
 VALIDATION_DIR="/opt/stayconnect/validation"
 HA_CURRENT="/opt/stayconnect/hotel-admin"
 STATE_DIR="/var/lib/stayconnect/phase6-validation"
@@ -75,15 +137,68 @@ say(){ printf '\n== %s ==\n' "$1"; }
 # section refusing to start while everything else looked configured.
 q(){ docker exec -i "$PG" psql -U "$DBUSER" -d "$DB" -tAqc "$1" </dev/null 2>&1; }
 
+# guard_environment refuses to run anywhere it was not compiled to run, on FOUR independent grounds. Every
+# one of them fails closed: a missing file, an unreadable field, a mismatch or an absent entry all refuse.
 guard_environment() {
-  local host; host="$(hostname)"
+  local host want_appl want_serial got_appl got_serial db_appl
+  host="$(hostname)"
+
+  # 1. the host must be named.
   case " $AUTHORIZED_HOSTS " in
     *" $host "*) : ;;
     *) echo "REFUSED: host '$host' is not in the compiled allow-list ($AUTHORIZED_HOSTS)" >&2; exit 2 ;;
   esac
+
+  # 2. and it must have a compiled appliance identity. A host in the list with no entry is a mistake, and the
+  #    safe reading of a mistake here is "do not enable a guest capability".
+  if ! set -- $(authorized_appliance_for "$host"); then
+    echo "REFUSED: host '$host' is listed but has no compiled appliance identity" >&2; exit 2
+  fi
+  want_appl="${1:-}"; want_serial="${2:-}"
+  [ -n "$want_appl" ] && [ -n "$want_serial" ] || {
+    echo "REFUSED: the compiled entry for '$host' is incomplete" >&2; exit 2; }
+
+  # 3. THE APPLIANCE'S OWN SIGNED ASSIGNMENT must agree. This is the document scd verifies against the pinned
+  #    registry root anchor, so it is the appliance's strongest statement of who it is. Read with python3
+  #    rather than grep, because a field that happens to appear in a comment or another object is not the
+  #    field being asked for.
+  [ -r "$ASSIGNMENT_DOC" ] || {
+    echo "REFUSED: cannot read the signed assignment at $ASSIGNMENT_DOC, so this appliance cannot be identified" >&2
+    exit 2; }
+  got_appl="$(python3 -c 'import json,sys
+try:
+    d=json.load(open(sys.argv[1]))["current"]
+    print(d.get("appliance_id") or "")
+except Exception:
+    print("")' "$ASSIGNMENT_DOC" 2>/dev/null)"
+  got_serial="$(python3 -c 'import json,sys
+try:
+    d=json.load(open(sys.argv[1]))["current"]
+    print(d.get("serial") or "")
+except Exception:
+    print("")' "$ASSIGNMENT_DOC" 2>/dev/null)"
+  [ "$got_appl" = "$want_appl" ] || {
+    echo "REFUSED: this appliance reports id '${got_appl:-<unreadable>}'; '$host' is compiled as '$want_appl'" >&2
+    exit 2; }
+  [ "$got_serial" = "$want_serial" ] || {
+    echo "REFUSED: this appliance reports serial '${got_serial:-<unreadable>}'; '$host' is compiled as '$want_serial'" >&2
+    exit 2; }
+
+  # 4. AND A SECOND, INDEPENDENT SOURCE. The site database's own appliances row must carry the same id. Two
+  #    sources that have to agree is what makes this an identity check rather than a file read: a stale or
+  #    hand-edited assignment does not by itself admit the run.
+  db_appl="$(q "SELECT id FROM public.appliances WHERE id = '$want_appl'")"
+  [ "$db_appl" = "$want_appl" ] || {
+    echo "REFUSED: the site database does not hold appliance '$want_appl' (got '${db_appl:-<none>}')" >&2
+    echo "         The signed assignment and the database disagree about which appliance this is." >&2
+    exit 2; }
+
   case "$DB" in
     *prod*|*production*) echo "REFUSED: database '$DB' looks like Production" >&2; exit 2 ;;
   esac
+
+  printf 'identity: %s / appliance %s / serial %s -- authorised, from the signed assignment and the site DB\n' \
+    "$host" "$want_appl" "$want_serial"
 }
 
 # ---- baseline capture ---------------------------------------------------------------------------------------
@@ -522,6 +637,21 @@ case "${1:-run}" in
         appliance_identity && seed_scope >/dev/null 2>&1
         ok "every flag on, the product setting on, and synthetic state seeded; abandoning mid-way"
         exit 3 ;;
+      partial-device-selfservice)
+        # THE SAME ABANDONMENT AS `partial`, WITHIN THE AUTHORISED CAPABILITY. The existing injection cases
+        # enable STAYCONNECT_PHASE6_AGGREGATE_ONLINE_TIME, which the PRE-LIVE authorisation does not cover, so
+        # proving restoration on this appliance needed a case that turns on only what was authorised: the
+        # master gate, the Guest Device Self-Service children, and the Phase-3 arm the surface fails closed
+        # without. It then abandons the run with the capability on, the product setting on and synthetic state
+        # seeded -- which is the state restoration actually has to recover from.
+        trap finish EXIT INT TERM
+        set_flags STAYCONNECT_PHASE3_MASTER STAYCONNECT_PHASE3_PMS_AUTH                   STAYCONNECT_PHASE6_MASTER STAYCONNECT_PHASE6_DEVICE_SELFSERVICE_GUEST                   STAYCONNECT_PHASE6_DEVICE_SELFSERVICE_ADMIN
+        grant_writer_prereq
+        setting_on true
+        appliance_identity && seed_scope >/dev/null 2>&1
+        ok "device self-service enabled, the setting on and synthetic state seeded; abandoning mid-way"
+        exit 3 ;;
+
       double-restore)
         # Idempotence: restoring an already-restored appliance must be a no-op that still verifies.
         trap finish EXIT INT TERM
@@ -531,8 +661,17 @@ case "${1:-run}" in
     esac
     ;;
 
-  run)
-    say "Phase-6 controlled validation on $(hostname)"
+  run|run-device-selfservice)
+    # SCOPE IS ASSIGNED HERE, from the positional mode, unconditionally -- so an exported P6_SCOPE cannot
+    # choose one. `run` is the full validation; `run-device-selfservice` stops at the boundary of what the
+    # Product Owner authorised for the PRE-LIVE acceptance run, which is the Guest Device Self-Service
+    # capability and nothing else. Sections 0-4 and 7 run either way; section 5 enables a DIFFERENT Phase-6
+    # child (aggregate online time) and is skipped in the narrow scope.
+    case "${1:-run}" in
+      run-device-selfservice) P6_SCOPE=device-selfservice ;;
+      *)                      P6_SCOPE=full ;;
+    esac
+    say "Phase-6 controlled validation on $(hostname) [scope: $P6_SCOPE]"
     trap finish EXIT INT TERM
     capture_baseline
     # SOURCED, not executed: the body must run inside this shell so that its failures, its counters and any
@@ -541,5 +680,5 @@ case "${1:-run}" in
     . "$(dirname "$0")/phase6-controlled-validation-body.sh"
     ;;
 
-  *) echo "usage: $0 [run|restore|selftest CASE]" >&2; exit 2 ;;
+  *) echo "usage: $0 [run|run-device-selfservice|restore|selftest CASE]" >&2; exit 2 ;;
 esac
