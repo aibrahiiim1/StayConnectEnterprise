@@ -747,6 +747,14 @@ func main() {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(10 * time.Second))
+	// WHO MAY ASK FOR WHAT. One socket carries the guest-authentication routes portald needs and the
+	// administrative routes edged drives -- backups, licence install, appliance enrolment, voucher codes --
+	// and reaching it is a single group-membership fact. This gate splits the two by the caller's identity;
+	// admin_surface.go holds the classification and the reasoning.
+	//
+	// AFTER Recoverer and Timeout, and before every route: a refusal should still be logged, recovered and
+	// bounded like any other response.
+	r.Use(s.peerGate)
 	r.Get("/v1/health", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	r.Method("GET", "/metrics", s.met.Handler())
 	// The voucher surface lives here because the DEK does: scd is root and unix-socket only, edged is the

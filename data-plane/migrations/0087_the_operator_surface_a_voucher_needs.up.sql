@@ -9,8 +9,24 @@
 -- THREE THINGS, AND ONE ASYMMETRY THAT DECIDES THE THIRD.
 --
 -- 1. iam_v2.vouchers gains created_at and issued_by. A list an operator can use needs to say WHEN a card
---    was made and WHO made it, and the table said neither. Safe as a plain ALTER: the table holds zero
---    rows in production (iam_v2 is live-DARK), so DEFAULT now() invents no history.
+--    was made and WHO made it, and the table said neither.
+--
+--    CORRECTION, MADE AFTER THIS MIGRATION WAS APPLIED TO PRE-LIVE. The sentence here originally read
+--    "Safe as a plain ALTER: the table holds zero rows in production (iam_v2 is live-DARK), so DEFAULT now()
+--    invents no history." THE ROW COUNT WAS WRONG. iam_v2.vouchers held EIGHT rows on the appliance, from
+--    earlier live authentication testing, and DEFAULT now() therefore stamped all eight with the migration's
+--    own timestamp. Their created_at is when 0087 ran, not when they were issued. The ALTER was still safe
+--    -- NOT NULL with a DEFAULT cannot fail on existing rows -- so nothing broke; what the claim got wrong
+--    was the honesty of the data it produced.
+--
+--    The consequence, stated so it is not rediscovered as a bug: for those eight vouchers created_at is a
+--    floor, not a fact. It is not backfilled, because there is nothing truthful to backfill it FROM -- no
+--    other column records their issue time. All eight were revoked during the same closure work, so no card
+--    whose created_at is synthetic is redeemable.
+--
+--    WHY THE CLAIM WAS MADE AT ALL: "iam_v2 is live-DARK" was read as "iam_v2 is empty", and DARK means
+--    unreached by guests, not unwritten. The rows had been created by admin-side testing, which is exactly
+--    the traffic a dark schema does receive. A row count is one query; it was asserted instead of run.
 --
 -- 2. iam_v2.voucher_code_reveals — the append-only record of every time a code was recovered in the clear.
 --
@@ -39,7 +55,7 @@
 --     (internal/iamv2/repo_pg.go: UNUSED and now inside [valid_from, valid_until)), so a stored
 --     REDEMPTION_EXPIRED would be a denormalisation of a computed fact -- two answers to one question, and
 --     the stored one always the staler.
---   * No REDEMPTION_EXPIRED writer, for the reason above.
+--   * No UPDATE grant to svc_scd, for the reason given in 3 above: one narrow transition gets one kernel.
 
 BEGIN;
 

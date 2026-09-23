@@ -25,6 +25,31 @@ ENVDIR="${SC_ENV_DIR:-/etc/stayconnect}"
 say() { echo "[install-units] $*"; }
 die() { echo "[install-units] ABORT: $*" >&2; exit 1; }
 
+# list_service_accounts prints every distinct non-root account the units being installed declare.
+#
+# IT IS A FUNCTION SO THAT THE SELF-TEST CAN ASK THE REAL SCRIPT. Step 3b creates these accounts, and the
+# self-test runs with SC_SKIP_SYSTEMD=1 precisely so that it does not touch the real machine -- which would
+# leave the derivation itself unexercised. A test that re-implemented this sed would be the "parallel copy
+# of the logic that could drift" this script already warns about above, so instead
+# SC_LIST_SERVICE_ACCOUNTS=1 prints the answer and exits, and the self-test asserts on that.
+list_service_accounts() {
+  for u in "$SRC"/systemd/stayconnect-*.service; do
+    [ -f "$u" ] || continue
+    # One User= per unit. A commented-out line is ignored; an empty User= means root.
+    svcuser="$(sed -n 's/^[[:space:]]*User=[[:space:]]*\([^[:space:]#]*\).*/\1/p' "$u" | head -n1)"
+    case "$svcuser" in
+      ""|root) continue ;;
+      *%*|*\$*) continue ;;   # a systemd specifier; not resolvable without systemd
+    esac
+    echo "$svcuser"
+  done | sort -u
+}
+
+if [ "${SC_LIST_SERVICE_ACCOUNTS:-0}" = "1" ]; then
+  list_service_accounts
+  exit 0
+fi
+
 # ---- 1. GATE: refuse an invalid configuration before touching the system ----
 GUARD="$SRC/scripts/check-phase6-guest-dependency.sh"
 [ -x "$GUARD" ] || chmod +x "$GUARD" 2>/dev/null
@@ -254,6 +279,60 @@ for u in "$SRC"/systemd/stayconnect-*.service; do
   done
 done
 [ "$missing" = "0" ] || die "one or more units reference a helper that is missing or not executable; those services would fail with status=203/EXEC"
+
+# ---- 3b. SERVICE ACCOUNTS, DERIVED FROM THE UNITS THAT NAME THEM -----------
+#
+# THE SAME DEFECT AS THE HELPER LIST, ONE FIELD ACROSS. A unit whose User= names an account that does not
+# exist does not fail at install time: it installs cleanly, reloads cleanly, and then refuses to start with
+# "Failed to determine user credentials" -- a service that is present, enabled and dead.
+#
+# It was already true here and unnoticed: stayconnect-pmsd.service has named User=stayconnect-pmsd since
+# Phase 3 and NO install path ever created that account. It works on this appliance because somebody ran
+# useradd by hand once. A factory-clean provision would have installed the unit and left pmsd dead.
+# deploy/scripts/provision-fresh-appliance.sh now creates the accounts too; this covers the UPGRADE path,
+# which is the one that runs on an appliance that already exists.
+#
+# DERIVED, NOT LISTED, for the reason written above the helper block: a hand-written list is a thing that
+# falls behind the units. Every distinct User= across the units being installed is read out of the unit
+# files. An account that is missing is created as a locked system account; one that already exists is left
+# exactly as it is -- no usermod, no shell change, no group change, because an existing account may have
+# been deliberately adjusted and this script has no business overruling that.
+if [ "$SKIP_SYSTEMD" = "1" ]; then
+  say "SC_SKIP_SYSTEMD=1: not creating service accounts"
+else
+  acct_missing=0
+  for svcuser in $(list_service_accounts); do
+    if id "$svcuser" >/dev/null 2>&1; then continue; fi
+    # Which unit asked for it, computed HERE rather than carried from a loop variable: the earlier version
+    # of these two messages printed $(basename "$u") after the loop over units had been replaced by a loop
+    # over accounts, so $u held whatever the previous loop in the script left behind. A diagnostic that
+    # names the wrong file is worse than one that names none.
+    namedby="$(grep -l "^[[:space:]]*User=[[:space:]]*$svcuser\$" "$SRC"/systemd/stayconnect-*.service 2>/dev/null \
+      | xargs -r -n1 basename | paste -sd, -)"
+    if useradd --system --no-create-home --shell /usr/sbin/nologin "$svcuser" 2>/dev/null; then
+      say "created system account $svcuser (named by ${namedby:-a unit}, and it did not exist)"
+    else
+      echo "[install-units] REFUSED: ${namedby:-a unit} requires the account '$svcuser', which does not" >&2
+      echo "                exist and could not be created. That service would install and then fail to" >&2
+      echo "                start with 'Failed to determine user credentials'." >&2
+      acct_missing=1
+    fi
+  done
+  [ "$acct_missing" = "0" ] || die "a unit names a service account that does not exist and could not be created"
+
+  # THE SUPPLEMENTARY GROUP IS NOT DERIVED, and the difference is deliberate. Creating a missing account is
+  # unambiguous; deciding which secondary groups it belongs to is a privilege decision, and a script that
+  # read SupplementaryGroups= and silently granted them would be a script that escalates whatever a future
+  # unit file asks for. systemd applies SupplementaryGroups= itself at start time, so nothing needs to be
+  # done here -- what IS checked is that the group exists, because systemd fails the start if it does not.
+  for u in "$SRC"/systemd/stayconnect-*.service; do
+    [ -f "$u" ] || continue
+    for g in $(sed -n 's/^[[:space:]]*SupplementaryGroups=[[:space:]]*\(.*\)/\1/p' "$u" | tr ',' ' '); do
+      case "$g" in ""|*%*|*\$*) continue ;; esac
+      getent group "$g" >/dev/null 2>&1 || die "$(basename "$u") requires group '$g', which does not exist"
+    done
+  done
+fi
 
 # ---- 4. units --------------------------------------------------------------
 changed=0

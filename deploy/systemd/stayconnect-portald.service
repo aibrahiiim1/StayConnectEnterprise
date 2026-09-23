@@ -14,8 +14,24 @@ EnvironmentFile=/etc/stayconnect/portald.env
 ExecStart=/opt/stayconnect/bin/portald
 Restart=always
 RestartSec=2
-User=stayconnect
-Group=stayconnect
+# ITS OWN USER, AND THIS IS THE SECURITY BOUNDARY IT EXISTS FOR.
+#
+# portald listens on *:8380 -- every guest VLAN -- and it used to run as User=stayconnect, the same account
+# as edged. That made it the most exposed process on the appliance and gave it edged's identity: it could
+# ptrace edged, and it could call every administrative route on /run/stayconnect/scd.sock directly,
+# including /v1/backup/restore, /v1/license/install, /v1/setup/enroll and the voucher code reveal. None of
+# those check an operator, because the operator authentication, permission check and password step-up all
+# live in edged, and nothing proved they had happened.
+#
+# SupplementaryGroups, NOT Group. The socket is root:stayconnect 0660 and guest authentication genuinely
+# runs through it (commerce, sessions, phase3/5/6), so access to the socket must stay. What changed is that
+# group membership no longer buys the administrative surface: cmd/scd/admin_surface.go classifies every
+# route and requires the peer to be edged's uid for the administrative ones.
+#
+# The primary group stays portald's own, so anything it creates is not group-shared with edged by default.
+User=stayconnect-portald
+Group=stayconnect-portald
+SupplementaryGroups=stayconnect
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 ProtectSystem=strict

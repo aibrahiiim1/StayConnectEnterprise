@@ -63,8 +63,41 @@ say "packages ok"
 say "layout"
 mkdir -p "$SC"/{bin,releases} "$ETC"/{identity,license,assignment,certs,secrets} /var/log/stayconnect /run/kea /var/lib/kea
 chmod 700 "$ETC/secrets"
+# THE SERVICE ACCOUNTS, ALL OF THEM.
+#
+# This script created exactly one -- stayconnect -- and two units in deploy/systemd name accounts it never
+# made: stayconnect-pmsd (since Phase 3) and now stayconnect-portald. On this appliance both exist because
+# somebody ran useradd by hand, so the omission was invisible; a factory-clean provision would install the
+# units and then fail to start those services with "Failed to determine user credentials". That is the same
+# class of defect as a grant only a migration performs: a live-only artefact that no install path recreates.
+#
+# WHY EACH ONE IS SEPARATE, rather than one account for the whole product:
+#
+#	stayconnect           edged, and the OWNER of /run/stayconnect/scd.sock's group. Reaching that socket
+#	                      is what the group means, and scd's administrative routes now additionally
+#	                      require the peer to be THIS uid (cmd/scd/admin_surface.go).
+#	stayconnect-portald   the captive portal. It listens on *:8380 -- on every guest VLAN -- so it is the
+#	                      process most likely to be attacked and the one that must own the least. It keeps
+#	                      the stayconnect SUPPLEMENTARY group because guest authentication runs through
+#	                      scd's socket, and gets nothing else.
+#	stayconnect-pmsd      the PMS interface, which holds the credentials for the hotel's Protel connection.
+#
+# Sharing a uid makes the separation cosmetic: a process can ptrace another running under the same uid, so
+# a compromised portal reaches edged's memory whatever any in-process check does. That is why this is a
+# provisioning change and not only a code change.
 id stayconnect >/dev/null 2>&1 || useradd --system --home "$SC" --shell /usr/sbin/nologin stayconnect
+for svcuser in stayconnect-portald stayconnect-pmsd; do
+  id "$svcuser" >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin "$svcuser"
+done
+# portald needs the socket group, and NOT as its primary group -- its primary group is its own, so files it
+# creates are not group-readable by edged by default.
+id -nG stayconnect-portald | tr ' ' '\n' | grep -qx stayconnect || usermod -aG stayconnect stayconnect-portald
+
 chown -R stayconnect:stayconnect /var/log/stayconnect
+# GROUP-WRITABLE, because more than one account writes here now. portald's unit lists
+# /var/log/stayconnect in ReadWritePaths, and under its own uid a 0755 directory owned by stayconnect
+# refuses it -- systemd would grant the mount and the kernel would still deny the write.
+chmod 775 /var/log/stayconnect
 # CADDY'S LOG DIRECTORY *AND ITS FILES*. Caddy runs unprivileged; a root-owned log file inside a
 # caddy-owned directory still fails to open, and Caddy then refuses the whole config on start AND on reload.
 mkdir -p /var/log/caddy && chown -R caddy:caddy /var/log/caddy && chmod 755 /var/log/caddy
