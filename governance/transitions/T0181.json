@@ -36,6 +36,7 @@
   "state_note": "Phase status is unchanged: Phase 7 remains ACCEPTED_AND_CLOSED at verified full-system LIVE-DARK maturity. This transition closes the MISSION and reconciles the register to it. It grants nothing, deploys nothing and lifts nothing -- D41 stands and Go-Live is not authorised.",
   "base": "1898c127257a328756fbb83ac63294075c2ce26c",
   "base_note": "The master merge commit of PR #178, which recorded T0180.",
-  "head": "bdaf4e5650ae918cc197cecfeb04ec345beeb98c",
-  "previous_delivery": "T0180"
+  "head": "a69ee03a",
+  "previous_delivery": "T0180",
+  "the_keyword_validator_had_no_word_for_a_closed_mission": "The adversarial mutation suite refuses to run until the GOOD state passes both validators, and it refused: BASELINE FAIL structural=0 keyword=1. The governance gate failed the same way on the same step, so this was caught by the mechanism built for it rather than by reading.\n\nTHE CAUSE WAS A WHITELIST WITH NO ENTRY FOR THIS STATE. validate-project-state.sh extracts `next authorized (activity|action|step)[^.]*` from both pack files and requires the result to match one of a long list of legitimate phrasings -- every phase added its own as it arrived. There was an entry for 'Execute to DONE the Product-Owner-authorised FUNCTIONAL-COMPLETENESS CLOSURE' and none for that mission being finished.\n\nAND THE EXTRACTOR STOPS AT THE FIRST PERIOD, which made the first attempt unfixable by adding a pattern: the field opened 'NONE. The Product-Owner ...', so the candidate string was the single word 'NONE' and no phrase could be matched against it. The field now states its claim BEFORE the first period, and the allow-list gains the CLOSED phrasing. That is an addition -- it recognises a new legitimate state and removes no check."
 }
