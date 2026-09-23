@@ -269,7 +269,8 @@ ledger_lock_key(){ q "SELECT hashtextextended('stayconnect_edge_migrate:ledger',
 # compared BEFORE this function ran, so the runner verified one file and executed another. A verify-then-use
 # pair with anything in between is not a guarantee. apply_one now re-verifies immediately before the cat.
 verify_no_gap_below(){ # $1 = version being applied, $2 = the directory it came from
-  local ver="$1" dir="$2" missing="" floor="" gapf=""
+  local ver="$1" dir="$2" missing="" floor="" gapf="" required_list="" required_n=0
+  REQUIRED_BELOW=""; REQUIRED_BELOW_N=0
   [ -d "$dir" ] || { echo "REFUSED: cannot check for gaps: '$dir' is not a directory" >&2; exit 2; }
   # THE BASELINE FLOOR. A factory-clean appliance is built from migrations/baseline/, which creates the end
   # state directly, so the migrations the baseline covered have NO ledger rows and never will. Treating
@@ -280,6 +281,31 @@ verify_no_gap_below(){ # $1 = version being applied, $2 = the directory it came 
   # everything below it came from the baseline. That is the database's own evidence rather than a constant
   # this script would have to be told.
   floor="$(q "SELECT coalesce(min(version),'') FROM public.schema_migrations WHERE version ~ '^[0-9]{4}_'")"
+  # AN EMPTY LEDGER IS A FACTORY-CLEAN APPLIANCE, NOT A HUNDRED GAPS. Caught by review, and it would have
+  # refused the first apply on every newly provisioned appliance.
+  #
+  # migrations/baseline/0000_production_baseline.sql says what it is: "This is the CURRENT schema and only
+  # the current schema. A new Production appliance is built from this file". It creates that end state
+  # directly and inserts NO ledger rows -- verified, it contains no INSERT INTO schema_migrations at all.
+  # So a freshly provisioned appliance has a current schema and an empty ledger, and the floor computed
+  # above is empty too. With an empty floor the guard below does not exclude anything, so every historical
+  # file counts as missing and the apply is refused, listing migrations the baseline had already applied.
+  #
+  # There is no ledger evidence to check against in that state, and inventing some would be worse than
+  # admitting it: the check is SKIPPED, loudly, naming the baseline as the reason. What it protects -- an
+  # out-of-order apply on an appliance with real per-migration history -- does not exist on an appliance
+  # that has none.
+  #
+  # THE BETTER FIX IS IN THE BASELINE, not here: if generate-production-baseline.sh recorded the versions
+  # its dump covers, the ledger would never be empty on a fresh appliance, this branch would be unnecessary,
+  # and clean-install-reconstruction.sh would not have to insert those rows itself. That is a change to a
+  # generated artefact and its generator, and it is recorded rather than done in passing.
+  if [ -z "$floor" ]; then
+    echo "  gap check SKIPPED: public.schema_migrations is empty, which is a factory-clean appliance built"
+    echo "                     from migrations/baseline/ -- the baseline is the floor, and no lower"
+    echo "                     migration has (or will ever have) a ledger row to find."
+    return 0
+  fi
   for gapf in "$dir"/[0-9][0-9][0-9][0-9]_*.up.sql; do
     [ -f "$gapf" ] || continue
     local n; n="$(basename "$gapf" .up.sql)"
@@ -287,10 +313,16 @@ verify_no_gap_below(){ # $1 = version being applied, $2 = the directory it came 
     # numeric order.
     [ "$n" \< "$ver" ] || continue
     [ -z "$floor" ] || [ ! "$n" \< "$floor" ] || continue
+    required_n=$((required_n+1))
+    if [ -n "$required_list" ]; then required_list="$required_list,'$n'"; else required_list="'$n'"; fi
     local applied; applied="$(q "SELECT count(*) FROM public.schema_migrations WHERE version='$n'")"
     [ "$applied" = "1" ] || missing="$missing $n"
   done
-  [ -z "$missing" ] && { echo "  no gap below $ver: every lower numbered migration is applied"; return 0; }
+  # PUBLISHED FOR THE UNDER-LOCK RE-ASSERTION. apply_one repeats this invariant inside the ledger lock and
+  # needs the same set, not a re-derivation that could differ from what was actually checked here.
+  REQUIRED_BELOW="$required_list"
+  REQUIRED_BELOW_N="$required_n"
+  [ -z "$missing" ] && { echo "  no gap below $ver: every lower numbered migration is applied ($required_n checked)"; return 0; }
   echo "REFUSED: $ver cannot be applied while a LOWER migration is unapplied:" >&2
   for m in $missing; do echo "           $m" >&2; done
   echo "         Applying out of order leaves the ledger claiming a schema the database does not have," >&2
@@ -540,10 +572,32 @@ apply_one(){ # $1=file  atomic lock-then-ledger
       printf "SET statement_timeout='60s';\nSELECT pg_advisory_lock(%s);\n" "$lkey"
       printf "SELECT pg_advisory_lock(%s);\nSET statement_timeout=0;\n" "$key"
       printf "SELECT (NOT EXISTS(SELECT 1 FROM public.schema_migrations WHERE version='%s')) AS need \\\\gset\n" "$ver"
+      # AND THE GAP INVARIANT, RE-ESTABLISHED INSIDE THE LOCK. Caught by review.
+      #
+      # verify_no_gap_below ran BEFORE this session took the ledger lock, so its answer was true when it was
+      # computed and not necessarily when the row is written. The concrete sequence: an apply of 0090
+      # validates while 0089 is present, a concurrent DOWN runner then takes the lock first and removes
+      # 0089, and this session -- which only rechecked whether 0090 itself was absent -- commits, recreating
+      # exactly the ledger gap the guard exists to prevent.
+      #
+      # The EXACT SET is re-asserted rather than "some lower version exists", because the weaker form does
+      # not catch that sequence at all: 0088 is still there, so "something below" is trivially true while
+      # 0089 is the hole. $REQUIRED_BELOW is the list verify_no_gap_below already established must be
+      # present; if a concurrent run removed any of them, the count no longer matches and the apply does not
+      # happen. Empty when the ledger is empty (a factory-clean appliance), which skips the assertion for
+      # the reason verify_no_gap_below states.
+      if [ -n "${REQUIRED_BELOW:-}" ]; then
+        printf "SELECT ((SELECT count(*) FROM public.schema_migrations WHERE version IN (%s)) = %s) AS nogap \\\\gset\n" \
+          "$REQUIRED_BELOW" "$REQUIRED_BELOW_N"
+      else
+        printf "SELECT true AS nogap \\\\gset\n"
+      fi
+      printf "\\\\if :nogap\n"
       printf "\\\\if :need\n\\\\echo APPLYING_UNDER_LOCK\n"
       cat "$f"
       printf "\nINSERT INTO public.schema_migrations(version) VALUES ('%s') ON CONFLICT DO NOTHING;\n" "$ver"
       printf "\\\\else\n\\\\echo SKIP_AFTER_LOCK\n\\\\endif\n"
+      printf "\\\\else\n\\\\echo GAP_APPEARED_UNDER_LOCK\n\\\\endif\n"
       printf "SELECT pg_advisory_unlock(%s);\nSELECT pg_advisory_unlock(%s);\n" "$key" "$lkey"
     } | $EDGE_PSQL -v ON_ERROR_STOP=1 2>&1
   )"
@@ -553,6 +607,19 @@ apply_one(){ # $1=file  atomic lock-then-ledger
   # hypothetical: see the note on the two proofs below.
   [ "${EDGE_MIGRATE_DEBUG:-0}" = "1" ] && { echo "---- psql output (rc=$rc) ----"; printf '%s
 ' "$out"; echo "---- end ----"; }
+  # A GAP THAT OPENED WHILE THIS RUNNER WAS STARTING, reported as itself rather than as a generic runner
+  # error. Nothing was applied and no ledger row was written: the apply is inside the \if that this failed.
+  #
+  # Named explicitly because the first version left it falling through to "RUNNER ERROR", which is true and
+  # useless -- an operator reading it cannot tell a concurrent rollback from a broken runner, and the two
+  # call for opposite actions.
+  if echo "$out" | grep -q "GAP_APPEARED_UNDER_LOCK"; then
+    echo "REFUSED: every lower migration was applied when this runner checked, and one of them is NOT" >&2
+    echo "         applied now -- a concurrent rollback removed it while this apply was starting." >&2
+    echo "         NOTHING was applied and NO ledger row was written, so the ledger has no hole." >&2
+    echo "         Re-read the ledger and decide which direction you meant before running either again." >&2
+    exit 3
+  fi
   # ON_ERROR_STOP IS FORCED HERE AND NOT LEFT TO THE CALLER, because without it a FAILED migration is
   # recorded as APPLIED and can never be retried.
   #

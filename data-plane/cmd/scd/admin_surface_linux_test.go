@@ -116,6 +116,46 @@ func TestEdgedItselfIsStillAdmitted(t *testing.T) {
 	}
 }
 
+// THE CASE A REVIEW CAUGHT: edged's OWN UID, A DIFFERENT IMAGE.
+//
+// After portald was given its own account this gate checked the uid alone, on the belief that edged was
+// then the only thing holding it. stayconnect-hotel-admin.service was still running `/usr/bin/node
+// server.js` as User=stayconnect -- uid 998 on the appliance, exactly edged's -- with a group that opens
+// scd.sock. So the Node process rendering the admin web UI was admitted to /v1/backup/restore,
+// /v1/license/install and /v1/setup/enroll.
+//
+// It has its own account now, and this asserts the in-process half: sharing the account is not enough.
+func TestSharingEdgedsUIDIsNotEnough(t *testing.T) {
+	mine := currentUIDAsEdged(t)
+	for _, exe := range []string{
+		"/usr/bin/node",                // hotel-admin, as it actually ran
+		"/opt/stayconnect/bin/portald", // and anything else that lands on this account
+		"/usr/bin/curl",
+		"/opt/stayconnect/bin/edged-copy", // a near-miss name must not pass
+	} {
+		for _, path := range []string{"/v1/backup/restore", "/v1/license/install", "/v1/setup/enroll"} {
+			code, body := gate(t, asPeer("POST", path, mine, exe))
+			if code != http.StatusForbidden {
+				t.Errorf("%s from edged's uid running %s returned %d, not 403", path, exe, code)
+			}
+			if !strings.Contains(body, "edged") {
+				t.Errorf("%s refused without saying who may call it: %q", path, strings.TrimSpace(body))
+			}
+		}
+	}
+}
+
+// AND THE GUEST SURFACE IS UNAFFECTED BY THE IMAGE. The guest routes are reachable by anything the socket's
+// group admits, whatever binary it is -- that is what keeps the captive portal working.
+func TestTheGuestSurfaceDoesNotCareWhichImageCalls(t *testing.T) {
+	mine := currentUIDAsEdged(t)
+	for _, exe := range []string{"/usr/bin/node", "/opt/stayconnect/bin/portald", "/usr/bin/curl"} {
+		if code, _ := gate(t, asPeer("POST", "/v1/sessions/activate", mine, exe)); code != http.StatusOK {
+			t.Errorf("a guest route refused %s (%d); guest authentication must not depend on the image", exe, code)
+		}
+	}
+}
+
 // AND THE GUEST SURFACE STAYS OPEN TO THE FOREIGN UID, which is the entire reason the socket group still
 // admits portald. If this fails, guests cannot sign in.
 func TestTheGuestSurfaceStaysOpenToPortald(t *testing.T) {
