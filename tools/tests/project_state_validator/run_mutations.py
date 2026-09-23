@@ -670,6 +670,22 @@ MUTATIONS = [
   "scripts/clean-install-reconstruction.sh",
    ("replace", [('for f in $(ls "$MIG"/*.up.sql | sort); do',
                  'for f in "$MIG"/0010_phase3_stay_resolution.up.sql; do')])),
+
+ # Both raised by review on PR #179, and both were real holes in the rule as first written.
+ #
+ # M72: the closure rules were CONDITIONAL on two sentinel fields that nothing else in the repository
+ # required, so deleting both switched the entire safeguard off and the state still reported PASS.
+ ("M72 both closure sentinels removed, switching the safeguard off",
+  "governance/project-state.json",
+   ("json_set", [(["current_state_facts", "functional_completeness_mission_status"], "REMOVED"),
+                 (["current_state_facts", "functional_completeness_verdict"], "REMOVED")])),
+ # M73: the ledger check matched the words "ledger completeness", which live in an echo banner -- so
+ # the loop underneath could be deleted while the heading, the match and the PASS all survived.
+ # apply_one swallows the ledger insert with `|| true`, so a migration really can apply unrecorded.
+ ("M73 the ledger-completeness loop deleted while its heading survives",
+  "scripts/clean-install-reconstruction.sh",
+   ("replace", [('  [ "$(psql_q -c "SELECT count(*) FROM schema_migrations WHERE version=\'$n\'")" = "1" ] || {\n    bad "migration $n is not recorded in schema_migrations"; unrecorded=$((unrecorded+1)); }',
+                 '  : # assertion removed; the heading above is untouched')])),
 ]
 
 def apply(relpath, op):

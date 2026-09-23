@@ -156,6 +156,15 @@ jobs:
         if: steps.reuse.outputs.hit != 'true'
         run: python tools/tests/standing_records_negative.py
 
+      # CLOSURE COHERENCE, BOTH DIRECTIONS. The mutation suite proves a rule can FAIL; it cannot prove a rule
+      # stays QUIET when it should, because every case it runs is expected to be caught. Two of the three
+      # defects review found in check_closure_coherence were of that second kind: a safeguard that two
+      # deleted keys switched off, and a ban so broad that any FUTURE authorised activity would have failed
+      # validation for existing. A suite that only asserts detection would have shipped both.
+      - name: Closure coherence — negative and positive tests
+        if: steps.reuse.outputs.hit != 'true'
+        run: python tools/tests/closure_coherence/run_negative.py
+
       # A GRANT ONLY A MIGRATION MAKES IS A GRANT THAT DISAPPEARS.
       #
       # gatep-grants.sql opens by revoking ALL privileges on ALL tables, sequences and functions in public
