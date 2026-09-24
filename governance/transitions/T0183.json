@@ -1,0 +1,32 @@
+{
+  "transition_id": "T0183",
+  "seq": 183,
+  "timestamp": "2026-09-24T09:42:46+03:00",
+  "timestamp_derivation": "The committer date of the last CONTENT commit of this delivery, so the receipt cannot post-date the commit that introduces it.",
+  "record_type": "DELIVERY_MODEL_ACTIVATION_NIGHTLY_AUTHORITATIVE_VALIDATION",
+  "authorisation": "The same Product-Owner mission as T0182, continued: redesign delivery so normal development is not interrupted by the four full gates, and prove the new model end to end. This delivery is the second half of that one authorisation, not a new mission.",
+  "what_this_closes": "T0182 landed the mechanism with the OLD pull_request triggers still in place, because workflow_dispatch only fires for a workflow already on the DEFAULT BRANCH -- the delivery that adds the mechanism cannot be validated by it. That constraint is discharged the moment T0182 merges, and this delivery removes the daytime cycle:\n\n  * no gate runs on pull_request;\n  * phase4 and phase5 no longer run a full gate on every push to phase/**;\n  * push remains only for master.\n\nThe register declares NIGHTLY_AUTHORITATIVE_VALIDATION, and the transitional NIGHTLY_MODEL_LANDING value is DELETED from the validator's accepted set rather than left available: a transition value that outlives its transition is just a way to switch the checks off. Proven -- setting the register back to the landing value now fails with 'the only accepted value is NIGHTLY_AUTHORITATIVE_VALIDATION'.",
+  "a_consequence_stated_rather_than_discovered": "An open pull request now carries NO required checks until a nightly run reports them, so it sits unmergeable all day and GitHub shows its status as blocked. That is the intended state of a delivery candidate under this model, not a stuck pull request, and it is written into the gate workflows themselves so the next person to look does not treat it as a fault.",
+  "two_validators_contradicted_each_other": "Removing the trigger made tools/project-state.py fail with 'governance CI must run on pull_request', while tools/validate-delivery-protocol.py refuses exactly that trigger. Two validators asserting opposite things about the same line is worse than either being wrong, because whichever one is edited to agree looks like the other was right.\n\nResolved by locating the question in ONE place. project-state.py keeps everything it was actually protecting -- the gate exists, targets master, runs every required command, ignores no failure, asserts a clean tree -- and now requires the nightly workflow_dispatch instead of pull_request. WHICH EVENT earns a required context is asserted only by validate-delivery-protocol.py, against the model the register declares.",
+  "the_regression_this_delivery_exists_to_prevent_is_guarded": "M61f reintroduces a pull_request trigger on a gate -- the daytime interruption, back -- and the suite requires it to be detected.\n\nITS FIRST ANCHOR WAS WRONG AND THE PROOF SILENTLY PASSED, which is worth recording because it is the fifth instance of the same family in this mission. The anchor was 'on:\\n  push:', which no longer exists: removing pull_request left a long comment between 'on:' and 'push:'. So the mutation replaced nothing, the validator correctly reported PASS on an unmutated file, and the run looked like evidence of detection. A mutation whose anchor does not resolve proves the opposite of what it appears to. The anchor now targets the push block, which exists, and the refusal names the model.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. This increment performed controlled acceptance ON the PRE-LIVE appliance and left it PRE-LIVE with the capability OFF: no phase transition, no cutover, no enablement."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. This increment performed controlled acceptance ON the PRE-LIVE appliance and left it PRE-LIVE with the capability OFF: no phase transition, no cutover, no enablement."
+  },
+  "state_note": "Phase status unchanged: Phase 7 remains ACCEPTED_AND_CLOSED and functional completeness remains PASS with that mission CLOSED at T0181. This transition completes the delivery-model change begun at T0182. It grants no environment, lifts no deferral, and authorises neither Guest activation nor Go-Live.",
+  "base": "b798b085ee4f5e69da123c83fb8f8b9d066e0bbf",
+  "base_note": "The master merge commit of PR #180, which recorded T0182 and put the orchestrator on master.",
+  "head": "0f6ef2da",
+  "previous_delivery": "T0182",
+  "go_live": "NOT authorised. Guest activation remains DEFERRED by D41."
+}
