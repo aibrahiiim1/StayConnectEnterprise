@@ -61,6 +61,10 @@ type Event struct {
 	GuestLastName  string
 	GuestFirstName string
 
+	// Sharers is the OPTIONAL full occupancy list, set only by connectors whose provider names every occupant
+	// (the REST connectors). The FIAS adapter never sets it, so a FIAS payload is byte-identical to before.
+	Sharers []EventSharer
+
 	// keyed-HMAC provenance digest of the source evidence (never the raw frame); key is never stored here
 	SourceEvidenceHash string
 	EvidenceKeyVersion int
