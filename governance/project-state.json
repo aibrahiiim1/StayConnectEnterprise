@@ -1709,8 +1709,8 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "b798b085ee4f5e69da123c83fb8f8b9d066e0bbf",
     "base_note": "The master merge commit of PR #180, which recorded T0182.",
-    "head": "0f6ef2da",
-    "head_note": "The last CONTENT commit of this delivery: removing the daytime full-gate triggers, deleting the transitional landing value, and resolving the contradiction between two validators about which event earns a required context.",
+    "head": "4273e14e",
+    "head_note": "The last CONTENT commit of this delivery: the third validator that encoded the retired pull_request trigger, found by the first real nightly run refusing to merge.",
     "transition": "T0183",
     "previous_delivery": "T0182",
     "note": "T0183. The four authoritative gates no longer run on pull_request, so normal daytime development is not interrupted at all. The complete four-gate validation happens once a night at 03:10 Africa/Cairo against the exact head of the single active delivery candidate, and only an all-green result on that exact head is merged.\n\nTHIS PULL REQUEST IS ITSELF THE END-TO-END PROOF OF THE MODEL. It carries no pull_request checks, so its four required contexts can only be produced by the orchestrator dispatching them at its exact head -- which establishes the two things that were still unproven by argument: that GITHUB_TOKEN can trigger workflow_dispatch from inside Actions, and that a dispatched run's check runs satisfy required contexts pinned to the Actions app on the pull-request head."
