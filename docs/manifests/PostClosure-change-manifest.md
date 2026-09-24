@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `b798b085ee4f5e69da123c83fb8f8b9d066e0bbf`
-- **HEAD commit:** `4273e14e`
-- **Provenance (generation HEAD = inventory_head):** `b1e2b13fb40fa2521fd45d464c174adf6085a0ff`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `5ce8c662`
+- **Provenance (generation HEAD = inventory_head):** `95fa3d6c38f474e312e2dc177efc3b72cbe4a660`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/nightly-model-activate`
 - **Remote branch:** `origin/delivery/nightly-model-activate`
 - **Changed files:** 34
@@ -24,7 +24,7 @@
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
-| `exports/chatgpt/phase-evidence/GIT_STAT_0abc5bf5.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs: rebuild at the delivery head |
+| `exports/chatgpt/phase-evidence/GIT_STAT_bafaeba8.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs: rebuild at the delivery head |
 | `exports/chatgpt/phase-evidence/GIT_STAT_d78bd812.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Packs: rebuild at the T0183 governance commit |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
@@ -40,10 +40,10 @@
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the T0183 governance commit |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the T0183 governance commit |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the T0183 governance commit |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: the delivery head is the third-validator correction |
-| `governance/transitions/T0183.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: the delivery head is the third-validator correction |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: the delivery head is the mutation-anchor audit |
+| `governance/transitions/T0183.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: the delivery head is the mutation-anchor audit |
 | `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Two validators must not contradict each other about the trigger |
-| `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Activate the model: the four gates stop running on every push |
+| `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | M20 was obsolete, and an obsolete mutation aborts the whole suite |
 | `tools/validate-branch-protection.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | A third validator encoded the old trigger, found by the live nightly run |
 | `tools/validate-delivery-protocol.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Activate the model: the four gates stop running on every push |
 
@@ -57,11 +57,11 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   2 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   2 +-
  docs/context/StayConnect-IAM-Handoff.md            |   2 +-
- docs/manifests/PostClosure-change-manifest.md      | 183 ++++++++-------------
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 342840 -> 342841 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 149040 -> 149393 bytes
+ docs/manifests/PostClosure-change-manifest.md      | 187 ++++++++-------------
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 342840 -> 342839 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 149040 -> 149392 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44004 -> 44002 bytes
- .../chatgpt/phase-evidence/GIT_STAT_0abc5bf5.txt   |   4 +
+ .../chatgpt/phase-evidence/GIT_STAT_bafaeba8.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_d78bd812.txt   |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   6 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
@@ -78,12 +78,12 @@
  .../StayConnect-IAM-Phase1A-Plan.md                |   2 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |   2 +-
  governance/project-state.json                      |  24 +--
- governance/transitions/T0183.json                  |  33 ++++
+ governance/transitions/T0183.json                  |  34 ++++
  tools/project-state.py                             |  15 +-
- .../tests/project_state_validator/run_mutations.py |   7 +
+ .../tests/project_state_validator/run_mutations.py |  17 +-
  tools/validate-branch-protection.py                |  19 ++-
  tools/validate-delivery-protocol.py                |  22 +--
- 34 files changed, 278 insertions(+), 210 deletions(-)
+ 34 files changed, 291 insertions(+), 212 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -93,6 +93,10 @@ M  docs/manifests/PostClosure-change-manifest.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 95fa3d6c Packs: rebuild at the delivery head
+HISTORICAL: bafaeba8 Governance: the delivery head is the mutation-anchor audit
+HISTORICAL: 5ce8c662 M20 was obsolete, and an obsolete mutation aborts the whole suite
+HISTORICAL: 16751a39 Delivery: the manifest lists itself
 HISTORICAL: b1e2b13f Packs: rebuild at the delivery head
 HISTORICAL: 0abc5bf5 Governance: the delivery head is the third-validator correction
 HISTORICAL: 4273e14e A third validator encoded the old trigger, found by the live nightly run
