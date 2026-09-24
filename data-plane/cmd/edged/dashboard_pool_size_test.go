@@ -64,6 +64,25 @@ func TestThePoolSizeGuardAsksTheQuestionTheArithmeticAssumes(t *testing.T) {
 	}
 }
 
+// THE /24 GUARD WAS THE SECOND FORM OF THE SAME DEFECT. Once the /32 comparison was fixed, the fourth-octet
+// arithmetic still needed both ends in one /24, and every pool crossing an octet boundary (10.20.0.10 to
+// 10.20.3.250 on a /22) was excluded and scored as zero. The size is now the integer distance between the two
+// addresses, which is correct for any IPv4 range; the overview computes the same figure in Go (ipv4RangeSize)
+// and that arithmetic is tested directly in overview_calc_test.go.
+func TestThePoolSizeCountsRangesThatCrossAnOctetBoundary(t *testing.T) {
+	src, err := os.ReadFile("resources_dashboard.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := stripComments(string(src))
+	if !strings.Contains(s, "sum((p.end_ip - p.start_ip) + 1)") {
+		t.Error("the pool size is no longer the address distance plus one; ranges wider than a /24 would miscount")
+	}
+	if strings.Contains(s, "set_masklen(p.start_ip::cidr, 24)") {
+		t.Error("the /24 guard is back; every pool that crosses an octet boundary would be scored as zero")
+	}
+}
+
 func TestZeroMeansNoPoolRatherThanAPoolThatWasExcluded(t *testing.T) {
 	// The COALESCE is correct and must stay — a network with genuinely no pool is 0, not NULL. What made the
 	// original defect invisible was that the SAME zero also meant "the guard rejected every row". With the
