@@ -162,10 +162,21 @@ def main():
     # path through this model, so the question is whether the head that failed is STILL the delivery head. If a
     # commit has landed since, the next nightly run judges that new head and there is nothing for this session
     # to repair.
+    # A FAILED LOOKUP IS NOT AN EMPTY LIST. This substituted [] on an HTTP error, and an empty candidate list
+    # reads as "the head moved on, nothing is owed" -- so an API failure produced a CLEAR verdict in the one
+    # check CLAUDE.md tells every session to run before starting work. Now it is indistinguishable from nothing
+    # only if we make it so, and we do not: None means unreadable, and the decision module fails closed on it.
     try:
         pulls = api(tok, "/pulls?state=open&per_page=100")
-    except urllib.error.HTTPError:
-        pulls = []
+    except urllib.error.HTTPError as e:
+        info["open_candidates"] = "UNREADABLE (HTTP %s)" % e.code
+        unresolved, why = nd.failure_is_unresolved(last, None)
+        info["resolution"] = why
+        out("UNKNOWN",
+            "the last authoritative nightly validation FAILED and the open-candidate list could not be read "
+            "(HTTP %s), so whether a repair is owed cannot be determined. Treat this as UNKNOWN, not as "
+            "clear." % e.code, info)
+        return 2
     cands = [p for p in pulls
              if (p.get("base") or {}).get("ref") == "master" and not p.get("draft")
              and nd.HOLD_LABEL not in [l.get("name") for l in (p.get("labels") or [])]]

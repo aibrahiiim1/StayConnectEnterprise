@@ -445,6 +445,16 @@ def failure_is_unresolved(run, candidate_heads):
 
     An unknown tested head is treated as UNRESOLVED, because "I cannot tell whether this was fixed" is not
     the same as "it was fixed".
+
+    `candidate_heads=None` MEANS "COULD NOT BE DETERMINED" and is also UNRESOLVED, for the same reason. An
+    empty LIST and an unreadable lookup are different facts and must not collapse into one: the caller
+    substituted [] on an HTTP error, so a failed API call read as "nothing is owed" -- a fail-open in the one
+    check every session is told to run first.
+
+    AND AN EMPTY LIST STILL PROVES NOTHING ABOUT WHY. A candidate disappears from that list when it is merged,
+    when it is closed, when it is marked draft, and when it carries the hold label. Naming one of those as what
+    happened would hand the next session an invented history, so the reason says only what is known: no
+    eligible candidate is visible.
     """
     if not run:
         return False, "there is no authoritative run to judge"
@@ -452,16 +462,31 @@ def failure_is_unresolved(run, candidate_heads):
     if concl == "success":
         return False, "the authoritative run succeeded"
     tested = str(run.get("tested_head") or "").strip()
-    heads = [str(h) for h in (candidate_heads or [])]
+    if candidate_heads is None:
+        return True, ("the run failed and the list of open candidates could not be read, so the failure cannot "
+                      "be shown to have been superseded")
+    heads = [str(h) for h in candidate_heads]
     if not tested:
         return True, ("the run failed and the head it tested could not be read, so it cannot be shown to "
                       "have been superseded")
     if tested in heads:
         return True, ("the run failed on %s, which is STILL the delivery head -- nothing has addressed it"
                       % tested[:12])
+    # TWO DIFFERENT REASONS A RED NIGHT IS NO LONGER OWED, and they read as different sentences because a
+    # future session acts on this text. Joining them produced "the delivery head has moved to no open
+    # candidate since", which is not a sentence and was printed by the very run that merged this delivery.
+    #
+    # THE FIRST FIX WAS WORSE THAN THE DEFECT: it replaced a malformed sentence with a confident false one,
+    # "that pull request has been merged or closed since". Nothing here knows that. The list is also empty for
+    # a draft, for a held candidate, and -- before the caller was corrected -- for a failed API call. The
+    # reason now states the observation and lists the possibilities without choosing between them.
+    if not heads:
+        return False, ("the run failed on %s and no eligible candidate is visible now -- it may have been "
+                       "merged or closed, or marked draft, or put on hold -- so nothing can be shown to be "
+                       "owed on that head" % tested[:12])
     return False, ("the run failed on %s, but the delivery head has moved to %s since; the next nightly run "
                    "judges the new head"
-                   % (tested[:12], ", ".join(h[:12] for h in heads) or "no open candidate"))
+                   % (tested[:12], ", ".join(h[:12] for h in heads)))
 
 
 def summarise(decisions):
