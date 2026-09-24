@@ -445,9 +445,20 @@ def cmd_validate(deep=True, manifest_equality=True):
         fail("mandatory governance CI missing: .github/workflows/project-governance.yml (GH-MANDATORY-CI)")
     else:
         w = open(wf, encoding="utf-8").read()
-        if "pull_request:" not in w: fail("governance CI must run on pull_request (targeting master)")
+        # THE TRIGGER THIS DEMANDS CHANGED WITH THE DELIVERY MODEL (T0182/T0183). It used to require
+        # `pull_request:` and to treat `workflow_dispatch` as merely permitted. Under the nightly model the
+        # gate must NOT run on pull_request -- that is the daytime interruption the Product Owner removed --
+        # and the dispatch is how its required context is earned at all. Demanding the old trigger here would
+        # make the two validators contradict each other, with this one insisting on the thing
+        # validate-delivery-protocol.py now refuses.
+        #
+        # The substance is unchanged: the gate must still exist, still target master, and still run every
+        # required command without ignoring failures. Which EVENT earns it is asserted in one place, by
+        # validate-delivery-protocol.py, against the model the register declares.
+        if "workflow_dispatch" not in w:
+            fail("governance CI must accept the nightly workflow_dispatch; without it the required context "
+                 "cannot be earned on a delivery head at all")
         if "master" not in w: fail("governance CI must target the master branch")
-        if "workflow_dispatch" not in w: fail("governance CI must allow manual workflow_dispatch")
         for cmd in ["tools/project-state.py validate", "tools/project-state.py check-generated",
                     "tools/tests/project_state_validator/run_mutations.py", "tools/validate-project-state.sh"]:
             if cmd not in w: fail(f"governance CI missing required validation command: {cmd}")
