@@ -123,7 +123,7 @@ export function IssueDialog({
     <Dialog open={open} onOpenChange={(v) => !busy && onOpenChange(v)}>
       <DialogContent size="lg">
         <DialogHeader>
-          <DialogTitle>{issued ? `${issued.count} vouchers issued` : "Issue vouchers"}</DialogTitle>
+          <DialogTitle>{issued ? `${issued.count.toLocaleString()} voucher${issued.count === 1 ? "" : "s"} issued` : "Issue vouchers"}</DialogTitle>
           <DialogDescription>
             {issued
               ? "These codes are shown once. Copy, download or print them now."

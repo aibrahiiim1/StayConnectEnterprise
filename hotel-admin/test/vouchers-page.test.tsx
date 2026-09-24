@@ -295,6 +295,8 @@ describe("issuing vouchers", () => {
 
     const codes = await screen.findAllByTestId("held-code");
     expect(codes.map((c) => c.textContent)).toEqual(["48273962", "K7PX4R9M"]);
+    // The result title agrees with its count (live verification found "1 vouchers issued").
+    expect(screen.getByRole("dialog", { name: "25 vouchers issued" })).toBeTruthy();
     expect(screen.getByText(/not be shown again/)).toBeTruthy();
     expect(screen.getByRole("button", { name: /Copy all/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Download CSV/ })).toBeTruthy();
