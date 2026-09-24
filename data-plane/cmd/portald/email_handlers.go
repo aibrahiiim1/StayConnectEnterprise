@@ -13,24 +13,24 @@ import (
 
 // branding serves the hotel's published portal design to the landing page.
 //
-// GUEST-FACING AND THEREFORE NARROW. It proxies scd, which reads the tenant's branding document; portald
-// adds no interpretation. If the hotel has published nothing, or scd cannot answer, the portal falls back to
-// its own defaults -- which is why a failure here is an empty object rather than an error page. A guest must
-// never be unable to sign in because a logo could not be fetched.
+// GUEST-FACING AND THEREFORE NARROW. It reads the tenant's design from scd and hands the guest only what
+// portaldesign.ForGuests lets through: known fields, each re-checked, the custom stylesheet and fragment
+// rebuilt from the same allowlist edged applied on save. It used to copy scd's answer through verbatim, so a
+// design that reached the database any other way -- written before the allowlist existed, restored from a
+// backup -- reached every guest device exactly as stored.
+//
+// If the hotel has published nothing, or scd cannot answer, the portal falls back to its own defaults --
+// which is why a failure here is an empty object rather than an error page. A guest must never be unable to
+// sign in because a logo could not be fetched.
 func (h *handler) branding(w http.ResponseWriter, r *http.Request) {
-	req, _ := http.NewRequestWithContext(r.Context(), "GET", "http://unix/v1/tenant/branding", nil)
-	resp, err := h.scd.Do(req)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	if err != nil || resp.StatusCode != http.StatusOK {
-		if resp != nil {
-			_ = resp.Body.Close()
-		}
+	d, ok := h.guestDesign(r.Context())
+	if !ok {
 		_, _ = w.Write([]byte(`{}`))
 		return
 	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(w, resp.Body)
+	_ = json.NewEncoder(w).Encode(map[string]any{"design": d})
 }
 
 func (h *handler) authMethods(w http.ResponseWriter, r *http.Request) {

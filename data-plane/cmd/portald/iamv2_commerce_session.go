@@ -250,6 +250,8 @@ func (h *handler) renderPackages(w http.ResponseWriter, pkgs []struct {
 		rows = append(rows, row{ID: p.PackageID, Name: name, Detail: detail})
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// The same policy as the sign-in page. This page runs no script at all, so the nonce is simply unused.
+	setPortalCSP(w)
 	_ = packagesTmpl.Execute(w, rows)
 }
 

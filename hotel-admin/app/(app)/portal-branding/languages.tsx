@@ -33,14 +33,20 @@ export type ShippedWording = {
   strings: Record<string, Record<string, string>>;
 };
 
-export function LanguagesSection({ d, setD, writable }: {
+export function LanguagesSection({ d, setD, writable, part = "all", onEditWording, initialEditing }: {
   d: Design;
   setD: (f: (p: Design) => Design) => void;
   writable: boolean;
+  /** The designer shows "which languages guests are offered" and "what the page says" as two sections. */
+  part?: "all" | "offered" | "wording";
+  /** Where "Add another language" sends the operator to type the new language's wording. */
+  onEditWording?: (code: string) => void;
+  /** Which language the wording editor opens on. */
+  initialEditing?: string;
 }) {
   const [shipped, setShipped] = useState<ShippedWording | null>(null);
   const [shippedErr, setShippedErr] = useState<string | null>(null);
-  const [editing, setEditing] = useState("en");
+  const [editing, setEditing] = useState(initialEditing ?? "en");
   const [filter, setFilter] = useState("");
   const [newCode, setNewCode] = useState("");
   const [newLabel, setNewLabel] = useState("");
@@ -139,9 +145,47 @@ export function LanguagesSection({ d, setD, writable }: {
     !needle || key.includes(needle) || english.toLowerCase().includes(needle) ||
     effective(current?.code ?? "en", key).toLowerCase().includes(needle);
 
+  const showOffered = part !== "wording";
+  const showWording = part !== "offered";
+
+  const addLanguage = (
+    <div className="flex flex-wrap items-end gap-2 border-t pt-4">
+      <label className="block text-sm">
+        <span className="block font-medium">Add another language</span>
+        <span className="mb-1.5 block text-xs text-muted-foreground">
+          One the portal does not ship. You supply its wording; anything you leave empty shows English.
+        </span>
+        <span className="flex flex-wrap gap-2">
+          <Input value={newCode} className="w-20" placeholder="es" disabled={!writable}
+            aria-label="Language code"
+            onChange={(e) => setNewCode(e.target.value.toLowerCase().slice(0, 5))} />
+          <Input value={newLabel} className="w-40" placeholder="Español" disabled={!writable}
+            aria-label="Shown as"
+            onChange={(e) => setNewLabel(e.target.value)} />
+          <Button variant="secondary" disabled={!newCode.trim() || !writable}
+            onClick={() => {
+              const code = newCode.trim();
+              setD((p) => ({
+                ...p,
+                languages: [
+                  ...offeredLanguages(p).filter((l) => l.code !== code),
+                  { code, label: newLabel.trim() || code.toUpperCase() },
+                ],
+              }));
+              setEditing(code); setNewCode(""); setNewLabel("");
+              onEditWording?.(code);
+            }}>
+            Add
+          </Button>
+        </span>
+      </label>
+    </div>
+  );
+
   return (
     <div className="space-y-5">
       {/* ---- which languages guests are offered ----------------------------------------------------- */}
+      {showOffered && (
       <Card>
         <CardHeader><CardTitle>Guest languages</CardTitle></CardHeader>
         <CardBody className="space-y-3">
@@ -170,10 +214,13 @@ export function LanguagesSection({ d, setD, writable }: {
               );
             })}
           </div>
+          {part === "offered" && addLanguage}
         </CardBody>
       </Card>
+      )}
 
       {/* ---- the wording itself --------------------------------------------------------------------- */}
+      {showWording && (
       <Card>
         <CardHeader><CardTitle>Wording</CardTitle></CardHeader>
         <CardBody className="space-y-4">
@@ -291,36 +338,7 @@ export function LanguagesSection({ d, setD, writable }: {
           )}
 
           {/* A language the portal does not ship. It arrives empty, and says so. */}
-          <div className="flex flex-wrap items-end gap-2 border-t pt-4">
-            <label className="block text-sm">
-              <span className="block font-medium">Add another language</span>
-              <span className="mb-1.5 block text-xs text-muted-foreground">
-                One the portal does not ship. You supply its wording; anything you leave empty shows English.
-              </span>
-              <span className="flex gap-2">
-                <Input value={newCode} className="w-20" placeholder="es" disabled={!writable}
-                  aria-label="Language code"
-                  onChange={(e) => setNewCode(e.target.value.toLowerCase().slice(0, 5))} />
-                <Input value={newLabel} placeholder="Español" disabled={!writable}
-                  aria-label="Shown as"
-                  onChange={(e) => setNewLabel(e.target.value)} />
-                <Button variant="secondary" disabled={!newCode.trim() || !writable}
-                  onClick={() => {
-                    const code = newCode.trim();
-                    setD((p) => ({
-                      ...p,
-                      languages: [
-                        ...offeredLanguages(p).filter((l) => l.code !== code),
-                        { code, label: newLabel.trim() || code.toUpperCase() },
-                      ],
-                    }));
-                    setEditing(code); setNewCode(""); setNewLabel("");
-                  }}>
-                  Add
-                </Button>
-              </span>
-            </label>
-          </div>
+          {part === "all" && addLanguage}
 
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Check className="h-3.5 w-3.5" />
@@ -329,6 +347,7 @@ export function LanguagesSection({ d, setD, writable }: {
           </p>
         </CardBody>
       </Card>
+      )}
     </div>
   );
 }

@@ -9,29 +9,36 @@
 //
 // So edged hands the admin portald's OWN landing page and this renders it in a sandboxed frame with the
 // settings currently being edited injected into it. The template, the stylesheet and the script are the real
-// ones. What is stubbed is only the appliance the page would otherwise talk to.
+// ones -- including all six layouts, which is why the template gallery's thumbnails are this same page at a
+// small scale rather than pictures of it. What is stubbed is only the appliance the page would otherwise talk to.
 //
 // SANDBOXING. The frame is `sandbox="allow-scripts"` — an opaque origin with no form submission, no access to
 // the admin page around it, and no cookies. It needs no network either: window.fetch is replaced before the
 // portal's own script runs, so every call it makes is answered locally from the settings under edit. Images
 // are injected as data: URIs for the same reason — /assets/<name> is a GUEST-network path that resolves to
 // nothing from the admin origin.
+//
+// WHAT THE FRAME SHOWS FOR THE ADVANCED FIELDS. When the server has answered /validate, the preview renders
+// the SANITISED fragment and stylesheet -- what a guest would actually receive -- rather than the raw text in
+// the editor. An operator who pastes an <img onerror> sees the image without the handler, which is the truth.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "@/lib/api";
-import { Monitor, Smartphone, RefreshCw } from "lucide-react";
+import { Monitor, Smartphone, Tablet, RefreshCw } from "lucide-react";
+import { Segmented } from "@/components/ui/tabs";
+import { Skeleton } from "@/components/ui/misc";
 import { Design } from "./strings";
 
-type Device = "desktop" | "mobile";
+type Device = "desktop" | "tablet" | "mobile";
 
-/** The two shapes a captive portal is actually met on.
+/** The shapes a captive portal is actually met on.
  *
- *  1100 rather than 1440 for the desktop frame. Both are desktop as far as the portal is concerned — its last
- *  breakpoint is 1024 — but the sign-in card is 960px wide either way, so a 1440 frame scaled into this column
- *  spends a third of its pixels on empty background and leaves the card too small to read. 1100 shows the same
- *  layout with the card filling it. */
-const DEVICES: Record<Device, { w: number; h: number; label: string }> = {
-  desktop: { w: 1100, h: 820, label: "Desktop" },
+ *  1180 rather than 1440 for the desktop frame. Both are desktop as far as the portal is concerned — its last
+ *  breakpoint is 1024 — but a 1440 frame scaled into this column spends a third of its pixels on empty
+ *  background and leaves the card too small to read. */
+export const DEVICES: Record<Device, { w: number; h: number; label: string }> = {
+  desktop: { w: 1180, h: 820, label: "Desktop" },
+  tablet: { w: 820, h: 1100, label: "Tablet" },
   mobile: { w: 390, h: 844, label: "Mobile" },
 };
 
@@ -45,8 +52,9 @@ const PREVIEW_METHODS = {
 };
 
 /** buildSrcDoc injects the stub and the settings ahead of the portal's own script. */
-function buildSrcDoc(html: string, design: Design) {
-  const payload = JSON.stringify({ design });
+export function buildSrcDoc(html: string, design: Design) {
+  // "</" is escaped so no value in the design can close the shim's <script> element early.
+  const payload = JSON.stringify({ design }).replace(/<\//g, "<\\/");
   const methods = JSON.stringify(PREVIEW_METHODS);
   const shim = `<script>
 (function () {
@@ -83,32 +91,40 @@ function buildSrcDoc(html: string, design: Design) {
   return html.includes("</head>") ? html.replace("</head>", shim + "</head>") : shim + html;
 }
 
-export function PortalPreview({ design }: { design: Design }) {
-  const [device, setDevice] = useState<Device>("desktop");
+// ONE FETCH OF THE PORTAL PAGE, SHARED. The main preview and six gallery thumbnails all render the same
+// document; it changes when portald is redeployed, not when a colour is picked.
+let portalPage: Promise<string> | null = null;
+
+export function usePortalHTML() {
   const [html, setHtml] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [assets, setAssets] = useState<Record<string, string>>({});
-  const box = useRef<HTMLDivElement>(null);
-  const [boxWidth, setBoxWidth] = useState(0);
-
-  // The portal page itself is fetched once. It changes when portald is redeployed, not when a colour is
-  // picked, so re-fetching it per keystroke would be a request per character for an unchanging document.
   useEffect(() => {
     let live = true;
-    api.get<{ html: string }>("/portal-branding/preview")
-      .then((r) => { if (live) { setHtml(r.html); setErr(null); } })
+    if (!portalPage) {
+      portalPage = api.get<{ html: string }>("/portal-branding/preview").then((r) => r.html);
+      portalPage.catch(() => { portalPage = null; });
+    }
+    portalPage
+      .then((h) => { if (live) { setHtml(h); setErr(null); } })
       .catch((e) => { if (live) setErr(e instanceof ApiError ? e.message : "the preview could not be loaded"); });
     return () => { live = false; };
   }, []);
+  return { html, err };
+}
 
-  // Images referenced as /assets/<name> are read back through the operator API and inlined. Fetched per
-  // asset, once, and kept — an operator switching between Desktop and Mobile should not re-download a
-  // background photograph each time.
+const assetCache = new Map<string, string>();
+
+/** Images referenced as /assets/<name> are read back through the operator API and inlined. Fetched per asset,
+ *  once, and kept -- switching device or template should not re-download a background photograph. */
+export function useInlinedDesign(design: Design): Design {
+  const [loaded, bump] = useState(0);
+  const urls = [design.logo_url, design.background_url, design.hero_image_url];
+  const key = urls.join("|");
   useEffect(() => {
-    const wanted = [design.logo_url, design.background_url]
+    const wanted = urls
       .filter((u): u is string => !!u && u.startsWith("/assets/"))
       .map((u) => u.slice("/assets/".length))
-      .filter((name) => !assets[name]);
+      .filter((name) => !assetCache.has(name));
     if (!wanted.length) return;
     let live = true;
     (async () => {
@@ -123,26 +139,89 @@ export function PortalPreview({ design }: { design: Design }) {
             fr.onerror = () => reject(fr.error);
             fr.readAsDataURL(blob);
           });
-          if (live) setAssets((p) => ({ ...p, [name]: data }));
+          assetCache.set(name, data);
+          if (live) bump((n) => n + 1);
         } catch { /* an asset that will not load simply does not appear in the preview */ }
       }
     })();
     return () => { live = false; };
-  }, [design.logo_url, design.background_url, assets]);
-
-  const previewDesign = useMemo(() => {
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return useMemo(() => {
     const inline = (u?: string) => {
       if (!u || !u.startsWith("/assets/")) return u;
-      return assets[u.slice("/assets/".length)] ?? undefined;
+      return assetCache.get(u.slice("/assets/".length)) ?? undefined;
     };
-    return { ...design, logo_url: inline(design.logo_url), background_url: inline(design.background_url) };
-  }, [design, assets]);
+    return {
+      ...design,
+      logo_url: inline(design.logo_url),
+      background_url: inline(design.background_url),
+      hero_image_url: inline(design.hero_image_url),
+    };
+  }, [design, loaded]);
+}
 
-  const srcDoc = useMemo(() => (html ? buildSrcDoc(html, previewDesign) : null), [html, previewDesign]);
+/** The value, once it has stopped changing for `ms`. Frames reload when their document changes, so they follow
+ *  the operator's edits a moment after the typing stops rather than on every keystroke. */
+export function useSettled<T>(value: T, ms: number): T {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return settled;
+}
 
-  // The frame renders at the device's REAL pixel width and is scaled down to fit the column, so what is on
-  // screen is the true layout rather than a narrow viewport pretending to be a phone. A 390px-wide frame
-  // shown at 390px would trigger the desktop rules of a responsive design and show the wrong thing.
+/** A frame rendered at the device's REAL pixel width and scaled to fit, so what is on screen is the true layout
+ *  rather than a narrow viewport pretending to be a phone. */
+export function PortalFrame({
+  srcDoc, width, height, scale, title, interactive = true,
+}: {
+  srcDoc: string; width: number; height: number; scale: number; title: string; interactive?: boolean;
+}) {
+  return (
+    <div style={{ height: height * scale, width: width * scale, overflow: "hidden" }}>
+      <iframe
+        title={title}
+        srcDoc={srcDoc}
+        sandbox="allow-scripts"
+        tabIndex={interactive ? undefined : -1}
+        aria-hidden={interactive ? undefined : true}
+        loading={interactive ? undefined : "lazy"}
+        style={{
+          width, height, border: 0, transform: `scale(${scale})`, transformOrigin: "top left",
+          pointerEvents: interactive ? undefined : "none",
+        }}
+      />
+    </div>
+  );
+}
+
+export function PortalPreview({ design, sanitized }: {
+  design: Design;
+  /** The server's sanitised Advanced fields, when it has answered for the current text. */
+  sanitized?: { custom_css: string; custom_html: string } | null;
+}) {
+  const [device, setDevice] = useState<Device>("desktop");
+  const { html, err } = usePortalHTML();
+  const box = useRef<HTMLDivElement>(null);
+  const [boxWidth, setBoxWidth] = useState(0);
+
+  // A light re-render: the frame reloads a quarter-second after the operator stops changing things, not on
+  // every keystroke of a hex value.
+  const settled = useSettled(design, 250);
+
+  const inlined = useInlinedDesign(settled);
+  const shown = useMemo<Design>(() => {
+    if (!sanitized) return inlined;
+    return {
+      ...inlined,
+      custom_css: inlined.custom_css ? sanitized.custom_css : inlined.custom_css,
+      custom_html: inlined.custom_html ? sanitized.custom_html : inlined.custom_html,
+    };
+  }, [inlined, sanitized]);
+  const srcDoc = useMemo(() => (html ? buildSrcDoc(html, shown) : null), [html, shown]);
+
   useEffect(() => {
     const el = box.current;
     if (!el) return;
@@ -153,58 +232,51 @@ export function PortalPreview({ design }: { design: Design }) {
   }, []);
 
   const spec = DEVICES[device];
-  const scale = boxWidth > 0 ? Math.min(1, boxWidth / spec.w) : 0.3;
+  // Tall devices are also bounded by height, so a tablet does not become a scroll of its own.
+  const scale = boxWidth > 0 ? Math.min(1, boxWidth / spec.w, device === "desktop" ? 1 : 760 / spec.h) : 0.3;
 
   return (
     <section className="space-y-3" aria-label="Guest portal preview">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold">Preview</h2>
-        <div className="inline-flex rounded-md border p-0.5" role="group" aria-label="Preview device">
-          {(Object.keys(DEVICES) as Device[]).map((k) => (
-            <button
-              key={k}
-              type="button"
-              aria-pressed={device === k}
-              onClick={() => setDevice(k)}
-              className={`inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-xs ${
-                device === k ? "bg-primary text-primary-foreground" : "text-muted-foreground"
-              }`}
-            >
-              {k === "desktop" ? <Monitor className="h-3.5 w-3.5" /> : <Smartphone className="h-3.5 w-3.5" />}
-              {DEVICES[k].label}
-            </button>
-          ))}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold">Live preview</h2>
+          <p className="text-xs text-muted-foreground">The real sign-in page, with your unsaved changes.</p>
         </div>
+        <Segmented<Device>
+          label="Preview device"
+          size="sm"
+          value={device}
+          onChange={setDevice}
+          options={(Object.keys(DEVICES) as Device[]).map((k) => ({
+            value: k,
+            label: (
+              <span className="inline-flex items-center gap-1.5">
+                {k === "desktop" ? <Monitor className="h-3.5 w-3.5" /> : k === "tablet" ? <Tablet className="h-3.5 w-3.5" /> : <Smartphone className="h-3.5 w-3.5" />}
+                {DEVICES[k].label}
+              </span>
+            ),
+          }))}
+        />
       </div>
 
-      <div ref={box} className="overflow-hidden rounded-lg border bg-surface">
+      <div ref={box} className="flex justify-center overflow-hidden rounded-lg border bg-surface">
         {err ? (
           <p className="p-4 text-sm text-muted-foreground">
-            {err} <RefreshCw className="inline h-3.5 w-3.5" />
+            {err} <RefreshCw className="inline h-3.5 w-3.5" aria-hidden />
           </p>
         ) : !srcDoc ? (
-          <p className="p-4 text-sm text-muted-foreground">Loading the sign-in page…</p>
-        ) : (
-          <div style={{ height: spec.h * scale, overflow: "hidden" }}>
-            <iframe
-              title={`Guest portal, ${spec.label.toLowerCase()}`}
-              srcDoc={srcDoc}
-              sandbox="allow-scripts"
-              style={{
-                width: spec.w,
-                height: spec.h,
-                border: 0,
-                transform: `scale(${scale})`,
-                transformOrigin: "top left",
-              }}
-            />
+          <div className="w-full space-y-3 p-4" aria-label="Loading the sign-in page">
+            <Skeleton className="h-6 w-1/3" />
+            <Skeleton className="h-64 w-full" />
           </div>
+        ) : (
+          <PortalFrame srcDoc={srcDoc} width={spec.w} height={spec.h} scale={scale}
+            title={`Guest portal, ${spec.label.toLowerCase()}`} />
         )}
       </div>
       <p className="text-xs text-muted-foreground">
-        The real sign-in page, rendered with the settings above. Room sign-in, vouchers and personal accounts
-        are all shown here so you can check every tab — which of them guests actually see is decided in
-        Sign-in methods, not on this page.
+        Room sign-in, vouchers and personal accounts are all shown here so you can check every tab — which of
+        them guests actually see is decided in Sign-in methods, not on this page.
       </p>
     </section>
   );

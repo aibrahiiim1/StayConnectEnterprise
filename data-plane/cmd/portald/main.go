@@ -70,6 +70,10 @@ type handler struct {
 	commerceCfg      iamv2.CommerceConfig
 	commerceSessions *commerceSessionStore
 
+	// designs caches the published portal design for a few seconds (see portal_design.go). Nil disables the
+	// cache, which is what the tests' literal handlers get.
+	designs *designCache
+
 	// clock drives the Phase-3 guest response-time budget (pms_phase3_budget.go). Nil means the real clock;
 	// only tests set it, so they can assert the budget arithmetic instead of measuring a loaded CI runner.
 	clock phase3Clock
@@ -102,6 +106,7 @@ func newHandler(c cfg) (*handler, error) {
 		tmplSucc:    tsucc,
 		arpCache:    defaultArp,
 		commerceCfg: commCfg,
+		designs:     &designCache{},
 	}
 	// THE STORE EXISTS ONLY WHERE THERE IS SOMEWHERE FOR IT TO LEAD.
 	//
@@ -165,6 +170,8 @@ func (n neuteredFS) Open(name string) (http.File, error) {
 func (h *handler) landing(w http.ResponseWriter, r *http.Request, errMsg string) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	nonce := setPortalCSP(w)
+	tpl := h.templateData(r.Context())
 	// THE DEVICE'S OWN ADDRESSES, from the connection and the ARP table -- never from a header a guest can
 	// set. Both are legitimately available to a captive portal (the portal must already know them to
 	// authorise the device at all) and both are shown only in the information panel the guest opens
@@ -188,6 +195,14 @@ func (h *handler) landing(w http.ResponseWriter, r *http.Request, errMsg string)
 		// so the page carries the same words /api/languages serves and there is no second copy to drift.
 		"Languages": portalLanguages,
 		"Strings":   builtinStrings,
+		// The per-response script nonce the Content-Security-Policy names, and the published template, so the
+		// first paint is already the hotel's layout.
+		"Nonce":      nonce,
+		"Template":   tpl["Template"],
+		"Density":    tpl["Density"],
+		"Panel":      tpl["Panel"],
+		"HeroHeight": tpl["HeroHeight"],
+		"Surface":    tpl["Surface"],
 	})
 }
 
@@ -333,6 +348,7 @@ func (h *handler) authCredentials(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) success(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	nonce := setPortalCSP(w)
 	dur, _ := time.ParseDuration(r.URL.Query().Get("t") + "s")
 	_ = h.tmplSucc.Execute(w, map[string]any{
 		"SessionID":       r.URL.Query().Get("s"),
@@ -340,6 +356,7 @@ func (h *handler) success(w http.ResponseWriter, r *http.Request) {
 		"HumanRemaining":  humanDuration(dur),
 		// Phase 2 DARK: the guest commerce panel renders only when the portal surface is ON.
 		"CommerceEnabled": h.commerceCfg.PortalOn(),
+		"Nonce":           nonce,
 	})
 }
 
