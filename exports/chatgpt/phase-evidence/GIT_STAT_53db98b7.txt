@@ -1,4 +1,0 @@
-commit 53db98b71f2aec7b6e6399fc22a3a495bd3108b0
-Date:   Thu Sep 24 15:05:26 2026 +0300
-
-    Governance: T0185 records the merge, and the field that gave the mechanism away
