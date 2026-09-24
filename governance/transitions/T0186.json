@@ -1,0 +1,33 @@
+{
+  "transition_id": "T0186",
+  "seq": 186,
+  "timestamp": "2026-09-24T17:26:30+03:00",
+  "timestamp_derivation": "The committer date of the CONTENT commit of this correction, which is after the merge it follows (2026-09-24T13:51:22Z).",
+  "record_type": "DELIVERY_MODEL_POST_MERGE_TREE_ASSERTION",
+  "authorisation": "The same Product-Owner mission as T0182-T0185, whose DONE criteria required proving the complete path EMPIRICALLY. This records what that proof exposed once the path was driven by the real workflow rather than from a workstation.",
+  "what_running_it_twice_revealed": "The same delivery was merged twice by different means, and the difference is the finding:\n\n    PR #181, merged with a personal access token   -> 6 workflow runs on the merge commit\n    PR #182, merged by the orchestrator            -> 0\n\nGitHub creates no workflow runs from events made with GITHUB_TOKEN, and the orchestrator merges with GITHUB_TOKEN. So the `push: master` gates -- the second net, the reason that trigger exists at all, 'master's own runs must be real' -- NEVER FIRE for a nightly merge. Nothing in the repository said so. No check would have noticed. It was invisible until the path ran without a workstation in it, which is exactly what the mission's empirical requirement was for.",
+  "the_exposure_measured_rather_than_assumed": "Smaller than it looks, and not nothing. The merge pins the validated SHA and strict_required_status_checks_policy requires the branch to be up to date, so the merge commit's tree should equal the validated head's tree. Verified on both merges: 11376ccc and 31f0dfe1 both carry tree bb4f74ab757f; 69466353 and d1082086 likewise. No unvalidated content reached master.\n\nBut that is an INFERENCE resting on two settings, either of which could be relaxed by somebody who does not know this depends on them. An inference is not a check, and the whole subject of this mission is the difference between the two.",
+  "what_replaces_the_net": "Step 8 of the orchestrator: after merging, compare the tree SHA of the merge commit with the tree SHA of the head the four gates passed. TREE_MISMATCH refuses and names both trees; an unreadable tree also refuses, because 'I could not check' is not 'it matched'.\n\nGuarded rather than trusted: validate-delivery-protocol.py requires the assertion to exist in the runner, M61h removes it and the mutation suite requires that to be detected, and five assertions cover identical, mismatched and unreadable trees (91 total, up from 86). The documentation states plainly that master carries no push runs for a nightly merge and that this is expected -- so the next person does not read it as a fault -- and that a merge performed by a PERSON still triggers them, which is why the trigger stays.",
+  "the_decision_this_raises_and_does_not_take": "Merging with a personal access token or a GitHub App token would make the push events fire and restore the net exactly as it was. That is a credentials and trust-boundary change, which is a Product-Owner decision under CLAUDE.md 0A.5, so it is RECORDED here rather than made. The tree assertion is the part that needed no new authority.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. THIS increment contacted no appliance and changed no operational state: it is repository and governance only -- the delivery-model merge and one correction to the session-start check. PRE-LIVE remains PRE-LIVE with the capability OFF; no phase transition, no cutover, no enablement. (Earlier increments in this lineage did perform controlled PRE-LIVE acceptance; that history belongs to their own receipts, not to this one.)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. THIS increment contacted no appliance and changed no operational state: it is repository and governance only -- the delivery-model merge and one correction to the session-start check. PRE-LIVE remains PRE-LIVE with the capability OFF; no phase transition, no cutover, no enablement. (Earlier increments in this lineage did perform controlled PRE-LIVE acceptance; that history belongs to their own receipts, not to this one.)"
+  },
+  "state_note": "No phase, activity or acceptance state changes. Phase 7 remains ACCEPTED_AND_CLOSED, functional completeness remains PASS with that mission CLOSED at T0181, Guest activation remains DEFERRED by D41, Go-Live remains unauthorised, and PRE-LIVE was not contacted.",
+  "base": "31f0dfe1b6622031a3c3f7c9c53c607b4fc80b18",
+  "base_note": "The master merge commit of PR #182, which recorded T0185 and was the first merge performed by the orchestrator itself.",
+  "head": "54062659",
+  "head_note": "The CONTENT commit of this correction: the orchestrator asserts after merging that master carries the tree the four gates validated.",
+  "previous_delivery": "T0185",
+  "go_live": "NOT authorised. Guest activation remains DEFERRED by D41."
+}
