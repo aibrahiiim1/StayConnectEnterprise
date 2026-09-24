@@ -445,19 +445,20 @@ def cmd_validate(deep=True, manifest_equality=True):
         fail("mandatory governance CI missing: .github/workflows/project-governance.yml (GH-MANDATORY-CI)")
     else:
         w = open(wf, encoding="utf-8").read()
-        # THE TRIGGER THIS DEMANDS CHANGED WITH THE DELIVERY MODEL (T0182/T0183). It used to require
-        # `pull_request:` and to treat `workflow_dispatch` as merely permitted. Under the nightly model the
-        # gate must NOT run on pull_request -- that is the daytime interruption the Product Owner removed --
-        # and the dispatch is how its required context is earned at all. Demanding the old trigger here would
-        # make the two validators contradict each other, with this one insisting on the thing
-        # validate-delivery-protocol.py now refuses.
+        # THE TRIGGER THIS DEMANDS, AND WHY IT WENT AWAY AND CAME BACK (T0182 -> T0183, T0184).
         #
-        # The substance is unchanged: the gate must still exist, still target master, and still run every
-        # required command without ignoring failures. Which EVENT earns it is asserted in one place, by
-        # validate-delivery-protocol.py, against the model the register declares.
-        if "workflow_dispatch" not in w:
-            fail("governance CI must accept the nightly workflow_dispatch; without it the required context "
-                 "cannot be earned on a delivery head at all")
+        # T0183 briefly required `workflow_dispatch` here instead, because the nightly model dispatched the
+        # gates at the delivery ref and the daytime pull_request run was the 29-31 minute interruption the
+        # Product Owner removed. That was wrong about a fact, and the fact was measured, not argued:
+        # a dispatched run's check runs do NOT satisfy a ruleset-required status check. See
+        # tools/nightly_delivery.py for the verbatim refusal GitHub returned with all four green.
+        #
+        # So `pull_request:` is required again -- and the cost is removed by the sentinel attempt instead of
+        # by changing the event. Which EVENT earns the context is asserted in ONE place,
+        # validate-delivery-protocol.py; this check owns only the substance below.
+        if "pull_request:" not in w:
+            fail("governance CI must run on pull_request; only a pull_request run's checks satisfy a "
+                 "ruleset-required status check, as PR #181 measured")
         if "master" not in w: fail("governance CI must target the master branch")
         for cmd in ["tools/project-state.py validate", "tools/project-state.py check-generated",
                     "tools/tests/project_state_validator/run_mutations.py", "tools/validate-project-state.sh"]:
