@@ -26,7 +26,7 @@ import (
 const mewsClientName = "StayConnect Enterprise 1.0"
 
 // mewsPage is the Limitation object; Count is at most 1000 per the pagination guideline.
-const mewsPage = 1000
+var mewsPage = 1000 // a var only so contract tests can page with small pages
 
 // mewsCollidingLookback bounds the CollidingUtc window used to list in-house reservations. A Started
 // reservation's interval intersects [now-30d, now+1d] unless its scheduled end is more than 30 days past,

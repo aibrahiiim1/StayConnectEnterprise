@@ -151,6 +151,36 @@ func TestRESTRevision_Refusals(t *testing.T) {
 	}
 }
 
+// The exact draft body the Hotel Admin sends for a non-Protel provider: no endpoint, no FIAS timings.
+func TestRESTRevision_HotelAdminDraftBodyAccepted(t *testing.T) {
+	for kind, body := range map[string]string{
+		"mews":        `{"source_timezone":"Europe/Prague","read_only":true,"provider_config":{}}`,
+		"apaleo":      `{"source_timezone":"Europe/Berlin","read_only":true,"provider_config":{"property_id":"MUC","poll_interval_seconds":30}}`,
+		"opera-cloud": `{"source_timezone":"America/New_York","read_only":true,"provider_config":{"gateway_url":"https://gw.example.com","hotel_id":"HQ1","scope":"urn:opc:hgbu:ws:__myscopes__"}}`,
+	} {
+		var in authorRevisionReq
+		r := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(body))
+		if err := decodeJSON(r, &in); err != nil {
+			t.Fatalf("%s: body refused by the decoder: %v", kind, err)
+		}
+		prov, _ := pmsprovider.Get(kind)
+		rc, verr := validateRESTRevision(prov, &in)
+		if verr != nil {
+			t.Fatalf("%s: %v", kind, verr)
+		}
+		cfg := rc.StoredConfig()
+		for _, k := range []string{"endpoint", "dial_timeout_ms", "read_timeout_ms", "write_timeout_ms",
+			"heartbeat_interval_ms", "heartbeat_timeout_ms", "feed_freshness_ms", "complete_sync_ms"} {
+			if cfg[k] == nil || cfg[k] == "" || cfg[k] == int64(0) {
+				t.Fatalf("%s: %s not derived: %v", kind, k, cfg)
+			}
+		}
+		if len(ignoredTopLevelFields(&in)) != 0 {
+			t.Fatalf("%s: nothing was ignored in this body", kind)
+		}
+	}
+}
+
 func TestIgnoredTopLevelFields_ReportedNotSilent(t *testing.T) {
 	in := validRevisionReq()
 	got := ignoredTopLevelFields(in)

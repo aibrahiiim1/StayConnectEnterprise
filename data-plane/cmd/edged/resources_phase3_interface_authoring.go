@@ -203,7 +203,10 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 	// a protel-fias caller sees the same answers in the same order. With provider_config the connector kind
 	// decides which schema applies, so validation waits for the interface lookup below.
 	var cfg map[string]any
-	hasProviderCfg := len(in.ProviderConfig) > 0
+	// PRESENCE, not length: a REST draft that accepts every provider default may legitimately send
+	// "provider_config": {}. For protel-fias an empty object maps nothing, so the same validation and the same
+	// stored config result as sending no provider_config at all.
+	hasProviderCfg := in.ProviderConfig != nil
 	if !hasProviderCfg {
 		var verr error
 		cfg, verr = validateRevisionConfig(&in)

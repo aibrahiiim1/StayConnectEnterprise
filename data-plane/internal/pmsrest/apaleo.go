@@ -26,7 +26,7 @@ import (
 	"time"
 )
 
-const apaleoPage = 500
+var apaleoPage = 500 // a var only so contract tests can page with small pages
 
 type apaleoClient struct {
 	o            Options

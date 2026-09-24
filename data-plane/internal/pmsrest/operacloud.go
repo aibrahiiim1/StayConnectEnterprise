@@ -28,7 +28,7 @@ import (
 	"time"
 )
 
-const operaPage = 100
+var operaPage = 100 // a var only so contract tests can page with small pages
 
 type operaClient struct {
 	o            Options
