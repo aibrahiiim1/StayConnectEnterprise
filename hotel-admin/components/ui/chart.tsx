@@ -325,3 +325,287 @@ function niceCeiling(peak: number): number {
   const step = scaled <= 1 ? 1 : scaled <= 2 ? 2 : scaled <= 2.5 ? 2.5 : scaled <= 5 ? 5 : 10;
   return step * mag;
 }
+
+/**
+ * AreaChart — one or more series over TIME, drawn as lines with a faint wash.
+ *
+ * The column chart is right for a bounded set of bands (24 hours). It is wrong for a week of samples or thirty
+ * days: hundreds of 2px columns read as noise. A line states the shape, and the hover crosshair states the exact
+ * value at any point. Series are NOT stacked: two traffic directions are compared, not summed, and a stacked area
+ * makes the upper series unreadable against a moving baseline.
+ */
+export function AreaChart({
+  data,
+  series,
+  height = 180,
+  formatValue = (n) => n.toLocaleString(),
+  formatAxis,
+  tickCount = 6,
+  className,
+  emptyLabel = "No data recorded in this period",
+}: {
+  data: Point[];
+  series: { name: string; token?: SeriesToken }[];
+  height?: number;
+  formatValue?: (n: number) => string;
+  formatAxis?: (n: number) => string;
+  /** How many x-axis labels to show, spread evenly. */
+  tickCount?: number;
+  className?: string;
+  emptyLabel?: string;
+}) {
+  const [hover, setHover] = React.useState<number | null>(null);
+  const ref = React.useRef<HTMLDivElement>(null);
+  const [w, setW] = React.useState(600);
+
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((es) => setW(Math.max(120, es[0].contentRect.width)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const peak = Math.max(0, ...data.flatMap((d) => d.values.map((v) => v || 0)));
+  const allZero = peak <= 0;
+  const ceiling = allZero ? 1 : niceCeiling(peak);
+  const fmtAxis = formatAxis ?? formatValue;
+  const n = data.length;
+  const pad = 4;
+  const x = (i: number) => (n <= 1 ? w / 2 : pad + (i * (w - pad * 2)) / (n - 1));
+  const y = (v: number) => height - 2 - ((v || 0) / ceiling) * (height - 8);
+
+  const color = (si: number) => (series[si]?.token ? `hsl(var(--${series[si].token}))` : seriesColor(si));
+
+  const ticks = React.useMemo(() => {
+    if (n === 0) return [] as number[];
+    const k = Math.max(2, Math.min(tickCount, n));
+    return Array.from({ length: k }, (_, j) => Math.round((j * (n - 1)) / (k - 1)));
+  }, [n, tickCount]);
+
+  const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (n === 0) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const rel = ((e.clientX - rect.left) / rect.width) * w;
+    const i = Math.round(((rel - pad) / (w - pad * 2)) * (n - 1));
+    setHover(Math.max(0, Math.min(n - 1, i)));
+  };
+
+  return (
+    <div className={cn("min-w-0", className)}>
+      {series.length > 1 && <Legend items={series.map((s, i) => ({ name: s.name, index: i, token: s.token }))} />}
+      <div className="flex gap-2">
+        <div className="flex w-12 shrink-0 flex-col justify-between text-right" style={{ height }}>
+          {[1, 0.5, 0].map((f) => (
+            <span key={f} className="text-2xs leading-none tabular text-muted-foreground/70">
+              {fmtAxis(ceiling * f)}
+            </span>
+          ))}
+        </div>
+        <div ref={ref} className="relative min-w-0 flex-1">
+          <svg
+            width="100%"
+            height={height}
+            viewBox={`0 0 ${w} ${height}`}
+            preserveAspectRatio="none"
+            className="block overflow-visible"
+            onMouseMove={onMove}
+            onMouseLeave={() => setHover(null)}
+            role="img"
+            aria-label={`${series.map((s) => s.name).join(" and ")} over time`}
+          >
+            {[0, 0.5, 1].map((f) => (
+              <line
+                key={f}
+                x1={0}
+                x2={w}
+                y1={2 + f * (height - 8)}
+                y2={2 + f * (height - 8)}
+                stroke="hsl(var(--border))"
+                strokeWidth={1}
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
+            {!allZero &&
+              series.map((_, si) => {
+                const pts = data.map((d, i) => `${x(i).toFixed(1)},${y(d.values[si] ?? 0).toFixed(1)}`);
+                if (pts.length === 0) return null;
+                const line = `M${pts.join(" L")}`;
+                const area = `${line} L${x(n - 1).toFixed(1)},${height} L${x(0).toFixed(1)},${height} Z`;
+                return (
+                  <g key={si}>
+                    <path d={area} fill={color(si)} opacity={0.08} />
+                    <path
+                      d={line}
+                      fill="none"
+                      stroke={color(si)}
+                      strokeWidth={2}
+                      strokeLinejoin="round"
+                      strokeLinecap="round"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  </g>
+                );
+              })}
+            {hover !== null && (
+              <line
+                x1={x(hover)}
+                x2={x(hover)}
+                y1={0}
+                y2={height}
+                stroke="hsl(var(--border-strong))"
+                strokeWidth={1}
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
+          </svg>
+          {hover !== null && !allZero && data[hover] && (
+            <div
+              className="pointer-events-none absolute top-0 z-20 -translate-x-1/2 rounded-md border border-border bg-popover px-2.5 py-1.5 text-popover-foreground shadow-md"
+              style={{ left: `${(x(hover) / w) * 100}%` }}
+            >
+              <div className="mb-1 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {data[hover].label}
+              </div>
+              <div className="space-y-0.5">
+                {series.map((s, si) => (
+                  <Row key={si} swatch={color(si)} name={s.name} value={formatValue(data[hover].values[si] ?? 0)} />
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="relative mt-1.5 h-4">
+            {ticks.map((i) => (
+              <span
+                key={i}
+                className="absolute -translate-x-1/2 whitespace-nowrap text-2xs tabular text-muted-foreground/70"
+                style={{ left: `${(x(i) / w) * 100}%` }}
+              >
+                {data[i]?.label}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+      {allZero && <p className="mt-2 text-center text-xs text-muted-foreground">{emptyLabel}</p>}
+    </div>
+  );
+}
+
+/**
+ * BarList — a ranked list of named quantities ("top packages", "sign-in outcomes").
+ *
+ * The bar sits BEHIND the label, so a long name never fights a separate axis for space, and the value is always
+ * printed: the bar shows proportion, the number states it.
+ */
+export function BarList({
+  items,
+  formatValue = (n) => n.toLocaleString(),
+  max,
+  className,
+  emptyLabel = "Nothing recorded yet",
+}: {
+  items: {
+    name: React.ReactNode;
+    value: number;
+    key?: string;
+    tone?: "ok" | "warn" | "err" | "info" | "neutral";
+    hint?: React.ReactNode;
+  }[];
+  formatValue?: (n: number) => string;
+  max?: number;
+  className?: string;
+  emptyLabel?: string;
+}) {
+  const top = max ?? Math.max(0, ...items.map((i) => i.value));
+  const toneBg: Record<string, string> = {
+    ok: "bg-success/15",
+    warn: "bg-warning/20",
+    err: "bg-destructive/15",
+    info: "bg-info/15",
+    neutral: "bg-muted-foreground/10",
+  };
+  if (items.length === 0) return <p className={cn("text-sm text-muted-foreground", className)}>{emptyLabel}</p>;
+  return (
+    <ul className={cn("space-y-1.5", className)}>
+      {items.map((it, i) => {
+        const pct = top > 0 ? Math.max(1.5, (it.value / top) * 100) : 0;
+        return (
+          <li key={it.key ?? i} className="flex items-center gap-3">
+            <div className="relative min-w-0 flex-1 overflow-hidden rounded-md">
+              <span
+                className={cn("absolute inset-y-0 left-0 rounded-md", it.tone ? toneBg[it.tone] : "bg-primary/10")}
+                style={{ width: `${pct}%` }}
+                aria-hidden
+              />
+              <div className="relative flex min-w-0 items-baseline gap-2 px-2.5 py-1.5 text-sm">
+                <span className="truncate">{it.name}</span>
+                {it.hint && <span className="truncate text-xs text-muted-foreground">{it.hint}</span>}
+              </div>
+            </div>
+            <span className="w-20 shrink-0 text-right text-sm font-medium tabular">{formatValue(it.value)}</span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/**
+ * Heatmap — counts on a day × hour grid ("when do guests sign in?").
+ *
+ * A cell's shade is its share of the busiest cell. Every cell carries its count as an accessible label and a
+ * tooltip, so the grid is readable by value rather than only by colour.
+ */
+export function Heatmap({
+  rows,
+  columns,
+  values,
+  formatValue = (n) => n.toLocaleString(),
+  className,
+}: {
+  rows: string[];
+  columns: string[];
+  /** values[rowIndex][columnIndex] */
+  values: number[][];
+  formatValue?: (n: number) => string;
+  className?: string;
+}) {
+  const peak = Math.max(0, ...values.flat());
+  return (
+    <div className={cn("min-w-0 overflow-x-auto", className)}>
+      <table className="border-separate border-spacing-[3px]">
+        <tbody>
+          {rows.map((r, ri) => (
+            <tr key={r}>
+              <th scope="row" className="pr-2 text-right text-2xs font-medium text-muted-foreground">
+                {r}
+              </th>
+              {columns.map((c, ci) => {
+                const v = values[ri]?.[ci] ?? 0;
+                const a = peak > 0 ? v / peak : 0;
+                return (
+                  <td
+                    key={c}
+                    title={`${r} ${c}: ${formatValue(v)}`}
+                    aria-label={`${r} ${c}: ${formatValue(v)}`}
+                    className="size-4 min-w-4 rounded-[3px] bg-surface"
+                    style={v > 0 ? { background: `hsl(var(--chart-1) / ${(0.12 + a * 0.88).toFixed(2)})` } : undefined}
+                  />
+                );
+              })}
+            </tr>
+          ))}
+          <tr>
+            <td />
+            {columns.map((c, ci) => (
+              <td key={c} className="text-center text-2xs tabular text-muted-foreground/70">
+                {ci % 3 === 0 ? c : ""}
+              </td>
+            ))}
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
