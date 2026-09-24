@@ -250,10 +250,10 @@ correctness (including an ignored `timezone:` in both DST halves, across 366 nig
 1, so only the sentinel ran** · **a previous night's attempt offered as tonight's** · **a `workflow_dispatch`
 run offered as a required context** · a master-push run offered instead · nothing having been re-run at all · a
 different run id for the right gate · unreadable attempt numbers · a non-deciding run being mistaken for the
-night's verdict · a repaired failure being reported as still owed · and the positive path, because a module
+night's verdict · a repaired failure being reported as still owed · **the wording of the reason a future session acts on** · and the positive path, because a module
 that refuses everything would pass every negative case.
 
-**81 assertions**, run by the `governance` gate and again by the orchestrator before it decides anything.
+**83 assertions**, run by the `governance` gate and again by the orchestrator before it decides anything.
 
 The **fixtures** of the other suite are audited too: `run_mutations.py --anchors` resolves every mutation
 case's anchor in a single read pass. That exists because fixture drift has broken this suite three separate

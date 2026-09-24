@@ -459,9 +459,15 @@ def failure_is_unresolved(run, candidate_heads):
     if tested in heads:
         return True, ("the run failed on %s, which is STILL the delivery head -- nothing has addressed it"
                       % tested[:12])
+    # TWO DIFFERENT REASONS A RED NIGHT IS NO LONGER OWED, and they read as different sentences because a
+    # future session acts on this text. Joining them produced "the delivery head has moved to no open
+    # candidate since", which is not a sentence and was printed by the very run that merged this delivery.
+    if not heads:
+        return False, ("the run failed on %s, and no candidate is open any more -- that pull request has been "
+                       "merged or closed since, so nothing is owed" % tested[:12])
     return False, ("the run failed on %s, but the delivery head has moved to %s since; the next nightly run "
                    "judges the new head"
-                   % (tested[:12], ", ".join(h[:12] for h in heads) or "no open candidate"))
+                   % (tested[:12], ", ".join(h[:12] for h in heads)))
 
 
 def summarise(decisions):

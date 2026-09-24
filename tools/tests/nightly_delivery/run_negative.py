@@ -352,6 +352,26 @@ for label, run, heads, want in (
         oks += 1
         print("  ok   %-64s [%s]" % (label, "UNRESOLVED" if got else "clear"))
 
+# THE REASON IS NOT DECORATION -- IT IS WHAT THE NEXT SESSION ACTS ON, so it is asserted too.
+# The boolean above was right for the zero-candidate case from the start, and the sentence was not: joining an
+# empty head list produced "the delivery head has moved to no open candidate since", which is not a sentence.
+# The run that merged this very delivery printed it. A test that checks only the verdict cannot see that.
+_, why_none = nd.failure_is_unresolved(REDRUN, [])
+if "moved to no open candidate" in why_none:
+    fails.append("the zero-candidate reason is malformed: %r" % why_none)
+elif "merged or closed" not in why_none:
+    fails.append("the zero-candidate reason does not say why nothing is owed: %r" % why_none)
+else:
+    oks += 1
+    print("  ok   %-64s [%s]" % ("no candidate open: the reason is a sentence, and says why", "clear"))
+
+_, why_moved = nd.failure_is_unresolved(REDRUN, [SHA_B])
+if SHA_B[:12] not in why_moved:
+    fails.append("the superseded reason does not name the head that superseded it: %r" % why_moved)
+else:
+    oks += 1
+    print("  ok   %-64s [%s]" % ("head moved on: the reason names the new head", "clear"))
+
 
 print()
 print("=" * 78)
