@@ -122,7 +122,9 @@ type fakeClient struct {
 	lookedUp      [][]string
 }
 
-func (f *fakeClient) Probe(context.Context) (pmsrest.Probe, error) { return pmsrest.Probe{}, f.probeErr }
+func (f *fakeClient) Probe(context.Context) (pmsrest.Probe, error) {
+	return pmsrest.Probe{}, f.probeErr
+}
 func (f *fakeClient) Snapshot(context.Context) (pmsrest.Snapshot, error) {
 	if f.snapErr != nil {
 		return pmsrest.Snapshot{}, f.snapErr
