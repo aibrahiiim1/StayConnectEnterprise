@@ -7,8 +7,17 @@ run-name: ${{ inputs.correlation_id && format('nightly {0} · {1}', inputs.corre
 # production tests. Read-only repository permissions.
 
 on:
-  pull_request:
-    branches: [ master ]
+  # pull_request IS DELIBERATELY ABSENT NOW, and that is the whole point of the nightly model.
+  #
+  # These four gates cost 29-31 minutes of wall clock on every push, and queue time was zero -- the wait was
+  # the gates being thorough, not GitHub being slow. Running them on every `synchronize` meant the working day
+  # was spent validating commits that were about to be superseded. So the full cycle happens once a night,
+  # against the one commit actually proposed for master, dispatched by
+  # .github/workflows/nightly-authoritative-validation.yml. Nothing was removed, shortened or made unable to
+  # fail; only the moment changed.
+  #
+  # A consequence worth stating plainly: an open pull request carries NO required checks until the nightly run
+  # reports them, so it sits unmergeable all day. That is the intended state, not a stuck PR.
   push:
     branches: [ master ]
   # workflow_dispatch IS HOW THIS GATE IS NOW EARNED, and the reasoning that once forbade it is recorded

@@ -638,6 +638,13 @@ MUTATIONS = [
  ("M61e the register declares a delivery model nobody enforces",
   "governance/project-state.json",
    ("json_set", [(["current_state_facts", "delivery_model"], "SOMETHING_ELSE")])),
+ # NOW THAT THE MODEL IS ACTIVE, the daytime interruption can be reintroduced and must be refused. This is the
+ # protection the whole delivery exists to create: a gate running on pull_request again means every push pays
+ # the 29-31 minute cycle once more.
+ ("M61f a gate starts running on pull_request again, reinstating the daytime full-gate cycle",
+  ".github/workflows/phase5-post-stay-transfer.yml",
+   ("replace", [("  push:\n    branches: [ master ]",
+                 "  pull_request:\n    branches: [ master ]\n  push:\n    branches: [ master ]")])),
  ("M62 a superseded run is never cancelled (concurrency block removed)",
   ".github/workflows/phase4-financial-core.yml",
    ("replace", [("concurrency:\n  group:", "removed_concurrency:\n  group:")])),

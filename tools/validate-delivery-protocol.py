@@ -104,11 +104,14 @@ HEAD_ASSERTION = "scripts/ci/assert-dispatch-head.sh"
 DELIVERY_TZ = "Africa/Cairo"
 
 # The delivery model this repository is operating, read from the authoritative register rather than guessed
-# from the files. "ACTIVE" is the Product-Owner-approved nightly model in full force. "LANDING" exists for
-# exactly one delivery -- the one that puts the orchestrator on the default branch, which cannot itself be
-# validated by a mechanism that is not there yet -- and the delivery that flips to ACTIVE deletes it.
+# from the files.
+#
+# THERE IS ONLY ONE ACCEPTED VALUE, AND THAT IS DELIBERATE. A second value, NIGHTLY_MODEL_LANDING, existed for
+# exactly one delivery -- T0182, which put the orchestrator and the gates\' dispatch inputs on the default
+# branch and so could not be validated by a mechanism that was not there yet. While it was accepted, the
+# no-daytime-trigger checks below were deferred. It is deleted rather than left in place, because a transition
+# value that outlives its transition is just a way to switch the checks off.
 MODEL_ACTIVE = "NIGHTLY_AUTHORITATIVE_VALIDATION"
-MODEL_LANDING = "NIGHTLY_MODEL_LANDING"
 
 
 def delivery_model():
@@ -119,10 +122,10 @@ def delivery_model():
         fail("governance/project-state.json could not be read, so the delivery model is unknowable")
         return None
     m = str(((st.get("current_state_facts") or {}).get("delivery_model") or "")).strip()
-    if m not in (MODEL_ACTIVE, MODEL_LANDING):
-        fail("current_state_facts.delivery_model is %r; it must be %r (or %r for the single landing "
-             "delivery). The validator enforces what the register declares, so an undeclared model is "
-             "refused rather than assumed" % (m, MODEL_ACTIVE, MODEL_LANDING))
+    if m != MODEL_ACTIVE:
+        fail("current_state_facts.delivery_model is %r; the only accepted value is %r. The transitional "
+             "landing value was deleted with the delivery that used it, so the no-daytime-trigger checks can "
+             "no longer be deferred" % (m, MODEL_ACTIVE))
         return None
     ok("the register declares the delivery model: %s" % m)
     return m
@@ -170,9 +173,6 @@ def check_nightly_dispatch(name, text):
 
 def check_no_daytime_full_cycle(name, text, model):
     """Under the active model, a normal push must not start the full four-gate cycle."""
-    if model != MODEL_ACTIVE:
-        ok("%s daytime-trigger check deferred: the register declares %s" % (name, model))
-        return
     if re.search(r"(?m)^\s{2}pull_request:\s*$", text):
         fail("%s still triggers on pull_request. Under %s the four full gates must not run on every push; "
              "they are dispatched once a night against the exact delivery head" % (name, MODEL_ACTIVE))
