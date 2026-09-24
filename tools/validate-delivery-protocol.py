@@ -65,6 +65,23 @@ def read(relpath):
         return fh.read()
 
 
+def noncomment(text):
+    """The file with every whole-line comment removed.
+
+    A CHECK MAY NEVER BE SATISFIED BY A COMMENT, and in this repository that is not a hypothetical. It has now
+    happened four times in one delivery line: the ledger-completeness HEADING standing in for the ledger loop;
+    a guard letting either of two ledger loops vouch for the other; the gates passing a
+    "does it run assert-dispatch-head.sh" check on the strength of the explanatory comment above their dispatch
+    trigger; and this validator confirming the orchestrator proves its own rules because the file NAME appears
+    in a comment eleven lines into the header.
+
+    The shape is always the same: documentation quotes the identifier of the thing it documents, and a
+    substring search cannot tell the quotation from the code. So every string check below runs against this,
+    not against the raw text.
+    """
+    return "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
+
+
 def gate_workflows():
     """The gate workflows, taken from the protection model rather than hard-coded here.
 
@@ -130,12 +147,9 @@ def check_nightly_dispatch(name, text):
     # EXPLANATORY COMMENT above the dispatch trigger. So every gate passed while carrying neither the step nor
     # the env, and the same comment also fooled the patcher that was supposed to insert them. What is required
     # now is the executable form: a `run:` that invokes the script, and an `env:` key spelled exactly.
-    # COMMENTS ARE STRIPPED BEFORE ANYTHING BELOW IS ASKED, so a string that appears only in prose cannot
-    # satisfy a check. That is not hypothetical tidiness: the first version searched the WHOLE FILE, both of
-    # these strings appear in the explanatory comment above the dispatch trigger, and every gate therefore
-    # passed while carrying neither the step nor the env. The same comment also fooled the patcher meant to
-    # insert them, so the mention was the only thing that ever existed.
-    code = "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
+    # Comments are stripped first: see noncomment(). Both of these strings appear in the explanatory comment
+    # above the dispatch trigger, and searching the raw text passed every gate while it carried neither.
+    code = noncomment(text)
     if HEAD_ASSERTION not in code:
         fail("%s does not RUN %s in any step. The string may appear in a comment, which proves nothing: "
              "without the step, a dispatch whose branch moved under it would validate the wrong commit and "
@@ -227,10 +241,14 @@ def check_concurrency(name, text):
 
 def check_orchestrator():
     """The nightly orchestrator must exist, be scheduled for 03:10 Africa/Cairo, and prove its own rules."""
-    text = read(ORCHESTRATOR)
-    if text is None:
+    raw = read(ORCHESTRATOR)
+    if raw is None:
         fail("%s is missing; nothing would validate a delivery candidate or merge it" % ORCHESTRATOR)
         return
+    # STRIPPED, because this function already passed once on a comment. M61d removed the step that runs the
+    # fail-closed proofs and this check stayed quiet, because the header comment names run_negative.py while
+    # explaining the DST window. The mutation was detected only after this line changed.
+    text = noncomment(raw)
     crons = re.findall(r"(?m)^\s*-\s*cron:\s*'([^']+)'", text)
     if sorted(crons) != ["10 0 * * *", "10 1 * * *"]:
         fail("%s declares crons %r. It must declare BOTH '10 0 * * *' and '10 1 * * *': GitHub cron is "
@@ -266,10 +284,11 @@ def check_orchestrator():
 
 def check_reuse_refuses_nightly():
     """Earlier evidence -- including a previous night's -- may never stand in for tonight's fresh run."""
-    text = read("scripts/ci/evidence-reuse.sh")
-    if text is None:
+    raw = read("scripts/ci/evidence-reuse.sh")
+    if raw is None:
         fail("scripts/ci/evidence-reuse.sh is missing")
         return
+    text = noncomment(raw)          # the refusal is explained in a comment there too
     if "NIGHTLY_VALIDATION" not in text:
         fail("scripts/ci/evidence-reuse.sh does not refuse reuse during the nightly authoritative "
              "validation. A nightly run after a failed night is the EASIEST case for reuse to hit -- same "
