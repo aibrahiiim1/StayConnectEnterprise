@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 // CONNECTION RECOVERY BELONGS TO ONE CONNECTION, AND PROVENANCE FAILURE IS NOT SILENCE.
@@ -104,6 +104,8 @@ async function openManage() {
   render(<Page />);
   await screen.findByText("Main PMS");
   await userEvent.click(screen.getByRole("button", { name: "Manage" }));
+  // Recovery settings and the live configuration both live on the connection's Configuration tab.
+  await userEvent.click(await screen.findByRole("tab", { name: "Configuration" }));
 }
 
 describe("connection recovery is scoped to one interface", () => {
@@ -111,7 +113,7 @@ describe("connection recovery is scoped to one interface", () => {
     mockPage();
     await openManage();
 
-    await screen.findByText("Advanced configuration — connection recovery");
+    await screen.findByRole("heading", { name: "Connection recovery" });
 
     // THE ADDRESS IS THE ASSERTION. Reading from the site-level reconciliation route is exactly the bug:
     // it would return one set of values for every connection at the property.
@@ -128,7 +130,7 @@ describe("connection recovery is scoped to one interface", () => {
   it("no longer claims the values govern the whole property", async () => {
     mockPage();
     await openManage();
-    await screen.findByText("Advanced configuration — connection recovery");
+    await screen.findByRole("heading", { name: "Connection recovery" });
 
     // The old copy was accurate about a storage model that has since changed. Left behind it would be worse
     // than the original bug: a false warning that discourages an operator from tuning a link they own.
@@ -142,7 +144,7 @@ describe("connection recovery is scoped to one interface", () => {
     mockPage();
     put.mockResolvedValue({ config_version: 5 });
     await openManage();
-    await screen.findByText("Advanced configuration — connection recovery");
+    await screen.findByRole("heading", { name: "Connection recovery" });
 
     const field = await screen.findByDisplayValue("1200");
     await userEvent.clear(field);
@@ -164,7 +166,7 @@ describe("connection recovery is scoped to one interface", () => {
   it("says when nobody has configured this connection, without pretending it is unset", async () => {
     mockPage({ recovery: { ...recovery, is_default: true, config_version: 0 } });
     await openManage();
-    await screen.findByText("Advanced configuration — connection recovery");
+    await screen.findByRole("heading", { name: "Connection recovery" });
     // EVERY field says it, not one: "unconfigured" is a property of the whole row, and an operator reading
     // a single field must not have to look elsewhere to learn nobody has touched it.
     await waitFor(() =>
@@ -184,9 +186,10 @@ describe("a provenance read failure is visible, and is not mistaken for absence"
 
     // THE CONFIGURATION SURVIVES. This is the property that must never regress: losing the audit trail may
     // not cost an operator the ability to see what the connection is set to.
-    await screen.findByText("Current configuration");
-    expect(await screen.findByText("Version 1")).toBeTruthy();
-    expect(screen.getByText("In use")).toBeTruthy();
+    await screen.findByRole("heading", { name: "Live configuration" });
+    const sheet = screen.getByRole("dialog");
+    expect(await within(sheet).findByText("Version 1")).toBeTruthy();
+    expect(within(sheet).getByText("In use")).toBeTruthy();
 
     // AND THE FAILURE IS STATED, in the operator's terms, as a fault to report.
     expect(await screen.findByText(/could not be read just now/i)).toBeTruthy();
