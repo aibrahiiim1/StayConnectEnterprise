@@ -492,3 +492,37 @@ describe("history", () => {
     expect(post.mock.calls.find((c) => c[0] === "/portal-branding/rollback/3")![1]).toEqual({ password: "hunter2" });
   });
 });
+
+describe("unsaved work is kept only when the server would keep it (found on PRE-LIVE)", () => {
+  const drafts = () => put.mock.calls.filter((c) => c[0] === "/portal-branding/draft");
+  const refuseBase = (d: any): Verdict => ({
+    ok: !/<base/i.test(d.custom_html ?? ""),
+    issues: /<base/i.test(d.custom_html ?? "")
+      ? [{ field: "custom_html", severity: "error", message: "removed <base> and its content" }]
+      : [],
+    sanitized: { custom_css: d.custom_css ?? "", custom_html: (d.custom_html ?? "").replace(/<base[^>]*>/gi, "") },
+  });
+
+  it("never sends a design the server has refused, and says the work is not being kept", async () => {
+    put.mockResolvedValue({});
+    mockPost(refuseBase);
+    mock({ hotel_name: "Coral Sea" });
+    await renderPage();
+    open(/Advanced HTML/);
+    fireEvent.change(await screen.findByLabelText(/^custom html$/i), { target: { value: '<base href="https://evil.example/">' } });
+    expect(await screen.findByText(/your changes are not kept if you close this page/i)).toBeTruthy();
+    await new Promise((r) => setTimeout(r, 2300));
+    expect(drafts().length).toBe(0);
+  });
+
+  it("still keeps a clean design as the operator types", async () => {
+    put.mockResolvedValue({});
+    mockPost(refuseBase);
+    mock({ hotel_name: "Coral Sea" });
+    await renderPage();
+    open(/Advanced HTML/);
+    fireEvent.change(await screen.findByLabelText(/^custom html$/i), { target: { value: "<p>Breakfast 7-10</p>" } });
+    await waitFor(() => expect(drafts().length).toBeGreaterThan(0), { timeout: 4000 });
+    expect(drafts().at(-1)?.[1]?.design?.custom_html).toBe("<p>Breakfast 7-10</p>");
+  });
+});

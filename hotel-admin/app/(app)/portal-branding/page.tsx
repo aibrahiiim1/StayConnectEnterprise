@@ -128,15 +128,25 @@ export default function PortalSettingsPage() {
 
   // UNSAVED WORK SURVIVES A CLOSED TAB. Written quietly and never named: an operator should not have to learn
   // a second save verb to get the protection every document editor gives them for free.
+  //
+  // ONLY A DRAFT THE SERVER WILL ACCEPT IS SENT. The server validates drafts with the same rules as a save, so
+  // a draft carrying refused markup (a <base> tag, an inline handler) comes back 400. Found on PRE-LIVE: the
+  // autosave kept firing on its own timer and failing silently while the screen already showed the problem.
+  // It now waits for the verdict on THIS exact design and sends it only when that verdict is clean -- or when no
+  // verdict could be obtained, in which case the server decides as it always did.
   const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const designKey = useMemo(() => JSON.stringify(d), [d]);
+  const [verdictFor, setVerdictFor] = useState<{ key: string; clean: boolean | null } | null>(null);
+  const draftBlocked = verdictFor?.key === designKey && verdictFor.clean === false;
   useEffect(() => {
     if (!dirty || !writable) return;
+    if (!verdictFor || verdictFor.key !== designKey || verdictFor.clean === false) return;
     if (settle.current) clearTimeout(settle.current);
     settle.current = setTimeout(() => {
       api.put("/portal-branding/draft", { design: d }).catch(() => { /* a lost keystroke cache is not an error to report */ });
     }, 1500);
     return () => { if (settle.current) clearTimeout(settle.current); };
-  }, [d, dirty, writable]);
+  }, [d, designKey, dirty, writable, verdictFor]);
 
   // THE SERVER'S VERDICT, AS THE OPERATOR TYPES. Debounced, and only for someone who can save: it is the same
   // rule set that will accept or refuse the save, so there is no second copy of it in this screen.
@@ -144,10 +154,16 @@ export default function PortalSettingsPage() {
     if (saved === null || !writable) return;
     let live = true;
     setChecking(true);
+    const key = JSON.stringify(d);
     const t = setTimeout(() => {
       validateDesign(d as Record<string, unknown>)
-        .then((r) => { if (live) setValidation(r && Array.isArray(r.issues) ? r : null); })
-        .catch(() => { if (live) setValidation(null); })
+        .then((r) => {
+          if (!live) return;
+          const v = r && Array.isArray(r.issues) ? r : null;
+          setValidation(v);
+          setVerdictFor({ key, clean: v ? !v.issues.some((i) => i.severity === "error") : null });
+        })
+        .catch(() => { if (live) { setValidation(null); setVerdictFor({ key, clean: null }); } })
         .finally(() => { if (live) setChecking(false); });
     }, 450);
     return () => { live = false; clearTimeout(t); };
@@ -300,6 +316,9 @@ export default function PortalSettingsPage() {
             {blocking.slice(0, 5).map((i, n) => <li key={n}>{fieldName(i.field)}: {i.message}</li>)}
             {blocking.length > 5 && <li>and {blocking.length - 5} more</li>}
           </ul>
+          {draftBlocked && (
+            <p className="mt-2 text-xs">Until these are fixed, your changes are not kept if you close this page.</p>
+          )}
         </Callout>
       )}
       {saveErr ? <ErrorBanner err={saveErr} /> : null}
