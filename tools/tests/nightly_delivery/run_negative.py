@@ -61,51 +61,77 @@ def pr(number=200, head=SHA_A, draft=False, base="master", labels=None, state="o
 
 
 # =========================================================================================================
-print("== 8. SCHEDULING AND TIMEZONE CORRECTNESS (Africa/Cairo, not a frozen UTC offset) ==")
-# Egypt: UTC+2 in winter, UTC+3 under DST. The workflow fires at 00:10Z and 01:10Z; exactly one firing per
-# night must be admitted, in BOTH halves of the year, with no offset hard-coded anywhere.
-WINTER = dt.datetime(2027, 1, 15, tzinfo=UTC)      # UTC+2 -> 03:10 local == 01:10Z
-SUMMER = dt.datetime(2027, 7, 15, tzinfo=UTC)      # UTC+3 -> 03:10 local == 00:10Z
+print("== 8. SCHEDULING AND TIMEZONE CORRECTNESS (one timezone-aware cron; verified, not computed) ==")
+# The workflow now declares a single `- cron: '10 3 * * *'` with `timezone: "Africa/Cairo"`, so the PLATFORM
+# resolves Egypt's DST -- UTC+2 in winter, UTC+3 from late April to late October. What is asserted here is the
+# narrow thing that remains this repository's problem: that a run which did NOT start near 03:10 local is
+# refused, because an ignored `timezone:` would fire at 03:10 UTC and merge quietly at the wrong hour forever.
+WINTER = dt.datetime(2027, 1, 15, tzinfo=UTC)      # Cairo is UTC+2 -> 03:10 local == 01:10Z
+SUMMER = dt.datetime(2027, 7, 15, tzinfo=UTC)      # Cairo is UTC+3 -> 03:10 local == 00:10Z
 
-w0010 = nd.schedule_window(WINTER.replace(hour=0, minute=10))
-w0110 = nd.schedule_window(WINTER.replace(hour=1, minute=10))
-expect("winter: the 00:10Z firing is an hour early and skips", w0010, False, "TOO_EARLY")
-expect("winter: the 01:10Z firing is 03:10 Cairo and runs", w0110, True, "IN_WINDOW")
+expect("winter: a run at 01:10Z is 03:10 Cairo and proceeds",
+       nd.schedule_sanity(WINTER.replace(hour=1, minute=10)), True, "ON_SCHEDULE")
+expect("summer: a run at 00:10Z is 03:10 Cairo and proceeds",
+       nd.schedule_sanity(SUMMER.replace(hour=0, minute=10)), True, "ON_SCHEDULE")
 
-s0010 = nd.schedule_window(SUMMER.replace(hour=0, minute=10))
-s0110 = nd.schedule_window(SUMMER.replace(hour=1, minute=10))
-expect("summer: the 00:10Z firing is 03:10 Cairo and runs", s0010, True, "IN_WINDOW")
-expect("summer: the 01:10Z firing is an hour late and skips", s0110, False, "TOO_LATE")
-
-if abs(w0110.detail["utc_offset_hours"] - 2.0) > 0.01:
-    fails.append("winter offset measured as %s, expected +2" % w0110.detail["utc_offset_hours"])
+# THE CASE THE CHECK EXISTS FOR: `timezone:` ignored, so the cron is read as UTC.
+w_ignored = nd.schedule_sanity(WINTER.replace(hour=3, minute=10))
+s_ignored = nd.schedule_sanity(SUMMER.replace(hour=3, minute=10))
+expect("winter: an IGNORED timezone fires at 03:10Z = 05:10 Cairo and is refused",
+       w_ignored, False, "SCHEDULE_DRIFT")
+expect("summer: an IGNORED timezone fires at 03:10Z = 06:10 Cairo and is refused",
+       s_ignored, False, "SCHEDULE_DRIFT")
+if abs(w_ignored.detail["drift_minutes"] - 120.0) > 0.01:
+    fails.append("winter drift measured %s, expected +120" % w_ignored.detail["drift_minutes"])
+elif abs(s_ignored.detail["drift_minutes"] - 180.0) > 0.01:
+    fails.append("summer drift measured %s, expected +180" % s_ignored.detail["drift_minutes"])
 else:
     oks += 1
-    print("  ok   winter really is UTC+2 and summer really is UTC+3 (measured, not assumed)")
-if abs(s0010.detail["utc_offset_hours"] - 3.0) > 0.01:
-    fails.append("summer offset measured as %s, expected +3" % s0010.detail["utc_offset_hours"])
+    print("  ok   the ignored-timezone drift really is +120 winter / +180 summer (measured, not assumed)")
 
-# Exactly one firing admitted per night, checked across a whole year including both DST transitions.
-admitted = {}
+# The offsets themselves are measured from the tz database rather than written down anywhere.
+if abs(nd.schedule_sanity(WINTER.replace(hour=1, minute=10)).detail["utc_offset_hours"] - 2.0) > 0.01:
+    fails.append("winter offset is not +2")
+elif abs(nd.schedule_sanity(SUMMER.replace(hour=0, minute=10)).detail["utc_offset_hours"] - 3.0) > 0.01:
+    fails.append("summer offset is not +3")
+else:
+    oks += 1
+    print("  ok   Cairo really is UTC+2 in winter and UTC+3 in summer (read from the tz database)")
+
+# A late scheduler must not be mistaken for a misconfiguration, and the threshold must sit between the two.
+expect("a 40-minute-late scheduled start is tolerated",
+       nd.schedule_sanity(WINTER.replace(hour=1, minute=50)), True, "ON_SCHEDULE")
+expect("a 100-minute-late start is still tolerated (a late scheduler, not a wrong timezone)",
+       nd.schedule_sanity(WINTER.replace(hour=2, minute=50)), True, "ON_SCHEDULE")
+expect("a 120-minute drift is refused -- that is exactly the winter UTC misreading",
+       nd.schedule_sanity(WINTER.replace(hour=3, minute=10)), False, "SCHEDULE_DRIFT")
+expect("the middle of the working day is refused for a SCHEDULED run",
+       nd.schedule_sanity(WINTER.replace(hour=12, minute=0)), False, "SCHEDULE_DRIFT")
+
+# A MANUAL run is expected at any hour; the check is about the platform's timing, not about permission.
+expect("a workflow_dispatch at midday is exempt, because that is what manual means",
+       nd.schedule_sanity(WINTER.replace(hour=12, minute=0), event="workflow_dispatch"), True,
+       "NOT_SCHEDULED")
+expect("a workflow_dispatch on time is also fine",
+       nd.schedule_sanity(WINTER.replace(hour=1, minute=10), event="workflow_dispatch"), True,
+       "NOT_SCHEDULED")
+
+# Every night of a leap year, in both offsets, a correctly-scheduled run proceeds and a UTC-read one does not.
+good = bad_ = 0
 for day in range(366):
     d = dt.datetime(2027, 1, 1, tzinfo=UTC) + dt.timedelta(days=day)
-    n = sum(1 for hh in (0, 1) if nd.schedule_window(d.replace(hour=hh, minute=10)).proceed)
-    admitted.setdefault(n, 0)
-    admitted[n] += 1
-if set(admitted) != {1}:
-    fails.append("across 366 nights the number of admitted firings was %r, must always be exactly 1"
-                 % admitted)
+    local_target = d.astimezone(nd.ZoneInfo(nd.DELIVERY_TZ)).replace(hour=3, minute=10, second=0,
+                                                                     microsecond=0)
+    if nd.schedule_sanity(local_target.astimezone(UTC)).proceed:
+        good += 1
+    if not nd.schedule_sanity(d.replace(hour=3, minute=10)).proceed:
+        bad_ += 1
+if good != 366 or bad_ != 366:
+    fails.append("across 366 nights: %d/366 correct starts accepted, %d/366 UTC-read starts refused"
+                 % (good, bad_))
 else:
     oks += 1
-    print("  ok   exactly ONE firing admitted on each of 366 nights, across both DST transitions")
-
-# A late start is tolerated; a very late one is not, because the next firing must not also qualify.
-expect("a 40-minute-late start is still admitted",
-       nd.schedule_window(WINTER.replace(hour=1, minute=50)), True, "IN_WINDOW")
-expect("a 70-minute-late start is refused (the other firing must not qualify too)",
-       nd.schedule_window(WINTER.replace(hour=2, minute=20)), False, "TOO_LATE")
-expect("the middle of the working day is refused",
-       nd.schedule_window(WINTER.replace(hour=12, minute=0)), False, "TOO_")
+    print("  ok   366/366 nights: a correct 03:10-Cairo start proceeds and a UTC-read start is refused")
 
 # =========================================================================================================
 print()
@@ -243,11 +269,12 @@ if not (green.proceed and may.proceed):
 
 # =========================================================================================================
 print()
-print("== THE SESSION-START CHECK MUST NOT BE FOOLED BY THE NO-OP FIRING (review P1 on PR #180) ==")
-# The workflow fires twice and one firing exits 0 having done nothing. Under EEST the no-op is the LATER of
-# the two, so runs[0] is the no-op -- and a session-start check reading runs[0] would report CLEAR while the
-# night's real validation failed. The tool whose purpose is to notice a failure would be the thing hiding it.
-NOOP = {"id": 2, "conclusion": "success", "verdict": "OUTSIDE_SCHEDULE_WINDOW", "tested_head": ""}
+print("== THE SESSION-START CHECK MUST NOT BE FOOLED BY A RUN THAT DECIDED NOTHING (review P1, PR #180) ==")
+# The nightly no-op firing is GONE with the dual cron -- one timezone-aware schedule has no second firing. What
+# remains is the manual case: a dry run at midday, or a scheduled run refused for clock drift. Both exit 0 and
+# either can sit above a red night, so the VERDICT and never the conclusion decides which run speaks for the
+# night. Deleting this selection along with the no-op would have reopened the same false-CLEAR path.
+NOOP = {"id": 2, "conclusion": "success", "verdict": "WOULD_MERGE_DRY_RUN", "tested_head": ""}
 REDRUN = {"id": 1, "conclusion": "failure", "verdict": "GATES_NOT_ALL_GREEN", "tested_head": SHA_A}
 MERGED = {"id": 1, "conclusion": "success", "verdict": "MERGED", "tested_head": SHA_A}
 
@@ -263,16 +290,17 @@ def pick(label, runs, want_id):
     print("  ok   %-64s [run %s]" % (label, gid))
 
 
-pick("the newest run is a no-op; the red run beneath it is authoritative", [NOOP, REDRUN], 1)
-pick("two no-ops in a row are both skipped", [NOOP, dict(NOOP, id=3), MERGED], 1)
+pick("the newest run is a DRY RUN; the red run beneath it is authoritative", [NOOP, REDRUN], 1)
+pick("a dry run above a drift-refused run: both skipped",
+     [NOOP, dict(NOOP, id=3, verdict="SCHEDULE_DRIFT", conclusion="failure"), MERGED], 1)
 pick("a genuine newest run is selected normally", [MERGED, NOOP], 1)
 pick("an UNREADABLE verdict counts as authoritative, never as skippable",
      [{"id": 9, "conclusion": "failure", "verdict": "", "tested_head": SHA_A}, MERGED], 9)
 if nd.select_authoritative_run([NOOP, dict(NOOP, id=3)]) is not None:
-    fails.append("all-no-op history should select nothing")
+    fails.append("a history of nothing but non-deciding runs should select nothing")
 else:
     oks += 1
-    print("  ok   a history of nothing but no-ops selects no authoritative run")
+    print("  ok   a history of nothing but non-deciding runs selects no authoritative run")
 
 print()
 print("== A RED NIGHT IS ONLY UNRESOLVED WHILE ITS HEAD IS STILL THE HEAD (review P2 on PR #180) ==")

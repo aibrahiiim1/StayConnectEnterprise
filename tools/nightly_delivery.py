@@ -43,10 +43,10 @@ UTC = _dt.timezone.utc
 DELIVERY_TZ = "Africa/Cairo"
 TARGET_LOCAL_HOUR = 3
 TARGET_LOCAL_MINUTE = 10
-# A scheduled GitHub run can start late. The window must be wide enough to absorb that and NARROWER than the
-# gap between the two cron firings, or the wrong firing would also be inside it. The crons are one hour apart,
-# so 55 minutes is the widest value that keeps exactly one firing eligible per night.
-WINDOW_MINUTES = 55
+# How far from 03:10 local a SCHEDULED run may start before it is treated as evidence that the declared
+# timezone was not honoured. A late scheduler drifts by minutes; a UTC-interpreted cron drifts by 120 minutes
+# in winter and 180 in summer, so 105 separates the two without refusing a merely delayed run.
+MAX_DRIFT_MINUTES = 105
 
 REQUIRED_GATES = (
     "project-governance.yml",
@@ -75,32 +75,35 @@ class Decision:
 
 
 # ---------------------------------------------------------------------------------------------------------
-# 1. THE SCHEDULE, IN Africa/Cairo SEMANTICS RATHER THAN A FROZEN UTC OFFSET
+# 1. THE SCHEDULE -- STATED ONCE, AND VERIFIED RATHER THAN COMPUTED
 # ---------------------------------------------------------------------------------------------------------
-def schedule_window(now_utc, tz_name=DELIVERY_TZ, hour=TARGET_LOCAL_HOUR, minute=TARGET_LOCAL_MINUTE,
-                    window_minutes=WINDOW_MINUTES):
-    """Is `now_utc` inside tonight's 03:10 local window?
+def schedule_sanity(now_utc, event="schedule", tz_name=DELIVERY_TZ, hour=TARGET_LOCAL_HOUR,
+                    minute=TARGET_LOCAL_MINUTE, max_drift_minutes=MAX_DRIFT_MINUTES):
+    """Did this run actually start near 03:10 Africa/Cairo?
 
-    GITHUB CRON IS UTC-ONLY AND HAS NO TIMEZONE SUPPORT, and Egypt observes DST -- UTC+2 in winter, UTC+3
-    from the last Friday of April to the last Thursday of October. A single hard-coded UTC cron is therefore
-    wrong for half the year, which is precisely what this must not be.
+    THE SCHEDULE ITSELF IS NO LONGER THIS FUNCTION'S JOB. GitHub Actions takes an IANA `timezone:` beside
+    `cron:`, so the workflow states `10 3 * * *` in Africa/Cairo once and the platform resolves the offset
+    across Egypt's DST transitions. What this function does now is much narrower, and it is the reason it still
+    exists at all: IT CHECKS THAT THE PLATFORM DID WHAT THE WORKFLOW ASKED.
 
-    So the workflow fires at BOTH 00:10 and 01:10 UTC and this function decides which firing is the real one:
-    it converts `now` to Africa/Cairo, takes 03:10 on that local date, converts THAT back to UTC, and admits
-    the run only if `now` is in [target, target + window).
+    If `timezone:` were ignored -- removed in an edit, unsupported on some runner, mistyped -- the cron would
+    fire at 03:10 UTC, which is 05:10 or 06:10 in Cairo. Nothing else in this system would notice: the gates
+    would run, the merge would happen, and a nightly process would silently be running in the morning for as
+    long as nobody looked. A misconfiguration that still produces green merges is the kind that lasts.
 
-        winter (UTC+2): target = 01:10Z -> the 00:10Z firing is early and skips; the 01:10Z firing runs
-        summer (UTC+3): target = 00:10Z -> the 00:10Z firing runs; the 01:10Z firing is an hour late,
-                                           outside a 55-minute window, and skips
+    So the drift from 03:10 local is measured and a large one refuses. 105 minutes is chosen deliberately: a
+    scheduled GitHub run can start late by minutes and occasionally more, while an ignored timezone shows up as
+    a drift of at least 120 minutes (winter) or 180 (summer). The threshold separates the two cases without
+    refusing a merely delayed run.
 
-    Exactly one firing per night is admitted in both halves of the year, with no offset written down
-    anywhere. DST transitions in Egypt happen at midnight local, so 03:10 always exists and is never
-    ambiguous -- there is no gap or fold to resolve.
+    A MANUAL RUN IS EXEMPT. `workflow_dispatch` is expected at any hour -- that is what it is for -- so the
+    check applies only to the `schedule` event. It is a statement about the platform's timing, not about
+    whether validation is allowed to happen.
     """
     if ZoneInfo is None:
         return Decision(False, "NO_TZDB",
-                        "zoneinfo is unavailable, so Africa/Cairo cannot be resolved; refusing rather than "
-                        "assuming a UTC offset")
+                        "zoneinfo is unavailable, so Africa/Cairo cannot be resolved and the schedule cannot "
+                        "be verified; refusing rather than assuming an offset")
     if now_utc.tzinfo is None:
         now_utc = now_utc.replace(tzinfo=UTC)
     now_utc = now_utc.astimezone(UTC)
@@ -108,32 +111,35 @@ def schedule_window(now_utc, tz_name=DELIVERY_TZ, hour=TARGET_LOCAL_HOUR, minute
     zone = ZoneInfo(tz_name)
     local_now = now_utc.astimezone(zone)
     target_local = local_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    target_utc = target_local.astimezone(UTC)
-    delta_s = (now_utc - target_utc).total_seconds()
+    drift_min = (local_now - target_local).total_seconds() / 60.0
 
     detail = {
+        "event": event,
         "now_utc": now_utc.isoformat(),
         "now_local": local_now.isoformat(),
         "target_local": target_local.isoformat(),
-        "target_utc": target_utc.isoformat(),
         "utc_offset_hours": local_now.utcoffset().total_seconds() / 3600.0,
-        "minutes_after_target": round(delta_s / 60.0, 2),
-        "window_minutes": window_minutes,
+        "drift_minutes": round(drift_min, 2),
+        "max_drift_minutes": max_drift_minutes,
     }
-    if 0 <= delta_s < window_minutes * 60:
-        return Decision(True, "IN_WINDOW",
-                        "local time %s is inside tonight's %02d:%02d %s window"
-                        % (local_now.strftime("%Y-%m-%d %H:%M"), hour, minute, tz_name), detail)
-    if delta_s < 0:
-        return Decision(False, "TOO_EARLY",
-                        "local time %s is %.0f minutes BEFORE tonight's %02d:%02d %s target; this is the "
-                        "other cron firing"
-                        % (local_now.strftime("%H:%M"), -delta_s / 60.0, hour, minute, tz_name), detail)
-    return Decision(False, "TOO_LATE",
-                    "local time %s is %.0f minutes after tonight's %02d:%02d %s target, outside the "
-                    "%d-minute window"
-                    % (local_now.strftime("%H:%M"), delta_s / 60.0, hour, minute, tz_name, window_minutes),
-                    detail)
+
+    if str(event) != "schedule":
+        return Decision(True, "NOT_SCHEDULED",
+                        "this is a %s run, so the schedule check does not apply; local time is %s"
+                        % (event, local_now.strftime("%Y-%m-%d %H:%M %Z")), detail)
+
+    if abs(drift_min) <= max_drift_minutes:
+        return Decision(True, "ON_SCHEDULE",
+                        "started %s, %.0f minutes from the %02d:%02d %s target -- the platform honoured the "
+                        "declared timezone"
+                        % (local_now.strftime("%Y-%m-%d %H:%M %Z"), drift_min, hour, minute, tz_name), detail)
+
+    return Decision(False, "SCHEDULE_DRIFT",
+                    "started %s, which is %.0f minutes from the %02d:%02d %s target. That is far more than a "
+                    "late scheduler and is what an IGNORED `timezone:` looks like -- a UTC-interpreted cron "
+                    "lands 120 minutes late in winter and 180 in summer. Refusing: a nightly merge running at "
+                    "the wrong hour would otherwise go unnoticed indefinitely"
+                    % (local_now.strftime("%Y-%m-%d %H:%M %Z"), drift_min, hour, minute, tz_name), detail)
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -359,23 +365,31 @@ def merge_precondition(gates, expected_sha, pr_now, unresolved_threads):
 # ---------------------------------------------------------------------------------------------------------
 # 5. READING BACK WHAT A NIGHT DECIDED -- used by the session-start check, not by the orchestrator
 # ---------------------------------------------------------------------------------------------------------
-# A verdict that means "this was the other cron firing, I did nothing". It is a SUCCESS, so it is
-# indistinguishable from a good night by conclusion alone -- which is the trap below.
-NOOP_VERDICTS = ("OUTSIDE_SCHEDULE_WINDOW",)
+# Verdicts that mean "this run deliberately decided nothing". They are SUCCESSES, so they are
+# indistinguishable from a good night by conclusion alone -- which is the trap select_authoritative_run
+# exists for.
+#
+# The dual-cron no-op that used to be the main entry here is GONE, because one timezone-aware schedule has no
+# second firing. What remains is the manual case: a dry run, or a scheduled run refused for drift. Deleting
+# this set along with the no-op would have reopened the same false-CLEAR path through `--dry_run`.
+NOOP_VERDICTS = ("WOULD_MERGE_DRY_RUN", "SCHEDULE_DRIFT", "ORCHESTRATOR_UNUSABLE")
 
 
 def select_authoritative_run(runs):
     """The newest orchestrator run that actually DECIDED something.
 
-    THIS IS NOT runs[0], AND THE DIFFERENCE MATTERS EVERY NIGHT HALF THE YEAR. The workflow fires twice; one
-    firing does the work and the other exits 0 having done nothing. Under EEST the no-op is the LATER of the
-    two, so the newest run is the no-op -- and a session-start check that reads runs[0] would report CLEAR
-    while the real validation of the night failed. The tool whose whole job is to notice a failure would be
-    the thing hiding it.
+    THIS IS NOT runs[0], AND THE REASON SURVIVED THE SCHEDULE CHANGE. It used to be the nightly no-op firing:
+    two crons, one of which exited 0 having done nothing, and under EEST that no-op was the LATER run -- so
+    runs[0] was the no-op and a session-start check reading it would report CLEAR while the night's real
+    validation failed. One timezone-aware schedule removed that firing.
 
-    So a run is only authoritative if its verdict says it got past the window guard. A run whose verdict
-    cannot be read at all is treated as authoritative rather than skipped: an unreadable verdict must not
-    become a way to skip a red night.
+    What did not go away is the manual run. A dry run at midday succeeds, a scheduled run refused for clock
+    drift succeeds, and either can sit at runs[0] above a red night. The tool whose whole job is to notice a
+    failure would again be the thing hiding it, so the verdict -- not the conclusion -- decides which run
+    speaks for the night.
+
+    A run whose verdict cannot be read at all is treated as authoritative rather than skipped: an unreadable
+    verdict must not become a way to skip a red night.
     """
     for r in runs or []:
         v = str((r or {}).get("verdict") or "").strip().upper()

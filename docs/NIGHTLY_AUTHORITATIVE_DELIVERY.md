@@ -71,29 +71,48 @@ Two rules make it safe to read:
 
 `.github/workflows/nightly-authoritative-validation.yml` is the only thing that merges anything.
 
-### The schedule is Africa/Cairo, not a frozen UTC offset
+### The schedule is stated once, in Africa/Cairo
 
-GitHub cron is UTC-only and has no timezone support, and **Egypt observes DST** — UTC+2 in winter, UTC+3 from
-the last Friday of April to the last Thursday of October. A single hard-coded UTC cron is therefore an hour
-wrong for half the year.
+GitHub Actions accepts an IANA `timezone:` beside `cron:`, so the schedule is one line and Egypt's DST — UTC+2
+in winter, UTC+3 from the last Friday of April to the last Thursday of October — is the platform's arithmetic
+rather than ours:
 
-So the workflow fires **twice**, and `tools/nightly_delivery.py::schedule_window` decides which firing is
-tonight's by converting 03:10 Africa/Cairo — read from the tz database — back to UTC:
+```yaml
+on:
+  schedule:
+    - cron: '10 3 * * *'
+      timezone: "Africa/Cairo"
+```
 
-| Season | Offset | 03:10 Cairo is | `10 0 * * *` | `10 1 * * *` |
-|---|---|---|---|---|
-| Winter (EET) | UTC+2 | `01:10Z` | skips, `TOO_EARLY` | **runs** |
-| Summer (EEST) | UTC+3 | `00:10Z` | **runs** | skips, `TOO_LATE` |
+**What this replaced, kept here because it matters if `timezone:` is ever removed.** The first implementation
+used two crons — `10 0 * * *` and `10 1 * * *`, one per possible offset — and computed which firing was the
+real 03:10 local, exiting as a deliberate no-op on the other. It was correct, and it cost: one wasted run every
+night, and a session-start check that then had to tell a no-op from a real verdict, because both exit zero.
 
-The window is 55 minutes: wide enough to absorb a late scheduler, and narrower than the one-hour gap between
-firings so the wrong firing can never also qualify. Asserted for **all 366 nights of a leap year**, across
-both DST transitions, in `tools/tests/nightly_delivery/run_negative.py`.
+**One check survives, and it is not that selection logic.** `schedule_sanity()` verifies the platform actually
+honoured the timezone. If `timezone:` were dropped, mistyped, or unsupported, the same cron means 03:10 **UTC**
+— 05:10 or 06:10 in Cairo — and nothing else in the system would notice: the gates would run, the merge would
+happen, and a nightly process would quietly be a morning one for as long as nobody looked. A misconfiguration
+that still produces green merges is the kind that lasts.
+
+So the drift from 03:10 local is measured, and more than **105 minutes** refuses. That threshold is chosen to
+separate two things that look alike from a distance:
+
+| | drift | verdict |
+|---|---|---|
+| A late scheduler | minutes, occasionally tens of minutes | tolerated |
+| `timezone:` ignored, winter | **+120 min** | `SCHEDULE_DRIFT`, refused |
+| `timezone:` ignored, summer | **+180 min** | `SCHEDULE_DRIFT`, refused |
+
+A `workflow_dispatch` run is exempt — it is expected at any hour, which is what manual means. Asserted for all
+366 nights of a leap year in both directions: a correct 03:10-Cairo start proceeds, and a UTC-read start is
+refused, with the ±120/±180 drift measured from the tz database rather than written down.
 
 ### The sequence, and what each step refuses
 
 | Step | Refuses |
 |---|---|
-| **1. Window** | Any firing that is not tonight's 03:10 Cairo. |
+| **1. Schedule sanity** | A scheduled run that did not start near 03:10 Cairo — the signature of an ignored `timezone:`. |
 | **2. One candidate** | Zero candidates → quiet no-op (green). **Two or more → hard refusal**, naming them; choosing between them would invent an intent nobody expressed. |
 | **3. Dispatch** | `workflow_dispatch` at the candidate's branch, carrying `expected_sha` and tonight's `correlation_id`. |
 | **4. Wait** | Partial completion. Three of four green is a refusal, not an opportunity. |
@@ -144,8 +163,13 @@ The branch is preserved, nothing is merged, and the failure evidence stays in th
 |---|---|---|
 | `CLEAR` | merged, no candidate, or correctly waiting | 0 |
 | `IN_PROGRESS` | tonight's run is still going | 0 |
+| `SUPERSEDED_FAILURE` | it failed, but a later commit has already moved the head on | 0 |
 | `UNRESOLVED_FAILURE` | **repair this before starting new work** | 1 |
 | `UNKNOWN` | status could not be read — treat as unknown, not as clear | 2 |
+
+It reads the **verdict** each run recorded rather than its conclusion, because a dry run and a drift-refused
+run both exit zero and either can sit above a red night. An unreadable verdict counts as authoritative, and an
+unreadable tested head counts as unresolved: *"I cannot tell whether this was fixed"* is not *"it was fixed"*.
 
 "Unresolved" is deliberately not "the last run was red": a red night followed by fixes is what the model
 expects. It is red **and** not yet superseded.
@@ -172,5 +196,9 @@ orchestrator itself before it decides anything:
 
 wrong candidate/head · stale pass after a newer commit · missing candidate · multiple ambiguous candidates ·
 partial gate completion · a failed gate · a merge attempted without a fresh pass · scheduling and timezone
-correctness · earlier daytime/PR/master/previous-night evidence attempting to substitute · and the positive
-path, because a module that refuses everything would pass every negative case.
+correctness (including an ignored `timezone:` in both DST halves, across 366 nights) · earlier
+daytime/PR/master/previous-night evidence attempting to substitute · a non-deciding run being mistaken for the
+night's verdict · a repaired failure being reported as still owed · and the positive path, because a module
+that refuses everything would pass every negative case.
+
+**71 assertions**, run by the `governance` gate and again by the orchestrator before it decides anything.

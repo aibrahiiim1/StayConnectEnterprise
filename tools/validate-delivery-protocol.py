@@ -101,6 +101,7 @@ ORCHESTRATOR = ".github/workflows/nightly-authoritative-validation.yml"
 DECISION_MODULE = "tools/nightly_delivery.py"
 DECISION_TESTS = "tools/tests/nightly_delivery/run_negative.py"
 HEAD_ASSERTION = "scripts/ci/assert-dispatch-head.sh"
+DELIVERY_TZ = "Africa/Cairo"
 
 # The delivery model this repository is operating, read from the authoritative register rather than guessed
 # from the files. "ACTIVE" is the Product-Owner-approved nightly model in full force. "LANDING" exists for
@@ -250,14 +251,21 @@ def check_orchestrator():
     # explaining the DST window. The mutation was detected only after this line changed.
     text = noncomment(raw)
     crons = re.findall(r"(?m)^\s*-\s*cron:\s*'([^']+)'", text)
-    if sorted(crons) != ["10 0 * * *", "10 1 * * *"]:
-        fail("%s declares crons %r. It must declare BOTH '10 0 * * *' and '10 1 * * *': GitHub cron is "
-             "UTC-only and Egypt moves between UTC+2 and UTC+3, so one firing per offset is the only way "
-             "03:10 Africa/Cairo is hit all year. The decision module picks tonight's real firing"
-             % (ORCHESTRATOR, crons))
+    if crons != ["10 3 * * *"]:
+        fail("%s declares crons %r; it must declare exactly one, '10 3 * * *'. More than one firing means a "
+             "deliberate no-op run every night and a session-start check that has to tell a no-op from a real "
+             "verdict; none means nothing ever validates a candidate" % (ORCHESTRATOR, crons))
     else:
-        ok("%s fires at both 00:10Z and 01:10Z so 03:10 Africa/Cairo is hit in both halves of the year"
-           % ORCHESTRATOR)
+        ok("%s declares exactly one schedule: 03:10" % ORCHESTRATOR)
+    # THE TIMEZONE IS THE WHOLE SCHEDULE. Without it the same cron means 03:10 UTC -- 05:10 or 06:10 in Cairo
+    # -- and the nightly merge would run at the wrong hour while still going green, which is the kind of
+    # misconfiguration that lasts for months.
+    if not re.search(r"(?m)^\s*timezone:\s*[\"\']?%s[\"\']?\s*$" % re.escape(DELIVERY_TZ), text):
+        fail("%s does not declare `timezone: %s` beside its cron. Without it the cron is interpreted as UTC "
+             "and the nightly validation would run at 05:10 or 06:10 Cairo time instead of 03:10"
+             % (ORCHESTRATOR, DELIVERY_TZ))
+    else:
+        ok("%s states its schedule in %s, so the platform owns the DST arithmetic" % (ORCHESTRATOR, DELIVERY_TZ))
     if "cancel-in-progress: false" not in text:
         fail("%s may be cancellable; a cancelled orchestrator can leave four dispatched gates with nothing "
              "to read their verdict or merge on it" % ORCHESTRATOR)

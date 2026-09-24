@@ -6,7 +6,8 @@ adversarially by tools/tests/nightly_delivery/run_negative.py; nothing here deci
 
 THE SEQUENCE, and what each step refuses:
 
-  1. schedule window   03:10 Africa/Cairo, computed from the tz database, not from a frozen UTC offset.
+  1. schedule sanity   the run really started near 03:10 Africa/Cairo. The platform owns the timezone
+                       (one `cron:` with `timezone: Africa/Cairo`); this verifies it honoured it.
   2. one candidate     exactly one open, non-draft, non-held pull request to master. Zero is a quiet no-op;
                        two is a hard refusal.
   3. dispatch          workflow_dispatch at the candidate's branch, carrying the expected sha and tonight's
@@ -42,7 +43,8 @@ UTC = dt.timezone.utc
 REPO = os.environ.get("GITHUB_REPOSITORY", "aibrahiiim1/StayConnectEnterprise")
 TOKEN = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
 DRY_RUN = os.environ.get("NIGHTLY_DRY_RUN", "").lower() in ("1", "true", "yes")
-IGNORE_WINDOW = os.environ.get("NIGHTLY_IGNORE_SCHEDULE_WINDOW", "").lower() in ("1", "true", "yes")
+IGNORE_CHECK = os.environ.get("NIGHTLY_IGNORE_SCHEDULE_CHECK", "").lower() in ("1", "true", "yes")
+EVENT_NAME = os.environ.get("NIGHTLY_EVENT_NAME", "schedule")
 GATE_BUDGET_S = int(os.environ.get("NIGHTLY_GATE_BUDGET_SECONDS", "5400"))   # 90 minutes
 POLL_S = int(os.environ.get("NIGHTLY_POLL_SECONDS", "30"))
 
@@ -119,21 +121,23 @@ def main():
     say("## Nightly authoritative validation")
     say()
 
-    # ---- 1. the schedule window ---------------------------------------------------------------------
+    # ---- 1. the schedule sanity check ---------------------------------------------------------------
     now = dt.datetime.now(tz=UTC)
-    win = nd.schedule_window(now)
+    win = nd.schedule_sanity(now, EVENT_NAME)
     say("**schedule** `%s` — %s" % (win.code, win.reason))
-    for k in ("now_utc", "now_local", "target_utc", "utc_offset_hours", "minutes_after_target"):
+    for k in ("event", "now_utc", "now_local", "utc_offset_hours", "drift_minutes"):
         if k in (win.detail or {}):
             say("  - %s: `%s`" % (k, win.detail[k]))
     if not win.proceed:
-        if IGNORE_WINDOW:
+        if IGNORE_CHECK:
             say()
-            say("> **schedule window overridden** by an explicit operator request. This changes only WHEN "
-                "the validation runs. Every gate still runs fresh on the exact head, and every fail-closed "
-                "rule below still applies.")
+            say("> **schedule check overridden** by an explicit operator request. This changes only WHEN the "
+                "validation runs. Every gate still runs fresh on the exact head, and every fail-closed rule "
+                "below still applies.")
         else:
-            finish(0, "OUTSIDE_SCHEDULE_WINDOW", "Nothing ran. This is the other cron firing.")
+            finish(1, win.code,
+                   "Nothing ran. The declared `timezone: Africa/Cairo` appears not to have been honoured, "
+                   "which would otherwise mean a nightly merge quietly running at the wrong hour.")
 
     # ---- 2. exactly one candidate -------------------------------------------------------------------
     pulls_raw = api("/pulls?state=open&per_page=100")

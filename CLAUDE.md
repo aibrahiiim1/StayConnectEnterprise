@@ -268,9 +268,9 @@ pushes, which makes it more valuable rather than less.
 
 ### Nightly
 
-At **03:10 Africa/Cairo** the orchestrator validates the exact head of the single active delivery candidate
-with one complete fresh run of all four gates, and merges automatically only if all four pass **that exact
-head**. A commit pushed during the run makes the pass stale; the next night judges the new head. Zero
+At **03:10 Africa/Cairo** — one `cron: '10 3 * * *'` with `timezone: "Africa/Cairo"`, so the platform owns the
+DST arithmetic — the orchestrator validates the exact head of the single active delivery candidate with one
+complete fresh run of all four gates, and merges automatically only if all four pass **that exact head**. A commit pushed during the run makes the pass stale; the next night judges the new head. Zero
 candidates is a quiet no-op; two or more is a hard refusal. Mark a PR **draft** or label it **`nightly-hold`**
 to keep it open overnight without merging.
 
@@ -280,9 +280,10 @@ to keep it open overnight without merging.
 python tools/nightly-status.py
 ```
 
-`UNRESOLVED_FAILURE` (exit 1) means the latest nightly validation failed and has not been superseded:
-**diagnose and repair that first**, on the same delivery branch, before starting new work. `UNKNOWN` (exit 2)
-is not the same as clear. Nothing else notifies you — the push that caused the failure succeeded, and the
+`UNRESOLVED_FAILURE` (exit 1) means the latest nightly validation failed and the head it failed on is **still**
+the delivery head: **diagnose and repair that first**, on the same delivery branch, before starting new work.
+`SUPERSEDED_FAILURE` (exit 0) means a later commit already moved past it. `UNKNOWN` (exit 2) is not the same as
+clear. Nothing else notifies you — the push that caused the failure succeeded, and the
 evidence sits in a workflow run nobody has opened.
 
 ---
