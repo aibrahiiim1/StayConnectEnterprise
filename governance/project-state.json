@@ -1709,8 +1709,8 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "8ac4034eaa53af40ecd212a02a084e7f53e9aef8",
     "base_note": "The master merge commit of PR #179, which recorded T0181.",
-    "head": "682febb1",
-    "head_note": "The last CONTENT commit of this delivery: the gates carried neither the wrong-commit refusal nor the NIGHTLY_VALIDATION env while every check said they did, because the explanatory comment contained both strings and satisfied the patcher and the validator alike. Both now demand the executable form.",
+    "head": "a3174b6f",
+    "head_note": "The last CONTENT commit of this delivery: one helper, noncomment(), applied to every string check in the delivery-protocol validator, after the fourth instance of a check being satisfied by a comment that quoted the identifier of the thing it documents.",
     "transition": "T0182",
     "previous_delivery": "T0181",
     "note": "T0182. Delivery is redesigned so normal development is not interrupted by the four full gates. The gates keep every step they had and run in full -- once a night, at 03:10 Africa/Cairo, against the exact head of the single active delivery candidate, merged automatically only on an all-green result for that exact head. Nothing was removed, shortened or made unable to fail.\n\nThis delivery LANDS the mechanism with the old pull_request triggers still in place, because workflow_dispatch only fires for a workflow already on the default branch: the delivery that adds the mechanism cannot be validated by it. current_state_facts.delivery_model records NIGHTLY_MODEL_LANDING, and the next delivery removes the daytime triggers, flips it to NIGHTLY_AUTHORITATIVE_VALIDATION, deletes the landing value from the validator, and is itself validated and merged BY the new nightly mechanism.\n\nIt also records the STANDING PRE-LIVE DEPLOYMENT DECISION so no future session asks for that approval again, together with the two rules that keep a deployed-ahead-of-master appliance readable."
