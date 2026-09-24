@@ -29,6 +29,7 @@ a missing rule -- is a FAIL. A security check that passes because it could not l
 import io
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -110,9 +111,21 @@ def main():
         if names != [context]:
             fail("%s must define exactly one job named %r (a required status context IS the job name); "
                  "found %r" % (wf, context, names))
-        if "pull_request:" not in text:
-            fail("%s has no pull_request trigger, so its required context would never report on a PR and "
-                 "master would be permanently unmergeable" % wf)
+        # THE EVENT THAT EARNS THE CONTEXT CHANGED WITH THE DELIVERY MODEL (T0182/T0183). This used to require
+        # `pull_request:`, on the reasoning that without it the required context would never report and master
+        # would be permanently unmergeable. The reasoning was right and the premise is no longer true: under
+        # the nightly model the context is reported by the orchestrator's workflow_dispatch AT THE PULL-REQUEST
+        # HEAD, which is the only mechanism that satisfies a context pinned to the Actions app for that commit.
+        # Proven live on PR #181: four dispatched runs, four check runs on the PR head, under these exact names.
+        #
+        # What this check is really protecting is that SOMETHING can report the context. So it now requires the
+        # dispatch trigger. Requiring pull_request here would contradict validate-delivery-protocol.py, which
+        # refuses it -- and two validators demanding opposite things about one line is worse than either being
+        # wrong, because whichever is edited to agree makes the other look correct.
+        if not re.search(r"(?m)^\s{2}workflow_dispatch:\s*$", text):
+            fail("%s declares no workflow_dispatch trigger. Under the nightly delivery model that is how its "
+                 "required context is reported on a pull-request head, so without it master would be "
+                 "permanently unmergeable" % wf)
     if not fails:
         ok("every gate workflow declares exactly the job name its required context expects")
 
