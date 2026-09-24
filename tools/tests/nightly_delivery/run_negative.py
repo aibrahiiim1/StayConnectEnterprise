@@ -340,6 +340,9 @@ for label, run, heads, want in (
     ("still the delivery head -> unresolved", REDRUN, [SHA_A], True),
     ("the head has moved on -> superseded", REDRUN, [SHA_B], False),
     ("no open candidate at all -> superseded", REDRUN, [], False),
+    # AN UNREADABLE LOOKUP IS NOT AN EMPTY LIST. nightly-status.py substituted [] on an HTTP error, so a failed
+    # API call produced a CLEAR verdict in the check every session runs first. None now means "unreadable".
+    ("the candidate list could not be read -> unresolved, not clear", REDRUN, None, True),
     ("the tested head is unreadable -> unresolved, not assumed fixed",
      dict(REDRUN, tested_head=""), [SHA_B], True),
     ("a successful run is never unresolved", MERGED, [SHA_A], False),
@@ -359,11 +362,28 @@ for label, run, heads, want in (
 _, why_none = nd.failure_is_unresolved(REDRUN, [])
 if "moved to no open candidate" in why_none:
     fails.append("the zero-candidate reason is malformed: %r" % why_none)
-elif "merged or closed" not in why_none:
-    fails.append("the zero-candidate reason does not say why nothing is owed: %r" % why_none)
+elif "no eligible candidate is visible" not in why_none:
+    fails.append("the zero-candidate reason does not state the observation: %r" % why_none)
 else:
     oks += 1
-    print("  ok   %-64s [%s]" % ("no candidate open: the reason is a sentence, and says why", "clear"))
+    print("  ok   %-64s [%s]" % ("no candidate visible: the reason states the observation", "clear"))
+
+# AND DOES NOT INVENT A HISTORY. Review finding on PR #182: the first fix replaced a malformed sentence with a
+# confident false one ("that pull request has been merged or closed since"). Nothing here knows that -- the
+# list is also empty for a draft, a held candidate, and (before the caller was fixed) a failed API call. The
+# reason must offer the possibilities, never pick one.
+if "may have been" not in why_none:
+    fails.append("the zero-candidate reason asserts a history it cannot know: %r" % why_none)
+else:
+    oks += 1
+    print("  ok   %-64s [%s]" % ("no candidate visible: the reason does not invent a history", "clear"))
+
+_, why_unread = nd.failure_is_unresolved(REDRUN, None)
+if "could not be read" not in why_unread:
+    fails.append("an unreadable candidate list does not say so: %r" % why_unread)
+else:
+    oks += 1
+    print("  ok   %-64s [%s]" % ("unreadable candidate list: says so, and fails closed", "UNRESOLVED"))
 
 _, why_moved = nd.failure_is_unresolved(REDRUN, [SHA_B])
 if SHA_B[:12] not in why_moved:

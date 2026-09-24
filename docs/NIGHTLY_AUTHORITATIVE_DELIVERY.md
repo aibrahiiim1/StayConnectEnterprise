@@ -215,7 +215,7 @@ The branch is preserved, nothing is merged, and the failure evidence stays in th
 | `IN_PROGRESS` | tonight's run is still going | 0 |
 | `SUPERSEDED_FAILURE` | it failed, but a later commit has already moved the head on | 0 |
 | `UNRESOLVED_FAILURE` | **repair this before starting new work** | 1 |
-| `UNKNOWN` | status could not be read — treat as unknown, not as clear | 2 |
+| `UNKNOWN` | status, or the open-candidate list, could not be read — treat as unknown, not as clear | 2 |
 
 It reads the **verdict** each run recorded rather than its conclusion, because a dry run and a drift-refused
 run both exit zero and either can sit above a red night. An unreadable verdict counts as authoritative, and an
@@ -253,7 +253,7 @@ different run id for the right gate · unreadable attempt numbers · a non-decid
 night's verdict · a repaired failure being reported as still owed · **the wording of the reason a future session acts on** · and the positive path, because a module
 that refuses everything would pass every negative case.
 
-**83 assertions**, run by the `governance` gate and again by the orchestrator before it decides anything.
+**86 assertions**, run by the `governance` gate and again by the orchestrator before it decides anything.
 
 The **fixtures** of the other suite are audited too: `run_mutations.py --anchors` resolves every mutation
 case's anchor in a single read pass. That exists because fixture drift has broken this suite three separate
