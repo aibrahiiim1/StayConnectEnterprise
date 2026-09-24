@@ -28,8 +28,8 @@
   "state_note": "No phase, activity or acceptance state changes. Phase 7 remains ACCEPTED_AND_CLOSED, functional completeness remains PASS with that mission CLOSED at T0181, Guest activation remains DEFERRED by D41, Go-Live remains unauthorised, and PRE-LIVE was not contacted at any point in this delivery.",
   "base": "d10820867212de8bf727d66defa4fee35ca07926",
   "base_note": "The master merge commit of PR #181, which recorded T0184 and put the Option E orchestrator on master.",
-  "head": "ee9ce580",
-  "head_note": "The CONTENT commit of this correction: the session-start reason reads as a sentence, and its wording is asserted.",
+  "head": "84c39ee8",
+  "head_note": "The CONTENT commit of this correction: the session-start reason states its observation without inventing a history, an unreadable candidate list fails closed, and the register no longer carries the retracted dispatch claim.",
   "previous_delivery": "T0184",
   "go_live": "NOT authorised. Guest activation remains DEFERRED by D41.",
   "a_copied_claim_is_still_a_claim": "previous_state and new_state were copied wholesale from T0184, which carried 'This increment performed controlled acceptance ON the PRE-LIVE appliance'. Copied into a repository-only receipt that itself states PRE-LIVE was never contacted, it made this record contradict itself about operational history -- caught in review, not by a validator.\n\nBoth values now describe what this increment actually did. The mechanism is worth naming: inheriting a field because it was 'unchanged' is not the same as the CLAIM in it still being true."
