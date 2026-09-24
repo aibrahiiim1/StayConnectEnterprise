@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `8ac4034eaa53af40ecd212a02a084e7f53e9aef8`
-- **HEAD commit:** `682febb1`
-- **Provenance (generation HEAD = inventory_head):** `001095cd3fefd664750e4becc695d1daf54946d3`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `a3174b6f`
+- **Provenance (generation HEAD = inventory_head):** `3986f64c6f31e3090f834057f250cf2830e39d92`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/nightly-authoritative-delivery`
 - **Remote branch:** `origin/delivery/nightly-authoritative-delivery`
 - **Changed files:** 48
@@ -29,7 +29,7 @@
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
-| `exports/chatgpt/phase-evidence/GIT_STAT_147d773a.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs: rebuild at the delivery head |
+| `exports/chatgpt/phase-evidence/GIT_STAT_1e9166cf.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs: rebuild at the delivery head |
 | `exports/chatgpt/phase-evidence/GIT_STAT_39b79f79.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Packs: rebuild at the T0182 governance commit |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
@@ -48,8 +48,8 @@
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the T0182 governance commit |
 | `governance/artifact-registry.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Move the cost of the gates off every push and onto one nightly run |
 | `governance/ci-reuse-policy.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | A mention is not a step, and my own comment proved it |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: the delivery head is the mention-versus-step correction |
-| `governance/transitions/T0182.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: the delivery head is the mention-versus-step correction |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: the delivery head is the shared comment-stripping helper |
+| `governance/transitions/T0182.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: the delivery head is the shared comment-stripping helper |
 | `scripts/ci/assert-dispatch-head.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Move the cost of the gates off every push and onto one nightly run |
 | `scripts/ci/evidence-reuse.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Move the cost of the gates off every push and onto one nightly run |
 | `scripts/ci/nightly-orchestrate.py` | CREATED | `A` | other | OTHER | rollback REMOVES it | Move the cost of the gates off every push and onto one nightly run |
@@ -58,7 +58,7 @@
 | `tools/tests/nightly_delivery/run_negative.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Move the cost of the gates off every push and onto one nightly run |
 | `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | A mention is not a step, and my own comment proved it |
 | `tools/validate-ci-reuse-policy.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Move the cost of the gates off every push and onto one nightly run |
-| `tools/validate-delivery-protocol.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | A mention is not a step, and my own comment proved it |
+| `tools/validate-delivery-protocol.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | One helper, applied everywhere: a check may never be satisfied by a comment |
 | `tools/validate-project-state.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Zero-stale: register the nightly next-action phrasing in the allow-list |
 
 ## Total diff statistics (`git diff --stat`)
@@ -76,11 +76,11 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   4 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   4 +-
  docs/context/StayConnect-IAM-Handoff.md            |   4 +-
- docs/manifests/PostClosure-change-manifest.md      | 159 +++++----
+ docs/manifests/PostClosure-change-manifest.md      | 163 +++++----
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343523 -> 342842 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 149012 -> 149042 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44104 -> 44006 bytes
- .../chatgpt/phase-evidence/GIT_STAT_147d773a.txt   |   4 +
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44104 -> 44003 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_1e9166cf.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_39b79f79.txt   |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   6 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
@@ -100,7 +100,7 @@
  governance/artifact-registry.json                  |   6 +
  governance/ci-reuse-policy.json                    |  49 +++
  governance/project-state.json                      |  42 ++-
- governance/transitions/T0182.json                  |  39 +++
+ governance/transitions/T0182.json                  |  40 +++
  scripts/ci/assert-dispatch-head.sh                 |  55 ++++
  scripts/ci/evidence-reuse.sh                       |  19 ++
  scripts/ci/nightly-orchestrate.py                  | 279 ++++++++++++++++
@@ -109,9 +109,9 @@
  tools/tests/nightly_delivery/run_negative.py       | 251 ++++++++++++++
  .../tests/project_state_validator/run_mutations.py |  28 +-
  tools/validate-ci-reuse-policy.py                  |  21 ++
- tools/validate-delivery-protocol.py                | 212 ++++++++++--
+ tools/validate-delivery-protocol.py                | 231 +++++++++++--
  tools/validate-project-state.sh                    |   2 +-
- 48 files changed, 2142 insertions(+), 246 deletions(-)
+ 48 files changed, 2166 insertions(+), 246 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -121,6 +121,10 @@ M  docs/manifests/PostClosure-change-manifest.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 3986f64c Packs: rebuild at the delivery head
+HISTORICAL: 1e9166cf Governance: the delivery head is the shared comment-stripping helper
+HISTORICAL: a3174b6f One helper, applied everywhere: a check may never be satisfied by a comment
+HISTORICAL: e4757bcc Delivery: the manifest lists itself
 HISTORICAL: 001095cd Packs: rebuild at the delivery head
 HISTORICAL: 147d773a Governance: the delivery head is the mention-versus-step correction
 HISTORICAL: 682febb1 A mention is not a step, and my own comment proved it
