@@ -345,21 +345,42 @@ def merge_precondition(gates, expected_sha, pr_now, unresolved_threads):
         return Decision(False, "NOT_MERGEABLE",
                         "GitHub reports the pull request as not mergeable (state %r)"
                         % (pr_now or {}).get("mergeable_state"))
+
+    # WHY `blocked` IS NOT AUTOMATICALLY A REFUSAL, and why this is not a weakening.
+    #
+    # `mergeable_state` is a SUMMARY. It reports `blocked` when ANY check in the rollup is unfinished --
+    # including checks nothing requires. This repository has two third-party apps installed (observed on
+    # PR #181: `cursor` and `kilo-code-bot`) that open an EMPTY check suite on every push, status `queued`,
+    # zero runs, which never completes. The rollup is therefore permanently unfinished and the summary says
+    # `blocked` forever, on a pull request whose four REQUIRED contexts are green.
+    #
+    # Demanding `clean` meant deferring to that summary instead of to the requirement. The requirement is the
+    # ruleset: four named contexts, pinned to the Actions app, on this head -- and this orchestrator verifies
+    # that far more precisely than the summary does, per gate, per sha, per correlation id, refusing a run that
+    # is not tonight's or not about this commit. Unresolved threads are checked separately above, and the
+    # ruleset requires zero approvals.
+    #
+    # So `blocked` is accepted ONLY with all four gates positively established green and no unresolved thread,
+    # and the merge call itself is PINNED to the sha -- GitHub applies the ruleset and refuses if anything is
+    # genuinely unmet, which is reported as MERGE_REFUSED_BY_GITHUB rather than retried. Every other state is
+    # still refused, and `behind` still waits rather than rebasing.
     state = str((pr_now or {}).get("mergeable_state") or "")
-    if state != "clean":
+    if state not in ("clean", "blocked"):
         return Decision(False, "MERGEABLE_STATE_%s" % (state.upper() or "UNKNOWN"),
-                        "mergeable_state is %r, not 'clean'. %s"
+                        "mergeable_state is %r. %s"
                         % (state,
                            "The branch is behind master and strict status checks are on; updating it would "
                            "write a new commit and invalidate tonight's verdict, so this waits."
                            if state == "behind" else
-                           "Refusing to merge on anything but a clean state."))
+                           "Refusing to merge on anything but 'clean', or 'blocked' with every required "
+                           "context positively verified green."))
 
     return Decision(True, "MAY_MERGE",
                     "all four gates freshly passed %s, the branch tip is still %s, no thread is unresolved "
-                    "and the pull request is clean"
-                    % (str(expected_sha)[:12], str(expected_sha)[:12]),
-                    {"pr": (pr_now or {}).get("number"), "sha": expected_sha})
+                    "and the pull request is mergeable (state %s)"
+                    % (str(expected_sha)[:12], str(expected_sha)[:12], state or "unknown"),
+                    {"pr": (pr_now or {}).get("number"), "sha": expected_sha,
+                     "mergeable_state": state})
 
 
 # ---------------------------------------------------------------------------------------------------------

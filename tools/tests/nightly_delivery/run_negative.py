@@ -247,6 +247,19 @@ expect("an unreadable thread count is refused, not assumed zero",
        nd.merge_precondition(green, SHA_A, pr(), None), False, "THREADS_UNREADABLE")
 expect("a branch BEHIND master waits instead of being rebased",
        nd.merge_precondition(green, SHA_A, pr(mergeable_state="behind"), 0), False, "BEHIND")
+# `blocked` IS ACCEPTED ONLY WITH THE REQUIREMENT ITSELF VERIFIED. Observed on PR #181: two third-party apps
+# (`cursor`, `kilo-code-bot`) open an empty check suite on every push -- status queued, zero runs -- which never
+# completes, so the rollup summary says `blocked` forever on a pull request whose four required contexts are
+# green. Deferring to the summary meant never merging; deferring to the requirement is what the ruleset says.
+expect("blocked WITH all four gates verified green is accepted",
+       nd.merge_precondition(green, SHA_A, pr(mergeable_state="blocked"), 0), True, "MAY_MERGE")
+expect("blocked WITHOUT green gates is still refused",
+       nd.merge_precondition(nd.classify_gate_runs(SHA_A, CORR, []), SHA_A,
+                             pr(mergeable_state="blocked"), 0), False, "GATES_NOT_GREEN")
+expect("blocked with an unresolved thread is still refused",
+       nd.merge_precondition(green, SHA_A, pr(mergeable_state="blocked"), 2), False, "UNRESOLVED_THREADS")
+expect("blocked on a head that moved is still refused",
+       nd.merge_precondition(green, SHA_A, pr(head=SHA_B, mergeable_state="blocked"), 0), False, "HEAD_MOVED")
 expect("a dirty/conflicted branch is refused",
        nd.merge_precondition(green, SHA_A, pr(mergeable_state="dirty"), 0), False, "DIRTY")
 expect("mergeable=false is refused",
