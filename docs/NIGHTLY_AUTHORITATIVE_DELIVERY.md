@@ -17,12 +17,33 @@ meant the working day was spent waiting on validation of commits that were about
 **So the cost moved rather than shrank.** Nothing was removed, shortened, or made unable to fail. The same
 four gates run in full — once a night, against the one commit that is actually being proposed for master.
 
-## 2. Daytime: development is not interrupted
+## 2. Daytime: a cheap sentinel, and development is not interrupted
 
-The four gate workflows **do not run on `pull_request` at all**, and on `push` only for `master`. During the
-working day an agent therefore:
+The four gate workflows **do** run on `pull_request` — that is the only trigger whose checks a ruleset-required
+status check accepts (§4, *How the contexts are earned*). What changed is what they **do** on a daytime push.
 
-1. modifies code, commits, pushes — **no full-gate cycle starts**;
+Attempt 1 of a pull-request run executes exactly one step, first, before anything is checked out:
+
+```yaml
+- name: Daytime sentinel (attempt 1 establishes the required context and fails on purpose)
+  if: github.event_name == 'pull_request' && github.run_attempt == 1
+  run: |
+    ...
+    exit 1
+```
+
+Two properties, both deliberate:
+
+- the required context **exists**, so GitHub can evaluate the rule at all; and
+- it does **not pass**, so master cannot become mergeable before the nightly validation has actually run.
+
+Because the step is first and fails, every heavy step beneath it is skipped: no Go build, no PostgreSQL, no
+browser, no mutation matrix. The cost is seconds instead of 29–31 minutes.
+
+**Nobody waits for attempt 1.** It is expected to be red, it says so in its own log, and it is not evidence
+about the change. During the working day an agent therefore:
+
+1. modifies code, commits, pushes — **the four contexts go red in seconds and no full-gate cycle starts**;
 2. deploys completed changes to **PRE-LIVE `172.21.60.25`** under the standing decision in §3;
 3. verifies the deployment and records the exact deployed commit;
 4. continues working.
@@ -114,9 +135,9 @@ refused, with the ±120/±180 drift measured from the tz database rather than wr
 |---|---|
 | **1. Schedule sanity** | A scheduled run that did not start near 03:10 Cairo — the signature of an ignored `timezone:`. |
 | **2. One candidate** | Zero candidates → quiet no-op (green). **Two or more → hard refusal**, naming them; choosing between them would invent an intent nobody expressed. |
-| **3. Dispatch** | `workflow_dispatch` at the candidate's branch, carrying `expected_sha` and tonight's `correlation_id`. |
+| **3. Re-run** | Each gate's existing `pull_request` run for that exact head is re-run. A gate with no such run to re-run is a refusal (`RERUN_INCOMPLETE`), not something to work around. |
 | **4. Wait** | Partial completion. Three of four green is a refusal, not an opportunity. |
-| **5. Classify** | Any run that is not `workflow_dispatch`, not on `expected_sha`, not carrying tonight's correlation id, not `completed`, or not `success`. Two runs for one gate is also refused. |
+| **5. Classify** | Any run that is not the run we re-ran (matched by **run id**), not `pull_request`, not on `expected_sha`, not on a **later attempt** than the one it was on when we asked, not `completed`, or not `success`. |
 | **6. Re-read** | **A stale pass.** The head is read again after the gates finish; if a commit landed during the run, tonight's verdict is about a commit that is no longer the tip, and it waits for the next night. |
 | **7. Merge** | `merge` method only, **`sha` pinned**, so GitHub itself refuses if anything moved between decision and call. |
 
@@ -124,29 +145,58 @@ A candidate is an **open, non-draft pull request targeting `master`** without th
 a PR draft or labelling it `nightly-hold` are the two supported ways to keep work open overnight without it
 being merged — neither requires weakening or disabling anything.
 
-### Why a dispatch, and why that is not a loophole
+### How the contexts are earned, and the three mechanisms that do not work
 
-A required context is pinned to `integration_id: 15368` (the GitHub Actions app) and branch protection reads
-the check runs on the **pull-request head SHA**. Two alternatives were therefore unavailable rather than
-merely worse:
+A required context here is pinned to `integration_id: 15368` (the GitHub Actions app) and is evaluated for the
+pull request. Three mechanisms were tried or considered, and only the third works:
 
-- a `schedule`-triggered run always runs on the default branch, so its checks attach to **master**; and
-- a commit status posted through the Statuses API carries a different integration, which the pin refuses —
-  exactly what the pin is for.
-
-A `workflow_dispatch` at `ref: <delivery branch>` produces a run whose `head_sha` **is** the branch tip, so
-its checks land on the PR head honestly.
-
-The earlier rule "never use `workflow_dispatch` to satisfy a required check" existed for two real hazards, and
-both are closed by construction rather than by assertion:
-
-| Old hazard | Closed by |
+| Mechanism | Outcome |
 |---|---|
-| A dispatched run blocks a PR whose own checks are green | There are no other checks. The dispatch is the only source of these contexts. |
-| A dispatched success is inherited as reuse evidence | The nightly run **declines reuse outright** (`NIGHTLY_VALIDATION=true`), and the orchestrator counts only runs carrying **tonight's** correlation id. |
-| A dispatch names a ref, so the branch can move under it | `scripts/ci/assert-dispatch-head.sh` fails the gate unless the head it is validating is exactly the decided sha. |
+| A `schedule` run | Always runs on the default branch, so its checks attach to **master**, never to the PR. Unavailable. |
+| A commit status via the Statuses API | Carries a different integration, which the pin refuses — exactly what the pin is for. Unavailable. |
+| A `workflow_dispatch` at the delivery ref | **Refused by the ruleset, measured.** See below. |
+| **Re-running the PR's own `pull_request` run** | **Works.** A re-run keeps `event=pull_request` and the same `head_sha`, so its checks count, and it arrives as attempt 2+, where the gates execute in full. |
+
+#### The dispatch model was built, deployed, and refused by the platform
+
+This is recorded rather than quietly removed, because every visible signal said it worked.
+
+A `workflow_dispatch` at `ref: <delivery branch>` produces a run whose `head_sha` **is** the branch tip. On
+PR #181 that run produced four green check runs, **under exactly the four required context names**, **from app
+15368**, **attached to the pull-request head**, which GitHub reported as associated with the pull request. Asked
+to merge on them, GitHub answered:
+
+```
+HTTP 405  Repository rule violations found
+4 of 4 required status checks are expected.
+```
+
+— with all four green, and GraphQL `statusCheckRollup` **null** for that commit. **A dispatched run's check
+runs do not satisfy a ruleset-required status check.** Attaching to the head, coming from the pinned app, and
+being associated with the PR are each necessary and none is sufficient.
+
+**The mistake worth naming is not the design, it is what was accepted as proof of it.** Seeing the four checks
+land on the head was reported as the model working. It was evidence that the *artefact* appeared, not that the
+*requirement* was satisfied, and the only thing that could tell the difference was asking GitHub to merge.
+
+So the original repository rule — *never use `workflow_dispatch` to satisfy a required check* — turns out to
+have been right for a reason nobody had written down: it cannot be done. `workflow_dispatch` is retired from
+all four gates, and `scripts/ci/assert-dispatch-head.sh` is retired with it; under a re-run the head SHA is set
+by GitHub from the run being re-run, so a wrong-commit run is not a thing that can occur.
+
+#### Why a re-run is not a loophole either
+
+| Hazard | Closed by |
+|---|---|
+| A cheap daytime attempt could satisfy the requirement | It **fails**. A non-passing context cannot merge anything, which is the sentinel's entire purpose. |
+| A previous night's pass is reused as this night's | The orchestrator records the attempt each run was on **before** it asked, and requires a **later** attempt. An unchanged tree cannot produce one. |
+| A green run for a different commit is counted | Matched by run id **and** `head_sha` **and** event. |
+| A dispatched success is inherited as reuse evidence | The nightly attempt **declines reuse outright** (`NIGHTLY_VALIDATION=true`). |
 
 ### Fresh execution is guaranteed, not hoped for
+
+The authoritative attempt is identified by the run itself — `github.event_name == 'pull_request' &&
+github.run_attempt != 1` — so `NIGHTLY_VALIDATION` cannot be true on a run that is not one.
 
 `scripts/ci/evidence-reuse.sh` refuses before it looks at anything when `NIGHTLY_VALIDATION=true`. This
 matters most in the case that would otherwise be easiest to hit: a nightly run **after a failed night**, where
@@ -196,9 +246,17 @@ orchestrator itself before it decides anything:
 
 wrong candidate/head · stale pass after a newer commit · missing candidate · multiple ambiguous candidates ·
 partial gate completion · a failed gate · a merge attempted without a fresh pass · scheduling and timezone
-correctness (including an ignored `timezone:` in both DST halves, across 366 nights) · earlier
-daytime/PR/master/previous-night evidence attempting to substitute · a non-deciding run being mistaken for the
+correctness (including an ignored `timezone:` in both DST halves, across 366 nights) · **a run still on attempt
+1, so only the sentinel ran** · **a previous night's attempt offered as tonight's** · **a `workflow_dispatch`
+run offered as a required context** · a master-push run offered instead · nothing having been re-run at all · a
+different run id for the right gate · unreadable attempt numbers · a non-deciding run being mistaken for the
 night's verdict · a repaired failure being reported as still owed · and the positive path, because a module
 that refuses everything would pass every negative case.
 
-**71 assertions**, run by the `governance` gate and again by the orchestrator before it decides anything.
+**81 assertions**, run by the `governance` gate and again by the orchestrator before it decides anything.
+
+The **fixtures** of the other suite are audited too: `run_mutations.py --anchors` resolves every mutation
+case's anchor in a single read pass. That exists because fixture drift has broken this suite three separate
+ways — aborting the whole matrix, silently mutating nothing while reporting `[MISS]`, and continuing to match
+while the configuration it called a defect became the required state. `tools/preflight.sh` runs it in
+seconds, rather than discovering it twenty gate-minutes later.

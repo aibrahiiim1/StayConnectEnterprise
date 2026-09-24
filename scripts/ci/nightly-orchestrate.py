@@ -10,11 +10,13 @@ THE SEQUENCE, and what each step refuses:
                        (one `cron:` with `timezone: Africa/Cairo`); this verifies it honoured it.
   2. one candidate     exactly one open, non-draft, non-held pull request to master. Zero is a quiet no-op;
                        two is a hard refusal.
-  3. dispatch          workflow_dispatch at the candidate's branch, carrying the expected sha and tonight's
-                       correlation id. The run's head_sha is therefore the PR head, which is the only way the
-                       pinned required contexts can be satisfied for that commit.
+  3. re-run            the EXISTING pull_request run of each gate for that exact head. Only a pull_request
+                       run's checks satisfy the ruleset -- a workflow_dispatch run's do not, measured:
+                       `HTTP 405 ... 4 of 4 required status checks are expected` with four green checks from
+                       the pinned app already on the head. A re-run keeps the event and the head sha and
+                       arrives as attempt 2+, which is where the gates actually execute.
   4. wait              until all four complete, or the budget runs out. Partial completion is refusal.
-  5. classify          all four must be fresh (tonight's correlation id), on the expected sha, and green.
+  5. classify          the same run ids that were re-run, on the expected sha, on a LATER attempt, green.
   6. re-read           the PR head again. If a commit landed during the run, the pass is stale and waits for
                        the next night -- that is the single most important refusal in this file.
   7. merge             `merge` method only, with the sha PINNED, so GitHub itself refuses if anything moved
@@ -158,40 +160,56 @@ def main():
     pr = cand.detail["chosen"]
     number, head_ref, expected_sha = pr["number"], pr["head_ref"], pr["head_sha"]
     _tested_head = expected_sha
-    correlation = "nightly-%s-%s" % (now.strftime("%Y%m%dT%H%M%SZ"), expected_sha[:12])
+
     say("  - pull request: **#%s** (`%s`)" % (number, head_ref))
     say("  - head under test: `%s`" % expected_sha)
-    say("  - correlation id: `%s`" % correlation)
+    say("  - freshness is proved by the ATTEMPT NUMBER: each re-run must come back on a later attempt "
+        "than the sentinel it replaces")
 
-    # ---- 3. dispatch all four gates at that exact ref ----------------------------------------------
+    # ---- 3. re-run the pull_request run of each gate, at that exact head --------------------------
+    #
+    # A re-run, not a dispatch. Only a pull_request run's checks satisfy the ruleset; a dispatched run's do
+    # not, which GitHub states plainly when asked to merge on them. The run to re-run is the one whose
+    # head_sha is the head we decided on -- the sentinel attempt the daytime push created.
     say()
-    say("**dispatch** four authoritative gates at `%s`" % head_ref)
-    dispatched_at = dt.datetime.now(tz=UTC)
+    say("**re-run** the pull_request run of each gate at `%s`" % expected_sha[:12])
+    requested = {}
     for wf in nd.REQUIRED_GATES:
+        run = find_pr_run(wf, expected_sha)
+        if run is None:
+            say("  - `%s`: NO pull_request run exists for this head. The sentinel attempt should have created "
+                "one on push; without it there is no countable context to re-run." % wf)
+            continue
         try:
-            api("/actions/workflows/%s/dispatches" % wf, "POST",
-                {"ref": head_ref, "inputs": {"expected_sha": expected_sha,
-                                             "correlation_id": correlation,
-                                             "nightly": "true"}})
-            say("  - dispatched `%s`" % wf)
+            api("/actions/runs/%d/rerun" % run["id"], "POST", {})
+            requested[wf] = {"id": run["id"], "attempt": run.get("run_attempt") or 1}
+            say("  - `%s`: re-ran run %s (was attempt %s)" % (wf, run["id"], run.get("run_attempt")))
         except urllib.error.HTTPError as e:
-            say("  - FAILED to dispatch `%s`: HTTP %s %s"
-                % (wf, e.code, e.read().decode("utf-8", "replace")[:200]))
-            finish(1, "DISPATCH_FAILED")
+            body = e.read().decode("utf-8", "replace")[:160]
+            # A run already on a fresh attempt cannot be re-run again while it is active; that is not a
+            # failure to report as one, so it is recorded and judged by the classifier like any other.
+            say("  - `%s`: re-run refused (HTTP %s %s)" % (wf, e.code, body))
+    if len(requested) != len(nd.REQUIRED_GATES):
+        say()
+        say("Not every gate could be re-run, so the four required contexts cannot all be freshly earned "
+            "tonight. Refusing rather than merging on whatever is there.")
+        finish(1, "RERUN_INCOMPLETE")
 
     # ---- 4. wait for all four ----------------------------------------------------------------------
     say()
-    say("**waiting** up to %d minutes for all four to complete" % (GATE_BUDGET_S // 60))
+    say("**waiting** up to %d minutes for all four re-runs to complete" % (GATE_BUDGET_S // 60))
     deadline = time.time() + GATE_BUDGET_S
     runs, last = [], ""
     while True:
-        runs = collect_runs(correlation, dispatched_at)
-        done = sum(1 for r in runs if r["status"] == "completed")
-        state = "%d/%d complete" % (done, len(nd.REQUIRED_GATES))
+        runs = read_runs(requested)
+        done = sum(1 for r in runs
+                   if r["status"] == "completed"
+                   and int(r.get("run_attempt") or 0) > int(requested[r["workflow_file"]]["attempt"]))
+        state = "%d/%d complete on a new attempt" % (done, len(nd.REQUIRED_GATES))
         if state != last:
             say("  - %s" % state)
             last = state
-        if len(runs) >= len(nd.REQUIRED_GATES) and done >= len(nd.REQUIRED_GATES):
+        if done >= len(nd.REQUIRED_GATES):
             break
         if time.time() > deadline:
             say("  - BUDGET EXHAUSTED with %s" % state)
@@ -199,7 +217,7 @@ def main():
         time.sleep(POLL_S)
 
     # ---- 5. all four, fresh, this sha, green -------------------------------------------------------
-    gates = nd.classify_gate_runs(expected_sha, correlation, runs)
+    gates = nd.classify_rerun_runs(expected_sha, requested, runs)
     say()
     say("**gates** `%s` — %s" % (gates.code, gates.reason))
     for wf, info in sorted((gates.detail or {}).get("per_gate", {}).items()):
@@ -235,9 +253,10 @@ def main():
                   {"merge_method": "merge", "sha": expected_sha,
                    "commit_title": "Merge PR #%d: nightly authoritative validation passed at %s"
                                    % (number, expected_sha[:12]),
-                   "commit_message": "All four authoritative gates ran fresh against %s under %s and "
-                                     "passed.\n\nThis merge introduces no content of its own."
-                                     % (expected_sha, correlation)})
+                   "commit_message": "All four authoritative gates freshly re-ran against %s and passed. "
+                                     "The required contexts were earned by pull_request runs on a later "
+                                     "attempt than the daytime sentinel.\n\nThis merge introduces no content "
+                                     "of its own." % expected_sha})
     except urllib.error.HTTPError as e:
         say("  - MERGE REFUSED by GitHub: HTTP %s %s"
             % (e.code, e.read().decode("utf-8", "replace")[:300]))
@@ -254,25 +273,35 @@ def main():
     finish(0, "MERGED")
 
 
-def collect_runs(correlation, since):
-    """Runs carrying tonight's correlation id, one entry per gate, shaped for classify_gate_runs."""
-    out, seen = [], set()
-    for wf in nd.REQUIRED_GATES:
+def find_pr_run(wf, head_sha):
+    """The pull_request run of `wf` for exactly this head, newest first.
+
+    There is normally exactly one: the sentinel attempt the daytime push created. If a branch was force-pushed
+    to the same sha, or the pull request was reopened, there may be several -- the newest is the one whose
+    checks are current for the commit, and re-running it is what updates them.
+    """
+    try:
+        data = api("/actions/workflows/%s/runs?event=pull_request&per_page=40" % wf)
+    except urllib.error.HTTPError:
+        return None
+    for r in data.get("workflow_runs", []):
+        if str(r.get("head_sha") or "") == str(head_sha):
+            return r
+    return None
+
+
+def read_runs(requested):
+    """The requested runs, read back by id and shaped for classify_rerun_runs."""
+    out = []
+    for wf, want in (requested or {}).items():
         try:
-            data = api("/actions/workflows/%s/runs?event=workflow_dispatch&per_page=25" % wf)
+            r = api("/actions/runs/%d" % int(want["id"]))
         except urllib.error.HTTPError:
             continue
-        for r in data.get("workflow_runs", []):
-            title = r.get("display_title") or r.get("name") or ""
-            if correlation not in title:
-                continue
-            if r["id"] in seen:
-                continue
-            seen.add(r["id"])
-            out.append({"workflow_file": os.path.basename(r.get("path") or ""),
-                        "head_sha": r.get("head_sha"), "event": r.get("event"),
-                        "display_title": title, "status": r.get("status"),
-                        "conclusion": r.get("conclusion"), "id": r["id"]})
+        out.append({"workflow_file": os.path.basename(r.get("path") or ""),
+                    "id": r.get("id"), "head_sha": r.get("head_sha"), "event": r.get("event"),
+                    "status": r.get("status"), "conclusion": r.get("conclusion"),
+                    "run_attempt": r.get("run_attempt")})
     return out
 
 

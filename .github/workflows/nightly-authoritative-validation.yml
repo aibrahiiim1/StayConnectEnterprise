@@ -3,9 +3,19 @@ name: Nightly Authoritative Validation
 # ---------------------------------------------------------------------------------------------------------
 # ONE COMPLETE AUTHORITATIVE VALIDATION PER NIGHT, AT 03:10 Africa/Cairo, AGAINST THE EXACT DELIVERY HEAD.
 #
-# Normal development is no longer interrupted: the four gate workflows do not run on `pull_request` at all.
-# They are dispatched here, once a night, at the exact head of the single active delivery candidate, and an
-# all-green result on that exact head is merged automatically.
+# Normal development is no longer interrupted. The four gate workflows DO run on `pull_request` -- that is the
+# only event whose check runs satisfy a ruleset-required status check -- but attempt 1 executes a single step, a
+# deliberate sentinel, and fails in seconds. The required context therefore EXISTS and does not PASS.
+#
+# Once a night this orchestrator RE-RUNS each gate's own `pull_request` run for the exact head of the single
+# active delivery candidate. A re-run keeps `event=pull_request` and the same head SHA, so its checks count, and
+# it arrives as attempt 2+, where the full gate executes. An all-green result on that exact head is merged
+# automatically.
+#
+# A DISPATCH WAS TRIED FIRST AND THE PLATFORM REFUSED IT. Four dispatched runs put four green check runs under
+# exactly the required context names, from the pinned Actions app, on the pull-request head -- and the ruleset
+# answered `HTTP 405 ... 4 of 4 required status checks are expected`. Measured on PR #181. Do not reintroduce a
+# dispatch trigger on a gate.
 #
 # ONE SCHEDULE, AND THE PLATFORM HANDLES THE TIMEZONE. GitHub Actions supports an IANA `timezone:` alongside
 # `cron:`, so 03:10 Africa/Cairo is stated once and Egypt's DST -- UTC+2 in winter, UTC+3 from late April to
@@ -38,8 +48,8 @@ on:
         type: boolean
         default: false
 
-# Never cancel a nightly run: it may already have dispatched the gates, and a cancelled orchestrator would
-# leave four runs in flight with nothing to read their verdict or merge on it.
+# Never cancel a nightly run: it may already have re-run the gates, and a cancelled orchestrator would leave
+# four runs in flight with nothing to read their verdict or merge on it.
 concurrency:
   group: nightly-authoritative-validation
   cancel-in-progress: false
@@ -47,7 +57,7 @@ concurrency:
 permissions:
   contents: write            # the protected merge
   pull-requests: write       # reading the candidate and merging it
-  actions: write             # dispatching the four gates
+  actions: write             # re-running each gate's pull_request run, and reading the results back
 
 jobs:
   nightly:
@@ -68,7 +78,7 @@ jobs:
           python-version: '3.12'
 
       # The rules that can refuse a merge are proven before any of them is used tonight. If this fails,
-      # nothing is dispatched and nothing is merged.
+      # nothing is re-run and nothing is merged.
       - name: Fail-closed proofs for tonight's decision rules
         run: python tools/tests/nightly_delivery/run_negative.py
 

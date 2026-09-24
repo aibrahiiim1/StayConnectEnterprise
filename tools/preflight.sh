@@ -128,6 +128,10 @@ BINARY_PY
   # the service roles and runs AFTER the migrations. Four operator reads (0080-0083) were lost this way and
   # the factory-clean baseline proves it -- it contained none of them while the appliance had all four.
   python tools/validate-migration-grant-durability.py || rc=1
+  # THE MUTATION MATRIX'S ANCHORS, resolved without running it. Drift there costs 20 gate-minutes and returns
+  # either an aborted matrix or a case that silently mutated nothing; this answers the same question in a
+  # single read pass. It is not a substitute for the matrix, only for discovering its fixtures late.
+  python tools/tests/project_state_validator/run_mutations.py --anchors || rc=1
 
   # The governance gate's LAST step fails if anything is left in the tree, including untracked build output.
   # Discovering that after everything else has passed is the most annoying possible way to fail.
@@ -213,6 +217,11 @@ stage4() {
   begin "Stage 4 - PREFLIGHT_FIXTURE_PARITY (disposable-PG fixture vs migrations)"
   local rc=0
   python tools/check-fixture-parity.py || rc=1
+
+# Cheapest possible guard against the fixture drift that aborts the whole mutation matrix in CI
+# minutes from now. Read-only, no sandbox, no validators.
+step "mutation anchors" "every mutation case still resolves against the checkout"
+python tools/tests/project_state_validator/run_mutations.py --anchors || rc=1
   record "fixture carries every column its queries select" "$rc"
 }
 

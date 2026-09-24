@@ -15,18 +15,25 @@ EVERY FUNCTION FAILS CLOSED. The answer to any uncertainty -- no candidate, two 
 be matched, a head that moved, an unreadable field -- is "do not merge". None of them can answer "merge"
 by accident, because each returns an explicit decision object whose default is refusal.
 
-WHY THE REQUIRED CONTEXTS MUST COME FROM A DISPATCH AT THE DELIVERY REF. The ruleset pins each required
-context to integration_id 15368, the GitHub Actions app, and branch protection reads the check runs attached
-to the PULL REQUEST HEAD SHA. That rules out both alternatives:
+HOW THE REQUIRED CONTEXTS ARE EARNED, AND THE THREE MECHANISMS THAT DO NOT WORK. The ruleset pins each
+required context to integration_id 15368 and evaluates it for the pull request. Measured on this repository:
 
-  * a `schedule`-triggered run always runs on the default branch, so its check runs attach to master and
-    would never satisfy the pull request; and
-  * a commit status posted through the Statuses API carries a different integration (or none), so the pinned
-    requirement refuses it -- which is exactly what the pin is for.
+  * a `schedule` run always runs on the default branch, so its checks attach to master -- never to the PR;
+  * a commit status posted through the Statuses API carries a different integration, which the pin refuses;
+  * a `workflow_dispatch` run at the delivery ref DOES put green checks with the right names, from app 15368,
+    on the pull-request head, and GitHub even reports them as associated with the PR -- and the ruleset STILL
+    refuses them. `HTTP 405 ... 4 of 4 required status checks are expected`, with statusCheckRollup null.
+    Attaching to the head, the right app, and PR association are each necessary and none is sufficient.
 
-A `workflow_dispatch` at `ref: <delivery branch>` produces a run whose head_sha IS the branch tip, so its
-check runs land on the PR head and satisfy the requirement honestly. That is the only mechanism that both
-reports the pinned contexts and validates the intended commit.
+WHAT WORKS IS A pull_request RUN, RE-RUN. The daytime push produces attempt 1, which fails in seconds as a
+deliberate sentinel: the context exists so the rule can be evaluated, and is non-passing so nothing can merge
+on a check that validated nothing. At 03:10 Africa/Cairo the orchestrator RE-RUNS that same run for the exact
+head. A re-run keeps `event=pull_request` and the same head SHA, so its checks count, and it arrives as
+attempt 2 or higher, where the gates execute in full.
+
+The attempt number is therefore the freshness proof, and it is stronger than the correlation id it replaced:
+this module is handed the exact run ids it asked to re-run and the attempt each was on beforehand, and it
+requires those same runs to come back on a LATER attempt, green.
 """
 
 from __future__ import annotations
@@ -206,83 +213,87 @@ def select_candidate(pulls):
 # ---------------------------------------------------------------------------------------------------------
 # 3. THE RUNS THAT MAY COUNT -- FRESH, THIS SHA, THIS NIGHT, ALL FOUR
 # ---------------------------------------------------------------------------------------------------------
-def classify_gate_runs(expected_sha, correlation_id, runs, required_gates=REQUIRED_GATES):
-    """Decide whether the four gates have freshly and successfully validated exactly `expected_sha`.
+def classify_rerun_runs(expected_sha, requested, runs, required_gates=REQUIRED_GATES):
+    """Have the four gates freshly and successfully re-run for exactly `expected_sha`?
 
-    `runs` is a list of dicts: workflow_file, head_sha, event, display_title, status, conclusion, id.
+    `requested` maps workflow file -> {"id": run id we asked to re-run, "attempt": its attempt BEFORE we asked}.
+    `runs` is a list of dicts: workflow_file, id, head_sha, event, status, conclusion, run_attempt.
 
-    FOUR INDEPENDENT THINGS ARE REQUIRED OF EVERY GATE, and each one closes a specific way this could be
-    satisfied by something other than tonight's fresh validation of tonight's commit:
+    FIVE INDEPENDENT THINGS ARE REQUIRED OF EVERY GATE, and each closes a specific way this could be satisfied
+    by something other than tonight's full execution of tonight's commit:
 
-      event == workflow_dispatch   a `pull_request` or `push` run is not this mechanism. Under the new model
-                                   the gates do not run on pull_request at all, but asserting the event means
-                                   a future re-introduction cannot quietly start counting.
-      head_sha == expected_sha     the commit actually validated. A branch can move between the moment the
-                                   candidate is read and the moment a runner checks it out, and then the run
-                                   is a true verdict about the WRONG commit.
-      correlation id in the title  THIS night's dispatch, not a previous one. Tree-identical content from an
-                                   earlier night would otherwise be indistinguishable, which is the whole
-                                   point of demanding a fresh run.
-      completed / success          a gate still running has not passed. Partial completion is refusal, not
-                                   an opportunity to merge the three that finished.
-
-    A gate reporting MORE than one matching run is also refused: two runs for one gate on one night means
-    something dispatched twice and this cannot tell which verdict was meant.
+      the SAME RUN we re-ran      identified by run id, not by name or recency. A different run for the same
+                                  gate -- an older commit, a re-opened PR -- cannot be mistaken for this one.
+      event == pull_request       the only event whose checks the ruleset counts. Asserted so that a future
+                                  change back to dispatch cannot quietly start counting again.
+      head_sha == expected_sha    the commit actually validated. The branch can move while the gates run.
+      run_attempt > the attempt   the sentinel is attempt 1 and does nothing. A LATER attempt is the only one
+      it was on before           that executed the gate, so the number is the freshness proof: a previous
+                                  night's attempt on an unchanged tree cannot stand in for tonight's.
+      completed / success         a gate still running has not passed. Partial completion is refusal.
     """
     expected_sha = str(expected_sha or "")
-    correlation_id = str(correlation_id or "")
     if len(expected_sha) < 40:
         return Decision(False, "NO_EXPECTED_SHA",
                         "the expected head sha is missing or not a full 40-character sha, so no run could "
                         "be proved to be about the right commit")
-    if not correlation_id:
-        return Decision(False, "NO_CORRELATION_ID",
-                        "no correlation id, so a run from a previous night could not be told from tonight's")
+    if not requested:
+        return Decision(False, "NOTHING_WAS_RERUN",
+                        "no run was re-run, so there is nothing that could have executed the gates tonight")
+
+    by_id = {}
+    for r in runs or []:
+        by_id[str(r.get("id"))] = r
 
     per_gate, problems = {}, []
     for wf in required_gates:
-        matches = []
-        for r in runs or []:
-            if str(r.get("workflow_file") or "") != wf:
-                continue
-            why = []
-            if str(r.get("event") or "") != "workflow_dispatch":
-                why.append("event is %r" % r.get("event"))
-            if str(r.get("head_sha") or "") != expected_sha:
-                why.append("head_sha is %s" % str(r.get("head_sha"))[:12])
-            if correlation_id not in str(r.get("display_title") or ""):
-                why.append("does not carry tonight's correlation id")
-            if why:
-                continue
-            matches.append(r)
-
-        if not matches:
-            per_gate[wf] = {"state": "MISSING"}
-            problems.append("%s has no run for %s carrying tonight's correlation id"
-                            % (wf, expected_sha[:12]))
+        want = (requested or {}).get(wf)
+        if not want:
+            per_gate[wf] = {"state": "NOT_REQUESTED"}
+            problems.append("%s was never re-run" % wf)
             continue
-        if len(matches) > 1:
-            per_gate[wf] = {"state": "DUPLICATE", "runs": [m.get("id") for m in matches]}
-            problems.append("%s has %d matching runs (%s); which verdict was meant is unknowable"
-                            % (wf, len(matches), ", ".join(str(m.get("id")) for m in matches)))
+        r = by_id.get(str(want.get("id")))
+        if r is None:
+            per_gate[wf] = {"state": "MISSING", "id": want.get("id")}
+            problems.append("%s run %s could not be read back" % (wf, want.get("id")))
             continue
 
-        r = matches[0]
+        info = {"state": "FOUND", "id": r.get("id"), "status": r.get("status"),
+                "conclusion": r.get("conclusion"), "attempt": r.get("run_attempt"),
+                "attempt_before": want.get("attempt")}
+        per_gate[wf] = info
+
+        if str(r.get("event") or "") != "pull_request":
+            problems.append("%s is a %r run; only pull_request checks satisfy the ruleset"
+                            % (wf, r.get("event")))
+            continue
+        if str(r.get("head_sha") or "") != expected_sha:
+            problems.append("%s validated %s, not %s"
+                            % (wf, str(r.get("head_sha"))[:12], expected_sha[:12]))
+            continue
+        try:
+            attempt_now = int(r.get("run_attempt") or 0)
+            attempt_before = int(want.get("attempt") or 0)
+        except (TypeError, ValueError):
+            problems.append("%s attempt numbers are unreadable, so freshness cannot be established" % wf)
+            continue
+        if attempt_now <= attempt_before:
+            problems.append("%s is still on attempt %d; the re-run did not start, so only the sentinel has "
+                            "run" % (wf, attempt_now))
+            continue
         status, concl = str(r.get("status") or ""), str(r.get("conclusion") or "")
-        per_gate[wf] = {"state": "FOUND", "id": r.get("id"), "status": status, "conclusion": concl}
         if status != "completed":
             problems.append("%s is still %s" % (wf, status or "unreported"))
         elif concl != "success":
             problems.append("%s concluded %s" % (wf, concl or "unreported"))
 
-    detail = {"expected_sha": expected_sha, "correlation_id": correlation_id, "per_gate": per_gate}
+    detail = {"expected_sha": expected_sha, "per_gate": per_gate}
     if problems:
         return Decision(False, "GATES_NOT_ALL_GREEN",
                         "the four authoritative gates did not all freshly pass %s: %s"
                         % (expected_sha[:12], "; ".join(problems)), detail)
     return Decision(True, "ALL_FOUR_FRESH_GREEN",
-                    "all four authoritative gates freshly passed %s under tonight's dispatch"
-                    % expected_sha[:12], detail)
+                    "all four authoritative gates freshly re-ran and passed %s" % expected_sha[:12], detail)
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -356,7 +367,7 @@ def merge_precondition(gates, expected_sha, pr_now, unresolved_threads):
     #
     # Demanding `clean` meant deferring to that summary instead of to the requirement. The requirement is the
     # ruleset: four named contexts, pinned to the Actions app, on this head -- and this orchestrator verifies
-    # that far more precisely than the summary does, per gate, per sha, per correlation id, refusing a run that
+    # that far more precisely than the summary does, per gate, per sha, per attempt, refusing a run that
     # is not tonight's or not about this commit. Unresolved threads are checked separately above, and the
     # ruleset requires zero approvals.
     #

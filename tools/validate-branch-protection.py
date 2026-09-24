@@ -111,21 +111,21 @@ def main():
         if names != [context]:
             fail("%s must define exactly one job named %r (a required status context IS the job name); "
                  "found %r" % (wf, context, names))
-        # THE EVENT THAT EARNS THE CONTEXT CHANGED WITH THE DELIVERY MODEL (T0182/T0183). This used to require
-        # `pull_request:`, on the reasoning that without it the required context would never report and master
-        # would be permanently unmergeable. The reasoning was right and the premise is no longer true: under
-        # the nightly model the context is reported by the orchestrator's workflow_dispatch AT THE PULL-REQUEST
-        # HEAD, which is the only mechanism that satisfies a context pinned to the Actions app for that commit.
-        # Proven live on PR #181: four dispatched runs, four check runs on the PR head, under these exact names.
+        # WHAT THIS CHECK PROTECTS: that SOMETHING can report the required context for a pull-request head.
         #
-        # What this check is really protecting is that SOMETHING can report the context. So it now requires the
-        # dispatch trigger. Requiring pull_request here would contradict validate-delivery-protocol.py, which
-        # refuses it -- and two validators demanding opposite things about one line is worse than either being
-        # wrong, because whichever is edited to agree makes the other look correct.
-        if not re.search(r"(?m)^\s{2}workflow_dispatch:\s*$", text):
-            fail("%s declares no workflow_dispatch trigger. Under the nightly delivery model that is how its "
-                 "required context is reported on a pull-request head, so without it master would be "
-                 "permanently unmergeable" % wf)
+        # A RETRACTION, KEPT ON PURPOSE. T0183 required `workflow_dispatch` here instead, citing "proven live on
+        # PR #181: four dispatched runs, four check runs on the PR head, under these exact names." Every word of
+        # that was true and the conclusion drawn from it was false. Checks appearing on the head was taken as
+        # evidence that the ruleset would accept them; it does not, and asking GitHub to merge is what said so.
+        # Seeing the artefact is not the same as testing the requirement.
+        #
+        # MEASURED, NOT REASONED: only a pull_request run's checks satisfy a ruleset-required status check.
+        # A workflow_dispatch run puts green checks with the right names, from the pinned app, on the head, and
+        # GitHub associates them with the pull request -- and the ruleset still answered
+        # `HTTP 405 ... 4 of 4 required status checks are expected`. So this requires the trigger that works.
+        if not re.search(r"(?m)^\s{2}pull_request:\s*$", text):
+            fail("%s declares no pull_request trigger. Only a pull_request run's checks satisfy a "
+                 "ruleset-required status check, so without it master would be permanently unmergeable" % wf)
     if not fails:
         ok("every gate workflow declares exactly the job name its required context expects")
 

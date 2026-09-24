@@ -57,6 +57,9 @@ If this harness ever writes to the canonical tree again it says so, instead of l
 Run from anywhere:  python tools/tests/project_state_validator/run_mutations.py
 Flags:  --require-full   fail if MUTATION_MAX_CASES is set. The authoritative CI gate passes this, so a
                          limited run can never be mistaken for the full matrix.
+        --anchors        READ-ONLY. Resolve every case's anchor and exit. Seconds instead of minutes, and it
+                         catches the fixture drift that otherwise aborts the matrix or silently turns a case
+                         into a no-op. Run by preflight; not a substitute for the matrix.
 Env:    MUTATION_MAX_CASES=N  TEST-ONLY. Runs the first N mutations. It exists so the isolation regression
                          can launch short overlapping child runs; CI leaves it unset and passes
                          --require-full.
@@ -441,14 +444,19 @@ MUTATIONS = [
    ("remove", None)),
  ("M19 required CI validation command removed", ".github/workflows/project-governance.yml",
    ("replace", [("python tools/project-state.py validate", "echo skip-validate")])),
- # M20 WAS "CI no longer runs on PRs to master", disabling the pull_request trigger. That trigger is GONE by
- # Product-Owner decision (T0182/T0183): the gates are dispatched once a night instead, so the mutation had no
- # anchor and aborted the whole suite as fixture drift -- which is how an obsolete mutation fails. It is
- # retargeted at the trigger that now earns the required context: disable the dispatch and the gate becomes
- # unreachable, so master is permanently unmergeable, which is exactly the defect M20 always described.
- ("M20 CI can no longer be dispatched, so its required context can never report",
+ # M20 HAS NOW BEEN RETARGETED TWICE, AND THE SECOND TIME WAS A CORRECTION OF THE FIRST.
+ #
+ # Originally: "CI no longer runs on PRs to master", disabling `pull_request:`. T0183 removed that trigger in
+ # favour of a nightly workflow_dispatch, so the anchor vanished and the case aborted the suite as fixture
+ # drift; it was retargeted at the dispatch. T0184 then established by measurement that a dispatched run's
+ # checks do NOT satisfy a ruleset-required status check, so `pull_request:` came back as the only trigger that
+ # earns the context -- and this case comes back with it, testing exactly what it originally tested.
+ #
+ # Worth keeping the history visible: for the span of T0183 this case was pointed at a trigger that could not
+ # earn the context at all, so it was proving the reachability of something unreachable.
+ ("M20 CI no longer runs on pull requests, so its required context can never report",
   ".github/workflows/project-governance.yml",
-   ("replace", [("  workflow_dispatch:", "  workflow_dispatch_disabled:")])),
+   ("replace", [("  pull_request:\n    branches: [ master ]", "  pull_request_disabled:\n    branches: [ master ]")])),
  ("M21 CI job ignores failures", ".github/workflows/project-governance.yml",
    ("append", "\n    continue-on-error: true\n")),
  ("M22 agent-only-operations decision removed", "governance/decision-register.json",
@@ -615,21 +623,27 @@ MUTATIONS = [
  # Each of these is a condition the repository was ACTUALLY IN before this rule existed, and each cost
  # measurable delivery time. They are mutations rather than prose precisely because prose is what allowed the
  # first two to persist unnoticed across all four gate workflows.
- # M61 USED TO BE "a gate can be satisfied by workflow_dispatch again", and it was RIGHT until the delivery
- # model changed. Under the nightly model the orchestrator's workflow_dispatch is the ONLY way a required
- # context is earned, so adding one is no longer a defect -- it is the required state, and the case reported
- # [MISS] the moment the model landed. An obsolete mutation is worse than no mutation: it fails the suite for
- # the wrong reason and invites someone to "fix" the validator back.
+ # THE M61 FAMILY HAS TRACKED THREE DELIVERY MODELS, AND THE CHURN IS ITSELF THE LESSON.
  #
- # What replaces it are the protections the new model actually depends on. Each of these would let the nightly
- # validation be satisfied by something other than a fresh, correct, complete run of the exact head.
- ("M61 a gate stops asserting the head the orchestrator decided on",
+ # Under daytime-full-gates, M61 was "a gate can be satisfied by workflow_dispatch again". Under the T0183
+ # nightly-dispatch model that became the REQUIRED state, so the case went [MISS]. Under T0184 -- where a
+ # dispatched run's checks were measured NOT to satisfy the ruleset -- it is a defect once more, and for a
+ # sharper reason than before: a dispatch trigger on a gate is an invitation back into a dead end that costs a
+ # night per attempt to rediscover.
+ #
+ # An obsolete mutation is worse than no mutation. It fails the suite for the wrong reason and invites someone
+ # to "fix" the validator until the case passes, which is how a protection gets removed by a green test.
+ #
+ # What these five defend is the Option E mechanism: a CHEAP NON-PASSING context by day, a FULL gate on the
+ # nightly re-run, and nothing in between that could let a merge happen on a check that validated nothing.
+ ("M61 a gate accepts workflow_dispatch again, reopening the dead end T0184 measured",
   ".github/workflows/phase3-software.yml",
-   ("replace", [("bash scripts/ci/assert-dispatch-head.sh",
-                 "true  # head assertion removed, label kept")])),
+   ("replace", [("  pull_request:\n    branches: [ master ]",
+                 "  workflow_dispatch:\n  pull_request:\n    branches: [ master ]")])),
  ("M61b a gate stops forbidding evidence reuse during the nightly validation",
   ".github/workflows/phase4-financial-core.yml",
-   ("replace", [("          NIGHTLY_VALIDATION: ${{ inputs.nightly }}",
+   ("replace", [("          NIGHTLY_VALIDATION: ${{ github.event_name == 'pull_request' "
+                 "&& github.run_attempt != 1 }}",
                  "          NIGHTLY_VALIDATION_DISABLED: 'false'")])),
  # M61c WAS "loses the cron that covers half the year", which was the dual-cron design. With one
  # timezone-aware entry the equivalent defect is losing the TIMEZONE: the same cron then means 03:10 UTC,
@@ -644,13 +658,24 @@ MUTATIONS = [
  ("M61e the register declares a delivery model nobody enforces",
   "governance/project-state.json",
    ("json_set", [(["current_state_facts", "delivery_model"], "SOMETHING_ELSE")])),
- # NOW THAT THE MODEL IS ACTIVE, the daytime interruption can be reintroduced and must be refused. This is the
- # protection the whole delivery exists to create: a gate running on pull_request again means every push pays
- # the 29-31 minute cycle once more.
- ("M61f a gate starts running on pull_request again, reinstating the daytime full-gate cycle",
+ # THE SINGLE WORST DEFECT THIS MODEL CAN HAVE, so it gets its own case. M61f used to be "a gate starts
+ # running on pull_request again"; under Option E pull_request is REQUIRED, and the equivalent damage is the
+ # sentinel that PASSES. A passing daytime context makes all four required checks green within a minute of a
+ # push, on attempts that validated nothing -- so the ruleset is satisfied and master becomes mergeable
+ # BEFORE any authoritative validation has run. Every other protection in this delivery is downstream of the
+ # sentinel failing.
+ ("M61f the daytime sentinel passes, so master becomes mergeable on checks that validated nothing",
   ".github/workflows/phase5-post-stay-transfer.yml",
-   ("replace", [("  push:\n    branches: [ master ]",
-                 "  pull_request:\n    branches: [ master ]\n  push:\n    branches: [ master ]")])),
+   ("replace", [('reports what the last authoritative night decided."\n          exit 1',
+                 'reports what the last authoritative night decided."\n          exit 0')])),
+ # AND THE OTHER WAY THE SENTINEL CAN STOP WORKING: not by passing, but by never standing aside. Restricted to
+ # the wrong attempt it fires on the nightly re-run too, so the gates never execute at all and the nightly
+ # validation can only ever refuse. That fails safe -- nothing merges -- but it means the delivery path is
+ # silently dead, which nobody discovers until a release is wanted.
+ ("M61g the sentinel is not confined to attempt 1, so the nightly re-run never executes the gate",
+  ".github/workflows/project-governance.yml",
+   ("replace", [("        if: github.event_name == 'pull_request' && github.run_attempt == 1",
+                 "        if: github.event_name == 'pull_request'")])),
  ("M62 a superseded run is never cancelled (concurrency block removed)",
   ".github/workflows/phase4-financial-core.yml",
    ("replace", [("concurrency:\n  group:", "removed_concurrency:\n  group:")])),
@@ -763,8 +788,91 @@ def apply(relpath, op):
 def restore(p, orig):
     with open(p, "wb") as f: f.write(orig)
 
+def audit_anchors():
+    """Resolve every mutation's anchor against the real checkout, and run nothing else.
+
+    WHY THIS EXISTS AS ITS OWN MODE. Fixture drift -- an anchor that no longer matches the file it points at --
+    is the most common way this suite breaks, and it has broken in three distinct ways that all look different
+    from the outside:
+
+      it ABORTS the whole matrix        M20's anchor vanished when a trigger was removed, and all 78 cases died
+                                       with it. One stale string, nothing tested.
+      it SILENTLY TESTS NOTHING        M61f's anchor did not exist, so the "mutation" changed no bytes; the
+                                       validators then passed on an unmutated tree and the case read [MISS]
+                                       when it should have read "this case is broken".
+      it BECOMES THE REQUIRED STATE    M61 kept matching while the model changed underneath it, so the case was
+                                       asserting that the correct configuration is a defect.
+
+    The full matrix costs minutes because it runs both validators per case. Anchor resolution costs a single
+    pass over a handful of files, so it belongs in preflight, where drift is found in seconds instead of after
+    the matrix has already thrown the answer away.
+
+    This checks RESOLUTION, not meaning. Only a human reading the case can tell that an anchor still points at
+    the thing the case is about -- which is the third failure above, and the reason each retargeted case
+    carries a comment saying what it now tests and why the previous target stopped being right.
+    """
+    print("=== anchor audit: every mutation must still resolve against the checkout ===")
+    bad, checked = [], 0
+    for name, relpath, op in MUTATIONS:
+        kind = op[0]
+        p = os.path.join(ROOT, relpath)
+        if not os.path.isfile(p):
+            # "remove" mutations are ABOUT a file being absent, but the file must exist to be removed.
+            bad.append((name, relpath, "the file does not exist"))
+            continue
+        if kind in ("append", "remove"):
+            continue
+        raw = _io.open(p, encoding="utf-8", newline="").read()
+        if kind == "replace":
+            for find, _repl in op[1]:
+                checked += 1
+                if find not in raw:
+                    bad.append((name, relpath, "anchor not found: %r" % find[:72]))
+        elif kind == "json_set":
+            doc = json.loads(raw)
+            for path, value in op[1]:
+                checked += 1
+                node = doc
+                try:
+                    # ONLY THE PARENT CHAIN MUST RESOLVE. The leaf deliberately may not exist: several cases
+                    # (M70) work by RE-INTRODUCING a key that closure removed, and json_set creates it. An
+                    # earlier version of this audit demanded the leaf and reported M70 as drift -- a check
+                    # stricter than the thing it stands for, which is just a false alarm with a green badge.
+                    for seg in path[:-1]:
+                        node = node[seg]
+                    if node.get(path[-1]) == value:
+                        # The one real no-op: the mutation would write the value already there, so the case
+                        # changes nothing and proves nothing. The applier raises on exactly this too.
+                        bad.append((name, relpath,
+                                    "%s already holds the mutated value, so the case is a no-op"
+                                    % "/".join(map(str, path))))
+                except (KeyError, TypeError, IndexError, AttributeError) as exc:
+                    bad.append((name, relpath, "the parent key path does not resolve (%s): %s"
+                                % (exc.__class__.__name__, "/".join(map(str, path[:-1])))))
+    for name, relpath, why in bad:
+        print("  DRIFT  %s" % name)
+        print("         %s: %s" % (relpath, why))
+    print("  %d anchors across %d cases; %d drifted" % (checked, len(MUTATIONS), len(bad)))
+    if bad:
+        print()
+        print("  This is a TEST-FIXTURE problem, not a repository defect. A drifted anchor either aborts the")
+        print("  matrix or turns its case into a no-op that reports [MISS]; either way the protection that case")
+        print("  stands for is not being tested. Retarget the case at what it is actually about, and say in a")
+        print("  comment why the old target stopped being right.")
+        print("=" * 50)
+        print("MUTATION_ANCHORS = FAIL (%d)" % len(bad))
+        return 1
+    print("=" * 50)
+    print("MUTATION_ANCHORS = PASS")
+    return 0
+
+
+
 def main():
     global WORK, _SANDBOX
+    if "--anchors" in sys.argv:
+        # No sandbox, no validators, no mutation: the checkout is only READ.
+        return audit_anchors()
     require_full = "--require-full" in sys.argv
     limit = os.environ.get("MUTATION_MAX_CASES")
     if require_full and limit:

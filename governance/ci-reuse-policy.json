@@ -10,6 +10,11 @@
     "phase3-software.yml": {
       "steps": [
         {
+          "name": "Daytime sentinel (attempt 1 establishes the required context and fails on purpose)",
+          "reuse": "always",
+          "why": "it is not a validation step at all: it exists so attempt 1 of a pull_request run REPORTS the required context cheaply and FAILS, which is what keeps master unmergeable until the nightly authoritative re-run has actually executed. Its verdict is a property of the RUN (the event and the attempt number), never of the tree, and it is the first step in the job -- before the reuse machinery exists. A reuse guard here would be incoherent in both directions: on a hit it would skip the step whose failure is the protection, and it can have no hit to consult because the lookup has not run yet."
+        },
+        {
           "name": "Check out the PR HEAD",
           "reuse": "always",
           "why": "infrastructure: the checkout every other step runs in."
@@ -28,11 +33,6 @@
           "name": "Set up Python",
           "reuse": "always",
           "why": "infrastructure: the interpreter the reuse lookup itself needs."
-        },
-        {
-          "name": "The head under test is the commit the orchestrator decided on",
-          "reuse": "always",
-          "why": "it compares the dispatch input against GITHUB_SHA, which are properties of the RUN and not of the tree, and it is the refusal that stops a green verdict being attached to a commit nobody decided to merge. It must execute on every dispatched run: skipping it on a reuse hit would skip exactly the check that says the run is about the right commit. It carries `if: github.event_name == 'workflow_dispatch'` and never the reuse guard."
         },
         {
           "name": "Execution-environment fingerprint",
@@ -209,6 +209,11 @@
     "phase4-financial-core.yml": {
       "steps": [
         {
+          "name": "Daytime sentinel (attempt 1 establishes the required context and fails on purpose)",
+          "reuse": "always",
+          "why": "it is not a validation step at all: it exists so attempt 1 of a pull_request run REPORTS the required context cheaply and FAILS, which is what keeps master unmergeable until the nightly authoritative re-run has actually executed. Its verdict is a property of the RUN (the event and the attempt number), never of the tree, and it is the first step in the job -- before the reuse machinery exists. A reuse guard here would be incoherent in both directions: on a hit it would skip the step whose failure is the protection, and it can have no hit to consult because the lookup has not run yet."
+        },
+        {
           "name": "Check out the PR HEAD",
           "reuse": "always",
           "why": "infrastructure: the checkout every other step runs in."
@@ -227,11 +232,6 @@
           "name": "Set up Node",
           "reuse": "always",
           "why": "infrastructure for the always-run dependency gate, which reads package-lock.json and needs no installed tree; it also has to precede the environment fingerprint so the Node version this gate uses is inside the comparison key."
-        },
-        {
-          "name": "The head under test is the commit the orchestrator decided on",
-          "reuse": "always",
-          "why": "it compares the dispatch input against GITHUB_SHA, which are properties of the RUN and not of the tree, and it is the refusal that stops a green verdict being attached to a commit nobody decided to merge. It must execute on every dispatched run: skipping it on a reuse hit would skip exactly the check that says the run is about the right commit. It carries `if: github.event_name == 'workflow_dispatch'` and never the reuse guard."
         },
         {
           "name": "Execution-environment fingerprint",
@@ -360,6 +360,11 @@
     "phase5-post-stay-transfer.yml": {
       "steps": [
         {
+          "name": "Daytime sentinel (attempt 1 establishes the required context and fails on purpose)",
+          "reuse": "always",
+          "why": "it is not a validation step at all: it exists so attempt 1 of a pull_request run REPORTS the required context cheaply and FAILS, which is what keeps master unmergeable until the nightly authoritative re-run has actually executed. Its verdict is a property of the RUN (the event and the attempt number), never of the tree, and it is the first step in the job -- before the reuse machinery exists. A reuse guard here would be incoherent in both directions: on a hit it would skip the step whose failure is the protection, and it can have no hit to consult because the lookup has not run yet."
+        },
+        {
           "name": "Check out the HEAD under test",
           "reuse": "always",
           "why": "infrastructure: the checkout every other step runs in."
@@ -373,11 +378,6 @@
           "name": "Set up Python",
           "reuse": "always",
           "why": "infrastructure: the interpreter the reuse lookup itself needs."
-        },
-        {
-          "name": "The head under test is the commit the orchestrator decided on",
-          "reuse": "always",
-          "why": "it compares the dispatch input against GITHUB_SHA, which are properties of the RUN and not of the tree, and it is the refusal that stops a green verdict being attached to a commit nobody decided to merge. It must execute on every dispatched run: skipping it on a reuse hit would skip exactly the check that says the run is about the right commit. It carries `if: github.event_name == 'workflow_dispatch'` and never the reuse guard."
         },
         {
           "name": "Execution-environment fingerprint",
@@ -458,6 +458,11 @@
     "project-governance.yml": {
       "steps": [
         {
+          "name": "Daytime sentinel (attempt 1 establishes the required context and fails on purpose)",
+          "reuse": "always",
+          "why": "it is not a validation step at all: it exists so attempt 1 of a pull_request run REPORTS the required context cheaply and FAILS, which is what keeps master unmergeable until the nightly authoritative re-run has actually executed. Its verdict is a property of the RUN (the event and the attempt number), never of the tree, and it is the first step in the job -- before the reuse machinery exists. A reuse guard here would be incoherent in both directions: on a hit it would skip the step whose failure is the protection, and it can have no hit to consult because the lookup has not run yet."
+        },
+        {
           "name": "Check out full history",
           "reuse": "always",
           "why": "infrastructure: the checkout every other step runs in, and the object graph the history checks read."
@@ -466,11 +471,6 @@
           "name": "Set up Python",
           "reuse": "always",
           "why": "infrastructure: the interpreter the reuse lookup itself needs."
-        },
-        {
-          "name": "The head under test is the commit the orchestrator decided on",
-          "reuse": "always",
-          "why": "it compares the dispatch input against GITHUB_SHA, which are properties of the RUN and not of the tree, and it is the refusal that stops a green verdict being attached to a commit nobody decided to merge. It must execute on every dispatched run: skipping it on a reuse hit would skip exactly the check that says the run is about the right commit. It carries `if: github.event_name == 'workflow_dispatch'` and never the reuse guard."
         },
         {
           "name": "Execution-environment fingerprint",

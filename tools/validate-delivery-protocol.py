@@ -72,6 +72,7 @@ def noncomment(text):
     happened four times in one delivery line: the ledger-completeness HEADING standing in for the ledger loop;
     a guard letting either of two ledger loops vouch for the other; the gates passing a
     "does it run assert-dispatch-head.sh" check on the strength of the explanatory comment above their dispatch
+    (that script and that check are both retired now; the defect they illustrate is not)
     trigger; and this validator confirming the orchestrator proves its own rules because the file NAME appears
     in a comment eleven lines into the header.
 
@@ -100,7 +101,7 @@ def gate_workflows():
 ORCHESTRATOR = ".github/workflows/nightly-authoritative-validation.yml"
 DECISION_MODULE = "tools/nightly_delivery.py"
 DECISION_TESTS = "tools/tests/nightly_delivery/run_negative.py"
-HEAD_ASSERTION = "scripts/ci/assert-dispatch-head.sh"
+RUNNER = "scripts/ci/nightly-orchestrate.py"
 DELIVERY_TZ = "Africa/Cairo"
 
 # The delivery model this repository is operating, read from the authoritative register rather than guessed
@@ -131,63 +132,94 @@ def delivery_model():
     return m
 
 
-def check_nightly_dispatch(name, text):
-    """The gate must be earnable by the nightly orchestrator, and only on stated terms."""
-    if not re.search(r"(?m)^\s{2}workflow_dispatch:\s*$", text):
-        fail("%s declares no workflow_dispatch trigger, so the nightly orchestrator cannot earn its "
-             "required context on the delivery head at all" % name)
-        return
-    for inp in ("expected_sha", "correlation_id", "nightly"):
-        if not re.search(r"(?m)^\s{6}%s:\s*$" % re.escape(inp), text):
-            fail("%s has no workflow_dispatch input %r; without it the run cannot be tied to the commit "
-                 "and the night the orchestrator decided on" % (name, inp))
-    for inp in ("expected_sha", "correlation_id"):
-        blk = re.search(r"(?ms)^\s{6}%s:\s*$(.*?)(?=^\s{6}\S|^\s{0,4}\S)" % re.escape(inp), text)
-        if blk and not re.search(r"required:\s*true", blk.group(1)):
-            fail("%s input %r is not required: true; a dispatch that omits it must not be possible"
-                 % (name, inp))
-    # A MENTION IS NOT A STEP, and the first version of this check accepted one. It searched the whole file
-    # for the strings "assert-dispatch-head.sh" and "NIGHTLY_VALIDATION" -- both of which appear in the
-    # EXPLANATORY COMMENT above the dispatch trigger. So every gate passed while carrying neither the step nor
-    # the env, and the same comment also fooled the patcher that was supposed to insert them. What is required
-    # now is the executable form: a `run:` that invokes the script, and an `env:` key spelled exactly.
-    # Comments are stripped first: see noncomment(). Both of these strings appear in the explanatory comment
-    # above the dispatch trigger, and searching the raw text passed every gate while it carried neither.
+def check_sentinel_and_rerun(name, text):
+    """The gate must report a CHEAP, NON-PASSING context by day and the full gate on the nightly re-run.
+
+    WHY THE MECHANISM IS THIS AND NOT A DISPATCH. Only a pull_request run's checks satisfy a ruleset-required
+    status check. A workflow_dispatch run puts green checks with the right names, from the pinned app, on the
+    pull-request head, and GitHub even associates them with the pull request -- and the ruleset still refuses
+    them: `HTTP 405 ... 4 of 4 required status checks are expected`. That was measured on PR #181, not reasoned
+    about, and it is why the trigger is pull_request again.
+
+    THE COST IS REMOVED BY THE SENTINEL INSTEAD. Attempt 1 fails in seconds as the FIRST step, so the context
+    exists (the rule can be evaluated) and does not pass (nothing merges on a check that validated nothing),
+    and every heavy step below is skipped. The nightly re-run arrives as attempt 2+, where the gate executes.
+
+    Each assertion below closes a way that could quietly stop being true.
+    """
     code = noncomment(text)
-    if HEAD_ASSERTION not in code:
-        fail("%s does not RUN %s in any step. The string may appear in a comment, which proves nothing: "
-             "without the step, a dispatch whose branch moved under it would validate the wrong commit and "
-             "still report green" % (name, HEAD_ASSERTION))
+    if not re.search(r"(?m)^\s{2}pull_request:\s*$", code):
+        fail("%s has no pull_request trigger. Only a pull_request run's checks satisfy the ruleset, so without "
+             "it the required context can never be earned and master is permanently unmergeable" % name)
+        return
+    if re.search(r"(?m)^\s{2}workflow_dispatch:\s*$", code):
+        fail("%s still declares workflow_dispatch. It was retired because a dispatched run's checks do NOT "
+             "satisfy a ruleset-required status check, and leaving it invites the same dead end again" % name)
+
+    m = re.search(r"(?ms)^      - name: Daytime sentinel[^\n]*\n(.*?)(?=^      - name: )", text)
+    if not m:
+        fail("%s has no 'Daytime sentinel' step. Without it every daytime push runs the full gate, which is "
+             "the 29-31 minute cost this model exists to remove" % name)
+        return
+    block = m.group(1)
+
+    # It must be FIRST, or the heavy steps run before it and the saving is imaginary.
+    steps = re.findall(r"(?m)^      - name: (.+)$", text)
+    if not steps or not steps[0].startswith("Daytime sentinel"):
+        fail("%s runs %r before the sentinel; the sentinel must be the FIRST step or the work it is meant to "
+             "skip has already happened" % (name, steps[0] if steps else "nothing"))
+
+    if "github.run_attempt == 1" not in block:
+        fail("%s sentinel is not restricted to attempt 1, so it would also fire on the nightly re-run and the "
+             "gate would never execute" % name)
+    if "github.event_name == 'pull_request'" not in block:
+        fail("%s sentinel is not restricted to pull_request, so a push to master would be sentinel-failed and "
+             "master would carry a red required check" % name)
+    if not re.search(r"(?m)^\s+exit 1\s*$", block):
+        fail("%s sentinel does not fail. A PASSING daytime context would let master become mergeable on a "
+             "check that validated nothing -- the one thing this must not do" % name)
     else:
-        ok("%s runs the wrong-commit refusal as a step" % name)
-    if not re.search(r"(?m)^\s+NIGHTLY_VALIDATION:\s", code):
-        fail("%s does not pass NIGHTLY_VALIDATION as an env key to the evidence-reuse step, so the nightly "
-             "run could be satisfied by earlier evidence instead of executing freshly. A mention in prose "
-             "does not set an environment variable" % name)
+        ok("%s reports a cheap NON-PASSING context by day, as the first step" % name)
+
+    # `always()` MEANS "EVEN IF AN EARLIER STEP FAILED", AND ON THE SENTINEL ATTEMPT ONE ALWAYS DID.
+    # Six steps in phase4/phase5 assemble and upload an evidence artifact under `always()`. Left alone they
+    # would run on every daytime push, against a workspace nothing was checked out into, and publish an
+    # artifact named as Phase evidence from a run that validated nothing. A junk artifact under an
+    # authoritative name is worse than no artifact, so each one must exclude the sentinel attempt.
+    stray = [c for c in re.findall(r"(?m)^\s+if: (always\(\).*)$", text)
+             if "run_attempt == 1" not in c]
+    if stray:
+        fail("%s has %d step(s) guarded by always() that do not exclude the sentinel attempt (%s). They would "
+             "run on every daytime push with nothing checked out, and publish evidence-named artifacts from a "
+             "run that validated nothing" % (name, len(stray), stray[0][:60]))
     else:
-        ok("%s forbids evidence reuse during the nightly authoritative validation" % name)
-    if "run-name:" not in text:
-        fail("%s has no run-name:, so the orchestrator cannot tell its own dispatch from an earlier one"
-             % name)
+        ok("%s runs nothing but the sentinel on attempt 1, always() steps included" % name)
+
+    if "NIGHTLY_VALIDATION" not in code:
+        fail("%s does not tell the evidence-reuse step when it is the authoritative attempt, so the nightly "
+             "re-run could be satisfied by earlier evidence instead of executing" % name)
+    elif "github.run_attempt != 1" not in code:
+        fail("%s computes NIGHTLY_VALIDATION without reference to the attempt number; the authoritative run "
+             "IS the later attempt, so that is what must disable reuse" % name)
+    else:
+        ok("%s forbids evidence reuse on the authoritative re-run attempt" % name)
 
 
 def check_no_daytime_full_cycle(name, text, model):
-    """Under the active model, a normal push must not start the full four-gate cycle."""
-    if re.search(r"(?m)^\s{2}pull_request:\s*$", text):
-        fail("%s still triggers on pull_request. Under %s the four full gates must not run on every push; "
-             "they are dispatched once a night against the exact delivery head" % (name, MODEL_ACTIVE))
-    else:
-        ok("%s does not run on pull_request, so daytime pushes are not interrupted" % name)
-    m = re.search(r"(?ms)^\s{2}push:\s*$(.*?)(?=^\s{2}\S|^\S)", text)
-    if m:
-        branches = re.findall(r"[\[\s,]'?\"?([A-Za-z0-9_./*-]+)'?\"?", m.group(1))
+    """A daytime push must not start the full four-gate cycle, and on push only master may run at all."""
+    code = noncomment(text)
+    if re.search(r"(?ms)^  push:\s*$(.*?)(?=^  \S|^\S)", code):
+        blk = re.search(r"(?ms)^  push:\s*$(.*?)(?=^  \S|^\S)", code).group(1)
+        branches = re.findall(r"[\[\s,]'?\"?([A-Za-z0-9_./*-]+)'?\"?", blk)
         stray = [b for b in branches if b not in ("master", "branches")]
         if stray:
-            fail("%s triggers a full gate run on push to %s. Only master may do that; a delivery or phase "
-                 "branch push would re-introduce the interruption this model removes"
+            fail("%s runs a full gate on push to %s. Only master may do that; a delivery or phase branch push "
+                 "would re-introduce the interruption this model removes"
                  % (name, ", ".join(sorted(set(stray)))))
         else:
             ok("%s runs on push only for master" % name)
+    # The pull_request trigger is REQUIRED now (see check_sentinel_and_rerun); what must not happen is the
+    # full gate running on it unconditionally. That is the sentinel's job and is asserted there.
 
 
 def check_concurrency(name, text):
@@ -216,10 +248,9 @@ def check_concurrency(name, text):
         if "github.workflow" not in group:
             fail("%s concurrency group %r does not include github.workflow, so unrelated workflows would "
                  "serialise against each other" % (name, group))
-        elif "inputs.expected_sha" not in group:
-            fail("%s concurrency group %r does not key on inputs.expected_sha. Two nights validating "
-                 "different commits on the same branch would share a group, and one could cancel or queue "
-                 "behind the other" % (name, group))
+        elif "pull_request.number" not in group and "github.ref" not in group:
+            fail("%s concurrency group %r keys on neither the pull request nor the ref, so unrelated "
+                 "deliveries would serialise against each other" % (name, group))
         else:
             ok("%s serialises per workflow and per commit under test" % name)
 
@@ -267,7 +298,7 @@ def check_orchestrator():
     else:
         ok("%s states its schedule in %s, so the platform owns the DST arithmetic" % (ORCHESTRATOR, DELIVERY_TZ))
     if "cancel-in-progress: false" not in text:
-        fail("%s may be cancellable; a cancelled orchestrator can leave four dispatched gates with nothing "
+        fail("%s may be cancellable; a cancelled orchestrator can leave four re-running gates with nothing "
              "to read their verdict or merge on it" % ORCHESTRATOR)
     else:
         ok("%s is never cancelled mid-flight" % ORCHESTRATOR)
@@ -275,15 +306,34 @@ def check_orchestrator():
         fail("%s does not run %s before deciding anything, so the rules that can refuse a merge would go "
              "unproven on the night they are used" % (ORCHESTRATOR, DECISION_TESTS))
     else:
-        ok("%s proves its own fail-closed rules before dispatching anything" % ORCHESTRATOR)
-    for need, why in (("actions: write", "dispatching the four gates"),
+        ok("%s proves its own fail-closed rules before deciding anything" % ORCHESTRATOR)
+    for need, why in (("actions: write", "re-running the four gates"),
                       ("contents: write", "the protected merge"),
                       ("pull-requests: write", "reading and merging the candidate")):
         if need not in text:
             fail("%s does not grant %s, which it needs for %s" % (ORCHESTRATOR, need, why))
+    # HOW THE CONTEXTS ARE EARNED IS THE ONE THING THAT CANNOT DRIFT. Asserted against the RUNNER, which is
+    # where the API call lives -- not against the workflow that merely schedules it.
+    runner = read(RUNNER)
+    if runner is None:
+        fail("%s is missing; the orchestrator workflow would have nothing to run" % RUNNER)
+    else:
+        rcode = noncomment(runner)
+        if "/rerun" not in rcode:
+            fail("%s does not RE-RUN anything. A required context can only be earned by a pull_request run, "
+                 "so the nightly validation must re-run each gate's existing pull_request run; a dispatch "
+                 "puts green checks on the head and the ruleset still refuses them" % RUNNER)
+        elif "workflows/%s/dispatches" in rcode or "/dispatches" in rcode:
+            fail("%s still dispatches a gate. A dispatched run's checks do not satisfy a ruleset-required "
+                 "status check, so a dispatch can only produce a run that looks authoritative and cannot "
+                 "merge" % RUNNER)
+        else:
+            ok("%s earns the required contexts by re-running each gate's pull_request run" % RUNNER)
+        if "classify_rerun_runs" not in rcode:
+            fail("%s does not put its re-run results through classify_rerun_runs, so the freshness, event, "
+                 "head and attempt rules would not be applied to them" % RUNNER)
     for f, why in ((DECISION_MODULE, "the decision logic every refusal comes from"),
-                   (DECISION_TESTS, "the adversarial proofs of those refusals"),
-                   (HEAD_ASSERTION, "the wrong-commit refusal")):
+                   (DECISION_TESTS, "the adversarial proofs of those refusals")):
         if read(f) is None:
             fail("%s is missing (%s)" % (f, why))
         else:
@@ -410,7 +460,7 @@ def main():
             fail("%s is required to report context %r but the workflow does not exist"
                  % (wf, bindings[wf]))
             continue
-        check_nightly_dispatch(wf, text)
+        check_sentinel_and_rerun(wf, text)
         check_no_daytime_full_cycle(wf, text, model)
         check_concurrency(wf, text)
 
