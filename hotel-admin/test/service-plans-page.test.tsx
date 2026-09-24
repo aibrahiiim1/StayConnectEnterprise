@@ -9,7 +9,7 @@
 // must not touch a package that is already current, and it must not drop any part of the package it rewrites.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 
 vi.mock("@/lib/api", () => {
   class ApiError extends Error {
@@ -263,5 +263,99 @@ describe("ServicePlansPage — editing an existing plan", () => {
     fireEvent.change(down, { target: { value: "10001" } });
     expect(down.checkValidity()).toBe(false);
     expect(screen.getAllByText(/up to 10000 mbps/i).length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// THE REDESIGN: Add refuses taken codes, the plan record opens in a sheet, and Delete… never pretends.
+
+if (!("ResizeObserver" in globalThis)) {
+  (globalThis as Record<string, unknown>).ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
+}
+
+describe("ServicePlansPage — add, record and delete", () => {
+  it("Add sends create_only so a taken code is refused rather than revised; Edit does not", async () => {
+    mockLoad([], [ONEDAY]);
+    p.mockResolvedValue({ current_revision_id: "new" });
+    render(<ServicePlansPage />);
+    await screen.findByText("OneDay", { selector: "button" });
+
+    fireEvent.click(screen.getByRole("button", { name: /add plan/i }));
+    fireEvent.change(document.querySelector('[name="code"]')!, { target: { value: "NEWPLAN" } });
+    fireEvent.click(screen.getByRole("button", { name: /^add plan$/i }));
+    await waitFor(() => expect(p).toHaveBeenCalledTimes(1));
+    expect(p.mock.calls[0][1].create_only).toBe(true);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^edit$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    await waitFor(() => expect(p).toHaveBeenCalledTimes(2));
+    expect(p.mock.calls[1][1]).not.toHaveProperty("create_only");
+  });
+
+  it("shows the server's code_exists refusal inside the form", async () => {
+    mockLoad([], [ONEDAY]);
+    const { ApiError } = await import("@/lib/api");
+    p.mockRejectedValue(new (ApiError as unknown as new (s: number, b: unknown) => Error)(409, { error: "code_exists" }));
+    render(<ServicePlansPage />);
+    await screen.findByText("OneDay", { selector: "button" });
+    fireEvent.click(screen.getByRole("button", { name: /add plan/i }));
+    fireEvent.change(document.querySelector('[name="code"]')!, { target: { value: "OneDay" } });
+    fireEvent.click(screen.getByRole("button", { name: /^add plan$/i }));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText(/code_exists/)).toBeInTheDocument();
+  });
+
+  // A plan's `enabled` flag changes nothing a guest receives, so the list no longer shows it as a status the
+  // operator could flip, and there is no switch for it.
+  it("presents no enable/disable state for a plan", async () => {
+    mockLoad([], [{ ...ONEDAY, enabled: false }]);
+    render(<ServicePlansPage />);
+    await screen.findByText("OneDay", { selector: "button" });
+    expect(screen.queryByText(/^disabled$/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /^(disable|enable)$/i })).toBeNull();
+    fireEvent.click(screen.getByText("OneDay", { selector: "button" }));
+    const sheet = await screen.findByRole("dialog");
+    expect(within(sheet).getByText(/does not change what guests receive/i)).toBeInTheDocument();
+  });
+
+  it("the plan record lists the packages using it and its saved versions", async () => {
+    g.mockImplementation((path: string) => {
+      if (path === "/commercial-packages/plans") return Promise.resolve(list(PLANS));
+      if (path === "/commercial-packages") return Promise.resolve(list(PACKAGES));
+      if (path === "/commercial-packages/plans/plan-free/revisions") return Promise.resolve(list([
+        { revision_id: "rev4", revision_no: 4, is_current: true, label: "Free Internet" },
+        { revision_id: "rev3", revision_no: 3, is_current: false, label: "Free Internet" },
+      ]));
+      return Promise.resolve(list([]));
+    });
+    render(<ServicePlansPage />);
+    fireEvent.click(await screen.findByText("Free Internet", { selector: "button" }));
+    const sheet = await screen.findByRole("dialog");
+    expect(within(sheet).getByText("Freee")).toBeInTheDocument();
+    expect(within(sheet).getByText("Older settings")).toBeInTheDocument();
+    expect(await within(sheet).findByText(/Version 4/)).toBeInTheDocument();
+    expect(within(sheet).getByText(/in force/)).toBeInTheDocument();
+  });
+
+  it("Delete… shows what is attached and why, offers no delete, and sends nothing", async () => {
+    g.mockImplementation((path: string) => {
+      if (path === "/commercial-packages/plans") return Promise.resolve(list(PLANS));
+      if (path === "/commercial-packages") return Promise.resolve(list(PACKAGES));
+      if (path === "/commercial-packages/plans/plan-free/deletability") return Promise.resolve({
+        deletable: false,
+        reasons: [
+          { code: "ACTIVE_PACKAGES", message: "2 active packages give this plan to guests.", count: 2 },
+          { code: "DELETE_REQUIRES_SCHEMA_CHANGE", message: "Removing a service plan's records needs a database change that has not been approved yet." },
+        ],
+      });
+      return Promise.resolve(list([]));
+    });
+    render(<ServicePlansPage />);
+    fireEvent.click(await screen.findByText("Free Internet", { selector: "button" }));
+    fireEvent.click(await screen.findByRole("button", { name: /delete…/i }));
+    expect(await screen.findByText("2 active packages give this plan to guests.")).toBeInTheDocument();
+    expect(screen.getByText(/has not been approved yet/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^delete$/i })).toBeNull();
+    expect(p).not.toHaveBeenCalled();
   });
 });

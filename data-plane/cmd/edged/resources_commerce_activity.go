@@ -300,7 +300,15 @@ func activitySummarySQL(f activityFilter, tenantID, siteID string) (string, []an
 	                  count(*) AS grants
 	             FROM f GROUP BY f.package_id, f.package_code) x),
 	       (SELECT COALESCE(json_agg(y ORDER BY y.grants DESC, y.source), '[]'::json) FROM (
-	           SELECT f.trigger AS source, count(*) AS grants FROM f GROUP BY f.trigger) y)`, args
+	           SELECT f.trigger AS source, count(*) AS grants FROM f GROUP BY f.trigger) y),
+	       -- Site-wide, whatever the filters: how many guests each package is serving right now. The package
+	       -- list shows it per row, and it is the same count as active_now split by package.
+	       (SELECT COALESCE(json_agg(z), '[]'::json) FROM (
+	           SELECT ipr.package_id::text AS package_id, count(*) AS grants
+	             FROM iam_v2.entitlements e
+	             JOIN iam_v2.internet_package_revisions ipr ON ipr.id = e.package_revision_id
+	            WHERE e.tenant_id = $1 AND e.site_id = $2 AND e.status = 'ACTIVE'
+	            GROUP BY ipr.package_id) z)`, args
 }
 
 // ---------------------------------------------------------------------------------------- shapes --------
@@ -389,6 +397,13 @@ type activitySummary struct {
 	Undated        int64                  `json:"undated"`
 	ByPackage      []activityPackageCount `json:"by_package"`
 	BySource       []activitySourceCount  `json:"by_source"`
+	// ActiveByPackage is site-wide and ignores every filter: guests each package is serving right now.
+	ActiveByPackage []activeByPackage `json:"active_by_package"`
+}
+
+type activeByPackage struct {
+	PackageID string `json:"package_id"`
+	Grants    int64  `json:"grants"`
 }
 
 type activityResponse struct {
@@ -494,16 +509,18 @@ func (s *server) listPackageActivity(w http.ResponseWriter, r *http.Request) {
 
 	sumSQL, sumArgs := activitySummarySQL(f, s.tenantID, s.siteID)
 	var active, ended, other int64
-	var byPkg, bySrc []byte
+	var byPkg, bySrc, activeBy []byte
 	if err := s.db.QueryRow(ctx, sumSQL, sumArgs...).Scan(
 		&out.Summary.InRange, &out.Summary.StartedInRange, &active, &ended, &other,
-		&out.Summary.DataBytes, &out.Summary.ActiveNow, &out.Summary.Undated, &byPkg, &bySrc); err != nil {
+		&out.Summary.DataBytes, &out.Summary.ActiveNow, &out.Summary.Undated, &byPkg, &bySrc, &activeBy); err != nil {
 		slog.Error("package activity summary failed", "err", err)
 		jsonErr(w, http.StatusInternalServerError, "internal", "package activity could not be summarised")
 		return
 	}
 	out.Summary.StatusCounts = map[string]int64{"active": active, "ended": ended, "other": other}
 	out.Summary.ByPackage, out.Summary.BySource = decodeActivityRankings(byPkg, bySrc)
+	out.Summary.ActiveByPackage = []activeByPackage{}
+	_ = json.Unmarshal(activeBy, &out.Summary.ActiveByPackage)
 	writeJSON(w, http.StatusOK, out)
 }
 
