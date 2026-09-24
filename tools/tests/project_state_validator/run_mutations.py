@@ -441,8 +441,14 @@ MUTATIONS = [
    ("remove", None)),
  ("M19 required CI validation command removed", ".github/workflows/project-governance.yml",
    ("replace", [("python tools/project-state.py validate", "echo skip-validate")])),
- ("M20 CI no longer runs on PRs to master", ".github/workflows/project-governance.yml",
-   ("replace", [("pull_request:", "pull_request_disabled:")])),
+ # M20 WAS "CI no longer runs on PRs to master", disabling the pull_request trigger. That trigger is GONE by
+ # Product-Owner decision (T0182/T0183): the gates are dispatched once a night instead, so the mutation had no
+ # anchor and aborted the whole suite as fixture drift -- which is how an obsolete mutation fails. It is
+ # retargeted at the trigger that now earns the required context: disable the dispatch and the gate becomes
+ # unreachable, so master is permanently unmergeable, which is exactly the defect M20 always described.
+ ("M20 CI can no longer be dispatched, so its required context can never report",
+  ".github/workflows/project-governance.yml",
+   ("replace", [("  workflow_dispatch:", "  workflow_dispatch_disabled:")])),
  ("M21 CI job ignores failures", ".github/workflows/project-governance.yml",
    ("append", "\n    continue-on-error: true\n")),
  ("M22 agent-only-operations decision removed", "governance/decision-register.json",
