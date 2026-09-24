@@ -33,6 +33,8 @@ func (s *server) commercialPackagesRoutes() http.Handler {
 	r.Get("/plans/{id}/revisions", s.listServicePlanRevisions)
 	// What still references a plan, and why it cannot be deleted (read-only; see resources_commerce_activity.go).
 	r.Get("/plans/{id}/deletability", s.getServicePlanDeletability)
+	// Permanent deletion of a plan nothing has ever used (migration 0091). Step-up + reason; audited.
+	r.Delete("/plans/{id}", s.deleteServicePlan)
 	// site checkout-grace configuration
 	r.Get("/grace", s.getGraceConfig)
 	r.Put("/grace", s.setGraceConfig)
@@ -51,6 +53,7 @@ func (s *server) commercialPackagesRoutes() http.Handler {
 	// publish route, which creates a new immutable revision.
 	r.Get("/{id}/current", s.getCommercialPackageCurrent)
 	r.Get("/{id}/deletability", s.getCommercialPackageDeletability)
+	r.Delete("/{id}", s.deleteCommercialPackage)
 	r.Post("/{id}/active", s.setCommercialPackageActive)
 	return r
 }

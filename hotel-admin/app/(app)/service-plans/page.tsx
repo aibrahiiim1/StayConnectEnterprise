@@ -20,7 +20,7 @@
 import { useCallback, useEffect, useMemo, useState, Fragment } from "react";
 import { AlertTriangle, CircleSlash, Gauge, Layers, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { api, ApiError, ListResp } from "@/lib/api";
-import { getPlanDeletability, type RevisionInfo } from "@/lib/api/commerce";
+import { deletePlan, getPlanDeletability, type RevisionInfo } from "@/lib/api/commerce";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -505,7 +505,15 @@ export default function ServicePlansPage() {
 
       {deleting && (
         <DeleteDialog open onOpenChange={(v) => !v && setDeleting(null)} kind="plan"
-          name={deleting.name || deleting.code} load={() => getPlanDeletability(deleting.plan_id)} />
+          name={deleting.name || deleting.code} load={() => getPlanDeletability(deleting.plan_id)}
+          onDelete={async ({ reason, password }) => {
+            const p = deleting;
+            await deletePlan(p.plan_id, reason, password);
+            const msg = `${p.name || p.code} and its saved versions were removed permanently.`;
+            setDeleting(null); setSelected((s) => (s?.plan_id === p.plan_id ? null : s));
+            toast.success("Service plan deleted", msg);
+            await load();
+          }} />
       )}
 
       {/* THE FORM IS A DIALOG: saving it publishes settings that decide how fast every guest on that plan gets. */}

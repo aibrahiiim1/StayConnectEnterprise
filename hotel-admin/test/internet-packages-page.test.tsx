@@ -6,10 +6,12 @@ import userEvent from "@testing-library/user-event";
 vi.mock("@/lib/api", () => {
   class ApiError extends Error {
     status: number;
+    body: unknown;
     constructor(status: number, body?: unknown) {
       super(typeof body === "object" && body && "message" in body ? String((body as { message: unknown }).message)
         : typeof body === "object" && body && "error" in body ? String((body as { error: unknown }).error) : `HTTP ${status}`);
       this.status = status;
+      this.body = body;
     }
   }
   return {
@@ -231,16 +233,15 @@ describe("InternetPackagesPage — packages", () => {
     expect(p.mock.calls[0][1]).not.toHaveProperty("create_only");
   });
 
-  // DELETE… NEVER PRETENDS. It shows what is attached, says why removal is not possible, offers Disable.
-  it("Delete… explains, with real counts, and offers Disable instead — it never deletes", async () => {
+  // DELETE… REFUSES WITH THE SERVER'S REASONS when anything uses the package, and offers Disable.
+  it("Delete… of a used package explains, with real counts, and offers Disable instead — it never deletes", async () => {
     routes({
       "/commercial-packages": list([PKG]),
       "/commercial-packages/pk1/deletability": {
         deletable: false,
         reasons: [
-          { code: "ACTIVE_ENTITLEMENTS", message: "2 guests are using this package right now.", count: 2 },
-          { code: "REVISION_HISTORY", message: "3 saved versions of this package are kept permanently for the record.", count: 3 },
-          { code: "DELETE_REQUIRES_SCHEMA_CHANGE", message: "Removing a package's records needs a database change that has not been approved yet. Disable it instead — a disabled package is no longer offered to guests and keeps its history." },
+          { code: "ENTITLEMENTS", message: "2 internet grants given to guests record this package.", count: 2 },
+          { code: "VOUCHERS", message: "3 vouchers were issued for this package.", count: 3 },
         ],
       },
     });
@@ -248,16 +249,55 @@ describe("InternetPackagesPage — packages", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Free WiFi" }));
     fireEvent.click(await screen.findByRole("button", { name: /delete…/i }));
 
-    expect(await screen.findByText("2 guests are using this package right now.")).toBeInTheDocument();
-    expect(screen.getByText("2")).toBeInTheDocument();
-    expect(screen.getByText(/needs a database change that has not been approved/i)).toBeInTheDocument();
+    expect(await screen.findByText("2 internet grants given to guests record this package.")).toBeInTheDocument();
+    expect(screen.getByText("3 vouchers were issued for this package.")).toBeInTheDocument();
+    expect(screen.getByText(/why it can't be deleted/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^delete package$/i })).toBeNull();
     expect(g).toHaveBeenCalledWith("/commercial-packages/pk1/deletability");
 
     fireEvent.click(screen.getByRole("button", { name: /disable instead/i }));
     expect(await screen.findByLabelText(/why are you disabling it/i)).toBeInTheDocument();
-    // Nothing was deleted, and nothing was sent at all.
     expect(p).not.toHaveBeenCalled();
     expect((api as unknown as { del: ReturnType<typeof vi.fn> }).del).not.toHaveBeenCalled();
+  });
+
+  // AN UNUSED PACKAGE IS DELETED for real, with a reason and the operator's password.
+  it("Delete… of an unused package asks for a reason and password, then deletes", async () => {
+    const d = (api as unknown as { del: ReturnType<typeof vi.fn> }).del;
+    d.mockResolvedValue({ deleted: true });
+    routes({
+      "/commercial-packages": list([PKG]),
+      "/commercial-packages/pk1/deletability": { deletable: true, reasons: [] },
+    });
+    render(<InternetPackagesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Free WiFi" }));
+    fireEvent.click(await screen.findByRole("button", { name: /delete…/i }));
+    expect(await screen.findByText(/cannot be undone/i)).toBeInTheDocument();
+    const go = screen.getByRole("button", { name: /^delete package$/i });
+    expect(go).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/why are you deleting it/i), { target: { value: "Created by mistake" } });
+    fireEvent.change(screen.getByLabelText(/confirm your password/i), { target: { value: "pw" } });
+    fireEvent.click(go);
+    await waitFor(() => expect(d).toHaveBeenCalledWith("/commercial-packages/pk1", { reason: "Created by mistake", password: "pw" }));
+  });
+
+  // SOMETHING STARTED USING IT while the dialog was open: the server's 409 becomes the refusal.
+  it("a 409 from the delete switches the dialog to the server's reasons", async () => {
+    const d = (api as unknown as { del: ReturnType<typeof vi.fn> }).del;
+    d.mockRejectedValue(new ApiError(409, { error: "in_use", deletability: {
+      deletable: false, reasons: [{ code: "PURCHASES", message: "1 purchase is on record for this package.", count: 1 }] } }));
+    routes({
+      "/commercial-packages": list([PKG]),
+      "/commercial-packages/pk1/deletability": { deletable: true, reasons: [] },
+    });
+    render(<InternetPackagesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Free WiFi" }));
+    fireEvent.click(await screen.findByRole("button", { name: /delete…/i }));
+    fireEvent.change(await screen.findByLabelText(/why are you deleting it/i), { target: { value: "Not needed" } });
+    fireEvent.change(screen.getByLabelText(/confirm your password/i), { target: { value: "pw" } });
+    fireEvent.click(screen.getByRole("button", { name: /^delete package$/i }));
+    expect(await screen.findByText("1 purchase is on record for this package.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^delete package$/i })).toBeNull();
   });
 });
 

@@ -12,7 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Ban, CheckCircle2, Gauge, Package, Pencil, Plus, Trash2, Users } from "lucide-react";
 import { api, ListResp } from "@/lib/api";
 import {
-  getActivity, getPackageDeletability, priceText, type PackageSummary, type RevisionInfo,
+  getActivity, getPackageDeletability, deletePackage, priceText, type PackageSummary, type RevisionInfo,
 } from "@/lib/api/commerce";
 import { StatCard, Toolbar } from "@/components/ui/page";
 import { Card, CardBody } from "@/components/ui/card";
@@ -484,6 +484,13 @@ export function PackagesTab({
           kind="package"
           name={deleting.name || deleting.code}
           load={() => getPackageDeletability(deleting.package_id)}
+          onDelete={async ({ reason, password }) => {
+            const p = deleting;
+            await deletePackage(p.package_id, reason, password);
+            const msg = `${p.name || p.code} and its saved versions were removed permanently.`;
+            setDeleting(null); setNotice(msg); toast.success("Package deleted", msg);
+            await load();
+          }}
           onDisableInstead={deleting.active ? () => {
             const p = deleting;
             setDeleting(null); setActionErr(null); setDisabling(p);

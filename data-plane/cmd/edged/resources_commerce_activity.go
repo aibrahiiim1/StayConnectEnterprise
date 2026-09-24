@@ -597,3 +597,77 @@ func writeDeletability(w http.ResponseWriter, d iamv2.Deletability, disabled boo
 	}
 	writeJSON(w, http.StatusOK, d)
 }
+
+// ---------------------------------------------------------------------------------- deletion ----------
+
+// deleteCommercialPackage permanently removes a package that nothing has ever used.
+//
+// The decision is the database's (iam_v2.internet_package_delete_unused, migration 0091): it locks the package,
+// re-counts every reference and refuses on any of them, so a guest buying the package a second before this
+// runs makes it a 409, never a lost purchase. This handler adds the step-up, the bounded reason and the audit.
+func (s *server) deleteCommercialPackage(w http.ResponseWriter, r *http.Request) {
+	s.deleteCatalogueItem(w, r, true)
+}
+
+// deleteServicePlan permanently removes a service plan no package version and no grant has ever used.
+func (s *server) deleteServicePlan(w http.ResponseWriter, r *http.Request) {
+	s.deleteCatalogueItem(w, r, false)
+}
+
+func (s *server) deleteCatalogueItem(w http.ResponseWriter, r *http.Request, pkg bool) {
+	noun, target, action := "service plan", "service_plan", "service_plan.deleted"
+	if pkg {
+		noun, target, action = "package", "commercial_package", "commercial_package.deleted"
+	}
+	id := chi.URLParam(r, "id")
+	if !uuidRe.MatchString(id) {
+		jsonErr(w, http.StatusNotFound, "not_found", "no such "+noun+" at this property")
+		return
+	}
+	var in struct {
+		Password string `json:"password"`
+		Reason   string `json:"reason"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid", "malformed request")
+		return
+	}
+	if !validReason(in.Reason) {
+		jsonErr(w, http.StatusBadRequest, "reason_required", "a bounded reason (4-500 characters) is required")
+		return
+	}
+	actor, ok := s.stepUpActor(w, r, in.Password)
+	if !ok {
+		return
+	}
+	var (
+		d        iamv2.Deletability
+		disabled bool
+		err      error
+	)
+	if pkg {
+		d, disabled, err = s.commerce.DeletePackage(r.Context(), s.tenantID, s.siteID, id, actor, in.Reason)
+	} else {
+		d, disabled, err = s.commerce.DeletePlan(r.Context(), s.tenantID, s.siteID, id, actor, in.Reason)
+	}
+	switch {
+	case disabled:
+		jsonErr(w, http.StatusServiceUnavailable, "phase2_disabled", "commercial packages are not enabled")
+	case errors.Is(err, iamv2.ErrCatalogueInUse):
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": "in_use", "message": "this " + noun + " is in use and cannot be deleted; disable it instead",
+			"deletability": d,
+		})
+	case errors.Is(err, iamv2.ErrCommerceNotFound):
+		jsonErr(w, http.StatusNotFound, "not_found", "no such "+noun+" at this property")
+	case errors.Is(err, iamv2.ErrCatalogueDeleteNeedsReason):
+		jsonErr(w, http.StatusBadRequest, "reason_required", "a bounded reason (4-500 characters) is required")
+	case errors.Is(err, iamv2.ErrCatalogueDeleteUnavailable):
+		jsonErr(w, http.StatusConflict, "delete_unavailable", "this appliance's database does not support deletion yet")
+	case err != nil:
+		jsonErr(w, http.StatusInternalServerError, "internal", "the "+noun+" could not be deleted")
+	default:
+		s.audit(r, action, target, id, map[string]any{"reason": in.Reason})
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "id": id})
+	}
+}

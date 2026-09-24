@@ -5,31 +5,44 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // fakeAdminRepo / fakeAdminTx implement only what these tests exercise. Embedding the interfaces keeps them
 // compiling as the interfaces grow; calling anything not overridden panics, which is the point.
 type fakeAdminRepo struct {
 	CommerceAdminRepository
-	tx       *fakeAdminTx
-	refs     []DeletabilityReason
-	found    bool
-	refsErr  error
-	gotScope [2]string
+	tx        *fakeAdminTx
+	blockers  []CatalogueBlocker
+	blockErr  error
+	deleteErr error
+	deleted   []string
+	gotScope  [2]string
 }
 
 func (f *fakeAdminRepo) WithTx(ctx context.Context, fn func(CommerceAdminTx) error) error {
 	return fn(f.tx)
 }
 
-func (f *fakeAdminRepo) PackageReferences(_ context.Context, t, s, _ string) ([]DeletabilityReason, bool, error) {
+func (f *fakeAdminRepo) PackageBlockers(_ context.Context, t, s, _ string) ([]CatalogueBlocker, error) {
 	f.gotScope = [2]string{t, s}
-	return f.refs, f.found, f.refsErr
+	return f.blockers, f.blockErr
 }
 
-func (f *fakeAdminRepo) PlanReferences(_ context.Context, t, s, _ string) ([]DeletabilityReason, bool, error) {
+func (f *fakeAdminRepo) PlanBlockers(_ context.Context, t, s, _ string) ([]CatalogueBlocker, error) {
 	f.gotScope = [2]string{t, s}
-	return f.refs, f.found, f.refsErr
+	return f.blockers, f.blockErr
+}
+
+func (f *fakeAdminRepo) DeleteUnusedPackage(_ context.Context, _, _, id, op, reason string) error {
+	f.deleted = append(f.deleted, "pkg:"+id+":"+op+":"+reason)
+	return f.deleteErr
+}
+
+func (f *fakeAdminRepo) DeleteUnusedPlan(_ context.Context, _, _, id, op, reason string) error {
+	f.deleted = append(f.deleted, "plan:"+id+":"+op+":"+reason)
+	return f.deleteErr
 }
 
 type fakeAdminTx struct {
@@ -167,91 +180,96 @@ func TestAddPlanWithAnExistingCodeIsRefused(t *testing.T) {
 	}
 }
 
-// DELETE IS NEVER OFFERED AS POSSIBLE until a removal path is approved, and the reasons say why.
-func TestDeletabilityIsAlwaysFalseAndEndsWithTheSchemaReason(t *testing.T) {
+// AN UNUSED ITEM IS DELETABLE: the database returned no blocker with a count.
+func TestDeletabilityIsYesWhenNothingDependsOnIt(t *testing.T) {
 	a, repo := newFakeAdmin(t)
-	repo.found = true
-	repo.refs = packageReasons(3, 1, 12, 12, 4, 0, 0)
+	repo.blockers = []CatalogueBlocker{}
 	d, disabled, err := a.PackageDeletability(context.Background(), "tenant-1", "site-1", "p")
-	if err != nil || disabled {
-		t.Fatalf("deletability: %v disabled=%v", err, disabled)
-	}
-	if d.Deletable {
-		t.Fatal("deletable must be false until the Product Owner approves a removal path")
-	}
-	last := d.Reasons[len(d.Reasons)-1]
-	if last.Code != ReasonDeleteRequiresSchemaChange || !strings.Contains(last.Message, "Disable it instead") {
-		t.Fatalf("the closing reason must be the schema-change one with the disable advice, got %+v", last)
-	}
-	if last.Count != nil {
-		t.Fatal("the schema-change reason is not a count")
-	}
-	codes := map[string]int64{}
-	for _, r := range d.Reasons {
-		if r.Count != nil {
-			codes[r.Code] = *r.Count
-		}
-	}
-	// Zero counts are not reasons: "0 guest accounts" tells the operator nothing.
-	if _, ok := codes["GUEST_ACCOUNTS"]; ok {
-		t.Error("a zero count was reported as a reason")
-	}
-	if _, ok := codes["CHECKOUT_GRACE"]; ok {
-		t.Error("a zero count was reported as a reason")
-	}
-	if codes["ACTIVE_ENTITLEMENTS"] != 1 || codes["ENTITLEMENTS"] != 12 || codes["OFFER_QUOTES"] != 4 || codes["REVISION_HISTORY"] != 3 {
-		t.Fatalf("counts were not carried through: %v", codes)
+	if err != nil || disabled || !d.Deletable || len(d.Reasons) != 0 {
+		t.Fatalf("unused package: %+v disabled=%v err=%v", d, disabled, err)
 	}
 	if repo.gotScope != [2]string{"tenant-1", "site-1"} {
 		t.Fatalf("scope not passed through: %v", repo.gotScope)
 	}
 }
 
-func TestDeletabilityOfAnUnknownPackageIsNotFound(t *testing.T) {
+// A USED ITEM IS NOT, and every reason carries the database's count in words.
+func TestDeletabilityIsNoWithTheDatabasesReasons(t *testing.T) {
 	a, repo := newFakeAdmin(t)
-	repo.found = false
-	if _, _, err := a.PackageDeletability(context.Background(), "t", "s", "p"); !errors.Is(err, ErrCommerceNotFound) {
-		t.Fatalf("want ErrCommerceNotFound, got %v", err)
+	repo.blockers = []CatalogueBlocker{{"ENTITLEMENTS", 12}, {"VOUCHERS", 1}, {"GUEST_ACCOUNTS", 0}, {"SOMETHING_NEW", 2}}
+	d, _, err := a.PackageDeletability(context.Background(), "t", "s", "p")
+	if err != nil || d.Deletable {
+		t.Fatalf("used package must not be deletable: %+v %v", d, err)
 	}
-	if _, _, err := a.PlanDeletability(context.Background(), "t", "s", "p"); !errors.Is(err, ErrCommerceNotFound) {
-		t.Fatalf("want ErrCommerceNotFound for plans, got %v", err)
+	if len(d.Reasons) != 3 {
+		t.Fatalf("zero counts are not reasons, unknown codes still are: %+v", d.Reasons)
 	}
-}
-
-func TestDeletabilityWordingIsSingularAndPlural(t *testing.T) {
-	one := packageReasons(1, 1, 1, 1, 1, 1, 1)
-	many := packageReasons(2, 2, 2, 2, 2, 1, 2)
-	if one[0].Message != "1 guest is using this package right now." {
-		t.Errorf("singular: %q", one[0].Message)
+	if d.Reasons[1].Message != "1 voucher was issued for this package." || *d.Reasons[0].Count != 12 {
+		t.Fatalf("wording/count: %+v", d.Reasons)
 	}
-	if many[0].Message != "2 guests are using this package right now." {
-		t.Errorf("plural: %q", many[0].Message)
-	}
-	pl := planReasons(1, 2, 3, 0, 5)
-	if pl[0].Message != "2 active packages give this plan to guests." {
-		t.Errorf("plan wording: %q", pl[0].Message)
+	if d.Reasons[2].Code != "SOMETHING_NEW" {
+		t.Fatalf("an unknown blocker must still refuse: %+v", d.Reasons[2])
 	}
 }
 
-// THE REFERENCE COUNTS READ ONLY WHAT svc_edged MAY READ. PostgreSQL checks privileges for every relation a
-// statement names, so one mention of an ungranted table fails the whole query on the appliance.
-func TestDeletabilitySQLNamesOnlyReadableTables(t *testing.T) {
-	for name, sql := range map[string]string{"package": packageReferencesSQL(), "plan": planReferencesSQL()} {
-		for _, forbidden := range []string{
-			"iam_v2.vouchers", "iam_v2.voucher_batches", "iam_v2.auth_context_offers",
-			"iam_v2.package_settlement_mappings", "iam_v2.package_eligibility_rules", "iam_v2.package_grant_tiers",
-		} {
-			if strings.Contains(sql, forbidden) {
-				t.Errorf("%s references SQL names %s, which svc_edged cannot read", name, forbidden)
-			}
+func TestDeletabilityOfAnUnknownOrSystemItemIsNotFound(t *testing.T) {
+	for _, code := range []string{"NOT_FOUND", "SYSTEM_PACKAGE", "SYSTEM_PLAN"} {
+		a, repo := newFakeAdmin(t)
+		repo.blockers = []CatalogueBlocker{{code, 1}}
+		if _, _, err := a.PackageDeletability(context.Background(), "t", "s", "p"); !errors.Is(err, ErrCommerceNotFound) {
+			t.Fatalf("%s: want ErrCommerceNotFound, got %v", code, err)
 		}
-		for _, scope := range []string{"tenant_id = $1", "site_id = $2"} {
-			if !strings.Contains(sql, scope) {
-				t.Errorf("%s references SQL is not scoped by %s", name, scope)
-			}
+		if _, _, err := a.PlanDeletability(context.Background(), "t", "s", "p"); !errors.Is(err, ErrCommerceNotFound) {
+			t.Fatalf("%s plan: want ErrCommerceNotFound, got %v", code, err)
 		}
 	}
-	if !strings.Contains(packageReferencesSQL(), "is_system = false") {
-		t.Error("a system package must answer not-found, not list its references")
+}
+
+// A DATABASE WITHOUT 0091 answers "no", never an approximation.
+func TestDeletabilityOnAnOlderDatabaseIsNo(t *testing.T) {
+	a, repo := newFakeAdmin(t)
+	repo.blockErr = ErrCatalogueDeleteUnavailable
+	d, _, err := a.PlanDeletability(context.Background(), "t", "s", "p")
+	if err != nil || d.Deletable || len(d.Reasons) != 1 || d.Reasons[0].Code != ReasonDeleteUnavailable {
+		t.Fatalf("pre-0091: %+v %v", d, err)
+	}
+}
+
+func TestDeleteRefusedInUseReturnsTheReasons(t *testing.T) {
+	a, repo := newFakeAdmin(t)
+	repo.deleteErr = ErrCatalogueInUse
+	repo.blockers = []CatalogueBlocker{{"PURCHASES", 2}}
+	d, _, err := a.DeletePackage(context.Background(), "t", "s", "p", "op", "not needed")
+	if !errors.Is(err, ErrCatalogueInUse) || d.Deletable || d.Reasons[0].Code != "PURCHASES" {
+		t.Fatalf("in-use refusal: %+v %v", d, err)
+	}
+}
+
+func TestDeletePassesOperatorAndReason(t *testing.T) {
+	a, repo := newFakeAdmin(t)
+	if _, _, err := a.DeletePlan(context.Background(), "t", "s", "p1", "op-9", "created by mistake"); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.deleted) != 1 || repo.deleted[0] != "plan:p1:op-9:created by mistake" {
+		t.Fatalf("delete call: %v", repo.deleted)
+	}
+}
+
+// NO MAPPED REFUSAL MAY BECOME A SUCCESS OR A 500.
+func TestCatalogueErrorMapping(t *testing.T) {
+	cases := map[string]error{
+		"42883": ErrCatalogueDeleteUnavailable, "23001": ErrCatalogueInUse, "23503": ErrCatalogueInUse,
+		"P0002": ErrCommerceNotFound,
+	}
+	for code, want := range cases {
+		if got := mapCatalogueErr(&pgconn.PgError{Code: code}); !errors.Is(got, want) {
+			t.Errorf("%s -> %v, want %v", code, got, want)
+		}
+	}
+	if got := mapCatalogueErr(&pgconn.PgError{Code: "23514", Message: "CATALOGUE_DELETE_NEEDS_A_REASON"}); !errors.Is(got, ErrCatalogueDeleteNeedsReason) {
+		t.Errorf("reason refusal -> %v", got)
+	}
+	if mapCatalogueErr(nil) != nil {
+		t.Error("nil must stay nil")
 	}
 }

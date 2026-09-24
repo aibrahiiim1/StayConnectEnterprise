@@ -59,10 +59,13 @@ type CommerceAdminRepository interface {
 	GetGraceConfig(ctx context.Context, tenantID, siteID string) (GraceConfig, error)
 	ListQuotes(ctx context.Context, tenantID, siteID string, limit int) ([]QuoteInspect, error)
 	ListPurchases(ctx context.Context, tenantID, siteID string, limit int) ([]PurchaseInspect, error)
-	// PackageReferences / PlanReferences count the records that still point at a package (any of its
-	// revisions) or at a plan. Read-only; see PackageDeletability. found=false means no such operator item.
-	PackageReferences(ctx context.Context, tenantID, siteID, packageID string) (reasons []DeletabilityReason, found bool, err error)
-	PlanReferences(ctx context.Context, tenantID, siteID, planID string) (reasons []DeletabilityReason, found bool, err error)
+	// PackageBlockers / PlanBlockers are what the database says still depends on a package (any of its
+	// revisions) or a plan; see PackageDeletability. DeleteUnusedPackage / DeleteUnusedPlan remove one that
+	// nothing depends on, and the database refuses otherwise (migration 0091).
+	PackageBlockers(ctx context.Context, tenantID, siteID, packageID string) ([]CatalogueBlocker, error)
+	PlanBlockers(ctx context.Context, tenantID, siteID, planID string) ([]CatalogueBlocker, error)
+	DeleteUnusedPackage(ctx context.Context, tenantID, siteID, packageID, operatorID, reason string) error
+	DeleteUnusedPlan(ctx context.Context, tenantID, siteID, planID, operatorID, reason string) error
 }
 
 // CommerceAdminTx is the transactional admin surface: a whole publish runs on one tx.

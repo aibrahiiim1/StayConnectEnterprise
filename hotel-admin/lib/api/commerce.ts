@@ -142,6 +142,11 @@ export const getPackageDeletability = (id: string) =>
   api.get<Deletability>(`/commercial-packages/${id}/deletability`);
 export const getPlanDeletability = (id: string) =>
   api.get<Deletability>(`/commercial-packages/plans/${id}/deletability`);
+// Permanent deletion of an item nothing has ever used. A 409 carries `deletability` with the reasons.
+export const deletePackage = (id: string, reason: string, password: string) =>
+  api.del<{ deleted: boolean }>(`/commercial-packages/${id}`, { reason, password });
+export const deletePlan = (id: string, reason: string, password: string) =>
+  api.del<{ deleted: boolean }>(`/commercial-packages/plans/${id}`, { reason, password });
 
 /** The status of one grant, in words, with the badge tone that goes with it. */
 export function statusWords(status: string): { label: string; tone: "ok" | "warn" | "err" | "info" | "default" } {

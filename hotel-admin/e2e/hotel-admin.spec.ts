@@ -98,12 +98,11 @@ async function installBackend(page: Page, opts: {
       },
       range: { from: "2026-07-25T00:00:00Z", to: "2026-08-01T12:00:00Z" },
     }));
-    // DELETE… asks what is attached; it is a read, and it is always "no".
+    // DELETE… asks what is attached; for a used package the answer is "no".
     if (/^\/commercial-packages\/[^/]+\/deletability$/.test(path)) return route.fulfill(json(200, {
       deletable: false,
       reasons: [
         { code: "ENTITLEMENTS", message: "2 internet grants given to guests record this package.", count: 2 },
-        { code: "DELETE_REQUIRES_SCHEMA_CHANGE", message: "Removing a package's records needs a database change that has not been approved yet. Disable it instead — a disabled package is no longer offered to guests and keeps its history." },
       ],
     }));
     // inspection
@@ -227,7 +226,7 @@ test("internet packages: guest activity rows are sanitized and carry no guest PI
   expect(html).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/);
 });
 
-test("internet packages: Delete… explains what is attached and never deletes", async ({ page }) => {
+test("internet packages: Delete… of a used package explains what is attached and never deletes", async ({ page }) => {
   const mutations: Mutations = [];
   await installBackend(page, {
     packages: [{ package_id: "pk1", code: "FREEWIFI", name: "Free WiFi", active: true, current_revision_id: "r2", revision_count: 2 }],
@@ -237,7 +236,8 @@ test("internet packages: Delete… explains what is attached and never deletes",
   await page.getByRole("button", { name: "Free WiFi" }).click();
   await page.getByRole("button", { name: /delete…/i }).click();
   await expect(page.getByText("2 internet grants given to guests record this package.")).toBeVisible();
-  await expect(page.getByText(/has not been approved yet/i)).toBeVisible();
+  await expect(page.getByText(/why it can't be deleted/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /^delete package$/i })).toHaveCount(0);
   await page.getByRole("button", { name: /disable instead/i }).click();
   await expect(page.getByLabel(/why are you disabling it/i)).toBeVisible();
   // Nothing was sent: the dialog reads, and the disable still waits for its own step-up.

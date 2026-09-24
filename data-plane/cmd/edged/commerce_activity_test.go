@@ -272,19 +272,27 @@ func TestActivitySQLReadsOnlyGrantedTablesAndRealColumns(t *testing.T) {
 
 type fakeCommerceRepo struct {
 	iamv2.CommerceAdminRepository
-	tx    *fakeCommerceTx
-	found bool
-	refs  []iamv2.DeletabilityReason
+	tx       *fakeCommerceTx
+	blockers []iamv2.CatalogueBlocker
+	deletes  int
 }
 
 func (f *fakeCommerceRepo) WithTx(ctx context.Context, fn func(iamv2.CommerceAdminTx) error) error {
 	return fn(f.tx)
 }
-func (f *fakeCommerceRepo) PackageReferences(context.Context, string, string, string) ([]iamv2.DeletabilityReason, bool, error) {
-	return f.refs, f.found, nil
+func (f *fakeCommerceRepo) PackageBlockers(context.Context, string, string, string) ([]iamv2.CatalogueBlocker, error) {
+	return f.blockers, nil
 }
-func (f *fakeCommerceRepo) PlanReferences(context.Context, string, string, string) ([]iamv2.DeletabilityReason, bool, error) {
-	return f.refs, f.found, nil
+func (f *fakeCommerceRepo) PlanBlockers(context.Context, string, string, string) ([]iamv2.CatalogueBlocker, error) {
+	return f.blockers, nil
+}
+func (f *fakeCommerceRepo) DeleteUnusedPackage(context.Context, string, string, string, string, string) error {
+	f.deletes++
+	return nil
+}
+func (f *fakeCommerceRepo) DeleteUnusedPlan(context.Context, string, string, string, string, string) error {
+	f.deletes++
+	return nil
 }
 
 type fakeCommerceTx struct {
@@ -335,9 +343,8 @@ func TestAddWithATakenCodeAnswers409CodeExists(t *testing.T) {
 	}
 }
 
-func TestDeletabilityRoutesNeverSayYes(t *testing.T) {
-	n := int64(2)
-	repo := &fakeCommerceRepo{found: true, refs: []iamv2.DeletabilityReason{{Code: "ENTITLEMENTS", Message: "2 grants", Count: &n}}}
+func TestDeletabilityRoutesCarryTheDatabasesAnswer(t *testing.T) {
+	repo := &fakeCommerceRepo{blockers: []iamv2.CatalogueBlocker{{Code: "ENTITLEMENTS", N: 2}}}
 	s := commerceTestServer(t, repo)
 	r := chi.NewRouter()
 	r.Mount("/commercial-packages", s.commercialPackagesRoutes())
@@ -355,9 +362,15 @@ func TestDeletabilityRoutesNeverSayYes(t *testing.T) {
 		if err := json.Unmarshal(w.Body.Bytes(), &d); err != nil {
 			t.Fatal(err)
 		}
-		if d.Deletable || len(d.Reasons) != 2 || d.Reasons[1].Code != iamv2.ReasonDeleteRequiresSchemaChange {
+		if d.Deletable || len(d.Reasons) != 1 || d.Reasons[0].Code != "ENTITLEMENTS" {
 			t.Fatalf("%s: %+v", path, d)
 		}
+	}
+	repo.blockers = nil
+	w0 := httptest.NewRecorder()
+	r.ServeHTTP(w0, httptest.NewRequest(http.MethodGet, "/commercial-packages/11111111-2222-3333-4444-555555555555/deletability", nil))
+	if !strings.Contains(w0.Body.String(), `"deletable":true`) {
+		t.Fatalf("an unused package must be deletable: %s", w0.Body.String())
 	}
 
 	// A malformed id is not a database error, and an unknown one is not found.
@@ -366,11 +379,42 @@ func TestDeletabilityRoutesNeverSayYes(t *testing.T) {
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("malformed id: want 404, got %d", w.Code)
 	}
-	repo.found = false
+	repo.blockers = []iamv2.CatalogueBlocker{{Code: "NOT_FOUND", N: 1}}
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/commercial-packages/11111111-2222-3333-4444-555555555555/deletability", nil))
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("unknown id: want 404, got %d", w.Code)
+	}
+}
+
+// DELETE REFUSES BEFORE IT REACHES THE DATABASE without an id, a reason and a step-up. (The step-up itself
+// reads the operator table; the database's refusals are proven in scripts/catalogue-delete-integration.sh.)
+func TestDeleteRoutesRefuseWithoutIdReasonAndStepUp(t *testing.T) {
+	repo := &fakeCommerceRepo{}
+	s := commerceTestServer(t, repo)
+	r := chi.NewRouter()
+	r.Mount("/commercial-packages", s.commercialPackagesRoutes())
+	const id = "11111111-2222-3333-4444-555555555555"
+	for _, base := range []string{"/commercial-packages/", "/commercial-packages/plans/"} {
+		for _, tc := range []struct {
+			path, body string
+			want       int
+		}{
+			{base + "zzz", `{"password":"x","reason":"not needed"}`, http.StatusNotFound},
+			{base + id, `{"password":"x","reason":""}`, http.StatusBadRequest},
+			{base + id, `{"password":"x","reason":"no"}`, http.StatusBadRequest},
+			{base + id, `not json`, http.StatusBadRequest},
+			{base + id, `{"password":"","reason":"not needed"}`, http.StatusUnauthorized},
+		} {
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, tc.path, strings.NewReader(tc.body)))
+			if w.Code != tc.want {
+				t.Fatalf("DELETE %s %s: want %d, got %d %s", tc.path, tc.body, tc.want, w.Code, w.Body.String())
+			}
+		}
+	}
+	if repo.deletes != 0 {
+		t.Fatalf("a refused request reached the database %d time(s)", repo.deletes)
 	}
 }
 

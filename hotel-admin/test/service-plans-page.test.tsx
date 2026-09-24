@@ -337,15 +337,14 @@ describe("ServicePlansPage — add, record and delete", () => {
     expect(within(sheet).getByText(/in force/)).toBeInTheDocument();
   });
 
-  it("Delete… shows what is attached and why, offers no delete, and sends nothing", async () => {
+  it("Delete… of a used plan shows what is attached and why, offers no delete, and sends nothing", async () => {
     g.mockImplementation((path: string) => {
       if (path === "/commercial-packages/plans") return Promise.resolve(list(PLANS));
       if (path === "/commercial-packages") return Promise.resolve(list(PACKAGES));
       if (path === "/commercial-packages/plans/plan-free/deletability") return Promise.resolve({
         deletable: false,
         reasons: [
-          { code: "ACTIVE_PACKAGES", message: "2 active packages give this plan to guests.", count: 2 },
-          { code: "DELETE_REQUIRES_SCHEMA_CHANGE", message: "Removing a service plan's records needs a database change that has not been approved yet." },
+          { code: "PACKAGE_REVISIONS", message: "2 package versions are built on this plan, including earlier saved versions.", count: 2 },
         ],
       });
       return Promise.resolve(list([]));
@@ -353,9 +352,28 @@ describe("ServicePlansPage — add, record and delete", () => {
     render(<ServicePlansPage />);
     fireEvent.click(await screen.findByText("Free Internet", { selector: "button" }));
     fireEvent.click(await screen.findByRole("button", { name: /delete…/i }));
-    expect(await screen.findByText("2 active packages give this plan to guests.")).toBeInTheDocument();
-    expect(screen.getByText(/has not been approved yet/i)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^delete$/i })).toBeNull();
+    expect(await screen.findByText(/2 package versions are built on this plan/)).toBeInTheDocument();
+    expect(screen.getByText(/why it can't be deleted/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^delete service plan$/i })).toBeNull();
     expect(p).not.toHaveBeenCalled();
+  });
+
+  it("Delete… of an unused plan deletes it with a reason and password", async () => {
+    const { api } = await import("@/lib/api");
+    const d = (api as unknown as { del: ReturnType<typeof vi.fn> }).del;
+    d.mockResolvedValue({ deleted: true });
+    g.mockImplementation((path: string) => {
+      if (path === "/commercial-packages/plans") return Promise.resolve(list(PLANS));
+      if (path === "/commercial-packages") return Promise.resolve(list(PACKAGES));
+      if (path === "/commercial-packages/plans/plan-free/deletability") return Promise.resolve({ deletable: true, reasons: [] });
+      return Promise.resolve(list([]));
+    });
+    render(<ServicePlansPage />);
+    fireEvent.click(await screen.findByText("Free Internet", { selector: "button" }));
+    fireEvent.click(await screen.findByRole("button", { name: /delete…/i }));
+    fireEvent.change(await screen.findByLabelText(/why are you deleting it/i), { target: { value: "Test plan" } });
+    fireEvent.change(screen.getByLabelText(/confirm your password/i), { target: { value: "pw" } });
+    fireEvent.click(screen.getByRole("button", { name: /^delete service plan$/i }));
+    await waitFor(() => expect(d).toHaveBeenCalledWith("/commercial-packages/plans/plan-free", { reason: "Test plan", password: "pw" }));
   });
 });
