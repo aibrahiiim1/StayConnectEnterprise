@@ -356,6 +356,68 @@ def merge_precondition(gates, expected_sha, pr_now, unresolved_threads):
                     {"pr": (pr_now or {}).get("number"), "sha": expected_sha})
 
 
+# ---------------------------------------------------------------------------------------------------------
+# 5. READING BACK WHAT A NIGHT DECIDED -- used by the session-start check, not by the orchestrator
+# ---------------------------------------------------------------------------------------------------------
+# A verdict that means "this was the other cron firing, I did nothing". It is a SUCCESS, so it is
+# indistinguishable from a good night by conclusion alone -- which is the trap below.
+NOOP_VERDICTS = ("OUTSIDE_SCHEDULE_WINDOW",)
+
+
+def select_authoritative_run(runs):
+    """The newest orchestrator run that actually DECIDED something.
+
+    THIS IS NOT runs[0], AND THE DIFFERENCE MATTERS EVERY NIGHT HALF THE YEAR. The workflow fires twice; one
+    firing does the work and the other exits 0 having done nothing. Under EEST the no-op is the LATER of the
+    two, so the newest run is the no-op -- and a session-start check that reads runs[0] would report CLEAR
+    while the real validation of the night failed. The tool whose whole job is to notice a failure would be
+    the thing hiding it.
+
+    So a run is only authoritative if its verdict says it got past the window guard. A run whose verdict
+    cannot be read at all is treated as authoritative rather than skipped: an unreadable verdict must not
+    become a way to skip a red night.
+    """
+    for r in runs or []:
+        v = str((r or {}).get("verdict") or "").strip().upper()
+        if v in NOOP_VERDICTS:
+            continue
+        return r
+    return None
+
+
+def failure_is_unresolved(run, candidate_heads):
+    """Is this red night still waiting for somebody, or has the branch already moved past it?
+
+    THE DOCUMENTED RULE IS "RED AND NOT YET SUPERSEDED", and the first implementation only checked "red".
+    That matters because a red night followed by a fix is the NORMAL path through this model: if every red run
+    stayed unresolved forever, the session-start check would tell every future session to stop and repair
+    something that had already been repaired.
+
+    So the head that FAILED is compared with the heads currently on offer. Still a candidate head -> nobody
+    has addressed it, and the next session must. No longer a candidate head -> a commit has landed since, and
+    the next nightly run judges that new head, which is exactly what the model says happens.
+
+    An unknown tested head is treated as UNRESOLVED, because "I cannot tell whether this was fixed" is not
+    the same as "it was fixed".
+    """
+    if not run:
+        return False, "there is no authoritative run to judge"
+    concl = str(run.get("conclusion") or "").lower()
+    if concl == "success":
+        return False, "the authoritative run succeeded"
+    tested = str(run.get("tested_head") or "").strip()
+    heads = [str(h) for h in (candidate_heads or [])]
+    if not tested:
+        return True, ("the run failed and the head it tested could not be read, so it cannot be shown to "
+                      "have been superseded")
+    if tested in heads:
+        return True, ("the run failed on %s, which is STILL the delivery head -- nothing has addressed it"
+                      % tested[:12])
+    return False, ("the run failed on %s, but the delivery head has moved to %s since; the next nightly run "
+                   "judges the new head"
+                   % (tested[:12], ", ".join(h[:12] for h in heads) or "no open candidate"))
+
+
 def summarise(decisions):
     """One-line-per-decision trace, so the run log says exactly why it did what it did."""
     out = []

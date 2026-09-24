@@ -87,10 +87,17 @@ def graphql(query, variables=None):
         return json.loads(r.read())
 
 
+_tested_head = ""
+
+
 def finish(code, verdict, extra=None):
     say()
     say("=" * 78)
     say("NIGHTLY_DELIVERY_VERDICT = %s" % verdict)
+    # THE HEAD THIS NIGHT ACTUALLY JUDGED, printed so the session-start check can tell a failure that is still
+    # waiting from one a later commit has already superseded. Without it, every red night would look unresolved
+    # forever and every future session would be told to repair something already repaired.
+    say("NIGHTLY_TESTED_HEAD = %s" % (_tested_head or "none"))
     if extra:
         say(extra)
     out = os.environ.get("GITHUB_OUTPUT")
@@ -143,8 +150,10 @@ def main():
         # No candidate is a correct no-op. Ambiguity needs an operator, so it is red.
         finish(0 if cand.code == "NO_CANDIDATE" else 1, cand.code)
 
+    global _tested_head
     pr = cand.detail["chosen"]
     number, head_ref, expected_sha = pr["number"], pr["head_ref"], pr["head_sha"]
+    _tested_head = expected_sha
     correlation = "nightly-%s-%s" % (now.strftime("%Y%m%dT%H%M%SZ"), expected_sha[:12])
     say("  - pull request: **#%s** (`%s`)" % (number, head_ref))
     say("  - head under test: `%s`" % expected_sha)

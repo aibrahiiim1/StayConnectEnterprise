@@ -17,12 +17,19 @@ Exit:   0  nothing unresolved -- merged, no candidate, waiting, or already repai
         1  an UNRESOLVED nightly failure: repair it before starting new work
         2  the status could not be determined (no token, API unusable) -- treat as unknown, not as clear
 """
+import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.error
 import urllib.request
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_spec = importlib.util.spec_from_file_location("nd", os.path.join(_ROOT, "tools", "nightly_delivery.py"))
+nd = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(nd)
 
 REPO = os.environ.get("GITHUB_REPOSITORY", "aibrahiiim1/StayConnectEnterprise")
 ORCHESTRATOR = "nightly-authoritative-validation.yml"
@@ -54,6 +61,58 @@ def api(tok, path):
         return json.load(r)
 
 
+def read_verdict(tok, run):
+    """The verdict and tested head a run recorded, read from its own job log.
+
+    The orchestrator prints `NIGHTLY_DELIVERY_VERDICT = X` and `NIGHTLY_TESTED_HEAD = Y` as its last act. They
+    are read back here rather than inferred from the run conclusion, because BOTH the no-op firing and a
+    successful merge exit 0 -- the conclusion cannot tell them apart, and that is the whole difficulty.
+
+    An unreadable log yields no verdict, which select_authoritative_run() treats as authoritative: not being
+    able to read a run must never become a way to skip a red night.
+    """
+    out = {"verdict": "", "tested_head": ""}
+    try:
+        jobs = api(tok, "/actions/runs/%d/jobs" % run["id"]).get("jobs") or []
+    except urllib.error.HTTPError:
+        return out
+    for j in jobs:
+        try:
+            log = joblog(tok, j["id"])
+        except Exception:                                        # noqa: BLE001
+            continue
+        m = re.findall(r"NIGHTLY_DELIVERY_VERDICT = (\S+)", log)
+        if m:
+            out["verdict"] = m[-1]
+        h = re.findall(r"NIGHTLY_TESTED_HEAD = (\S+)", log)
+        if h and h[-1] != "none":
+            out["tested_head"] = h[-1]
+        if out["verdict"]:
+            break
+    return out
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, newurl, headers, fp)
+
+
+def joblog(tok, job_id):
+    op = urllib.request.build_opener(_NoRedirect)
+    req = urllib.request.Request(
+        "https://api.github.com/repos/%s/actions/jobs/%d/logs" % (REPO, job_id),
+        headers={"Authorization": "Bearer " + tok, "Accept": "application/vnd.github+json",
+                 "User-Agent": "stayconnect-nightly-status"})
+    try:
+        return op.open(req).read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        if e.code in (301, 302, 307, 308):
+            url = e.reason if isinstance(e.reason, str) else e.headers.get("Location")
+            return urllib.request.urlopen(
+                urllib.request.Request(url, headers={"User-Agent": "sc"})).read().decode("utf-8", "replace")
+        raise
+
+
 def main():
     tok = token()
     if not tok:
@@ -73,10 +132,23 @@ def main():
         out("NO_RUNS", "the nightly orchestrator has never run.", None)
         return 0
 
-    last = runs[0]
+    # THE NEWEST RUN IS NOT NECESSARILY THE ONE THAT DECIDED ANYTHING. The workflow fires at 00:10Z and
+    # 01:10Z; one firing works and the other exits 0 having done nothing, and under EEST the no-op is the
+    # LATER of the two. Reading runs[0] would therefore report CLEAR on the strength of a no-op while the
+    # night's real validation was failing -- the tool whose whole purpose is to notice a failure would be the
+    # thing hiding it. So each run is annotated with the verdict it recorded, and the first one that got past
+    # the window guard is the authoritative one.
+    annotated = [dict(r, **read_verdict(tok, r)) for r in runs[:6]]
+    last = nd.select_authoritative_run(annotated)
+    if last is None:
+        out("NO_AUTHORITATIVE_RUN",
+            "every recent orchestrator run was the non-authoritative cron firing, so no night has decided "
+            "anything yet.", {"inspected": [r["id"] for r in annotated]})
+        return 0
     info = {"run_id": last["id"], "url": last["html_url"], "created_at": last["created_at"],
             "conclusion": last.get("conclusion"), "status": last.get("status"),
-            "title": last.get("display_title")}
+            "verdict": last.get("verdict") or "unreadable",
+            "tested_head": last.get("tested_head") or "unreadable"}
 
     if last.get("status") != "completed":
         out("IN_PROGRESS", "the latest nightly run is still %s." % last.get("status"), info)
@@ -86,22 +158,33 @@ def main():
                      "candidate, or correctly waited for a newer head.", info)
         return 0
 
-    # Red. Is it still about the head we are sitting on?
+    # RED -- BUT "RED" IS NOT THE SAME AS "WAITING FOR SOMEBODY". A red night followed by a fix is the normal
+    # path through this model, so the question is whether the head that failed is STILL the delivery head. If a
+    # commit has landed since, the next nightly run judges that new head and there is nothing for this session
+    # to repair.
     try:
         pulls = api(tok, "/pulls?state=open&per_page=100")
     except urllib.error.HTTPError:
         pulls = []
     cands = [p for p in pulls
              if (p.get("base") or {}).get("ref") == "master" and not p.get("draft")
-             and "nightly-hold" not in [l.get("name") for l in (p.get("labels") or [])]]
+             and nd.HOLD_LABEL not in [l.get("name") for l in (p.get("labels") or [])]]
+    heads = [(p.get("head") or {}).get("sha") for p in cands]
     info["open_candidates"] = [{"number": p["number"], "head_sha": (p.get("head") or {}).get("sha"),
                                "head_ref": (p.get("head") or {}).get("ref")} for p in cands]
 
+    unresolved, why = nd.failure_is_unresolved(last, heads)
+    info["resolution"] = why
+    if not unresolved:
+        out("SUPERSEDED_FAILURE",
+            "the last authoritative nightly validation FAILED, but %s. Nothing is owed before new work; the "
+            "next nightly run judges the current head." % why, info)
+        return 0
+
     out("UNRESOLVED_FAILURE",
-        "the latest nightly authoritative validation FAILED (%s) and has not been superseded by a later "
-        "run. Per the Product-Owner delivery model, inspect and repair this BEFORE starting new work, then "
-        "continue on the same delivery line -- the next nightly run judges the resulting head."
-        % last.get("conclusion"), info)
+        "the latest nightly authoritative validation FAILED (%s) and %s. Per the Product-Owner delivery "
+        "model, inspect and repair this BEFORE starting new work, then continue on the same delivery line -- "
+        "the next nightly run judges the resulting head." % (last.get("conclusion"), why), info)
     return 1
 
 

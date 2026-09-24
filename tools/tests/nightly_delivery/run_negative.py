@@ -241,6 +241,61 @@ expect("four fresh green gates, head unchanged, clean, no open thread", may, Tru
 if not (green.proceed and may.proceed):
     fails.append("the positive path does not merge; a decision module that always refuses is not correct")
 
+# =========================================================================================================
+print()
+print("== THE SESSION-START CHECK MUST NOT BE FOOLED BY THE NO-OP FIRING (review P1 on PR #180) ==")
+# The workflow fires twice and one firing exits 0 having done nothing. Under EEST the no-op is the LATER of
+# the two, so runs[0] is the no-op -- and a session-start check reading runs[0] would report CLEAR while the
+# night's real validation failed. The tool whose purpose is to notice a failure would be the thing hiding it.
+NOOP = {"id": 2, "conclusion": "success", "verdict": "OUTSIDE_SCHEDULE_WINDOW", "tested_head": ""}
+REDRUN = {"id": 1, "conclusion": "failure", "verdict": "GATES_NOT_ALL_GREEN", "tested_head": SHA_A}
+MERGED = {"id": 1, "conclusion": "success", "verdict": "MERGED", "tested_head": SHA_A}
+
+
+def pick(label, runs, want_id):
+    global oks
+    got = nd.select_authoritative_run(runs)
+    gid = (got or {}).get("id")
+    if gid != want_id:
+        fails.append("%s: selected run %r, wanted %r" % (label, gid, want_id))
+        return
+    oks += 1
+    print("  ok   %-64s [run %s]" % (label, gid))
+
+
+pick("the newest run is a no-op; the red run beneath it is authoritative", [NOOP, REDRUN], 1)
+pick("two no-ops in a row are both skipped", [NOOP, dict(NOOP, id=3), MERGED], 1)
+pick("a genuine newest run is selected normally", [MERGED, NOOP], 1)
+pick("an UNREADABLE verdict counts as authoritative, never as skippable",
+     [{"id": 9, "conclusion": "failure", "verdict": "", "tested_head": SHA_A}, MERGED], 9)
+if nd.select_authoritative_run([NOOP, dict(NOOP, id=3)]) is not None:
+    fails.append("all-no-op history should select nothing")
+else:
+    oks += 1
+    print("  ok   a history of nothing but no-ops selects no authoritative run")
+
+print()
+print("== A RED NIGHT IS ONLY UNRESOLVED WHILE ITS HEAD IS STILL THE HEAD (review P2 on PR #180) ==")
+# "Red" is not "waiting for somebody": a red night followed by a fix is the normal path. The first version
+# labelled every red run UNRESOLVED forever, which would tell every future session to repair something that
+# had already been repaired.
+for label, run, heads, want in (
+    ("still the delivery head -> unresolved", REDRUN, [SHA_A], True),
+    ("the head has moved on -> superseded", REDRUN, [SHA_B], False),
+    ("no open candidate at all -> superseded", REDRUN, [], False),
+    ("the tested head is unreadable -> unresolved, not assumed fixed",
+     dict(REDRUN, tested_head=""), [SHA_B], True),
+    ("a successful run is never unresolved", MERGED, [SHA_A], False),
+    ("no run at all is not unresolved", None, [SHA_A], False),
+):
+    got, why = nd.failure_is_unresolved(run, heads)
+    if got is not want:
+        fails.append("%s: got %r, wanted %r (%s)" % (label, got, want, why))
+    else:
+        oks += 1
+        print("  ok   %-64s [%s]" % (label, "UNRESOLVED" if got else "clear"))
+
+
 print()
 print("=" * 78)
 if fails:
