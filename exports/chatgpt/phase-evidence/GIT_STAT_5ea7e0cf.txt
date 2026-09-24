@@ -1,4 +1,0 @@
-commit 5ea7e0cf1e1db09c7deed1605e86c9b56d4755cd
-Date:   Thu Sep 24 09:42:47 2026 +0300
-
-    Governance: T0183 activates the nightly model
