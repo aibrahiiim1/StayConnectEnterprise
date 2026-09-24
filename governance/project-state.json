@@ -1208,7 +1208,7 @@
     "nightly_authoritative_validation": "The four authoritative gates no longer run on pull_request. One COMPLETE FRESH run of all four (governance, phase3-full-software-gate, phase4-financial-core-gate, phase5-post-stay-transfer-gate) is dispatched at 03:10 Africa/Cairo against the EXACT head of the single active delivery candidate, and an all-green result on that exact head is merged automatically through the protected path.\n\nTHE SCHEDULE IS ONE LINE: `- cron: '10 3 * * *'` with `timezone: \"Africa/Cairo\"`. GitHub Actions accepts an IANA timezone beside cron, so Egypt's DST -- UTC+2 in winter, UTC+3 from late April to late October -- is the platform's arithmetic and no offset is written down anywhere. What this repository still checks is that the platform HONOURED it: if the timezone were dropped or mistyped the same cron would mean 03:10 UTC, which is 05:10 or 06:10 in Cairo, and nothing else would notice because the gates would still run and the merge would still happen. Drift beyond 105 minutes refuses -- a late scheduler drifts by minutes, a UTC misreading by 120 (winter) or 180 (summer) -- and a manual workflow_dispatch is exempt because manual means any hour.\n\nNothing was removed, shortened or made unable to fail. The nightly run DECLINES evidence reuse outright, so no daytime, pull-request, master or previous-night verdict can substitute for it, and a commit pushed during the run makes the pass stale -- the next night judges the new head. Zero candidates is a quiet no-op; two or more is a hard refusal. Fail-closed behaviour is proven by 71 assertions in tools/tests/nightly_delivery/run_negative.py, which the governance gate runs and the orchestrator re-runs before deciding anything.",
     "session_start_check": "EVERY agent session runs `python tools/nightly-status.py` FIRST. Exit 1 / UNRESOLVED_FAILURE means the latest nightly authoritative validation failed and has not been superseded: diagnose and repair that on the same delivery branch before starting new work. UNKNOWN (exit 2) is not the same as clear. Nothing else notifies anyone -- the push that caused the failure succeeded and the evidence sits in a workflow run nobody has opened."
   },
-  "latest_transition_id": "T0184",
+  "latest_transition_id": "T0185",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1703,14 +1703,14 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "DELIVERY_MODEL_ACTIVATION_NIGHTLY_AUTHORITATIVE_VALIDATION",
+    "kind": "DELIVERY_MODEL_MERGED_AND_ONE_CORRECTION",
     "decision": "D42",
-    "decision_note": "The same decision as T0182 -- the nightly authoritative delivery model and the standing PRE-LIVE deployment authorisation. This is its second half, not a new decision.",
+    "decision_note": "The same Product-Owner mission as T0182-T0184. This lineage records the merge of PR #181 and the one defect the empirical proof exposed in the session-start check.",
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "b798b085ee4f5e69da123c83fb8f8b9d066e0bbf",
-    "base_note": "The master merge commit of PR #180, which recorded T0182.",
-    "head": "23e7db20",
-    "head_note": "The last CONTENT commit of this delivery: Option E -- the daytime sentinel, the nightly re-run, the retired dispatch activation and the synchronised validators, docs and fixtures.",
+    "base": "d10820867212de8bf727d66defa4fee35ca07926",
+    "base_note": "The master merge commit of PR #181, which recorded T0184 and put the Option E orchestrator on master.",
+    "head": "ee9ce580",
+    "head_note": "The CONTENT commit of this correction: the session-start reason reads as a sentence, and its wording is asserted.",
     "transition": "T0183",
     "previous_delivery": "T0182",
     "note": "T0183. The four authoritative gates no longer run on pull_request, so normal daytime development is not interrupted at all. The complete four-gate validation happens once a night at 03:10 Africa/Cairo against the exact head of the single active delivery candidate, and only an all-green result on that exact head is merged.\n\nTHIS PULL REQUEST IS ITSELF THE END-TO-END PROOF OF THE MODEL. It carries no pull_request checks, so its four required contexts can only be produced by the orchestrator dispatching them at its exact head -- which establishes the two things that were still unproven by argument: that GITHUB_TOKEN can trigger workflow_dispatch from inside Actions, and that a dispatched run's check runs satisfy required contexts pinned to the Actions app on the pull-request head."
