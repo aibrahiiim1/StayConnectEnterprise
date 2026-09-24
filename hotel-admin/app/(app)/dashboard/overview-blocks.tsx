@@ -330,6 +330,12 @@ export function PackagesCard({ snap }: { snap: OverviewSnapshot | null }) {
 
 export function PmsCard({ snap, canCharges }: { snap: OverviewSnapshot | null; canCharges: boolean }) {
   const pms = snap?.pms;
+  // THE OVERVIEW SHOWS CONNECTIONS THAT CAN SERVE A GUEST. One that is switched off and has never had a
+  // configuration published is not connected to any PMS: listing it here, under whatever name a setup script
+  // gave it, reads as a second PMS that is failing. It stays fully visible on the PMS connections screen,
+  // grouped as inactive; the overview only counts it.
+  const inUse = (pms?.interfaces ?? []).filter((i) => i.lifecycle_state === "ACTIVE" || i.published);
+  const neverConfigured = (pms?.interfaces.length ?? 0) - inUse.length;
   return (
     <BlockCard
       title="Property management system"
@@ -339,7 +345,7 @@ export function PmsCard({ snap, canCharges }: { snap: OverviewSnapshot | null; c
     >
       {!snap || !pms ? (
         <Skeleton className="h-48" />
-      ) : !pms.available || pms.interfaces.length === 0 ? (
+      ) : !pms.available || inUse.length === 0 ? (
         <EmptyState
           className="py-8"
           icon={<Hotel />}
@@ -349,7 +355,7 @@ export function PmsCard({ snap, canCharges }: { snap: OverviewSnapshot | null; c
         />
       ) : (
         <div className="space-y-4">
-          {pms.interfaces.map((i) => {
+          {inUse.map((i) => {
             const words = describePmsReadiness({
               transport: i.transport_status, sync: i.sync_status, roomAuthReady: i.room_auth_ready, inHouse: i.in_house_stays,
             });
@@ -377,6 +383,14 @@ export function PmsCard({ snap, canCharges }: { snap: OverviewSnapshot | null; c
               </div>
             );
           })}
+          {neverConfigured > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {neverConfigured === 1
+                ? "1 further connection is set up but has never been configured; it is not connected to any PMS."
+                : `${neverConfigured} further connections are set up but have never been configured; they are not connected to any PMS.`}{" "}
+              <Link href="/pms-interfaces" className="underline underline-offset-2 hover:text-foreground">Review</Link>
+            </p>
+          )}
           {pms.occupancy.available && (
             <MetricStrip
               items={[

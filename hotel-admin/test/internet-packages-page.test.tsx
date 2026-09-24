@@ -382,3 +382,20 @@ describe("InternetPackagesPage — guest activity", () => {
     });
   });
 });
+
+describe("a package with no published configuration (found live on PRE-LIVE)", () => {
+  // The appliance holds an active package with no current revision. The page asked the server for its
+  // configuration on every load, got a correct 404, and listed the package as "Active" -- which it cannot be,
+  // since there is nothing to offer.
+  it("is shown as not configured, and its configuration is never requested", async () => {
+    routes({ "/commercial-packages": list([{ package_id: "pk9", code: "SCAFFOLD", name: "Scaffold package", active: true, current_revision_id: "", revision_count: 0 }]) });
+    render(<InternetPackagesPage />);
+    const cell = (await screen.findAllByText(/Scaffold package|SCAFFOLD/))[0];
+    const row = cell.closest("tr")!;
+    expect(within(row).getByText(/not configured/i)).toBeInTheDocument();
+    expect(within(row).queryByText(/^active$/i)).toBeNull();
+    await waitFor(() => expect(g).toHaveBeenCalled());
+    const paths = g.mock.calls.map((c) => String(c[0]));
+    expect(paths.some((p) => p.endsWith("/current"))).toBe(false);
+  });
+});

@@ -264,3 +264,23 @@ describe("the source", () => {
     expect(src).not.toMatch(/iam_v2|Phase-?\d|T0\d{3}|D41/);
   });
 });
+
+describe("PMS connections on the overview (found live on PRE-LIVE)", () => {
+  // A connection that is switched off and never had a configuration published is not connected to any PMS.
+  // Listed by the name a setup script gave it, it read as a second PMS that was failing.
+  it("counts a never-configured connection instead of listing it", async () => {
+    route(() => {
+      const s = healthy();
+      s.pms.interfaces.push({
+        pms_interface_id: "i2", display_label: "Scaffold row from a setup script", lifecycle_state: "AUTH_DISABLED",
+        published: false, transport_status: "DISCONNECTED", sync_status: "NEVER", room_auth_ready: false,
+        in_house_stays: 0, pending_events: 0, review_events: 0,
+      });
+      return s;
+    });
+    render(<DashboardPage />);
+    expect(await screen.findByText("Opera")).toBeInTheDocument();
+    expect(screen.queryByText("Scaffold row from a setup script")).toBeNull();
+    expect(screen.getByText(/1 further connection is set up but has never been configured/)).toBeInTheDocument();
+  });
+});

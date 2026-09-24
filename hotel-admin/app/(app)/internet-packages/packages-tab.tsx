@@ -92,7 +92,10 @@ export function PackagesTab({
       // THE STAY-LENGTH OVERLAP CHECK. The list does not carry eligibility rules — edged authors them and
       // cannot read the table back — so they come one package at a time through the scoped reader. It is a
       // WARNING: overlapping ranges are legitimate when the operator wants the guest to choose.
-      const active = pkgs.filter((p) => p.active);
+      // A package with NO current revision has no conditions to read: asking the server for them returns a
+      // correct 404 ("no current configuration") that the browser then logs as an error on every load. Such a
+      // package is shown as not configured instead, and cannot overlap anything.
+      const active = pkgs.filter((p) => p.active && !!p.current_revision_id);
       const ranges = await Promise.all(active.map(async (p): Promise<PackageStayRange> => {
         try {
           const cur = await api.get<PackageCurrent>(`/commercial-packages/${p.package_id}/current`);
@@ -295,7 +298,15 @@ export function PackagesTab({
                         </div>
                       )}
                     </TD>
-                    <TD>{p.active ? <Badge tone="ok" dot>Active</Badge> : <Badge tone="default" dot>Disabled</Badge>}</TD>
+                    <TD>
+                      {!p.current_revision_id ? (
+                        <Badge tone="warn" dot>Not configured</Badge>
+                      ) : p.active ? (
+                        <Badge tone="ok" dot>Active</Badge>
+                      ) : (
+                        <Badge tone="default" dot>Disabled</Badge>
+                      )}
+                    </TD>
                     <TD className="whitespace-nowrap">{priceText(p.price_minor, p.currency, p.currency_exponent)}</TD>
                     <TD>
                       <div>{formatSpeed(p.down_kbps)} down{p.speed_allocation === "SHARED" ? " (shared)" : ""}</div>
@@ -334,7 +345,14 @@ export function PackagesTab({
                   title={p.name || p.code}
                   description={p.name && p.name !== p.code ? `Code ${p.code}` : undefined}
                   badges={<>
-                    {p.active ? <Badge tone="ok" dot>Offered to guests</Badge> : <Badge dot>Disabled</Badge>}
+                    {/* A package with no published configuration cannot be offered, whatever its active flag says. */}
+                    {!p.current_revision_id ? (
+                      <Badge tone="warn" dot>Not configured — not offered to guests</Badge>
+                    ) : p.active ? (
+                      <Badge tone="ok" dot>Offered to guests</Badge>
+                    ) : (
+                      <Badge dot>Disabled</Badge>
+                    )}
                     {p.package_type && <Badge tone="neutral">{p.package_type.replace(/_/g, " ").toLowerCase()}</Badge>}
                   </>}
                 />
