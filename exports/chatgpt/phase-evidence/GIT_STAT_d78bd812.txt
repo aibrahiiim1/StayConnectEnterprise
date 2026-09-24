@@ -1,0 +1,4 @@
+commit d78bd812fdaaaad719fda6d1aca4a7c977a37dbf
+Date:   Thu Sep 24 09:04:52 2026 +0300
+
+    Governance: the delivery head is the timezone-aware schedule
