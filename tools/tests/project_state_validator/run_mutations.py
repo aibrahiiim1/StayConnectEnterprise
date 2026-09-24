@@ -676,6 +676,13 @@ MUTATIONS = [
   ".github/workflows/project-governance.yml",
    ("replace", [("        if: github.event_name == 'pull_request' && github.run_attempt == 1",
                  "        if: github.event_name == 'pull_request'")])),
+ # THE NET THAT NEVER FIRES. `push: master` runs the four gates as a second check on what landed, and under
+ # this model it never happens: GITHUB_TOKEN events create no workflow runs, so an orchestrator merge produces
+ # zero runs on master's new head (measured: 6 from a personal-token merge, 0 from this one). The post-merge
+ # tree assertion replaces it. Remove that and NOTHING confirms master carries what the gates passed.
+ ("M61h the orchestrator stops checking that master carries the validated tree",
+  "scripts/ci/nightly-orchestrate.py",
+   ("replace", [("nd.merged_tree_is_what_was_validated(", "_skipped_tree_check(")])),
  ("M62 a superseded run is never cancelled (concurrency block removed)",
   ".github/workflows/phase4-financial-core.yml",
    ("replace", [("concurrency:\n  group:", "removed_concurrency:\n  group:")])),

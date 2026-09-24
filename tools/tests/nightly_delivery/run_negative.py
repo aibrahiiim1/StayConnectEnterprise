@@ -332,6 +332,32 @@ else:
     print("  ok   a history of nothing but non-deciding runs selects no authoritative run")
 
 print()
+print("== MASTER MUST CARRY THE TREE THE GATES VALIDATED (the push: master net never fires) ==")
+# FOUND BY RUNNING THE MODEL, NOT BY READING IT. The gates also run on `push: master` -- "master's own runs
+# must be real" -- and under this model that run NEVER HAPPENS: GitHub does not trigger workflow runs from
+# events created with GITHUB_TOKEN, and the orchestrator merges with GITHUB_TOKEN. Measured on one delivery
+# merged twice: the personal-token merge produced 6 runs on its merge commit, the orchestrator merge produced 0.
+#
+# So the inference that net rested on is asserted instead: the commit now on master carries exactly the tree
+# the four gates passed.
+TREE_A = "bb4f74ab757f6ee8e4f57bd08cc66e5a92b41f9d"   # the real tree of 11376ccc / merge 31f0dfe1
+TREE_B = "0000000000000000000000000000000000000000"
+for label, vt, mt, want, code in (
+    ("the merge carries the validated tree", TREE_A, TREE_A, True, "TREE_IDENTICAL"),
+    ("the merge carries a DIFFERENT tree -- content no gate saw", TREE_A, TREE_B, False, "TREE_MISMATCH"),
+    ("the validated tree could not be read", "", TREE_A, False, "TREE_UNREADABLE"),
+    ("the merge commit's tree could not be read", TREE_A, "", False, "TREE_UNREADABLE"),
+    ("neither tree could be read", "", "", False, "TREE_UNREADABLE"),
+):
+    d = nd.merged_tree_is_what_was_validated(SHA_A, vt, SHA_B, mt)
+    if d.proceed is not want or d.code != code:
+        fails.append("%s: got proceed=%r %s, wanted proceed=%r %s" % (label, d.proceed, d.code, want, code))
+    else:
+        oks += 1
+        print("  ok   %-64s [%s]" % (label, d.code))
+print()
+
+
 print("== A RED NIGHT IS ONLY UNRESOLVED WHILE ITS HEAD IS STILL THE HEAD (review P2 on PR #180) ==")
 # "Red" is not "waiting for somebody": a red night followed by a fix is the normal path. The first version
 # labelled every red run UNRESOLVED forever, which would tell every future session to repair something that

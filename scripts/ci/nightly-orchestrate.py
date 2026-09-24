@@ -270,7 +270,34 @@ def main():
     say("  - master is now `%s`" % master.get("sha"))
     if master.get("sha") != merge_sha:
         finish(1, "MASTER_NOT_AT_MERGE_COMMIT")
+
+    # ---- 8. master must carry the tree the gates actually validated -------------------------------------
+    #
+    # THE `push: master` GATES DO NOT RUN FOR A NIGHTLY MERGE, and that was found by running this rather than
+    # by reading it. GitHub does not trigger workflow runs from events created with GITHUB_TOKEN, and this
+    # merges with GITHUB_TOKEN, so master's new head receives ZERO runs. Measured on two merges of the same
+    # delivery: the one performed with a personal token produced 6 runs on its merge commit, the one performed
+    # here produced 0.
+    #
+    # Master's push run was the second net -- "master's own runs must be real". What it was really standing in
+    # for is this: that the commit now on master carries exactly the content the four gates passed. That
+    # follows from `strict_required_status_checks_policy` plus the pinned-SHA merge, but an inference resting
+    # on two settings someone could relax is not a check, so it is asserted here.
+    say()
+    tree = nd.merged_tree_is_what_was_validated(
+        expected_sha, read_tree(expected_sha), merge_sha, read_tree(merge_sha))
+    say("**post-merge** `%s` -- %s" % (tree.code, tree.reason))
+    if not tree.proceed:
+        finish(1, tree.code)
     finish(0, "MERGED")
+
+
+def read_tree(sha):
+    """The tree SHA of a commit, or "" when it cannot be read -- which the decision treats as a refusal."""
+    try:
+        return str(((api("/git/commits/%s" % sha) or {}).get("tree") or {}).get("sha") or "")
+    except urllib.error.HTTPError:
+        return ""
 
 
 def find_pr_run(wf, head_sha):

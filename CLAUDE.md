@@ -284,6 +284,12 @@ exact head**. A commit pushed during the run makes the pass stale; the next nigh
 candidates is a quiet no-op; two or more is a hard refusal. Mark a PR **draft** or label it **`nightly-hold`**
 to keep it open overnight without merging.
 
+**Master carries no `push` runs for a nightly merge, and that is not a fault.** GitHub creates no workflow
+runs from `GITHUB_TOKEN` events, and the orchestrator merges with `GITHUB_TOKEN` — measured: a personal-token
+merge produced 6 runs on its merge commit, an orchestrator merge produced 0. The orchestrator therefore asserts
+after merging that master's tree equals the validated head's tree, which is what those runs stood for. Merging
+with a PAT or App token would restore them and is a **Product-Owner decision**, not an implementation detail.
+
 **`workflow_dispatch` cannot satisfy a required check. This is measured, not policy.** On PR #181 four
 dispatched runs produced four green check runs under exactly the required context names, from the pinned
 Actions app, on the pull-request head — and the ruleset answered `HTTP 405 … 4 of 4 required status checks are

@@ -431,6 +431,44 @@ def select_authoritative_run(runs):
     return None
 
 
+def merged_tree_is_what_was_validated(validated_sha, validated_tree, merge_sha, merge_tree):
+    """Did the commit that landed on master carry exactly the tree the four gates validated?
+
+    WHY THIS EXISTS, AND IT WAS FOUND BY RUNNING THE MODEL RATHER THAN BY READING IT. The gates also run on
+    `push: master`, and that run is the second net: master's own runs must be real. Under the nightly model it
+    NEVER FIRES. GitHub does not trigger workflow runs from events created with GITHUB_TOKEN, and the
+    orchestrator merges with GITHUB_TOKEN -- so a nightly merge produces ZERO runs on master's new head.
+    Measured: PR #181, merged with a personal token, produced 6 runs on its merge commit; PR #182, merged by
+    the orchestrator, produced 0.
+
+    WHAT IS ACTUALLY AT RISK IS SMALLER THAN IT LOOKS, AND IS NOT NOTHING. `strict_required_status_checks_policy`
+    requires the branch to be up to date with master, and the merge pins the head SHA, so the merge commit's
+    tree should equal the validated head's tree -- and for both merges it did, byte for byte. But that is an
+    INFERENCE from two settings either of which could be relaxed by someone who does not know this depends on
+    them. The inference is exactly what master's push run was standing in for, so it is asserted here instead.
+
+    FAIL CLOSED ON AN UNREADABLE TREE. "I could not check" is not "it matched" -- the same rule the rest of
+    this module follows.
+    """
+    v_tree, m_tree = str(validated_tree or ""), str(merge_tree or "")
+    if not v_tree or not m_tree:
+        return Decision(False, "TREE_UNREADABLE",
+                        "the merge landed, but the tree of %s or of the merge commit %s could not be read, so "
+                        "it cannot be shown that master carries the validated content"
+                        % (str(validated_sha)[:12], str(merge_sha)[:12]),
+                        {"validated_tree": v_tree, "merge_tree": m_tree})
+    if v_tree != m_tree:
+        return Decision(False, "TREE_MISMATCH",
+                        "MASTER DOES NOT CARRY THE VALIDATED TREE: the gates validated %s (tree %s) but the "
+                        "merge commit %s carries tree %s. Something entered master that no gate has seen -- "
+                        "check that the ruleset still requires branches to be up to date"
+                        % (str(validated_sha)[:12], v_tree[:12], str(merge_sha)[:12], m_tree[:12]),
+                        {"validated_tree": v_tree, "merge_tree": m_tree})
+    return Decision(True, "TREE_IDENTICAL",
+                    "master carries exactly the tree the four gates validated (%s)" % v_tree[:12],
+                    {"tree": v_tree})
+
+
 def failure_is_unresolved(run, candidate_heads):
     """Is this red night still waiting for somebody, or has the branch already moved past it?
 

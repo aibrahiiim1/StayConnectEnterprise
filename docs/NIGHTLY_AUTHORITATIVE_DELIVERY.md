@@ -140,6 +140,7 @@ refused, with the ±120/±180 drift measured from the tz database rather than wr
 | **5. Classify** | Any run that is not the run we re-ran (matched by **run id**), not `pull_request`, not on `expected_sha`, not on a **later attempt** than the one it was on when we asked, not `completed`, or not `success`. |
 | **6. Re-read** | **A stale pass.** The head is read again after the gates finish; if a commit landed during the run, tonight's verdict is about a commit that is no longer the tip, and it waits for the next night. |
 | **7. Merge** | `merge` method only, **`sha` pinned**, so GitHub itself refuses if anything moved between decision and call. |
+| **8. Post-merge** | **Master carrying a tree no gate validated.** The tree of the merge commit must equal the tree of the validated head; an unreadable tree is a refusal, not a pass. |
 
 A candidate is an **open, non-draft pull request targeting `master`** without the `nightly-hold` label. Marking
 a PR draft or labelling it `nightly-hold` are the two supported ways to keep work open overnight without it
@@ -192,6 +193,32 @@ by GitHub from the run being re-run, so a wrong-commit run is not a thing that c
 | A previous night's pass is reused as this night's | The orchestrator records the attempt each run was on **before** it asked, and requires a **later** attempt. An unchanged tree cannot produce one. |
 | A green run for a different commit is counted | Matched by run id **and** `head_sha` **and** event. |
 | A dispatched success is inherited as reuse evidence | The nightly attempt **declines reuse outright** (`NIGHTLY_VALIDATION=true`). |
+
+### The `push: master` gates never run for a nightly merge — this is expected
+
+**Do not read master's missing runs as a fault.** GitHub does not create workflow runs from events made with
+`GITHUB_TOKEN`, and the orchestrator merges with `GITHUB_TOKEN`. Measured on one delivery merged twice:
+
+| Merge performed by | Runs on the merge commit |
+|---|---|
+| a personal access token (PR #181 → `d1082086`) | **6** — the four gates ran on master and passed |
+| the orchestrator's `GITHUB_TOKEN` (PR #182 → `31f0dfe1`) | **0** |
+
+So the second net — *master's own runs must be real* — silently does not exist under this model. It was found by
+running the model, not by reading it.
+
+**What that net was standing in for is asserted instead.** Its real content is that the commit now on master
+carries exactly what the four gates passed. That follows from `strict_required_status_checks_policy` (the branch
+must be up to date, so the merge commit's tree equals the head's tree) plus the pinned-SHA merge — and it held
+byte-for-byte on both merges. But an inference resting on two settings somebody could relax is not a check, so
+step 8 above compares the two tree SHAs and refuses on a mismatch or on an unreadable tree.
+
+**A merge performed by a person still triggers master's gates**, which is why the trigger stays.
+
+**The alternative was not taken.** Merging with a personal access token or a GitHub App token would make the
+push events fire and restore the net as-is. That is a credentials and trust-boundary change, so it is a
+Product-Owner decision rather than an implementation detail, and it is recorded as one rather than made
+quietly.
 
 ### Fresh execution is guaranteed, not hoped for
 
@@ -253,7 +280,7 @@ different run id for the right gate · unreadable attempt numbers · a non-decid
 night's verdict · a repaired failure being reported as still owed · **the wording of the reason a future session acts on** · and the positive path, because a module
 that refuses everything would pass every negative case.
 
-**86 assertions**, run by the `governance` gate and again by the orchestrator before it decides anything.
+**91 assertions**, run by the `governance` gate and again by the orchestrator before it decides anything.
 
 The **fixtures** of the other suite are audited too: `run_mutations.py --anchors` resolves every mutation
 case's anchor in a single read pass. That exists because fixture drift has broken this suite three separate

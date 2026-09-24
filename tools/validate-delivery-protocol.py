@@ -329,6 +329,18 @@ def check_orchestrator():
                  "merge" % RUNNER)
         else:
             ok("%s earns the required contexts by re-running each gate's pull_request run" % RUNNER)
+        # THE `push: master` NET DOES NOT FIRE FOR A NIGHTLY MERGE, so what it stood for must be asserted.
+        # GitHub creates no workflow runs from GITHUB_TOKEN events and the orchestrator merges with
+        # GITHUB_TOKEN: measured, a personal-token merge produced 6 runs on its merge commit and an
+        # orchestrator merge produced 0. Without this check nothing at all confirms that the commit on master
+        # carries the content the four gates passed.
+        if "merged_tree_is_what_was_validated" not in rcode:
+            fail("%s does not assert after merging that master carries the tree the gates validated. The "
+                 "`push: master` gates never run for a nightly merge (GITHUB_TOKEN creates no workflow runs), "
+                 "so this is the only thing standing between a relaxed up-to-date rule and unvalidated content "
+                 "on master" % RUNNER)
+        else:
+            ok("%s asserts after merging that master carries the validated tree" % RUNNER)
         if "classify_rerun_runs" not in rcode:
             fail("%s does not put its re-run results through classify_rerun_runs, so the freshness, event, "
                  "head and attempt rules would not be applied to them" % RUNNER)
