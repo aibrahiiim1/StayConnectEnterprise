@@ -31,6 +31,8 @@ export default function VouchersPage() {
       // payments_operator has neither -- so the panel must not even be requested for that role.
       canReadFormat={roles === null ? false : canRead("voucher-code-settings", r)}
       canEditFormat={roles === null ? false : canWrite("voucher-code-settings", r)}
+      // Only for the hotel name printed on voucher cards; the card prints without it.
+      canReadBranding={roles === null ? false : canRead("portal-branding", r)}
     />
   );
 }

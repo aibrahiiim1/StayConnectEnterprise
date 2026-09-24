@@ -768,6 +768,7 @@ func main() {
 	r.Post("/v1/vouchers/issue", s.issueVouchersIAMv2)
 	r.Get("/v1/vouchers", s.listVouchers)
 	r.Get("/v1/vouchers/summary", s.voucherSummary)
+	r.Get("/v1/vouchers/batches", s.listVoucherBatches)
 	r.Post("/v1/vouchers/export", s.exportVoucherCodes)
 	r.Post("/v1/vouchers/{id}/reveal", s.revealVoucherCode)
 	r.Post("/v1/vouchers/{id}/revoke", s.revokeVoucher)
