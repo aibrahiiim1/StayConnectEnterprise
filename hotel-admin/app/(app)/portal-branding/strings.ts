@@ -22,8 +22,24 @@ export type Design = {
   translations?: Record<string, Record<string, string>>;
   /** Which languages a guest is offered. Absent means "all the shipped ones". */
   languages?: { code: string; label: string }[];
+  /** The page layout. Absent means classic, the original page. */
+  template_id?: string;
+  /** Closed vocabularies each template translates into its own CSS. None of them carries markup. */
+  template_options?: TemplateOptions;
+  /** The photograph for the hero panel of the split/immersive/resort layouts. Falls back to background_url. */
+  hero_image_url?: string;
   custom_css?: string;
   custom_html?: string;
+};
+
+export type TemplateOptions = {
+  /** Darkening over the hero photograph, 0–90 (%). */
+  overlay?: number;
+  panel_position?: "start" | "center" | "end";
+  density?: "compact" | "comfortable" | "spacious";
+  hero_height?: "short" | "medium" | "tall";
+  surface?: "solid" | "glass";
+  heading_font?: string;
 };
 
 /** The six languages the portal ships complete wording for. Codes, order and native names match LANGS in
@@ -104,9 +120,12 @@ export const PORTAL_STRINGS: { group: string; key: string; english: string }[] =
 
 export const STRING_GROUPS = Array.from(new Set(PORTAL_STRINGS.map((s) => s.group)));
 
-/** The settings that are "advanced": the only ones that can put executable-shaped content on the page, and
- *  therefore the only ones whose change is confirmed with a password. Kept here so the screen and the
- *  server's own rule (advancedChanged, in resources_branding.go) are described by one list. */
+/** The settings that are "advanced": the only ones that can put markup or a stylesheet on the page, and
+ *  therefore the only ones whose change -- including clearing them -- is confirmed with a password (Product
+ *  Owner decision). This mirrors portaldesign.AdvancedFields on the server, which advancedChanged in
+ *  resources_branding.go reads. A NEW field that can carry markup or CSS must be added to BOTH lists or the
+ *  step-up is silently bypassed for it. The template choice and its options are closed vocabularies, not
+ *  markup, and deliberately save without a password. */
 export const ADVANCED_KEYS: (keyof Design)[] = ["custom_css", "custom_html"];
 
 export function advancedChanged(next: Design, current: Design) {
@@ -136,6 +155,38 @@ export function languageStatus(d: Design, code: string) {
   const custom = PORTAL_STRINGS.filter((s) => (tr[s.key] ?? "").trim() !== "").length;
   const shipped = isShippedLanguage(code);
   return { shipped, custom, total: PORTAL_STRINGS.length, missing: shipped ? 0 : PORTAL_STRINGS.length - custom };
+}
+
+/** WCAG contrast between two CSS colours in #rgb, #rrggbb(aa) or rgb() form; null when either cannot be read
+ *  (the designer then says nothing rather than guessing). */
+export function contrastRatio(a?: string, b?: string): number | null {
+  const la = luminanceOf(a);
+  const lb = luminanceOf(b);
+  if (la === null || lb === null) return null;
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+function luminanceOf(c?: string): number | null {
+  const rgb = parseColour(c);
+  if (!rgb) return null;
+  const lin = rgb.map((v) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+}
+
+function parseColour(c?: string): [number, number, number] | null {
+  if (!c) return null;
+  const v = c.trim();
+  const rgb = v.match(/^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/i);
+  if (rgb) return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
+  const hex = v.match(/^#([0-9a-f]{3,8})$/i);
+  if (!hex) return null;
+  let h = hex[1];
+  if (h.length === 3 || h.length === 4) h = h.slice(0, 3).split("").map((x) => x + x).join("");
+  if (h.length !== 6 && h.length !== 8) return null;
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
 }
 
 /** An appliance path is a GUEST-network path: /assets/<name> is served by portald on the guest side and

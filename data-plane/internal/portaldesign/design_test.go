@@ -2,6 +2,9 @@ package portaldesign
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -162,5 +165,45 @@ func TestForGuestsServesOnlyWhatIsSafe(t *testing.T) {
 	}
 	if ForGuests(nil)["template_id"] != nil && len(ForGuests(nil)) != 0 {
 		t.Error("a nil design should serve nothing")
+	}
+}
+
+// THE DESIGNER AND THE PORTAL AGREE ON THE LAYOUTS AND ON WHAT IS "ADVANCED".
+//
+// Hotel Admin offers the template gallery from its own list and asks for the password from its own list of
+// advanced keys. If either drifted from this package, the designer would offer a layout the server refuses, or
+// -- worse -- save a new markup field without the step-up the server would have required for it.
+func TestTheDesignerMirrorsThisPackage(t *testing.T) {
+	root := filepath.Join("..", "..", "..", "hotel-admin")
+	api, err := os.ReadFile(filepath.Join(root, "lib", "api", "portal-design.ts"))
+	if err != nil {
+		t.Skipf("the admin is not in this checkout (%v)", err)
+	}
+	var ids []string
+	for _, m := range regexp.MustCompile(`\{ id: "([a-z]+)", name: "`).FindAllStringSubmatch(string(api), -1) {
+		ids = append(ids, m[1])
+	}
+	var want []string
+	for _, tp := range Templates {
+		want = append(want, tp.ID)
+	}
+	if strings.Join(ids, ",") != strings.Join(want, ",") {
+		t.Errorf("the designer offers templates %v; the portal has %v", ids, want)
+	}
+
+	strs, err := os.ReadFile(filepath.Join(root, "app", "(app)", "portal-branding", "strings.ts"))
+	if err != nil {
+		t.Fatalf("strings.ts: %v", err)
+	}
+	m := regexp.MustCompile(`ADVANCED_KEYS: \(keyof Design\)\[\] = \[([^\]]*)\]`).FindStringSubmatch(string(strs))
+	if m == nil {
+		t.Fatal("ADVANCED_KEYS not found in strings.ts")
+	}
+	var keys []string
+	for _, k := range regexp.MustCompile(`"([a-z_]+)"`).FindAllStringSubmatch(m[1], -1) {
+		keys = append(keys, k[1])
+	}
+	if strings.Join(keys, ",") != strings.Join(AdvancedFields, ",") {
+		t.Errorf("the designer asks for the password on %v; the server on %v", keys, AdvancedFields)
 	}
 }
