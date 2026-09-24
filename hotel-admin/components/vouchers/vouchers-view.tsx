@@ -2,787 +2,485 @@
 
 // THE VOUCHER SCREEN.
 //
-// Until this existed, nothing in the product could issue a voucher. scd had the route; no caller anywhere
-// reached it. So VOUCHER was an authentication method a property could switch on, which then refused every
-// guest — correctly, because there were no vouchers and no way to make one.
+// FOUR JOBS, KEPT APART:
 //
-// FOUR JOBS, AND THE SCREEN'S WORK IS KEEPING THEM APART:
-//
-//   ISSUE    prints a batch. The codes appear once, here, in the response.
+//   ISSUE    prints a batch. The codes appear once, in the issue dialog, and nowhere else.
 //   REVEAL   recovers ONE code for a card already in circulation. Password, a reason, a permanent record.
 //   EXPORT   recovers a whole batch under the same gate, with one record naming the size of the selection.
-//   REVOKE   cancels an UNUSED card. It cannot cancel a redeemed one: that guest already has access, and
-//            taking access back is an entitlement action on a different screen.
+//   CANCEL   ends an UNUSED card that has not expired. A redeemed card cannot be cancelled: that guest already
+//            has access, and taking access back is an entitlement action on a different screen.
 //
-// THE HONEST SENTENCE ABOUT CONFIDENTIALITY, which this screen has to say out loud rather than imply.
-// Unlike a post-stay PIN or a guest password — both hashed — a voucher code is encrypted and CAN be read
-// again. So the reveal dialog does not promise "this is the only time you will see this": that would be
-// false. It says who will see that you looked, which is true, and which is the thing that actually
-// constrains what people do.
+// THE HONEST SENTENCE ABOUT CONFIDENTIALITY. Unlike a post-stay PIN or a guest password -- both hashed -- a
+// voucher code is encrypted and CAN be read again. So nothing here promises "you will never see this again"
+// about a reveal; it says who will see that you looked, which is true. Only the ISSUE response is one-time
+// in the sense that matters: after it, getting a code back is an audited act.
+//
+// STATUS IS WHAT THE CARD IS, NOT WHAT THE ROW SAYS. Nothing writes REDEMPTION_EXPIRED; expiry is enforced at
+// sign-in from the validity window. The server reports an effective state computed with that same rule, and
+// every filter, count and button on this screen uses it. The stored state is not changed.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import * as React from "react";
+import { Ban, CalendarClock, CheckCircle2, Plus, Settings2, Ticket, TicketCheck } from "lucide-react";
 import { api } from "@/lib/api";
-import type { Voucher, VoucherCodeFormat, VoucherReveal, VoucherState } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorBanner } from "@/components/ui/error-banner";
+import { FilterChips, Pagination, SearchInput } from "@/components/ui/data";
+import { Explain } from "@/components/ui/tooltip";
+import { Field, Select } from "@/components/ui/input";
+import { SkeletonRows } from "@/components/ui/misc";
+import { PageHeader, PageShell, StatCard, Toolbar } from "@/components/ui/page";
+import { Table, TableWrap, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  batchLabel,
+  effectiveStatus,
+  maskedCode,
+  validityWords,
+  type EffectiveStatus,
+  type Grantable,
+  type VoucherBatch,
+  type VoucherBatchesResp,
+  type VoucherListResp,
+  type VoucherReveal,
+  type VoucherRow,
+  type VoucherSummaryFull,
+} from "@/lib/api/vouchers";
+import { AccessLogTab } from "./access-log-tab";
+import { BatchesTab } from "./batches-tab";
+import { CodeSecurityTab } from "./code-security-tab";
+import { IssueDialog } from "./issue-dialog";
+import { StatusBadge, When } from "./shared";
+import { VoucherSheet } from "./voucher-sheet";
 
-// The one-time response of a print run. It exists only here: nothing stores a plaintext code.
-type IssuedBatch = { batch_id: string; count: number; codes: string[] };
+const PAGE = 50;
+type StatusFilter = "all" | EffectiveStatus;
+type Tab = "vouchers" | "batches" | "access" | "security";
 
-// What a batch can grant. The screen offers these rather than asking for a UUID nobody can see.
-type Grantable = {
-  id: string;
-  package_code: string;
-  revision_no: number;
-  package_type: string;
-  name: string;
-  price_minor: number;
-  currency: string;
-};
-
-// A code key generation. No key material is ever returned -- the sealed blind-index key is no more
-// publishable than the clear one -- so this is the number, the lifecycle and what it still indexes.
-type KeyGeneration = {
-  id: string;
-  generation_no: number;
-  superseded_at: string | null;
-  supersede_reason: string | null;
-  vouchers: number;
-  unused_vouchers: number;
-  active: boolean;
-};
-
-const STATE_WORDS: Record<VoucherState, string> = {
-  UNUSED: "Not used yet",
-  REDEEMED: "Redeemed",
-  REVOKED: "Cancelled",
-  REDEMPTION_EXPIRED: "Expired unused",
-};
+/** The counts each status chip shows, from a summary. Falls back to stored states for an older server. */
+function chipCounts(s: VoucherSummaryFull | null): Record<StatusFilter, number | undefined> {
+  if (!s) return { all: undefined, available: undefined, not_yet_valid: undefined, expired: undefined, redeemed: undefined, cancelled: undefined };
+  const total = s.total ?? s.unused + s.redeemed + s.revoked + s.redemption_expired;
+  return {
+    all: total,
+    available: s.available ?? s.unused,
+    not_yet_valid: s.not_yet_valid ?? 0,
+    expired: s.expired_unused ?? s.redemption_expired,
+    redeemed: s.redeemed,
+    cancelled: s.revoked,
+  };
+}
 
 export function VouchersView(props: {
   canIssue: boolean;
   canRevealCodes: boolean;
   canReadFormat: boolean;
   canEditFormat: boolean;
+  /** Whether the portal settings can be read, for the hotel name printed on cards. */
+  canReadBranding?: boolean;
 }) {
-  const { canIssue, canRevealCodes, canReadFormat, canEditFormat } = props;
+  const { canIssue, canRevealCodes, canReadFormat, canEditFormat, canReadBranding = false } = props;
 
-  const [rows, setRows] = useState<Voucher[] | null>(null);
-  const [reveals, setReveals] = useState<VoucherReveal[] | null>(null);
-  const [format, setFormat] = useState<VoucherCodeFormat | null>(null);
-  const [gens, setGens] = useState<KeyGeneration[] | null>(null);
-  const [grantable, setGrantable] = useState<Grantable[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [stateFilter, setStateFilter] = useState("");
-  // PAGINATION, because a batch can be 500 and the endpoint's default page is 100.
-  //
-  // Without this the screen showed the first hundred cards and silently presented them as the inventory:
-  // print five hundred and four hundred of them cannot be revealed or cancelled, because they are not on
-  // the screen at all. A list that quietly truncates is worse than one that says there is more, so this
-  // requests an explicit page and offers to fetch the next.
-  const [pageSize] = useState(200);
-  const [offset, setOffset] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
+  const [tab, setTab] = React.useState<Tab>("vouchers");
+  const [reloadKey, setReloadKey] = React.useState(0);
+  const reload = React.useCallback(() => setReloadKey((k) => k + 1), []);
 
-  // Issue form
-  const [revisionId, setRevisionId] = useState("");
-  const [count, setCount] = useState(10);
-  const [note, setNote] = useState("");
-  const [validUntil, setValidUntil] = useState("");
-  const [issued, setIssued] = useState<IssuedBatch | null>(null);
-
-  // The step-up dialogs
-  const [dialog, setDialog] = useState<
-    | { kind: "reveal"; row: Voucher }
-    | { kind: "revoke"; row: Voucher }
-    | { kind: "export"; batch: string; size: number }
-    | { kind: "rotate"; gen: KeyGeneration }
-    | null
-  >(null);
-  const [password, setPassword] = useState("");
-  const [reason, setReason] = useState("");
-  const [revealed, setRevealed] = useState<{ id: string; code: string } | null>(null);
-  const [exported, setExported] = useState<{ batch: string; rows: { id: string; code: string }[] } | null>(null);
-
-  const load = useCallback(
-    (nextOffset = 0, append = false) => {
-      const p = new URLSearchParams({ limit: String(pageSize), offset: String(nextOffset) });
-      if (stateFilter) p.set("state", stateFilter);
-      api
-        .get<{ vouchers?: Voucher[] }>(`/vouchers/?${p.toString()}`)
-        .then((m) => {
-          const got = m.vouchers ?? [];
-          setRows((prev) => (append ? [...(prev ?? []), ...got] : got));
-          // A full page means there may be another. An empty or short page is the end, stated rather
-          // than guessed at by the operator.
-          setHasMore(got.length === pageSize);
-          setOffset(nextOffset);
-          setError(null);
-        })
-        .catch((e) => setError(String(e?.message ?? e)));
-    },
-    [stateFilter, pageSize],
-  );
-
-  const loadReveals = useCallback(() => {
-    if (!canRevealCodes) return;
+  // ---- summary strip (whole property) ----
+  const [summary, setSummary] = React.useState<VoucherSummaryFull | null>(null);
+  const [summaryErr, setSummaryErr] = React.useState<unknown>(null);
+  React.useEffect(() => {
     api
-      .get<{ reveals?: VoucherReveal[] }>("/voucher-codes/reveals")
-      .then((m) => setReveals(m.reveals ?? []))
-      .catch(() => setReveals(null));
-  }, [canRevealCodes]);
+      .get<VoucherSummaryFull>("/vouchers/summary")
+      .then((s) => {
+        setSummary(s);
+        setSummaryErr(null);
+      })
+      .catch(setSummaryErr);
+  }, [reloadKey]);
 
-  useEffect(() => load(0, false), [load]);
-  useEffect(loadReveals, [loadReveals]);
-  const loadGenerations = useCallback(() => {
-    if (!canEditFormat) return;
-    api
-      .get<{ generations?: KeyGeneration[] }>("/voucher-code-settings/key-generations")
-      .then((m) => setGens(m.generations ?? []))
-      .catch(() => setGens(null));
-  }, [canEditFormat]);
+  // ---- filters ----
+  const [status, setStatus] = React.useState<StatusFilter>("all");
+  const [search, setSearch] = React.useState("");
+  const [pkg, setPkg] = React.useState("");
+  const [batch, setBatch] = React.useState("");
+  const [offset, setOffset] = React.useState(0);
+  const last4 = search.trim().toUpperCase();
+  const searchProblem = last4 && !/^[A-Z0-9]{1,4}$/.test(last4) ? "Search uses up to the last 4 letters or digits of a code." : null;
+  const narrowed = !!(last4 && !searchProblem) || !!pkg || !!batch;
 
-  // GATED ON THE PERMISSION, not attempted and swallowed.
-  //
-  // payments_operator holds `vouchers: read` and NO voucher-code-settings permission -- deliberately, in
-  // both matrices. It is offered the Vouchers destination and can read the card list, so an unconditional
-  // request here was refused by RBAC, the catch reset format to null, and the Code format panel said
-  // "Loading..." forever. A screen that waits for something it will never be given is worse than a screen
-  // that does not show it.
-  useEffect(() => {
-    if (!canReadFormat) {
-      setFormat(null);
+  React.useEffect(() => setOffset(0), [status, last4, pkg, batch]);
+
+  const filterQuery = React.useMemo(() => {
+    const p = new URLSearchParams();
+    if (last4 && !searchProblem) p.set("last4", last4);
+    if (pkg) p.set("package_revision_id", pkg);
+    if (batch) p.set("batch_id", batch);
+    return p;
+  }, [last4, searchProblem, pkg, batch]);
+
+  // Chip counts describe the population the other filters select, so they come from a FILTERED summary.
+  const [filteredSummary, setFilteredSummary] = React.useState<VoucherSummaryFull | null>(null);
+  React.useEffect(() => {
+    if (!narrowed) {
+      setFilteredSummary(null);
       return;
     }
-    api.get<VoucherCodeFormat>("/voucher-code-settings/").then(setFormat).catch(() => setFormat(null));
-  }, [canReadFormat]);
-  useEffect(loadGenerations, [loadGenerations]);
-  useEffect(() => {
-    if (!canIssue) return;
+    api
+      .get<VoucherSummaryFull>(`/vouchers/summary?${filterQuery.toString()}`)
+      .then(setFilteredSummary)
+      .catch(() => setFilteredSummary(null));
+  }, [narrowed, filterQuery, reloadKey]);
+  const counts = chipCounts(narrowed ? filteredSummary : summary);
+
+  // ---- the list ----
+  const [list, setList] = React.useState<VoucherListResp | null>(null);
+  const [listErr, setListErr] = React.useState<unknown>(null);
+  React.useEffect(() => {
+    if (searchProblem) return;
+    const p = new URLSearchParams(filterQuery);
+    p.set("limit", String(PAGE));
+    p.set("offset", String(offset));
+    if (status !== "all") p.set("effective", status);
+    setList(null);
+    api
+      .get<VoucherListResp>(`/vouchers/?${p.toString()}`)
+      .then((m) => {
+        setList(m);
+        setListErr(null);
+      })
+      .catch((e) => {
+        setListErr(e);
+        setList({ vouchers: [] });
+      });
+  }, [filterQuery, status, offset, reloadKey, searchProblem]);
+
+  // ---- what the filters can offer ----
+  const [grantable, setGrantable] = React.useState<Grantable[]>([]);
+  const [batches, setBatches] = React.useState<VoucherBatch[]>([]);
+  React.useEffect(() => {
     api
       .get<{ revisions?: Grantable[] }>("/vouchers/grantable")
       .then((m) => setGrantable(m.revisions ?? []))
-      .catch(() => setGrantable(null));
-  }, [canIssue]);
+      .catch(() => setGrantable([]));
+  }, []);
+  React.useEffect(() => {
+    api
+      .get<VoucherBatchesResp>("/vouchers/batches?limit=200")
+      .then((m) => setBatches(m.batches ?? []))
+      .catch(() => setBatches([]));
+  }, [reloadKey]);
 
-  // Batches, derived from the rows rather than fetched: a batch is a grouping of vouchers, not a record of
-  // its own, and inventing a second source for it is how the two disagree.
-  const batches = useMemo(() => {
-    const seen = new Map<string, number>();
-    for (const r of rows ?? []) if (r.batch_id) seen.set(r.batch_id, (seen.get(r.batch_id) ?? 0) + 1);
-    return [...seen.entries()].sort((a, b) => b[1] - a[1]);
-  }, [rows]);
+  const packageOptions = React.useMemo(() => {
+    const m = new Map<string, string>();
+    for (const g of grantable) m.set(g.id, `${g.name} (version ${g.revision_no})`);
+    for (const b of batches)
+      if (!m.has(b.package_revision_id) && b.package_name)
+        m.set(b.package_revision_id, `${b.package_name}${b.package_revision_no ? ` (version ${b.package_revision_no})` : ""}`);
+    return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [grantable, batches]);
 
-  const closeDialog = () => {
-    setDialog(null);
-    setPassword("");
-    setReason("");
-  };
+  // ---- access log (reveals) ----
+  const [reveals, setReveals] = React.useState<VoucherReveal[] | null>(null);
+  const [revealsErr, setRevealsErr] = React.useState<unknown>(null);
+  React.useEffect(() => {
+    if (!canRevealCodes) return;
+    api
+      .get<{ reveals?: VoucherReveal[] }>("/voucher-codes/reveals")
+      .then((m) => {
+        setReveals(m.reveals ?? []);
+        setRevealsErr(null);
+      })
+      .catch(setRevealsErr);
+  }, [canRevealCodes, reloadKey]);
 
-  const canSubmit = password.length > 0 && reason.trim().length >= 4 && !busy;
+  // ---- the hotel name printed on cards ----
+  const [hotelName, setHotelName] = React.useState<string | undefined>(undefined);
+  React.useEffect(() => {
+    if (!canReadBranding) return;
+    api
+      .get<{ design?: { hotel_name?: string } }>("/portal-branding")
+      .then((m) => setHotelName(m.design?.hotel_name || undefined))
+      .catch(() => setHotelName(undefined));
+  }, [canReadBranding]);
 
-  async function submit() {
-    if (!dialog) return;
-    setBusy(true);
-    setError(null);
-    try {
-      if (dialog.kind === "reveal") {
-        const out = await api.post<{ voucher_id: string; code: string }>(
-          `/voucher-codes/${dialog.row.id}/reveal`,
-          { password, reason: reason.trim() },
-        );
-        setRevealed({ id: out.voucher_id, code: out.code });
-      } else if (dialog.kind === "revoke") {
-        await api.post(`/vouchers/${dialog.row.id}/revoke`, { password, reason: reason.trim() });
-        load(0, false);
-      } else if (dialog.kind === "rotate") {
-        await api.post(`/voucher-code-settings/key-generations/${dialog.gen.id}/supersede`, {
-          password,
-          reason: reason.trim(),
-        });
-        loadGenerations();
-      } else {
-        const out = await api.post<{ batch_id: string; vouchers: { id: string; code: string }[] }>(
-          "/voucher-codes/export",
-          { password, reason: reason.trim(), batch_id: dialog.batch },
-        );
-        setExported({ batch: out.batch_id, rows: out.vouchers });
-      }
-      closeDialog();
-      loadReveals();
-    } catch (e: any) {
-      setError(String(e?.message ?? e));
-    } finally {
-      setBusy(false);
-    }
-  }
+  // ---- dialogs and sheets ----
+  const [issueOpen, setIssueOpen] = React.useState(false);
+  const [selected, setSelected] = React.useState<VoucherRow | null>(null);
+  const [focusBatch, setFocusBatch] = React.useState<{ id: string } | null>(null);
 
-  async function issue() {
-    setBusy(true);
-    setError(null);
-    try {
-      const body: Record<string, unknown> = {
-        package_revision_id: revisionId.trim(),
-        count,
-      };
-      if (note.trim()) body.note = note.trim();
-      if (validUntil) body.valid_until = new Date(validUntil).toISOString();
-      const out = await api.post<IssuedBatch>("/vouchers/issue", body);
-      setIssued(out);
-      load(0, false);
-    } catch (e: any) {
-      setError(String(e?.message ?? e));
-    } finally {
-      setBusy(false);
-    }
-  }
+  const rows = list?.vouchers ?? null;
+  const batchKnown = !batch || batches.some((b) => b.batch_id === batch);
 
-  async function saveFormat(mode: "numbers" | "mixed", length: number) {
-    setBusy(true);
-    setError(null);
-    try {
-      const out = await api.put<VoucherCodeFormat>("/voucher-code-settings/", {
-        code_mode: mode,
-        code_length: length,
-      });
-      setFormat(out);
-    } catch (e: any) {
-      setError(String(e?.message ?? e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  // CSV is built here rather than asked of the server, because the server has already done the part only it
-  // can do — opening the codes, and recording that it did. Turning rows into a file is not a second
-  // privileged act and does not deserve a second audit row.
-  function downloadExported() {
-    if (!exported) return;
-    const csv = ["voucher_id,code", ...exported.rows.map((r) => `${r.id},${r.code}`)].join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `vouchers-${exported.batch.slice(0, 8)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  function viewBatchCards(id: string) {
+    setBatch(id);
+    setStatus("all");
+    setSearch("");
+    setTab("vouchers");
   }
 
   return (
-    <div className="space-y-6 p-6">
-      <header className="space-y-1">
-        <h1 className="text-2xl font-semibold">Vouchers</h1>
-        <p className="text-sm text-muted-foreground">
-          Printed cards a guest redeems for internet access. A code is encrypted and can be read again —
-          every time it is, this screen records who read it and why.
-        </p>
-      </header>
-
-      {error && (
-        <div role="alert" className="rounded-md border border-destructive/30 bg-destructive-subtle p-3 text-sm">
-          {error}
-        </div>
-      )}
-
-      {/* ---- the code format (migration 0085) ---- */}
-      {canReadFormat && (
-      <section className="rounded-md border p-4 space-y-3">
-        <h2 className="font-semibold">Code format</h2>
-        {format === null ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : (
+    <PageShell width="wide">
+      <PageHeader
+        icon={<Ticket />}
+        title="Vouchers"
+        description="Printed cards a guest redeems for internet access. Showing or exporting a code needs your password and is recorded."
+        actions={
           <>
-            <p className="text-sm text-muted-foreground">
-              {format.config_version === 0
-                ? "Nobody has chosen a format, so new batches use the defaults below."
-                : `Chosen at this property (version ${format.config_version}).`}{" "}
-              Digits only suits a numeric keypad; mixed suits a printed card. Never more than eight
-              characters. Changing this affects the <strong>next</strong> batch you print — cards already
-              issued keep the format they were printed with and stay redeemable.
-            </p>
-            <div className="flex flex-wrap items-end gap-3 text-sm">
-              <label className="block">
-                Characters
-                <select
-                  className="mt-1 block rounded border px-2 py-1"
-                  value={format.code_mode}
-                  disabled={!canEditFormat || busy}
-                  onChange={(e) => saveFormat(e.target.value as "numbers" | "mixed", format.code_length)}
-                >
-                  <option value="numbers">Digits only</option>
-                  <option value="mixed">Digits and letters</option>
-                </select>
-              </label>
-              <label className="block">
-                Length
-                <select
-                  className="mt-1 block rounded border px-2 py-1"
-                  value={format.code_length}
-                  disabled={!canEditFormat || busy}
-                  onChange={(e) => saveFormat(format.code_mode, Number(e.target.value))}
-                >
-                  {[6, 7, 8].map((n) => (
-                    <option key={n} value={n}>
-                      {n} characters
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {!canEditFormat && (
-                <span className="text-muted-foreground">
-                  Your role can see the format and not change it.
-                </span>
-              )}
-            </div>
+            {canReadFormat && (
+              <Button variant="secondary" onClick={() => setTab("security")}>
+                <Settings2 /> Code format
+              </Button>
+            )}
+            {canIssue && (
+              <Button onClick={() => setIssueOpen(true)}>
+                <Plus /> Issue vouchers
+              </Button>
+            )}
           </>
-        )}
-      </section>
-      )}
+        }
+      />
 
-      {/* ---- code key generations ---- */}
-      {canEditFormat && gens !== null && (
-        <section className="rounded-md border p-4 space-y-2">
-          <h2 className="font-semibold">Code keys</h2>
-          <p className="text-sm text-muted-foreground">
-            Every code is indexed under a key, and each card stays tied to the key that made it. Retiring a
-            key means new batches use a fresh one; cards already printed keep working. Until now this could
-            be described and not done — the key a property started with was its key forever.
-          </p>
-          <table className="w-full text-sm">
-            <thead className="text-left text-muted-foreground">
-              <tr>
-                <th className="py-2">Key</th>
-                <th>State</th>
-                <th>Cards made with it</th>
-                <th>Still unused</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {gens.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="py-3 text-muted-foreground">
-                    No key yet — the first batch you print creates one.
-                  </td>
-                </tr>
-              )}
-              {gens.map((g) => (
-                <tr key={g.id} className="border-t">
-                  <td className="py-2">Generation {g.generation_no}</td>
-                  <td>
-                    {g.active ? (
-                      "In use"
-                    ) : (
-                      <span title={g.supersede_reason ?? undefined}>Retired {g.superseded_at}</span>
-                    )}
-                  </td>
-                  <td>{g.vouchers.toLocaleString()}</td>
-                  <td>{g.unused_vouchers.toLocaleString()}</td>
-                  <td className="text-right">
-                    <button
-                      type="button"
-                      disabled={!g.active || busy}
-                      className="rounded border px-2 py-1 disabled:opacity-40"
-                      onClick={() => setDialog({ kind: "rotate", gen: g })}
+      <ErrorBanner err={summaryErr} />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <StatCard
+          label="Available now"
+          value={summary ? (summary.available ?? summary.unused).toLocaleString() : "—"}
+          icon={<CheckCircle2 />}
+          tone="ok"
+          hint="Unused and inside their validity window"
+        />
+        <StatCard
+          label="Used"
+          value={summary ? summary.redeemed.toLocaleString() : "—"}
+          icon={<TicketCheck />}
+          hint="A guest signed in with them"
+        />
+        <StatCard
+          label="Expired unused"
+          value={summary ? (summary.expired_unused ?? summary.redemption_expired).toLocaleString() : "—"}
+          icon={<CalendarClock />}
+          tone={summary && (summary.expired_unused ?? 0) > 0 ? "warn" : "default"}
+          hint="Past valid-until; refused at sign-in"
+        />
+        <StatCard
+          label="Cancelled"
+          value={summary ? summary.revoked.toLocaleString() : "—"}
+          icon={<Ban />}
+          hint="Cancelled before use"
+        />
+        <StatCard
+          label="Issued this week"
+          value={summary?.issued_last_7_days != null ? summary.issued_last_7_days.toLocaleString() : "—"}
+          icon={<Ticket />}
+          tone="primary"
+          hint="Cards issued in the last 7 days"
+          className="col-span-2 sm:col-span-1"
+        />
+      </div>
+
+      <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
+        <TabsList className="overflow-x-auto">
+          <TabsTrigger value="vouchers">Vouchers</TabsTrigger>
+          <TabsTrigger value="batches">Batches</TabsTrigger>
+          {canRevealCodes && <TabsTrigger value="access">Access log</TabsTrigger>}
+          {canReadFormat && <TabsTrigger value="security">Code security</TabsTrigger>}
+        </TabsList>
+
+        <TabsContent value="vouchers" className="space-y-4 pt-4">
+          <Card>
+            <div className="space-y-3 border-b border-border px-4 py-3">
+              <Toolbar>
+                <div className="flex w-full flex-wrap items-end gap-3">
+                  <div className="w-full sm:w-auto">
+                    <SearchInput
+                      value={search}
+                      onChange={setSearch}
+                      delay={300}
+                      placeholder="Last 4 characters"
+                      label="Search by the last 4 characters of a code"
+                      className="sm:w-56"
+                    />
+                  </div>
+                  <Field label="Package" className="w-full sm:w-56">
+                    <Select value={pkg} onChange={(e) => setPkg(e.target.value)}>
+                      <option value="">All packages</option>
+                      {packageOptions.map(([id, label]) => (
+                        <option key={id} value={id}>
+                          {label}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Batch" className="w-full sm:w-64">
+                    <Select value={batch} onChange={(e) => setBatch(e.target.value)}>
+                      <option value="">All batches</option>
+                      {!batchKnown && <option value={batch}>Batch {batch.slice(0, 8)}</option>}
+                      {batches.map((b) => (
+                        <option key={b.batch_id} value={b.batch_id}>
+                          {batchLabel(b)} · {b.count} cards
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  {narrowed && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setSearch("");
+                        setPkg("");
+                        setBatch("");
+                      }}
                     >
-                      Retire
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
-
-      {/* ---- issue ---- */}
-      {canIssue && (
-        <section className="rounded-md border p-4 space-y-3">
-          <h2 className="font-semibold">Print a batch</h2>
-          <div className="flex flex-wrap items-end gap-3 text-sm">
-            <label className="block">
-              What these cards grant
-              {grantable === null ? (
-                <input
-                  className="mt-1 block w-80 rounded border px-2 py-1"
-                  value={revisionId}
-                  onChange={(e) => setRevisionId(e.target.value)}
-                  placeholder="internet package revision id"
+                      Clear filters
+                    </Button>
+                  )}
+                </div>
+              </Toolbar>
+              {searchProblem && <p className="text-xs text-destructive">{searchProblem}</p>}
+              <div className="flex flex-wrap items-center gap-2">
+                <FilterChips
+                  label="Status"
+                  value={status}
+                  onChange={setStatus}
+                  options={[
+                    { value: "all", label: "All", count: counts.all },
+                    { value: "available", label: "Available", count: counts.available, tone: "ok" },
+                    { value: "not_yet_valid", label: "Not yet valid", count: counts.not_yet_valid, tone: "info" },
+                    { value: "expired", label: "Expired (never used)", count: counts.expired, tone: "warn" },
+                    { value: "redeemed", label: "Used", count: counts.redeemed },
+                    { value: "cancelled", label: "Cancelled", count: counts.cancelled, tone: "err" },
+                  ]}
                 />
-              ) : (
-                <select
-                  className="mt-1 block w-80 rounded border px-2 py-1"
-                  value={revisionId}
-                  onChange={(e) => setRevisionId(e.target.value)}
-                >
-                  <option value="">Choose an internet package…</option>
-                  {grantable.map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {g.name} — {g.package_code} r{g.revision_no}
-                      {g.price_minor > 0 && g.currency
-                        ? ` — ${(g.price_minor / 100).toFixed(2)} ${g.currency}`
-                        : " — free"}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </label>
-            <label className="block">
-              How many
-              <input
-                type="number"
-                min={1}
-                max={500}
-                className="mt-1 block w-24 rounded border px-2 py-1"
-                value={count}
-                onChange={(e) => setCount(Number(e.target.value))}
+                <Explain>
+                  Expiry is enforced when a guest signs in: a card past its valid-until is refused there, while its record
+                  still says unused. These statuses show what each card is right now.
+                </Explain>
+              </div>
+            </div>
+
+            <ErrorBanner err={listErr} className="mx-4 mt-3" />
+            {rows === null ? (
+              <SkeletonRows rows={6} cols={5} />
+            ) : rows.length === 0 ? (
+              <EmptyState
+                icon={<Ticket />}
+                title={narrowed || status !== "all" ? "No cards match these filters" : "No vouchers yet"}
+                hint={
+                  narrowed || status !== "all"
+                    ? "Try another status, or clear the filters."
+                    : canIssue
+                      ? "Issue a batch to print cards guests can use to sign in."
+                      : "Cards appear here once someone issues a batch."
+                }
+                action={
+                  !narrowed && status === "all" && canIssue ? (
+                    <Button onClick={() => setIssueOpen(true)}>
+                      <Plus /> Issue vouchers
+                    </Button>
+                  ) : undefined
+                }
               />
-            </label>
-            <label className="block">
-              Valid until (optional)
-              <input
-                type="datetime-local"
-                className="mt-1 block rounded border px-2 py-1"
-                value={validUntil}
-                onChange={(e) => setValidUntil(e.target.value)}
-              />
-            </label>
-            <label className="block">
-              Note (optional)
-              <input
-                className="mt-1 block w-64 rounded border px-2 py-1"
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                placeholder="conference desk, week 12"
-              />
-            </label>
-            <button
-              type="button"
-              disabled={busy || !revisionId.trim() || count < 1 || count > 500}
-              className="rounded-md bg-primary px-3 py-1 font-medium text-primary-foreground disabled:opacity-50"
-              onClick={issue}
-            >
-              Print {count}
-            </button>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Leave <em>Valid until</em> empty for cards that never expire. A date already past is refused —
-            cards printed from it could never be redeemed.
-          </p>
-          {grantable !== null && grantable.length === 0 && (
-            <p className="text-xs text-muted-foreground">
-              No internet package is published yet, so there is nothing for a card to grant. Publish one
-              under <strong>Internet packages</strong> first.
-            </p>
-          )}
-        </section>
-      )}
-
-      {/* ---- the one-time batch sheet ---- */}
-      {issued && (
-        <section
-          role="status"
-          className="rounded-md border border-warning/30 bg-warning-subtle p-4 text-sm space-y-2"
-        >
-          <div className="font-semibold">
-            {issued.count} codes — printed now, shown here
-          </div>
-          <p>
-            Print or copy these now. Closing this panel does not destroy them: unlike a post-stay PIN, a
-            voucher code can be recovered later — but doing so is recorded against your name, so it is
-            easier to keep them now.
-          </p>
-          <div className="max-h-60 overflow-y-auto rounded bg-background p-2 font-mono text-base tracking-widest">
-            {issued.codes.map((c) => (
-              <div key={c}>{c}</div>
-            ))}
-          </div>
-          <div className="flex gap-2">
-            <button type="button" className="rounded border px-3 py-1" onClick={() => window.print()}>
-              Print
-            </button>
-            <button type="button" className="rounded border px-3 py-1" onClick={() => setIssued(null)}>
-              Done
-            </button>
-          </div>
-        </section>
-      )}
-
-      {/* ---- a single revealed code ---- */}
-      {revealed && (
-        <section role="status" className="rounded-md border border-warning/30 bg-warning-subtle p-4 text-sm space-y-2">
-          <div className="font-semibold">Code for card {revealed.id.slice(0, 8)}</div>
-          <div className="font-mono text-2xl tracking-widest">{revealed.code}</div>
-          <p>This reveal is recorded with your name and your reason. It cannot be un-recorded.</p>
-          <button type="button" className="rounded border px-3 py-1" onClick={() => setRevealed(null)}>
-            Close
-          </button>
-        </section>
-      )}
-
-      {/* ---- an exported batch ---- */}
-      {exported && (
-        <section role="status" className="rounded-md border border-warning/30 bg-warning-subtle p-4 text-sm space-y-2">
-          <div className="font-semibold">
-            {exported.rows.length} codes from batch {exported.batch.slice(0, 8)}
-          </div>
-          <p>One record was written naming you, your reason and the size of this selection.</p>
-          <div className="flex gap-2">
-            <button type="button" className="rounded border px-3 py-1" onClick={downloadExported}>
-              Download CSV
-            </button>
-            <button type="button" className="rounded border px-3 py-1" onClick={() => setExported(null)}>
-              Close
-            </button>
-          </div>
-        </section>
-      )}
-
-      {/* ---- batches ---- */}
-      {batches.length > 0 && canRevealCodes && (
-        <section className="rounded-md border p-4 space-y-2">
-          <h2 className="font-semibold">Batches</h2>
-          <ul className="space-y-1 text-sm">
-            {batches.map(([id, n]) => (
-              <li key={id} className="flex items-center gap-3">
-                <span className="font-mono">{id.slice(0, 8)}</span>
-                <span className="text-muted-foreground">{n} cards in view</span>
-                <button
-                  type="button"
-                  className="rounded border px-2 py-0.5"
-                  onClick={() => setDialog({ kind: "export", batch: id, size: n })}
-                >
-                  Export codes
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {/* ---- the list ---- */}
-      <section className="space-y-2">
-        <div className="flex items-center gap-3">
-          <h2 className="font-semibold">Cards</h2>
-          <select
-            className="rounded border px-2 py-1 text-sm"
-            value={stateFilter}
-            onChange={(e) => setStateFilter(e.target.value)}
-          >
-            <option value="">All states</option>
-            {Object.entries(STATE_WORDS).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
-          </select>
-        </div>
-        <table className="w-full text-sm">
-          <thead className="text-left text-muted-foreground">
-            <tr>
-              <th className="py-2">Card</th>
-              <th>State</th>
-              <th>Batch</th>
-              <th>Printed</th>
-              <th>Valid until</th>
-              <th>Note</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {rows === null && (
-              <tr>
-                <td colSpan={7} className="py-4 text-muted-foreground">
-                  Loading…
-                </td>
-              </tr>
-            )}
-            {rows?.length === 0 && (
-              <tr>
-                <td colSpan={7} className="py-4 text-muted-foreground">
-                  No cards yet. Print a batch above.
-                </td>
-              </tr>
-            )}
-            {rows?.map((row) => (
-              <tr key={row.id} className="border-t">
-                <td className="py-2 font-mono">…{row.code_last4}</td>
-                <td>{STATE_WORDS[row.state]}</td>
-                <td className="font-mono">{row.batch_id ? row.batch_id.slice(0, 8) : "—"}</td>
-                <td>{row.created_at}</td>
-                <td>{row.redemption_valid_until ?? "never expires"}</td>
-                <td className="text-muted-foreground">{row.notes ?? ""}</td>
-                <td className="space-x-2 text-right">
-                  <button
-                    type="button"
-                    disabled={!canRevealCodes}
-                    className="rounded border px-2 py-1 disabled:opacity-40"
-                    onClick={() => setDialog({ kind: "reveal", row })}
-                  >
-                    Show code
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!canIssue || row.state !== "UNUSED"}
-                    className="rounded-md border border-destructive/40 px-2 py-1 text-destructive disabled:opacity-50"
-                    onClick={() => setDialog({ kind: "revoke", row })}
-                  >
-                    Cancel card
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {rows !== null && (
-          <div className="flex items-center gap-3 text-sm text-muted-foreground">
-            <span>
-              Showing {rows.length.toLocaleString()} card{rows.length === 1 ? "" : "s"}
-              {hasMore ? " so far" : ""}
-            </span>
-            {hasMore && (
-              <button
-                type="button"
-                className="rounded border px-2 py-1"
-                onClick={() => load(offset + pageSize, true)}
-              >
-                Load more
-              </button>
-            )}
-          </div>
-        )}
-      </section>
-
-      {/* ---- the step-up dialog ---- */}
-      {dialog && (
-        <div role="dialog" aria-modal="true" className="rounded border p-4 space-y-3">
-          <h2 className="text-lg font-semibold">
-            {dialog.kind === "reveal"
-              ? "Show this code"
-              : dialog.kind === "revoke"
-                ? "Cancel this card"
-                : dialog.kind === "rotate"
-                  ? `Retire code key generation ${dialog.gen.generation_no}`
-                  : "Export a batch of codes"}
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            {dialog.kind === "reveal" ? (
-              <>
-                The code will be shown once here, and this reveal will be recorded permanently with your name
-                and your reason. It is not a one-time view — a voucher code can be read again — so the record
-                is what makes it accountable.
-              </>
-            ) : dialog.kind === "revoke" ? (
-              <>
-                This card stops working. It cannot be un-cancelled. A card that has already been redeemed
-                cannot be cancelled here at all: that guest has access, and ending it is done from their
-                session.
-              </>
-            ) : dialog.kind === "rotate" ? (
-              <>
-                New batches will be printed under a fresh key. The{" "}
-                <strong>{dialog.gen.unused_vouchers.toLocaleString()} unused cards</strong> printed under
-                generation {dialog.gen.generation_no} keep working — each card is tied to the key that
-                made it — so nothing in circulation stops. This cannot be undone: a retired generation is
-                not brought back.
-              </>
             ) : (
-              <>
-                Every code in batch {dialog.batch.slice(0, 8)} will be recovered and offered as a CSV. One
-                record is written naming you, your reason and how many codes you took.
-              </>
+              <TableWrap>
+                <Table>
+                  <THead>
+                    <TR>
+                      <TH>Card</TH>
+                      <TH>Package</TH>
+                      <TH>Status</TH>
+                      <TH className="hidden sm:table-cell">Validity</TH>
+                      <TH className="hidden md:table-cell">Batch</TH>
+                      <TH className="hidden lg:table-cell">Issued</TH>
+                    </TR>
+                  </THead>
+                  <TBody>
+                    {rows.map((r) => (
+                      <TR
+                        key={r.id}
+                        tabIndex={0}
+                        aria-label={`Card ${maskedCode(r.code_last4)}`}
+                        className="cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50"
+                        onClick={() => setSelected(r)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setSelected(r);
+                          }
+                        }}
+                      >
+                        <TD className="whitespace-nowrap font-mono tracking-widest">{maskedCode(r.code_last4)}</TD>
+                        <TD>{r.package_name ?? <span className="text-muted-foreground">Earlier package version</span>}</TD>
+                        <TD>
+                          <StatusBadge status={effectiveStatus(r)} />
+                        </TD>
+                        <TD className="hidden whitespace-nowrap sm:table-cell">
+                          {validityWords(r.redemption_valid_from, r.redemption_valid_until)}
+                        </TD>
+                        <TD className="hidden md:table-cell">
+                          {r.batch_id ? (
+                            <span className="font-mono text-xs text-muted-foreground">{r.batch_id.slice(0, 8)}</span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TD>
+                        <TD className="hidden whitespace-nowrap lg:table-cell">
+                          <When iso={r.created_at} />
+                          {r.issued_by_label && <div className="text-xs text-muted-foreground">{r.issued_by_label}</div>}
+                        </TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
+              </TableWrap>
             )}
-          </p>
-          <label className="block text-sm">
-            Reason (recorded, 4–500 characters)
-            <input
-              className="mt-1 w-full rounded border px-2 py-1"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder={
-                dialog.kind === "revoke" ? "batch lost in the post" : "guest at the desk, card unreadable"
-              }
-            />
-          </label>
-          <label className="block text-sm">
-            Your password
-            <input
-              type="password"
-              className="mt-1 w-full rounded border px-2 py-1"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </label>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              disabled={!canSubmit}
-              className={
-                dialog.kind === "revoke"
-                  ? "rounded-md bg-destructive px-3 py-1 text-sm font-medium text-destructive-foreground disabled:opacity-50"
-                  : "rounded-md bg-primary px-3 py-1 text-sm font-medium text-primary-foreground disabled:opacity-50"
-              }
-              onClick={submit}
-            >
-              {dialog.kind === "reveal"
-                ? "Show it"
-                : dialog.kind === "revoke"
-                  ? "Cancel the card"
-                  : dialog.kind === "rotate"
-                    ? "Retire this generation"
-                    : "Export"}
-            </button>
-            <button type="button" className="rounded border px-3 py-1" onClick={closeDialog}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
+            {rows && rows.length > 0 && (
+              <div className="border-t border-border px-4 py-3">
+                <Pagination offset={offset} limit={PAGE} shown={rows.length} total={list?.total ?? null} onChange={setOffset} />
+              </div>
+            )}
+          </Card>
+        </TabsContent>
 
-      {/* ---- who has looked ---- */}
-      {canRevealCodes && (
-        <section className="space-y-2">
-          <h2 className="font-semibold">Who has read a code</h2>
-          <p className="text-sm text-muted-foreground">
-            Every reveal and every export, permanently. Nothing on this list can be edited or removed.
-          </p>
-          <table className="w-full text-sm">
-            <thead className="text-left text-muted-foreground">
-              <tr>
-                <th className="py-2">When</th>
-                <th>What</th>
-                <th>How many</th>
-                <th>Who</th>
-                <th>Why</th>
-              </tr>
-            </thead>
-            <tbody>
-              {reveals === null && (
-                <tr>
-                  <td colSpan={5} className="py-4 text-muted-foreground">
-                    Loading…
-                  </td>
-                </tr>
-              )}
-              {reveals?.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="py-4 text-muted-foreground">
-                    Nobody has read a code yet.
-                  </td>
-                </tr>
-              )}
-              {reveals?.map((r, i) => (
-                <tr key={`${r.revealed_at}-${i}`} className="border-t">
-                  <td className="py-2">{r.revealed_at}</td>
-                  <td>{r.action === "REVEAL" ? "One card" : "A batch export"}</td>
-                  <td>{r.voucher_count}</td>
-                  <td>{r.operator_label}</td>
-                  <td className="text-muted-foreground">{r.reason}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
-    </div>
+        <TabsContent value="batches" className="pt-4">
+          <BatchesTab
+            canRevealCodes={canRevealCodes}
+            reloadKey={reloadKey}
+            onViewCards={viewBatchCards}
+            hotelName={hotelName}
+            focusBatch={focusBatch}
+          />
+        </TabsContent>
+
+        {canRevealCodes && (
+          <TabsContent value="access" className="pt-4">
+            <AccessLogTab reveals={reveals} error={revealsErr} />
+          </TabsContent>
+        )}
+
+        {canReadFormat && (
+          <TabsContent value="security" className="pt-4">
+            <CodeSecurityTab canEditFormat={canEditFormat} />
+          </TabsContent>
+        )}
+      </Tabs>
+
+      <VoucherSheet
+        row={selected}
+        onOpenChange={(v) => !v && setSelected(null)}
+        canIssue={canIssue}
+        canRevealCodes={canRevealCodes}
+        reveals={reveals}
+        onChanged={reload}
+        onShowBatch={(id) => {
+          setSelected(null);
+          setFocusBatch({ id });
+          setTab("batches");
+        }}
+      />
+
+      <IssueDialog open={issueOpen} onOpenChange={setIssueOpen} onIssued={reload} hotelName={hotelName} />
+    </PageShell>
   );
 }
