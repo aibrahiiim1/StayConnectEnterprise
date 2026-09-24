@@ -1,0 +1,4 @@
+commit 1e9166cf47ba1de0ef1c6de3d30f46e63bd5d5e1
+Date:   Thu Sep 24 03:59:29 2026 +0300
+
+    Governance: the delivery head is the shared comment-stripping helper

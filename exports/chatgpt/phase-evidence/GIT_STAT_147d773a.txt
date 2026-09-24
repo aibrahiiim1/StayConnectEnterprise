@@ -1,4 +1,0 @@
-commit 147d773a78ff2fe88c61b25990c840d4b5eed4a6
-Date:   Thu Sep 24 03:34:43 2026 +0300
-
-    Governance: the delivery head is the mention-versus-step correction
