@@ -22,7 +22,7 @@ const landingHTML = `<!doctype html>
     --sc-card:       #ffffff;
     --sc-line:       #e3e8e8;
     --sc-radius:     20px;
-    --sc-bg: url("/assets/portal-background.jpg");
+    --sc-bg: none; /* no photo unless the hotel sets one; the old default named a file no appliance ships, so every guest page load requested it and got a 404 */
     font-family: "Inter", -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
   }
   * { box-sizing: border-box; }
