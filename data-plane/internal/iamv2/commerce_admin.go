@@ -59,11 +59,18 @@ type CommerceAdminRepository interface {
 	GetGraceConfig(ctx context.Context, tenantID, siteID string) (GraceConfig, error)
 	ListQuotes(ctx context.Context, tenantID, siteID string, limit int) ([]QuoteInspect, error)
 	ListPurchases(ctx context.Context, tenantID, siteID string, limit int) ([]PurchaseInspect, error)
+	// PackageReferences / PlanReferences count the records that still point at a package (any of its
+	// revisions) or at a plan. Read-only; see PackageDeletability. found=false means no such operator item.
+	PackageReferences(ctx context.Context, tenantID, siteID, packageID string) (reasons []DeletabilityReason, found bool, err error)
+	PlanReferences(ctx context.Context, tenantID, siteID, planID string) (reasons []DeletabilityReason, found bool, err error)
 }
 
 // CommerceAdminTx is the transactional admin surface: a whole publish runs on one tx.
 type CommerceAdminTx interface {
 	UpsertPackage(ctx context.Context, tenantID, siteID, code string) (packageID string, err error)
+	// CreatePackage inserts a NEW package row and refuses with ErrCodeExists when the code is already taken.
+	// It is what "Add package" uses; UpsertPackage stays the path that publishes a revision of an existing one.
+	CreatePackage(ctx context.Context, tenantID, siteID, code string) (packageID string, err error)
 	NextRevisionNo(ctx context.Context, packageID string) (int, error)
 	PlanRevisionBelongs(ctx context.Context, tenantID, siteID, planRevisionID string) (bool, error)
 	InsertPackageRevision(ctx context.Context, spec PackagePublishSpec, packageID string, revNo int) (revisionID string, err error)
@@ -74,6 +81,8 @@ type CommerceAdminTx interface {
 
 	// service plans
 	UpsertPlan(ctx context.Context, tenantID, siteID, code string) (planID string, err error)
+	// CreatePlan is CreatePackage for service plans.
+	CreatePlan(ctx context.Context, tenantID, siteID, code string) (planID string, err error)
 	NextPlanRevisionNo(ctx context.Context, planID string) (int, error)
 	InsertPlanRevision(ctx context.Context, spec PlanPublishSpec, planID string, revNo int) (revisionID string, err error)
 	SetPlanCurrentRevision(ctx context.Context, planID, revisionID string) error
@@ -92,6 +101,9 @@ type RevisionInfo struct {
 	PriceMinor  int64  `json:"price_minor,omitempty"`  // packages only
 	Currency    string `json:"currency,omitempty"`     // packages only
 	PackageType string `json:"package_type,omitempty"` // packages only
+	// CurrencyExponent is the revision's own minor-unit exponent (packages only). Absent when the revision
+	// recorded none, so a client can say it assumed one rather than silently inventing it.
+	CurrencyExponent *int `json:"currency_exponent,omitempty"`
 }
 
 // PlanSummary is the read shape for the service-plan list.
@@ -191,6 +203,8 @@ type PlanPublishSpec struct {
 	// SpeedAllocation is PER_DEVICE or SHARED. Empty publishes PER_DEVICE, so an operator (or an older client)
 	// that says nothing about it gets exactly what every revision published so far promised.
 	SpeedAllocation string
+	// CreateOnly: see PackagePublishSpec.CreateOnly.
+	CreateOnly bool
 }
 
 // PackageSummary is the read shape for the admin list.
@@ -211,12 +225,16 @@ type PackageSummary struct {
 	//
 	// They are read-only projections. The revision chain underneath is untouched and still immutable; this
 	// only stops the operator having to reconstruct it by hand.
-	Name         *string `json:"name,omitempty"`
-	PriceMinor   *int64  `json:"price_minor,omitempty"`
-	Currency     *string `json:"currency,omitempty"`
-	PackageType  *string `json:"package_type,omitempty"`
-	VisibleFrom  *string `json:"visible_from,omitempty"`
-	VisibleUntil *string `json:"visible_until,omitempty"`
+	Name       *string `json:"name,omitempty"`
+	PriceMinor *int64  `json:"price_minor,omitempty"`
+	Currency   *string `json:"currency,omitempty"`
+	// CurrencyExponent is how many minor units make one major unit of PriceMinor (2 for USD: 500 = 5.00),
+	// carried from the revision so a price is formatted with the exponent it was published with rather than
+	// printed in minor units or divided by a guessed 100.
+	CurrencyExponent *int    `json:"currency_exponent,omitempty"`
+	PackageType      *string `json:"package_type,omitempty"`
+	VisibleFrom      *string `json:"visible_from,omitempty"`
+	VisibleUntil     *string `json:"visible_until,omitempty"`
 	// The eligibility-rule and grant-tier counts are deliberately ABSENT. svc_edged authors both tables and
 	// holds no SELECT on either, so reading them here is what turned this list into a 500 under the real
 	// runtime role. See the note in ListPackages.
@@ -258,6 +276,7 @@ type PackageCurrent struct {
 	PackageType           string            `json:"package_type"`
 	PriceMinor            int64             `json:"price_minor"`
 	Currency              string            `json:"currency"`
+	CurrencyExponent      *int              `json:"currency_exponent,omitempty"`
 	SettlementMethods     []string          `json:"settlement_methods"`
 	Display               map[string]any    `json:"display"`
 	DurationPolicy        map[string]any    `json:"duration_policy"`
@@ -286,6 +305,9 @@ type PackagePublishSpec struct {
 	// {"mode":"FIXED"}) means the pinned service plan revision's quota is used unchanged, which is what every
 	// revision published before this field existed carries.
 	DataAllocationPolicy map[string]any
+	// CreateOnly means "this is a NEW package": publication refuses with ErrCodeExists when the code is already
+	// in use, instead of silently becoming a new revision of the package that owns it. Edit leaves it false.
+	CreateOnly bool
 }
 
 // AdminResult is the guest-independent result of an admin mutation.
@@ -384,7 +406,12 @@ func (a *CommerceAdmin) PublishRevision(ctx context.Context, spec PackagePublish
 			res = AdminResult{Reason: "plan_revision_not_found"}
 			return nil
 		}
-		pkgID, err := tx.UpsertPackage(ctx, spec.TenantID, spec.SiteID, spec.PackageCode)
+		var pkgID string
+		if spec.CreateOnly {
+			pkgID, err = tx.CreatePackage(ctx, spec.TenantID, spec.SiteID, spec.PackageCode)
+		} else {
+			pkgID, err = tx.UpsertPackage(ctx, spec.TenantID, spec.SiteID, spec.PackageCode)
+		}
 		if err != nil {
 			return err
 		}
@@ -420,6 +447,10 @@ func (a *CommerceAdmin) PublishRevision(ctx context.Context, spec PackagePublish
 		var de *Error
 		if errors.As(err, &de) && de.Code == ErrInvalidInput {
 			return AdminResult{}, de
+		}
+		// A taken code on Add is the operator's to act on ("open it and edit it"), not a repository fault.
+		if errors.Is(err, ErrCodeExists) {
+			return AdminResult{}, ErrCodeExists
 		}
 		return AdminResult{}, &Error{Code: ErrRepo, Msg: "publish"}
 	}
@@ -597,7 +628,13 @@ func (a *CommerceAdmin) PublishPlanRevision(ctx context.Context, spec PlanPublis
 	}
 	var res AdminResult
 	err := a.repo.WithTx(ctx, func(tx CommerceAdminTx) error {
-		planID, err := tx.UpsertPlan(ctx, spec.TenantID, spec.SiteID, spec.PlanCode)
+		var planID string
+		var err error
+		if spec.CreateOnly {
+			planID, err = tx.CreatePlan(ctx, spec.TenantID, spec.SiteID, spec.PlanCode)
+		} else {
+			planID, err = tx.UpsertPlan(ctx, spec.TenantID, spec.SiteID, spec.PlanCode)
+		}
 		if err != nil {
 			return err
 		}
@@ -620,6 +657,9 @@ func (a *CommerceAdmin) PublishPlanRevision(ctx context.Context, spec PlanPublis
 		var de *Error
 		if errors.As(err, &de) && de.Code == ErrInvalidInput {
 			return AdminResult{}, de
+		}
+		if errors.Is(err, ErrCodeExists) {
+			return AdminResult{}, ErrCodeExists
 		}
 		return AdminResult{}, &Error{Code: ErrRepo, Msg: "publish plan"}
 	}
