@@ -29,6 +29,7 @@ a missing rule -- is a FAIL. A security check that passes because it could not l
 import io
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -110,9 +111,21 @@ def main():
         if names != [context]:
             fail("%s must define exactly one job named %r (a required status context IS the job name); "
                  "found %r" % (wf, context, names))
-        if "pull_request:" not in text:
-            fail("%s has no pull_request trigger, so its required context would never report on a PR and "
-                 "master would be permanently unmergeable" % wf)
+        # WHAT THIS CHECK PROTECTS: that SOMETHING can report the required context for a pull-request head.
+        #
+        # A RETRACTION, KEPT ON PURPOSE. T0183 required `workflow_dispatch` here instead, citing "proven live on
+        # PR #181: four dispatched runs, four check runs on the PR head, under these exact names." Every word of
+        # that was true and the conclusion drawn from it was false. Checks appearing on the head was taken as
+        # evidence that the ruleset would accept them; it does not, and asking GitHub to merge is what said so.
+        # Seeing the artefact is not the same as testing the requirement.
+        #
+        # MEASURED, NOT REASONED: only a pull_request run's checks satisfy a ruleset-required status check.
+        # A workflow_dispatch run puts green checks with the right names, from the pinned app, on the head, and
+        # GitHub associates them with the pull request -- and the ruleset still answered
+        # `HTTP 405 ... 4 of 4 required status checks are expected`. So this requires the trigger that works.
+        if not re.search(r"(?m)^\s{2}pull_request:\s*$", text):
+            fail("%s declares no pull_request trigger. Only a pull_request run's checks satisfy a "
+                 "ruleset-required status check, so without it master would be permanently unmergeable" % wf)
     if not fails:
         ok("every gate workflow declares exactly the job name its required context expects")
 

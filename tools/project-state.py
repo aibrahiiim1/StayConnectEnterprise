@@ -445,9 +445,21 @@ def cmd_validate(deep=True, manifest_equality=True):
         fail("mandatory governance CI missing: .github/workflows/project-governance.yml (GH-MANDATORY-CI)")
     else:
         w = open(wf, encoding="utf-8").read()
-        if "pull_request:" not in w: fail("governance CI must run on pull_request (targeting master)")
+        # THE TRIGGER THIS DEMANDS, AND WHY IT WENT AWAY AND CAME BACK (T0182 -> T0183, T0184).
+        #
+        # T0183 briefly required `workflow_dispatch` here instead, because the nightly model dispatched the
+        # gates at the delivery ref and the daytime pull_request run was the 29-31 minute interruption the
+        # Product Owner removed. That was wrong about a fact, and the fact was measured, not argued:
+        # a dispatched run's check runs do NOT satisfy a ruleset-required status check. See
+        # tools/nightly_delivery.py for the verbatim refusal GitHub returned with all four green.
+        #
+        # So `pull_request:` is required again -- and the cost is removed by the sentinel attempt instead of
+        # by changing the event. Which EVENT earns the context is asserted in ONE place,
+        # validate-delivery-protocol.py; this check owns only the substance below.
+        if "pull_request:" not in w:
+            fail("governance CI must run on pull_request; only a pull_request run's checks satisfy a "
+                 "ruleset-required status check, as PR #181 measured")
         if "master" not in w: fail("governance CI must target the master branch")
-        if "workflow_dispatch" not in w: fail("governance CI must allow manual workflow_dispatch")
         for cmd in ["tools/project-state.py validate", "tools/project-state.py check-generated",
                     "tools/tests/project_state_validator/run_mutations.py", "tools/validate-project-state.sh"]:
             if cmd not in w: fail(f"governance CI missing required validation command: {cmd}")

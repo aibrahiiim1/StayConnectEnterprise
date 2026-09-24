@@ -41,6 +41,11 @@ compute: there was no `concurrency:` key in any gate workflow, so superseded run
 reported the same required context as the real one (1 274 s duplicated, and a merge blocked for ~20 minutes
 while it finished).
 
+**A footnote to that second fault, added 2026-09-24.** It was later measured that a dispatched run's checks
+never satisfy a *ruleset*-required status check in the first place — so the 1 274 s bought a run that could
+block a merge and could never permit one. The original rule against dispatching a required check was more
+right than the reasoning given for it.
+
 ---
 
 ## 1. The order of work
@@ -93,14 +98,18 @@ passing check.
 
 ## 3. CI hygiene
 
-- **SUPERSEDED 2026-09-24 by [`NIGHTLY_AUTHORITATIVE_DELIVERY.md`](NIGHTLY_AUTHORITATIVE_DELIVERY.md).**
-  This section used to read *"never use `workflow_dispatch` to satisfy or repair a required check"* and
-  *"after a genuine correction, re-run only the failed jobs of the `pull_request` run"*. Both are now
-  historical: under the Product-Owner-approved nightly model the gates **do not run on `pull_request` at
-  all**, and the nightly orchestrator's `workflow_dispatch` at the delivery ref is the *only* way the required
-  contexts are earned. The two hazards the old rule named are closed by construction — there are no other
-  checks for a dispatch to block, and the nightly run **declines evidence reuse outright** while counting only
-  runs carrying tonight's correlation id. See that document for the full reasoning and the table of closures.
+- **`workflow_dispatch` NEVER satisfies a required check — and the reason is stronger than the one first
+  written down.** This rule was briefly retracted on 2026-09-24, when the nightly model dispatched the gates
+  at the delivery ref, and then reinstated the same day by measurement: on PR #181 four dispatched runs put
+  four green check runs under exactly the required context names, from the pinned Actions app, on the
+  pull-request head — and the ruleset answered `HTTP 405 … 4 of 4 required status checks are expected`, with
+  `statusCheckRollup` null. **It is not merely discouraged; it cannot work.** See
+  [`NIGHTLY_AUTHORITATIVE_DELIVERY.md`](NIGHTLY_AUTHORITATIVE_DELIVERY.md) §4.
+- **The gates run on `pull_request`, and attempt 1 is a sentinel that fails on purpose.** It costs seconds,
+  gives the pull request a required context that exists and does not pass, and skips every heavy step. Do not
+  treat a red attempt 1 as a finding, and do not wait for it.
+- **After a genuine correction, do not re-run jobs by hand.** Push the fix; the nightly re-run of the current
+  head is the authoritative attempt.
 - **To repair a failed night:** fix the cause on the same delivery branch and push. Do not re-run the gates by
   hand; the next nightly run judges the resulting head. `python tools/nightly-status.py` is the session-start
   check that tells you a repair is owed.
@@ -179,12 +188,12 @@ Parallelism is for reducing elapsed time, never for sharing a working tree.
 Prose is what allowed a missing `concurrency:` key to persist unnoticed across four workflows, so every
 statement above that *can* be checked from the tree *is*:
 
-- **`tools/validate-delivery-protocol.py`** — every gate workflow declares the nightly `workflow_dispatch`
-  with its required `expected_sha`/`correlation_id` inputs, runs the wrong-commit refusal, forbids evidence
-  reuse during the nightly run, and (once the register declares the model ACTIVE) does **not** run on
-  `pull_request` or on any push but master; the orchestrator exists with both Africa/Cairo crons and proves
-  its own fail-closed rules; and each gate carries a `concurrency:` block keyed on workflow and the commit
-  under test whose
+- **`tools/validate-delivery-protocol.py`** — every gate workflow runs on `pull_request`, does **not**
+  declare `workflow_dispatch`, carries the daytime sentinel **as its first step** restricted to
+  `pull_request` attempt 1 and ending in `exit 1`, forbids evidence reuse on the authoritative re-run attempt,
+  and runs on no push but master; the orchestrator exists with one Africa/Cairo cron and proves its own
+  fail-closed rules; the runner **re-runs** each gate's `pull_request` run and dispatches nothing; and each
+  gate carries a `concurrency:` block keyed on workflow and the commit under test whose
   `cancel-in-progress` is restricted to pull requests and is never unconditionally true; this document, the
   preflight and the PR template all exist; this document is registered in the artifact registry; and the
   preflight still implements each of the four late-failure checks (checked by marker, so it cannot be

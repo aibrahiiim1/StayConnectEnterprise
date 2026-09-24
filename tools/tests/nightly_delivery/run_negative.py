@@ -42,15 +42,21 @@ def expect(label, decision, proceed, code_contains=None):
     print("  ok   %-64s [%s]" % (label, decision.code))
 
 
-def gate_run(wf, sha=SHA_A, corr=CORR, event="workflow_dispatch", status="completed",
-             conclusion="success", rid=1):
-    return {"workflow_file": wf, "head_sha": sha, "event": event, "status": status,
-            "conclusion": conclusion, "id": rid,
-            "display_title": "nightly %s %s" % (corr, sha[:12])}
+# THE RE-RUN MODEL. The daytime push leaves attempt 1 -- the sentinel -- failed. The orchestrator re-runs that
+# same run id; the re-run keeps event=pull_request and the head sha, and arrives as attempt 2. So a fixture is
+# a run id, the attempt it was on when we asked, and the attempt it came back on.
+REQUESTED = {wf: {"id": 100 + i, "attempt": 1} for i, wf in enumerate(nd.REQUIRED_GATES)}
+
+
+def rerun_run(wf, sha=SHA_A, event="pull_request", status="completed", conclusion="success",
+              attempt=2, rid=None):
+    return {"workflow_file": wf, "id": rid if rid is not None else REQUESTED[wf]["id"],
+            "head_sha": sha, "event": event, "status": status, "conclusion": conclusion,
+            "run_attempt": attempt}
 
 
 def all_four(**kw):
-    return [gate_run(wf, rid=i, **kw) for i, wf in enumerate(nd.REQUIRED_GATES, start=1)]
+    return [rerun_run(wf, **kw) for wf in nd.REQUIRED_GATES]
 
 
 def pr(number=200, head=SHA_A, draft=False, base="master", labels=None, state="open",
@@ -164,53 +170,62 @@ expect("one real candidate beside a draft and a held one is UNAMBIGUOUS",
 print()
 print("== 1. WRONG CANDIDATE / WRONG HEAD -- a true verdict about the wrong commit ==")
 expect("every gate green, but for a different sha",
-       nd.classify_gate_runs(SHA_A, CORR, all_four(sha=SHA_B)), False, "GATES_NOT_ALL_GREEN")
+       nd.classify_rerun_runs(SHA_A, REQUESTED, all_four(sha=SHA_B)), False, "GATES_NOT_ALL_GREEN")
 expect("no expected sha supplied at all",
-       nd.classify_gate_runs("", CORR, all_four()), False, "NO_EXPECTED_SHA")
+       nd.classify_rerun_runs("", REQUESTED, all_four()), False, "NO_EXPECTED_SHA")
 expect("a truncated sha is not an identity",
-       nd.classify_gate_runs(SHA_A[:12], CORR, all_four(sha=SHA_A[:12])), False, "NO_EXPECTED_SHA")
+       nd.classify_rerun_runs(SHA_A[:12], REQUESTED, all_four(sha=SHA_A[:12])), False, "NO_EXPECTED_SHA")
+expect("a different run id for the right gate is not the run we re-ran",
+       nd.classify_rerun_runs(SHA_A, REQUESTED, all_four(rid=999)), False, "GATES_NOT_ALL_GREEN")
 
 print()
 print("== EARLIER / REUSED EVIDENCE MUST NOT SUBSTITUTE FOR TONIGHT'S FRESH RUN ==")
-expect("all four green but from a PREVIOUS night's dispatch",
-       nd.classify_gate_runs(SHA_A, CORR, all_four(corr="nightly-20260901-oldoldold")),
+# THE SENTINEL IS ATTEMPT 1 AND VALIDATES NOTHING. A run still on attempt 1 has only run the sentinel, so
+# "green on attempt 1" must never be accepted -- and it cannot be, because the sentinel fails by design.
+expect("all four still on attempt 1 -- only the sentinel ran",
+       nd.classify_rerun_runs(SHA_A, REQUESTED, all_four(attempt=1)), False, "GATES_NOT_ALL_GREEN")
+expect("a previous night's attempt is not tonight's: attempt must be LATER than when we asked",
+       nd.classify_rerun_runs(SHA_A, {wf: {"id": 100 + i, "attempt": 5}
+                                      for i, wf in enumerate(nd.REQUIRED_GATES)},
+                              all_four(attempt=5)), False, "GATES_NOT_ALL_GREEN")
+expect("all four green but they were workflow_dispatch runs, whose checks the ruleset refuses",
+       nd.classify_rerun_runs(SHA_A, REQUESTED, all_four(event="workflow_dispatch")),
        False, "GATES_NOT_ALL_GREEN")
-expect("all four green but they were pull_request runs",
-       nd.classify_gate_runs(SHA_A, CORR, all_four(event="pull_request")), False, "GATES_NOT_ALL_GREEN")
 expect("all four green but they were master push runs",
-       nd.classify_gate_runs(SHA_A, CORR, all_four(event="push")), False, "GATES_NOT_ALL_GREEN")
-expect("no correlation id to distinguish nights",
-       nd.classify_gate_runs(SHA_A, "", all_four()), False, "NO_CORRELATION_ID")
-expect("two runs for one gate -- which verdict was meant is unknowable",
-       nd.classify_gate_runs(SHA_A, CORR, all_four() + [gate_run(nd.REQUIRED_GATES[0], rid=99)]),
-       False, "GATES_NOT_ALL_GREEN")
+       nd.classify_rerun_runs(SHA_A, REQUESTED, all_four(event="push")), False, "GATES_NOT_ALL_GREEN")
+expect("nothing was re-run at all",
+       nd.classify_rerun_runs(SHA_A, {}, all_four()), False, "NOTHING_WAS_RERUN")
+expect("unreadable attempt numbers cannot establish freshness",
+       nd.classify_rerun_runs(SHA_A, REQUESTED, all_four(attempt="?")), False, "GATES_NOT_ALL_GREEN")
 
 print()
 print("== 5. PARTIAL GATE COMPLETION -- three of four is a refusal, not an opportunity ==")
-for i, wf in enumerate(nd.REQUIRED_GATES):
+for wf in nd.REQUIRED_GATES:
     runs = [r for r in all_four() if r["workflow_file"] != wf]
-    expect("only three gates reported (%s absent)" % wf.replace(".yml", ""),
-           nd.classify_gate_runs(SHA_A, CORR, runs), False, "GATES_NOT_ALL_GREEN")
-expect("one gate still in progress",
-       nd.classify_gate_runs(SHA_A, CORR,
-                             [gate_run(nd.REQUIRED_GATES[0], status="in_progress", conclusion=""),
-                              gate_run(nd.REQUIRED_GATES[1], rid=2), gate_run(nd.REQUIRED_GATES[2], rid=3),
-                              gate_run(nd.REQUIRED_GATES[3], rid=4)]),
+    expect("only three gates came back (%s absent)" % wf.replace(".yml", ""),
+           nd.classify_rerun_runs(SHA_A, REQUESTED, runs), False, "GATES_NOT_ALL_GREEN")
+    short = {k: v for k, v in REQUESTED.items() if k != wf}
+    expect("only three gates could be re-run (%s not requested)" % wf.replace(".yml", ""),
+           nd.classify_rerun_runs(SHA_A, short, all_four()), False, "GATES_NOT_ALL_GREEN")
+expect("one gate still in progress on its new attempt",
+       nd.classify_rerun_runs(SHA_A, REQUESTED,
+                              [rerun_run(nd.REQUIRED_GATES[0], status="in_progress", conclusion="")] +
+                              [rerun_run(wf) for wf in nd.REQUIRED_GATES[1:]]),
        False, "GATES_NOT_ALL_GREEN")
-expect("no runs at all (the dispatch produced nothing)",
-       nd.classify_gate_runs(SHA_A, CORR, []), False, "GATES_NOT_ALL_GREEN")
+expect("no runs came back at all",
+       nd.classify_rerun_runs(SHA_A, REQUESTED, []), False, "GATES_NOT_ALL_GREEN")
 
 print()
 print("== 6. A FAILED GATE ==")
 for concl in ("failure", "cancelled", "timed_out", "skipped", "neutral", "action_required", ""):
-    runs = [gate_run(nd.REQUIRED_GATES[0], conclusion=concl, rid=1)] + \
-           [gate_run(wf, rid=i) for i, wf in enumerate(nd.REQUIRED_GATES[1:], start=2)]
+    runs = [rerun_run(nd.REQUIRED_GATES[0], conclusion=concl)] + \
+           [rerun_run(wf) for wf in nd.REQUIRED_GATES[1:]]
     expect("governance concluded %r" % (concl or "unreported"),
-           nd.classify_gate_runs(SHA_A, CORR, runs), False, "GATES_NOT_ALL_GREEN")
+           nd.classify_rerun_runs(SHA_A, REQUESTED, runs), False, "GATES_NOT_ALL_GREEN")
 
 print()
 print("== THE POSITIVE PATH -- all four fresh, this sha, this night ==")
-green = nd.classify_gate_runs(SHA_A, CORR, all_four())
+green = nd.classify_rerun_runs(SHA_A, REQUESTED, all_four())
 expect("all four gates freshly green on the expected sha", green, True, "ALL_FOUR_FRESH_GREEN")
 
 # =========================================================================================================
@@ -229,12 +244,13 @@ expect("the head cannot be re-read at all",
 print()
 print("== 7. AN ATTEMPTED MERGE WITHOUT A VALID FRESH NIGHTLY PASS ==")
 for label, gates in (
-    ("gates never ran", nd.classify_gate_runs(SHA_A, CORR, [])),
-    ("a gate failed", nd.classify_gate_runs(
-        SHA_A, CORR, [gate_run(nd.REQUIRED_GATES[0], conclusion="failure")] +
-        [gate_run(wf, rid=i) for i, wf in enumerate(nd.REQUIRED_GATES[1:], start=2)])),
-    ("evidence was from a previous night", nd.classify_gate_runs(SHA_A, CORR, all_four(corr="old"))),
-    ("evidence was a pull_request run", nd.classify_gate_runs(SHA_A, CORR, all_four(event="pull_request"))),
+    ("gates never came back", nd.classify_rerun_runs(SHA_A, REQUESTED, [])),
+    ("a gate failed", nd.classify_rerun_runs(
+        SHA_A, REQUESTED, [rerun_run(nd.REQUIRED_GATES[0], conclusion="failure")] +
+        [rerun_run(wf) for wf in nd.REQUIRED_GATES[1:]])),
+    ("only the sentinel ran", nd.classify_rerun_runs(SHA_A, REQUESTED, all_four(attempt=1))),
+    ("the evidence was a dispatched run", nd.classify_rerun_runs(
+        SHA_A, REQUESTED, all_four(event="workflow_dispatch"))),
 ):
     expect("merge refused because %s" % label,
            nd.merge_precondition(gates, SHA_A, pr(), 0), False, "GATES_NOT_GREEN")
@@ -247,6 +263,19 @@ expect("an unreadable thread count is refused, not assumed zero",
        nd.merge_precondition(green, SHA_A, pr(), None), False, "THREADS_UNREADABLE")
 expect("a branch BEHIND master waits instead of being rebased",
        nd.merge_precondition(green, SHA_A, pr(mergeable_state="behind"), 0), False, "BEHIND")
+# `blocked` IS ACCEPTED ONLY WITH THE REQUIREMENT ITSELF VERIFIED. Observed on PR #181: two third-party apps
+# (`cursor`, `kilo-code-bot`) open an empty check suite on every push -- status queued, zero runs -- which never
+# completes, so the rollup summary says `blocked` forever on a pull request whose four required contexts are
+# green. Deferring to the summary meant never merging; deferring to the requirement is what the ruleset says.
+expect("blocked WITH all four gates verified green is accepted",
+       nd.merge_precondition(green, SHA_A, pr(mergeable_state="blocked"), 0), True, "MAY_MERGE")
+expect("blocked WITHOUT green gates is still refused",
+       nd.merge_precondition(nd.classify_rerun_runs(SHA_A, REQUESTED, []), SHA_A,
+                             pr(mergeable_state="blocked"), 0), False, "GATES_NOT_GREEN")
+expect("blocked with an unresolved thread is still refused",
+       nd.merge_precondition(green, SHA_A, pr(mergeable_state="blocked"), 2), False, "UNRESOLVED_THREADS")
+expect("blocked on a head that moved is still refused",
+       nd.merge_precondition(green, SHA_A, pr(head=SHA_B, mergeable_state="blocked"), 0), False, "HEAD_MOVED")
 expect("a dirty/conflicted branch is refused",
        nd.merge_precondition(green, SHA_A, pr(mergeable_state="dirty"), 0), False, "DIRTY")
 expect("mergeable=false is refused",

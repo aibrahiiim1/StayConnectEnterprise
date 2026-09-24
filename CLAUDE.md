@@ -118,9 +118,13 @@ those sixteen failures were knowable on a workstation in seconds to minutes: a f
 
 **CI hygiene.**
 
-* **SUPERSEDED 2026-09-24 — see §0F.** The four gates no longer run on `pull_request`; the nightly
-  orchestrator's `workflow_dispatch` is how they are earned. Do not re-run gates by hand to repair a night:
-  fix the cause and push, and the next nightly run judges the new head.
+* **The four gates DO run on `pull_request`, and attempt 1 is a deliberate sentinel.** It fails in seconds
+  so the required context exists and cannot pass; nobody waits for it, and a red daytime check is not a
+  finding about the change. The full gates execute only on the nightly re-run of that same run. Never use
+  `workflow_dispatch` to satisfy or repair a required check — measured on PR #181, a dispatched run's checks
+  do not satisfy a ruleset-required status check at all, even green, on the head, from the pinned app.
+* **Do not re-run gates by hand to repair a night.** Fix the cause and push; the next nightly run judges the
+  new head. `python tools/nightly-status.py` says whether a repair is owed.
 * Superseded pull-request runs now cancel automatically; master runs never do.
 * Prepare read-only delivery material while gates run. **Never merge or deploy before the required exact head
   is ALL_GREEN.**
@@ -262,17 +266,29 @@ as authoritative master state. Only master says a change passed the gates.
 
 ### Daytime
 
-Work, commit, push, deploy to PRE-LIVE, verify, continue. **The four gates do not run on `pull_request`, so
-there is nothing to wait for after a push.** `bash tools/preflight.sh` is now the only fast signal between
-pushes, which makes it more valuable rather than less.
+Work, commit, push, deploy to PRE-LIVE, verify, continue. **A push makes the four required checks go RED in
+seconds and starts no full-gate cycle: attempt 1 of each gate runs one step, a deliberate sentinel, and fails.**
+
+That red is not a finding about the change. It exists so the required context is reported (the rule can be
+evaluated) and cannot pass (nothing merges on a check that validated nothing). **Do not wait for it, do not
+try to make it green, and do not re-run it by hand.** `bash tools/preflight.sh` is the only fast signal
+between pushes, which makes it more valuable rather than less.
 
 ### Nightly
 
 At **03:10 Africa/Cairo** — one `cron: '10 3 * * *'` with `timezone: "Africa/Cairo"`, so the platform owns the
-DST arithmetic — the orchestrator validates the exact head of the single active delivery candidate with one
-complete fresh run of all four gates, and merges automatically only if all four pass **that exact head**. A commit pushed during the run makes the pass stale; the next night judges the new head. Zero
+DST arithmetic — the orchestrator **re-runs** each gate's existing `pull_request` run for the exact head of the
+single active delivery candidate. A re-run keeps the event and the head SHA, so its checks satisfy the ruleset,
+and arrives as attempt 2+, where the full gate executes. It merges automatically only if all four pass **that
+exact head**. A commit pushed during the run makes the pass stale; the next night judges the new head. Zero
 candidates is a quiet no-op; two or more is a hard refusal. Mark a PR **draft** or label it **`nightly-hold`**
 to keep it open overnight without merging.
+
+**`workflow_dispatch` cannot satisfy a required check. This is measured, not policy.** On PR #181 four
+dispatched runs produced four green check runs under exactly the required context names, from the pinned
+Actions app, on the pull-request head — and the ruleset answered `HTTP 405 … 4 of 4 required status checks are
+expected`. Only a `pull_request` run's checks count, which is why the nightly path is a re-run and not a
+dispatch. Do not reintroduce a dispatch trigger on a gate.
 
 ### THE FIRST THING EVERY SESSION DOES
 

@@ -1,5 +1,4 @@
 name: Phase 5 Post-Stay and Transfer CI
-run-name: ${{ inputs.correlation_id && format('nightly {0} · {1}', inputs.correlation_id, inputs.expected_sha) || github.workflow }}
 
 # The authoritative automated gate for Phase 5 (Post-Stay PIN re-authentication and the Cross-PMS Transfer
 # workflow). It runs on the exact HEAD under test and produces machine-verifiable evidence — never a
@@ -30,49 +29,26 @@ run-name: ${{ inputs.correlation_id && format('nightly {0} · {1}', inputs.corre
 # and ONE eventual PR — so without this the only way to obtain authoritative CI for work in progress would be
 # to open a PR early or to merge, and neither is authorized.
 on:
+  # THE REQUIRED CONTEXT MUST COME FROM A pull_request RUN. Nothing else counts.
+  #
+  # PROVEN, NOT ASSUMED. The previous design had the nightly orchestrator dispatch these gates with
+  # workflow_dispatch at the delivery ref. Every visible signal said it worked: the four check runs landed on
+  # the pull-request HEAD SHA, they came from app 15368 (the pinned integration), and GitHub reported them as
+  # associated with the pull request. It still did not satisfy the ruleset. GitHub's own merge enforcement
+  # answered:
+  #
+  #     HTTP 405  Repository rule violations found
+  #     4 of 4 required status checks are expected.
+  #
+  # -- with all four green, and GraphQL statusCheckRollup null for that commit. A dispatched run's checks do
+  # not count toward a ruleset-required status check. Attaching to the head, coming from the right app, and
+  # being associated with the PR are each necessary and none is sufficient.
+  #
+  # So the trigger is pull_request again, and the COST is removed a different way: see the sentinel step below.
   pull_request:
     branches: [ master ]
   push:
-    branches: [ master, 'phase/**' ]
-  # workflow_dispatch IS HOW THIS GATE IS NOW EARNED, and the reasoning that once forbade it is recorded
-  # here with what closed each hazard, because it was correct at the time.
-  #
-  # IT USED TO BE FORBIDDEN because a dispatched run reports a check with the SAME NAME as the pull_request
-  # run -- a required status context IS the job name -- and that had two consequences that cost real delivery
-  # time: a dispatched run in progress could block the merge of a PR whose own checks were already green, and
-  # a dispatched SUCCESS was a candidate the evidence-reuse lookup could inherit, so a required check could be
-  # satisfied by a run that never evaluated a pull request.
-  #
-  # UNDER THE NIGHTLY DELIVERY MODEL the dispatch is not a second opinion beside the PR's own checks -- it is
-  # the ONLY source of them, by Product-Owner decision, so normal daytime pushes are not interrupted by the
-  # full four-gate cycle. Both old hazards are closed, and not by assertion:
-  #
-  #   blocking a green PR   there is no other run to be blocked. These contexts report only from the nightly
-  #                         dispatch, so "in progress" is the PR simply not being ready to merge yet.
-  #   inherited evidence    the nightly run DECLINES evidence reuse outright (scripts/ci/evidence-reuse.sh
-  #                         refuses while NIGHTLY_VALIDATION=true), and the orchestrator only counts runs that
-  #                         carry TONIGHT'S correlation id. A previous dispatch cannot stand in for tonight.
-  #   the wrong commit      a dispatch names a ref, not a commit, so the branch can move between the decision
-  #                         and the checkout. scripts/ci/assert-dispatch-head.sh fails the gate unless the
-  #                         head it is validating is exactly the sha the orchestrator decided on.
-  #
-  # This gate must therefore never be dispatched by hand as a way of producing a green context. The inputs are
-  # required, and a dispatch without them fails closed.
-  workflow_dispatch:
-    inputs:
-      expected_sha:
-        description: 'The full 40-character commit the orchestrator decided to validate. Required.'
-        required: true
-        type: string
-      correlation_id:
-        description: "Tonight's correlation id. Required, and proves the run is not an earlier night's."
-        required: true
-        type: string
-      nightly:
-        description: 'true when this is the nightly authoritative validation, which forbids evidence reuse.'
-        required: false
-        default: 'true'
-        type: string
+    branches: [ master ]
 
 # ---------------------------------------------------------------------------------------------------------
 # ONE RUN PER REF, AND A SUPERSEDED RUN IS CANCELLED INSTEAD OF BEING LEFT TO FINISH.
@@ -86,7 +62,7 @@ on:
 # master's green record is the thing the protection rule reads, and cancelling it would leave the default
 # branch with a check that is neither passing nor failing.
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.expected_sha || github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -99,6 +75,43 @@ jobs:
     env:
       EVID: ${{ github.workspace }}/.phase5-evidence
     steps:
+      # ---------------------------------------------------------------------------------------------------
+      # THE DAYTIME SENTINEL. This is what stops a push costing 29-31 minutes.
+      #
+      # Attempt 1 of a pull_request run does almost nothing and FAILS, in seconds. That gives the pull request
+      # a required context that EXISTS (so GitHub can evaluate the rule) and is NON-PASSING (so master cannot
+      # become mergeable before the nightly authoritative validation has actually run). Because this is the
+      # FIRST step, its failure skips every heavy step beneath it -- no Go build, no PostgreSQL, no browser, no
+      # mutation matrix.
+      #
+      # The nightly orchestrator then RE-RUNS this same run for the same head. A re-run keeps event=pull_request
+      # and the same head SHA -- so its checks do count -- and arrives as attempt 2 or higher, where this step
+      # steps aside and the full gate executes.
+      #
+      # An agent does NOT wait for attempt 1. It is expected to be red, it says so, and it is not evidence
+      # about the change.
+      #
+      # A push to master is never a sentinel: master's own runs must be real.
+      - name: Daytime sentinel (attempt 1 establishes the required context and fails on purpose)
+        if: github.event_name == 'pull_request' && github.run_attempt == 1
+        run: |
+          echo "SENTINEL ATTEMPT -- this is not a validation result."
+          echo
+          echo "  workflow  : ${{ github.workflow }}"
+          echo "  head      : ${{ github.event.pull_request.head.sha }}"
+          echo "  attempt   : ${{ github.run_attempt }}"
+          echo
+          echo "This attempt exists so the required context '${{ github.job }}' is REPORTED for this commit,"
+          echo "and it fails so the pull request cannot become mergeable on a check that validated nothing."
+          echo
+          echo "The full four-gate validation runs once a night at 03:10 Africa/Cairo, when the nightly"
+          echo "orchestrator re-runs THIS run for the exact delivery head. That re-run arrives as attempt 2+"
+          echo "and executes everything below."
+          echo
+          echo "Nobody should wait on this attempt. Push, deploy to PRE-LIVE under the standing decision, and"
+          echo "carry on: python tools/nightly-status.py reports what the last authoritative night decided."
+          exit 1
+
       - name: Check out the HEAD under test
         uses: actions/checkout@v4
         with:
@@ -124,16 +137,6 @@ jobs:
       # version-tagged actions all resolve at run time, so an identical tree says nothing about the toolchain
       # that would run the tests. This publishes a fingerprint of the resolved environment; the lookup below
       # reads the candidate run's own fingerprint out of its log and refuses to reuse across a difference.
-      # THE RUN MUST BE ABOUT THE COMMIT THE ORCHESTRATOR DECIDED ON. A dispatch names a ref, so the branch
-      # can move between the decision and this checkout; a green verdict attached to a commit nobody chose to
-      # merge is the one outcome the nightly model must never produce. Fails closed on any mismatch, and on a
-      # dispatch that carries no expected sha at all.
-      - name: The head under test is the commit the orchestrator decided on
-        if: github.event_name == 'workflow_dispatch'
-        run: >
-          bash scripts/ci/assert-dispatch-head.sh
-          '${{ inputs.expected_sha }}' '${{ github.sha }}' '${{ inputs.correlation_id }}'
-
       - name: Execution-environment fingerprint
         id: env
         run: bash scripts/ci/env-fingerprint.sh postgres:16-alpine
@@ -158,8 +161,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           EVIDENCE_ENV_FINGERPRINT: ${{ steps.env.outputs.fingerprint }}
-          NIGHTLY_VALIDATION: ${{ inputs.nightly }}
-          NIGHTLY_CORRELATION_ID: ${{ inputs.correlation_id }}
+          NIGHTLY_VALIDATION: ${{ github.event_name == 'pull_request' && github.run_attempt != 1 }}
+          NIGHTLY_CORRELATION_ID: attempt-${{ github.run_attempt }}
         run: bash scripts/ci/evidence-reuse.sh phase5-post-stay-transfer.yml
       - name: Evidence-publication self-test (does the publisher refuse an incomplete run?)
         if: steps.reuse.outputs.hit != 'true'
@@ -235,8 +238,13 @@ jobs:
       # demoted "the evidence does not exist" to a log line; and nothing assembled or checked the evidence
       # before uploading it. A green run with no artifact is indistinguishable from a green run whose
       # evidence was never produced, so every one of those three is closed below.
+      # NOT ON THE SENTINEL ATTEMPT. `always()` means "even if an earlier step failed", and on attempt 1 an
+      # earlier step ALWAYS failed -- on purpose, before anything was even checked out. Without the exclusion
+      # below, every daytime push would run these steps against an empty workspace and publish an artifact
+      # named as Phase evidence, produced by a run that validated nothing. A junk artifact under an
+      # authoritative name is worse than no artifact.
       - name: Assemble the Phase-5 evidence artifact
-        if: always() && steps.reuse.outputs.hit != 'true'
+        if: always() && !(github.event_name == 'pull_request' && github.run_attempt == 1) && steps.reuse.outputs.hit != 'true'
         run: python3 scripts/ci/phase5_evidence.py
 
       # See the Phase-3 workflow for why a reused verdict still publishes an artifact under its own commit.
@@ -251,12 +259,12 @@ jobs:
         run: bash scripts/ci/evidence-pointer.sh "$GITHUB_WORKSPACE/.phase5-evidence" "Phase-5 Post-Stay and Transfer CI"
 
       - name: Record the HEAD for the artifact name
-        if: always()
+        if: always() && !(github.event_name == 'pull_request' && github.run_attempt == 1)
         id: head
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Publish the Phase-5 evidence artifact
-        if: always()
+        if: always() && !(github.event_name == 'pull_request' && github.run_attempt == 1)
         id: publish
         uses: actions/upload-artifact@v4
         with:
@@ -274,7 +282,7 @@ jobs:
       # this digest" -- so the ID and the digest are read back from the action that created them and the job
       # fails if either is absent.
       - name: Prove the artifact really exists
-        if: always()
+        if: always() && !(github.event_name == 'pull_request' && github.run_attempt == 1)
         env:
           ART_ID: ${{ steps.publish.outputs.artifact-id }}
           ART_DIGEST: ${{ steps.publish.outputs.artifact-digest }}
