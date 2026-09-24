@@ -1,4 +1,0 @@
-commit 0682395e6f612559e2b01e030372805cb77c9c6b
-Date:   Thu Sep 24 03:07:20 2026 +0300
-
-    Governance: the delivery head is the allow-list registration
