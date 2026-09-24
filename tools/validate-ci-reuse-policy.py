@@ -194,6 +194,27 @@ def main():
         # rather than left to whoever edits the workflow next.
         fp_idx = [i for i, (n, b) in enumerate(steps) if "env-fingerprint.sh" in b]
         reuse_idx = [i for i, (n, b) in enumerate(steps) if "evidence-reuse.sh" in b]
+
+        # A WORKFLOW THAT SKIPS NOTHING NEEDS NO LOOKUP, and demanding one of it would be a rule with no
+        # subject. The nightly orchestrator is the case: every one of its steps is classified `always`,
+        # because its inputs are live GitHub state and wall-clock time, so there is nothing for an earlier
+        # verdict to stand in for. What must still hold is the converse -- a workflow with nothing to skip
+        # must not carry a lookup or a reuse guard either, or it would be claiming a saving it never takes.
+        declared_steps = (declared.get(wf) or {}).get("steps") or []
+        reusable = [s for s in declared_steps if str(s.get("reuse")) == "tree-pure"]
+        if not reusable:
+            if reuse_idx or fp_idx:
+                fail("%s classifies no step as tree-pure, so it skips nothing -- yet it carries an "
+                     "evidence-reuse lookup or an environment fingerprint. Remove them, or classify what "
+                     "they are for" % wf)
+            elif any("steps.reuse.outputs.hit" in b for _, b in steps):
+                fail("%s classifies no step as tree-pure but a step is still guarded by a reuse hit; that "
+                     "guard can only ever skip work nobody decided was skippable" % wf)
+            else:
+                print("  ok: %s skips nothing -- every step is classified always, and it carries no reuse "
+                      "machinery" % wf)
+            continue
+
         if len(fp_idx) != 1:
             fail("%s: expected exactly one execution-environment fingerprint step, found %d. Without it "
                  "the lookup cannot show that an earlier verdict came from the same machine."

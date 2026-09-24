@@ -118,10 +118,9 @@ those sixteen failures were knowable on a workstation in seconds to minutes: a f
 
 **CI hygiene.**
 
-* **Never** use `workflow_dispatch` to satisfy or repair a required check — the four gates no longer accept
-  it. A required status context *is* a job name, so a dispatched run reports the same context: it can block
-  the merge of a PR whose own checks are green, and its success can be inherited as evidence.
-* After a genuine correction, re-run **only the failed jobs** of the `pull_request` run.
+* **SUPERSEDED 2026-09-24 — see §0F.** The four gates no longer run on `pull_request`; the nightly
+  orchestrator's `workflow_dispatch` is how they are earned. Do not re-run gates by hand to repair a night:
+  fix the cause and push, and the next nightly run judges the new head.
 * Superseded pull-request runs now cancel automatically; master runs never do.
 * Prepare read-only delivery material while gates run. **Never merge or deploy before the required exact head
   is ALL_GREEN.**
@@ -230,6 +229,62 @@ role holds `EXECUTE` on `cloud_mode_set`.
 
 **Retention still runs.** It is local housekeeping on records already delivered and opens no connection.
 Stopping a producer is not a retention policy, and no historical record was deleted by this decision.
+
+---
+
+## 0F. NIGHTLY AUTHORITATIVE DELIVERY, AND THE STANDING PRE-LIVE DEPLOYMENT DECISION
+
+**Standing Product-Owner decision, 2026-09-24. It supersedes every earlier rule in this file or in `docs/`
+that requires the four full CI gates to pass before work continues, or that requires deployment approval to be
+requested again. The full form is [`docs/NIGHTLY_AUTHORITATIVE_DELIVERY.md`](docs/NIGHTLY_AUTHORITATIVE_DELIVERY.md);
+where the two differ, that file wins.**
+
+### The standing PRE-LIVE deployment authorization
+
+> **Until explicitly revoked or changed by the Product Owner, every completed application/code change may be
+> deployed promptly to the PRE-LIVE appliance at `172.21.60.25` without waiting for the nightly CI run.**
+
+**This is continuing. Do not ask for it again.** Asking again is a defect in reading this section. It covers the
+directly required parts of deploying: build and package, install, service restart, deployment verification,
+retry and rollback, and recording exact deployed-source provenance.
+
+It authorizes **none** of the following, which remain separate Product-Owner decisions: a new
+product/architecture/security decision · destructive or historical data mutation · a new database
+migration/schema decision · networking or topology changes · PMS configuration, posting or traffic ·
+financial or payment-provider activity · Guest activation or Guest Go-Live · Root-CA or trust changes ·
+Go-Live.
+
+**PRE-LIVE will often be AHEAD of master during the day, and that is intended.** Two rules keep it readable:
+always record the **exact deployed commit SHA**, read back from the installed artifact rather than the build
+host (`current_state_facts.deployed_runtime_services`) — that record has been wrong immediately after three
+consecutive deployments, so update it *as part of* deploying; and **never** treat deployed PRE-LIVE provenance
+as authoritative master state. Only master says a change passed the gates.
+
+### Daytime
+
+Work, commit, push, deploy to PRE-LIVE, verify, continue. **The four gates do not run on `pull_request`, so
+there is nothing to wait for after a push.** `bash tools/preflight.sh` is now the only fast signal between
+pushes, which makes it more valuable rather than less.
+
+### Nightly
+
+At **03:10 Africa/Cairo** — one `cron: '10 3 * * *'` with `timezone: "Africa/Cairo"`, so the platform owns the
+DST arithmetic — the orchestrator validates the exact head of the single active delivery candidate with one
+complete fresh run of all four gates, and merges automatically only if all four pass **that exact head**. A commit pushed during the run makes the pass stale; the next night judges the new head. Zero
+candidates is a quiet no-op; two or more is a hard refusal. Mark a PR **draft** or label it **`nightly-hold`**
+to keep it open overnight without merging.
+
+### THE FIRST THING EVERY SESSION DOES
+
+```
+python tools/nightly-status.py
+```
+
+`UNRESOLVED_FAILURE` (exit 1) means the latest nightly validation failed and the head it failed on is **still**
+the delivery head: **diagnose and repair that first**, on the same delivery branch, before starting new work.
+`SUPERSEDED_FAILURE` (exit 0) means a later commit already moved past it. `UNKNOWN` (exit 2) is not the same as
+clear. Nothing else notifies you — the push that caused the failure succeeded, and the
+evidence sits in a workflow run nobody has opened.
 
 ---
 

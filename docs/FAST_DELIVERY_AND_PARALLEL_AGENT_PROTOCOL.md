@@ -93,12 +93,17 @@ passing check.
 
 ## 3. CI hygiene
 
-- **Never use `workflow_dispatch` to satisfy or repair a required check.** The four gate workflows no longer
-  accept it. A required status context *is* a job name, so a dispatched run reports the same context: it can
-  block the merge of a PR whose own checks are green, and its success is a candidate the evidence-reuse
-  lookup may inherit — a required gate satisfied by a run that never evaluated a pull request.
-- **After a genuine correction, re-run only the failed jobs** of the `pull_request` run. Do not start a fresh
-  run, and do not re-run checks that already succeeded.
+- **SUPERSEDED 2026-09-24 by [`NIGHTLY_AUTHORITATIVE_DELIVERY.md`](NIGHTLY_AUTHORITATIVE_DELIVERY.md).**
+  This section used to read *"never use `workflow_dispatch` to satisfy or repair a required check"* and
+  *"after a genuine correction, re-run only the failed jobs of the `pull_request` run"*. Both are now
+  historical: under the Product-Owner-approved nightly model the gates **do not run on `pull_request` at
+  all**, and the nightly orchestrator's `workflow_dispatch` at the delivery ref is the *only* way the required
+  contexts are earned. The two hazards the old rule named are closed by construction — there are no other
+  checks for a dispatch to block, and the nightly run **declines evidence reuse outright** while counting only
+  runs carrying tonight's correlation id. See that document for the full reasoning and the table of closures.
+- **To repair a failed night:** fix the cause on the same delivery branch and push. Do not re-run the gates by
+  hand; the next nightly run judges the resulting head. `python tools/nightly-status.py` is the session-start
+  check that tells you a repair is owed.
 - **Superseded runs are cancelled automatically.** Every gate now declares:
 
   ```yaml
@@ -174,8 +179,12 @@ Parallelism is for reducing elapsed time, never for sharing a working tree.
 Prose is what allowed a missing `concurrency:` key to persist unnoticed across four workflows, so every
 statement above that *can* be checked from the tree *is*:
 
-- **`tools/validate-delivery-protocol.py`** — every gate workflow reports on `pull_request`, declares no
-  `workflow_dispatch`, and carries a `concurrency:` block keyed on workflow and ref whose
+- **`tools/validate-delivery-protocol.py`** — every gate workflow declares the nightly `workflow_dispatch`
+  with its required `expected_sha`/`correlation_id` inputs, runs the wrong-commit refusal, forbids evidence
+  reuse during the nightly run, and (once the register declares the model ACTIVE) does **not** run on
+  `pull_request` or on any push but master; the orchestrator exists with both Africa/Cairo crons and proves
+  its own fail-closed rules; and each gate carries a `concurrency:` block keyed on workflow and the commit
+  under test whose
   `cancel-in-progress` is restricted to pull requests and is never unconditionally true; this document, the
   preflight and the PR template all exist; this document is registered in the artifact registry; and the
   preflight still implements each of the four late-failure checks (checked by marker, so it cannot be

@@ -1,4 +1,5 @@
 name: Phase 4 Financial Core CI
+run-name: ${{ inputs.correlation_id && format('nightly {0} · {1}', inputs.correlation_id, inputs.expected_sha) || github.workflow }}
 
 # The authoritative automated gate for the Phase-4 financial execution core. It runs on the exact HEAD under
 # test and produces machine-verifiable evidence — never a hand-typed number and never a workstation result.
@@ -27,15 +28,45 @@ on:
     branches: [ master ]
   push:
     branches: [ master, 'phase/**' ]
-  # workflow_dispatch is DELIBERATELY ABSENT from this gate.
+  # workflow_dispatch IS HOW THIS GATE IS NOW EARNED, and the reasoning that once forbade it is recorded
+  # here with what closed each hazard, because it was correct at the time.
   #
-  # A dispatched run reports a check with the SAME NAME as the pull_request run, because a required status
-  # context IS the job name. That has two consequences, both of which cost this project real delivery time:
-  # a dispatched run in progress blocks the merge of a PR whose own checks are already green, and a
-  # dispatched SUCCESS is a candidate the evidence-reuse lookup can inherit -- so a required check could be
-  # satisfied by a run that never evaluated a pull request. The gate must be earned on the event that
-  # actually proposes the change. To re-run after a genuine correction, re-run the FAILED JOBS of the
-  # pull_request run; do not dispatch a fresh one.
+  # IT USED TO BE FORBIDDEN because a dispatched run reports a check with the SAME NAME as the pull_request
+  # run -- a required status context IS the job name -- and that had two consequences that cost real delivery
+  # time: a dispatched run in progress could block the merge of a PR whose own checks were already green, and
+  # a dispatched SUCCESS was a candidate the evidence-reuse lookup could inherit, so a required check could be
+  # satisfied by a run that never evaluated a pull request.
+  #
+  # UNDER THE NIGHTLY DELIVERY MODEL the dispatch is not a second opinion beside the PR's own checks -- it is
+  # the ONLY source of them, by Product-Owner decision, so normal daytime pushes are not interrupted by the
+  # full four-gate cycle. Both old hazards are closed, and not by assertion:
+  #
+  #   blocking a green PR   there is no other run to be blocked. These contexts report only from the nightly
+  #                         dispatch, so "in progress" is the PR simply not being ready to merge yet.
+  #   inherited evidence    the nightly run DECLINES evidence reuse outright (scripts/ci/evidence-reuse.sh
+  #                         refuses while NIGHTLY_VALIDATION=true), and the orchestrator only counts runs that
+  #                         carry TONIGHT'S correlation id. A previous dispatch cannot stand in for tonight.
+  #   the wrong commit      a dispatch names a ref, not a commit, so the branch can move between the decision
+  #                         and the checkout. scripts/ci/assert-dispatch-head.sh fails the gate unless the
+  #                         head it is validating is exactly the sha the orchestrator decided on.
+  #
+  # This gate must therefore never be dispatched by hand as a way of producing a green context. The inputs are
+  # required, and a dispatch without them fails closed.
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: 'The full 40-character commit the orchestrator decided to validate. Required.'
+        required: true
+        type: string
+      correlation_id:
+        description: "Tonight's correlation id. Required, and proves the run is not an earlier night's."
+        required: true
+        type: string
+      nightly:
+        description: 'true when this is the nightly authoritative validation, which forbids evidence reuse.'
+        required: false
+        default: 'true'
+        type: string
 
 # ---------------------------------------------------------------------------------------------------------
 # ONE RUN PER REF, AND A SUPERSEDED RUN IS CANCELLED INSTEAD OF BEING LEFT TO FINISH.
@@ -49,7 +80,7 @@ on:
 # master's green record is the thing the protection rule reads, and cancelling it would leave the default
 # branch with a check that is neither passing nor failing.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ inputs.expected_sha || github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -95,6 +126,16 @@ jobs:
       # version-tagged actions all resolve at run time, so an identical tree says nothing about the toolchain
       # that would run the tests. This publishes a fingerprint of the resolved environment; the lookup below
       # reads the candidate run's own fingerprint out of its log and refuses to reuse across a difference.
+      # THE RUN MUST BE ABOUT THE COMMIT THE ORCHESTRATOR DECIDED ON. A dispatch names a ref, so the branch
+      # can move between the decision and this checkout; a green verdict attached to a commit nobody chose to
+      # merge is the one outcome the nightly model must never produce. Fails closed on any mismatch, and on a
+      # dispatch that carries no expected sha at all.
+      - name: The head under test is the commit the orchestrator decided on
+        if: github.event_name == 'workflow_dispatch'
+        run: >
+          bash scripts/ci/assert-dispatch-head.sh
+          '${{ inputs.expected_sha }}' '${{ github.sha }}' '${{ inputs.correlation_id }}'
+
       - name: Execution-environment fingerprint
         id: env
         run: bash scripts/ci/env-fingerprint.sh postgres:16-alpine
@@ -119,6 +160,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           EVIDENCE_ENV_FINGERPRINT: ${{ steps.env.outputs.fingerprint }}
+          NIGHTLY_VALIDATION: ${{ inputs.nightly }}
+          NIGHTLY_CORRELATION_ID: ${{ inputs.correlation_id }}
         run: bash scripts/ci/evidence-reuse.sh phase4-financial-core.yml
       - name: Initialise evidence staging
         if: steps.reuse.outputs.hit != 'true'

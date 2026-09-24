@@ -30,6 +30,11 @@
           "why": "infrastructure: the interpreter the reuse lookup itself needs."
         },
         {
+          "name": "The head under test is the commit the orchestrator decided on",
+          "reuse": "always",
+          "why": "it compares the dispatch input against GITHUB_SHA, which are properties of the RUN and not of the tree, and it is the refusal that stops a green verdict being attached to a commit nobody decided to merge. It must execute on every dispatched run: skipping it on a reuse hit would skip exactly the check that says the run is about the right commit. It carries `if: github.event_name == 'workflow_dispatch'` and never the reuse guard."
+        },
+        {
           "name": "Execution-environment fingerprint",
           "reuse": "always",
           "why": "NOT A VERDICT AND NEVER REUSED — it MEASURES this run's machine (hosted image version, kernel, resolved Go/Node/npm/Python, container image digests) so the lookup can refuse a verdict produced under a different one. It must precede the decision that consumes it."
@@ -224,6 +229,11 @@
           "why": "infrastructure for the always-run dependency gate, which reads package-lock.json and needs no installed tree; it also has to precede the environment fingerprint so the Node version this gate uses is inside the comparison key."
         },
         {
+          "name": "The head under test is the commit the orchestrator decided on",
+          "reuse": "always",
+          "why": "it compares the dispatch input against GITHUB_SHA, which are properties of the RUN and not of the tree, and it is the refusal that stops a green verdict being attached to a commit nobody decided to merge. It must execute on every dispatched run: skipping it on a reuse hit would skip exactly the check that says the run is about the right commit. It carries `if: github.event_name == 'workflow_dispatch'` and never the reuse guard."
+        },
+        {
           "name": "Execution-environment fingerprint",
           "reuse": "always",
           "why": "NOT A VERDICT AND NEVER REUSED — it MEASURES this run's machine (hosted image version, kernel, resolved Go/Node/npm/Python, container image digests) so the lookup can refuse a verdict produced under a different one. It must precede the decision that consumes it."
@@ -365,6 +375,11 @@
           "why": "infrastructure: the interpreter the reuse lookup itself needs."
         },
         {
+          "name": "The head under test is the commit the orchestrator decided on",
+          "reuse": "always",
+          "why": "it compares the dispatch input against GITHUB_SHA, which are properties of the RUN and not of the tree, and it is the refusal that stops a green verdict being attached to a commit nobody decided to merge. It must execute on every dispatched run: skipping it on a reuse hit would skip exactly the check that says the run is about the right commit. It carries `if: github.event_name == 'workflow_dispatch'` and never the reuse guard."
+        },
+        {
           "name": "Execution-environment fingerprint",
           "reuse": "always",
           "why": "NOT A VERDICT AND NEVER REUSED — it MEASURES this run's machine (hosted image version, kernel, resolved Go/Node/npm/Python, container image digests) so the lookup can refuse a verdict produced under a different one. It must precede the decision that consumes it."
@@ -453,6 +468,11 @@
           "why": "infrastructure: the interpreter the reuse lookup itself needs."
         },
         {
+          "name": "The head under test is the commit the orchestrator decided on",
+          "reuse": "always",
+          "why": "it compares the dispatch input against GITHUB_SHA, which are properties of the RUN and not of the tree, and it is the refusal that stops a green verdict being attached to a commit nobody decided to merge. It must execute on every dispatched run: skipping it on a reuse hit would skip exactly the check that says the run is about the right commit. It carries `if: github.event_name == 'workflow_dispatch'` and never the reuse guard."
+        },
+        {
           "name": "Execution-environment fingerprint",
           "reuse": "always",
           "why": "NOT A VERDICT AND NEVER REUSED — it MEASURES this run's machine (hosted image version, kernel, resolved Go/Node/npm/Python, container image digests) so the lookup can refuse a verdict produced under a different one. It must precede the decision that consumes it."
@@ -496,6 +516,11 @@
           "name": "Closure coherence — negative and positive tests",
           "reuse": "tree-pure",
           "why": "it builds in-process variations of the tracked governance/project-state.json and runs the tracked rule against them, asserting both that each contradiction is refused AND that legitimate future authorised work is allowed. One case gutters scripts/clean-install-reconstruction.sh to prove the ledger guard checks the assertion rather than its heading, then restores it byte-exact and verifies that it did. Every input is the tree; an identical tree gives an identical verdict. No clock, no network, no database, no artifact."
+        },
+        {
+          "name": "Nightly delivery decision — fail-closed proofs",
+          "reuse": "tree-pure",
+          "why": "it drives the tracked decision module through constructed in-memory states -- candidate lists, gate-run lists, pull-request snapshots and fixed UTC instants -- and asserts each verdict. The schedule cases are computed from the tz database against pinned datetimes, not against the wall clock, so the verdict does not move with the time of day. Every input is the tree; an identical tree gives an identical verdict. No clock dependence, no network, no database, no artifact."
         },
         {
           "name": "Migration grant durability — a migration grant must also be named in Gate-P",
@@ -582,6 +607,30 @@
           "name": "Working tree must remain clean",
           "reuse": "always",
           "why": "NOT TREE-PURE — runner state after this run's steps. The always-run checks above still execute on a hit, so it still has something to assert."
+        }
+      ]
+    },
+    "nightly-authoritative-validation.yml": {
+      "steps": [
+        {
+          "name": "Check out master (the judge, not the candidate)",
+          "reuse": "always",
+          "why": "it fetches the decision module and its proofs from the DEFAULT BRANCH. The candidate is the thing under judgement, so the judge must never be supplied by it. Nothing here is skippable: there is no evidence-reuse step in this workflow at all."
+        },
+        {
+          "name": "Set up Python",
+          "reuse": "always",
+          "why": "the toolchain the decision module runs on. This workflow has no reuse lookup, so no step in it is ever skipped."
+        },
+        {
+          "name": "Fail-closed proofs for tonight's decision rules",
+          "reuse": "always",
+          "why": "the rules that can refuse a merge are proven on the night they are used, before anything is dispatched or merged. Skipping this would mean deciding a merge with unproven rules, which is the one thing this workflow must never do."
+        },
+        {
+          "name": "Validate, and merge if all four gates freshly pass the exact head",
+          "reuse": "always",
+          "why": "it reads the live pull-request list, dispatches the four gates, waits for their verdicts and performs the protected merge. Every input is live GitHub state and wall-clock time, so it is inherently unreusable and must run in full every night."
         }
       ]
     }
