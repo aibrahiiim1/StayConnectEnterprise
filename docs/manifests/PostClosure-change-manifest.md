@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `8ac4034eaa53af40ecd212a02a084e7f53e9aef8`
-- **HEAD commit:** `af701fb4`
-- **Provenance (generation HEAD = inventory_head):** `c220d80552f3cf276470cc9345fd1d9a650c84f6`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `6264a0a1`
+- **Provenance (generation HEAD = inventory_head):** `cd10d069ab5219221ae48491a48a9670d7e69b14`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/nightly-authoritative-delivery`
 - **Remote branch:** `origin/delivery/nightly-authoritative-delivery`
 - **Changed files:** 48
@@ -12,15 +12,15 @@
 
 | Path | Classification | Git status | Domain | Workstream | Rollback | Purpose (last commit subject in range) |
 |---|---|---|---|---|---|---|
-| `.github/workflows/nightly-authoritative-validation.yml` | CREATED | `A` | configuration | CI | rollback REMOVES it | Move the cost of the gates off every push and onto one nightly run |
+| `.github/workflows/nightly-authoritative-validation.yml` | CREATED | `A` | configuration | CI | rollback REMOVES it | One timezone-aware schedule replaces the dual-cron no-op design |
 | `.github/workflows/phase3-software.yml` | MODIFIED | `M` | configuration | CI | rollback RESTORES prior content | A mention is not a step, and my own comment proved it |
 | `.github/workflows/phase4-financial-core.yml` | MODIFIED | `M` | configuration | CI | rollback RESTORES prior content | A mention is not a step, and my own comment proved it |
 | `.github/workflows/phase5-post-stay-transfer.yml` | MODIFIED | `M` | configuration | CI | rollback RESTORES prior content | A mention is not a step, and my own comment proved it |
 | `.github/workflows/project-governance.yml` | MODIFIED | `M` | configuration | CI | rollback RESTORES prior content | A mention is not a step, and my own comment proved it |
-| `CLAUDE.md` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Move the cost of the gates off every push and onto one nightly run |
+| `CLAUDE.md` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | One timezone-aware schedule replaces the dual-cron no-op design |
 | `docs/FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Move the cost of the gates off every push and onto one nightly run |
 | `docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Move the cost of the gates off every push and onto one nightly run |
-| `docs/NIGHTLY_AUTHORITATIVE_DELIVERY.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Move the cost of the gates off every push and onto one nightly run |
+| `docs/NIGHTLY_AUTHORITATIVE_DELIVERY.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | One timezone-aware schedule replaces the dual-cron no-op design |
 | `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0182 records the nightly delivery model and the standing PRE-LIVE decision |
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0182 records the nightly delivery model and the standing PRE-LIVE decision |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0182 records the nightly delivery model and the standing PRE-LIVE decision |
@@ -30,7 +30,7 @@
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
 | `exports/chatgpt/phase-evidence/GIT_STAT_39b79f79.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Packs: rebuild at the T0182 governance commit |
-| `exports/chatgpt/phase-evidence/GIT_STAT_8ee1bbb4.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs: rebuild at the delivery head |
+| `exports/chatgpt/phase-evidence/GIT_STAT_d78bd812.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Packs: rebuild at the delivery head |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the delivery head |
@@ -48,40 +48,40 @@
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs: rebuild at the T0182 governance commit |
 | `governance/artifact-registry.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Move the cost of the gates off every push and onto one nightly run |
 | `governance/ci-reuse-policy.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | A mention is not a step, and my own comment proved it |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: the delivery head is the session-start check review round |
-| `governance/transitions/T0182.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: the delivery head is the session-start check review round |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: the delivery head is the timezone-aware schedule |
+| `governance/transitions/T0182.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: the delivery head is the timezone-aware schedule |
 | `scripts/ci/assert-dispatch-head.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Move the cost of the gates off every push and onto one nightly run |
 | `scripts/ci/evidence-reuse.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Move the cost of the gates off every push and onto one nightly run |
-| `scripts/ci/nightly-orchestrate.py` | CREATED | `A` | other | OTHER | rollback REMOVES it | Two review findings, both in the tool that must never be wrong |
+| `scripts/ci/nightly-orchestrate.py` | CREATED | `A` | other | OTHER | rollback REMOVES it | One timezone-aware schedule replaces the dual-cron no-op design |
 | `tools/nightly-status.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Two review findings, both in the tool that must never be wrong |
-| `tools/nightly_delivery.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Two review findings, both in the tool that must never be wrong |
-| `tools/tests/nightly_delivery/run_negative.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Two review findings, both in the tool that must never be wrong |
-| `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | A mention is not a step, and my own comment proved it |
+| `tools/nightly_delivery.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | One timezone-aware schedule replaces the dual-cron no-op design |
+| `tools/tests/nightly_delivery/run_negative.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | One timezone-aware schedule replaces the dual-cron no-op design |
+| `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | One timezone-aware schedule replaces the dual-cron no-op design |
 | `tools/validate-ci-reuse-policy.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Move the cost of the gates off every push and onto one nightly run |
-| `tools/validate-delivery-protocol.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | One helper, applied everywhere: a check may never be satisfied by a comment |
+| `tools/validate-delivery-protocol.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | One timezone-aware schedule replaces the dual-cron no-op design |
 | `tools/validate-project-state.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Zero-stale: register the nightly next-action phrasing in the allow-list |
 
 ## Total diff statistics (`git diff --stat`)
 ```text
- .../workflows/nightly-authoritative-validation.yml |  75 ++++
+ .../workflows/nightly-authoritative-validation.yml |  81 ++++
  .github/workflows/phase3-software.yml              |  61 ++-
  .github/workflows/phase4-financial-core.yml        |  61 ++-
  .github/workflows/phase5-post-stay-transfer.yml    |  61 ++-
  .github/workflows/project-governance.yml           |  70 +++-
- CLAUDE.md                                          |  62 ++-
+ CLAUDE.md                                          |  63 ++-
  docs/FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md  |  25 +-
  docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md         |   4 +-
- docs/NIGHTLY_AUTHORITATIVE_DELIVERY.md             | 176 +++++++++
+ docs/NIGHTLY_AUTHORITATIVE_DELIVERY.md             | 204 ++++++++++
  .../StayConnect-IAM-Phase0-Contract.md             |   4 +-
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   4 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   4 +-
  docs/context/StayConnect-IAM-Handoff.md            |   4 +-
- docs/manifests/PostClosure-change-manifest.md      | 167 ++++----
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343523 -> 342841 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 149012 -> 149042 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44104 -> 44005 bytes
+ docs/manifests/PostClosure-change-manifest.md      | 171 ++++----
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343523 -> 342840 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 149012 -> 149040 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44104 -> 44004 bytes
  .../chatgpt/phase-evidence/GIT_STAT_39b79f79.txt   |   4 -
- .../chatgpt/phase-evidence/GIT_STAT_8ee1bbb4.txt   |   4 +
+ .../chatgpt/phase-evidence/GIT_STAT_d78bd812.txt   |   4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   6 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
  .../phase-evidence/tools/validate-project-state.sh |   2 +-
@@ -100,18 +100,18 @@
  governance/artifact-registry.json                  |   6 +
  governance/ci-reuse-policy.json                    |  49 +++
  governance/project-state.json                      |  42 +-
- governance/transitions/T0182.json                  |  41 ++
+ governance/transitions/T0182.json                  |  42 ++
  scripts/ci/assert-dispatch-head.sh                 |  55 +++
  scripts/ci/evidence-reuse.sh                       |  19 +
- scripts/ci/nightly-orchestrate.py                  | 288 ++++++++++++++
+ scripts/ci/nightly-orchestrate.py                  | 292 ++++++++++++++
  tools/nightly-status.py                            | 206 ++++++++++
- tools/nightly_delivery.py                          | 426 +++++++++++++++++++++
- tools/tests/nightly_delivery/run_negative.py       | 306 +++++++++++++++
- .../tests/project_state_validator/run_mutations.py |  28 +-
+ tools/nightly_delivery.py                          | 440 +++++++++++++++++++++
+ tools/tests/nightly_delivery/run_negative.py       | 334 ++++++++++++++++
+ .../tests/project_state_validator/run_mutations.py |  31 +-
  tools/validate-ci-reuse-policy.py                  |  21 +
- tools/validate-delivery-protocol.py                | 231 +++++++++--
+ tools/validate-delivery-protocol.py                | 239 +++++++++--
  tools/validate-project-state.sh                    |   2 +-
- 48 files changed, 2380 insertions(+), 246 deletions(-)
+ 48 files changed, 2477 insertions(+), 246 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -121,6 +121,10 @@ M  docs/manifests/PostClosure-change-manifest.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: cd10d069 Packs: rebuild at the delivery head
+HISTORICAL: d78bd812 Governance: the delivery head is the timezone-aware schedule
+HISTORICAL: 6264a0a1 One timezone-aware schedule replaces the dual-cron no-op design
+HISTORICAL: 29ae2de1 Delivery: the manifest lists itself
 HISTORICAL: c220d805 Packs: rebuild at the delivery head
 HISTORICAL: 8ee1bbb4 Governance: the delivery head is the session-start check review round
 HISTORICAL: af701fb4 Two review findings, both in the tool that must never be wrong
