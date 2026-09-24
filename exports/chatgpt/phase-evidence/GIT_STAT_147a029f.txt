@@ -1,4 +1,0 @@
-commit 147a029fa80cd8e46a026ebfff23dba94f9388c1
-Date:   Thu Sep 24 15:56:23 2026 +0300
-
-    Governance: the lineage head is the review-correction commit
