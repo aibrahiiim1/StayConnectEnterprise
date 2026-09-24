@@ -76,27 +76,38 @@ function mockInterfacePage(overrides: Record<string, any> = {}) {
     if (path === "/pms-interfaces") return Promise.resolve({ interfaces: [overrides.iface ?? iface] });
     if (path.endsWith("/health")) return Promise.resolve({ health: overrides.health ?? health });
     if (path.endsWith("/revisions")) return Promise.resolve({ revisions: overrides.revisions ?? revisions });
-    return Promise.resolve({ interface: iface, guest_networks: overrides.routes ?? [] });
+    if (path === "/pms-providers") {
+      return overrides.providers
+        ? Promise.resolve({ providers: overrides.providers })
+        : Promise.reject(Object.assign(new Error("page not found"), { status: 404 }));
+    }
+    if (path === "/pms-routing") return Promise.resolve({ routes: [], unmapped_guest_networks: [] });
+    return Promise.resolve({ interface: overrides.iface ?? iface, guest_networks: overrides.routes ?? [] });
   });
 }
 
+// Opens a connection's side sheet from its card, then (optionally) one of its tabs.
+async function openSheet(tab?: string) {
+  await screen.findByText("Main PMS");
+  await userEvent.click(await screen.findByRole("button", { name: "Manage" }));
+  if (tab) await userEvent.click(await screen.findByRole("tab", { name: tab }));
+}
+
 describe("PMS interfaces page", () => {
-  it("shows the published revision, not the newest one", async () => {
+  it("shows the published revision as live, and a newer one only as a draft", async () => {
     mockInterfacePage();
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
     render(<Page />);
-    await screen.findByText("Main PMS");
-    await userEvent.click(screen.getByRole("button", { name: "Manage" }));
+    await openSheet("Configuration");
 
-    // THE MAIN VIEW SHOWS WHAT IS IN FORCE, not the newest thing saved.
-    //
-    // Version 1 is in use even though version 2 exists and is newer, and the routine question -- "what is
-    // this connection set to?" -- is answered without opening anything. Previous versions are behind
-    // History, which is why the newest version must NOT be what this card shows.
-    await screen.findByText("Current configuration");
-    expect(await screen.findByText("Version 1")).toBeTruthy();
-    expect(screen.getByText("In use")).toBeTruthy();
-    expect(screen.queryByText("Version 2")).toBeNull();
+    // THE LIVE SECTION SHOWS WHAT IS IN FORCE, not the newest thing saved. Version 1 is in use even though
+    // version 2 exists and is newer; version 2 is offered as a draft to put live, never labelled as in use.
+    await screen.findByRole("heading", { name: "Live configuration" });
+    const sheet = screen.getByRole("dialog");
+    expect(await within(sheet).findByText("Version 1")).toBeTruthy();
+    expect(within(sheet).getAllByText("In use")).toHaveLength(1);
+    expect(within(sheet).getByText("Draft")).toBeTruthy();
+    expect(within(sheet).getByRole("button", { name: "Put version 2 live" })).toBeTruthy();
   });
 
   it("states plainly when an interface has nothing published", async () => {
@@ -108,28 +119,25 @@ describe("PMS interfaces page", () => {
     });
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
     render(<Page />);
-    // An interface with nothing published resolves nothing. It is stated as the CONSEQUENCE now -- "No" under
-    // "Can guests sign in?" with the reason beneath -- rather than as a "not configured" badge, because the
-    // operator's question is whether guests can get online, not whether a record exists.
-    expect(await screen.findByText("No")).toBeTruthy();
-    expect(screen.getByText(/No configuration has been put live/i)).toBeTruthy();
+    // Stated as the CONSEQUENCE, on the card itself: no live configuration, and why room sign-in is closed.
+    expect(await screen.findByText(/No configuration has been put live/i)).toBeTruthy();
+    expect(screen.getByText("None published")).toBeTruthy();
   });
 
-  it("shows the four health dimensions separately and the age of the backlog", async () => {
+  it("shows the health dimensions separately and the age of the backlog", async () => {
     mockInterfacePage();
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
     render(<Page />);
-    await screen.findByText("Main PMS");
-    await userEvent.click(screen.getByRole("button", { name: "Manage" }));
+    await openSheet();
 
-    await screen.findByText("Connection status");
+    await screen.findByText("The checks room sign-in depends on");
     // separate, because they fail separately and each has a different response
     expect(screen.getAllByText("Connection").length).toBeGreaterThan(0);
     expect(screen.getByText("Live updates")).toBeTruthy();
     expect(screen.getAllByText("Guest list").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/12/).length).toBeGreaterThan(0);
     // the age of the oldest waiting event is what separates a busy morning from a stuck processor
-    expect(screen.getByText(/^Oldest /)).toBeTruthy();
+    expect(screen.getByText(/^Oldest waiting message arrived/)).toBeTruthy();
   });
 
   it("publishes with the revision the operator believed was live, a reason and a password", async () => {
@@ -137,91 +145,117 @@ describe("PMS interfaces page", () => {
     post.mockResolvedValue({ current_revision_id: "r2", revision_no: 2 });
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
     render(<Page />);
-    await screen.findByText("Main PMS");
-    await userEvent.click(screen.getByRole("button", { name: "Manage" }));
+    await openSheet("History");
 
-    // Rolling back means putting a previous version back, so it is reached through History.
-    await screen.findByText("Current configuration");
-    await userEvent.click(screen.getByRole("button", { name: /^History/ }));
     await screen.findByText("Configuration history");
-    await userEvent.click(screen.getByRole("button", { name: /Put this version back in use/ }));
-    await userEvent.type(await screen.findByLabelText(/Reason/), "CONFIG_UPDATE");
-    await userEvent.type(screen.getByLabelText(/Confirm your password/), "pw");
-    // Scoped to the dialog rather than picked by index: the row button that OPENED it has the same name, it is
-    // inert while the dialog is open, and which of the two comes first in the document is an implementation
-    // detail of where Radix portals its content.
-    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^Put live$/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Put version 2 live" }));
+    const dialog = await screen.findByRole("dialog", { name: /Put version 2 live/ });
+    await userEvent.selectOptions(within(dialog).getByLabelText(/Reason/), "ENDPOINT_CHANGE");
+    await userEvent.type(within(dialog).getByLabelText(/Confirm your password/), "pw");
+    await userEvent.click(within(dialog).getByRole("button", { name: /^Put live$/ }));
 
     await waitFor(() => expect(post).toHaveBeenCalled());
     const [path, body] = post.mock.calls[0];
     expect(path).toBe("/pms-interfaces/i1/publish");
-    expect(body.revision_id).toBe("r2");
-    // THE OPTIMISTIC CHECK: without this the server cannot tell a deliberate change from one that would
-    // silently revert whoever published while this form was open.
-    expect(body.expected_revision_id).toBe("r1");
-    expect(body.reason_code).toBe("CONFIG_UPDATE");
-    expect(body.password).toBe("pw");
+    // THE OPTIMISTIC CHECK: without expected_revision_id the server cannot tell a deliberate change from one
+    // that would silently revert whoever published while this form was open.
+    expect(body).toEqual({ revision_id: "r2", expected_revision_id: "r1", reason_code: "ENDPOINT_CHANGE", password: "pw" });
+  });
+
+  it("puts an older version back in use as a rollback", async () => {
+    mockInterfacePage({
+      iface: { ...iface, current_revision_id: "r2", current_revision_no: 2 },
+      revisions: [
+        { ...revisions[0], published: true },
+        { ...revisions[1], published: false },
+      ],
+    });
+    post.mockResolvedValue({ current_revision_id: "r1", revision_no: 1 });
+    const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
+    render(<Page />);
+    await openSheet("History");
+
+    await userEvent.click(await screen.findByRole("button", { name: /Put this version back in use/ }));
+    const dialog = await screen.findByRole("dialog", { name: /Put version 1 live/ });
+    await userEvent.type(within(dialog).getByLabelText(/Confirm your password/), "pw");
+    await userEvent.click(within(dialog).getByRole("button", { name: /^Put live$/ }));
+
+    await waitFor(() => expect(post).toHaveBeenCalled());
+    expect(post.mock.calls[0][1]).toEqual({
+      revision_id: "r1", expected_revision_id: "r2", reason_code: "CONFIG_ROLLBACK", password: "pw",
+    });
   });
 
   it("surfaces a refused publication instead of appearing to succeed", async () => {
     mockInterfacePage();
-    post.mockRejectedValue(new Error("another operator published a different revision"));
+    post.mockRejectedValue(Object.assign(
+      new Error("another operator published a different revision while this form was open"),
+      { code: "revision_conflict", status: 409 },
+    ));
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
     render(<Page />);
-    await screen.findByText("Main PMS");
-    await userEvent.click(screen.getByRole("button", { name: "Manage" }));
-    // Rolling back means putting a previous version back, so it is reached through History.
-    await screen.findByText("Current configuration");
-    await userEvent.click(screen.getByRole("button", { name: /^History/ }));
-    await screen.findByText("Configuration history");
-    await userEvent.click(screen.getByRole("button", { name: /Put this version back in use/ }));
-    await userEvent.type(await screen.findByLabelText(/Reason/), "CONFIG_UPDATE");
-    await userEvent.type(screen.getByLabelText(/Confirm your password/), "pw");
-    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^Put live$/ }));
+    await openSheet("History");
+    await userEvent.click(await screen.findByRole("button", { name: "Put version 2 live" }));
+    const dialog = await screen.findByRole("dialog", { name: /Put version 2 live/ });
+    await userEvent.type(within(dialog).getByLabelText(/Confirm your password/), "pw");
+    await userEvent.click(within(dialog).getByRole("button", { name: /^Put live$/ }));
 
-    const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toMatch(/another operator published/);
+    const alert = await within(dialog).findByRole("alert");
+    expect(alert.textContent).toMatch(/another operator published a different revision/i);
+    expect(alert.textContent).toMatch(/reload/i);
   });
 
   // THE SUPPORTED CONNECTOR HAS NO CREDENTIAL, so the page must not present one.
   //
-  // This replaces a test that asserted the Credential card behaved SECURELY — masked input, never echoed,
-  // never fetched. That was the right test while a credential could exist. The Protel FIAS link carries no
-  // transport authentication (credential_mode=NONE), so the card's "never set" badge described a missing
-  // secret that is not supposed to exist, and read as a fault on a correctly configured interface.
-  //
-  // The component and its endpoint are deliberately still in the tree for a connector that authenticates;
-  // what is asserted here is that nothing REACHES the operator and nothing is requested.
+  // The Protel FIAS link carries no transport authentication (credential_mode=NONE), so a Credentials tab — or a
+  // "never set" warning — would describe a missing secret that is not supposed to exist, and read as a fault on a
+  // correctly configured interface. The tab exists only for providers that sign in with a key.
   it("presents no credential surface for a connector that needs none", async () => {
     mockInterfacePage();
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
     const { container } = render(<Page />);
-    await screen.findByText("Main PMS");
-    await userEvent.click(screen.getByRole("button", { name: "Manage" }));
+    await openSheet();
 
-    expect(screen.queryByRole("heading", { name: "Credential" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: /credential/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /replace credential/i })).toBeNull();
-    // the misleading warning specifically: an interface that needs no secret is not "never set"
     expect(container.textContent).not.toMatch(/never set/i);
-    // and nothing on the page ever asks the server for one
     for (const [p] of get.mock.calls) expect(String(p)).not.toMatch(/secret/);
   });
 
-  // Only the connector the canonical runtime supports is offered. pmsd refuses any other kind at validation,
-  // so offering one here would let an operator author and publish configuration that can never connect.
-  it("offers only the supported connector when creating an interface", async () => {
+  // THE PROVIDER LIST COMES FROM THE CATALOGUE. A provider the catalogue does not list is never offered, and
+  // without a catalogue at all only Protel (FIAS) — the connector every appliance carries — is offered.
+  it("offers only Protel when the provider catalogue is unavailable", async () => {
     mockInterfacePage();
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
-    const { container } = render(<Page />);
+    render(<Page />);
     await screen.findByText("Main PMS");
-    await userEvent.click(screen.getByRole("button", { name: /add connection/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /add connection/i }));
 
-    for (const unsupported of ["opera-fias", "fidelio-fias", "mews", "apaleo", "stub"]) {
-      expect(container.textContent).not.toContain(unsupported);
+    const dialog = await screen.findByRole("dialog", { name: /Add a PMS connection/ });
+    const radios = within(dialog).getAllByRole("radio");
+    expect(radios.map((r) => (r as HTMLInputElement).value)).toEqual(["protel-fias"]);
+    expect(within(dialog).getByText(/Only Protel is offered/)).toBeTruthy();
+  });
+
+  it("offers exactly the catalogue's providers and never one it does not list", async () => {
+    mockInterfacePage({
+      providers: [
+        { kind: "protel-fias", label: "Protel (FIAS)", transport: "SOCKET", verification: "LIVE_PROVIDER_VERIFIED" },
+        { kind: "apaleo", label: "apaleo", transport: "REST_POLL", verification: "AUTOMATED_CONTRACT_VERIFIED" },
+      ],
+    });
+    const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
+    render(<Page />);
+    await screen.findByText("Main PMS");
+    await userEvent.click(await screen.findByRole("button", { name: /add connection/i }));
+
+    const dialog = await screen.findByRole("dialog", { name: /Add a PMS connection/ });
+    await waitFor(() =>
+      expect(within(dialog).getAllByRole("radio").map((r) => (r as HTMLInputElement).value))
+        .toEqual(["protel-fias", "apaleo"]));
+    for (const unlisted of ["opera-fias", "fidelio-fias", "mews", "stub"]) {
+      expect(dialog.textContent).not.toContain(unlisted);
     }
-    // Two matches is correct: the existing interface's row and the create form's fixed connector. Asserting
-    // "at least one" keeps the test about WHICH connectors are offered rather than about page layout.
-    expect((await screen.findAllByText("Protel (FIAS)")).length).toBeGreaterThan(0);
   });
 
   // A Protel revision form must not ask for values the implementation controls. Each of these was a way to
@@ -230,8 +264,8 @@ describe("PMS interfaces page", () => {
     mockInterfacePage();
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
     render(<Page />);
-    await screen.findByText("Main PMS");
-    await userEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await openSheet("Configuration");
+    await userEvent.click(await screen.findByRole("button", { name: "Edit configuration" }));
 
     expect(await screen.findByLabelText(/PMS time zone/)).toBeTruthy(); // still the operator's to set
     for (const gone of [/folio identity/i, /credential mode/i, /normalization version/i, /resync supported/i]) {
@@ -243,8 +277,7 @@ describe("PMS interfaces page", () => {
     mockInterfacePage({ routes: [] });
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
     render(<Page />);
-    await screen.findByText("Main PMS");
-    await userEvent.click(screen.getByRole("button", { name: "Manage" }));
+    await openSheet("Guest networks");
     // configured but unreachable looks identical to healthy everywhere else on the page
     expect(await screen.findByText(/No Wi-Fi network points at this connection/)).toBeTruthy();
   });
