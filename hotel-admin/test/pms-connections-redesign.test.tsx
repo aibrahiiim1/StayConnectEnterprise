@@ -374,3 +374,36 @@ describe("operator wording", () => {
     }
   });
 });
+
+// EDITING A SAVED WEB-API CONNECTION STARTS FROM WHAT WAS SAVED. edged stores a REST provider's settings under
+// config.provider (pmsprovider.RESTConfig.StoredConfig); `provider_config` is only the request field. Reading
+// the request name started every Mews/Apaleo/OPERA edit from defaults and blanks -- dropping required property
+// ids and silently resetting optional scoping. The revision below has the exact shape StoredConfig writes.
+describe("editing a saved web-API connection", () => {
+  const storedRevision = {
+    source_timezone: "Europe/Berlin",
+    config: {
+      endpoint: "https://api.example.test",
+      resync_supported: true,
+      auth: { credential_mode: "AUTH_KEY", read_only: true },
+      provider: { base_url: "https://api.example.test", property_id: "BER", poll_interval_s: 300 },
+      heartbeat_interval_ms: 300000,
+    },
+  };
+
+  it("reloads every persisted provider value instead of defaults or blanks", async () => {
+    const { valuesFromRevision } = await import("@/lib/api/pms-connections");
+    const { values, timezone } = valuesFromRevision(REST_PROVIDER as any, storedRevision);
+    expect(values.base_url).toBe("https://api.example.test");
+    expect(values.property_id).toBe("BER");
+    expect(String(values.poll_interval_s)).toBe("300"); // not the catalogue default of 60
+    expect(timezone).toBe("Europe/Berlin");
+  });
+
+  it("shows the persisted values in the configuration summary", async () => {
+    const { ConfigSummary } = await import("@/app/(app)/pms-interfaces/provider-fields");
+    render(<ConfigSummary provider={REST_PROVIDER as any} rev={storedRevision} />);
+    expect(screen.getByText("BER")).toBeInTheDocument();
+    expect(screen.getByText("300 seconds")).toBeInTheDocument();
+  });
+});

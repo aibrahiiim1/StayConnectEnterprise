@@ -312,15 +312,23 @@ export function credentialSecret(p: PmsProvider, values: Record<string, string>)
   return out;
 }
 
+/**
+ * The provider-specific values a saved revision carries. edged STORES them under `config.provider`
+ * (pmsprovider.RESTConfig.StoredConfig); `provider_config` is only the name of the request field that sends
+ * them. Reading the request name here started every Mews, Apaleo and OPERA Cloud edit from defaults and blanks.
+ */
+export function storedProviderValues(cfg: Record<string, unknown>): Record<string, unknown> {
+  const pick = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : {});
+  return { ...pick(cfg.provider_config), ...pick(cfg.provider) };
+}
+
 /** The values a revision already carries, to start an edit from what is live rather than from defaults. */
 export function valuesFromRevision(
   p: PmsProvider, rev: { config?: Record<string, unknown>; source_timezone?: string } | null | undefined,
 ): { values: FormValues; timezone: string } {
   const fields = fieldsFor(p);
   const cfg = (rev?.config ?? {}) as Record<string, unknown>;
-  const nested = (cfg.provider_config && typeof cfg.provider_config === "object"
-    ? cfg.provider_config : {}) as Record<string, unknown>;
-  const src: Record<string, unknown> = { ...cfg, ...nested };
+  const src: Record<string, unknown> = { ...cfg, ...storedProviderValues(cfg) };
   // A redacted value is not a value: starting an edit from "[redacted]" would save the placeholder.
   for (const k of Object.keys(src)) if (src[k] === "[redacted]") delete src[k];
   return { values: initialValues(fields, src), timezone: rev?.source_timezone || "Africa/Cairo" };

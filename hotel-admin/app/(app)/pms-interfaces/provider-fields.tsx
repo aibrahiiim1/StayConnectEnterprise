@@ -11,7 +11,7 @@ import { Field, Input, Select } from "@/components/ui/input";
 import { Switch } from "@/components/ui/misc";
 import { KeyValueGrid } from "@/components/ui/data";
 import type { FormValues, PmsProvider, PmsProviderField } from "@/lib/api/pms-connections";
-import { PROTEL_KIND, fieldsFor } from "@/lib/api/pms-connections";
+import { PROTEL_KIND, fieldsFor, storedProviderValues } from "@/lib/api/pms-connections";
 
 export function ProviderFieldsForm({
   fields,
@@ -162,8 +162,7 @@ export function configRows(
     }
     return rows;
   }
-  const nested = (cfg.provider_config && typeof cfg.provider_config === "object"
-    ? cfg.provider_config : {}) as Record<string, unknown>;
+  const nested = storedProviderValues(cfg);
   const rows = [{ label: "PMS time zone", value: rev.source_timezone || "—" }];
   for (const f of fieldsFor(provider)) {
     const raw = nested[f.key] ?? cfg[f.key];
