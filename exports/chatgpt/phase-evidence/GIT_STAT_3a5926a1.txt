@@ -1,4 +1,0 @@
-commit 3a5926a152e4b398e9697398b3332462184afb20
-Date:   Thu Sep 24 23:37:26 2026 +0300
-
-    Governance: T0186 records the Hotel Admin overhaul and its deployed provenance

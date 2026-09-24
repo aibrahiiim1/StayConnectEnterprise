@@ -1,0 +1,4 @@
+commit eb46f5e773e9f9893ed75726b2f648a7707e464b
+Date:   Fri Sep 25 02:02:12 2026 +0300
+
+    Governance: T0187 records safe catalogue deletion, migration 0091 and the scaffold removal
