@@ -1,0 +1,4 @@
+commit dbd71442c8e326104cd44c31f0b7fdefcfb26fc3
+Date:   Thu Sep 24 17:27:04 2026 +0300
+
+    Governance: T0186 records the net that never fires
