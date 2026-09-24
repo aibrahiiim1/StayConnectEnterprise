@@ -1,0 +1,4 @@
+commit c049ce07fe17cf96e51b81eedd209f86e9d105c3
+Date:   Thu Sep 24 11:04:49 2026 +0300
+
+    Governance: the delivery head is the mergeable-state correction
