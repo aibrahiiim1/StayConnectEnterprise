@@ -1,0 +1,4 @@
+commit 8ee1bbb441dee0f6ca0e0968049fa2f7f403e166
+Date:   Thu Sep 24 04:32:26 2026 +0300
+
+    Governance: the delivery head is the session-start check review round
