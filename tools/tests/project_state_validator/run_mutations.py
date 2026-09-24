@@ -609,10 +609,32 @@ MUTATIONS = [
  # Each of these is a condition the repository was ACTUALLY IN before this rule existed, and each cost
  # measurable delivery time. They are mutations rather than prose precisely because prose is what allowed the
  # first two to persist unnoticed across all four gate workflows.
- ("M61 a gate can be satisfied by workflow_dispatch again",
+ # M61 USED TO BE "a gate can be satisfied by workflow_dispatch again", and it was RIGHT until the delivery
+ # model changed. Under the nightly model the orchestrator's workflow_dispatch is the ONLY way a required
+ # context is earned, so adding one is no longer a defect -- it is the required state, and the case reported
+ # [MISS] the moment the model landed. An obsolete mutation is worse than no mutation: it fails the suite for
+ # the wrong reason and invites someone to "fix" the validator back.
+ #
+ # What replaces it are the protections the new model actually depends on. Each of these would let the nightly
+ # validation be satisfied by something other than a fresh, correct, complete run of the exact head.
+ ("M61 a gate stops asserting the head the orchestrator decided on",
   ".github/workflows/phase3-software.yml",
-   ("replace", [("permissions:\n  contents: read",
-                 "  workflow_dispatch:\n\npermissions:\n  contents: read")])),
+   ("replace", [("bash scripts/ci/assert-dispatch-head.sh",
+                 "true  # head assertion removed, label kept")])),
+ ("M61b a gate stops forbidding evidence reuse during the nightly validation",
+  ".github/workflows/phase4-financial-core.yml",
+   ("replace", [("          NIGHTLY_VALIDATION: ${{ inputs.nightly }}",
+                 "          NIGHTLY_VALIDATION_DISABLED: 'false'")])),
+ ("M61c the nightly orchestrator loses the cron that covers half the year",
+  ".github/workflows/nightly-authoritative-validation.yml",
+   ("replace", [("    - cron: '10 1 * * *'", "    # cron removed")])),
+ ("M61d the nightly orchestrator stops proving its own fail-closed rules before merging",
+  ".github/workflows/nightly-authoritative-validation.yml",
+   ("replace", [("        run: python tools/tests/nightly_delivery/run_negative.py",
+                 "        run: true  # proofs skipped")])),
+ ("M61e the register declares a delivery model nobody enforces",
+  "governance/project-state.json",
+   ("json_set", [(["current_state_facts", "delivery_model"], "SOMETHING_ELSE")])),
  ("M62 a superseded run is never cancelled (concurrency block removed)",
   ".github/workflows/phase4-financial-core.yml",
    ("replace", [("concurrency:\n  group:", "removed_concurrency:\n  group:")])),

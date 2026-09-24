@@ -125,14 +125,27 @@ def check_nightly_dispatch(name, text):
         if blk and not re.search(r"required:\s*true", blk.group(1)):
             fail("%s input %r is not required: true; a dispatch that omits it must not be possible"
                  % (name, inp))
-    if HEAD_ASSERTION not in text:
-        fail("%s never runs %s, so a dispatch whose branch moved under it would validate the wrong commit "
-             "and still report green" % (name, HEAD_ASSERTION))
+    # A MENTION IS NOT A STEP, and the first version of this check accepted one. It searched the whole file
+    # for the strings "assert-dispatch-head.sh" and "NIGHTLY_VALIDATION" -- both of which appear in the
+    # EXPLANATORY COMMENT above the dispatch trigger. So every gate passed while carrying neither the step nor
+    # the env, and the same comment also fooled the patcher that was supposed to insert them. What is required
+    # now is the executable form: a `run:` that invokes the script, and an `env:` key spelled exactly.
+    # COMMENTS ARE STRIPPED BEFORE ANYTHING BELOW IS ASKED, so a string that appears only in prose cannot
+    # satisfy a check. That is not hypothetical tidiness: the first version searched the WHOLE FILE, both of
+    # these strings appear in the explanatory comment above the dispatch trigger, and every gate therefore
+    # passed while carrying neither the step nor the env. The same comment also fooled the patcher meant to
+    # insert them, so the mention was the only thing that ever existed.
+    code = "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
+    if HEAD_ASSERTION not in code:
+        fail("%s does not RUN %s in any step. The string may appear in a comment, which proves nothing: "
+             "without the step, a dispatch whose branch moved under it would validate the wrong commit and "
+             "still report green" % (name, HEAD_ASSERTION))
     else:
-        ok("%s refuses a dispatch that is not about the decided commit" % name)
-    if "NIGHTLY_VALIDATION" not in text:
-        fail("%s does not pass NIGHTLY_VALIDATION to the evidence-reuse step, so the nightly run could be "
-             "satisfied by earlier evidence instead of executing freshly" % name)
+        ok("%s runs the wrong-commit refusal as a step" % name)
+    if not re.search(r"(?m)^\s+NIGHTLY_VALIDATION:\s", code):
+        fail("%s does not pass NIGHTLY_VALIDATION as an env key to the evidence-reuse step, so the nightly "
+             "run could be satisfied by earlier evidence instead of executing freshly. A mention in prose "
+             "does not set an environment variable" % name)
     else:
         ok("%s forbids evidence reuse during the nightly authoritative validation" % name)
     if "run-name:" not in text:

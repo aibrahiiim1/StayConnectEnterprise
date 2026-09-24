@@ -124,6 +124,16 @@ jobs:
       # version-tagged actions all resolve at run time, so an identical tree says nothing about the toolchain
       # that would run the tests. This publishes a fingerprint of the resolved environment; the lookup below
       # reads the candidate run's own fingerprint out of its log and refuses to reuse across a difference.
+      # THE RUN MUST BE ABOUT THE COMMIT THE ORCHESTRATOR DECIDED ON. A dispatch names a ref, so the branch
+      # can move between the decision and this checkout; a green verdict attached to a commit nobody chose to
+      # merge is the one outcome the nightly model must never produce. Fails closed on any mismatch, and on a
+      # dispatch that carries no expected sha at all.
+      - name: The head under test is the commit the orchestrator decided on
+        if: github.event_name == 'workflow_dispatch'
+        run: >
+          bash scripts/ci/assert-dispatch-head.sh
+          '${{ inputs.expected_sha }}' '${{ github.sha }}' '${{ inputs.correlation_id }}'
+
       - name: Execution-environment fingerprint
         id: env
         run: bash scripts/ci/env-fingerprint.sh postgres:16-alpine
@@ -148,6 +158,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           EVIDENCE_ENV_FINGERPRINT: ${{ steps.env.outputs.fingerprint }}
+          NIGHTLY_VALIDATION: ${{ inputs.nightly }}
+          NIGHTLY_CORRELATION_ID: ${{ inputs.correlation_id }}
         run: bash scripts/ci/evidence-reuse.sh phase5-post-stay-transfer.yml
       - name: Evidence-publication self-test (does the publisher refuse an incomplete run?)
         if: steps.reuse.outputs.hit != 'true'
