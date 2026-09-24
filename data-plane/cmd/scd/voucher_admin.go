@@ -67,6 +67,71 @@ type voucherRow struct {
 	ValidUntil        *string `json:"redemption_valid_until"`
 	Notes             *string `json:"notes"`
 	IssuedBy          *string `json:"issued_by"`
+	// EffectiveState is what the card IS right now, as opposed to what the row says. Nothing ever writes
+	// REDEMPTION_EXPIRED -- expiry is enforced at sign-in by voucherRedeemable, from the window columns -- so
+	// a card past its valid-until stays UNUSED in the table forever. Reading `state` alone, a screen shows
+	// "not used yet" and offers to cancel a card that can no longer be redeemed. This is computed from the
+	// same [from, until) rule the authenticator applies, at query time, and changes nothing stored.
+	EffectiveState string `json:"effective_state"`
+}
+
+// THE EFFECTIVE STATE, as SQL, in exactly one place. The window rule is voucherRedeemable's
+// (internal/iamv2/repo_pg.go): [from, until), NULL meaning unbounded. REDEMPTION_EXPIRED is still honoured
+// if anything ever writes it.
+const voucherEffectiveStateSQL = `CASE
+	    WHEN state = 'REDEEMED' THEN 'redeemed'
+	    WHEN state = 'REVOKED'  THEN 'cancelled'
+	    WHEN state = 'REDEMPTION_EXPIRED' THEN 'expired'
+	    WHEN redemption_valid_until IS NOT NULL AND redemption_valid_until <= now() THEN 'expired'
+	    WHEN redemption_valid_from  IS NOT NULL AND redemption_valid_from  >  now() THEN 'not_yet_valid'
+	    ELSE 'available' END`
+
+// voucherListFilterSQL is the WHERE clause the list, its total and the filtered summary share, so the page,
+// the count under it and the chip counts cannot disagree about what a filter means. Parameters:
+// $1 tenant, $2 site, $3 state, $4 batch_id, $5 effective, $6 last4, $7 package_revision_id.
+const voucherListFilterSQL = `
+	     WHERE tenant_id = $1 AND site_id = $2
+	       AND ($3 = '' OR state = $3)
+	       AND ($4 = '' OR batch_id::text = $4)
+	       AND ($5 = '' OR (` + voucherEffectiveStateSQL + `) = $5)
+	       AND ($6 = '' OR strpos(upper(code_last4), $6) > 0)
+	       AND ($7 = '' OR package_revision_id::text = $7)`
+
+// voucherListFilters are the list filters. They are refused rather than ignored when malformed: a filter
+// the server silently dropped would present the whole inventory as the filtered one.
+type voucherListFilters struct {
+	State, Batch, Effective, Last4, Package string
+}
+
+func parseVoucherListFilters(q interface{ Get(string) string }) (voucherListFilters, error) {
+	f := voucherListFilters{
+		State:     strings.ToUpper(strings.TrimSpace(q.Get("state"))),
+		Batch:     strings.TrimSpace(q.Get("batch_id")),
+		Effective: strings.ToLower(strings.TrimSpace(q.Get("effective"))),
+		Last4:     strings.ToUpper(strings.TrimSpace(q.Get("last4"))),
+		Package:   strings.TrimSpace(q.Get("package_revision_id")),
+	}
+	switch f.State {
+	case "", "UNUSED", "REDEEMED", "REVOKED", "REDEMPTION_EXPIRED":
+	default:
+		return f, errors.New("state must be one of UNUSED, REDEEMED, REVOKED, REDEMPTION_EXPIRED")
+	}
+	switch f.Effective {
+	case "", "available", "not_yet_valid", "expired", "redeemed", "cancelled":
+	default:
+		return f, errors.New("effective must be one of available, not_yet_valid, expired, redeemed, cancelled")
+	}
+	// The last four characters are the display hint the list already shows. Searching them is matching a card
+	// in somebody's hand, not reading a code -- and never more than those four characters.
+	if len(f.Last4) > 4 {
+		return f, errors.New("last4 searches at most the last four characters of a code")
+	}
+	for _, c := range f.Last4 {
+		if !((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+			return f, errors.New("last4 may contain only letters and digits")
+		}
+	}
+	return f, nil
 }
 
 // listVouchers answers the operator list. It returns code_last4 and never a code: the list is the screen an
@@ -91,29 +156,22 @@ func (s *server) listVouchers(w http.ResponseWriter, r *http.Request) {
 		}
 		offset = n
 	}
-	state := strings.ToUpper(strings.TrimSpace(q.Get("state")))
-	switch state {
-	case "", "UNUSED", "REDEEMED", "REVOKED", "REDEMPTION_EXPIRED":
-	default:
-		httpErr(w, http.StatusBadRequest,
-			"state must be one of UNUSED, REDEEMED, REVOKED, REDEMPTION_EXPIRED")
+	f, ferr := parseVoucherListFilters(q)
+	if ferr != nil {
+		httpErr(w, http.StatusBadRequest, ferr.Error())
 		return
 	}
-	batch := strings.TrimSpace(q.Get("batch_id"))
 
 	rows, err := s.db.Query(r.Context(), `
 	    SELECT id::text, code_last4, state, package_revision_id::text, batch_id::text,
 	           to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
 	           to_char(redemption_valid_from  AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
 	           to_char(redemption_valid_until AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
-	           notes, issued_by::text
-	      FROM iam_v2.vouchers
-	     WHERE tenant_id = $1 AND site_id = $2
-	       AND ($3 = '' OR state = $3)
-	       AND ($4 = '' OR batch_id::text = $4)
+	           notes, issued_by::text, `+voucherEffectiveStateSQL+`
+	      FROM iam_v2.vouchers`+voucherListFilterSQL+`
 	     ORDER BY created_at DESC, id
-	     LIMIT $5 OFFSET $6`,
-		s.tenID, s.siteID, state, batch, limit, offset)
+	     LIMIT $8 OFFSET $9`,
+		s.tenID, s.siteID, f.State, f.Batch, f.Effective, f.Last4, f.Package, limit, offset)
 	if err != nil {
 		httpErr(w, http.StatusInternalServerError, "voucher list failed")
 		return
@@ -123,7 +181,7 @@ func (s *server) listVouchers(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var v voucherRow
 		if err := rows.Scan(&v.ID, &v.CodeLast4, &v.State, &v.PackageRevisionID, &v.BatchID,
-			&v.CreatedAt, &v.ValidFrom, &v.ValidUntil, &v.Notes, &v.IssuedBy); err != nil {
+			&v.CreatedAt, &v.ValidFrom, &v.ValidUntil, &v.Notes, &v.IssuedBy, &v.EffectiveState); err != nil {
 			httpErr(w, http.StatusInternalServerError, "voucher list failed")
 			return
 		}
@@ -133,20 +191,52 @@ func (s *server) listVouchers(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusInternalServerError, "voucher list failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"authority": "iam_v2", "vouchers": out})
+	rows.Close()
+	// THE TOTAL, under the same filter. Without it a list can only say "there may be more", and an operator
+	// looking for one card in a 500-card batch cannot tell how far they have to page.
+	var total int64
+	if err := s.db.QueryRow(r.Context(), `SELECT count(*) FROM iam_v2.vouchers`+voucherListFilterSQL,
+		s.tenID, s.siteID, f.State, f.Batch, f.Effective, f.Last4, f.Package).Scan(&total); err != nil {
+		httpErr(w, http.StatusInternalServerError, "voucher list failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"authority": "iam_v2", "vouchers": out, "total": total})
 }
 
 // voucherSummary counts by state. This is what the dashboard tile reads: edged holds no privilege on
 // iam_v2.vouchers, which is why its own query could never have worked.
+//
+// The four stored-state counts are unchanged. The effective counts beside them answer what the stored ones
+// cannot: how many UNUSED cards can still actually be redeemed, how many have passed their valid-until
+// (nothing writes REDEMPTION_EXPIRED, so that stored count stays zero), and how many are not valid yet.
+// The batch, last4 and package filters of the list narrow the population counted, so a screen's filter
+// counts describe the filtered view rather than the whole property.
 func (s *server) voucherSummary(w http.ResponseWriter, r *http.Request) {
+	f, ferr := parseVoucherListFilters(r.URL.Query())
+	if ferr != nil {
+		httpErr(w, http.StatusBadRequest, ferr.Error())
+		return
+	}
+	// A summary answers "how many in each state", so a state filter on it would be a question with one
+	// answer. Both state filters are ignored here on purpose.
+	f.State, f.Effective = "", ""
 	var unused, redeemed, revoked, expired int64
+	var available, expiredUnused, notYetValid, total, lastWeek, batches int64
 	err := s.db.QueryRow(r.Context(), `
 	    SELECT count(*) FILTER (WHERE state = 'UNUSED'),
 	           count(*) FILTER (WHERE state = 'REDEEMED'),
 	           count(*) FILTER (WHERE state = 'REVOKED'),
-	           count(*) FILTER (WHERE state = 'REDEMPTION_EXPIRED')
-	      FROM iam_v2.vouchers WHERE tenant_id = $1 AND site_id = $2`,
-		s.tenID, s.siteID).Scan(&unused, &redeemed, &revoked, &expired)
+	           count(*) FILTER (WHERE state = 'REDEMPTION_EXPIRED'),
+	           count(*) FILTER (WHERE (`+voucherEffectiveStateSQL+`) = 'available'),
+	           count(*) FILTER (WHERE (`+voucherEffectiveStateSQL+`) = 'expired'),
+	           count(*) FILTER (WHERE (`+voucherEffectiveStateSQL+`) = 'not_yet_valid'),
+	           count(*),
+	           count(*) FILTER (WHERE created_at >= now() - interval '7 days'),
+	           count(DISTINCT batch_id)
+	      FROM iam_v2.vouchers`+voucherListFilterSQL,
+		s.tenID, s.siteID, f.State, f.Batch, f.Effective, f.Last4, f.Package).Scan(
+		&unused, &redeemed, &revoked, &expired,
+		&available, &expiredUnused, &notYetValid, &total, &lastWeek, &batches)
 	if err != nil {
 		httpErr(w, http.StatusInternalServerError, "voucher summary failed")
 		return
@@ -154,6 +244,108 @@ func (s *server) voucherSummary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"authority": "iam_v2",
 		"unused":    unused, "redeemed": redeemed, "revoked": revoked, "redemption_expired": expired,
+		"available": available, "expired_unused": expiredUnused, "not_yet_valid": notYetValid,
+		"total": total, "issued_last_7_days": lastWeek, "batches": batches,
+	})
+}
+
+// voucherBatchRow is one print run, aggregated. A batch is not a row of its own under iam_v2 -- it is the
+// set of vouchers sharing a batch_id -- so this is derived from the voucher table rather than stored.
+type voucherBatchRow struct {
+	BatchID           string  `json:"batch_id"`
+	PackageRevisionID string  `json:"package_revision_id"`
+	Count             int64   `json:"count"`
+	Redeemed          int64   `json:"redeemed"`
+	Cancelled         int64   `json:"cancelled"`
+	Available         int64   `json:"available"`
+	Expired           int64   `json:"expired"`
+	NotYetValid       int64   `json:"not_yet_valid"`
+	Unused            int64   `json:"unused"`
+	CreatedAt         string  `json:"created_at"`
+	IssuedBy          *string `json:"issued_by"`
+	Notes             *string `json:"notes"`
+	ValidFrom         *string `json:"redemption_valid_from"`
+	ValidUntil        *string `json:"redemption_valid_until"`
+}
+
+// listVoucherBatches answers the batch list an export needs.
+//
+// Before this, the screen derived batches from whichever page of cards it had loaded, so a batch beyond the
+// loaded page did not exist on screen, and a batch half on screen was labelled with the half it could see
+// while the export pulled all of it. Read-only, no code material, and the same table the list already reads.
+func (s *server) listVoucherBatches(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit := 50
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 200 {
+			httpErr(w, http.StatusBadRequest, "limit must be between 1 and 200")
+			return
+		}
+		limit = n
+	}
+	offset := 0
+	if v := q.Get("offset"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			httpErr(w, http.StatusBadRequest, "offset must not be negative")
+			return
+		}
+		offset = n
+	}
+	batch := strings.TrimSpace(q.Get("batch_id"))
+	rows, err := s.db.Query(r.Context(), `
+	    SELECT batch_id::text, min(package_revision_id::text), count(*),
+	           count(*) FILTER (WHERE state = 'REDEEMED'),
+	           count(*) FILTER (WHERE state = 'REVOKED'),
+	           count(*) FILTER (WHERE (`+voucherEffectiveStateSQL+`) = 'available'),
+	           count(*) FILTER (WHERE (`+voucherEffectiveStateSQL+`) = 'expired'),
+	           count(*) FILTER (WHERE (`+voucherEffectiveStateSQL+`) = 'not_yet_valid'),
+	           count(*) FILTER (WHERE state = 'UNUSED'),
+	           to_char(min(created_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+	           min(issued_by::text), min(notes),
+	           to_char(min(redemption_valid_from)  AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+	           to_char(max(redemption_valid_until) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+	      FROM iam_v2.vouchers
+	     WHERE tenant_id = $1 AND site_id = $2 AND batch_id IS NOT NULL
+	       AND ($3 = '' OR batch_id::text = $3)
+	     GROUP BY batch_id
+	     ORDER BY min(created_at) DESC, batch_id
+	     LIMIT $4 OFFSET $5`, s.tenID, s.siteID, batch, limit, offset)
+	if err != nil {
+		httpErr(w, http.StatusInternalServerError, "batch list failed")
+		return
+	}
+	defer rows.Close()
+	out := make([]voucherBatchRow, 0, limit)
+	for rows.Next() {
+		var b voucherBatchRow
+		if err := rows.Scan(&b.BatchID, &b.PackageRevisionID, &b.Count, &b.Redeemed, &b.Cancelled,
+			&b.Available, &b.Expired, &b.NotYetValid, &b.Unused, &b.CreatedAt, &b.IssuedBy, &b.Notes,
+			&b.ValidFrom, &b.ValidUntil); err != nil {
+			httpErr(w, http.StatusInternalServerError, "batch list failed")
+			return
+		}
+		out = append(out, b)
+	}
+	if rows.Err() != nil {
+		httpErr(w, http.StatusInternalServerError, "batch list failed")
+		return
+	}
+	rows.Close()
+	// Cards printed before batches existed carry no batch_id. They are counted, not hidden: an export names a
+	// batch, so those cards cannot be exported, and the screen should be able to say why.
+	var total, unbatched int64
+	if err := s.db.QueryRow(r.Context(), `
+	    SELECT count(DISTINCT batch_id) FILTER (WHERE $3 = '' OR batch_id::text = $3),
+	           count(*) FILTER (WHERE batch_id IS NULL)
+	      FROM iam_v2.vouchers WHERE tenant_id = $1 AND site_id = $2`,
+		s.tenID, s.siteID, batch).Scan(&total, &unbatched); err != nil {
+		httpErr(w, http.StatusInternalServerError, "batch list failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"authority": "iam_v2", "batches": out, "total": total, "unbatched_vouchers": unbatched,
 	})
 }
 

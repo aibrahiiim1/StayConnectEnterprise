@@ -22,6 +22,7 @@ package main
 // ever issued, and that whoever may set the format must be able to read codes to do it. Neither follows.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -29,6 +30,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 // ----- the daily surface: issue, list, revoke -------------------------------------------------------
@@ -43,6 +45,10 @@ func (s *server) vouchersRoutes() http.Handler {
 	// an identifier the product never shows is a form nobody can complete, which is its own kind of
 	// unreachable feature.
 	r.Get("/grantable", s.listGrantablePackageRevisions)
+	// READ-ONLY, and under `vouchers` rather than `voucher-codes` because neither returns code material:
+	// a batch is a count of cards and a history is when a card was issued, redeemed or cancelled.
+	r.Get("/batches", s.listVoucherBatches)
+	r.Get("/{id}/history", s.voucherHistory)
 	r.Post("/issue", s.issueVouchers)
 	r.Post("/{id}/revoke", s.revokeVoucher)
 	return r
@@ -78,7 +84,7 @@ func (s *server) listGrantablePackageRevisions(w http.ResponseWriter, r *http.Re
 	rows, err := s.db.Query(ctx, `
 	    SELECT r.id::text, p.code, r.revision_no, r.package_type,
 	           COALESCE(r.display->>'name', p.code) AS name,
-	           r.price_minor, COALESCE(r.currency, '') AS currency
+	           r.price_minor, COALESCE(r.currency, '') AS currency, r.currency_exponent
 	      FROM iam_v2.internet_packages p
 	      JOIN iam_v2.internet_package_revisions r
 	        ON r.tenant_id = p.tenant_id AND r.site_id = p.site_id AND r.id = p.current_revision_id
@@ -97,12 +103,15 @@ func (s *server) listGrantablePackageRevisions(w http.ResponseWriter, r *http.Re
 		Name        string `json:"name"`
 		PriceMinor  int64  `json:"price_minor"`
 		Currency    string `json:"currency"`
+		// How many minor units make a major one (2 for EUR, 0 for JPY). NULL when the revision never set it,
+		// in which case the screen falls back to the currency's own convention.
+		CurrencyExponent *int16 `json:"currency_exponent"`
 	}
 	out := []rev{}
 	for rows.Next() {
 		var v rev
 		if err := rows.Scan(&v.ID, &v.PackageCode, &v.RevisionNo, &v.PackageType, &v.Name,
-			&v.PriceMinor, &v.Currency); err != nil {
+			&v.PriceMinor, &v.Currency, &v.CurrencyExponent); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "query_failed", "the package list could not be read")
 			return
 		}
@@ -112,11 +121,248 @@ func (s *server) listGrantablePackageRevisions(w http.ResponseWriter, r *http.Re
 }
 
 func (s *server) listVouchers(w http.ResponseWriter, r *http.Request) {
-	s.scd.proxy(w, r, http.MethodGet, "/v1/vouchers?"+r.URL.RawQuery, nil)
+	s.proxyVoucherRows(w, r, "/v1/vouchers?"+r.URL.RawQuery, "vouchers")
 }
 
 func (s *server) voucherSummary(w http.ResponseWriter, r *http.Request) {
-	s.scd.proxy(w, r, http.MethodGet, "/v1/vouchers/summary", nil)
+	path := "/v1/vouchers/summary"
+	if r.URL.RawQuery != "" {
+		path += "?" + r.URL.RawQuery
+	}
+	s.scd.proxy(w, r, http.MethodGet, path, nil)
+}
+
+// listVoucherBatches is the print-run list, aggregated by scd (which holds SELECT on iam_v2.vouchers; edged
+// deliberately does not), labelled here with the package and operator names edged can already read.
+func (s *server) listVoucherBatches(w http.ResponseWriter, r *http.Request) {
+	s.proxyVoucherRows(w, r, "/v1/vouchers/batches?"+r.URL.RawQuery, "batches")
+}
+
+// proxyVoucherRows relays an scd voucher list and adds the names a screen needs next to the identifiers:
+// what package a revision is, and who an issuing operator is. scd returns only ids -- it has no reason to
+// read the operator table -- and a list of UUIDs is a list nobody can read.
+//
+// ADDITIVE AND BEST-EFFORT. The names are looked up from tables edged already reads (the package
+// catalogue it serves /grantable from, and the operator table it authenticates against). If a lookup fails
+// the rows are relayed exactly as scd sent them: a missing label is an inconvenience, a list that fails
+// because a label could not be found is an outage.
+func (s *server) proxyVoucherRows(w http.ResponseWriter, r *http.Request, path, key string) {
+	st, raw, err := s.scd.call(r.Context(), http.MethodGet, path, nil)
+	if err != nil {
+		jsonErr(w, http.StatusBadGateway, "scd_unreachable", err.Error())
+		return
+	}
+	if st == http.StatusOK && s.db != nil {
+		revIDs, opIDs := voucherRowIDs(raw, key)
+		ctx, cancel := dbCtx(r)
+		pkgs := s.voucherPackageLabels(ctx, revIDs)
+		ops := s.voucherOperatorLabels(ctx, opIDs)
+		cancel()
+		raw = applyVoucherLabels(raw, key, pkgs, ops)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(st)
+	_, _ = w.Write(raw)
+}
+
+type voucherPackageLabel struct {
+	Name       string
+	Code       string
+	RevisionNo int
+}
+
+// voucherRowIDs collects the distinct package revision and issuing operator ids in a relayed list.
+func voucherRowIDs(raw []byte, key string) (revIDs, opIDs []string) {
+	var env map[string]json.RawMessage
+	if json.Unmarshal(raw, &env) != nil {
+		return nil, nil
+	}
+	var rows []map[string]any
+	if json.Unmarshal(env[key], &rows) != nil {
+		return nil, nil
+	}
+	seenR, seenO := map[string]bool{}, map[string]bool{}
+	for _, row := range rows {
+		if v, ok := row["package_revision_id"].(string); ok && v != "" && !seenR[v] {
+			seenR[v] = true
+			revIDs = append(revIDs, v)
+		}
+		if v, ok := row["issued_by"].(string); ok && v != "" && !seenO[v] {
+			seenO[v] = true
+			opIDs = append(opIDs, v)
+		}
+	}
+	return revIDs, opIDs
+}
+
+// applyVoucherLabels adds package_name / package_code / package_revision_no and issued_by_label to each row
+// it can name. Pure, so the transformation is testable without a database. Anything it cannot parse is
+// returned untouched.
+func applyVoucherLabels(raw []byte, key string, pkgs map[string]voucherPackageLabel, ops map[string]string) []byte {
+	if len(pkgs) == 0 && len(ops) == 0 {
+		return raw
+	}
+	var env map[string]json.RawMessage
+	if json.Unmarshal(raw, &env) != nil {
+		return raw
+	}
+	var rows []map[string]any
+	if json.Unmarshal(env[key], &rows) != nil {
+		return raw
+	}
+	for _, row := range rows {
+		if v, ok := row["package_revision_id"].(string); ok {
+			if p, found := pkgs[v]; found {
+				row["package_name"] = p.Name
+				row["package_code"] = p.Code
+				row["package_revision_no"] = p.RevisionNo
+			}
+		}
+		if v, ok := row["issued_by"].(string); ok {
+			if label, found := ops[v]; found {
+				row["issued_by_label"] = label
+			}
+		}
+	}
+	enc, err := json.Marshal(rows)
+	if err != nil {
+		return raw
+	}
+	env[key] = enc
+	out, err := json.Marshal(env)
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
+// voucherPackageLabels names package revisions, INCLUDING superseded ones: a card pins the revision it was
+// printed against, so a batch printed last month names a revision /grantable no longer offers.
+func (s *server) voucherPackageLabels(ctx context.Context, ids []string) map[string]voucherPackageLabel {
+	out := map[string]voucherPackageLabel{}
+	if len(ids) == 0 {
+		return out
+	}
+	rows, err := s.db.Query(ctx, `
+	    SELECT r.id::text, COALESCE(r.display->>'name', p.code), p.code, r.revision_no
+	      FROM iam_v2.internet_package_revisions r
+	      JOIN iam_v2.internet_packages p
+	        ON p.tenant_id = r.tenant_id AND p.site_id = r.site_id AND p.id = r.package_id
+	     WHERE r.tenant_id = $1 AND r.site_id = $2 AND r.id::text = ANY($3::text[])`,
+		s.tenantID, s.siteID, ids)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var l voucherPackageLabel
+		if rows.Scan(&id, &l.Name, &l.Code, &l.RevisionNo) == nil {
+			out[id] = l
+		}
+	}
+	return out
+}
+
+// voucherOperatorLabels names the operators who issued cards: the display name, else the email.
+func (s *server) voucherOperatorLabels(ctx context.Context, ids []string) map[string]string {
+	out := map[string]string{}
+	if len(ids) == 0 {
+		return out
+	}
+	rows, err := s.db.Query(ctx, `
+	    SELECT id::text, COALESCE(NULLIF(display_name, ''), email)
+	      FROM operators WHERE id::text = ANY($1::text[])`, ids)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, label string
+		if rows.Scan(&id, &label) == nil {
+			out[id] = label
+		}
+	}
+	return out
+}
+
+// voucherHistory answers what happened to ONE card after it was printed: when it was redeemed (the
+// entitlement it granted) and when and why it was cancelled (the operator audit record the revoke route
+// writes). It returns no code and no reveal record -- who READ a code is the voucher-codes audit, gated by
+// that permission, and does not leak through a route a read-only role can call.
+//
+// Each part is answered independently and says when it could not be: a history that silently omitted a
+// cancellation because the audit table was unreadable would read as "never cancelled".
+func (s *server) voucherHistory(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	if len(id) != 36 {
+		jsonErr(w, http.StatusBadRequest, "invalid", "a voucher id is a UUID")
+		return
+	}
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+
+	out := map[string]any{"voucher_id": id}
+
+	// Redemption: the entitlement a voucher granted names it as its subject.
+	type grant struct {
+		ActivatedAt  *string `json:"activated_at"`
+		Status       string  `json:"status"`
+		WindowEndsAt *string `json:"window_ends_at"`
+		TerminatedAt *string `json:"terminated_at"`
+		TerminalRsn  *string `json:"terminal_reason"`
+	}
+	grants := []grant{}
+	rows, err := s.db.Query(ctx, `
+	    SELECT to_char(activated_at  AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), status,
+	           to_char(window_ends_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+	           to_char(terminated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), terminal_reason
+	      FROM iam_v2.entitlements
+	     WHERE tenant_id = $1 AND site_id = $2 AND voucher_id::text = $3
+	     ORDER BY activated_at NULLS LAST
+	     LIMIT 20`, s.tenantID, s.siteID, id)
+	if err != nil {
+		out["redemption_available"] = false
+	} else {
+		for rows.Next() {
+			var g grant
+			if rows.Scan(&g.ActivatedAt, &g.Status, &g.WindowEndsAt, &g.TerminatedAt, &g.TerminalRsn) == nil {
+				grants = append(grants, g)
+			}
+		}
+		rows.Close()
+		out["redemption_available"] = rows.Err() == nil
+	}
+	out["entitlements"] = grants
+
+	// Cancellation: the audit record revokeVoucher writes on success.
+	type cancelled struct {
+		At     string  `json:"at"`
+		By     *string `json:"by"`
+		Reason *string `json:"reason"`
+	}
+	var c *cancelled
+	var at string
+	var by, reason *string
+	err = s.db.QueryRow(ctx, `
+	    SELECT to_char(a.ts AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+	           COALESCE(NULLIF(o.display_name, ''), o.email, a.actor_id), a.payload->>'reason'
+	      FROM audit_log a
+	      LEFT JOIN operators o ON o.id::text = a.actor_id
+	     WHERE a.action = 'voucher.revoked' AND a.target_type = 'voucher' AND a.target_id = $1
+	       AND (a.tenant_id IS NULL OR a.tenant_id::text = $2)
+	     ORDER BY a.ts DESC LIMIT 1`, id, s.tenantID).Scan(&at, &by, &reason)
+	switch {
+	case err == nil:
+		c = &cancelled{At: at, By: by, Reason: reason}
+		out["cancellation_available"] = true
+	case errors.Is(err, pgx.ErrNoRows):
+		out["cancellation_available"] = true
+	default:
+		out["cancellation_available"] = false
+	}
+	out["cancelled"] = c
+	writeJSON(w, http.StatusOK, out)
 }
 
 // issueVouchers mints a batch. NOT a step-up action: it creates a secret rather than revealing one, and the
