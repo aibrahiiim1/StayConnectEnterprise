@@ -1,0 +1,4 @@
+commit bafaeba8e2521ed94a4c499da1eed3061755eccb
+Date:   Thu Sep 24 10:27:16 2026 +0300
+
+    Governance: the delivery head is the mutation-anchor audit

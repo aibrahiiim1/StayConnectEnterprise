@@ -1,4 +1,0 @@
-commit 0abc5bf546ad1cce11c8db950431a1664a0747fb
-Date:   Thu Sep 24 10:06:43 2026 +0300
-
-    Governance: the delivery head is the third-validator correction
