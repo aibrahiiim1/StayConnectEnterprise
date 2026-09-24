@@ -43,7 +43,7 @@ func (r *PgCommerceAdminRepository) ListPackages(ctx context.Context, tenantID, 
 	for rows.Next() {
 		var s PackageSummary
 		if err := rows.Scan(&s.PackageID, &s.Code, &s.Active, &s.CurrentRevisionID, &s.RevisionCount,
-			&s.Name, &s.PriceMinor, &s.Currency, &s.PackageType, &s.VisibleFrom, &s.VisibleUntil,
+			&s.Name, &s.PriceMinor, &s.Currency, &s.CurrencyExponent, &s.PackageType, &s.VisibleFrom, &s.VisibleUntil,
 			&s.ServicePlanID, &s.ServicePlanRevisionID, &s.ServicePlanCode, &s.ServicePlanRevisionNo,
 			&s.DownKbps, &s.UpKbps, &s.MaxConcurrentDevices, &s.DeviceLimitPolicy,
 			&s.TimeQuotaSeconds, &s.DataQuotaBytes, &s.SpeedAllocation,
@@ -58,7 +58,7 @@ func (r *PgCommerceAdminRepository) ListPackages(ctx context.Context, tenantID, 
 func (r *PgCommerceAdminRepository) ListPackageRevisions(ctx context.Context, tenantID, siteID, packageID string) ([]RevisionInfo, error) {
 	rows, err := r.db.Query(ctx,
 		`SELECT r.id::text, r.revision_no, (r.id = p.current_revision_id) AS is_current,
-		        r.package_type, r.price_minor, r.currency
+		        r.package_type, r.price_minor, r.currency, r.currency_exponent::int
 		   FROM iam_v2.internet_package_revisions r
 		   JOIN iam_v2.internet_packages p ON p.id = r.package_id
 		  WHERE r.tenant_id=$1 AND r.site_id=$2 AND r.package_id=$3
@@ -71,7 +71,7 @@ func (r *PgCommerceAdminRepository) ListPackageRevisions(ctx context.Context, te
 	for rows.Next() {
 		var ri RevisionInfo
 		var cur *string
-		if err := rows.Scan(&ri.RevisionID, &ri.RevisionNo, &ri.IsCurrent, &ri.PackageType, &ri.PriceMinor, &cur); err != nil {
+		if err := rows.Scan(&ri.RevisionID, &ri.RevisionNo, &ri.IsCurrent, &ri.PackageType, &ri.PriceMinor, &cur, &ri.CurrencyExponent); err != nil {
 			return nil, err
 		}
 		if cur != nil {
@@ -339,6 +339,26 @@ func (t *pgCommerceAdminTx) UpsertPackage(ctx context.Context, tenantID, siteID,
 	return id, err
 }
 
+// CreatePackage is "Add package": a NEW row or a refusal, never a quiet revision of an existing package.
+//
+// ON CONFLICT DO NOTHING rather than a SELECT-then-INSERT, so two operators adding the same code at once get
+// one package and one ErrCodeExists instead of both passing the check and one landing on the other's package.
+func (t *pgCommerceAdminTx) CreatePackage(ctx context.Context, tenantID, siteID, code string) (string, error) {
+	if reservedCommerceCode(code) {
+		return "", &Error{Code: ErrInvalidInput, Msg: reservedCommerceCodeMsg}
+	}
+	var id string
+	err := t.tx.QueryRow(ctx,
+		`INSERT INTO iam_v2.internet_packages (tenant_id, site_id, code, active)
+		 VALUES ($1,$2,$3,true)
+		 ON CONFLICT (tenant_id, site_id, code) DO NOTHING
+		 RETURNING id::text`, tenantID, siteID, code).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrCodeExists
+	}
+	return id, err
+}
+
 func (t *pgCommerceAdminTx) NextRevisionNo(ctx context.Context, packageID string) (int, error) {
 	var n int
 	err := t.tx.QueryRow(ctx,
@@ -441,6 +461,23 @@ func (t *pgCommerceAdminTx) UpsertPlan(ctx context.Context, tenantID, siteID, co
 		 VALUES ($1,$2,$3,true)
 		 ON CONFLICT (tenant_id, site_id, code) DO UPDATE SET code = EXCLUDED.code
 		 RETURNING id::text`, tenantID, siteID, code).Scan(&id)
+	return id, err
+}
+
+// CreatePlan is "Add plan": see CreatePackage.
+func (t *pgCommerceAdminTx) CreatePlan(ctx context.Context, tenantID, siteID, code string) (string, error) {
+	if reservedCommerceCode(code) {
+		return "", &Error{Code: ErrInvalidInput, Msg: reservedCommerceCodeMsg}
+	}
+	var id string
+	err := t.tx.QueryRow(ctx,
+		`INSERT INTO iam_v2.service_plans (tenant_id, site_id, code, enabled)
+		 VALUES ($1,$2,$3,true)
+		 ON CONFLICT (tenant_id, site_id, code) DO NOTHING
+		 RETURNING id::text`, tenantID, siteID, code).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrCodeExists
+	}
 	return id, err
 }
 
@@ -763,13 +800,13 @@ func (r *PgCommerceAdminRepository) GetPackageCurrent(ctx context.Context, tenan
 		        COALESCE(cur.currency,''), COALESCE(cur.settlement_methods, ARRAY[]::text[]),
 		        COALESCE(cur.display,'{}'::jsonb), COALESCE(cur.duration_policy,'{}'::jsonb),
 		        cur.visible_from::text, cur.visible_until::text,
-		        COALESCE(cur.data_allocation_policy,'{}'::jsonb)
+		        COALESCE(cur.data_allocation_policy,'{}'::jsonb), cur.currency_exponent::int
 		   FROM iam_v2.internet_packages p
 		   JOIN iam_v2.internet_package_revisions cur ON cur.id = p.current_revision_id
 		  WHERE p.tenant_id=$1 AND p.site_id=$2 AND p.id=$3 AND p.is_system = false`,
 		tenantID, siteID, packageID).Scan(&c.PackageID, &c.Code, &c.Active, &c.RevisionID, &c.RevisionNo,
 		&c.ServicePlanRevisionID, &c.PackageType, &c.PriceMinor, &c.Currency, &c.SettlementMethods,
-		&display, &duration, &c.VisibleFrom, &c.VisibleUntil, &alloc)
+		&display, &duration, &c.VisibleFrom, &c.VisibleUntil, &alloc, &c.CurrencyExponent)
 	if err != nil {
 		return PackageCurrent{}, err
 	}
@@ -856,7 +893,7 @@ func wrapIfDenied(err error) error {
 func packagesListSQL() string {
 	return `SELECT p.id::text, p.code, p.active, COALESCE(p.current_revision_id::text,''),
 		        (SELECT count(*) FROM iam_v2.internet_package_revisions r WHERE r.package_id = p.id),
-		        cur.display->>'name', cur.price_minor, cur.currency, cur.package_type,
+		        cur.display->>'name', cur.price_minor, cur.currency, cur.currency_exponent::int, cur.package_type,
 		        cur.visible_from::text, cur.visible_until::text,
 		        -- THE ELIGIBILITY AND TIER COUNTS ARE NOT READ HERE, AND THAT IS A PRIVILEGE FACT.
 		        --
