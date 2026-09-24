@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"html/template"
-	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -274,11 +273,16 @@ func TestTheGuardSheetOutranksTheHotelsLayer(t *testing.T) {
 	}
 }
 
-func TestPackagesPageCarriesThePolicyToo(t *testing.T) {
+// The package-selection page runs no script, but it is still a guest-facing page reached without a proxy, and
+// its forms must only ever post back to this portal.
+func TestThePolicyHelperSetsEveryHeaderAGuestPageNeeds(t *testing.T) {
 	w := httptest.NewRecorder()
-	setPortalCSP(w)
-	if !strings.Contains(w.Header().Get("Content-Security-Policy"), "form-action 'self'") {
-		t.Error("the policy helper does not set form-action")
+	nonce := setPortalCSP(w)
+	csp := w.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "form-action 'self'") || !strings.Contains(csp, "'nonce-"+nonce+"'") {
+		t.Errorf("unexpected policy %q", csp)
 	}
-	_ = io.Discard
+	if w.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Error("nosniff is not set")
+	}
 }
