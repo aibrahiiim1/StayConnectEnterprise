@@ -17,6 +17,8 @@ function renderSuccess(commerceEnabled: boolean): string {
   const end = src.indexOf("`", start);
   let html = src.slice(start, end);
   html = html.replace(/\{\{\.SessionID\}\}/g, "sess-1");
+  // The per-response CSP nonce. Served here without the header, so any placeholder is inert.
+  html = html.replace(/\{\{\.Nonce\}\}/g, "e2e-nonce");
   // pick the {{else}} branch of the DurationSeconds conditional
   html = html.replace(/\{\{if \.DurationSeconds\}\}[\s\S]*?\{\{else\}\}([\s\S]*?)\{\{end\}\}/, "$1");
   if (commerceEnabled) {

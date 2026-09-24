@@ -35,6 +35,8 @@ import (
 	"regexp"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/portaldesign"
 )
 
 // portalAssetDir is created by deployment and owned by the service user; both edged (which writes) and
@@ -95,7 +97,7 @@ func (s *server) listPortalAssets(w http.ResponseWriter, r *http.Request) {
 	used := map[string]bool{}
 	if doc, err := s.loadBranding(r); err == nil {
 		for _, d := range []map[string]any{doc.Design, doc.Draft} {
-			for _, k := range []string{"logo_url", "background_url"} {
+			for _, k := range portaldesign.ImageFields() {
 				if v, ok := d[k].(string); ok {
 					used[strings.TrimPrefix(v, "/assets/")] = true
 				}
@@ -232,7 +234,7 @@ func (s *server) deletePortalAsset(w http.ResponseWriter, r *http.Request) {
 	// image on the sign-in page, and the operator would have no idea why.
 	if doc, err := s.loadBranding(r); err == nil {
 		for _, d := range []map[string]any{doc.Design, doc.Draft} {
-			for _, k := range []string{"logo_url", "background_url"} {
+			for _, k := range portaldesign.ImageFields() {
 				if v, ok := d[k].(string); ok && strings.TrimPrefix(v, "/assets/") == name {
 					jsonErr(w, http.StatusConflict, "in_use",
 						"this image is used by the portal design. Change the design first, then delete it.")

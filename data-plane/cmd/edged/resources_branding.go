@@ -28,20 +28,22 @@ package main
 // -----------------------------
 // Operators may supply custom CSS and a custom HTML fragment. This is a CAPTIVE PORTAL: the page collects a
 // guest's room number, surname and voucher codes, so anything injected into it can steal credentials. Script
-// is therefore not merely discouraged, it is refused — see validateAdvanced, which rejects the document
-// rather than sanitising it. Silently stripping a tag teaches an operator that their template "worked".
+// is therefore not merely discouraged, it is refused — see validateDesign, which rejects the document rather
+// than sanitising it (silently stripping a tag teaches an operator that their template "worked"), and
+// internal/portaldesign, whose allowlist both this service and the portal apply.
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/portaldesign"
 )
 
 // maxRevisions bounds the history kept in the document. Branding is presentation, not audit evidence: a
@@ -74,6 +76,7 @@ type brandingRevision struct {
 
 func (s *server) brandingRoutes() http.Handler {
 	r := chi.NewRouter()
+	r.Use(brandingBodyLimit)
 	r.Get("/", s.getBranding)
 	r.Put("/draft", s.saveBrandingDraft)
 	// SETTINGS IS WHAT AN OPERATOR PRESSES. It is /publish's behaviour under the only vocabulary a hotel has:
@@ -85,6 +88,8 @@ func (s *server) brandingRoutes() http.Handler {
 	r.Get("/preview", s.previewPortal)
 	// The shipped wording, read from the portal for the same reason. See portalLanguages.
 	r.Get("/languages", s.portalLanguages)
+	// What the portal would make of a design, without saving it. See validateBranding.
+	r.Post("/validate", s.validateBranding)
 	r.Post("/publish", s.publishBranding)
 	r.Post("/rollback/{version}", s.rollbackBranding)
 	return r
@@ -172,89 +177,101 @@ func orEmpty(m map[string]any) map[string]any {
 
 // ------------------------------------------------------------------------------------------- validation
 
-var (
-	// A CSS colour an operator may set. Deliberately narrow: this value is interpolated into a style
-	// property, so "anything the browser accepts" would include url() and expressions.
-	reColor  = regexp.MustCompile(`^#[0-9a-fA-F]{3,8}$|^rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)$`)
-	reLength = regexp.MustCompile(`^\d{1,3}(px|rem|em|%)$`)
-	// Script in any of its spellings. Matched case-insensitively against the raw text rather than a parsed
-	// tree, because the parse that matters happens in the guest's browser, not here.
-	reScript = regexp.MustCompile(`(?is)<\s*script|javascript\s*:|\son[a-z]+\s*=|<\s*iframe|<\s*object|<\s*embed|<\s*form|expression\s*\(|@import|behaviour\s*:|behavior\s*:`)
-)
-
 // validateDesign refuses a design rather than repairing one.
 //
 // Every field here ends up inside the guest's page. A URL that is not a URL, a colour that is really a
-// url(javascript:...), or a "logo" pointing at an attacker's host are all ways to turn the sign-in page into
-// something that collects credentials for somebody else.
+// url(javascript:...), a "logo" pointing at an attacker's host, or a fragment carrying <base href> are all ways
+// to turn the sign-in page into something that collects credentials for somebody else.
+//
+// THE RULES LIVE IN internal/portaldesign, not here, because portald applies exactly the same rules again
+// before it serves a design to a guest. This used to be a regular-expression denylist over the raw text, which
+// lost to every spelling it had not thought of (an <img/onerror> with no space before the handler, a <base>
+// with no script in it at all, an entity-encoded javascript&#58;). It is now an allowlist over a parsed tree:
+// the design is refused if its sanitised form would differ from what the operator wrote, and the refusal lists
+// precisely what would have been removed.
 func validateDesign(d map[string]any) error {
-	str := func(k string) (string, bool) {
-		v, ok := d[k]
-		if !ok || v == nil {
-			return "", false
-		}
-		s, ok := v.(string)
-		return s, ok
+	errs := portaldesign.Errors(portaldesign.Validate(d))
+	if len(errs) == 0 {
+		return nil
 	}
-	for _, k := range []string{"brand_color", "brand_color_dark", "text_color"} {
-		if v, ok := str(k); ok && v != "" && !reColor.MatchString(v) {
-			return fmt.Errorf("%s must be a hex or rgb() colour", k)
-		}
-	}
-	if v, ok := str("corner_radius"); ok && v != "" && !reLength.MatchString(v) {
-		return fmt.Errorf("corner_radius must be a length such as 18px")
-	}
-	for _, k := range []string{"logo_url", "background_url"} {
-		if v, ok := str(k); ok && v != "" {
-			// "//host/path" is PROTOCOL-RELATIVE: it starts with a slash and resolves to an external host
-			// over whatever scheme the page was served with. A leading-slash check alone accepts it, which is
-			// how an "appliance path" becomes somebody else's server.
-			if strings.HasPrefix(v, "//") {
-				return fmt.Errorf("%s must not be protocol-relative; use an appliance path or a full https URL", k)
-			}
-			if !strings.HasPrefix(v, "/") && !strings.HasPrefix(v, "https://") && !strings.HasPrefix(v, "data:image/") {
-				return fmt.Errorf("%s must be an appliance path, an https URL or an inline image", k)
-			}
-			if reScript.MatchString(v) {
-				return fmt.Errorf("%s contains script", k)
-			}
+	msg := portaldesign.Summary(errs)
+	for _, e := range errs {
+		if e.Field == "custom_css" || e.Field == "custom_html" {
+			msg += ". This page collects room numbers and voucher codes, so executable or re-targeting content " +
+				"in it could steal a guest's credentials — styling and markup only"
+			break
 		}
 	}
-	if v, ok := str("hotel_name"); ok && len(v) > 120 {
-		return fmt.Errorf("hotel_name is too long")
-	}
-	if v, ok := str("font_family"); ok && strings.ContainsAny(v, "{};<>") {
-		return fmt.Errorf("font_family contains characters that are not part of a font stack")
-	}
-	return validateAdvanced(d)
+	return errors.New(msg)
 }
 
-// validateAdvanced polices the custom HTML/CSS escape hatch.
+// brandingBodyLimit caps every request on this surface. The design is read on each guest page load, and the
+// field limits in portaldesign already bound what a valid one can weigh; a body larger than their sum is not a
+// design, it is a way to make edged buffer megabytes before refusing it.
+func brandingBodyLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, portaldesign.MaxBodyBytes)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+type brandingValidateReq struct {
+	Design map[string]any `json:"design"`
+}
+
+// validateBranding answers "what would the portal do with this design?" without saving anything.
 //
-// REFUSES, NEVER SANITISES. Stripping a <script> would leave the operator believing their template works and
-// leave the next reader unsure what the stored document really contains. A refusal names the problem while
-// they are still looking at it.
-func validateAdvanced(d map[string]any) error {
-	for _, k := range []string{"custom_css", "custom_html"} {
-		v, ok := d[k]
-		if !ok || v == nil {
-			continue
+// The designer calls it while an operator types in the Advanced editors, so a problem is named where it is
+// being made -- "removed the onerror attribute on <img>" -- rather than as a refusal at the moment of saving.
+// sanitized carries what a guest would actually receive for the two advanced fields, so the preview can
+// render the SAFE version and an operator can adopt it with one click. Nothing here is stored, and nothing
+// here needs the step-up: it changes nothing.
+func (s *server) validateBranding(w http.ResponseWriter, req *http.Request) {
+	var in brandingValidateReq
+	if err := decodeJSON(req, &in); err != nil {
+		if refusedTooLarge(w, err) {
+			return
 		}
-		s, ok := v.(string)
-		if !ok {
-			return fmt.Errorf("%s must be text", k)
-		}
-		if len(s) > 64*1024 {
-			return fmt.Errorf("%s is larger than 64 KB", k)
-		}
-		if reScript.MatchString(s) {
-			return fmt.Errorf(
-				"%s contains script, an inline event handler, a frame or an @import. This page collects room "+
-					"numbers and voucher codes, so executable content in it can steal a guest's credentials — "+
-					"styling and markup only", k)
-		}
+		jsonErr(w, http.StatusBadRequest, "bad_request", "body must be a JSON object with a design")
+		return
 	}
-	return nil
+	if in.Design == nil {
+		in.Design = map[string]any{}
+	}
+	issues := portaldesign.Validate(in.Design)
+	if issues == nil {
+		issues = []portaldesign.Issue{}
+	}
+	guest := portaldesign.ForGuests(in.Design)
+	sanitized := map[string]any{
+		"custom_css":  orString(guest["custom_css"]),
+		"custom_html": orString(guest["custom_html"]),
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":        len(portaldesign.Errors(issues)) == 0,
+		"issues":    issues,
+		"sanitized": sanitized,
+		"templates": portaldesign.Templates,
+	})
+}
+
+// refusedTooLarge answers 413 when a body hit brandingBodyLimit, rather than calling a design that is merely
+// too big "malformed".
+func refusedTooLarge(w http.ResponseWriter, err error) bool {
+	var tooBig *http.MaxBytesError
+	if errors.As(err, &tooBig) {
+		jsonErr(w, http.StatusRequestEntityTooLarge, "too_large",
+			fmt.Sprintf("the design is larger than the portal accepts (%d KB)", portaldesign.MaxBodyBytes/1024))
+		return true
+	}
+	return false
+}
+
+func orString(v any) string {
+	s, _ := v.(string)
+	return s
 }
 
 // ------------------------------------------------------------------------------------------- mutations
@@ -266,6 +283,9 @@ type brandingDraftReq struct {
 func (s *server) saveBrandingDraft(w http.ResponseWriter, req *http.Request) {
 	var in brandingDraftReq
 	if err := decodeJSON(req, &in); err != nil {
+		if refusedTooLarge(w, err) {
+			return
+		}
 		jsonErr(w, http.StatusBadRequest, "bad_request", "body must be a JSON object with a design")
 		return
 	}
@@ -307,6 +327,9 @@ type brandingPublishReq struct {
 func (s *server) publishBranding(w http.ResponseWriter, req *http.Request) {
 	var in brandingPublishReq
 	if err := decodeJSON(req, &in); err != nil {
+		if refusedTooLarge(w, err) {
+			return
+		}
 		jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")
 		return
 	}
@@ -459,7 +482,10 @@ func advancedChanged(next, current map[string]any) bool {
 		}
 		return ""
 	}
-	for _, k := range []string{"custom_css", "custom_html"} {
+	// The list is portaldesign.AdvancedFields -- the SAME list the portal treats as markup, and the one
+	// ADVANCED_KEYS in the Hotel Admin designer mirrors. A new field that can carry markup or CSS is added
+	// there once, and this rule, the portal and the screen all follow.
+	for _, k := range portaldesign.AdvancedFields {
 		if get(next, k) != get(current, k) {
 			return true
 		}
@@ -474,6 +500,9 @@ func (s *server) saveBrandingSettings(w http.ResponseWriter, req *http.Request) 
 	}
 	var in brandingSettingsReq
 	if err := decodeJSON(req, &in); err != nil {
+		if refusedTooLarge(w, err) {
+			return
+		}
 		jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")
 		return
 	}

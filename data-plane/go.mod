@@ -33,6 +33,7 @@ require (
 require (
 	github.com/stayconnect/enterprise/license v0.0.0
 	golang.org/x/crypto v0.49.0
+	golang.org/x/net v0.51.0
 )
 
 replace github.com/stayconnect/enterprise/license => ../license

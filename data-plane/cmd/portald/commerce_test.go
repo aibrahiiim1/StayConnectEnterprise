@@ -28,6 +28,13 @@ type capture struct {
 func newBridgeHandler(t *testing.T, portalOn bool, cap *capture) (*handler, func()) {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The landing page reads the published portal design (to render its template on first paint). That
+		// read is not a commerce call and is answered without being recorded, so "the dark bridge never
+		// calls scd" keeps meaning exactly what it did.
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/tenant/branding" {
+			_, _ = w.Write([]byte(`{}`))
+			return
+		}
 		cap.called = true
 		cap.method = r.Method
 		cap.path = r.URL.Path
