@@ -52,7 +52,7 @@ SELECT iam_v2.begin_controlled_operation('commerce_intent');
 -- the interface exists to hang a stay off, and it authenticates nobody.
 INSERT INTO iam_v2.pms_interfaces (id, tenant_id, site_id, connector_kind, display_label, lifecycle_state)
 VALUES ('6d5f0000-0000-4000-8000-000000000101', :'ten'::uuid, :'site'::uuid, 'protel-fias',
-        'Phase-6 controlled validation (no PMS)', 'AUTH_DISABLED')
+        'Validation scope (not connected)', 'AUTH_DISABLED')
 ON CONFLICT (id) DO UPDATE SET lifecycle_state = 'AUTH_DISABLED';
 
 -- A stay, so the entitlement hangs off something real-shaped. No PMS is contacted and no PMS event is

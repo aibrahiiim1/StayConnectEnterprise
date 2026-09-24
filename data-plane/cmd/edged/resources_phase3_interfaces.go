@@ -42,6 +42,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsd"
+	"github.com/stayconnect/enterprise/data-plane/internal/pmsprovider"
 )
 
 // ---------- interfaces ----------
@@ -71,6 +72,12 @@ type pmsInterfaceRow struct {
 	Endpoint       *string `json:"endpoint,omitempty"`
 	SourceTimezone *string `json:"source_timezone,omitempty"`
 	BaseCurrency   *string `json:"financial_base_currency,omitempty"`
+
+	// From the provider registry (GET /pms-providers), for the row's connector kind. Empty for a kind the
+	// registry does not list.
+	ProviderLabel string `json:"provider_label"`
+	Transport     string `json:"transport"`
+	Verification  string `json:"verification"`
 }
 
 func (s *server) pmsInterfacesRoutes() http.Handler {
@@ -91,6 +98,8 @@ func (s *server) pmsInterfacesRoutes() http.Handler {
 	r.Post("/{id}/publish", s.publishPMSInterfaceRevision)
 	r.Post("/{id}/full-resync", s.requestFullResync)
 	r.Post("/{id}/secret", s.rotatePMSInterfaceSecret)
+	// A bounded, read-only credential + reachability check for REST connectors (never dials a FIAS socket).
+	r.Post("/{id}/test-connection", s.testPMSConnection)
 	// THE LIFECYCLE TRANSITION. An interface is created AUTH_DISABLED and publishing a revision does not
 	// change that — deliberately, because publishing decides WHAT the connector would dial and activating
 	// decides WHETHER it dials at all, and collapsing the two means the moment an operator finishes typing
@@ -225,6 +234,7 @@ func scanPMSInterface(row interface{ Scan(...any) error }, e *pmsInterfaceRow) e
 		return err
 	}
 	e.Published = e.CurrentRevisionID != ""
+	e.ProviderLabel, e.Transport, e.Verification = providerMeta(e.ConnectorKind)
 	return nil
 }
 
@@ -608,9 +618,13 @@ func (s *server) publishPMSInterfaceRevision(w http.ResponseWriter, r *http.Requ
 // ---------- secret rotation (write-only) ----------
 
 type rotateSecretReq struct {
-	Secret     string `json:"secret"`
-	ReasonCode string `json:"reason_code"`
-	Password   string `json:"password"`
+	// Secret is a JSON string for protel-fias (stored exactly as before). For a REST connector it is a JSON
+	// object of the provider's credential fields -- e.g. Mews {"client_token":"…","access_token":"…"},
+	// Apaleo {"client_id":"…","client_secret":"…"}, OPERA Cloud {"client_id":"…","client_secret":"…",
+	// "app_key":"…"} -- or a JSON string containing such an object. It is sealed and never echoed back.
+	Secret     json.RawMessage `json:"secret"`
+	ReasonCode string          `json:"reason_code"`
+	Password   string          `json:"password"`
 }
 
 // rotatePMSInterfaceSecret stores a NEW credential generation and supersedes the previous one.
@@ -627,7 +641,26 @@ func (s *server) rotatePMSInterfaceSecret(w http.ResponseWriter, r *http.Request
 		jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")
 		return
 	}
-	if strings.TrimSpace(in.Secret) == "" {
+	// The secret's JSON shape. A string is what this endpoint always took and is stored exactly as before; an
+	// object is accepted only for a connector whose registry entry declares credential fields. Anything else
+	// is the same malformed-body refusal a non-string always produced.
+	rawSecret := []byte(strings.TrimSpace(string(in.Secret)))
+	var secretStr string
+	secretIsObject := false
+	switch {
+	case len(rawSecret) == 0 || string(rawSecret) == "null":
+	case rawSecret[0] == '"':
+		if err := json.Unmarshal(rawSecret, &secretStr); err != nil {
+			jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")
+			return
+		}
+	case rawSecret[0] == '{':
+		secretIsObject = true
+	default:
+		jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")
+		return
+	}
+	if !secretIsObject && strings.TrimSpace(secretStr) == "" {
 		jsonErr(w, http.StatusBadRequest, "secret_required", "a credential is required")
 		return
 	}
@@ -668,16 +701,32 @@ func (s *server) rotatePMSInterfaceSecret(w http.ResponseWriter, r *http.Request
 
 	// Lock the interface so two concurrent rotations cannot both compute the same next generation number and
 	// leave two rows claiming to be current.
-	var exists bool
-	err = tx.QueryRow(ctx, `SELECT true FROM iam_v2.pms_interfaces
+	var connectorKind string
+	err = tx.QueryRow(ctx, `SELECT connector_kind FROM iam_v2.pms_interfaces
 		WHERE tenant_id=$1 AND site_id=$2 AND id=$3::uuid FOR UPDATE`,
-		s.tenantID, s.siteID, id).Scan(&exists)
+		s.tenantID, s.siteID, id).Scan(&connectorKind)
 	if errors.Is(err, pgx.ErrNoRows) {
 		jsonErr(w, http.StatusNotFound, "not_found", "no such PMS interface")
 		return
 	}
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	// The plaintext that is sealed. For protel-fias (and any connector without declared credential fields) it
+	// is the string exactly as submitted, as it always was. For a REST connector it is the canonical JSON of
+	// its credential fields, validated against the registry; the values never appear in a response or error.
+	plaintext := []byte(secretStr)
+	if prov, ok := pmsprovider.Get(connectorKind); ok && prov.IsREST() {
+		raw := json.RawMessage(rawSecret)
+		norm, verr := pmsprovider.NormalizeSecret(prov, raw)
+		if verr != nil {
+			jsonErr(w, http.StatusBadRequest, verr.Code, verr.Message)
+			return
+		}
+		plaintext = norm
+	} else if secretIsObject {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")
 		return
 	}
 
@@ -700,7 +749,7 @@ func (s *server) rotatePMSInterfaceSecret(w http.ResponseWriter, r *http.Request
 	}
 	sealed, err := pmsd.SealSecret(keyring, keyID, pmsd.Interface{
 		TenantID: s.tenantID, SiteID: s.siteID, ID: id,
-	}, generationID, []byte(in.Secret))
+	}, generationID, plaintext)
 	if err != nil {
 		jsonErr(w, http.StatusServiceUnavailable, "encryption_unavailable", "the credential rotation was refused")
 		return

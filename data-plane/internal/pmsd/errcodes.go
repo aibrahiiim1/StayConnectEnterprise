@@ -38,6 +38,15 @@ const (
 	CodePanicRecovered      Code = "PANIC_RECOVERED"
 	CodeOutboundBlocked     Code = "OUTBOUND_FRAME_BLOCKED"
 	CodeUnclassified        Code = "UNCLASSIFIED" // never carries the raw text
+
+	// REST provider failures (polled HTTPS connectors). Bounded like every other code: the provider's
+	// response body, URL and credential never reach one.
+	CodeProviderAuth        Code = "PROVIDER_AUTH_FAILED"      // 401/403 or a refused token request
+	CodeProviderRateLimited Code = "PROVIDER_RATE_LIMITED"     // 429 persisted past the bounded retries
+	CodeProviderTimeout     Code = "PROVIDER_TIMEOUT"          // request timeout / 408 / 504 after retries
+	CodeProviderUnavailable Code = "PROVIDER_UNAVAILABLE"      // 5xx or network failure after retries
+	CodeProviderResponse    Code = "PROVIDER_RESPONSE_INVALID" // malformed or unexpected response body
+	CodeProviderRejected    Code = "PROVIDER_REQUEST_REJECTED" // any other 4xx
 )
 
 // codeSet is the authoritative allowlist; Valid() and tests assert nothing outside it is ever produced.
@@ -48,6 +57,8 @@ var codeSet = map[Code]struct{}{
 	CodeDialTimeout: {}, CodeDialFailed: {}, CodeProtocolFraming: {}, CodeProtocolLinkEnded: {},
 	CodeRuntimeGenStale: {}, CodeQueueOverflow: {}, CodeEventInvalid: {}, CodeAssignmentMissing: {},
 	CodeContextCanceled: {}, CodePanicRecovered: {}, CodeOutboundBlocked: {}, CodeUnclassified: {},
+	CodeProviderAuth: {}, CodeProviderRateLimited: {}, CodeProviderTimeout: {}, CodeProviderUnavailable: {},
+	CodeProviderResponse: {}, CodeProviderRejected: {},
 }
 
 func (c Code) Valid() bool { _, ok := codeSet[c]; return ok }

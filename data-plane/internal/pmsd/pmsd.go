@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/stayconnect/enterprise/data-plane/internal/pmsprovider"
 )
 
 // TransportStatus / ContinuityStatus / SyncStatus mirror the iam_v2.pms_interface_runtime enums.
@@ -85,6 +86,9 @@ type Revision struct {
 	Published                bool
 	CredentialMode           string // "NONE" (no-auth transport, e.g. Protel FIAS) | "AUTH_KEY"
 	ActiveSecretGenerationID string
+	// ProviderConfig is the revision's config.provider object (raw JSON), carried only by REST connectors.
+	// Empty for protel-fias, whose configuration is entirely the typed fields above.
+	ProviderConfig []byte
 }
 
 // Credential modes. Protel FIAS is a no-auth transport → NONE (no Secret Generation is fabricated,
@@ -94,7 +98,9 @@ const (
 	CredentialAuthKey = "AUTH_KEY"
 )
 
-var supportedConnectorKinds = map[string]struct{}{"protel-fias": {}}
+// supportedConnectorKinds derives from the provider registry (internal/pmsprovider), the single catalogue
+// edged's authoring allowlist also derives from. protel-fias is a member exactly as before.
+var supportedConnectorKinds = pmsprovider.KindSet()
 var supportedCredentialModes = map[string]struct{}{CredentialNone: {}, CredentialAuthKey: {}}
 
 // RequiresSecret reports whether this revision's credential mode needs a Secret Generation.

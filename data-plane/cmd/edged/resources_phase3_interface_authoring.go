@@ -30,8 +30,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,6 +43,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/pmsprovider"
 )
 
 // pmsAllowedKinds is the set of connector kinds the CANONICAL PMS runtime supports.
@@ -67,9 +67,17 @@ import (
 // the API is what a script, a restored fixture or a future screen will use.
 //
 // A kind belongs in this map when pmsd declares support for it — the two lists are meant to agree.
-var pmsAllowedKinds = map[string]bool{
-	"protel-fias": true,
-}
+//
+// They now agree by construction: both derive from the provider registry (internal/pmsprovider), which lists
+// protel-fias (live-verified) and the REST connectors pmsd can run (Mews, Apaleo, OPERA Cloud). opera-fias,
+// fidelio-fias and stub remain unregistered and are refused here exactly as before.
+var pmsAllowedKinds = func() map[string]bool {
+	m := map[string]bool{}
+	for _, k := range pmsprovider.Kinds() {
+		m[k] = true
+	}
+	return m
+}()
 
 const (
 	// folioStrategyUnset is the fail-closed default: while a revision carries it, PMS financial posting is
@@ -176,6 +184,12 @@ type authorRevisionReq struct {
 	MaxAuthCacheAgeSeconds int64  `json:"max_auth_cache_age_seconds"`
 	FinancialBaseCurrency  string `json:"financial_base_currency"`
 	FinancialCurrencyExp   *int   `json:"financial_base_currency_exponent"`
+	// ProviderConfig carries the connector's settings keyed by the field keys GET /pms-providers publishes.
+	// Absent or empty for protel-fias means EXACTLY the validation and stored config this endpoint always
+	// produced. For protel-fias, when present, its keys are the top-level field names above and override them
+	// before the same validation runs. For a REST connector it is required and validated against the
+	// provider's schema (unknown keys refused), and stored under config.provider.
+	ProviderConfig map[string]any `json:"provider_config"`
 }
 
 func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Request) {
@@ -185,10 +199,21 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
 	}
-	cfg, verr := validateRevisionConfig(&in)
-	if verr != nil {
-		jsonErr(w, http.StatusBadRequest, "validation", verr.Error())
-		return
+	// With no provider_config the request is validated EXACTLY as it always was, before any database read, so
+	// a protel-fias caller sees the same answers in the same order. With provider_config the connector kind
+	// decides which schema applies, so validation waits for the interface lookup below.
+	var cfg map[string]any
+	// PRESENCE, not length: a REST draft that accepts every provider default may legitimately send
+	// "provider_config": {}. For protel-fias an empty object maps nothing, so the same validation and the same
+	// stored config result as sending no provider_config at all.
+	hasProviderCfg := in.ProviderConfig != nil
+	if !hasProviderCfg {
+		var verr error
+		cfg, verr = validateRevisionConfig(&in)
+		if verr != nil {
+			jsonErr(w, http.StatusBadRequest, "validation", verr.Error())
+			return
+		}
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -212,6 +237,50 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 			"this interface is decommissioned: it cannot be configured, and a revision authored against it "+
 				"could never be published")
 		return
+	}
+	// PROVIDER-AWARE VALIDATION. The kind is read here only when it decides the schema: a request without
+	// provider_config against a protel-fias interface never reaches this branch's logic beyond the kind
+	// lookup, and is stored exactly as before.
+	var restCfg *pmsprovider.RESTConfig
+	var ignored []string
+	{
+		var kind string
+		if err := s.db.QueryRow(ctx,
+			`SELECT connector_kind FROM iam_v2.pms_interfaces WHERE id=$1 AND tenant_id=$2 AND site_id=$3`,
+			id, s.tenantID, s.siteID).Scan(&kind); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "internal", "author failed")
+			return
+		}
+		prov, known := pmsprovider.Get(kind)
+		switch {
+		case known && prov.IsREST():
+			if !hasProviderCfg {
+				jsonErr(w, http.StatusBadRequest, "provider_config_required",
+					"provider_config is required for a "+prov.Label+" connection: its settings are listed by GET /pms-providers")
+				return
+			}
+			rc, perr := validateRESTRevision(prov, &in)
+			if perr != nil {
+				jsonErr(w, http.StatusBadRequest, perr.Code, perr.Message)
+				return
+			}
+			restCfg = &rc
+			cfg = rc.StoredConfig()
+			ignored = ignoredTopLevelFields(&in)
+		case hasProviderCfg:
+			// protel-fias (or a legacy kind): provider_config keys are the top-level fields, then the SAME
+			// validation as always.
+			if perr := applyFIASProviderConfig(&in); perr != nil {
+				jsonErr(w, http.StatusBadRequest, perr.Code, perr.Message)
+				return
+			}
+			var verr error
+			cfg, verr = validateRevisionConfig(&in)
+			if verr != nil {
+				jsonErr(w, http.StatusBadRequest, "validation", verr.Error())
+				return
+			}
+		}
 	}
 	raw, _ := json.Marshal(cfg)
 
@@ -303,6 +372,11 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	fingerprint := pmsSourceFingerprint(connectorKind, in.Endpoint)
+	if restCfg != nil {
+		// A REST source is identified by the provider's own property identity, never by a credential.
+		fingerprint = pmsprovider.SourceFingerprint(connectorKind, restCfg.SourceIdentity())
+		in.Endpoint = restCfg.Endpoint()
+	}
 
 	var revID string
 	var revNo int
@@ -354,10 +428,117 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 	// rotating a secret is its own endpoint with its own re-authentication.
 	s.audit(r, "pms_interface_revision.authored", "pms_interface", id,
 		map[string]any{"revision_id": revID, "revision_no": revNo, "endpoint": in.Endpoint})
-	writeJSON(w, http.StatusCreated, map[string]any{
+	resp := map[string]any{
 		"revision_id": revID, "revision_no": revNo, "published": false,
 		"note": "Draft revision. Publish it to make it the interface's current configuration.",
-	})
+	}
+	if restCfg != nil {
+		// Said out loud rather than silently dropped: for a REST connector these top-level values are derived
+		// from provider_config, so anything the caller sent for them was not stored.
+		resp["ignored_fields"] = ignored
+	}
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+// validateRESTRevision validates a REST connector's revision request. Top-level source_timezone and
+// max_auth_cache_age_seconds are honoured when provider_config does not carry them; folio identity stays
+// UNSET and no financial currency is accepted (financial posting exists only on the FIAS path).
+func validateRESTRevision(prov pmsprovider.Provider, in *authorRevisionReq) (pmsprovider.RESTConfig, *pmsprovider.ValidationError) {
+	if s := strings.TrimSpace(in.FolioIdentityStrategy); s != "" && s != folioStrategyUnset {
+		return pmsprovider.RESTConfig{}, &pmsprovider.ValidationError{Code: "validation", Field: "folio_identity_strategy",
+			Message: "folio_identity_strategy must be " + folioStrategyUnset + " for a revision authored here"}
+	}
+	if strings.TrimSpace(in.FinancialBaseCurrency) != "" || in.FinancialCurrencyExp != nil {
+		return pmsprovider.RESTConfig{}, &pmsprovider.ValidationError{Code: "validation", Field: "financial_base_currency",
+			Message: "a financial base currency applies only to the FIAS posting path; leave it empty for " + prov.Label}
+	}
+	if in.ReadOnly != nil && !*in.ReadOnly {
+		return pmsprovider.RESTConfig{}, &pmsprovider.ValidationError{Code: "validation", Field: "read_only",
+			Message: "read_only must be true: this connector is read-only and pmsd refuses any other revision"}
+	}
+	rc, verr := pmsprovider.NormalizeREST(prov, in.ProviderConfig, in.SourceTimezone, in.MaxAuthCacheAgeSeconds)
+	if verr != nil {
+		return pmsprovider.RESTConfig{}, verr
+	}
+	in.FolioIdentityStrategy = folioStrategyUnset
+	in.NormalizationVersion = canonicalNormalizationVersion
+	in.SourceTimezone = rc.SourceTimezone
+	in.CredentialMode = pmsprovider.CredentialAuthKey
+	return rc, nil
+}
+
+// ignoredTopLevelFields lists the FIAS-shaped top-level values a REST request carried that were not stored
+// because the REST connector derives them.
+func ignoredTopLevelFields(in *authorRevisionReq) []string {
+	out := []string{}
+	add := func(name string, set bool) {
+		if set {
+			out = append(out, name)
+		}
+	}
+	add("endpoint", strings.TrimSpace(in.Endpoint) != "")
+	add("credential_mode", strings.TrimSpace(in.CredentialMode) != "" && in.CredentialMode != pmsprovider.CredentialAuthKey)
+	add("dial_timeout_ms", in.DialTimeoutMS != 0)
+	add("read_timeout_ms", in.ReadTimeoutMS != 0)
+	add("write_timeout_ms", in.WriteTimeoutMS != 0)
+	add("heartbeat_interval_ms", in.HeartbeatIntervalMS != 0)
+	add("heartbeat_timeout_ms", in.HeartbeatTimeoutMS != 0)
+	add("feed_freshness_ms", in.FeedFreshnessMS != 0)
+	add("complete_sync_ms", in.CompleteSyncMS != 0)
+	return out
+}
+
+// applyFIASProviderConfig maps a protel-fias provider_config onto the top-level request fields it names,
+// each checked against the registry's field definition. Unknown keys are refused. The caller then runs
+// validateRevisionConfig unchanged, so the stored config is identical to a request that sent the same values
+// at the top level.
+func applyFIASProviderConfig(in *authorRevisionReq) *pmsprovider.ValidationError {
+	prov, _ := pmsprovider.Get(pmsprovider.KindProtelFIAS)
+	for k, raw := range in.ProviderConfig {
+		f, ok := prov.Field(k)
+		if !ok {
+			return &pmsprovider.ValidationError{Code: pmsprovider.CodeUnknownField, Field: k,
+				Message: "\"" + k + "\" is not a setting of the " + prov.Label + " connector"}
+		}
+		if raw == nil {
+			continue
+		}
+		if s, isStr := raw.(string); isStr && strings.TrimSpace(s) == "" && f.Type != pmsprovider.FieldString {
+			continue
+		}
+		v, verr := pmsprovider.Coerce(f, raw)
+		if verr != nil {
+			return verr
+		}
+		switch k {
+		case "endpoint":
+			in.Endpoint = v.(string)
+		case "source_timezone":
+			in.SourceTimezone = v.(string)
+		case "dial_timeout_ms":
+			in.DialTimeoutMS = v.(int64)
+		case "read_timeout_ms":
+			in.ReadTimeoutMS = v.(int64)
+		case "write_timeout_ms":
+			in.WriteTimeoutMS = v.(int64)
+		case "heartbeat_interval_ms":
+			in.HeartbeatIntervalMS = v.(int64)
+		case "heartbeat_timeout_ms":
+			in.HeartbeatTimeoutMS = v.(int64)
+		case "feed_freshness_ms":
+			in.FeedFreshnessMS = v.(int64)
+		case "complete_sync_ms":
+			in.CompleteSyncMS = v.(int64)
+		case "max_auth_cache_age_seconds":
+			in.MaxAuthCacheAgeSeconds = v.(int64)
+		case "financial_base_currency":
+			in.FinancialBaseCurrency = v.(string)
+		case "financial_base_currency_exponent":
+			n := int(v.(int64))
+			in.FinancialCurrencyExp = &n
+		}
+	}
+	return nil
 }
 
 // nullIfBlankText, not nullIfEmpty: that name already belongs to a helper in the integration-tagged test
@@ -533,10 +714,11 @@ func isUndefinedColumn(err error) bool {
 // keeps a property's internal host and port out of screens and conflict records that only ever need to answer
 // "same source or not". Truncated to 32 hex characters, which is far beyond collision risk for the handful of
 // interfaces one appliance hosts and short enough to read in a comparison.
+//
+// The implementation now lives in the provider registry so pmsd, edged and every connector share one; the
+// regression test pins that it is byte-for-byte the function that was here.
 func pmsSourceFingerprint(connectorKind, endpoint string) string {
-	sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(connectorKind)) + "|" +
-		strings.ToLower(strings.TrimSpace(endpoint))))
-	return hex.EncodeToString(sum[:])[:32]
+	return pmsprovider.SourceFingerprint(connectorKind, endpoint)
 }
 
 // interfaceConnectorKind reads the interface's connector kind inside the authoring transaction.

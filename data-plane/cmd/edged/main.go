@@ -445,6 +445,8 @@ func main() {
 				mountResource(r, s, "checkout-grace", s.checkoutGraceConfigRoutes)
 				mountResource(r, s, "operational-alerts", s.operationalAlertsRoutes)
 				mountResource(r, s, "pms-interfaces", s.pmsInterfacesRoutes)
+				// The connector catalogue the connection form is built from. Guarded by the pms-interfaces key.
+				r.With(s.resourcePermission("pms-interfaces")).Get("/pms-providers", s.listPMSProviders)
 				mountResource(r, s, "pms-routing", s.pmsRoutingRoutes)
 				mountResource(r, s, "pms-source-conflicts", s.pmsSourceConflictsRoutes)
 				// Unresolved departures as CASES. Read is wide because "which guests does the PMS and the

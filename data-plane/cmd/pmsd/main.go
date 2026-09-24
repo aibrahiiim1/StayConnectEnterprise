@@ -144,10 +144,21 @@ func main() {
 			}
 			return stayengine.NewProcessorWithCheckout(p, checkout.NewConverter(p)), nil
 		},
-		Dial: pmsd.NewFIASDial(netDialer, pmsd.AdapterKeys{
-			IdentityKey: identKey, IdentityKeyVersion: identKeyVer,
-			EvidenceKey: evKey, EvidenceKeyVersion: evKeyVer,
-		}, time.Now, log),
+		// The provider registry routes each interface to its adapter. protel-fias reaches exactly the FIAS dial
+		// it always used; the REST connectors (Mews, Apaleo, OPERA Cloud) reach the polled REST adapter.
+		Dial: pmsd.NewRegistryDial(
+			pmsd.NewFIASDial(netDialer, pmsd.AdapterKeys{
+				IdentityKey: identKey, IdentityKeyVersion: identKeyVer,
+				EvidenceKey: evKey, EvidenceKeyVersion: evKeyVer,
+			}, time.Now, log),
+			pmsd.NewRESTDial(pmsd.RESTDialDeps{
+				Keys: pmsd.AdapterKeys{
+					IdentityKey: identKey, IdentityKeyVersion: identKeyVer,
+					EvidenceKey: evKey, EvidenceKeyVersion: evKeyVer,
+				},
+				Now: time.Now, Log: log,
+			}),
+		),
 		Log: log,
 	}
 
