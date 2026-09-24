@@ -224,16 +224,36 @@ func TestProvidersCatalogue_Contract(t *testing.T) {
 		m := f.(map[string]any)
 		keys[m["key"].(string)] = m["type"].(string)
 	}
-	// every field authorRevisionReq accepted before the registry, and nothing else
-	for _, k := range []string{"endpoint", "source_timezone", "dial_timeout_ms", "read_timeout_ms", "write_timeout_ms",
-		"heartbeat_interval_ms", "heartbeat_timeout_ms", "feed_freshness_ms", "complete_sync_ms",
-		"max_auth_cache_age_seconds", "financial_base_currency", "financial_base_currency_exponent"} {
-		if _, ok := keys[k]; !ok {
-			t.Fatalf("protel-fias field %q missing", k)
+	// The catalogue must describe EXACTLY the operator-settable fields authorRevisionReq accepts: every JSON field
+	// of the request struct, minus the ones validateRevisionConfig fixes for protel-fias (the operator cannot
+	// choose them) and provider_config itself. Derived from the struct by reflection rather than listed by hand,
+	// so a field added to the request but forgotten in the catalogue fails here instead of silently vanishing
+	// from the UI. (A hand-written list also collided with a text guard in scripts/pmsd-pg-integration.sh that
+	// looks for Phase-4 schema names: two of these request fields share their names with Phase-4 columns.)
+	fixedByValidation := map[string]bool{
+		"folio_identity_strategy": true, "normalization_version": true, "credential_mode": true,
+		"read_only": true, "resync_supported": true, "provider_config": true,
+	}
+	want := map[string]bool{}
+	rt := reflect.TypeOf(authorRevisionReq{})
+	for i := 0; i < rt.NumField(); i++ {
+		name := strings.Split(rt.Field(i).Tag.Get("json"), ",")[0]
+		if name != "" && name != "-" && !fixedByValidation[name] {
+			want[name] = true
 		}
 	}
-	if keys["endpoint"] != "host_port" || len(keys) != 12 {
-		t.Fatalf("protel fields %v", keys)
+	for k := range want {
+		if _, ok := keys[k]; !ok {
+			t.Fatalf("protel-fias catalogue is missing request field %q", k)
+		}
+	}
+	for k := range keys {
+		if !want[k] {
+			t.Fatalf("protel-fias catalogue publishes %q, which the revision request does not accept", k)
+		}
+	}
+	if keys["endpoint"] != "host_port" || len(want) < 10 {
+		t.Fatalf("protel fields %v (want %v)", keys, want)
 	}
 	for _, k := range []string{"mews", "apaleo", "opera-cloud"} {
 		p := byKind[k]
