@@ -1,4 +1,0 @@
-commit 6ce27e84564f96f3153d5d260baa2d2003730416
-Date:   Fri Sep 25 19:37:00 2026 +0300
-
-    Governance: T0189 records the merge of PR #184 and moves the Velonet base to it
