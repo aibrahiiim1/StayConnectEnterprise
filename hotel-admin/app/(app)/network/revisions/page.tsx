@@ -19,6 +19,7 @@ import { PendingChangeBanner, ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { ChevronRight, History } from "lucide-react";
 import { errMsg, formatDate } from "@/lib/utils";
+import { HelpList, HelpSection } from "@/components/help";
 import {
   HealthCheckList, REVISION_STATE, RevisionStateBadge, ValidationIssueList, useNetworkAccess,
 } from "@/components/network/shared";
@@ -85,7 +86,32 @@ export default function RevisionsPage() {
         icon={<History />}
         eyebrow="Networking"
         title="Config history"
-        description="Every network validate and apply ever made, with what it checked and how it ended. Nothing here is ever deleted — rollback and the current configuration's history depend on it."
+        description="Every network validate and apply, with what it checked and how it ended."
+        help={
+          <>
+            <HelpSection title="What a revision is">
+              <p>
+                Each validate and apply of the guest network configuration is recorded as a numbered revision, with its
+                validation result, apply events and health checks. Select a row to see them.
+              </p>
+            </HelpSection>
+            <HelpSection title="Why nothing is ever deleted">
+              <p>
+                A revision is what a rollback returns <strong>to</strong>, and what the current configuration&rsquo;s
+                history points at. Removing one would leave a misleading gap, so the list is filtered and folded instead.
+              </p>
+            </HelpSection>
+            <HelpSection title="States that need attention">
+              <HelpList
+                items={[
+                  <><strong>Awaiting confirmation</strong> — live now; keep it or it rolls back automatically.</>,
+                  <><strong>Rolled back</strong> — the previous configuration was put back.</>,
+                  <><strong>Failed</strong> — the apply did not complete; see the failure reason.</>,
+                ]}
+              />
+            </HelpSection>
+          </>
+        }
       />
 
       {known && !writable && <ReadOnlyNotice>Your role can view the history but not keep or roll back a change.</ReadOnlyNotice>}

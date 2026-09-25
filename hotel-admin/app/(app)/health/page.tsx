@@ -26,6 +26,7 @@ import { KeyValueGrid, Timeline } from "@/components/ui/data";
 import { Sheet, SheetContent, SheetHeader, SheetBody, SheetSection } from "@/components/ui/sheet";
 import { LiveStatus, ReadOnlyNotice, refreshingClass } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
+import { HelpList, HelpSection } from "@/components/help";
 import {
   Stethoscope, RefreshCw, RotateCw, FileText, CheckCircle2, XCircle, Server, Hourglass,
 } from "lucide-react";
@@ -198,7 +199,38 @@ export default function HealthPage() {
         icon={<Stethoscope />}
         eyebrow="System"
         title="Diagnostics"
-        description="Whether each service on this appliance is running. Recheck a service, read its recent logs, or restart it."
+        description="Whether each service on this appliance is running."
+        help={
+          <>
+            <HelpSection title="What this page shows">
+              <p>
+                Every monitored service on the appliance, refreshed every {POLL_SECONDS} seconds. If a refresh fails, the
+                last answer stays on screen and the status beside the title says so.
+              </p>
+            </HelpSection>
+            <HelpSection title="Service states">
+              <HelpList
+                items={[
+                  <><strong>Healthy</strong> — running and passing its health check.</>,
+                  <><strong>Waiting</strong> — intentionally idle until its prerequisite exists (for example DHCP before any guest network is configured). Not a fault.</>,
+                  <><strong>Starting / Recovering</strong> — coming up, or being restarted automatically.</>,
+                  <><strong>Degraded</strong> — running, but a check or a dependency is failing.</>,
+                  <><strong>Crash-loop / Failed</strong> — keeps stopping, or could not be recovered automatically.</>,
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="Actions">
+              <HelpList
+                items={[
+                  <><strong>Logs</strong> — recent log lines, sanitised by the appliance (secrets and guest details removed). Every role that can open this page can read them.</>,
+                  <><strong>Recheck</strong> — runs the service&rsquo;s health check again now.</>,
+                  <><strong>Restart</strong> — stops and starts the service. It asks for a reason and your password, says what it will interrupt, and is recorded against your account.</>,
+                ]}
+              />
+              <p>Select a service name for its details, recent logs and recovery history.</p>
+            </HelpSection>
+          </>
+        }
         actions={
           <>
             {sum && (
@@ -257,7 +289,7 @@ export default function HealthPage() {
         <CardHeader>
           <div className="space-y-0.5">
             <CardTitle>Services</CardTitle>
-            <CardDescription>Select a service to see its details, recent logs and recovery history.</CardDescription>
+            <CardDescription>Select a service for its details.</CardDescription>
           </div>
         </CardHeader>
         <div className={cn(refreshing && sum && refreshingClass)}>

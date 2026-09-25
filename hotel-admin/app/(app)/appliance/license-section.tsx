@@ -314,9 +314,7 @@ export function LicenseSection() {
           <div className="space-y-0.5">
             <CardTitle className="flex items-center gap-2"><Upload className="size-4" aria-hidden /> Upload licence file</CardTitle>
             <CardDescription>
-              For renewals, or when this appliance has no connection to OneGate Central. Semantics generates the file
-              for this serial and WAN MAC; the appliance checks it is bound to this exact hardware before accepting it,
-              and refuses an older licence than the one installed.
+              For renewals, or when this appliance has no connection to OneGate Central.
             </CardDescription>
           </div>
         </CardHeader>
@@ -356,9 +354,7 @@ export function LicenseSection() {
           <div className="space-y-0.5">
             <CardTitle className="flex items-center gap-2"><Cloud className="size-4" aria-hidden /> Connection to Central</CardTitle>
             <CardDescription>
-              OneGate Central issues and renews this appliance&apos;s licence and certificate. Guests are authorised
-              by this appliance from its own data, so a Central outage does not interrupt service — it only delays
-              licence renewal.
+              OneGate Central issues and renews this appliance&apos;s licence and certificate.
             </CardDescription>
           </div>
         </CardHeader>
@@ -421,9 +417,7 @@ export function LicenseSection() {
               <div className="space-y-2">
                 <div className="text-label">Feature entitlements</div>
                 <p className="text-caption text-muted-foreground">
-                  A standard OneGate licence includes every product feature. What a licence limits is the number of
-                  concurrent online guests, the validity window and the grace period shown above. This table is shown
-                  for support; per-feature entitlements exist in the signed licence format for future editions.
+                  Shown for support. A standard OneGate licence includes every product feature.
                 </p>
                 <div className="overflow-hidden rounded-md border border-border">
                   <Table>

@@ -20,6 +20,7 @@ import { useToast } from "@/components/ui/toast";
 import { PendingChangeBanner, ReadOnlyNotice, useSecondsLeft } from "@/components/ui/patterns";
 import { CheckCircle2, Network, Pencil, Plus, Power, Trash2, Users, Wifi } from "lucide-react";
 import { errMsg } from "@/lib/utils";
+import { HelpList, HelpSection } from "@/components/help";
 import {
   ApplyResults, DhcpModeBadge, networkTypeLabel, useNetworkAccess,
 } from "@/components/network/shared";
@@ -172,7 +173,27 @@ export default function NetworkPage() {
         icon={<Network />}
         eyebrow="Networking"
         title="Guest networks"
-        description="The Wi-Fi networks guests join. Each one is a VLAN your wireless controller maps an SSID to, with its own addresses and sign-in page. Changes are staged, then applied with an automatic rollback."
+        description="The Wi-Fi networks guests join."
+        help={
+          <>
+            <HelpSection title="What a guest network is">
+              <p>
+                Each guest network is a VLAN your wireless controller maps an SSID to, with its own addresses and
+                sign-in page.
+              </p>
+            </HelpSection>
+            <HelpSection title="How changes reach guests">
+              <HelpList
+                items={[
+                  <>Creating, editing, disabling or deleting a network only <strong>stages</strong> the change.</>,
+                  <><strong>Validate</strong> checks the staged configuration without touching anything live.</>,
+                  <><strong>Apply changes</strong> makes it live and starts a confirmation timer.</>,
+                  <>If nobody keeps the change before the timer runs out, the appliance rolls back on its own.</>,
+                ]}
+              />
+            </HelpSection>
+          </>
+        }
         actions={writable && (
           <>
             <Button variant="secondary" disabled={busy !== null} onClick={onValidate}>

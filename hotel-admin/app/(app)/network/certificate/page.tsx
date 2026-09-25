@@ -15,6 +15,7 @@ import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { errMsg, formatDate } from "@/lib/utils";
 import { useNetworkAccess } from "@/components/network/shared";
+import { HelpList, HelpSection } from "@/components/help";
 import { Lock, RefreshCw, RotateCw, CheckCircle2, ShieldCheck } from "lucide-react";
 
 type CertStatus = {
@@ -112,7 +113,34 @@ export default function CertificatePage() {
         icon={<Lock />}
         eyebrow="Networking"
         title="TLS certificate"
-        description="The HTTPS certificate Hotel Admin itself is served with, for its host name and management IP. Renewal is automatic: checked daily, renewed at 45 days left, when the management IP changes, or when the covered names drift."
+        description="The HTTPS certificate Hotel Admin itself is served with."
+        help={
+          <>
+            <HelpSection title="What this certificate is">
+              <p>
+                The certificate your browser sees when it opens Hotel Admin. It covers the appliance&rsquo;s host name and
+                its management IP address.
+              </p>
+            </HelpSection>
+            <HelpSection title="Automatic renewal">
+              <HelpList
+                items={[
+                  "Checked daily.",
+                  "Renewed when 45 days are left.",
+                  "Renewed when the management IP changes, or when the covered names drift from the configuration.",
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="Check and rotate">
+              <p>
+                <strong>Check certificate</strong> reads and validates the certificate now; it changes nothing.{" "}
+                <strong>Rotate</strong> issues a new certificate straight away through the same safe lifecycle —
+                validate, swap, reload, health check — and puts the previous one back if the health check fails. You
+                cannot upload your own key.
+              </p>
+            </HelpSection>
+          </>
+        }
         actions={writable ? (
           <>
             <Button variant="ghost" size="icon" aria-label="Refresh" onClick={() => { setErr(null); load(); }}><RefreshCw /></Button>

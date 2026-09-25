@@ -21,6 +21,7 @@ import { SkeletonRows } from "@/components/ui/misc";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { formatDate, formatRelative } from "@/lib/utils";
+import { HelpList, HelpSection } from "@/components/help";
 
 const stateTone = (s: string) => (s === "ACKNOWLEDGED" ? "info" : "warn");
 const stateWord = (s: string) => (s === "ACKNOWLEDGED" ? "Acknowledged" : s === "OPEN" ? "Open" : s.toLowerCase());
@@ -92,7 +93,32 @@ export function OperationalAlertsView({
         icon={<BellRing />}
         eyebrow="System"
         title="Alerts"
-        description="Checkouts the configured policy could not handle on its own — for example when an emergency grace period was used. Resolved alerts leave the queue."
+        description="Checkouts the configured policy could not handle on its own."
+        help={
+          <>
+            <HelpSection title="What raises an alert">
+              <p>
+                A checkout situation the configured policy could not handle on its own — for example when an emergency
+                grace period was used.
+              </p>
+            </HelpSection>
+            <HelpSection title="Working the queue">
+              <HelpList
+                items={[
+                  <><strong>Acknowledge</strong> — you have seen it and are dealing with it. It stays in the queue.</>,
+                  <><strong>Resolve</strong> — it is handled. Resolved alerts leave the queue.</>,
+                  "If someone else changed an alert while you were looking at it, your action is refused and the queue refreshes so you see the current state.",
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="Clock suspect">
+              <p>
+                The appliance&rsquo;s clock may not have been trustworthy at the boundary time, so treat that time with
+                care.
+              </p>
+            </HelpSection>
+          </>
+        }
       />
 
       {readOnly && <ReadOnlyNotice>Your role can view alerts but not acknowledge or resolve them.</ReadOnlyNotice>}

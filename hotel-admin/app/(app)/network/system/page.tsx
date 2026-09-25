@@ -21,6 +21,7 @@ import { PendingChangeBanner, ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { errMsg } from "@/lib/utils";
 import { ValidationIssueList, useNetworkAccess } from "@/components/network/shared";
+import { HelpList, HelpSection } from "@/components/help";
 import {
   Router, Download, RefreshCw, Archive, Network, ArrowRight, Stethoscope, ChevronDown, History, CheckCircle2,
 } from "lucide-react";
@@ -189,7 +190,39 @@ export default function NetworkSettingsPage() {
       icon={<Router />}
       eyebrow="Networking"
       title="WAN / LAN settings"
-      description="The appliance's own internet uplink and management address. Changes are previewed, applied with an automatic rollback, and recorded."
+      description="The appliance's own internet uplink and management address."
+      help={
+        <>
+          <HelpSection title="What this page covers">
+            <p>
+              Only the appliance&rsquo;s WAN / management uplink and the legacy base bridge. Guest Wi-Fi is configured
+              under <strong>Guest networks</strong> (VLAN, gateway, sign-in page) and <strong>DHCP &amp; leases</strong>{" "}
+              (address pools, lease times, reservations).
+            </p>
+          </HelpSection>
+          <HelpSection title="How a change is applied">
+            <HelpList
+              items={[
+                <><strong>Validate &amp; preview</strong> checks the change and shows the before and after.</>,
+                <><strong>Apply change</strong> asks for your password and puts it live immediately.</>,
+                "A confirmation timer then starts. Keep the change before it runs out, or the appliance rolls back on its own.",
+                "Every apply, keep and roll back is recorded in the change history.",
+              ]}
+            />
+          </HelpSection>
+          <HelpSection title="Legacy base bridge">
+            <p>
+              The appliance&rsquo;s original LAN bridge. Guest networks do not use it, so it is normal for its DHCP to be
+              off. DHCP has one source of truth, the guest network pages, and is not edited here.
+            </p>
+          </HelpSection>
+          <HelpSection title="Diagnostics">
+            <p>
+              A read-only snapshot of addresses, routes and reachability. Download the report to send it to support.
+            </p>
+          </HelpSection>
+        </>
+      }
       actions={
         <Button variant="secondary" onClick={() => { setErr(null); load(); loadHistory(); }}>
           <RefreshCw /> Refresh
@@ -307,10 +340,6 @@ export default function NetworkSettingsPage() {
             </div>
           </CardHeader>
           <CardBody className="space-y-3 text-sm">
-            <p className="text-muted-foreground">
-              Guests are served by the guest networks you create — each has its own VLAN, gateway, address pool and
-              sign-in page.
-            </p>
             <div className="grid gap-2">
               <Link href="/network" className="group flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2.5 hover:border-border-strong hover:bg-accent/50">
                 <span><span className="font-medium">Guest networks</span><span className="block text-caption text-muted-foreground">Create and edit guest networks, gateways and portal</span></span>
@@ -335,10 +364,8 @@ export default function NetworkSettingsPage() {
         </summary>
         <div className="space-y-4 border-t border-border px-5 py-4">
           <p className="text-sm text-muted-foreground">
-            This is the appliance&apos;s <strong>legacy base bridge</strong>. Guest networks, their gateways, address
-            pools and sign-in pages are managed under <Link href="/network" className="text-primary underline">Guest networks</Link> and{" "}
-            <Link href="/network/dhcp" className="text-primary underline">DHCP &amp; leases</Link> — not here. It is normal for
-            this bridge to have DHCP off when guests are served by guest networks.
+            Not a guest network — guests are managed under{" "}
+            <Link href="/network" className="text-primary underline">Guest networks</Link>.
           </p>
           <KeyValueGrid
             columns={3}
@@ -390,10 +417,10 @@ export default function NetworkSettingsPage() {
                 <Field label="Prefix length"><Input type="number" value={lanPrefix} onChange={(e) => { setLanPrefix(Number(e.target.value));}} /></Field>
                 {/* DHCP has ONE source of truth: the guest network pages. Shown read-only here to avoid a second,
                     conflicting editor for the same scope. */}
-                <Callout tone="neutral" title="DHCP is not edited here">
-                  Guest address pools, lease times and reservations are managed per guest network in{" "}
+                <p className="text-caption text-muted-foreground">
+                  DHCP is not edited here; see{" "}
                   <Link href="/network/dhcp" className="text-primary underline">DHCP &amp; leases</Link>.
-                </Callout>
+                </p>
               </fieldset>
             </div>
 
@@ -457,7 +484,7 @@ export default function NetworkSettingsPage() {
         <CardHeader>
           <div className="space-y-1">
             <CardTitle className="flex items-center gap-2"><Stethoscope className="size-4" aria-hidden /> Diagnostics</CardTitle>
-            <CardDescription>A read-only snapshot of addresses, routes and reachability, with a report you can send to support.</CardDescription>
+            <CardDescription>A read-only snapshot of addresses, routes and reachability.</CardDescription>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="secondary" size="sm" onClick={loadDiag} disabled={diagBusy}>

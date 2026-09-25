@@ -14,7 +14,7 @@ import {
   DoorOpen, BedDouble, Plug, Route, Inbox, ShieldCheck, UserX, Layers, ArrowLeftRight, HeartPulse, Receipt,
   LifeBuoy, Globe, AtSign, MessageSquare, Stethoscope, Bell, Hourglass, CalendarClock, ChartColumn,
 } from "lucide-react";
-import { OneGateLockup } from "@/components/brand";
+import { BySemantics, OneGateLockup } from "@/components/brand";
 import { Tooltip } from "@/components/ui/tooltip";
 
 // THERE IS NO BUILD-TIME GATE IN THIS FILE, AND THAT IS THE POINT.
@@ -548,7 +548,15 @@ export function Nav({
           );
           return collapsed ? <Tooltip content="Sign out" side="right">{signOut}</Tooltip> : signOut;
         })()}
+
+        {/* The company line. The rail has no room for words; the expanded sidebar ends with it. */}
+        {!collapsed && (
+          <div className="mt-2 border-t border-sidebar-border/70 px-2.5 pt-2">
+            <BySemantics className="text-2xs text-sidebar-muted" />
+          </div>
+        )}
       </div>
+
     </aside>
   );
 }
