@@ -1,0 +1,52 @@
+{
+  "transition_id": "T0193",
+  "seq": 193,
+  "timestamp": "2026-09-26T00:12:44+03:00",
+  "timestamp_derivation": "Written after the deployment and its live verification completed on PRE-LIVE and before the commit that introduces this receipt.",
+  "record_type": "VELONET_DEPLOYED_TO_PRE_LIVE",
+  "authorisation": "Product-Owner mission of 2026-09-26 to deploy the merged Velonet delivery from authoritative master to PRE-LIVE 172.21.60.25 and verify it, under the standing PRE-LIVE deployment decision. It did NOT authorise Go-Live, Guest activation, PMS configuration or financial traffic, networking or topology changes, a new migration, or any deployment to Central.",
+  "source": {
+    "master": "38d2ab7995661e1838fa2803c669b1d64411d0e5",
+    "merged_by": "PR #186 (38d2ab79); the redesign itself merged by PR #185 (15730cd4), the Hotel Admin overhaul by PR #184 (017b1b5a)",
+    "build": "A clean clone of master at 38d2ab79 with an empty working tree."
+  },
+  "deployed": {
+    "portald": "sha256 1513c6f93cfa51f2f2b86ba19f52a85452b9a4874e07d05fbbce2f1a9c286d1d, built by scripts/build-appliance-binaries.sh (golang 1.25.12 container, -trimpath, CGO_ENABLED=0, -tags stayconnect_production); read back from the INSTALLED bytes on the appliance: vcs.revision=38d2ab79, vcs.modified=false, -tags=stayconnect_production. Backup kept as /opt/stayconnect/bin/portald.bak-pre-38d2ab79-20260925T210709Z.",
+    "hotel_admin": "Bundle sha256 d0562dfde64cb8f325894db6408013f785ca816550c7a7b46620a77ce591f374, BUILD_ID dY7ynnaj6XBJuq2YR3qYd, packaged by deploy/scripts/deploy-hotel-admin.sh (capability contract satisfied) and installed by its appliance installer as release 20260925-210739; hotel-admin-release.json on the appliance records source_commit 38d2ab79, source_state clean and that BUILD_ID, matching .next/BUILD_ID on disk; the installer's verify reports the release verified. Previous release 20260925-082905 kept as the rollback target."
+  },
+  "not_deployed": {
+    "edged_scd_pmsd_acctd_netd": "Unchanged on purpose. The Velonet delivery changed no data-plane code outside cmd/portald; edged already runs f4817c39, which carries migration 0091's code, and the other four differ from master only through earlier merged work that this mission does not ship.",
+    "migrations": "None. The migration ledger ends at 0091 before and after; the delivery carries no migration.",
+    "cloud_admin": "NOT deployed. cloud-admin is Central's console (Central 150.0.0.252), not an appliance component, and this mission authorised PRE-LIVE only. Central still serves its previous build."
+  },
+  "restarts": "Only stayconnect-portald (2026-09-25T21:07:09Z UTC) and stayconnect-hotel-admin (21:07:46Z) restarted. scd, edged, pmsd, acctd, netd and caddy kept their earlier start times; kea-dhcp4-server and unbound stayed active.",
+  "verification": {
+    "hotel_admin_live": "A Chrome browser driving https://172.21.60.25 signed in and opened all 39 operator screens: 39 of 39 returned 200 with no application error and no console error, each page title equal to its menu label; the Velonet design tokens and the self-hosted Inter font were loaded. Seven screens show 'Not enabled on this appliance' as before (features switched off on this appliance). Read-only apart from the operator login.",
+    "guest_portal_live": "Through a tunnel to portald :8380, at an iPhone profile and at desktop width: 200, the hotel's branded Classic template, the two sign-in groups, no horizontal overflow, no console or CSP error, and the Arabic selection switching the page to right to left. /api/auth-methods, /api/branding and /api/languages 200; captive-detection probes unchanged. No sign-in was submitted.",
+    "pms": "Protel interface ACTIVE, continuity CONTINUOUS, room sign-in ready, sync COMPLETE, 0 pending and 0 review events, heartbeat current before and after; in-house stays moved 460 -> 463 by ordinary PMS traffic. No PMS configuration was read for change or changed.",
+    "licensing": "Licence Active (2,000 concurrent online guests, valid until 2026-12-01), activation 'activated', enrolled, production build, no hardware mismatch; scd evaluates the licence Active; the signed assignment is 'assigned' and refreshed successfully after the deployment.",
+    "unchanged_state": "Interface and netplan fingerprints identical before and after; the stateless nftables ruleset stable and netd logged nothing and did not restart; migration ledger 42 rows ending 0091 before and after; no error logged by scd, edged, portald or hotel-admin since the deployment.",
+    "appliance_manifest": "/opt/stayconnect/DEPLOYED_BINARIES.{sha256,txt} rewritten from the installed bytes (previous copies kept as .bak-<ts>); sha256sum -c reports all six OK."
+  },
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. THIS transition records a merge to master and closes a delivery; it changed no phase, applied no migration, deployed nothing, performed no cutover and enabled no capability. PRE-LIVE remains PRE-LIVE."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. THIS transition records a PRE-LIVE deployment of already-merged front-end presentation under the standing PRE-LIVE deployment decision; it changed no phase, applied no migration, changed no configuration, networking, PMS or licensing state, performed no cutover and enabled no capability. PRE-LIVE remains PRE-LIVE."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Phase 7 remains ACCEPTED_AND_CLOSED under D41, Guest activation remains DEFERRED by D41, Go-Live remains unauthorised.",
+  "base": "38d2ab7995661e1838fa2803c669b1d64411d0e5",
+  "base_note": "Master after the merge of PR #186; the deployed source.",
+  "head": "38d2ab79",
+  "head_note": "The deployed source commit. This lineage adds only the deployment record.",
+  "previous_delivery": "T0192",
+  "go_live": "NOT authorised. Guest activation remains DEFERRED by D41."
+}
