@@ -1,6 +1,6 @@
 "use client";
 
-// REPORTING TO THE STAYCONNECT CLOUD — the whole queue, in one card, with the two things a property can do
+// REPORTING TO VELONET CENTRAL — the whole queue, in one card, with the two things a property can do
 // about it.
 //
 // WHAT THIS CARD REPLACED. Four bare numbers and a sentence that inferred the problem from the size of the
@@ -29,7 +29,8 @@ import { describeOutbox, OutboxFigures } from "@/lib/health-words";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
+import { Field, Input } from "@/components/ui/input";
+import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { DialogForm } from "@/components/ui/dialog";
 import { formatDate } from "@/lib/utils";
@@ -168,16 +169,12 @@ export function CloudSyncQueueCard({
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <CloudUpload size={16} /> Reporting to the Velonet cloud
+          <CloudUpload className="size-4" aria-hidden /> Reporting to Velonet Central
         </CardTitle>
       </CardHeader>
       <CardBody className="space-y-3">
-        <ErrorBanner err={err} />
-        {note && (
-          <p className="text-sm text-success-subtle-foreground" role="status">
-            {note}
-          </p>
-        )}
+        <ErrorBanner err={err} className="mb-0" />
+        {note && <Callout tone="success">{note}</Callout>}
 
         <Row
           k="Cloud role"
@@ -191,7 +188,7 @@ export function CloudSyncQueueCard({
         />
         {licensingOnly && (
           <p className="text-xs text-muted-foreground">
-            This appliance contacts the Velonet cloud for its licence, its own identity and the
+            This appliance contacts Velonet Central for its licence, its own identity and the
             certificate that authenticates them — and for nothing else. Operational reporting is switched off
             by decision, not by a fault. The figures below are the records this appliance produced while
             reporting was enabled; they are kept, not sent.
@@ -200,11 +197,11 @@ export function CloudSyncQueueCard({
         <Row k="Delivered" v={num(o.delivered)} />
         <Row
           k="Waiting to be sent"
-          v={<b className={(o.pending ?? 0) > 0 ? "text-warning-subtle-foreground" : ""}>{num(o.pending)}</b>}
+          v={<b className={(o.pending ?? 0) > 0 ? "tabular text-warning-subtle-foreground" : "tabular"}>{num(o.pending)}</b>}
         />
         <Row
           k="Given up on"
-          v={<b className={exhausted > 0 ? "text-destructive" : ""}>{num(exhausted)}</b>}
+          v={<b className={exhausted > 0 ? "tabular text-destructive" : "tabular"}>{num(exhausted)}</b>}
         />
         <Row k="Total recorded" v={num(o.total)} />
         <Row k="Oldest still waiting" v={o.oldest_pending ? formatDate(o.oldest_pending) : "—"} />
@@ -245,10 +242,10 @@ export function CloudSyncQueueCard({
             </p>
             <p className="text-xs text-muted-foreground">
               Recovery puts them back in the queue, oldest first, in batches. Nothing is deleted and nothing
-              is changed — the cloud records each record once, however many times it arrives.
+              is changed — Central records each record once, however many times it arrives.
             </p>
-            <Button size="sm" onClick={() => { setRecoverOpen(true); setRecoverErr(null); }}>
-              <RotateCcw className="mr-1 h-4 w-4" /> Recover these records
+            <Button size="sm" variant="secondary" onClick={() => { setRecoverOpen(true); setRecoverErr(null); }}>
+              <RotateCcw /> Recover these records
             </Button>
           </div>
         )}
@@ -266,7 +263,7 @@ export function CloudSyncQueueCard({
                 id="csq-retention"
                 type="number"
                 inputMode="numeric"
-                className={`w-28 ${daysBad ? "border-danger" : ""}`}
+                className="w-28"
                 value={days}
                 min={lim.min_days}
                 max={lim.max_days}
@@ -288,20 +285,16 @@ export function CloudSyncQueueCard({
             </div>
             <p id="csq-retention-help" className="text-xs text-muted-foreground">
               Standard: 30. Allowed: {lim.min_days}–{lim.max_days}. This removes records that have{" "}
-              <strong>already been delivered</strong> to the cloud. Records still waiting, and records the
+              <strong>already been delivered</strong> to Central. Records still waiting, and records the
               appliance gave up on, are never removed by this — a queue that cannot be delivered is not made
               to look empty.
             </p>
             {daysBad && (
-              <p className="text-xs text-danger" role="alert">
+              <p className="text-xs text-destructive" role="alert">
                 Enter a whole number between {lim.min_days} and {lim.max_days}.
               </p>
             )}
-            {!canSetRetention && (
-              <p className="text-xs text-muted-foreground">
-                Your role can see this setting but not change it.
-              </p>
-            )}
+            {!canSetRetention && <ReadOnlyNotice>Your role can see this setting but not change it.</ReadOnlyNotice>}
             {settings.last_change && (
               <p className="text-xs text-muted-foreground">
                 Last changed {formatDate(settings.last_change.changed_at)} by{" "}
@@ -357,25 +350,20 @@ export function CloudSyncQueueCard({
           <dt className="text-muted-foreground">Oldest of them</dt>
           <dd>{o.oldest_exhausted ? formatDate(o.oldest_exhausted) : "—"}</dd>
         </dl>
-        <div className="space-y-1">
-          <label htmlFor="csq-recover-reason" className="block text-sm font-medium">
-            Reason <span className="font-normal text-muted-foreground">(recorded with your name)</span>
-          </label>
+        <Field
+          label="Reason"
+          required
+          hint="Recorded with your name. At least 3 characters. Recovery happens in batches, so this may need running more than once — the card shows how many are left each time."
+        >
           <Input
-            id="csq-recover-reason"
             value={recoverReason}
             onChange={(e) => setRecoverReason(e.target.value)}
             maxLength={200}
-            placeholder="e.g. cloud reporting restored, sending the backlog"
-            aria-describedby="csq-recover-help"
+            placeholder="e.g. reporting restored, sending the backlog"
           />
-          <p id="csq-recover-help" className="text-xs text-muted-foreground">
-            At least 3 characters. Recovery happens in batches, so this may need running more than once —
-            the card shows how many are left each time.
-          </p>
-        </div>
+        </Field>
         <Callout tone="neutral" title="Arriving twice is safe">
-          The cloud records each record once, keyed on this appliance and the record&apos;s own sequence
+          Central records each record once, keyed on this appliance and the record&apos;s own sequence
           number, so a record that is sent again after an interrupted attempt is not counted twice.
         </Callout>
       </DialogForm>

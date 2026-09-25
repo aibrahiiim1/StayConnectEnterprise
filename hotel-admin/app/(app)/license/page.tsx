@@ -1,6 +1,6 @@
 "use client";
 
-// License now lives on the consolidated Appliance & licence screen.
+// The licence now lives on the consolidated Appliance & licence screen.
 //
 // There were two destinations for one question -- is this appliance connected and set up, and what does its
 // licence allow -- and both showed the licence, both offered an upload, and an operator had to choose which
@@ -15,7 +15,7 @@ export default function LicenseMoved() {
   useEffect(() => { router.replace("/appliance?section=license"); }, [router]);
   return (
     <div className="mx-auto w-full max-w-3xl text-sm text-muted-foreground">
-      License now lives on the <strong>Appliance &amp; licence</strong> screen. Taking you there&hellip;
+      The licence now lives on the <strong>Appliance &amp; licence</strong> screen. Taking you there&hellip;
     </div>
   );
 }

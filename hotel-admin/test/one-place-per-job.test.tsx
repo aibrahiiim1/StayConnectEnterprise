@@ -72,6 +72,6 @@ describe("an activated appliance has one place to install a licence", () => {
   });
 
   it("Licence remains the one place a licence file is installed after activation", () => {
-    expect(license).toContain("Upload license file");
+    expect(license).toContain("Upload licence file");
   });
 });

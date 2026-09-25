@@ -54,6 +54,12 @@ export function ApplianceStatus({ className }: { className?: string }) {
   const tone = down.length > 0 ? "err" : degraded ? "warn" : "ok";
   const word = down.length > 0 ? "Attention" : degraded ? "Degraded" : "Healthy";
 
+  // What is worth checking when the appliance is running but not clean. Listed, so the tooltip names the
+  // problem rather than only a colour.
+  const worth: string[] = [];
+  if (down.length === 0 && health?.status === "degraded") worth.push("The admin service reports itself degraded");
+  if (down.length === 0 && (outboxWords.tone === "warn" || outboxWords.tone === "err")) worth.push(outboxWords.headline);
+
   return (
     <Tooltip
       side="bottom"
@@ -68,8 +74,13 @@ export function ApplianceStatus({ className }: { className?: string }) {
                 : "Everything this appliance needs is running"}
           </div>
           {down.length > 0 && (
-            <ul className="list-disc space-y-0.5 pl-4">
+            <ul className="list-disc space-y-0.5 ps-4">
               {down.map((d) => <li key={d}>{d}</li>)}
+            </ul>
+          )}
+          {worth.length > 0 && (
+            <ul className="list-disc space-y-0.5 ps-4">
+              {worth.map((d) => <li key={d}>{d}</li>)}
             </ul>
           )}
           {down.length === 0 && (
@@ -88,9 +99,10 @@ export function ApplianceStatus({ className }: { className?: string }) {
     >
       <Link
         href="/health"
+        aria-label={`Appliance health: ${word}. Open Diagnostics.`}
         className={cn(
           "hidden items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 text-xs font-medium",
-          "transition-colors hover:bg-surface sm:inline-flex",
+          "transition-colors hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:inline-flex",
           tone === "err" && "border-destructive/30 text-destructive-subtle-foreground",
           tone === "warn" && "border-warning/30 text-warning-subtle-foreground",
           className,
