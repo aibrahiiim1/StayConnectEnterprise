@@ -183,3 +183,18 @@ hero height, surface, photo darkening). Six layout templates (Classic, Split, Im
 Resort, Kiosk) are variations of one token set, so each stays coherent under any hotel's colour and photo.
 Every page — sign-in, package choice, "You're online", errors — is branded and translated in the six
 built-in languages, and fully mirrored in Arabic.
+
+## Design decisions on record
+
+- **Info stays blue.** The brand book defines `info` as `#245d92`, close to the Velonet blue. It is kept as
+  the brand defines it; `info` is therefore never used without its word or icon, never on a button and never
+  inside the active navigation item (whose tint it resembles).
+- **"Licence" in Hotel Admin, "License" in Central.** Each console uses the spelling of its own menu in the
+  redesign handoff (Hotel Admin: *Appliance & licence*; Central: *Licenses*), which also matches the words the
+  appliance's own services send to Hotel Admin.
+- **Central shows licensing only.** Appliances report nothing but licensing to Central, so Central's screens
+  show licenses, sites and appliances and never guest activity; a screen that would need telemetry is not
+  built rather than shown empty.
+- **Controls mirror the server.** Each console hides an action its server refuses for the signed-in role
+  (Hotel Admin: `lib/roles.ts`; Central: `lib/permissions.ts`, which cites the ctrlapi rule for every entry).
+  The UI never widens or narrows what the server allows.
