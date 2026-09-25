@@ -770,3 +770,35 @@ main.card { display: block; }
    container the reference for position:fixed inside it -- so a fragment cannot lift itself over the forms. */
 #custom-html { position: relative; inset: auto; z-index: 0; contain: layout paint; transform: none; translate: none; }
 `
+
+// portalPageGuardCSS is the same guarantee for the pages after sign-in -- package choice, "You're online", the
+// status page and the failure pages -- which carry the hotel's custom CSS too, in the same `@layer hotel` under
+// the same unlayered guard (guestHead in templates.go). What a guest needs on those pages is the path from the
+// page to the words and the buttons: the heading and the message (a refusal is role="alert"), the facts, the
+// actions (Disconnect, Back, Status), the package buttons, the device and package panels once they have
+// something to show, and the language pill. Values match the portal's own, so an unstyled page is unchanged.
+// Nothing here uses !important, for the same reason as above, and every rule that sets display respects the
+// hidden attribute, which is how the pages' own scripts show and hide their panels and buttons.
+const portalPageGuardCSS = `
+html, body { display: block; visibility: visible; opacity: 1; }
+.page { display: flex; }
+main.card { display: block; }
+[data-template="split"] main.card { display: flex; }
+[data-template="headerbar"] main.card { display: grid; }
+.sc-body, .page-title, .page-lead, .choice-list, .choice-list form, .section:not([hidden]) { display: block; }
+.fact, .actions, .actions form, .actions .btn:not([hidden]), .choice-list button.choice { display: flex; }
+.page, main.card, .sc-body, .page-title, .page-lead, [role=alert], .fact, .fact-label, .fact-value, .actions,
+.actions form, .actions .btn, .choice-list, .choice-list form, .choice-list button.choice, .section:not([hidden]),
+.section button, .section .confirm-row, .langbar, #lang {
+  visibility: visible; pointer-events: auto; filter: none; clip-path: none; content-visibility: visible;
+  transform: none; translate: none; scale: none; rotate: none;
+}
+.page, main.card, .sc-body, .page-title, .page-lead, [role=alert], .fact, .fact-label, .fact-value, .actions,
+.actions form, .choice-list, .choice-list form, .section:not([hidden]), .section .confirm-row, .langbar, #lang,
+.actions .btn:not(:disabled), .choice-list button.choice:not(:disabled), .section button:not(:disabled) { opacity: 1; }
+.sc-body, .actions, .actions form, .actions .btn, .choice-list, .choice-list form, .choice-list button.choice,
+.section:not([hidden]) { height: auto; max-height: none; overflow: visible; }
+.page, main.card, .sc-body { position: relative; inset: auto; }
+.actions, .actions form, .actions .btn, .choice-list, .choice-list form, .choice-list button.choice { position: static; }
+*::before, *::after { pointer-events: none; }
+`

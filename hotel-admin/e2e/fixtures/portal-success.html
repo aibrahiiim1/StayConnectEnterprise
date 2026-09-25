@@ -3,7 +3,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light">
-<style>
+<style id="sc-base">
+  @layer sc-base, sc-template, hotel;
+  @layer sc-base {
   :root {
     --sc-brand: #1773bd;
     --sc-brand-dark: #125c97;
@@ -454,7 +456,10 @@
     .panel.active, .card { animation: sc-in 200ms cubic-bezier(0.2, 0, 0, 1); }
     @keyframes sc-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
   }
-
+}
+</style>
+<style id="sc-templates">
+@layer sc-template {
   .sc-hero { display: none; }
   .sc-hero-logo { display: block; max-height: 56px; max-width: 220px; margin: 0 0 16px; object-fit: contain; }
   .sc-hero-logo[hidden] { display: none; }
@@ -700,7 +705,47 @@
   [data-template="headerbar"] .card--page .sc-body { max-width: none; }
   .choice-list { margin-top: 20px; }
   .choice-list form { margin: 0; }
+  .fact + .tl-note { margin-top: 10px; }
+}
 </style>
+
+<style id="sc-guard">
+html, body { display: block; visibility: visible; opacity: 1; }
+.page { display: flex; }
+main.card { display: block; }
+[data-template="split"] main.card { display: flex; }
+[data-template="headerbar"] main.card { display: grid; }
+.sc-body, .page-title, .page-lead, .choice-list, .choice-list form, .section:not([hidden]) { display: block; }
+.fact, .actions, .actions form, .actions .btn:not([hidden]), .choice-list button.choice { display: flex; }
+.page, main.card, .sc-body, .page-title, .page-lead, [role=alert], .fact, .fact-label, .fact-value, .actions,
+.actions form, .actions .btn, .choice-list, .choice-list form, .choice-list button.choice, .section:not([hidden]),
+.section button, .section .confirm-row, .langbar, #lang {
+  visibility: visible; pointer-events: auto; filter: none; clip-path: none; content-visibility: visible;
+  transform: none; translate: none; scale: none; rotate: none;
+}
+.page, main.card, .sc-body, .page-title, .page-lead, [role=alert], .fact, .fact-label, .fact-value, .actions,
+.actions form, .choice-list, .choice-list form, .section:not([hidden]), .section .confirm-row, .langbar, #lang,
+.actions .btn:not(:disabled), .choice-list button.choice:not(:disabled), .section button:not(:disabled) { opacity: 1; }
+.sc-body, .actions, .actions form, .actions .btn, .choice-list, .choice-list form, .choice-list button.choice,
+.section:not([hidden]) { height: auto; max-height: none; overflow: visible; }
+.page, main.card, .sc-body { position: relative; inset: auto; }
+.actions, .actions form, .actions .btn, .choice-list, .choice-list form, .choice-list button.choice { position: static; }
+*::before, *::after { pointer-events: none; }
+</style>
+<script nonce="e2e-nonce">
+  
+  
+  (function () {
+    if (window.CSSLayerBlockRule) return;
+    ['sc-base', 'sc-templates', 'sc-hotel'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      var css = el.textContent.replace(/@layer[^;{]*;/g, '').replace(/@layer\s+[\w-]+\s*\{/, '');
+      var end = css.lastIndexOf('}');
+      el.textContent = end >= 0 ? css.slice(0, end) : css;
+    });
+  })();
+</script>
 <title>You&#39;re online</title>
 <script nonce="e2e-nonce">
   
@@ -722,7 +767,7 @@
     <span class="fact-label">Time remaining</span><span class="fact-value">No time limit</span>
   </div>
   <div class="actions">
-    <a class="btn btn--outline" href="/status">Status</a>
+    <a class="btn btn--outline" href="/status?s=sess-1&amp;t=0">Status</a>
     <form method="POST" action="/logout"><button class="btn btn--outline" type="submit">Disconnect</button></form>
   </div>
 

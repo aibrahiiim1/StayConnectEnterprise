@@ -20,6 +20,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -278,6 +279,29 @@ type guestPage struct {
 	JS        template.JS       // the part of it the page's own script reads, as JSON
 	Languages []portalLanguage
 	Brand     guestBrand
+	// HotelSheet is the hotel's custom CSS as the pages after sign-in carry it: one <style id="sc-hotel">
+	// wrapping the sheet in `@layer hotel`, or empty. The sign-in page ignores it; its script applies the same
+	// sheet from /api/branding in the same way.
+	HotelSheet template.HTML
+}
+
+// reImportant matches what the sign-in page's script removes a second time before layering the hotel's sheet.
+var reImportant = regexp.MustCompile(`(?i)!\s*important`)
+
+// hotelSheet is the hotel's custom CSS for a server-rendered page, or "" when there is none.
+//
+// The value has already been through portaldesign.ForGuests -- rebuilt rule by rule from the allowlist edged
+// applies on save, with !important and any </style removed -- which is the same text /api/branding hands the
+// sign-in page. Two things are done again here, exactly as the sign-in page's script does them: !important is
+// stripped (it is the one thing that lets a layered rule outrank the unlayered guard), and the sheet goes
+// inside `@layer hotel`, below the guard. A sheet that could still close its element is not served at all.
+func hotelSheet(d map[string]any) template.HTML {
+	css, _ := d["custom_css"].(string)
+	css = strings.TrimSpace(reImportant.ReplaceAllString(css, ""))
+	if css == "" || strings.Contains(strings.ToLower(css), "</style") {
+		return ""
+	}
+	return template.HTML("<style id=\"sc-hotel\">@layer hotel {\n" + css + "\n}</style>")
 }
 
 func (h *handler) newGuestPage(r *http.Request, nonce string, jsPrefixes ...string) guestPage {
@@ -299,7 +323,7 @@ func buildGuestPage(r *http.Request, d map[string]any, nonce string, jsPrefixes 
 	}
 	return guestPage{
 		Lang: lang.Code, Dir: dir, Nonce: nonce, T: words, JS: jsData(subset(words, jsPrefixes...)),
-		Languages: offeredLanguages(d), Brand: brandFor(d),
+		Languages: offeredLanguages(d), Brand: brandFor(d), HotelSheet: hotelSheet(d),
 	}
 }
 
@@ -547,19 +571,118 @@ func packageRows(words map[string]string, pkgs []struct {
 
 type errorView struct {
 	guestPage
-	Title   string
-	Message string
+	Title     string
+	Message   string
+	BackHref  string
+	BackLabel string
 }
 
 var errorTmpl = template.Must(template.New("error").Parse(compactMarkup(errorHTML)))
 
-// renderGuestError draws the branded, translated failure page for a flow that has left the sign-in page (the
-// social provider's return). The status code is the caller's and is unchanged; only what the guest reads is.
+// renderGuestError draws the branded, translated failure page for a sign-in flow that has left the sign-in
+// page (the social provider's leg). The status code is the caller's and is unchanged; only what the guest
+// reads is.
 func (h *handler) renderGuestError(w http.ResponseWriter, r *http.Request, status int, key string) {
+	h.renderGuestNotice(w, r, status, "errpage.title", key, "/", "errpage.back")
+}
+
+// renderGuestNotice is the same page with its own heading and way back, for a guest who is past sign-in (the
+// status page when the appliance cannot answer, a disconnect that could not tell which device asked).
+func (h *handler) renderGuestNotice(w http.ResponseWriter, r *http.Request, status int, titleKey, key, backHref, backKey string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	nonce := setPortalCSP(w)
 	p := h.newGuestPage(r, nonce)
 	w.WriteHeader(status)
-	_ = errorTmpl.Execute(w, errorView{guestPage: p, Title: p.T["errpage.title"], Message: p.T[key]})
+	_ = errorTmpl.Execute(w, errorView{
+		guestPage: p, Title: p.T[titleKey], Message: p.T[key], BackHref: backHref, BackLabel: p.T[backKey],
+	})
+}
+
+// ---- connection status -------------------------------------------------------------------------------------
+
+type statusView struct {
+	guestPage
+	HasTime    bool
+	TimeLeft   string
+	HardExpiry string
+	BackHref   string
+}
+
+var statusTmpl = template.Must(template.New("status").Parse(compactMarkup(statusHTML)))
+
+// scdStatus is the part of scd's /v1/sessions/status answer the page reads. scd sends ip, session_id and
+// active always, and the three online-time fields only for a package with an online-time allowance.
+type scdStatus struct {
+	SessionID              string   `json:"session_id"`
+	Active                 bool     `json:"active"`
+	TimeMode               string   `json:"time_mode"`
+	RemainingOnlineSeconds *float64 `json:"remaining_online_seconds"`
+	HardExpiry             string   `json:"hard_expiry"`
+}
+
+// onlinePageHref is the way back to "You're online": the page the guest came from, rebuilt from the two values
+// the Status link carries (the session, and the duration that page was showing), or from scd's session id.
+func onlinePageHref(r *http.Request, sessionID string) string {
+	q := url.Values{}
+	s := r.URL.Query().Get("s")
+	if sessionID != "" {
+		s = sessionID
+	}
+	if s == "" {
+		return "/"
+	}
+	q.Set("s", s)
+	if t := r.URL.Query().Get("t"); t != "" && strings.Trim(t, "0123456789") == "" {
+		q.Set("t", t)
+	}
+	return "/success?" + q.Encode()
+}
+
+func (h *handler) renderStatus(w http.ResponseWriter, r *http.Request, st scdStatus) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	nonce := setPortalCSP(w)
+	p := h.newGuestPage(r, nonce)
+	v := statusView{guestPage: p, BackHref: onlinePageHref(r, st.SessionID)}
+	if st.TimeMode == "AGGREGATE_ONLINE_TIME" && st.RemainingOnlineSeconds != nil {
+		v.HasTime = true
+		v.TimeLeft = humanSpan(p.T, time.Duration(*st.RemainingOnlineSeconds)*time.Second)
+		if v.TimeLeft == "" {
+			v.TimeLeft = p.T["tl.none"]
+		}
+		v.HardExpiry = st.HardExpiry
+	}
+	_ = statusTmpl.Execute(w, v)
+}
+
+// wantsHTML reports whether a request is a browser navigating rather than a script asking for data: it
+// prefers text/html to application/json. A fetch() with no Accept header sends */*, which prefers neither and
+// so keeps the JSON it has always had; a browser's navigation lists text/html first.
+func wantsHTML(r *http.Request) bool {
+	var html, jsonQ float64 = -1, -1
+	for _, part := range strings.Split(r.Header.Get("Accept"), ",") {
+		fields := strings.Split(part, ";")
+		mt := strings.ToLower(strings.TrimSpace(fields[0]))
+		q := 1.0
+		for _, f := range fields[1:] {
+			f = strings.TrimSpace(f)
+			if strings.HasPrefix(f, "q=") {
+				if _, err := fmt.Sscanf(f[2:], "%g", &q); err != nil {
+					q = 0
+				}
+			}
+		}
+		switch mt {
+		case "text/html", "application/xhtml+xml":
+			if q > html {
+				html = q
+			}
+		case "application/json":
+			if q > jsonQ {
+				jsonQ = q
+			}
+		}
+	}
+	return html > 0 && html > jsonQ
 }

@@ -16,19 +16,29 @@ import (
 // ---- /auth/social/start?provider=google -------------------------------------
 
 func (h *handler) socialStart(w http.ResponseWriter, r *http.Request) {
+	// The sign-in page reaches this route with a LINK, so every refusal below is a page the guest's browser
+	// lands on. A browser gets the branded, translated failure page with the same status code; any other
+	// client keeps the JSON it always had.
+	fail := func(status int, key, msg string) {
+		if wantsHTML(r) {
+			h.renderGuestError(w, r, status, key)
+			return
+		}
+		jsonErr(w, status, msg)
+	}
 	provider := r.URL.Query().Get("provider")
 	if provider == "" {
-		jsonErr(w, 400, "provider required")
+		fail(400, "errpage.social", "provider required")
 		return
 	}
 	ip := clientIP(r)
 	if ip == nil {
-		jsonErr(w, 400, "bad ip")
+		fail(400, "err.device.detect", "bad ip")
 		return
 	}
 	mac, ok := h.arpCache(ip)
 	if !ok {
-		jsonErr(w, 400, "device not on guest network")
+		fail(400, "err.device.network", "device not on guest network")
 		return
 	}
 
@@ -54,11 +64,17 @@ func (h *handler) socialStart(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.scd.Do(req)
 	if err != nil {
 		slog.Error("scd social start", "err", err)
-		jsonErr(w, 502, "service unavailable")
+		fail(502, "err.service", "service unavailable")
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
+		if wantsHTML(r) {
+			// scd's reason ("provider not enabled") is for the log, not for the guest.
+			slog.Info("social sign-in start refused", "provider", provider, "status", resp.StatusCode)
+			h.renderGuestError(w, r, resp.StatusCode, "errpage.social")
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(resp.StatusCode)
 		_, _ = io.Copy(w, resp.Body)
@@ -68,7 +84,7 @@ func (h *handler) socialStart(w http.ResponseWriter, r *http.Request) {
 		AuthorizeURL string `json:"authorize_url"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&sr); err != nil || sr.AuthorizeURL == "" {
-		jsonErr(w, 502, "bad scd response")
+		fail(502, "err.service", "bad scd response")
 		return
 	}
 	http.Redirect(w, r, sr.AuthorizeURL, http.StatusFound)

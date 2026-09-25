@@ -96,6 +96,42 @@ func TestRenderPortalShots(t *testing.T) {
 			w = httptest.NewRecorder()
 			h.renderGuestError(w, req("/auth/social/callback", lang), http.StatusBadGateway, "errpage.social")
 			write("error-"+v.name+"-"+lang+".html", w.Body.String())
+
+			// The status page a guest reaches from "Status", with the online-time clocks scd reports for such a
+			// package; the same page when the appliance cannot answer; and the refusals a browser can land on.
+			nav := func(sh *handler, path string) string {
+				r := req(path, lang)
+				r.Header.Set("Accept", "text/html,application/xhtml+xml,*/*;q=0.8")
+				w := httptest.NewRecorder()
+				sh.routes().ServeHTTP(w, r)
+				return w.Body.String()
+			}
+			sh := statusHandler(t, v.design, `{"ip":"10.77.0.42","session_id":"abc","active":true,`+
+				`"time_mode":"AGGREGATE_ONLINE_TIME","remaining_online_seconds":7800,"hard_expiry":"2026-09-30T12:00:00Z"}`, 200)
+			write("status-"+v.name+"-"+lang+".html", nav(sh, "/status?s=abc&t=8100"))
+			write("statusdown-"+v.name+"-"+lang+".html", nav(statusHandler(t, v.design, "", 0), "/status?s=abc&t=8100"))
+			sh.arpCache = func(net.IP) (net.HardwareAddr, bool) { return nil, false }
+			write("socialstart-"+v.name+"-"+lang+".html", nav(sh, "/auth/social/start?provider=google"))
 		}
+	}
+
+	// The hotel's custom CSS after sign-in: a restyle that also tries to hide the controls, which the guard
+	// keeps on screen.
+	css := shotsDesign("classic")
+	css["custom_css"] = ".card { border: 3px solid #0a5c4a; } .page-title { color: #0a5c4a; font-style: italic; } " +
+		".actions, .choice-list, .actions .btn { display: none; visibility: hidden; opacity: 0; }"
+	for _, lang := range []string{"en", "ar"} {
+		sh := statusHandler(t, css, `{"ip":"10.77.0.42","session_id":"abc","active":true}`, 200)
+		r := req("/status", lang)
+		r.Header.Set("Accept", "text/html")
+		w := httptest.NewRecorder()
+		sh.routes().ServeHTTP(w, r)
+		write("hotelcss-status-"+lang+".html", w.Body.String())
+		w = httptest.NewRecorder()
+		sh.routes().ServeHTTP(w, req("/success?s=abc&t=8100", lang))
+		write("hotelcss-success-"+lang+".html", w.Body.String())
+		w = httptest.NewRecorder()
+		sh.renderPackages(w, req("/packages", lang), pkgs)
+		write("hotelcss-packages-"+lang+".html", w.Body.String())
 	}
 }

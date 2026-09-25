@@ -356,6 +356,12 @@ func (h *handler) success(w http.ResponseWriter, r *http.Request) {
 func (h *handler) logout(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r)
 	if ip == nil {
+		// Disconnect is a plain form post, so the browser lands on whatever this answers. Same status code; a
+		// page in words for a browser, the old plain answer for anything else.
+		if wantsHTML(r) {
+			h.renderGuestNotice(w, r, 400, "online.disconnect", "err.device.detect", "/", "errpage.back")
+			return
+		}
 		http.Error(w, "bad ip", 400)
 		return
 	}
@@ -366,21 +372,51 @@ func (h *handler) logout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
+// status answers two different callers from the same scd lookup.
+//
+// A SCRIPT (the online page's own fetch, or any client that does not prefer HTML) gets exactly what it always
+// got: scd's JSON, copied through, and the same plain errors. A BROWSER NAVIGATING HERE -- the guest who taps
+// "Status" -- gets a page: branded, in their language, saying in words what scd said, with the online page's
+// own actions. The lookup, and what it is keyed on (the connection's address), are the same for both.
 func (h *handler) status(w http.ResponseWriter, r *http.Request) {
+	page := wantsHTML(r)
 	ip := clientIP(r)
 	if ip == nil {
+		if page {
+			h.renderGuestNotice(w, r, 400, "online.status", "err.device.detect", onlinePageHref(r, ""), "online.back")
+			return
+		}
 		http.Error(w, "bad ip", 400)
 		return
 	}
 	req, _ := http.NewRequestWithContext(r.Context(), "GET", "http://unix/v1/sessions/status?ip="+ip.String(), nil)
 	resp, err := h.scd.Do(req)
 	if err != nil {
+		if page {
+			h.renderGuestNotice(w, r, 500, "online.status", "err.service", onlinePageHref(r, ""), "online.back")
+			return
+		}
 		http.Error(w, "scd unreachable", 500)
 		return
 	}
 	defer resp.Body.Close()
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = io.Copy(w, resp.Body)
+	if !page {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.Copy(w, resp.Body)
+		return
+	}
+	var st scdStatus
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &st) != nil {
+		h.renderGuestNotice(w, r, http.StatusBadGateway, "online.status", "err.service", onlinePageHref(r, ""), "online.back")
+		return
+	}
+	if !st.Active {
+		// Not online: the sign-in page is where this device belongs, and it says so in the guest's language.
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	h.renderStatus(w, r, st)
 }
 
 // Well-known captive-detect probes.

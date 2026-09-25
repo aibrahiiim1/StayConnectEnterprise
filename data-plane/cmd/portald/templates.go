@@ -25,13 +25,22 @@ const (
 )
 
 // guestHead opens every page after sign-in: language, direction, the hotel's layout attributes and colours
-// on <html>, and the one stylesheet. The sign-in page has its own head (layers and the guard sheet).
+// on <html>, and the stylesheets in the SAME cascade as the sign-in page -- the portal's styling and the
+// template in layers, the hotel's custom CSS in `@layer hotel` above them, and an unlayered guard sheet over the
+// controls these pages need (portalPageGuardCSS). The hotel's sheet is rendered by the server here (HotelSheet,
+// built by hotelSheet in portal_page.go from the design ForGuests already sanitised), so the hotel's look
+// carries on after sign-in and its CSS still cannot hide Disconnect, Back or a package button.
 const guestHead = `<!doctype html>
 <html lang="{{.Lang}}" dir="{{.Dir}}" data-template="{{.Brand.Template}}" data-density="{{.Brand.Density}}" data-panel="{{.Brand.Panel}}" data-hero="{{.Brand.HeroHeight}}" data-surface="{{.Brand.Surface}}"{{with .Brand.Style}} style="{{.}}"{{end}}><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light">
-<style>` + portalBaseCSS + portalTemplateCSS + `
+<style id="sc-base">
+  @layer sc-base, sc-template, hotel;
+  @layer sc-base {` + portalBaseCSS + `}
+</style>
+<style id="sc-templates">
+@layer sc-template {` + portalTemplateCSS + `
   [data-template="split"] .card { display: flex; }
   [data-template="headerbar"] .card { display: grid; }
   /* The pages after sign-in have no help column, so the business layout's wide card closes up around them. */
@@ -39,7 +48,25 @@ const guestHead = `<!doctype html>
   [data-template="headerbar"] .card--page .sc-body { max-width: none; }
   .choice-list { margin-top: 20px; }
   .choice-list form { margin: 0; }
-</style>`
+  .fact + .tl-note { margin-top: 10px; }
+}
+</style>
+{{with .HotelSheet}}{{.}}{{end}}
+<style id="sc-guard">` + portalPageGuardCSS + `</style>
+<script nonce="{{.Nonce}}">
+  // A browser without cascade layers drops a layered block whole; there the wrappers come off before anything
+  // paints and plain source order -- base, template, hotel, guard -- keeps the same outcome.
+  (function () {
+    if (window.CSSLayerBlockRule) return;
+    ['sc-base', 'sc-templates', 'sc-hotel'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      var css = el.textContent.replace(/@layer[^;{]*;/g, '').replace(/@layer\s+[\w-]+\s*\{/, '');
+      var end = css.lastIndexOf('}');
+      el.textContent = end >= 0 ? css.slice(0, end) : css;
+    });
+  })();
+</script>`
 
 // guestChrome is the hero (decoration, for the photographic and bar layouts) and the language pill.
 const guestChrome = `
@@ -1259,10 +1286,54 @@ const errorHTML = guestHead + `
   <div class="status-icon status-icon--err" aria-hidden="true">` + iconAlert + `</div>
   <h1 class="page-title">{{.Title}}</h1>
   <p class="page-lead" role="alert">{{.Message}}</p>
-  <div class="actions"><a class="btn" href="/">{{index .T "errpage.back"}}</a></div>
+  <div class="actions"><a class="btn" href="{{.BackHref}}">{{.BackLabel}}</a></div>
 </div>
 </main>
 </div>` + guestScripts + `
+</body></html>`
+
+// ============================================================================================================
+// CONNECTION STATUS (a guest who follows the "Status" link, or otherwise navigates to /status)
+// ============================================================================================================
+
+// statusHTML draws what scd's session status says, in words: the device is online, and -- only on a package
+// that has an online-time allowance, the one case where scd reports it -- how much of that time is left and
+// when the access ends regardless. A script-driven fetch of /status still gets scd's JSON (main.go); only a
+// browser navigating here gets this page. The actions are the online page's own: back to it, and Disconnect.
+const statusHTML = guestHead + `
+<title>{{index .T "online.status"}}</title>
+</head><body>
+<div class="page">` + guestChrome + `
+<main class="card card--page">` + guestBrandblock + `
+<div class="sc-body">
+  <div class="status-icon" aria-hidden="true">` + iconCheck + `</div>
+  <h1 class="page-title">{{index .T "online.title"}}</h1>
+  <p class="page-lead">{{index .T "online.lead"}}</p>
+  {{if .HasTime}}
+  <div class="fact"><span class="fact-label">{{index .T "online.remaining"}}</span><span class="fact-value">{{.TimeLeft}}</span></div>
+  <p class="tl-note">{{index .T "tl.note"}}</p>
+  {{with .HardExpiry}}<p class="tl-note" id="st-ends" data-at="{{.}}" hidden></p>{{end}}
+  {{end}}
+  <div class="actions">
+    <a class="btn btn--outline" href="{{.BackHref}}">{{index .T "online.back"}}</a>
+    <form method="POST" action="/logout"><button class="btn btn--outline" type="submit">{{index .T "online.disconnect"}}</button></form>
+  </div>
+</div>
+</main>
+</div>` + guestScripts + `
+<script nonce="{{.Nonce}}">
+  // The end of the access is a moment, shown in the device's own clock and the page's language.
+  (function () {
+    var el = document.getElementById('st-ends');
+    if (!el) return;
+    var ts = Date.parse(el.getAttribute('data-at'));
+    if (isNaN(ts)) return;
+    var d = new Date(ts), when;
+    try { when = d.toLocaleString(document.documentElement.lang || undefined); } catch (e) { when = d.toLocaleString(); }
+    el.textContent = String({{index .T "tl.ends"}}).split('{date}').join(when);
+    el.hidden = false;
+  })();
+</script>
 </body></html>`
 
 // ============================================================================================================
@@ -1289,7 +1360,7 @@ const successHTML = guestHead + `
     {{else}}<span class="fact-label">{{index .T "online.remaining"}}</span><span class="fact-value">{{index .T "online.unlimited"}}</span>{{end}}
   </div>
   <div class="actions">
-    <a class="btn btn--outline" href="/status">{{index .T "online.status"}}</a>
+    <a class="btn btn--outline" href="/status?s={{.SessionID}}&amp;t={{.DurationSeconds}}">{{index .T "online.status"}}</a>
     <form method="POST" action="/logout"><button class="btn btn--outline" type="submit">{{index .T "online.disconnect"}}</button></form>
   </div>
 

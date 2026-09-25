@@ -160,6 +160,7 @@ export const PORTAL_STRINGS: { group: string; key: string; english: string }[] =
   { group: "You're online", key: "online.unlimited", english: "No time limit" },
   { group: "You're online", key: "online.status", english: "Status" },
   { group: "You're online", key: "online.disconnect", english: "Disconnect" },
+  { group: "You're online", key: "online.back", english: "Back" },
   { group: "You're online", key: "tl.left", english: "{t} of internet time left" },
   { group: "You're online", key: "tl.note", english: "This counts down only while you are connected." },
   { group: "You're online", key: "tl.ends", english: "Your access ends on {date}, whether or not the time is used." },
