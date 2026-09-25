@@ -17,6 +17,7 @@ import { usePermissions } from "@/lib/permissions";
 import { MonoId, SkeletonRows } from "@/components/ui/misc";
 import { CustomerScope, SelectCustomerCard } from "@/components/customer-scope";
 import { formatDate } from "@/lib/utils";
+import { HelpList, HelpSection } from "@/components/help";
 
 const ACTION_TONE: Record<string, "ok" | "warn" | "err" | "info" | "default"> = {
   created: "ok",
@@ -69,7 +70,26 @@ export default function AuditPage() {
         eyebrow="Administration"
         title="Audit log"
         icon={<ScrollText />}
-        description="Who did what for this customer in the last 7 days. Entries are never edited or removed."
+        description="Who did what for this customer in the last 7 days."
+        help={
+          <>
+            <HelpSection title="About the audit log">
+              <p>
+                The audit log is kept per customer: select a customer in the sidebar to see it. It covers the last
+                7 days, and entries are never edited or removed.
+              </p>
+            </HelpSection>
+            <HelpSection title="Filtering">
+              <HelpList
+                items={[
+                  <>Enter one or more actions, comma-separated, for example <span className="font-mono">site.created,operator.disabled</span>, then <strong>Apply</strong>.</>,
+                  <>Leave the filter blank to see every action.</>,
+                  <>Open <strong>Payload</strong> on a row to see the recorded details.</>,
+                ]}
+              />
+            </HelpSection>
+          </>
+        }
       >
         <CustomerScope />
       </PageHeader>

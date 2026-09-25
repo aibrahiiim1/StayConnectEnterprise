@@ -19,6 +19,7 @@ import { useToast } from "@/components/ui/toast";
 import { DeleteDialog } from "@/components/delete-dialog";
 import { formatRelative } from "@/lib/utils";
 import { usePermissions } from "@/lib/permissions";
+import { HelpList, HelpSection } from "@/components/help";
 
 type Tenant = {
   id: string;
@@ -149,7 +150,30 @@ export default function TenantsPage() {
         eyebrow="Commercial"
         title="Customers"
         icon={<Building2 />}
-        description="The hotel groups and companies that own sites. Order of work: Customer, then Site, then activate an Appliance, which issues its License."
+        description="The hotel groups and companies that own sites."
+        help={
+          <>
+            <HelpSection title="Order of work">
+              <HelpList
+                items={[
+                  <>Create the <strong>Customer</strong> here.</>,
+                  <>Add its <strong>Site</strong> (one physical property) under Sites.</>,
+                  <>Activate an <strong>Appliance</strong> under Onboarding, which issues its <strong>License</strong>.</>,
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="Managing customers">
+              <HelpList
+                items={[
+                  <>The <strong>slug</strong> is lower-case and unique, used in addresses and single sign-on. It cannot be changed; the name can.</>,
+                  <><strong>Archive</strong> hides a customer from active lists and keeps everything; <strong>Restore</strong> brings it back.</>,
+                  <><strong>Delete</strong> is permanent and asks you to type the customer name.</>,
+                  <>Creating, archiving and deleting customers is for platform administrators; a customer&apos;s own users can rename it.</>,
+                ]}
+              />
+            </HelpSection>
+          </>
+        }
         actions={canCreate ? <Button onClick={() => { setCreateErr(null); setShowNew(true); }}><Plus /> New customer</Button> : undefined}
       />
 
@@ -245,11 +269,11 @@ export default function TenantsPage() {
         error={createErr}
         onSubmit={onCreate}
       >
-        <Field label="Slug" required hint="Lower-case, unique, used in addresses and single sign-on. e.g. acme-hotels">
-          <Input name="slug" required placeholder="acme-hotels" />
+        <Field label="Slug" required hint="Lower-case, unique, used in addresses and single sign-on. e.g. semantics">
+          <Input name="slug" required placeholder="semantics" />
         </Field>
         <Field label="Name" required>
-          <Input name="name" required placeholder="Acme Hotels Group" />
+          <Input name="name" required placeholder="Semantics" />
         </Field>
       </DialogForm>
 

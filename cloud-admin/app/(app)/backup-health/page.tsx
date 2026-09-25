@@ -11,6 +11,7 @@ import { ErrorBanner, Callout } from "@/components/ui/error-banner";
 import { PageHeader, PageShell, StatCard } from "@/components/ui/page";
 import { RoleRestricted } from "@/components/role-restricted";
 import { usePermissions } from "@/lib/permissions";
+import { HelpList, HelpSection } from "@/components/help";
 import { Meter, Skeleton } from "@/components/ui/misc";
 import { formatRelative } from "@/lib/utils";
 
@@ -85,7 +86,41 @@ export default function BackupHealthPage() {
         eyebrow="Administration"
         title="Backup health"
         icon={<HardDrive />}
-        description="Whether Central's own backup and rollback storage is healthy. The cleanup never deletes the current or previous release, certificate-authority material, the newest full database backup, or operator-pinned artifacts."
+        description="Whether Central's own backup and rollback storage is healthy."
+        help={
+          <>
+            <HelpSection title="What the cleanup never deletes">
+              <HelpList
+                items={[
+                  <>The current and previous release.</>,
+                  <>Certificate-authority material.</>,
+                  <>The newest full database backup.</>,
+                  <>Operator-pinned artifacts.</>,
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="Retention policy">
+              {s ? (
+                <p>
+                  Keep the newest {s.keep_binaries} binaries, {s.keep_releases} releases (plus current and previous),{" "}
+                  {s.keep_db} database dumps (the newest is never deleted) and {s.keep_config} config backups.
+                  Currently retained <strong>{s.retained}</strong>, pinned <strong>{s.pinned}</strong>, protected{" "}
+                  <strong>{s.protected}</strong>; the next run would delete <strong>{s.delete_candidates}</strong>.
+                </p>
+              ) : (
+                <p>The retention figures appear here once the backup status has loaded.</p>
+              )}
+            </HelpSection>
+            <HelpSection title="Reading the figures">
+              <HelpList
+                items={[
+                  <><strong>Rollback path</strong> is valid when both the current and the previous release are present.</>,
+                  <><strong>Protected</strong> items are never deleted; <strong>Delete candidates</strong> are removed on the next cleanup run.</>,
+                ]}
+              />
+            </HelpSection>
+          </>
+        }
       />
 
       {!canRead ? (
@@ -136,12 +171,6 @@ export default function BackupHealthPage() {
             />
           </section>
 
-          <Callout tone="neutral" title="Retention policy">
-            Keep the newest {s.keep_binaries} binaries · {s.keep_releases} releases (plus current and previous) ·{" "}
-            {s.keep_db} database dumps (the newest is never deleted) · {s.keep_config} config backups. Retained{" "}
-            <strong>{s.retained}</strong> · pinned <strong>{s.pinned}</strong> · protected <strong>{s.protected}</strong> ·
-            would delete <strong>{s.delete_candidates}</strong>.
-          </Callout>
 
           <ItemTable title="Protected" description="Never deleted." items={s.protected_items} tone="ok" />
           {(s.pinned ?? 0) > 0 && <ItemTable title="Operator-pinned" items={s.pinned_items} tone="warn" />}

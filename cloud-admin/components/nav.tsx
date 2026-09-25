@@ -9,7 +9,7 @@ import {
   ShieldAlert, FileBadge, KeyRound, HardDrive,
   PanelLeftClose, PanelLeftOpen,
 } from "lucide-react";
-import { OneGateLockup } from "@/components/brand";
+import { BySemantics, OneGateLockup } from "@/components/brand";
 import { CustomerSelector } from "@/components/customer-selector";
 import { Tooltip } from "@/components/ui/tooltip";
 import { PAGE_READ, usePermissions } from "@/lib/permissions";
@@ -243,6 +243,11 @@ export function Nav({
           );
           return collapsed ? <Tooltip content="Sign out" side="right">{signOut}</Tooltip> : signOut;
         })()}
+        {!collapsed && (
+          <div className="px-2.5 pb-0.5 pt-2">
+            <BySemantics className="text-sidebar-muted" />
+          </div>
+        )}
       </div>
     </aside>
   );

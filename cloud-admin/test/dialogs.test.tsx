@@ -26,7 +26,7 @@ describe("ConfirmDialog — typed confirmation", () => {
         confirmLabel="Delete site"
         confirmVariant="danger"
         consequences={["It cannot be undone."]}
-        confirmText="hurghada"
+        confirmText="demo-hotel"
         confirmTextLabel="Type the site code"
         requireReason
         onConfirm={onConfirm}
@@ -37,12 +37,12 @@ describe("ConfirmDialog — typed confirmation", () => {
     expect(button).toBeDisabled();
 
     const typed = screen.getByLabelText(/Type the site code/);
-    await user.type(typed, "Hurghada"); // case matters
+    await user.type(typed, "Demo-Hotel"); // case matters
     await user.type(screen.getByLabelText(/Reason/), "closed property");
     expect(button).toBeDisabled();
 
     await user.clear(typed);
-    await user.type(typed, "hurghada");
+    await user.type(typed, "demo-hotel");
     expect(button).toBeEnabled();
     await user.click(button);
     expect(onConfirm).toHaveBeenCalledWith({ reason: "closed property", password: "" });
@@ -79,22 +79,22 @@ describe("DeleteDialog — the destructive-action pattern", () => {
         open
         onClose={() => {}}
         onDeleted={() => {}}
-        title='Delete site "Coral"'
+        title='Delete site "Demo"'
         what="Site"
-        expected="coral"
+        expected="demo"
         confirmHint="Type the site code"
         deleteUrl="/v1/sites/s1?tenant_id=t1"
       />,
     );
     expect(screen.getByText("It cannot be undone.")).toBeInTheDocument();
-    await user.type(screen.getByLabelText(/Type the site code/), "coral");
+    await user.type(screen.getByLabelText(/Type the site code/), "demo");
     await user.type(screen.getByLabelText(/Reason/), "duplicate");
     await user.click(screen.getByRole("button", { name: "Delete site" }));
 
     await waitFor(() => expect(screen.getByText(/cannot be deleted because it still contains/)).toBeInTheDocument());
     expect(screen.getByText("2 appliances")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /View appliances/ })).toHaveAttribute("href", "/appliances");
-    expect(calls[0]).toMatchObject({ method: "DELETE", url: "/api/v1/sites/s1?tenant_id=t1", body: { confirm: "coral", reason: "duplicate" } });
+    expect(calls[0]).toMatchObject({ method: "DELETE", url: "/api/v1/sites/s1?tenant_id=t1", body: { confirm: "demo", reason: "duplicate" } });
   });
 });
 

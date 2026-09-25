@@ -22,6 +22,7 @@ import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { usePermissions } from "@/lib/permissions";
 import { formatDate, formatRelative, errMsg } from "@/lib/utils";
 import { graceEndOf, licenseState } from "@/lib/license-state";
+import { HelpList, HelpSection } from "@/components/help";
 
 type ApplianceRow = { id: string; site_id: string; serial: string; name: string; last_seen_at?: string };
 type StateFilter = "all" | "active" | "grace" | "expired" | "suspended" | "revoked" | "superseded" | "awaiting";
@@ -217,7 +218,44 @@ export default function LicensesPage() {
         eyebrow="Commercial"
         title="Licenses"
         icon={<BadgeCheck />}
-        description="Each appliance's signed license: max concurrent online guests, validity window and grace period. Renewing issues a new signed version."
+        description="Each appliance's signed license and its state."
+        help={
+          <>
+            <HelpSection title="What a license carries">
+              <p>
+                A license binds to exactly one appliance and carries only the maximum number of concurrent online
+                guests (0 = unlimited, across the whole appliance), a validity window and a grace period.
+              </p>
+              <p>
+                Activating an appliance under Onboarding issues its license automatically. You can also issue one
+                here for a site and appliance of the selected customer.
+              </p>
+            </HelpSection>
+            <HelpSection title="License states">
+              <HelpList
+                items={[
+                  <><strong>Active</strong>: valid and in force.</>,
+                  <><strong>Grace</strong>: past valid-until; guests are still served, with warnings.</>,
+                  <><strong>Expired</strong> or <strong>Revoked</strong>: the appliance refuses new guest sign-ins.</>,
+                  <><strong>Suspended</strong>: paused; it can be resumed.</>,
+                  <><strong>Superseded</strong>: replaced by a newer signed version and can never be replayed.</>,
+                  <><strong>Awaiting appliance binding</strong>: issued to a site with no appliance yet.</>,
+                ]}
+              />
+              <p>Existing guest sessions are never dropped by a license state change.</p>
+            </HelpSection>
+            <HelpSection title="Renewing and offline install">
+              <HelpList
+                items={[
+                  <><strong>Renew</strong> issues a new signed license version; the previous document becomes Superseded.</>,
+                  <><strong>Download for offline</strong> creates a signed, appliance-bound, single-use package valid for 7 days. Upload it in Hotel Admin under Appliance &amp; licence.</>,
+                  <>Issuing, renewing, suspending, resuming and revoking may ask you to confirm your password.</>,
+                  <>How many guests are online against the limit is shown on the appliance itself, in Hotel Admin.</>,
+                ]}
+              />
+            </HelpSection>
+          </>
+        }
         actions={
           canChange && can["licenses.read"] ? (
             <Button onClick={() => { setIssueErr(null); setShowNew(true); }} disabled={!canIssue}>

@@ -12,6 +12,7 @@ import { ErrorBanner } from "@/components/ui/error-banner";
 import { PageHeader, PageShell, StatCard, Toolbar } from "@/components/ui/page";
 import { RoleRestricted } from "@/components/role-restricted";
 import { usePermissions } from "@/lib/permissions";
+import { HelpList, HelpSection } from "@/components/help";
 import { SearchInput } from "@/components/ui/data";
 import { MonoId, SkeletonRows, Switch } from "@/components/ui/misc";
 import { statusWord } from "@/lib/license-state";
@@ -87,7 +88,31 @@ export default function CertificatesPage() {
         eyebrow="Administration"
         title="Certificates"
         icon={<FileBadge />}
-        description="Appliance client certificates issued by Central's internal certificate authority. Read-only and metadata only — no private keys or certificate material are ever shown."
+        description="Appliance client certificates issued by Central. Read-only."
+        help={
+          <>
+            <HelpSection title="What this page shows">
+              <p>
+                The client certificates Central&apos;s internal certificate authority issued to appliances. Each
+                appliance uses its certificate to authenticate to Central.
+              </p>
+              <p>
+                The page is read-only and shows metadata only: public fingerprint, issuer, validity, status,
+                revocation reason and last rotation. No private keys or certificate material are ever shown.
+              </p>
+            </HelpSection>
+            <HelpSection title="Statuses">
+              <HelpList
+                items={[
+                  <><strong>Active</strong>: in use.</>,
+                  <><strong>Expired</strong>: past its expiry date while still marked active.</>,
+                  <><strong>Superseded</strong>: replaced by a newer certificate; hidden until you turn on <strong>Show superseded</strong>.</>,
+                  <><strong>Revoked</strong>: no longer trusted.</>,
+                ]}
+              />
+            </HelpSection>
+          </>
+        }
       />
 
       {!canRead ? (

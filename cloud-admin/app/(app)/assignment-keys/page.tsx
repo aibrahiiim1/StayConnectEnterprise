@@ -11,6 +11,7 @@ import { ErrorBanner } from "@/components/ui/error-banner";
 import { PageHeader, PageShell, StatCard } from "@/components/ui/page";
 import { RoleRestricted } from "@/components/role-restricted";
 import { usePermissions } from "@/lib/permissions";
+import { HelpList, HelpSection } from "@/components/help";
 import { MonoId, SkeletonRows } from "@/components/ui/misc";
 import { statusWord } from "@/lib/license-state";
 import { formatDate } from "@/lib/utils";
@@ -75,7 +76,28 @@ export default function AssignmentKeysPage() {
         eyebrow="Administration"
         title="Assignment keys"
         icon={<KeyRound />}
-        description="Keys that sign the documents binding an appliance to its customer and site. Active keys sign and verify; verify-only keys still verify existing assignments but sign nothing; revoked keys are no longer trusted. Read-only — no private key material is shown."
+        description="Keys that sign each appliance's customer and site assignment. Read-only."
+        help={
+          <>
+            <HelpSection title="What these keys do">
+              <p>
+                Assignment keys sign the documents that bind an appliance to its customer and site. The page is
+                read-only and shows metadata and the public fingerprint only; the private signing key is never
+                stored or shown.
+              </p>
+            </HelpSection>
+            <HelpSection title="Key states">
+              <HelpList
+                items={[
+                  <><strong>Active</strong>: signs and verifies.</>,
+                  <><strong>Verify-only</strong>: still verifies existing assignments but signs nothing new.</>,
+                  <><strong>Revoked</strong>: no longer trusted.</>,
+                  <><strong>Dependencies</strong>: how many appliances hold a current assignment signed by the key.</>,
+                ]}
+              />
+            </HelpSection>
+          </>
+        }
       />
 
       {!canRead ? (
