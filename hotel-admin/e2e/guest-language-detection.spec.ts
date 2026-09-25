@@ -38,7 +38,7 @@ async function startPortal(enabled: string[] | null) {
       return json({ pms: { enabled: true, mode: "room_any" }, voucher: { enabled: true } });
     }
     if (url.startsWith("/api/branding")) {
-      return json({ design: { hotel_name: "Coral Sea Holiday Resort", ...(langs ? { languages: langs } : {}) } });
+      return json({ design: { hotel_name: "Semantics Demo Hotel", ...(langs ? { languages: langs } : {}) } });
     }
     if (url.startsWith("/api/languages")) return json(SHIPPED);
     if (url.startsWith("/access/status")) return json({});

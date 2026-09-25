@@ -589,7 +589,7 @@ export default function PortalSettingsPage() {
                 <Field label="Hotel name" error={fieldError("hotel_name")}
                   hint={`Shown at the top of the sign-in page and in the browser tab. ${(d.hotel_name ?? "").length}/${LIMITS.hotelName}`}>
                   <Input value={d.hotel_name ?? ""} disabled={!writable} maxLength={LIMITS.hotelName}
-                    onChange={(e) => set("hotel_name", e.target.value)} placeholder="Coral Sea Holiday Resort" />
+                    onChange={(e) => set("hotel_name", e.target.value)} placeholder="Semantics Demo Hotel" />
                 </Field>
                 <Field label="Welcome line" error={fieldError("welcome_text")}
                   hint={`One short sentence under the hotel name — the headline in the photographic layouts. Leave empty to show nothing. ${(d.welcome_text ?? "").length}/${LIMITS.welcomeText}`}>

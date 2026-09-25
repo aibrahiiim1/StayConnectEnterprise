@@ -48,7 +48,7 @@ they are **not** Sites. A hotel with two buildings on one uplink is still one Si
      customers** mode you must choose it here. A Site always has exactly one
      owner.
    - **Code** — short and unique, e.g. `hurghada` or `marina`.
-   - **Name** — the property name, e.g. `Coral Sea Resort Hurghada`.
+   - **Name** — the property name, e.g. `Semantics Demo Hotel`.
    - **Timezone** — optional, defaults to `UTC` (e.g. `Africa/Cairo`).
    - **Country** — optional two-letter code (e.g. `EG`).
 5. Click **Create site**.

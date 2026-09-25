@@ -76,7 +76,7 @@ const preview = (page: Page) => page.frameLocator('iframe[title^="Guest portal"]
 const saved = (page: Page) => expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
 
 test.beforeEach(() => {
-  design = { hotel_name: "Coral Sea Holiday Resort", brand_color: "#0f6b63" };
+  design = { hotel_name: "Semantics Demo Hotel", brand_color: "#0f6b63" };
   lastSave = null;
 });
 
@@ -103,7 +103,7 @@ test("the preview renders the real guest portal, at every size", async ({ page }
   const frame = preview(page);
   // The portal's OWN markup, inside the frame: its card, its brand slot, its sign-in tabs.
   await expect(frame.locator(".card")).toBeVisible();
-  await expect(frame.locator("#brand-name")).toHaveText("Coral Sea Holiday Resort");
+  await expect(frame.locator("#brand-name")).toHaveText("Semantics Demo Hotel");
   // And its script ran: the tabs are generated from the auth-methods answer, not present in the template.
   await expect(frame.locator('.tab[data-group="guest"]')).toBeVisible();
   await expect(frame.locator('.tab[data-group="account"]')).toBeVisible();
@@ -128,7 +128,7 @@ test("the template gallery shows the real page in each layout, and choosing one 
   // Each thumbnail is the portal itself, rendered with this hotel's name in that layout.
   const thumb = page.frameLocator('iframe[title="Template thumbnail: Split"]');
   await expect(thumb.locator("html")).toHaveAttribute("data-template", "split");
-  await expect(thumb.locator(".sc-hero-name")).toHaveText("Coral Sea Holiday Resort");
+  await expect(thumb.locator(".sc-hero-name")).toHaveText("Semantics Demo Hotel");
 
   await gallery.getByText("Resort", { exact: true }).click();
   await expect(preview(page).locator("html")).toHaveAttribute("data-template", "editorial");

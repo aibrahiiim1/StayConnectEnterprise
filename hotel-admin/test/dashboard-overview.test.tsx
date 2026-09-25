@@ -130,7 +130,7 @@ function route(overview: (range: string) => any, health: any = HEALTH) {
     }
     if (path === "/health") return Promise.resolve(health);
     if (path === "/capabilities") return Promise.resolve({ surfaces: [] });
-    if (path === "/setup/status") return Promise.resolve({ assignment: { site_name: "Coral Sea" }, hardware: { hostname: "sc-01" } });
+    if (path === "/setup/status") return Promise.resolve({ assignment: { site_name: "Semantics Demo" }, hardware: { hostname: "sc-01" } });
     return Promise.reject(new Error(`unexpected ${path}`));
   });
 }
@@ -143,7 +143,7 @@ describe("the overview", () => {
   it("renders the measured figures and the property context", async () => {
     route(() => healthy());
     render(<DashboardPage />);
-    expect(await screen.findByText("Coral Sea · sc-01")).toBeInTheDocument();
+    expect(await screen.findByText("Semantics Demo · sc-01")).toBeInTheDocument();
     expect((await screen.findAllByText("5.40 GB")).length).toBeGreaterThan(0);
     expect(screen.getByText("80%")).toBeInTheDocument(); // 20 of 25 room checks
     expect(screen.getByText("Name or reservation did not match")).toBeInTheDocument();

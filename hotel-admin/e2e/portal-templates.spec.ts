@@ -88,7 +88,7 @@ for (const vp of VIEWPORTS) {
       await page.setViewportSize({ width: vp.width, height: vp.height });
       const posted: Posted[] = [];
       await serve(page, tpl, {
-        hotel_name: "Coral Sea Holiday Resort",
+        hotel_name: "Semantics Demo Hotel",
         welcome_text: "Welcome — connect to our Wi-Fi",
         help_text: "Ask reception if you need a code.",
         custom_html: '<section><h3>Pool</h3><p>08:00–20:00</p></section><section><h3>Spa</h3><p>10:00–22:00</p></section>',
@@ -110,7 +110,7 @@ for (const vp of VIEWPORTS) {
     test(`${tpl} at ${vp.name}: a hostile stylesheet cannot hide the sign-in`, async ({ page }) => {
       await page.setViewportSize({ width: vp.width, height: vp.height });
       const posted: Posted[] = [];
-      await serve(page, tpl, { hotel_name: "Coral Sea", custom_css: HOSTILE_CSS }, posted);
+      await serve(page, tpl, { hotel_name: "Semantics Demo", custom_css: HOSTILE_CSS }, posted);
       await page.goto("http://localhost/portal");
       // The hotel sheet really was applied -- in its layer -- so the assertion below is about the guard.
       await expect(page.locator("style#sc-hotel")).toHaveCount(1);
@@ -138,7 +138,7 @@ for (const v of OPTION_VARIANTS) {
       await page.setViewportSize({ width: vp.width, height: vp.height });
       const posted: Posted[] = [];
       await page.unrouteAll({ behavior: "ignoreErrors" });
-      await serve(page, v.tpl, { hotel_name: "Coral Sea Holiday Resort", welcome_text: "Welcome", template_options: v.options }, posted);
+      await serve(page, v.tpl, { hotel_name: "Semantics Demo Hotel", welcome_text: "Welcome", template_options: v.options }, posted);
       await page.goto("http://localhost/portal");
       if (process.env.PORTAL_SHOTS) {
         const tag = Object.values(v.options).join("-").replace(/[^a-z0-9-]/gi, "");
@@ -156,7 +156,7 @@ for (const tpl of TEMPLATES) {
       await page.setViewportSize({ width: vp.width, height: vp.height });
       const posted: Posted[] = [];
       await page.unrouteAll({ behavior: "ignoreErrors" });
-      await serve(page, tpl, { hotel_name: "Coral Sea", welcome_text: "مرحبا" }, posted);
+      await serve(page, tpl, { hotel_name: "Semantics Demo", welcome_text: "مرحبا" }, posted);
       await page.goto("http://localhost/portal");
       await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
       const box = await page.locator("#pms-room").boundingBox();

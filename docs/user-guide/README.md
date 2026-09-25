@@ -113,7 +113,7 @@ template, brand, wording, languages and custom CSS/HTML. Details: [guest-portal.
 
 ## Glossary
 
-- **Customer** — The hotel group or company that owns sites (e.g., "Coral Sea Resorts").
+- **Customer** — The hotel group or company that owns sites (e.g., "Semantics").
 - **Site** — One physical property (one hotel or resort). Buildings, floors and SSIDs are not sites.
 - **Appliance** — The OneGate gateway at a site. Hands out addresses, shows the sign-in page, enforces speed
   and time limits and talks to the PMS. It does not broadcast Wi-Fi; the hotel's access points do.

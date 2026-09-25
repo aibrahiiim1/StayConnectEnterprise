@@ -20,7 +20,7 @@ Because you're platform-scoped, the sidebar has a **Customer context** selector 
 1. Go to **Commercial → Customers** (`/tenants`).
 2. Click **New customer**. Fill in:
    - **Slug** — short identifier, e.g. `coral-sea`
-   - **Name** — e.g. "Coral Sea Resorts"
+   - **Name** — e.g. "Semantics"
 3. Save. The customer is created with no sites, operators or appliances.
 4. Create its **sites** (**Infrastructure → Sites**) and **activate** its appliances (**Infrastructure → Onboarding**) — see [control-panel-config-manual.md](control-panel-config-manual.md). You can also create the customer and site directly from the Activate form.
 5. If the customer should have its own Central login: select the customer, go to **Administration → Operators**, click **New operator**:

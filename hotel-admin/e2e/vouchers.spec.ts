@@ -66,7 +66,7 @@ export async function installBackend(page: Page, baseURL = "http://127.0.0.1:312
     if (path === "/voucher-code-settings/") return route.fulfill(json(200, { code_mode: "numbers", code_length: 8, config_version: 0 }));
     if (path === "/voucher-code-settings/changes") return route.fulfill(json(200, { changes: [] }));
     if (path === "/voucher-code-settings/key-generations") return route.fulfill(json(200, { generations: [] }));
-    if (path === "/portal-branding") return route.fulfill(json(200, { design: { hotel_name: "Coral Sea Resort" }, draft: {} }));
+    if (path === "/portal-branding") return route.fulfill(json(200, { design: { hotel_name: "Semantics Demo Hotel" }, draft: {} }));
     return route.fulfill(json(200, { data: [], meta: { has_more: false } }));
   });
 }
@@ -102,7 +102,7 @@ test("issuing shows the codes once and prints only the cards", async ({ page, ba
   const printed = await page.evaluate(() => (window as any).__printed[0]);
   expect(printed.cards).toBe(3);
   expect(printed.text).toContain("48273962");
-  expect(printed.text).toContain("Coral Sea Resort");
+  expect(printed.text).toContain("Semantics Demo Hotel");
   // The print root is removed after printing: nothing of the codes is left in the document outside the dialog.
   await expect(page.locator(".voucher-print-root")).toHaveCount(0);
 });
