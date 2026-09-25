@@ -4,8 +4,6 @@
 //
 // WHAT THIS REPLACES. A raw table of the audit rows: a timestamp, an actor uuid, a dotted action code, a
 // target uuid, an IP and a payload column that said "—". Every fact was present and none of it was legible.
-// An operator asking "who turned the guest network off on Tuesday" had to know that the answer looked like
-// `network.guest.disabled`, and then read two uuids to find out who and which.
 //
 // The trail itself is unchanged and untouchable: append-only, nothing rewritten, nothing backfilled. What
 // changed is that the screen now reads it out loud. Each row leads with a sentence, a person and a time; the
@@ -19,17 +17,21 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "@/lib/api";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageShell, PageHeader, Toolbar } from "@/components/ui/page";
+import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { SkeletonRows } from "@/components/ui/misc";
-import { formatDate } from "@/lib/utils";
+import { FilterChips, KeyValueGrid, SearchInput } from "@/components/ui/data";
+import { refreshingClass } from "@/components/ui/patterns";
+import { cn, formatDate } from "@/lib/utils";
 import {
-  auditWords, auditActor, AUDIT_CATEGORIES, SEVERITY_TONE, type AuditCategory,
+  auditWords, auditActor, AUDIT_CATEGORIES, type AuditCategory,
 } from "@/lib/audit-words";
-import { ScrollText, Search, ChevronRight, ShieldAlert } from "lucide-react";
+import { ScrollText, ChevronRight, ShieldAlert, RefreshCw } from "lucide-react";
 
 type Row = {
   ts: string;
@@ -54,6 +56,8 @@ const CATEGORY_PREFIX: Record<AuditCategory, string[]> = {
   "Diagnostics": ["health"],
 };
 
+const LIMIT = 500;
+
 const RANGES = [
   { label: "Last 24 hours", hours: 24 },
   { label: "Last 7 days", hours: 24 * 7 },
@@ -61,33 +65,42 @@ const RANGES = [
   { label: "Everything", hours: 0 },
 ];
 
+type Chip = "all" | "security" | AuditCategory;
+
 export default function ActivityPage() {
   const [rows, setRows] = useState<Row[] | null>(null);
+  // Whether the rows on screen were narrowed by the server to one category. Counts per category are only
+  // honest when they were not: a narrowed page has nothing to say about the other categories.
+  const [narrowed, setNarrowed] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [range, setRange] = useState(RANGES[2]);
-  const [category, setCategory] = useState<AuditCategory | "">("");
-  const [securityOnly, setSecurityOnly] = useState(false);
+  const [chip, setChip] = useState<Chip>("all");
   const [text, setText] = useState("");
   const [open, setOpen] = useState<string | null>(null);
   const [names, setNames] = useState<Map<string, string>>(new Map());
 
+  const category: AuditCategory | "" = chip === "all" || chip === "security" ? "" : chip;
+  const securityOnly = chip === "security";
+
   const load = useCallback(async () => {
     setBusy(true); setErr(null);
     try {
-      const p = new URLSearchParams({ limit: "500" });
+      const p = new URLSearchParams({ limit: String(LIMIT) });
       if (range.hours) p.set("from", new Date(Date.now() - range.hours * 3600_000).toISOString());
       // A category becomes one prefix clause. Several prefixes per category means several requests would be
       // wrong; instead the widest prefix is sent and the rest is narrowed below, on a page the server sized.
+      let serverNarrowed = false;
       if (category) {
         const prefixes = CATEGORY_PREFIX[category];
-        if (prefixes.length === 1) p.set("action_prefix", prefixes[0]);
+        if (prefixes.length === 1) { p.set("action_prefix", prefixes[0]); serverNarrowed = true; }
       }
       const r = await api.get<{ data: Row[] }>(`/audit?${p.toString()}`);
       setRows(r.data ?? []);
+      setNarrowed(serverNarrowed);
     } catch (e) {
+      // The last answer stays on screen; the banner says this one failed.
       setErr(e instanceof ApiError ? e.message : "the activity trail could not be read");
-      setRows(null);
     } finally { setBusy(false); }
   }, [range, category]);
 
@@ -121,125 +134,167 @@ export default function ActivityPage() {
     });
   }, [rows, text, category, securityOnly]);
 
-  const securityCount = useMemo(
-    () => (rows ?? []).filter((r) => auditWords(r.action).severity === "security").length,
-    [rows],
-  );
+  const counts = useMemo(() => {
+    const out = { security: 0, byCategory: new Map<AuditCategory, number>() };
+    for (const r of rows ?? []) {
+      const w = auditWords(r.action);
+      if (w.severity === "security") out.security++;
+      out.byCategory.set(w.category, (out.byCategory.get(w.category) ?? 0) + 1);
+    }
+    return out;
+  }, [rows]);
+
+  const chipOptions: { value: Chip; label: React.ReactNode; count?: number; tone?: "warn" }[] = [
+    { value: "all", label: "Everything", count: narrowed || !rows ? undefined : rows.length },
+    // SECURITY EVENTS FIRST, because that is the filter somebody reaches for under pressure.
+    {
+      value: "security",
+      label: <><ShieldAlert className="size-3.5" aria-hidden /> Security</>,
+      count: narrowed || !rows ? undefined : counts.security,
+      tone: "warn",
+    },
+    ...AUDIT_CATEGORIES.map((c) => ({
+      value: c as Chip,
+      label: c,
+      count: narrowed || !rows ? undefined : counts.byCategory.get(c) ?? 0,
+    })),
+  ];
+
+  const filtered = chip !== "all" || text.trim() !== "";
+  const clearFilters = () => { setChip("all"); setText(""); };
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-5">
-      <header>
-        <div className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground">System</div>
-        <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight sm:text-2xl">
-          <ScrollText className="h-5 w-5" /> Activity
-        </h1>
-        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-          Every change made to this appliance, by staff and by the system itself. The record is written as it
-          happens and is never edited or removed.
-        </p>
-      </header>
+    <PageShell width="wide">
+      <PageHeader
+        icon={<ScrollText />}
+        eyebrow="System"
+        title="Activity"
+        description="Every change made to this appliance, by staff and by the system itself. The record is written as it happens and is never edited or removed."
+        actions={
+          <Button variant="secondary" onClick={load} disabled={busy}>
+            <RefreshCw className={cn(busy && "animate-spin motion-reduce:animate-none")} />
+            {busy ? "Reading…" : "Refresh"}
+          </Button>
+        }
+      />
 
-      {err && (
-        <div role="alert" className="rounded-lg border border-destructive/25 bg-destructive-subtle p-3 text-sm text-destructive-subtle-foreground">
-          {err}
-        </div>
-      )}
+      <ErrorBanner err={err} className="mb-0" />
 
-      <Card>
-        <CardBody className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="relative min-w-0 flex-1">
-              <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input value={text} onChange={(e) => setText(e.target.value)} className="pl-8"
-                aria-label="Search the activity trail"
-                placeholder="Search — what happened, who, an address, an id" />
-            </label>
-            <select
-              aria-label="Period"
-              className="h-9 rounded-md border bg-card px-2 text-sm"
-              value={range.label}
-              onChange={(e) => setRange(RANGES.find((x) => x.label === e.target.value) ?? RANGES[2])}
-            >
-              {RANGES.map((r) => <option key={r.label}>{r.label}</option>)}
-            </select>
-            <Button variant="secondary" onClick={load} disabled={busy}>{busy ? "Reading…" : "Refresh"}</Button>
-          </div>
+      <div className="space-y-3">
+        <Toolbar className="items-center">
+          <SearchInput
+            value={text}
+            onChange={setText}
+            label="Search the activity trail"
+            placeholder="Search — what happened, who, an address, an id"
+            className="sm:w-96"
+          />
+          <Select
+            aria-label="Period"
+            className="h-9 w-full sm:w-44"
+            value={range.label}
+            onChange={(e) => setRange(RANGES.find((x) => x.label === e.target.value) ?? RANGES[2])}
+          >
+            {RANGES.map((r) => <option key={r.label}>{r.label}</option>)}
+          </Select>
+        </Toolbar>
+        <FilterChips<Chip> label="Show" value={chip} onChange={setChip} options={chipOptions} />
+      </div>
 
-          <div className="flex flex-wrap gap-1.5">
-            <Chip on={category === "" && !securityOnly} onClick={() => { setCategory(""); setSecurityOnly(false); }}>
-              Everything
-            </Chip>
-            {/* SECURITY EVENTS FIRST, because that is the filter somebody reaches for under pressure. */}
-            <Chip on={securityOnly} onClick={() => { setSecurityOnly((v) => !v); setCategory(""); }}>
-              <ShieldAlert className="mr-1 inline h-3.5 w-3.5" />
-              Security {securityCount > 0 && <span className="ml-1 opacity-70">{securityCount}</span>}
-            </Chip>
-            {AUDIT_CATEGORIES.map((c) => (
-              <Chip key={c} on={category === c} onClick={() => { setCategory(category === c ? "" : c); setSecurityOnly(false); }}>
-                {c}
-              </Chip>
-            ))}
-          </div>
-        </CardBody>
-      </Card>
-
-      <Card>
+      <Card className="overflow-hidden">
         <CardHeader>
-          <CardTitle>
-            {visible === null ? "Activity" : `${visible.length} ${visible.length === 1 ? "entry" : "entries"}`}
-          </CardTitle>
+          <div className="space-y-0.5">
+            <CardTitle>
+              {visible === null ? "Activity" : `${visible.length.toLocaleString()} ${visible.length === 1 ? "entry" : "entries"}`}
+            </CardTitle>
+            <CardDescription>{range.label} · up to {LIMIT} entries per request</CardDescription>
+          </div>
         </CardHeader>
-        <CardBody>
-          {visible === null ? <SkeletonRows rows={6} cols={3} /> : visible.length === 0 ? (
-            <EmptyState icon={<ScrollText />} title="Nothing matches"
-              hint="No recorded activity fits these filters. Widen the period or clear the search." />
+
+        {rows && rows.length >= LIMIT && (
+          <Callout tone="info" className="m-4 mb-0">
+            Only the first {LIMIT} entries for this period are shown. Choose a shorter period or a category to see
+            the rest.
+          </Callout>
+        )}
+
+        <div className={cn(busy && rows && refreshingClass)}>
+          {visible === null ? (
+            err ? (
+              <EmptyState icon={<ScrollText />} title="The activity trail could not be read"
+                hint="It appears here once the appliance answers." />
+            ) : <SkeletonRows rows={6} cols={3} />
+          ) : visible.length === 0 ? (
+            filtered ? (
+              <EmptyState icon={<ScrollText />} title="Nothing matches"
+                hint="No recorded activity fits these filters. Widen the period or clear the search."
+                action={<Button variant="secondary" size="sm" onClick={clearFilters}>Clear filters</Button>} />
+            ) : (
+              <EmptyState icon={<ScrollText />} title="No activity in this period"
+                hint="Nothing was recorded. Choose a longer period to look further back." />
+            )
           ) : (
-            <ul className="divide-y">
+            <ul className="divide-y divide-border">
               {visible.map((r, i) => {
                 const w = auditWords(r.action);
                 const id = `${r.ts}-${i}`;
                 const isOpen = open === id;
+                const panel = `activity-${i}`;
                 return (
-                  <li key={id} className="py-3">
+                  <li key={id}>
                     <button
                       type="button"
-                      className="flex w-full items-start gap-3 text-left"
+                      className="flex w-full items-start gap-3 px-4 py-3 text-start transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-5"
                       aria-expanded={isOpen}
+                      aria-controls={panel}
                       onClick={() => setOpen(isOpen ? null : id)}
                     >
-                      <ChevronRight className={`mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform ${isOpen ? "rotate-90" : ""}`} />
+                      <ChevronRight
+                        className={cn(
+                          "mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform rtl:-scale-x-100",
+                          isOpen && "rotate-90 rtl:rotate-90",
+                        )}
+                        aria-hidden
+                      />
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-medium">{w.title}</span>
-                          {w.severity === "security" && <Badge tone="warn">Security</Badge>}
+                          <span className="text-emphasis">{w.title}</span>
+                          {w.severity === "security" && (
+                            <Badge tone="warn"><ShieldAlert className="size-3" aria-hidden /> Security</Badge>
+                          )}
                           <Badge tone="default">{w.category}</Badge>
                         </div>
-                        <div className="mt-0.5 text-xs text-muted-foreground">
+                        <div className="mt-0.5 text-caption text-muted-foreground">
                           {auditActor(r.actor_type, r.actor_id, names)} · {formatDate(r.ts)}
                           {r.ip ? ` · from ${r.ip.replace(/\/\d+$/, "")}` : ""}
-                          {r.target_type ? ` · ${r.target_type}` : ""}
+                          {r.target_type ? <span className="hidden sm:inline"> · {r.target_type}</span> : null}
                         </div>
                       </div>
                     </button>
 
                     {isOpen && (
-                      <div className="ml-7 mt-3 space-y-2 rounded-md border bg-surface p-3 text-xs">
-                        {w.note && <p className="text-muted-foreground">{w.note}</p>}
+                      <div id={panel} className="mb-4 me-4 ms-11 space-y-3 rounded-md border border-border bg-surface p-3 sm:me-5">
+                        {w.note && <p className="text-sm text-muted-foreground">{w.note}</p>}
                         {/* THE EXACT RECORD. Unchanged, for the day the readable version is not enough. */}
-                        <dl className="grid grid-cols-[9rem_1fr] gap-x-4 gap-y-1">
-                          <Detail k="Recorded" v={new Date(r.ts).toISOString()} />
-                          <Detail k="Action code" v={r.action} mono />
-                          <Detail k="Actor" v={r.actor_id || `(${r.actor_type ?? "system"})`} mono />
-                          <Detail k="Target" v={r.target_id ? `${r.target_type ?? ""} ${r.target_id}`.trim() : "—"} mono />
-                          <Detail k="Source address" v={r.ip || "—"} mono />
-                        </dl>
+                        <KeyValueGrid
+                          columns={2}
+                          items={[
+                            { label: "Recorded", value: <span className="font-mono text-xs break-all">{new Date(r.ts).toISOString()}</span> },
+                            { label: "Action code", value: <span className="font-mono text-xs break-all">{r.action}</span> },
+                            { label: "Actor", value: <span className="font-mono text-xs break-all">{r.actor_id || `(${r.actor_type ?? "system"})`}</span> },
+                            { label: "Target", value: <span className="font-mono text-xs break-all">{r.target_id ? `${r.target_type ?? ""} ${r.target_id}`.trim() : "—"}</span> },
+                            { label: "Source address", value: <span className="font-mono text-xs break-all">{r.ip || "—"}</span> },
+                          ]}
+                        />
                         {r.payload !== null && r.payload !== undefined && (
-                          <div>
-                            <div className="mb-1 text-muted-foreground">Details</div>
-                            <pre className="overflow-x-auto rounded bg-card p-2 font-mono text-2xs">
+                          <details className="group">
+                            <summary className="cursor-pointer select-none rounded-sm text-label text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                              Raw payload
+                            </summary>
+                            <pre className="mt-2 max-h-80 overflow-auto rounded-md border border-border bg-card p-2 font-mono text-2xs">
                               {JSON.stringify(r.payload, null, 2)}
                             </pre>
-                          </div>
+                          </details>
                         )}
                       </div>
                     )}
@@ -248,26 +303,8 @@ export default function ActivityPage() {
               })}
             </ul>
           )}
-        </CardBody>
+        </div>
       </Card>
-    </div>
-  );
-}
-
-function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button type="button" onClick={onClick} aria-pressed={on}
-      className={`rounded-full border px-3 py-1.5 text-xs ${on ? "border-primary bg-primary/5 text-primary" : "text-muted-foreground"}`}>
-      {children}
-    </button>
-  );
-}
-
-function Detail({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
-  return (
-    <>
-      <dt className="text-muted-foreground">{k}</dt>
-      <dd className={`m-0 break-all ${mono ? "font-mono" : ""}`}>{v}</dd>
-    </>
+    </PageShell>
   );
 }

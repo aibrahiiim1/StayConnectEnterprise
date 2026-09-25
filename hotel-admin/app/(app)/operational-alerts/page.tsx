@@ -17,5 +17,6 @@ export default function OperationalAlertsPage() {
       .then((m) => setRoles(m.roles ?? []))
       .catch(() => setRoles([]));
   }, []);
-  return <OperationalAlertsView canAct={roles === null ? false : canWrite("operational-alerts", roles)} />;
+  const canAct = roles === null ? false : canWrite("operational-alerts", roles);
+  return <OperationalAlertsView canAct={canAct} readOnly={roles !== null && !canAct} />;
 }
