@@ -30,6 +30,7 @@ import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { HelpSection } from "@/components/help";
 import { SplitBar } from "@/components/ui/chart";
 import { MonoId, SkeletonRows, Meter } from "@/components/ui/misc";
 import { LiveStatus, refreshingClass } from "@/components/ui/patterns";
@@ -179,21 +180,37 @@ export default function PMSResolutionsPage() {
         eyebrow="Property management system"
         title="Guest sign-in checks"
         icon={<ShieldCheck />}
-        description="Recent room sign-in checks against the PMS and why they were refused. Where to look when guests say they cannot get online with their room number. Deliberately names no guest or room."
+        description="Recent room sign-in checks against the PMS and why they were refused."
+        help={
+          <>
+            <HelpSection title="When to use this page">
+              <p>
+                Recent room sign-in checks against the PMS and why they were refused. This is where to look when
+                guests say they cannot get online with their room number.
+              </p>
+              <p>
+                Each refusal reason below says what it means and, where there is one, what to do about it. If
+                sign-in fails on one network and works on others, the network is usually pointed at the wrong
+                property management system, or at none — check <strong>Network routing</strong>.
+              </p>
+            </HelpSection>
+            <HelpSection title="No guest is named on this page">
+              <p>
+                Only the outcome and the network are recorded here. A list of who tried to sign in and failed would
+                let anyone with a read-only account work out who is staying at the property, so it is deliberately
+                not collected — the guest&rsquo;s own stay is on{" "}
+                <Link href="/stays" className="underline underline-offset-2">Stays</Link>, where looking at one
+                person is the point and the access is gated accordingly.
+              </p>
+            </HelpSection>
+          </>
+        }
         actions={
           <LiveStatus updatedAt={updatedAt} refreshing={refreshing} error={!!err && !!rows?.length} onRefresh={() => void load(true)} />
         }
       />
 
       <ErrorBanner err={err} />
-
-      <Callout tone="neutral" title="No guest is named on this page">
-        Only the outcome and the network are recorded here. A list of who tried to sign in and failed would let
-        anyone with a read-only account work out who is staying at the property, so it is deliberately not
-        collected — the guest&rsquo;s own stay is on{" "}
-        <Link href="/stays" className="underline underline-offset-2">Stays</Link>, where looking at one person is
-        the point and the access is gated accordingly.
-      </Callout>
 
       {summary && summary.total > 0 && (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

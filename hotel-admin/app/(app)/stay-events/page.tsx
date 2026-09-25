@@ -27,6 +27,7 @@ import { Select } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { Explain } from "@/components/ui/tooltip";
+import { HelpList, HelpSection } from "@/components/help";
 import { MonoId, SkeletonRows } from "@/components/ui/misc";
 import { DetailDialog } from "@/components/ui/dialog";
 import { DList } from "@/components/ui/misc";
@@ -153,7 +154,32 @@ export default function StayEventsPage() {
         eyebrow="Property management system"
         title="PMS activity"
         icon={<Inbox />}
-        description="Every message the PMS has sent this appliance — check-ins, check-outs and stay changes — and whether the guest list was updated from it. Answers “has the Wi-Fi seen that check-in yet?”"
+        description="Messages from the PMS and whether the guest list was updated from them."
+        help={
+          <>
+            <HelpSection title="What this page shows">
+              <p>
+                Every message the PMS has sent this appliance — check-ins, check-outs and stay changes — and whether
+                the guest list was updated from it. It answers &ldquo;has the Wi-Fi seen that check-in yet?&rdquo;
+              </p>
+            </HelpSection>
+            <HelpSection title="What happened to a message">
+              <HelpList
+                items={[
+                  <><strong>Applied</strong> — the guest list was updated from it.</>,
+                  <><strong>Needs a decision</strong> — it could not be applied without guessing, so the appliance stopped rather than guessed. Until it is resolved the guest list may not reflect what the front desk has done.</>,
+                  <><strong>Not matched to a stay</strong> — the appliance received the message but could not tell which stay it is about, usually a reservation it has not seen or a room number that does not match the guest list it holds.</>,
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="If nothing arrives">
+              <p>
+                If the front desk has checked guests in since the connection came up and nothing is listed here, look
+                at the PMS connection screen.
+              </p>
+            </HelpSection>
+          </>
+        }
         actions={
           <LiveStatus updatedAt={updatedAt} refreshing={refreshing} error={!!err && !!rows?.length} onRefresh={() => void load(true)} />
         }
