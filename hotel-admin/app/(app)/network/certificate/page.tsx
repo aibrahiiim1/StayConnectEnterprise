@@ -1,14 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, ApiError, Whoami } from "@/lib/api";
-import { canWrite } from "@/lib/roles";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
+import { api, ApiError } from "@/lib/api";
+import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { errMsg } from "@/lib/utils";
-import { ShieldCheck, RefreshCw, RotateCw, CheckCircle2 } from "lucide-react";
+import { ConfirmDialog } from "@/components/ui/dialog";
+import { ErrorBanner, Callout } from "@/components/ui/error-banner";
+import { PageShell, PageHeader } from "@/components/ui/page";
+import { KeyValueGrid } from "@/components/ui/data";
+import { Skeleton } from "@/components/ui/misc";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ReadOnlyNotice } from "@/components/ui/patterns";
+import { useToast } from "@/components/ui/toast";
+import { errMsg, formatDate } from "@/lib/utils";
+import { useNetworkAccess } from "@/components/network/shared";
+import { Lock, RefreshCw, RotateCw, CheckCircle2, ShieldCheck } from "lucide-react";
 
 type CertStatus = {
   available?: boolean;
@@ -34,149 +41,195 @@ const THRESH: Record<string, { tone: "ok" | "info" | "warn" | "err"; label: stri
   healthy:     { tone: "ok",   label: "Healthy" },
   renewal_due: { tone: "info", label: "Renewal due" },
   warning:     { tone: "warn", label: "Warning" },
-  critical:    { tone: "warn", label: "Critical" },
+  critical:    { tone: "err",  label: "Critical" },
   emergency:   { tone: "err",  label: "Emergency" },
   expired:     { tone: "err",  label: "Expired" },
 };
 
-function Row({ k, v }: { k: string; v: React.ReactNode }) {
-  return (
-    <div className="flex justify-between gap-4 border-b border-border py-1.5 text-sm last:border-0">
-      <span className="text-muted-foreground">{k}</span>
-      <span className="text-right text-text break-all">{v ?? "—"}</span>
-    </div>
-  );
-}
+const when = (s?: string) => (s ? formatDate(s) : "—");
+const mono = (s?: string) => (s ? <span className="break-all font-mono text-xs">{s}</span> : "—");
 
 export default function CertificatePage() {
-  const [me, setMe] = useState<Whoami | null>(null);
+  const { known, writable } = useNetworkAccess();
   const [st, setSt] = useState<CertStatus | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [note, setNote] = useState<string | null>(null);
+  const [result, setResult] = useState<{ tone: "success" | "danger"; text: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-
-  // rotate form
-  const [showRotate, setShowRotate] = useState(false);
-  const [reason, setReason] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
+  const [rotating, setRotating] = useState(false);
+  const [rotateErr, setRotateErr] = useState<string | null>(null);
+  const toast = useToast();
 
   async function load() {
     try {
       setSt(await api.get<CertStatus>("/hotel-admin-cert"));
     } catch (e) { setErr(errMsg(e)); }
   }
-  useEffect(() => {
-    (async () => {
-      try { setMe(await api.get<Whoami>("/auth/whoami")); } catch { /* layout guards */ }
-      load();
-    })();
-  }, []);
+  useEffect(() => { load(); }, []);
 
-  const writable = me ? canWrite("network", me.roles) : false;
-  const thr = THRESH[st?.status_threshold ?? ""] ?? { tone: "default" as any, label: st?.status_threshold ?? "—" };
+  const thr = THRESH[st?.status_threshold ?? ""] ?? { tone: "default" as const, label: st?.status_threshold ?? "Unknown" };
+  const days = typeof st?.days_remaining === "number" ? st.days_remaining : null;
 
   async function check() {
-    setBusy("check"); setErr(null); setNote(null);
+    setBusy("check"); setErr(null); setResult(null);
     try {
       const r = await api.post<{ ok: boolean; exit: number }>("/hotel-admin-cert/check", {});
-      setNote(r.ok ? "Certificate validated — no problems found." : `Validation reported a problem (exit ${r.exit}).`);
+      if (r.ok) {
+        setResult({ tone: "success", text: "Certificate validated — no problems found." });
+        toast.success("Certificate checked", "No problems found.");
+      } else {
+        setResult({ tone: "danger", text: `Validation reported a problem (exit ${r.exit}).` });
+      }
       await load();
     } catch (e) { setErr(errMsg(e)); }
     finally { setBusy(null); }
   }
 
-  async function rotate(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy("rotate"); setErr(null); setNote(null);
+  async function rotate({ reason, password }: { reason: string; password: string }) {
+    setBusy("rotate"); setRotateErr(null); setResult(null);
     try {
+      // The server requires the typed word itself: `confirmation` must be exactly ROTATE. The dialog only
+      // enables its button once that is what was typed.
       const r = await api.post<{ ok: boolean; exit: number }>("/hotel-admin-cert/rotate", {
-        reason, password, confirmation: confirm,
+        reason, password, confirmation: "ROTATE",
       });
-      setNote(r.ok ? "Certificate rotated successfully." : `Rotation failed (exit ${r.exit}); the previous certificate is still serving.`);
-      setShowRotate(false); setReason(""); setPassword(""); setConfirm("");
+      setRotating(false);
+      if (r.ok) {
+        setResult({ tone: "success", text: "Certificate rotated successfully." });
+        toast.success("Certificate rotated");
+      } else {
+        setResult({ tone: "danger", text: `Rotation failed (exit ${r.exit}); the previous certificate is still serving.` });
+      }
       await load();
     } catch (e) {
-      if (e instanceof ApiError && e.body?.error === "reauth_required") setErr("Password confirmation failed.");
-      else setErr(errMsg(e));
+      if (e instanceof ApiError && e.body?.error === "reauth_required") setRotateErr("Password confirmation failed.");
+      else setRotateErr(errMsg(e));
     } finally { setBusy(null); }
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-5">
-      <div className="flex items-baseline justify-between mb-1">
-        <h1 className="text-2xl font-semibold flex items-center gap-2"><ShieldCheck className="h-5 w-5" /> Hotel Admin TLS certificate</h1>
-        <Button variant="ghost" size="sm" onClick={load}><RefreshCw size={14} /> Refresh</Button>
-      </div>
-      <p className="text-sm text-muted mb-4">
-        The dual-SAN certificate for <code>hotel.stayconnect.local</code> and the management IP. Renewal is
-        automatic (checked daily; renews at 45 days, on IP change, or SAN drift). It is issued from the local
-        appliance certificate authority — never the vendor appliance PKI.
-      </p>
+    <PageShell width="narrow">
+      <PageHeader
+        icon={<Lock />}
+        eyebrow="Networking"
+        title="TLS certificate"
+        description="The HTTPS certificate Hotel Admin itself is served with, for its host name and management IP. Renewal is automatic: checked daily, renewed at 45 days left, when the management IP changes, or when the covered names drift."
+        actions={writable ? (
+          <>
+            <Button variant="ghost" size="icon" aria-label="Refresh" onClick={() => { setErr(null); load(); }}><RefreshCw /></Button>
+            <Button variant="secondary" disabled={busy !== null} onClick={() => { setRotateErr(null); setRotating(true); }}>
+              <RotateCw /> Rotate…
+            </Button>
+            <Button disabled={busy !== null} onClick={check}>
+              <CheckCircle2 /> {busy === "check" ? "Checking…" : "Check certificate"}
+            </Button>
+          </>
+        ) : (
+          <Button variant="secondary" onClick={() => { setErr(null); load(); }}><RefreshCw /> Refresh</Button>
+        )}
+      />
 
-      {err && <div className="text-err text-sm mb-3">{err}</div>}
-      {note && <div className="text-sm mb-3 inline-flex items-center gap-1 text-ok"><CheckCircle2 size={14} /> {note}</div>}
+      {known && !writable && (
+        <ReadOnlyNotice>Your role can view the certificate but not check or rotate it.</ReadOnlyNotice>
+      )}
 
-      <Card className="mb-4">
+      <ErrorBanner err={err} className="mb-0" />
+      {result && <Callout tone={result.tone}>{result.text}</Callout>}
+
+      <Card>
         <CardHeader>
-          <CardTitle>Status</CardTitle>
-          <Badge tone={thr.tone as any}>{thr.label}{typeof st?.days_remaining === "number" ? ` · ${st.days_remaining}d left` : ""}</Badge>
+          <div className="space-y-1">
+            <CardTitle>Status</CardTitle>
+            {st && st.available !== false && st.expires_at && (
+              <CardDescription>Expires {when(st.expires_at)}</CardDescription>
+            )}
+          </div>
+          {st && st.available !== false && (
+            <Badge tone={thr.tone} dot>
+              {thr.label}{days !== null ? ` · ${days} ${days === 1 ? "day" : "days"} left` : ""}
+            </Badge>
+          )}
         </CardHeader>
-        <CardBody>
-          {!st ? <div className="text-sm text-muted-foreground">Loading…</div> : st.available === false ? (
-            <div className="text-sm text-warning-subtle-foreground">No certificate status available yet. Run “Check certificate”.</div>
+        <CardBody className="space-y-5">
+          {!st ? (
+            err ? null : (
+              <div className="grid gap-4 sm:grid-cols-2" aria-busy="true">
+                <span className="sr-only">Loading</span>
+                {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
+              </div>
+            )
+          ) : st.available === false ? (
+            <EmptyState
+              icon={<ShieldCheck />}
+              title="No certificate status yet"
+              hint={writable ? "Run “Check certificate” to read the certificate now." : "The appliance has not reported the certificate yet."}
+              action={writable ? <Button size="sm" disabled={busy !== null} onClick={check}>Check certificate</Button> : undefined}
+            />
           ) : (
             <>
-              <Row k="Subject" v={<code>{st.subject}</code>} />
-              <Row k="Issuer" v={<code>{st.issuer}</code>} />
-              <Row k="Serial" v={<code>{st.serial}</code>} />
-              <Row k="SHA-256 fingerprint" v={<code className="text-xs">{st.fingerprint_sha256}</code>} />
-              <Row k="DNS SANs" v={(st.dns_sans ?? []).join(", ")} />
-              <Row k="IP SANs" v={(st.ip_sans ?? []).join(", ")} />
-              <Row k="Current management IP" v={<code>{st.current_management_ip}</code>} />
-              <Row k="SAN configuration match" v={st.san_config_match ? <span className="text-ok">yes</span> : <span className="text-err">no</span>} />
-              <Row k="Issued at" v={st.issued_at} />
-              <Row k="Expires at" v={st.expires_at} />
-              <Row k="Days remaining" v={st.days_remaining} />
-              <Row k="Last successful renewal" v={st.last_successful_renewal || "—"} />
-              <Row k="Last renewal attempt" v={st.last_renewal_attempt || "—"} />
-              <Row k="Last renewal result" v={st.last_renewal_result || "—"} />
-              {st.last_error ? <Row k="Last error" v={<span className="text-err">{st.last_error}</span>} /> : null}
+              {st.last_error && <Callout tone="danger" title="Last renewal error">{st.last_error}</Callout>}
+              {st.san_config_match === false && (
+                <Callout tone="warning" title="The certificate does not match the current configuration">
+                  Its names or addresses differ from what the appliance is using now. It is renewed automatically; you can
+                  also rotate it.
+                </Callout>
+              )}
+              <KeyValueGrid
+                items={[
+                  { label: "Subject", value: mono(st.subject) },
+                  { label: "Serial", value: mono(st.serial) },
+                  { label: "Host names covered", value: (st.dns_sans ?? []).length ? mono((st.dns_sans ?? []).join(", ")) : "—" },
+                  { label: "IP addresses covered", value: (st.ip_sans ?? []).length ? mono((st.ip_sans ?? []).join(", ")) : "—" },
+                  { label: "Current management IP", value: mono(st.current_management_ip) },
+                  {
+                    label: "Matches configuration",
+                    value: st.san_config_match ? <Badge tone="ok">Yes</Badge> : <Badge tone="err">No</Badge>,
+                  },
+                  { label: "Issued", value: when(st.issued_at) },
+                  { label: "Expires", value: when(st.expires_at) },
+                  { label: "Days remaining", value: days !== null ? <span className="tabular">{days}</span> : "—" },
+                  { label: "SHA-256 fingerprint", value: mono(st.fingerprint_sha256), wide: true },
+                ]}
+              />
             </>
           )}
         </CardBody>
       </Card>
 
-      <div className="flex items-center gap-2">
-        <Button variant="secondary" disabled={!writable || busy !== null} onClick={check}>
-          {busy === "check" ? "Checking…" : <><CheckCircle2 size={14} /> Check certificate</>}
-        </Button>
-        <Button disabled={!writable || busy !== null} onClick={() => setShowRotate((s) => !s)}>
-          <RotateCw size={14} /> Rotate Hotel Admin certificate
-        </Button>
-      </div>
-      {!writable && <p className="text-xs text-muted mt-2">Rotation and diagnostics require the Hotel IT (network) role.</p>}
-
-      {showRotate && (
-        <Card className="mt-4 border-warn">
-          <CardHeader><CardTitle>Rotate certificate</CardTitle></CardHeader>
+      {st && st.available !== false && (
+        <Card>
+          <CardHeader><CardTitle>Renewal</CardTitle></CardHeader>
           <CardBody>
-            <p className="text-sm text-muted mb-3">
-              Mints a new dual-SAN certificate through the same safe lifecycle (validate → atomic swap →
-              reload → health check → automatic rollback on failure). You cannot upload a key.
-            </p>
-            <form onSubmit={rotate} className="space-y-3">
-              <div><Label>Reason</Label><Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="why are you rotating?" required /></div>
-              <div><Label>Confirm your password</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required /></div>
-              <div><Label>Type ROTATE to confirm</Label><Input value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="ROTATE" required /></div>
-              <div className="flex justify-end gap-2">
-                <Button type="button" variant="ghost" onClick={() => setShowRotate(false)}>Cancel</Button>
-                <Button type="submit" disabled={busy !== null}>{busy === "rotate" ? "Rotating…" : "Rotate now"}</Button>
-              </div>
-            </form>
+            <KeyValueGrid
+              columns={3}
+              items={[
+                { label: "Last successful renewal", value: when(st.last_successful_renewal) },
+                { label: "Last attempt", value: when(st.last_renewal_attempt) },
+                { label: "Last result", value: st.last_renewal_result || "—" },
+              ]}
+            />
           </CardBody>
         </Card>
       )}
-    </div>
+
+      <ConfirmDialog
+        open={rotating}
+        onOpenChange={(v) => { if (!v) setRotating(false); }}
+        title="Rotate the TLS certificate?"
+        description="A new certificate is issued for Hotel Admin. You cannot upload a key."
+        consequences={[
+          "The new certificate goes through the safe lifecycle: validate, swap, reload, health check.",
+          "If the health check fails, the previous certificate is put back automatically.",
+        ]}
+        confirmLabel="Rotate now"
+        confirmVariant="danger"
+        busy={busy === "rotate"}
+        error={rotateErr}
+        requireReason
+        reasonPlaceholder="Why are you rotating?"
+        confirmText="ROTATE"
+        requirePassword
+        onConfirm={rotate}
+      />
+    </PageShell>
   );
 }

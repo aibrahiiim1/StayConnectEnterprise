@@ -4,28 +4,40 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
-  api, ListResp, Whoami, Pool,
+  api, ListResp, Pool,
   GuestNetwork, GuestNetworkStatus, Reservation, GuestNetworkInput,
 } from "@/lib/api";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Card, CardBody, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Field, Input, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ArrowLeft, Plus, X } from "lucide-react";
-import { canWrite } from "@/lib/roles";
-import { errMsg } from "@/lib/utils";
+import { ErrorBanner, Callout } from "@/components/ui/error-banner";
+import { PageShell, PageHeader } from "@/components/ui/page";
+import { KeyValueGrid } from "@/components/ui/data";
+import { MonoId, Skeleton, SkeletonRows } from "@/components/ui/misc";
+import { ReadOnlyNotice } from "@/components/ui/patterns";
+import { useToast } from "@/components/ui/toast";
+import { ArrowLeft, Network, Pencil, Plus, Save, Trash2, X, Pin } from "lucide-react";
+import { cn, errMsg } from "@/lib/utils";
+import {
+  AddReservationDialog, EditReservationDialog, RemoveReservationDialog, SwitchRow,
+  DhcpModeBadge, networkTypeLabel, useNetworkAccess,
+} from "@/components/network/shared";
+
+const FORM_ID = "guest-network-settings";
 
 export default function EditGuestNetworkPage() {
   const { id } = useParams<{ id: string }>();
-  const [roles, setRoles] = useState<string[]>([]);
+  const { known, writable } = useNetworkAccess();
   const [net, setNet] = useState<GuestNetwork | null>(null);
   const [status, setStatus] = useState<GuestNetworkStatus | null>(null);
   const [reservations, setReservations] = useState<Reservation[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
+  const toast = useToast();
 
   // editable form state
   const [name, setName] = useState("");
@@ -45,11 +57,10 @@ export default function EditGuestNetworkPage() {
   const [nat, setNat] = useState(true);
   const [clientIsolation, setClientIsolation] = useState(false);
 
-  // reservation form
-  const [newRes, setNewRes] = useState({ mac: "", reserved_ip: "", hostname: "", enabled: true });
+  // reservation dialogs
+  const [adding, setAdding] = useState(false);
   const [editRes, setEditRes] = useState<Reservation | null>(null);
-
-  const writable = canWrite("network", roles);
+  const [removing, setRemoving] = useState<Reservation | null>(null);
 
   function hydrate(g: GuestNetwork) {
     setNet(g);
@@ -88,11 +99,11 @@ export default function EditGuestNetworkPage() {
     api.get<GuestNetwork>(`/network/guest-networks/${id}`).then(hydrate).catch((e) => setErr(errMsg(e)));
     loadStatus();
     loadReservations();
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   async function onSave() {
-    setBusy(true); setErr(null); setMsg(null);
+    setBusy(true); setErr(null); setSaved(false);
     const body: GuestNetworkInput = {
       name: name.trim(),
       description: description.trim() || undefined,
@@ -114,223 +125,254 @@ export default function EditGuestNetworkPage() {
     };
     try {
       await api.put(`/network/guest-networks/${id}`, body);
-      setMsg("Saved. Apply changes from the guest networks page to activate.");
+      setSaved(true);
+      toast.success("Saved", "Apply changes from Guest networks to put it live.");
     } catch (e) { setErr(errMsg(e)); }
     finally { setBusy(false); }
   }
 
-  async function onCreateReservation() {
-    if (!newRes.mac.trim() || !newRes.reserved_ip.trim()) { setErr("MAC and reserved IP are required."); return; }
-    setBusy(true); setErr(null);
-    try {
-      await api.post("/network/dhcp/reservations", {
-        guest_network_id: id, mac: newRes.mac.trim(), reserved_ip: newRes.reserved_ip.trim(),
-        hostname: newRes.hostname.trim() || undefined, enabled: newRes.enabled,
-      });
-      setNewRes({ mac: "", reserved_ip: "", hostname: "", enabled: true });
-      loadReservations();
-    } catch (e) { setErr(errMsg(e)); }
-    finally { setBusy(false); }
-  }
+  const ro = !writable;
+  const enabled = status?.enabled ?? net?.enabled;
 
-  async function onUpdateReservation() {
-    if (!editRes) return;
-    setBusy(true); setErr(null);
-    try {
-      await api.put(`/network/dhcp/reservations/${editRes.id}`, {
-        reserved_ip: editRes.reserved_ip, hostname: editRes.hostname ?? "", enabled: editRes.enabled,
-      });
-      setEditRes(null);
-      loadReservations();
-    } catch (e) { setErr(errMsg(e)); }
-    finally { setBusy(false); }
-  }
-
-  // Reserving an address is how a printer, a TV or a door lock keeps the same IP. Saying which address is about
-  // to stop being reserved is the difference between a confirmation and a speed bump.
-  async function onDeleteReservation(rid: string) {
-    const r = (reservations ?? []).find((x) => x.id === rid);
-    if (!confirm(
-      `Remove the reserved address${r ? ` ${r.reserved_ip}` : ""}${r?.hostname ? ` (${r.hostname})` : ""}? ` +
-      "That device will be given any free address next time it connects.",
-    )) return;
-    try { await api.del(`/network/dhcp/reservations/${rid}`); loadReservations(); }
-    catch (e) { setErr(errMsg(e)); }
-  }
+  const backLink = (
+    <Link href="/network" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "-ms-3 self-start")}>
+      <ArrowLeft /> Guest networks
+    </Link>
+  );
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-5">
-      <Link href="/network" className="text-sm text-muted hover:text-text inline-flex items-center gap-1 mb-4">
-        <ArrowLeft size={14} /> Back to guest networks
-      </Link>
+    <PageShell>
+      {backLink}
+      <PageHeader
+        icon={<Network />}
+        eyebrow="Networking · Guest networks"
+        title={net?.name || "Guest network"}
+        description={
+          net ? (
+            <span className="inline-flex flex-wrap items-center gap-1.5">
+              <Badge tone={net.network_type === "vlan" ? "info" : "default"}>{networkTypeLabel(net)}</Badge>
+              {enabled ? <Badge tone="ok" dot>Enabled</Badge> : <Badge tone="default">Disabled</Badge>}
+              <span>Saved changes are staged; they reach guests when you apply them from Guest networks.</span>
+            </span>
+          ) : "Loading the network…"
+        }
+        actions={writable && net && (
+          <Button type="submit" form={FORM_ID} disabled={busy}>
+            <Save /> {busy ? "Saving…" : "Save changes"}
+          </Button>
+        )}
+      />
 
-      <div className="flex items-baseline justify-between mb-4">
-        <div>
-          <div className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground">Networking</div>
-          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{net?.name || "Guest network"}</h1>
-          {net && <div className="text-xs text-muted font-mono">{net.id}</div>}
-        </div>
-      </div>
+      {known && !writable && <ReadOnlyNotice>Your role can view this guest network but not change it.</ReadOnlyNotice>}
 
-      {err && <div className="text-err text-sm mb-4">{err}</div>}
-      {msg && <div className="text-ok text-sm mb-4">{msg}</div>}
+      <ErrorBanner err={err} className="mb-0" />
 
-      {!net ? <EmptyState title="Loading…" /> : (
-        <div className="space-y-6">
+      {saved && (
+        <Callout tone="success" title="Saved — not applied yet">
+          Guests are still on the previous settings.{" "}
+          <Link href="/network" className="font-medium underline">Go to Guest networks</Link> to validate and apply.
+        </Callout>
+      )}
+
+      {!net ? (
+        err ? null : (
+          <div className="space-y-4" aria-busy="true">
+            <span className="sr-only">Loading</span>
+            <Skeleton className="h-40 w-full" />
+            <Skeleton className="h-80 w-full" />
+          </div>
+        )
+      ) : (
+        <>
           {/* read-only topology + status */}
           <Card>
-            <CardHeader><CardTitle>Status &amp; topology</CardTitle></CardHeader>
-            <CardBody>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
-                <Field label="Type" value={net.network_type === "vlan" ? `VLAN ${net.vlan_id ?? "?"}` : "untagged"} />
-                <Field label="Parent interface" value={net.parent_interface} mono />
-                <Field label="Bridge" value={net.bridge_name} mono />
-                <Field label="Portal URL" value={net.portal_url ?? "—"} mono />
-                <Field label="Enabled" value={status?.enabled ?? net.enabled ? "yes" : "no"} />
-                <Field label="Active clients" value={String(status?.active_clients ?? "—")} />
+            <CardHeader>
+              <div className="space-y-1">
+                <CardTitle>Status &amp; topology</CardTitle>
+                <CardDescription>
+                  Fixed when the network was created. To change the type, VLAN or parent interface, delete the network
+                  and create a new one.
+                </CardDescription>
               </div>
-              <div className="text-xs text-muted mt-3">Type, VLAN, parent interface and bridge are immutable — delete and recreate to change topology.</div>
+            </CardHeader>
+            <CardBody>
+              <KeyValueGrid
+                columns={3}
+                items={[
+                  { label: "Type", value: networkTypeLabel(net) },
+                  { label: "Parent interface", value: <span className="font-mono">{net.parent_interface}</span> },
+                  { label: "Bridge", value: <span className="font-mono">{net.bridge_name}</span> },
+                  { label: "Sign-in page URL", value: net.portal_url ? <span className="font-mono break-all">{net.portal_url}</span> : "—" },
+                  { label: "Status", value: enabled ? <Badge tone="ok" dot>Enabled</Badge> : <Badge tone="default">Disabled</Badge> },
+                  { label: "Devices connected", value: <span className="tabular">{String(status?.active_clients ?? "—")}</span> },
+                  { label: "DHCP", value: <DhcpModeBadge mode={net.dhcp_mode} /> },
+                  { label: "Network ID", value: <MonoId value={net.id} title="Network ID" /> },
+                ]}
+              />
             </CardBody>
           </Card>
 
           {/* editable settings */}
-          <Card>
-            <CardHeader><CardTitle>Settings</CardTitle></CardHeader>
-            <CardBody className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div><Label>Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} disabled={!writable} /></div>
-                <div><Label>SSID label</Label><Input value={ssidLabel} onChange={(e) => setSsidLabel(e.target.value)} disabled={!writable} /></div>
-                <div><Label>Description</Label><Input value={description} onChange={(e) => setDescription(e.target.value)} disabled={!writable} /></div>
-                <div><Label>Subnet CIDR</Label><Input value={subnetCidr} onChange={(e) => setSubnetCidr(e.target.value)} disabled={!writable} /></div>
-                <div><Label>Gateway IP</Label><Input value={gatewayIp} onChange={(e) => setGatewayIp(e.target.value)} disabled={!writable} /></div>
-                <div><Label>Domain name</Label><Input value={domainName} onChange={(e) => setDomainName(e.target.value)} disabled={!writable} /></div>
-              </div>
+          <form
+            id={FORM_ID}
+            onSubmit={(e) => { e.preventDefault(); if (writable) void onSave(); }}
+            className="grid gap-5 lg:grid-cols-2"
+          >
+            <Card>
+              <CardHeader><CardTitle>Identity</CardTitle></CardHeader>
+              <CardBody className="space-y-4">
+                <Field label="Name" required><Input value={name} onChange={(e) => setName(e.target.value)} disabled={ro} /></Field>
+                <Field label="SSID label" hint="For reference: the SSID your wireless controller maps to this network.">
+                  <Input value={ssidLabel} onChange={(e) => setSsidLabel(e.target.value)} disabled={ro} />
+                </Field>
+                <Field label="Description"><Input value={description} onChange={(e) => setDescription(e.target.value)} disabled={ro} /></Field>
+              </CardBody>
+            </Card>
 
-              <div>
-                <Label>DHCP pools</Label>
-                <div className="space-y-2">
+            <Card>
+              <CardHeader><CardTitle>Addressing</CardTitle></CardHeader>
+              <CardBody className="space-y-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Field label="Subnet (CIDR)" required>
+                    <Input value={subnetCidr} onChange={(e) => setSubnetCidr(e.target.value)} disabled={ro} className="font-mono" />
+                  </Field>
+                  <Field label="Gateway IP" required>
+                    <Input value={gatewayIp} onChange={(e) => setGatewayIp(e.target.value)} disabled={ro} className="font-mono" />
+                  </Field>
+                </div>
+                <fieldset className="space-y-2">
+                  <legend className="mb-1.5 text-label">Address pools</legend>
                   {pools.map((p, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                      <Input placeholder="start" value={p.start_ip} disabled={!writable}
-                        onChange={(e) => setPools((ps) => ps.map((x, k) => k === i ? { ...x, start_ip: e.target.value } : x))} />
-                      <span className="text-muted-foreground">–</span>
-                      <Input placeholder="end" value={p.end_ip} disabled={!writable}
-                        onChange={(e) => setPools((ps) => ps.map((x, k) => k === i ? { ...x, end_ip: e.target.value } : x))} />
+                    <div key={i} className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
+                      <Input
+                        aria-label={`Pool ${i + 1} start`} placeholder="start" value={p.start_ip} disabled={ro} className="min-w-0 flex-1 font-mono"
+                        onChange={(e) => setPools((ps) => ps.map((x, k) => k === i ? { ...x, start_ip: e.target.value } : x))}
+                      />
+                      <span className="text-muted-foreground" aria-hidden>–</span>
+                      <Input
+                        aria-label={`Pool ${i + 1} end`} placeholder="end" value={p.end_ip} disabled={ro} className="min-w-0 flex-1 font-mono"
+                        onChange={(e) => setPools((ps) => ps.map((x, k) => k === i ? { ...x, end_ip: e.target.value } : x))}
+                      />
                       {writable && (
-                        <Button size="sm" variant="ghost" disabled={pools.length === 1}
-                          onClick={() => setPools((ps) => ps.filter((_, k) => k !== i))}><X size={14} /></Button>
+                        <Button
+                          size="icon" variant="ghost" disabled={pools.length === 1} aria-label={`Remove pool ${i + 1}`}
+                          onClick={() => setPools((ps) => ps.filter((_, k) => k !== i))}
+                        >
+                          <X />
+                        </Button>
                       )}
                     </div>
                   ))}
-                </div>
-                {writable && (
-                  <Button size="sm" variant="secondary" className="mt-2"
-                    onClick={() => setPools((ps) => [...ps, { start_ip: "", end_ip: "" }])}>
-                    <Plus size={14} /> Add pool
-                  </Button>
-                )}
-              </div>
+                  {writable && (
+                    <Button size="sm" variant="secondary" onClick={() => setPools((ps) => [...ps, { start_ip: "", end_ip: "" }])}>
+                      <Plus /> Add pool
+                    </Button>
+                  )}
+                </fieldset>
+              </CardBody>
+            </Card>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <Label>DNS mode</Label>
-                  <select value={dnsMode} onChange={(e) => setDnsMode(e.target.value)} disabled={!writable}
-                    className="h-9 w-full rounded-md bg-panel2 border border-border px-3 text-sm">
-                    <option value="appliance">appliance</option>
-                    <option value="custom">custom</option>
-                  </select>
+            <Card>
+              <CardHeader><CardTitle>DNS &amp; leases</CardTitle></CardHeader>
+              <CardBody className="space-y-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Field label="DNS for guests">
+                    <Select value={dnsMode} onChange={(e) => setDnsMode(e.target.value)} disabled={ro}>
+                      <option value="appliance">The appliance</option>
+                      <option value="custom">Custom servers</option>
+                    </Select>
+                  </Field>
+                  <Field label="Domain name">
+                    <Input value={domainName} onChange={(e) => setDomainName(e.target.value)} disabled={ro} />
+                  </Field>
                 </div>
                 {dnsMode === "custom" && (
-                  <div><Label>DNS servers (comma)</Label><Input value={dnsServers} onChange={(e) => setDnsServers(e.target.value)} disabled={!writable} /></div>
+                  <Field label="DNS servers" hint="Separate several with commas.">
+                    <Input value={dnsServers} onChange={(e) => setDnsServers(e.target.value)} disabled={ro} className="font-mono" />
+                  </Field>
                 )}
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div><Label>Lease default (s)</Label><Input type="number" value={leaseDefault} onChange={(e) => setLeaseDefault(e.target.value)} disabled={!writable} /></div>
-                <div><Label>Lease min (s)</Label><Input type="number" value={leaseMin} onChange={(e) => setLeaseMin(e.target.value)} disabled={!writable} /></div>
-                <div><Label>Lease max (s)</Label><Input type="number" value={leaseMax} onChange={(e) => setLeaseMax(e.target.value)} disabled={!writable} /></div>
-              </div>
-
-              <div className="flex flex-wrap gap-4">
-                <label className="flex items-center gap-2 text-sm text-muted"><input type="checkbox" checked={captivePortal} disabled={!writable} onChange={(e) => setCaptivePortal(e.target.checked)} /> Captive portal</label>
-                <label className="flex items-center gap-2 text-sm text-muted"><input type="checkbox" checked={internetAccess} disabled={!writable} onChange={(e) => setInternetAccess(e.target.checked)} /> Internet access</label>
-                <label className="flex items-center gap-2 text-sm text-muted"><input type="checkbox" checked={nat} disabled={!writable} onChange={(e) => setNat(e.target.checked)} /> NAT</label>
-                <label className="flex items-center gap-2 text-sm text-muted"><input type="checkbox" checked={clientIsolation} disabled={!writable} onChange={(e) => setClientIsolation(e.target.checked)} /> Client isolation</label>
-              </div>
-
-              {writable && (
-                <div className="flex justify-end">
-                  <Button disabled={busy} onClick={onSave}>{busy ? "Saving…" : "Save"}</Button>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <Field label="Lease time (s)"><Input type="number" value={leaseDefault} onChange={(e) => setLeaseDefault(e.target.value)} disabled={ro} /></Field>
+                  <Field label="Shortest (s)"><Input type="number" value={leaseMin} onChange={(e) => setLeaseMin(e.target.value)} disabled={ro} /></Field>
+                  <Field label="Longest (s)"><Input type="number" value={leaseMax} onChange={(e) => setLeaseMax(e.target.value)} disabled={ro} /></Field>
                 </div>
+              </CardBody>
+            </Card>
+
+            <Card>
+              <CardHeader><CardTitle>Guest access</CardTitle></CardHeader>
+              <CardBody className="space-y-4">
+                <SwitchRow label="Captive portal" hint="Guests see the sign-in page before they get online." checked={captivePortal} onChange={setCaptivePortal} disabled={ro} />
+                <SwitchRow label="Internet access" hint="Guests can reach the internet once signed in." checked={internetAccess} onChange={setInternetAccess} disabled={ro} />
+                <SwitchRow label="NAT (masquerade)" hint="Guest traffic leaves through the appliance's own address." checked={nat} onChange={setNat} disabled={ro} />
+                <SwitchRow label="Client isolation" hint="Guest devices cannot reach each other." checked={clientIsolation} onChange={setClientIsolation} disabled={ro} />
+              </CardBody>
+              {writable && (
+                <CardFooter className="justify-end">
+                  <Button type="submit" disabled={busy}><Save /> {busy ? "Saving…" : "Save changes"}</Button>
+                </CardFooter>
               )}
-            </CardBody>
-          </Card>
+            </Card>
+          </form>
 
           {/* reservations */}
           <Card>
-            <CardHeader><CardTitle>DHCP reservations</CardTitle></CardHeader>
-            <CardBody className="p-0">
-              {reservations === null ? <EmptyState title="Loading…" /> : reservations.length === 0 ? (
-                <EmptyState title="No reservations" hint="Pin a device MAC to a fixed IP inside this network." />
-              ) : (
-                <Table>
-                  <THead><TR><TH>MAC</TH><TH>Reserved IP</TH><TH>Hostname</TH><TH>Enabled</TH><TH></TH></TR></THead>
-                  <tbody>
-                    {reservations.map((r) => (
-                      <TR key={r.id}>
-                        <TD className="font-mono text-xs">{r.mac}</TD>
-                        <TD className="font-mono text-xs">{r.reserved_ip}</TD>
-                        <TD className="text-muted-foreground">{r.hostname || "—"}</TD>
-                        <TD>{r.enabled ? <Badge tone="ok">on</Badge> : <Badge tone="default">off</Badge>}</TD>
-                        <TD className="text-right space-x-2">
-                          {writable && <Button size="sm" variant="ghost" onClick={() => setEditRes(r)}>Edit</Button>}
-                          {writable && <Button size="sm" variant="ghost" onClick={() => onDeleteReservation(r.id)}>Delete</Button>}
-                        </TD>
-                      </TR>
-                    ))}
-                  </tbody>
-                </Table>
-              )}
+            <CardHeader>
+              <div className="space-y-1">
+                <CardTitle>DHCP reservations</CardTitle>
+                <CardDescription>Devices that always get the same address on this network.</CardDescription>
+              </div>
               {writable && (
-                <div className="px-5 py-4 border-t border-border grid grid-cols-1 sm:grid-cols-5 gap-2 items-end">
-                  <div><Label>MAC</Label><Input value={newRes.mac} onChange={(e) => setNewRes({ ...newRes, mac: e.target.value })} placeholder="aa:bb:cc:dd:ee:ff" /></div>
-                  <div><Label>Reserved IP</Label><Input value={newRes.reserved_ip} onChange={(e) => setNewRes({ ...newRes, reserved_ip: e.target.value })} placeholder="10.20.0.50" /></div>
-                  <div><Label>Hostname</Label><Input value={newRes.hostname} onChange={(e) => setNewRes({ ...newRes, hostname: e.target.value })} placeholder="Optional" /></div>
-                  <label className="flex items-center gap-2 text-sm text-muted h-9"><input type="checkbox" checked={newRes.enabled} onChange={(e) => setNewRes({ ...newRes, enabled: e.target.checked })} /> Enabled</label>
-                  <Button disabled={busy} onClick={onCreateReservation}><Plus size={14} /> Add</Button>
-                </div>
+                <Button variant="secondary" size="sm" onClick={() => setAdding(true)}><Plus /> Add reservation</Button>
               )}
-            </CardBody>
+            </CardHeader>
+            {reservations === null ? (
+              <SkeletonRows rows={2} cols={4} />
+            ) : reservations.length === 0 ? (
+              <EmptyState
+                icon={<Pin />}
+                title="No reservations"
+                hint="Pin a device to a fixed address inside this network."
+                action={writable ? <Button size="sm" onClick={() => setAdding(true)}><Plus /> Add reservation</Button> : undefined}
+              />
+            ) : (
+              <Table>
+                <THead>
+                  <TR>
+                    <TH>MAC address</TH><TH>Reserved IP</TH>
+                    <TH className="hidden sm:table-cell">Hostname</TH><TH>Status</TH>
+                    {writable && <TH><span className="sr-only">Actions</span></TH>}
+                  </TR>
+                </THead>
+                <TBody>
+                  {reservations.map((r) => (
+                    <TR key={r.id}>
+                      <TD className="font-mono text-xs">{r.mac}</TD>
+                      <TD className="font-mono text-xs">{r.reserved_ip}</TD>
+                      <TD className="hidden text-muted-foreground sm:table-cell">{r.hostname || "—"}</TD>
+                      <TD>{r.enabled ? <Badge tone="ok">Enabled</Badge> : <Badge tone="default">Disabled</Badge>}</TD>
+                      {writable && (
+                        <TD className="whitespace-nowrap text-end">
+                          <Button size="icon-sm" variant="ghost" aria-label={`Edit reservation ${r.reserved_ip}`} onClick={() => setEditRes(r)}><Pencil /></Button>
+                          <Button size="icon-sm" variant="ghost" aria-label={`Remove reservation ${r.reserved_ip}`} onClick={() => setRemoving(r)}><Trash2 /></Button>
+                        </TD>
+                      )}
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
+            )}
           </Card>
-        </div>
+        </>
       )}
 
-      {editRes && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/45 p-6 backdrop-blur-[2px]" onClick={() => setEditRes(null)}>
-          <div className="bg-panel border border-border rounded-lg shadow-panel max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
-            <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-              <h2 className="text-sm font-semibold tracking-tight">Edit reservation</h2>
-              <Button size="sm" variant="ghost" onClick={() => setEditRes(null)}><X size={14} /></Button>
-            </div>
-            <div className="px-5 py-4 space-y-3">
-              <div><Label>MAC</Label><Input value={editRes.mac} disabled className="font-mono" /></div>
-              <div><Label>Reserved IP</Label><Input value={editRes.reserved_ip} onChange={(e) => setEditRes({ ...editRes, reserved_ip: e.target.value })} /></div>
-              <div><Label>Hostname</Label><Input value={editRes.hostname ?? ""} onChange={(e) => setEditRes({ ...editRes, hostname: e.target.value })} /></div>
-              <label className="flex items-center gap-2 text-sm text-muted"><input type="checkbox" checked={editRes.enabled} onChange={(e) => setEditRes({ ...editRes, enabled: e.target.checked })} /> Enabled</label>
-              <div className="flex justify-end"><Button disabled={busy} onClick={onUpdateReservation}>{busy ? "Saving…" : "Save"}</Button></div>
-            </div>
-          </div>
-        </div>
+      {writable && (
+        <>
+          <AddReservationDialog open={adding} onOpenChange={setAdding} networkId={id} onSaved={() => { toast.success("Reservation added"); loadReservations(); }} />
+          <EditReservationDialog reservation={editRes} onClose={() => setEditRes(null)} onSaved={() => { toast.success("Reservation saved"); loadReservations(); }} />
+          <RemoveReservationDialog reservation={removing} onClose={() => setRemoving(null)} onRemoved={() => { toast.success("Reservation removed"); loadReservations(); }} />
+        </>
       )}
-    </div>
-  );
-}
-
-function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div>
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={mono ? "font-mono text-xs mt-0.5" : "text-sm mt-0.5"}>{value}</div>
-    </div>
+    </PageShell>
   );
 }

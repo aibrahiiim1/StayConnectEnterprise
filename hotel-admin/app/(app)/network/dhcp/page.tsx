@@ -2,18 +2,26 @@
 
 import { useEffect, useState } from "react";
 import {
-  api, ListResp, Whoami,
+  api, ListResp,
   DhcpLease, Reservation, GuestNetwork,
 } from "@/lib/api";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
+import { Card } from "@/components/ui/card";
+import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Plus, X } from "lucide-react";
-import { canWrite } from "@/lib/roles";
+import { ErrorBanner } from "@/components/ui/error-banner";
+import { PageShell, PageHeader, Toolbar } from "@/components/ui/page";
+import { SearchInput } from "@/components/ui/data";
+import { SkeletonRows } from "@/components/ui/misc";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ReadOnlyNotice } from "@/components/ui/patterns";
+import { useToast } from "@/components/ui/toast";
+import { Pencil, Pin, Plus, Trash2, Wifi } from "lucide-react";
 import { errMsg, formatRelative } from "@/lib/utils";
+import {
+  AddReservationDialog, EditReservationDialog, RemoveReservationDialog, useNetworkAccess,
+} from "@/components/network/shared";
 
 function leaseState(s?: number | string): string {
   if (s === 0 || s === "0" || s == null) return "active";
@@ -22,6 +30,12 @@ function leaseState(s?: number | string): string {
   return String(s);
 }
 
+const LEASE_STATE: Record<string, { label: string; tone: "ok" | "warn" | "default" }> = {
+  active: { label: "Active", tone: "ok" },
+  declined: { label: "Declined", tone: "warn" },
+  expired: { label: "Expired", tone: "warn" },
+};
+
 function leaseExpiry(l: DhcpLease): string {
   if (l.cltt && l["valid-lft"]) {
     return formatRelative(new Date((l.cltt + l["valid-lft"]) * 1000).toISOString());
@@ -29,19 +43,25 @@ function leaseExpiry(l: DhcpLease): string {
   return "—";
 }
 
+function matches(q: string, ...fields: (string | number | undefined | null)[]): boolean {
+  if (!q) return true;
+  const needle = q.trim().toLowerCase();
+  return fields.some((f) => f != null && String(f).toLowerCase().includes(needle));
+}
+
 export default function DhcpPage() {
   const [tab, setTab] = useState<"leases" | "reservations">("leases");
-  const [roles, setRoles] = useState<string[]>([]);
+  const { known, writable } = useNetworkAccess();
   const [leases, setLeases] = useState<DhcpLease[] | null>(null);
   const [reservations, setReservations] = useState<Reservation[] | null>(null);
   const [networks, setNetworks] = useState<GuestNetwork[]>([]);
   const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [showNew, setShowNew] = useState(false);
-  const [newRes, setNewRes] = useState({ guest_network_id: "", mac: "", reserved_ip: "", hostname: "", enabled: true });
+  const [q, setQ] = useState("");
+  const [adding, setAdding] = useState(false);
   const [editRes, setEditRes] = useState<Reservation | null>(null);
+  const [removing, setRemoving] = useState<Reservation | null>(null);
+  const toast = useToast();
 
-  const writable = canWrite("network", roles);
   const netName = (gid: string) => networks.find((n) => n.id === gid)?.name ?? gid;
 
   async function loadLeases() {
@@ -57,171 +77,163 @@ export default function DhcpPage() {
     loadLeases();
     loadReservations();
     api.get<ListResp<GuestNetwork>>("/network/guest-networks").then((r) => setNetworks(r.data ?? [])).catch(() => {});
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => {});
   }, []);
 
-  async function onCreate() {
-    if (!newRes.guest_network_id || !newRes.mac.trim() || !newRes.reserved_ip.trim()) {
-      setErr("Guest network, MAC and reserved IP are required."); return;
-    }
-    setBusy(true); setErr(null);
-    try {
-      await api.post("/network/dhcp/reservations", {
-        guest_network_id: newRes.guest_network_id, mac: newRes.mac.trim(), reserved_ip: newRes.reserved_ip.trim(),
-        hostname: newRes.hostname.trim() || undefined, enabled: newRes.enabled,
-      });
-      setShowNew(false);
-      setNewRes({ guest_network_id: "", mac: "", reserved_ip: "", hostname: "", enabled: true });
-      loadReservations();
-    } catch (e) { setErr(errMsg(e)); }
-    finally { setBusy(false); }
-  }
+  const shownLeases = (leases ?? []).filter((l) => matches(q, l["ip-address"], l["hw-address"], l.hostname));
+  const shownRes = (reservations ?? []).filter((r) => matches(q, r.reserved_ip, r.mac, r.hostname, netName(r.guest_network_id)));
 
-  async function onUpdate() {
-    if (!editRes) return;
-    setBusy(true); setErr(null);
-    try {
-      await api.put(`/network/dhcp/reservations/${editRes.id}`, {
-        reserved_ip: editRes.reserved_ip, hostname: editRes.hostname ?? "", enabled: editRes.enabled,
-      });
-      setEditRes(null);
-      loadReservations();
-    } catch (e) { setErr(errMsg(e)); }
-    finally { setBusy(false); }
-  }
-
-  // Reserving an address is how a printer, a TV or a door lock keeps the same IP. Removing the reservation means
-  // that device takes whatever address is free next time, which is why the confirmation says so rather than
-  // asking "Delete this reservation?" and leaving the consequence to be discovered.
-  async function onDelete(id: string) {
-    const r = reservations?.find((x) => x.id === id);
-    if (!confirm(
-      `Remove the reserved address${r ? ` ${r.reserved_ip}` : ""}?` +
-      `${r?.hostname ? ` (${r.hostname})` : ""} That device will be given any free address next time it connects.`,
-    )) return;
-    try { await api.del(`/network/dhcp/reservations/${id}`); loadReservations(); }
-    catch (e) { setErr(errMsg(e)); }
-  }
+  const noMatch = (what: string) => (
+    <EmptyState
+      title={`No ${what} match “${q}”`}
+      hint="Search looks at the IP address, MAC address and hostname."
+      action={<Button variant="secondary" size="sm" onClick={() => setQ("")}>Clear search</Button>}
+    />
+  );
 
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-5">
-      <div className="flex items-baseline justify-between mb-4">
-        <div>
-          <div className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground">Networking</div>
-          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">DHCP &amp; leases</h1>
-        </div>
-        {tab === "reservations" && writable && (
-          <Button onClick={() => setShowNew((v) => !v)}>
-            {showNew ? <><X size={14} /> Cancel</> : <><Plus size={14} /> New reservation</>}
+    <PageShell width="wide">
+      <PageHeader
+        icon={<Wifi />}
+        eyebrow="Networking"
+        title="DHCP & leases"
+        description="Which guest devices hold an address right now, and which devices always get the same one."
+        actions={writable && (
+          <Button onClick={() => { setTab("reservations"); setAdding(true); }}>
+            <Plus /> New reservation
           </Button>
         )}
-      </div>
+      />
 
-      <div className="flex gap-2 mb-4">
-        <button
-          onClick={() => setTab("leases")}
-          className={"px-3 py-1.5 rounded-md text-sm border " + (tab === "leases" ? "bg-panel2 text-text border-border" : "text-muted border-transparent hover:text-text")}
-        >Active leases</button>
-        <button
-          onClick={() => setTab("reservations")}
-          className={"px-3 py-1.5 rounded-md text-sm border " + (tab === "reservations" ? "bg-panel2 text-text border-border" : "text-muted border-transparent hover:text-text")}
-        >Reservations</button>
-      </div>
+      {known && !writable && <ReadOnlyNotice>Your role can view leases and reservations but not change them.</ReadOnlyNotice>}
 
-      {err && <div className="text-err text-sm mb-4">{err}</div>}
+      <ErrorBanner err={err} className="mb-0" />
 
-      {tab === "reservations" && showNew && writable && (
-        <Card className="mb-6">
-          <CardHeader><CardTitle>New reservation</CardTitle></CardHeader>
-          <CardBody>
-            <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 items-end">
-              <div>
-                <Label>Guest network</Label>
-                <select value={newRes.guest_network_id} onChange={(e) => setNewRes({ ...newRes, guest_network_id: e.target.value })}
-                  className="h-9 w-full rounded-md bg-panel2 border border-border px-3 text-sm">
-                  <option value="">Select…</option>
-                  {networks.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
-                </select>
-              </div>
-              <div><Label>MAC</Label><Input value={newRes.mac} onChange={(e) => setNewRes({ ...newRes, mac: e.target.value })} placeholder="aa:bb:cc:dd:ee:ff" /></div>
-              <div><Label>Reserved IP</Label><Input value={newRes.reserved_ip} onChange={(e) => setNewRes({ ...newRes, reserved_ip: e.target.value })} placeholder="10.20.0.50" /></div>
-              <div><Label>Hostname</Label><Input value={newRes.hostname} onChange={(e) => setNewRes({ ...newRes, hostname: e.target.value })} placeholder="Optional" /></div>
-              <div className="flex items-center gap-3">
-                <label className="flex items-center gap-2 text-sm text-muted h-9"><input type="checkbox" checked={newRes.enabled} onChange={(e) => setNewRes({ ...newRes, enabled: e.target.checked })} /> On</label>
-                <Button disabled={busy} onClick={onCreate}>{busy ? "Adding…" : "Add"}</Button>
-              </div>
-            </div>
-          </CardBody>
-        </Card>
-      )}
+      <Tabs value={tab} onValueChange={(v) => setTab(v as "leases" | "reservations")}>
+        <Toolbar className="items-center">
+          <TabsList className="border-b-0">
+            <TabsTrigger value="leases">
+              Active leases {leases !== null && <Badge tone="neutral">{leases.length}</Badge>}
+            </TabsTrigger>
+            <TabsTrigger value="reservations">
+              Reservations {reservations !== null && <Badge tone="neutral">{reservations.length}</Badge>}
+            </TabsTrigger>
+          </TabsList>
+          <SearchInput value={q} onChange={setQ} placeholder="Search IP, MAC or hostname" />
+        </Toolbar>
 
-      <Card>
-        <CardBody className="p-0">
-          {tab === "leases" ? (
-            leases === null ? <EmptyState title="Loading…" /> : leases.length === 0 ? (
-              <EmptyState title="No active leases" hint="Leases appear here once guests connect and Kea hands out addresses." />
+        <TabsContent value="leases" className="mt-4">
+          <Card>
+            {leases === null ? (
+              <SkeletonRows rows={5} cols={5} />
+            ) : leases.length === 0 ? (
+              <EmptyState icon={<Wifi />} title="No active leases" hint="Leases appear here once guests connect and are given an address." />
+            ) : shownLeases.length === 0 ? (
+              noMatch("leases")
             ) : (
               <Table>
-                <THead><TR><TH>IP address</TH><TH>MAC</TH><TH>Hostname</TH><TH>Subnet</TH><TH>State</TH><TH>Expires</TH></TR></THead>
-                <tbody>
-                  {leases.map((l, i) => (
-                    <TR key={i}>
-                      <TD className="font-mono text-xs">{l["ip-address"]}</TD>
-                      <TD className="font-mono text-xs">{l["hw-address"]}</TD>
-                      <TD className="text-muted-foreground">{l.hostname || "—"}</TD>
-                      <TD className="text-muted-foreground">{l["subnet-id"] ?? "—"}</TD>
-                      <TD><Badge tone={leaseState(l.state) === "active" ? "ok" : "warn"}>{leaseState(l.state)}</Badge></TD>
-                      <TD className="text-muted-foreground">{leaseExpiry(l)}</TD>
-                    </TR>
-                  ))}
-                </tbody>
+                <THead>
+                  <TR>
+                    <TH>IP address</TH>
+                    <TH className="hidden sm:table-cell">MAC address</TH>
+                    <TH className="hidden md:table-cell">Hostname</TH>
+                    <TH className="hidden lg:table-cell">Subnet ID</TH>
+                    <TH>State</TH>
+                    <TH className="hidden sm:table-cell">Expires</TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {shownLeases.map((l, i) => {
+                    const st = leaseState(l.state);
+                    const s = LEASE_STATE[st] ?? { label: st, tone: "default" as const };
+                    return (
+                      <TR key={i}>
+                        <TD className="font-mono text-xs">
+                          {l["ip-address"]}
+                          <div className="font-mono text-caption text-muted-foreground sm:hidden">{l["hw-address"]}</div>
+                        </TD>
+                        <TD className="hidden font-mono text-xs sm:table-cell">{l["hw-address"]}</TD>
+                        <TD className="hidden text-muted-foreground md:table-cell">{l.hostname || "—"}</TD>
+                        <TD className="hidden tabular text-muted-foreground lg:table-cell">{l["subnet-id"] ?? "—"}</TD>
+                        <TD><Badge tone={s.tone}>{s.label}</Badge></TD>
+                        <TD className="hidden text-muted-foreground sm:table-cell">{leaseExpiry(l)}</TD>
+                      </TR>
+                    );
+                  })}
+                </TBody>
               </Table>
-            )
-          ) : (
-            reservations === null ? <EmptyState title="Loading…" /> : reservations.length === 0 ? (
-              <EmptyState title="No reservations" hint="Pin device MACs to fixed IPs across your guest networks." />
+            )}
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="reservations" className="mt-4">
+          <Card>
+            {reservations === null ? (
+              <SkeletonRows rows={4} cols={5} />
+            ) : reservations.length === 0 ? (
+              <EmptyState
+                icon={<Pin />}
+                title="No reservations"
+                hint="Pin a device to a fixed address on one of your guest networks — a printer, a TV or a door lock."
+                action={writable ? <Button size="sm" onClick={() => setAdding(true)}><Plus /> New reservation</Button> : undefined}
+              />
+            ) : shownRes.length === 0 ? (
+              noMatch("reservations")
             ) : (
               <Table>
-                <THead><TR><TH>Guest network</TH><TH>MAC</TH><TH>Reserved IP</TH><TH>Hostname</TH><TH>Enabled</TH><TH></TH></TR></THead>
-                <tbody>
-                  {reservations.map((r) => (
+                <THead>
+                  <TR>
+                    <TH>Guest network</TH>
+                    <TH className="hidden sm:table-cell">MAC address</TH>
+                    <TH>Reserved IP</TH>
+                    <TH className="hidden md:table-cell">Hostname</TH>
+                    <TH className="hidden sm:table-cell">Status</TH>
+                    {writable && <TH><span className="sr-only">Actions</span></TH>}
+                  </TR>
+                </THead>
+                <TBody>
+                  {shownRes.map((r) => (
                     <TR key={r.id}>
                       <TD>{netName(r.guest_network_id)}</TD>
-                      <TD className="font-mono text-xs">{r.mac}</TD>
+                      <TD className="hidden font-mono text-xs sm:table-cell">{r.mac}</TD>
                       <TD className="font-mono text-xs">{r.reserved_ip}</TD>
-                      <TD className="text-muted-foreground">{r.hostname || "—"}</TD>
-                      <TD>{r.enabled ? <Badge tone="ok">on</Badge> : <Badge tone="default">off</Badge>}</TD>
-                      <TD className="text-right space-x-2">
-                        {writable && <Button size="sm" variant="ghost" onClick={() => setEditRes(r)}>Edit</Button>}
-                        {writable && <Button size="sm" variant="ghost" onClick={() => onDelete(r.id)}>Delete</Button>}
-                      </TD>
+                      <TD className="hidden text-muted-foreground md:table-cell">{r.hostname || "—"}</TD>
+                      <TD className="hidden sm:table-cell">{r.enabled ? <Badge tone="ok">Enabled</Badge> : <Badge tone="default">Disabled</Badge>}</TD>
+                      {writable && (
+                        <TD className="whitespace-nowrap text-end">
+                          <Button size="icon-sm" variant="ghost" aria-label={`Edit reservation ${r.reserved_ip}`} onClick={() => setEditRes(r)}><Pencil /></Button>
+                          <Button size="icon-sm" variant="ghost" aria-label={`Remove reservation ${r.reserved_ip}`} onClick={() => setRemoving(r)}><Trash2 /></Button>
+                        </TD>
+                      )}
                     </TR>
                   ))}
-                </tbody>
+                </TBody>
               </Table>
-            )
-          )}
-        </CardBody>
-      </Card>
+            )}
+          </Card>
+        </TabsContent>
+      </Tabs>
 
-      {editRes && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/45 p-6 backdrop-blur-[2px]" onClick={() => setEditRes(null)}>
-          <div className="bg-panel border border-border rounded-lg shadow-panel max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
-            <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-              <h2 className="text-sm font-semibold tracking-tight">Edit reservation</h2>
-              <Button size="sm" variant="ghost" onClick={() => setEditRes(null)}><X size={14} /></Button>
-            </div>
-            <div className="px-5 py-4 space-y-3">
-              <div><Label>Guest network</Label><Input value={netName(editRes.guest_network_id)} disabled /></div>
-              <div><Label>MAC</Label><Input value={editRes.mac} disabled className="font-mono" /></div>
-              <div><Label>Reserved IP</Label><Input value={editRes.reserved_ip} onChange={(e) => setEditRes({ ...editRes, reserved_ip: e.target.value })} /></div>
-              <div><Label>Hostname</Label><Input value={editRes.hostname ?? ""} onChange={(e) => setEditRes({ ...editRes, hostname: e.target.value })} /></div>
-              <label className="flex items-center gap-2 text-sm text-muted"><input type="checkbox" checked={editRes.enabled} onChange={(e) => setEditRes({ ...editRes, enabled: e.target.checked })} /> Enabled</label>
-              <div className="flex justify-end"><Button disabled={busy} onClick={onUpdate}>{busy ? "Saving…" : "Save"}</Button></div>
-            </div>
-          </div>
-        </div>
+      {writable && (
+        <>
+          <AddReservationDialog
+            open={adding}
+            onOpenChange={setAdding}
+            networks={networks}
+            onSaved={() => { toast.success("Reservation added"); loadReservations(); }}
+          />
+          <EditReservationDialog
+            reservation={editRes}
+            networkName={editRes ? netName(editRes.guest_network_id) : undefined}
+            onClose={() => setEditRes(null)}
+            onSaved={() => { toast.success("Reservation saved"); loadReservations(); }}
+          />
+          <RemoveReservationDialog
+            reservation={removing}
+            onClose={() => setRemoving(null)}
+            onRemoved={() => { toast.success("Reservation removed"); loadReservations(); }}
+          />
+        </>
       )}
-    </div>
+    </PageShell>
   );
 }
