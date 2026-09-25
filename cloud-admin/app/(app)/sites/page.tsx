@@ -8,7 +8,7 @@ import { useCustomer } from "@/lib/customer-context";
 import { Card } from "@/components/ui/card";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/input";
+import { Field, Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner, Callout } from "@/components/ui/error-banner";
@@ -18,17 +18,31 @@ import { FilterChips, SearchInput } from "@/components/ui/data";
 import { SkeletonRows } from "@/components/ui/misc";
 import { useToast } from "@/components/ui/toast";
 import { DeleteDialog } from "@/components/delete-dialog";
-import { CustomerScope } from "@/components/customer-scope";
+import { AllCustomersNotice, CustomerScope } from "@/components/customer-scope";
+import { RoleRestricted } from "@/components/role-restricted";
+import { usePermissions } from "@/lib/permissions";
 import { formatRelative } from "@/lib/utils";
 
 type StatusFilter = "all" | "active" | "archived";
 
 export default function SitesPage() {
   // Sites are customer-owned. The owning customer comes from the Customer context. "All customers" ("") lists
-  // every customer's sites (super-admin fan-out); a Site is still CREATED under one explicit customer, chosen in
-  // the New site dialog.
+  // every customer's sites (super-admin fan-out) and DISABLES creation (handoff section 7).
+  //
+  // Why creation follows the context rather than a per-dialog "Owning customer" choice: ctrlapi's createSite
+  // (control-plane/internal/api/sites.go) takes NO tenant in the body. The owner is auth.EffectiveTenantID —
+  // the ?tenant_id= of the request, which its own comment calls "the Control Panel's selected Customer
+  // Context" — and it refuses a create with none ("select a customer before creating a site"). So the site is
+  // created under the selected customer, and in All customers mode there is nothing to create it under.
+  //
+  // Roles: the server applies only the tenant-scope check to every Sites route and refuses no role writing
+  // (lib/permissions.ts "sites.write"), so no role-based hiding happens here beyond that check.
   const { selectedTenantId, selectedTenantName, ready, tenants } = useCustomer();
+  const { can } = usePermissions();
+  const canRead = can["sites.read"];
+  const canWrite = can["sites.write"];
   const allCustomers = selectedTenantId === "";
+  const canCreate = canWrite && !allCustomers;
   const nameFor = (tid?: string) => tenants.find((t) => t.id === tid)?.name ?? tid ?? "—";
   const toast = useToast();
 
@@ -60,9 +74,9 @@ export default function SitesPage() {
   async function onCreate(e: React.FormEvent<HTMLFormElement>) {
     setBusy(true); setCreateErr(null);
     const form = new FormData(e.currentTarget);
-    // The owning customer: the one selected in the form, otherwise the globally-selected customer.
-    const owner = (form.get("tenant_id") as string) || selectedTenantId;
-    if (!owner) { setCreateErr("Choose the owning customer for this site."); setBusy(false); return; }
+    // The owning customer is the selected Customer context (see the note at the top).
+    const owner = selectedTenantId;
+    if (!owner) { setCreateErr("Select a customer in the sidebar to create a site."); setBusy(false); return; }
     try {
       await api.post(`/v1/sites?tenant_id=${owner}`, {
         code: form.get("code"),
@@ -156,14 +170,23 @@ export default function SitesPage() {
         icon={<MapPin />}
         description="A site is one physical property — one hotel or resort. It belongs to exactly one customer and holds one or more appliances. Buildings, floors, SSIDs and guest networks are configured on the appliance; they are not sites."
         actions={
-          <Button onClick={() => { setCreateErr(null); setShowNew(true); }}>
-            <Plus /> New site
-          </Button>
+          canRead && canWrite ? (
+            <Button onClick={() => { setCreateErr(null); setShowNew(true); }} disabled={!canCreate}>
+              <Plus /> New site
+            </Button>
+          ) : undefined
         }
       >
         <CustomerScope />
       </PageHeader>
 
+      {!canRead ? (
+        <RoleRestricted what="Sites belong to a customer, and your sign-in has none." />
+      ) : (
+      <>
+      {allCustomers && canWrite && (
+        <AllCustomersNotice>Viewing sites across all customers. Select a customer in the sidebar to create a site.</AllCustomersNotice>
+      )}
       <ErrorBanner err={err} />
 
       <Card>
@@ -187,7 +210,7 @@ export default function SitesPage() {
             icon={<MapPin />}
             title="No sites yet"
             hint={allCustomers ? "No customer has a site yet." : `Create one under ${selectedTenantName} to start managing appliances.`}
-            action={<Button onClick={() => setShowNew(true)}><Plus /> New site</Button>}
+            action={canCreate ? <Button onClick={() => setShowNew(true)}><Plus /> New site</Button> : undefined}
           />
         ) : visible.length === 0 ? (
           <EmptyState
@@ -220,6 +243,7 @@ export default function SitesPage() {
                     <TD className="hidden text-muted-foreground md:table-cell">{s.country || "—"}</TD>
                     <TD className="hidden text-muted-foreground lg:table-cell">{formatRelative(s.created_at)}</TD>
                     <TD>
+                      {canWrite && (
                       <div className="flex justify-end gap-1">
                         <Button size="sm" variant="ghost" onClick={() => { setEditErr(null); setEditSite(s); }} aria-label={`Edit ${s.name}`}>
                           <Pencil /> <span className="hidden sm:inline">Edit</span>
@@ -237,6 +261,7 @@ export default function SitesPage() {
                           <Trash2 /> <span className="hidden sm:inline">Delete</span>
                         </Button>
                       </div>
+                      )}
                     </TD>
                   </TR>
                 );
@@ -245,30 +270,30 @@ export default function SitesPage() {
           </Table>
         )}
       </Card>
+      </>
+      )}
 
       <DialogForm
         open={showNew}
         onOpenChange={setShowNew}
         title="New site"
-        description="One physical property. It will belong to the customer you choose."
+        description="One physical property. It belongs to the customer selected in the Customer context."
         submitLabel="Create site"
         busyLabel="Creating…"
         busy={busy}
         error={createErr}
-        disabled={tenants.length === 0}
+        disabled={!canCreate}
         onSubmit={onCreate}
       >
-        {tenants.length === 0 ? (
+        {allCustomers ? (
           <Callout tone="warning">
-            No customers exist yet. Create a customer on the <Link href="/tenants" className="underline">Customers</Link> page first.
+            Select a customer in the sidebar first. A site always has exactly one owning customer (see{" "}
+            <Link href="/tenants" className="underline">Customers</Link>).
           </Callout>
         ) : (
           <>
-            <Field label="Owning customer" required hint="A site always has exactly one owning customer.">
-              <Select name="tenant_id" required defaultValue={allCustomers ? "" : selectedTenantId}>
-                {allCustomers && <option value="" disabled>Select a customer…</option>}
-                {tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </Select>
+            <Field label="Owning customer" hint="The customer selected in the Customer context. A site always has exactly one owning customer.">
+              <Input value={selectedTenantName} readOnly disabled />
             </Field>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Code" required hint="Short and unique, e.g. hurghada.">

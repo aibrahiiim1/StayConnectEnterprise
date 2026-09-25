@@ -17,8 +17,11 @@ export type Blocker = {
 /**
  * DeleteDialog — the one permanent-delete flow for owned resources (Customer, Site, Appliance).
  *
- * The contract is unchanged: DELETE {deleteUrl} with { confirm, reason }, wrapped in withStepUp so the server can
- * ask for the password again. It NEVER cascades — while dependencies exist the server answers 409 with the
+ * Each caller keeps its endpoint's contract. By default: DELETE {deleteUrl} with { confirm, reason }, wrapped in
+ * withStepUp so the server can ask for the password again. An endpoint that takes no body and no step-up (the
+ * customer-scoped DELETE /v1/appliances/{id}) passes `takesReason={false}` and `stepUp={false}`: the request is
+ * then exactly `DELETE {deleteUrl}` and no reason field is shown, but the dialog looks and reads the same — the
+ * consequence list, "It cannot be undone." and the typed confirmation. It NEVER cascades — while dependencies exist the server answers 409 with the
  * blocking list, which is rendered with a link to each. What changed is the presentation, now on the shared
  * ConfirmDialog: it says it cannot be undone, previews what is affected, lists blockers, and requires the typed
  * name/code/serial plus a reason before the button enables.
@@ -26,6 +29,7 @@ export type Blocker = {
 export function DeleteDialog({
   open, onClose, onDeleted,
   title, what, expected, confirmHint, deleteUrl, extraImpact,
+  consequences, takesReason = true, stepUp = true,
 }: {
   open: boolean;
   onClose: () => void;
@@ -36,6 +40,12 @@ export function DeleteDialog({
   confirmHint: string;           // e.g. "Type the customer name"
   deleteUrl: string;             // DELETE endpoint
   extraImpact?: React.ReactNode; // optional impact preview block
+  /** What this delete does. The last item should be "It cannot be undone." Defaults to the owned-records wording. */
+  consequences?: React.ReactNode[];
+  /** Does the endpoint take { confirm, reason }? When false the request carries no body and no reason is asked. */
+  takesReason?: boolean;
+  /** Wrap the request in withStepUp (the endpoint may answer reauth_required). */
+  stepUp?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -50,7 +60,8 @@ export function DeleteDialog({
   async function submit({ reason }: { reason: string }) {
     setBusy(true); setErr(null); setBlockers(null);
     try {
-      await withStepUp(() => api.del(deleteUrl, { confirm: expected, reason }));
+      const call = () => (takesReason ? api.del(deleteUrl, { confirm: expected, reason }) : api.del(deleteUrl));
+      await (stepUp ? withStepUp(call) : call());
       onDeleted();
       onClose();
     } catch (e: any) {
@@ -77,13 +88,13 @@ export function DeleteDialog({
       confirmVariant="danger"
       busy={busy}
       error={err}
-      consequences={[
-        "It cannot be undone.",
+      consequences={consequences ?? [
         "Deletion is blocked while any owned records still exist — you will see exactly what to remove first.",
+        "It cannot be undone.",
       ]}
       confirmText={expected}
       confirmTextLabel={confirmHint}
-      requireReason
+      requireReason={takesReason}
       reasonLabel="Reason (recorded in the audit log)"
       reasonPlaceholder="e.g. decommissioned test customer"
       onConfirm={submit}

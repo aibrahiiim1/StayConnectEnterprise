@@ -18,9 +18,11 @@ import { PageHeader, PageShell } from "@/components/ui/page";
 import { Stepper } from "@/components/ui/data";
 import { Segmented } from "@/components/ui/tabs";
 import { SkeletonRows, Switch } from "@/components/ui/misc";
-import { LiveStatus } from "@/components/ui/patterns";
+import { LiveStatus, ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { DeleteDialog } from "@/components/delete-dialog";
+import { RoleRestricted } from "@/components/role-restricted";
+import { usePermissions } from "@/lib/permissions";
 import { statusWord } from "@/lib/license-state";
 import { cn, formatRelative } from "@/lib/utils";
 
@@ -52,11 +54,25 @@ function slugify(s: string) {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
 }
 
-type AdvancedAction = { a: ApplianceRow; verb: string; title: string; url: string; consequence: string };
+type AdvancedAction = {
+  a: ApplianceRow; verb: string; title: string; url: string; consequence: string; consequences?: string[];
+};
 
 export default function OnboardingPage() {
   const router = useRouter();
   const toast = useToast();
+  // Every Onboarding call is catalog-gated (api/appliance_lifecycle.go LifecycleRoutes, offline_activation_api.go,
+  // certificates.go): reading needs platform.appliances.view; activating platform.appliances.assign; importing a
+  // request, deactivate, reconcile, decommission and delete platform.appliances.manage; the activation package
+  // and certificate reissue platform.certificates.issue. Each control shows only for a role holding its
+  // permission (lib/permissions.ts). A role that can only read (platform_support) sees the lists and a notice.
+  const { can } = usePermissions();
+  const canRead = can["onboarding.read"];
+  const canActivate = can["onboarding.activate"];
+  const canManage = can["onboarding.manage"];
+  const canImport = can["onboarding.importRequest"];
+  const canCert = can["onboarding.certificates"];
+  const readOnly = !canActivate && !canManage && !canImport && !canCert;
   const [pending, setPending] = useState<Pending[] | null>(null);
   const [pendingAt, setPendingAt] = useState<number | null>(null);
   const [pendingFailed, setPendingFailed] = useState(false);
@@ -315,7 +331,9 @@ export default function OnboardingPage() {
         description="Connect an appliance. A factory-clean appliance with internet appears here by itself: select it, choose its customer, site and license terms, and activate it once. Assignment, certificate and the signed license all happen for you."
       />
 
-      {phase ? (
+      {!canRead ? (
+        <RoleRestricted what="Onboarding is the vendor's appliance activation queue." />
+      ) : phase ? (
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2.5">
@@ -363,11 +381,14 @@ export default function OnboardingPage() {
         </Card>
       ) : (
         <>
+          {readOnly && <ReadOnlyNotice />}
           <Card>
             <CardHeader>
               <div className="space-y-0.5">
                 <CardTitle>Pending activation</CardTitle>
-                <CardDescription>Appliances that registered themselves and wait for activation. Select one to activate it.</CardDescription>
+                <CardDescription>
+                  Appliances that registered themselves and wait for activation.{canActivate ? " Select one to activate it." : ""}
+                </CardDescription>
               </div>
               <LiveStatus
                 updatedAt={pendingAt}
@@ -388,7 +409,7 @@ export default function OnboardingPage() {
               <Table aria-label="Pending activation">
                 <THead>
                   <TR>
-                    <TH className="w-10"><span className="sr-only">Selected</span></TH>
+                    {canActivate && <TH className="w-10"><span className="sr-only">Selected</span></TH>}
                     <TH>Serial</TH><TH>WAN MAC</TH><TH className="hidden md:table-cell">Model</TH>
                     <TH className="hidden md:table-cell">Source IP</TH><TH className="hidden sm:table-cell">First seen</TH>
                   </TR>
@@ -396,6 +417,17 @@ export default function OnboardingPage() {
                 <tbody>
                   {pending.map((p) => {
                     const selected = sel?.id === p.id;
+                    if (!canActivate) {
+                      return (
+                        <TR key={p.id}>
+                          <TD className="font-mono font-medium">{p.serial}</TD>
+                          <TD className="font-mono text-xs">{p.wan_mac || "—"}</TD>
+                          <TD className="hidden text-muted-foreground md:table-cell">{p.model || "—"}</TD>
+                          <TD className="hidden font-mono text-xs text-muted-foreground md:table-cell">{p.source_ip || "—"}</TD>
+                          <TD className="hidden text-muted-foreground sm:table-cell">{p.first_seen ? formatRelative(p.first_seen) : "—"}</TD>
+                        </TR>
+                      );
+                    }
                     return (
                       <TR
                         key={p.id}
@@ -428,7 +460,7 @@ export default function OnboardingPage() {
             )}
           </Card>
 
-          {sel && (
+          {sel && canActivate && (
             <Card aria-labelledby="activate-title" className="border-primary/40">
               <CardHeader>
                 <div className="space-y-0.5">
@@ -527,6 +559,7 @@ export default function OnboardingPage() {
             </Card>
           )}
 
+          {canImport && (
           <Card>
             <CardHeader>
               <div className="space-y-0.5">
@@ -559,6 +592,7 @@ export default function OnboardingPage() {
               </label>
             </CardBody>
           </Card>
+          )}
 
           {registered.length > 0 && (
             <Card>
@@ -567,12 +601,14 @@ export default function OnboardingPage() {
                   <CardTitle>Registered appliances</CardTitle>
                   <CardDescription>Appliances already activated, for resets and recovery.</CardDescription>
                 </div>
-                <label className="flex items-center gap-2 text-sm">
-                  <Switch checked={showAdvanced} onCheckedChange={setShowAdvanced} label="Advanced Support" />
-                  <span>Advanced Support</span>
-                </label>
+                {(canManage || canCert) && (
+                  <label className="flex items-center gap-2 text-sm">
+                    <Switch checked={showAdvanced} onCheckedChange={setShowAdvanced} label="Advanced Support" />
+                    <span>Advanced Support</span>
+                  </label>
+                )}
               </CardHeader>
-              {showAdvanced && (
+              {showAdvanced && (canManage || canCert) && (
                 <div className="px-5 pt-4">
                   <Callout tone="warning">
                     Advanced Support shows elevated technical actions. Each asks for a reason, which is written to the
@@ -596,45 +632,70 @@ export default function OnboardingPage() {
                       <TD className="hidden font-mono text-xs md:table-cell">{a.wan_mac || "—"}</TD>
                       <TD>
                         <div className="flex flex-wrap justify-end gap-1">
-                          <Button size="sm" variant="ghost" disabled={rowBusy === a.id} onClick={() => { setActErr(null); setDeactivate(a); }}>
-                            <PowerOff /> Deactivate
-                          </Button>
-                          <Button size="sm" variant="ghost" disabled={offlineBusy}
-                            title="Offline first activation: one signed file carrying the assignment, trust material and license."
-                            onClick={() => void generateActivationPackage(a.id, a.serial)}>
-                            <Download /> Activation package
-                          </Button>
+                          {canManage && (
+                            <Button size="sm" variant="ghost" disabled={rowBusy === a.id} onClick={() => { setActErr(null); setDeactivate(a); }}>
+                              <PowerOff /> Deactivate
+                            </Button>
+                          )}
+                          {canCert && (
+                            <Button size="sm" variant="ghost" disabled={offlineBusy}
+                              title="Offline first activation: one signed file carrying the assignment, trust material and license."
+                              onClick={() => void generateActivationPackage(a.id, a.serial)}>
+                              <Download /> Activation package
+                            </Button>
+                          )}
                           {showAdvanced && (
                             <>
-                              <Button size="sm" variant="ghost" disabled={rowBusy === a.id}
-                                onClick={() => { setActErr(null); setAdv({ a, verb: "reissue certificate", title: "Reissue certificate", url: `/cloud/v1/certificates/${a.id}/issue`, consequence: "Issues a new certificate for this appliance." }); }}>
-                                <Wrench /> Reissue cert
-                              </Button>
-                              <Button size="sm" variant="ghost" disabled={rowBusy === a.id}
-                                onClick={() => { setActErr(null); setAdv({ a, verb: "force reconcile", title: "Force reconcile", url: `/cloud/v1/appliances-admin/${a.id}/force-reconcile`, consequence: "Forces a reconcile of this appliance's assignment and license." }); }}>
-                                <Wrench /> Reconcile
-                              </Button>
-                              <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" disabled={rowBusy === a.id}
-                                onClick={() => { setActErr(null); setAdv({ a, verb: "decommission", title: "Decommission", url: `/cloud/v1/appliances-admin/${a.id}/decommission`, consequence: "Decommissions this appliance." }); }}>
-                                <Wrench /> Decommission
-                              </Button>
+                              {canCert && (
+                                <Button size="sm" variant="ghost" disabled={rowBusy === a.id}
+                                  onClick={() => { setActErr(null); setAdv({ a, verb: "reissue certificate", title: "Reissue certificate", url: `/cloud/v1/certificates/${a.id}/issue`, consequence: "Issues a new certificate for this appliance." }); }}>
+                                  <Wrench /> Reissue cert
+                                </Button>
+                              )}
+                              {canManage && (
+                                <Button size="sm" variant="ghost" disabled={rowBusy === a.id}
+                                  onClick={() => { setActErr(null); setAdv({ a, verb: "force reconcile", title: "Force reconcile", url: `/cloud/v1/appliances-admin/${a.id}/force-reconcile`, consequence: "Forces a reconcile of this appliance's assignment and license." }); }}>
+                                  <Wrench /> Reconcile
+                                </Button>
+                              )}
+                              {canManage && (
+                                <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" disabled={rowBusy === a.id}
+                                  onClick={() => {
+                                    setActErr(null);
+                                    setAdv({
+                                      a, verb: "decommission", title: "Decommission", url: `/cloud/v1/appliances-admin/${a.id}/decommission`,
+                                      consequence: "This permanently retires the appliance.",
+                                      consequences: [
+                                        "The appliance moves to the retired state and its credentials are withdrawn.",
+                                        "Any license bound to this appliance is revoked.",
+                                        "It cannot be undone.",
+                                      ],
+                                    });
+                                  }}>
+                                  <Wrench /> Decommission
+                                </Button>
+                              )}
                             </>
                           )}
-                          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" disabled={rowBusy === a.id} onClick={() => openDelete(a)}>
-                            <Trash2 /> Delete
-                          </Button>
+                          {canManage && (
+                            <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" disabled={rowBusy === a.id} onClick={() => openDelete(a)}>
+                              <Trash2 /> Delete
+                            </Button>
+                          )}
                         </div>
                       </TD>
                     </TR>
                   ))}
                 </tbody>
               </Table>
+              {canManage && (
               <CardFooter className="block text-caption text-muted-foreground">
                 <strong className="font-semibold text-foreground">Deactivate</strong> revokes the license (activate again to
                 restore). <strong className="font-semibold text-foreground">Delete</strong> removes the appliance, its license,
                 assignment and certificate — the appliance then reappears above as Pending. Delete the site or customer
                 from their own pages if you also want those gone.
               </CardFooter>
+              )}
             </Card>
           )}
         </>
@@ -661,6 +722,7 @@ export default function OnboardingPage() {
         onOpenChange={(v) => { if (!v) setAdv(null); }}
         title={adv ? `${adv.title}: ${adv.a.serial}` : ""}
         description={adv?.consequence}
+        consequences={adv?.consequences}
         confirmLabel={adv?.title ?? "Confirm"}
         confirmVariant={adv?.verb === "decommission" ? "danger" : "primary"}
         busy={actBusy}
@@ -680,6 +742,12 @@ export default function OnboardingPage() {
         expected={delApp?.serial ?? ""}
         confirmHint="Type the appliance serial"
         deleteUrl={`/cloud/v1/appliances-admin/${delApp?.id}`}
+        consequences={[
+          "The appliance, its assignment and its certificates are removed; its secure access ends.",
+          "Any license bound to this appliance is revoked.",
+          "The physical appliance registers again as Pending.",
+          "It cannot be undone.",
+        ]}
         extraImpact={delImpact && (
           <div className="rounded-md border border-border bg-surface p-3.5 text-sm">
             <div className="mb-1.5 font-semibold">This will remove and terminate:</div>

@@ -9,6 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner, Callout } from "@/components/ui/error-banner";
 import { PageHeader, PageShell, StatCard } from "@/components/ui/page";
+import { RoleRestricted } from "@/components/role-restricted";
+import { usePermissions } from "@/lib/permissions";
 import { Meter, Skeleton } from "@/components/ui/misc";
 import { formatRelative } from "@/lib/utils";
 
@@ -65,6 +67,9 @@ function ItemTable({
  * path exists.
  */
 export default function BackupHealthPage() {
+  // Reading needs "backupHealth.read" (lib/permissions.ts); the server refuses this page's list to other roles.
+  const { can } = usePermissions();
+  const canRead = can["backupHealth.read"];
   const [data, setData] = useState<Resp | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -83,6 +88,10 @@ export default function BackupHealthPage() {
         description="Whether Central's own backup and rollback storage is healthy. The cleanup never deletes the current or previous release, certificate-authority material, the newest full database backup, or operator-pinned artifacts."
       />
 
+      {!canRead ? (
+        <RoleRestricted what="Backup health describes Central's own host." />
+      ) : (
+      <>
       <ErrorBanner err={err} />
       {data && !data.available && (
         <Callout tone="warning" title="Backup status unavailable">{data.message}</Callout>
@@ -142,6 +151,8 @@ export default function BackupHealthPage() {
       )}
       {s === undefined && data?.available && (
         <EmptyState icon={<Trash2 />} title="No status reported" />
+      )}
+      </>
       )}
     </PageShell>
   );

@@ -14,10 +14,11 @@ import { ConfirmDialog, DialogForm } from "@/components/ui/dialog";
 import { PageHeader, PageShell, Toolbar } from "@/components/ui/page";
 import { FilterChips, SearchInput } from "@/components/ui/data";
 import { SkeletonRows } from "@/components/ui/misc";
-import { ConsequenceList } from "@/components/ui/patterns";
+import { ConsequenceList, ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { DeleteDialog } from "@/components/delete-dialog";
 import { formatRelative } from "@/lib/utils";
+import { usePermissions } from "@/lib/permissions";
 
 type Tenant = {
   id: string;
@@ -35,6 +36,14 @@ type StatusFilter = "all" | "active" | "archived";
  */
 export default function TenantsPage() {
   const toast = useToast();
+  // api/tenants.go: create, archive, restore and delete are platform-admin only (IsSuperAdmin). Renaming is
+  // allowed to a platform admin, and to ANY role on its own customer (patchTenant checks only the customer).
+  // A customer user therefore keeps Rename and loses the rest (lib/permissions.ts).
+  const { can } = usePermissions();
+  const canCreate = can["customers.create"];
+  const canRename = can["customers.rename"];
+  const canArchive = can["customers.archive"];
+  const canDelete = can["customers.delete"];
   const [rows, setRows] = useState<Tenant[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -141,9 +150,10 @@ export default function TenantsPage() {
         title="Customers"
         icon={<Building2 />}
         description="The hotel groups and companies that own sites. Order of work: Customer, then Site, then activate an Appliance, which issues its License."
-        actions={<Button onClick={() => { setCreateErr(null); setShowNew(true); }}><Plus /> New customer</Button>}
+        actions={canCreate ? <Button onClick={() => { setCreateErr(null); setShowNew(true); }}><Plus /> New customer</Button> : undefined}
       />
 
+      {!canCreate && !canRename && !canArchive && !canDelete && <ReadOnlyNotice />}
       <ErrorBanner err={err} />
 
       <Card>
@@ -167,7 +177,7 @@ export default function TenantsPage() {
             icon={<Building2 />}
             title="No customers yet"
             hint="Create the first customer to start adding sites and activating appliances."
-            action={<Button onClick={() => setShowNew(true)}><Plus /> New customer</Button>}
+            action={canCreate ? <Button onClick={() => setShowNew(true)}><Plus /> New customer</Button> : undefined}
           />
         ) : visible.length === 0 ? (
           <EmptyState
@@ -195,10 +205,12 @@ export default function TenantsPage() {
                     <TD className="hidden text-muted-foreground md:table-cell">{formatRelative(t.created_at)}</TD>
                     <TD>
                       <div className="flex justify-end gap-1">
-                        <Button size="sm" variant="ghost" disabled={rowBusy === t.id} onClick={() => { setRenameErr(null); setRenameT(t); }}>
-                          <Pencil /> <span className="hidden sm:inline">Rename</span>
-                        </Button>
-                        {archived ? (
+                        {canRename && (
+                          <Button size="sm" variant="ghost" disabled={rowBusy === t.id} onClick={() => { setRenameErr(null); setRenameT(t); }}>
+                            <Pencil /> <span className="hidden sm:inline">Rename</span>
+                          </Button>
+                        )}
+                        {!canArchive ? null : archived ? (
                           <Button size="sm" variant="ghost" disabled={rowBusy === t.id} onClick={() => onRestore(t)}>
                             <ArchiveRestore /> <span className="hidden sm:inline">Restore</span>
                           </Button>
@@ -207,9 +219,11 @@ export default function TenantsPage() {
                             <Archive /> <span className="hidden sm:inline">Archive</span>
                           </Button>
                         )}
-                        <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" disabled={rowBusy === t.id} onClick={() => setDelTenant(t)} aria-label={`Delete ${t.name}`}>
-                          <Trash2 /> <span className="hidden sm:inline">Delete</span>
-                        </Button>
+                        {canDelete && (
+                          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" disabled={rowBusy === t.id} onClick={() => setDelTenant(t)} aria-label={`Delete ${t.name}`}>
+                            <Trash2 /> <span className="hidden sm:inline">Delete</span>
+                          </Button>
+                        )}
                       </div>
                     </TD>
                   </TR>

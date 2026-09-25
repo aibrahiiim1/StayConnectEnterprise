@@ -16,6 +16,8 @@ import { SkeletonRows, Switch } from "@/components/ui/misc";
 import { useToast } from "@/components/ui/toast";
 import { statusWord } from "@/lib/license-state";
 import { formatDate, formatRelative } from "@/lib/utils";
+import { RoleRestricted } from "@/components/role-restricted";
+import { usePermissions } from "@/lib/permissions";
 
 type Alert = {
   id: string;
@@ -48,6 +50,12 @@ const kindWord = (k: string) => KIND_WORDS[k] ?? statusWord(k);
 // wan_mac_mismatch, etc. This screen lists them and lets an operator triage each through its lifecycle.
 export default function SecurityPage() {
   const toast = useToast();
+  // Listing AND triaging alerts are both gated by platform.appliances.view (api/appliance_lifecycle.go
+  // LifecycleRoutes; the PATCH uses the view permission). Whoever can read can triage, so there is no read-only
+  // state here; a role without the permission gets the restricted block (lib/permissions.ts).
+  const { can } = usePermissions();
+  const canRead = can["securityAlerts.read"];
+  const canTriage = can["securityAlerts.triage"];
   const [rows, setRows] = useState<Alert[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -118,6 +126,10 @@ export default function SecurityPage() {
         description="Raised when an appliance registration looks wrong — a cloned identity, a reused serial, or a WAN MAC that does not match the signed license. Activation is blocked while an alert is open."
       />
 
+      {!canRead ? (
+        <RoleRestricted what="Security alerts are the vendor's appliance-registration checks." />
+      ) : (
+      <>
       <ErrorBanner err={err} />
 
       <section aria-label="Alert counts" className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -169,6 +181,7 @@ export default function SecurityPage() {
                   </TD>
                   <TD><Badge tone={statusTone(a.status) as any} dot>{statusWord(a.status)}</Badge></TD>
                   <TD>
+                    {canTriage && (
                     <div className="flex flex-wrap justify-end gap-1">
                       {a.status === "open" && (
                         <Button size="sm" variant="secondary" disabled={busy === a.id} onClick={() => setStatus(a, "investigating")}>Investigate</Button>
@@ -186,6 +199,7 @@ export default function SecurityPage() {
                         <Button size="sm" variant="ghost" disabled={busy === a.id} onClick={() => setStatus(a, "open")}>Reopen</Button>
                       )}
                     </div>
+                    )}
                   </TD>
                 </TR>
               ))}
@@ -193,6 +207,8 @@ export default function SecurityPage() {
           </Table>
         )}
       </Card>
+      </>
+      )}
 
       <ConfirmDialog
         open={!!resolveReq}

@@ -17,6 +17,8 @@ import { SearchInput } from "@/components/ui/data";
 import { SkeletonRows } from "@/components/ui/misc";
 import { useToast } from "@/components/ui/toast";
 import { CustomerScope, SelectCustomerCard } from "@/components/customer-scope";
+import { RoleRestricted } from "@/components/role-restricted";
+import { usePermissions } from "@/lib/permissions";
 
 const ROLES = ["tenant_admin", "tenant_operator", "viewer", "billing"] as const;
 
@@ -40,6 +42,12 @@ export default function OperatorsPage() {
   // Operators are per-customer staff. Management requires a concrete customer in the Customer context; "All
   // customers" shows a prompt rather than allowing accidental cross-customer staff changes.
   const { me, selectedTenantId: tenantID, ready } = useCustomer();
+  // Every Operators route, the list included, is gated by mayManageOperators (api/operators.go): a platform admin,
+  // or the role "tenant_admin" in its own customer. Everyone else is refused even reading, so they get the
+  // restricted block and no controls (lib/permissions.ts "operators.read" / "operators.write").
+  const { can } = usePermissions();
+  const canRead = can["operators.read"];
+  const canWrite = can["operators.write"];
   const allCustomers = tenantID === "";
   const toast = useToast();
   const [rows, setRows] = useState<Operator[] | null>(null);
@@ -176,17 +184,21 @@ export default function OperatorsPage() {
         icon={<Users />}
         description="A customer's own staff sign-ins to Central, and the roles each one holds."
         actions={
-          <Button onClick={() => { setCreateErr(null); setShowNew(true); }} disabled={allCustomers}>
-            <Plus /> New operator
-          </Button>
+          canRead && canWrite ? (
+            <Button onClick={() => { setCreateErr(null); setShowNew(true); }} disabled={allCustomers}>
+              <Plus /> New operator
+            </Button>
+          ) : undefined
         }
       >
         <CustomerScope />
       </PageHeader>
 
-      <ErrorBanner err={err} />
+      {canRead && <ErrorBanner err={err} />}
 
-      {allCustomers ? (
+      {!canRead ? (
+        <RoleRestricted what="Operators are managed by the customer's admin." />
+      ) : allCustomers ? (
         <SelectCustomerCard what="Operators are a customer's own staff." />
       ) : (
         <>
@@ -208,7 +220,7 @@ export default function OperatorsPage() {
                 icon={<Users />}
                 title="No operators yet"
                 hint="Add the customer's first operator."
-                action={<Button onClick={() => setShowNew(true)}><Plus /> New operator</Button>}
+                action={canWrite ? <Button onClick={() => setShowNew(true)}><Plus /> New operator</Button> : undefined}
               />
             ) : visible.length === 0 ? (
               <EmptyState
@@ -242,7 +254,7 @@ export default function OperatorsPage() {
                           <ul className="flex flex-wrap gap-1" aria-label={`Roles of ${op.email}`}>
                             {(op.roles ?? []).map((r) => (
                               <li key={r.id}>
-                                {isSelf ? (
+                                {isSelf || !canWrite ? (
                                   <Badge tone={r.role === "platform_admin" ? "info" : "neutral"}>{roleLabel(r.role)}</Badge>
                                 ) : (
                                   <button
@@ -262,6 +274,7 @@ export default function OperatorsPage() {
                           </ul>
                         </TD>
                         <TD>
+                          {canWrite && (
                           <div className="flex justify-end gap-1">
                             <Button size="sm" variant="ghost" onClick={() => { beginAction(); setRoleOp(op); }} disabled={missingRoles(op).length === 0}>
                               <Plus /> Role
@@ -275,6 +288,7 @@ export default function OperatorsPage() {
                               </Button>
                             )}
                           </div>
+                          )}
                         </TD>
                       </TR>
                     );
