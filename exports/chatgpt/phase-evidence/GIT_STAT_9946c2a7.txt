@@ -1,0 +1,4 @@
+commit 9946c2a72f91c4cd650a02b914682e7873755089
+Date:   Sat Sep 26 00:29:25 2026 +0300
+
+    Governance: the provenance verification date moves with the T0193 re-read
