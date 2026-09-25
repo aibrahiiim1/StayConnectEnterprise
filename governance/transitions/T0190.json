@@ -1,0 +1,32 @@
+{
+  "transition_id": "T0190",
+  "seq": 190,
+  "timestamp": "2026-09-25T20:31:50+03:00",
+  "timestamp_derivation": "The committer date of the CONTENT commit of this correction (a23210e5), so the receipt cannot post-date the commit that introduces it.",
+  "record_type": "VELONET_REVIEW_CORRECTION",
+  "authorisation": "The same Product-Owner mission as T0189 (complete PR #184 and PR #185 now), which authorises fixing directly related failures and continuing.",
+  "the_correction": "The authoritative run for PR #185 found all four gates freshly green at a31af2a3 and refused to merge on UNRESOLVED_THREADS: one automated review thread (Codex, P2) on cloud-admin/app/(app)/dashboard/page.tsx. It was correct: platform_support and platform_billing are not the super-admin and have no default customer, so the redesigned dashboard called three customer-scoped lists with an empty tenant_id and ctrlapi refused each with 400 'tenant scope required'. With no customer in scope the dashboard now asks for nothing and says why. Presentation only: no route, permission, authorization or server behaviour changed.",
+  "verification_repository": "Central: tsc clean, vitest 8 files / 114 tests pass (one regression test added), next build passes.",
+  "deployment_provenance": "NONE. Nothing was deployed to PRE-LIVE or any appliance.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. THIS transition records a merge to master and moves a delivery base; it changed no phase, applied no migration, deployed nothing, performed no cutover and enabled no capability. PRE-LIVE remains PRE-LIVE."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. THIS transition records a merge to master and moves a delivery base; it changed no phase, applied no migration, deployed nothing, performed no cutover and enabled no capability. PRE-LIVE remains PRE-LIVE."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Phase 7 remains ACCEPTED_AND_CLOSED under D41, Guest activation remains DEFERRED by D41, Go-Live remains unauthorised.",
+  "base": "017b1b5a645b10285f68657162abf5c622b97c21",
+  "base_note": "The master merge commit of PR #184 (the Hotel Admin overhaul, T0187), on which the Velonet delivery now rests.",
+  "head": "a23210e5",
+  "head_note": "The CONTENT commit of this correction: the Central dashboard asks for no customer-scoped data when the role has no customer.",
+  "previous_delivery": "T0189",
+  "go_live": "NOT authorised. Guest activation remains DEFERRED by D41."
+}
