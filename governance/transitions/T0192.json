@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0192",
+  "seq": 192,
+  "timestamp": "2026-09-25T22:51:09+03:00",
+  "timestamp_derivation": "The committer date of the CONTENT commit of this correction (afbd2639), so the receipt cannot post-date the commit that introduces it.",
+  "record_type": "VELONET_CLOSURE_CORRECTIONS",
+  "authorisation": "The same Product-Owner closure mission as T0191, which authorises fixing directly related failures and carrying the synchronisation through the protected PR path.",
+  "the_corrections": {
+    "selftest_fixture_race": "The authoritative run for PR #186 at 4e9d7942 found governance, phase4 and phase5 green and phase3 red on edge-migrate selftest case 7m (rc=0 ledger=1), on a change that touched no code; the same case passed on identical migration code three times the same day. The fixture started its lock holder with docker exec -d and slept one fixed second; on a loaded runner the holder had not connected, so the runner took the ledger lock first and the guard was never exercised. The case now waits until that advisory lock is actually granted, and fails loudly if it never is. Test fixture only; the migration runner is unchanged. Local run: EDGE_MIGRATE_SELFTEST = PASS (37 cases).",
+    "closure_manifest_head": "An automated review (Codex, P2) on PR #186 observed that the closure manifest and current_delivery.head named 15730cd4 -- the base -- as the head, so the advertised range was empty. With a content commit now on this lineage, current_delivery.head and the manifest's HEAD name it (afbd2639)."
+  },
+  "deployment_provenance": "NONE. Nothing was deployed to PRE-LIVE or any appliance.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. THIS transition records a merge to master and closes a delivery; it changed no phase, applied no migration, deployed nothing, performed no cutover and enabled no capability. PRE-LIVE remains PRE-LIVE."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. THIS transition records a merge to master and closes a delivery; it changed no phase, applied no migration, deployed nothing, performed no cutover and enabled no capability. PRE-LIVE remains PRE-LIVE."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Phase 7 remains ACCEPTED_AND_CLOSED under D41, Guest activation remains DEFERRED by D41, Go-Live remains unauthorised.",
+  "base": "15730cd466120263d8927476257e83970d74c7bb",
+  "base_note": "Master after the merge of PR #185; this closure lineage is built on it.",
+  "head": "afbd2639",
+  "head_note": "The CONTENT commit of this lineage: the selftest 7m fixture waits for its lock to be held.",
+  "previous_delivery": "T0191",
+  "go_live": "NOT authorised. Guest activation remains DEFERRED by D41."
+}
