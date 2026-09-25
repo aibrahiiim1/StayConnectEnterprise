@@ -6,7 +6,7 @@ These are the two read-mostly roles in **Velonet Central**. Keep this short beca
 
 ## Viewer
 
-You can see everything for your customer in Central. You cannot change anything.
+You can see your customer's pages in Central. You cannot manage operators or licenses, or activate appliances.
 
 ### Who typically gets this role
 
@@ -19,21 +19,23 @@ You can see everything for your customer in Central. You cannot change anything.
 
 Open the menu items for your customer — Dashboard, Sites, Appliances, Licenses, Audit log and the other pages your role may read (Central's server decides which).
 
-Nothing is changed by your role: the server refuses any create, edit or delete you attempt.
+Central shows you exactly the actions its server accepts from your role. **Be aware:** Central's server
+currently lets every customer role — Viewer included — create, edit, archive and delete **Sites** and create
+and delete **Appliances**, and rename its own customer, so those buttons appear for you. Everything else is
+refused and hidden.
 
 ### What you cannot do
 
-- Create anything (sites, appliances, licenses, operators).
-- Edit, archive or delete anything.
-- Activate, deactivate or change an appliance or its license.
+- Issue, renew, suspend, resume or revoke a license.
+- Activate, deactivate or decommission an appliance (Onboarding).
 - Manage operators.
 
 ### Most useful pages for you
 
 - **Audit log** — who did what, when. Your primary tool for investigations.
-- **Licenses** — each appliance's license state, online guests against its limit, and validity.
+- **Licenses** — each appliance's license state, its maximum online guests, and validity.
 - **Dashboard** — licenses by state at a glance.
-- **Appliances** — which appliances are online.
+- **Appliances** — which appliances have reached Central recently.
 
 ### If you need to change something
 
@@ -43,7 +45,7 @@ Ask a customer admin or customer operator at your organisation. Don't ask to be 
 
 ## Billing
 
-You can view your customer's licenses and usage. That's it.
+A legacy role: it is no longer granted to new operators. If you already hold it, you can read your customer's licenses.
 
 ### Who typically gets this role
 
@@ -53,7 +55,7 @@ You can view your customer's licenses and usage. That's it.
 ### What you can do
 
 - See the same read-only views as a Viewer.
-- **Commercial → Licenses** — each appliance's max concurrent online guests, current online guests and usage, valid from/until, grace period and state.
+- **Commercial → Licenses** — each appliance's max concurrent online guests, valid from/until, grace period and state. Current online guests are shown on the appliance itself, in Hotel Admin.
 
 ### Changing what you are licensed for
 

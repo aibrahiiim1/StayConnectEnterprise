@@ -674,7 +674,7 @@ Hotel staff accounts for this appliance.
 
 - **Table:** operator (with a *you* marker), role badges (remove with ×; add with **+ role**), status (*Can
   sign in* / *Disabled*). **Change password** (typed twice, at least 10 characters) and **Disable**.
-  Removing a role and disabling an operator are confirmation dialogs; adding a role applies immediately.
+  Adding a role, removing a role and disabling an operator are each confirmed in a dialog first.
 - **Add operator:** email or username, name, password (at least 10 characters), role (the seven roles;
   *Site viewer* by default).
 - You cannot remove your own Site admin role or disable yourself. There is no action to re-enable a disabled

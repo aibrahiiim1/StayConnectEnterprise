@@ -55,18 +55,19 @@ language is defined in the [Velonet design system](../../design-system/README.md
 ## OVERVIEW
 
 ### Dashboard — `/dashboard`
-Fleet health at a glance: licenses issued by state and, for one customer, how busy their sites are.
+Licenses issued by state, the sites and appliances they cover, and what needs attention. It follows the
+Customer context.
 
 - **Fleet license summary** (platform admins): *Active*, *Expiring in 30 days or less*, *Expired*,
   *Suspended*, *Revoked*, and *Orphaned* (a license whose appliance or site was deleted). A link opens
   Licenses.
-- **Tiles:** *Active sessions*, *Data this month*, *Sessions today* (these need one customer selected; in
-  All customers mode they say *"Select a customer to see this"*) and *Licensed appliances*.
-- **Top sites (this month):** the five sites that used the most data, for the selected customer.
-- The session and data figures come from usage that appliances report to Central. Appliances are connected
-  for licensing only, so do not expect these figures to be complete; a hotel's own figures are on
-  **Hotel Admin → Overview**.
-- **Actions:** none.
+- **Tiles:** *Sites*, *Appliances* (with how many reached Central in the last 5 minutes), *Licensed
+  appliances* (licenses in force, grace included) and *Need attention*. Each opens its page.
+- **Licenses that need attention:** licenses expiring within 30 days, in grace, expired, suspended or not yet
+  bound to an appliance, soonest first.
+- Central is used for licensing only: guests, sessions, usage and network health are on each hotel's
+  appliance, in **Hotel Admin → Overview**. Central shows no guest activity.
+- **Actions:** none (the page links to Licenses).
 
 ---
 
@@ -143,8 +144,9 @@ Each appliance's signed license: max concurrent online guests, validity window a
 is the only entitlement.
 
 - **Shows:** tiles *Active*, *In grace*, *Expired or revoked*, *Awaiting appliance binding*; search and a state
-  filter; table Customer, Site, Appliance (serial or *not bound*), Version, Status, Online / Limit (∞ when
-  unlimited), Usage, validity, grace ends, Last sync.
+  filter; table Customer, Site, Appliance (serial or *not bound*), Version, Status, Max online guests (*Unlimited*
+  for 0), validity, grace ends, and when the appliance was last seen. How many guests are online against the
+  limit is shown on the appliance, in Hotel Admin under Appliance & licence.
 - **Issue license** (needs a customer selected and a site): Site, Appliance, **Max concurrent online guests**
   (0 = unlimited), Grace period (days), Valid from (empty = now), Valid until (empty = 365 days).
 - **Row actions** (each with password confirmation when asked):
@@ -171,7 +173,8 @@ A customer's own staff sign-ins to Central, and their roles. Requires a customer
 - **Shows:** tiles *Operators*, *Active*, *Invited*, *Disabled*; search; table Email (*you* marker), Name,
   Status, Roles.
 - **New operator:** Email, Display name, Initial password (at least 10 characters), Role (**Customer admin**,
-  **Customer operator**, **Viewer**, **Billing**).
+  **Customer operator**, **Viewer**). The legacy *Billing* role is no longer offered: the database has refused
+  it since the role catalogue was expanded, so granting it could only fail.
 - **Row actions:** **Add a role** (dialog), remove a role (confirmation dialog), **Reset password** (new
   password, at least 10 characters), **Disable** (confirmation dialog). You cannot disable yourself.
 

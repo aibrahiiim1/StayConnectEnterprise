@@ -87,8 +87,8 @@ These are Central logins for your organisation. Hotel staff who run an appliance
 
 - **Customer admin** — looks after your customer in Central: sites, appliances, operators; reads licenses. Give sparingly.
 - **Customer operator** — day-to-day Central work for your customer.
-- **Viewer** — read-only. Good for auditors or regional managers who want to look.
-- **Billing** — can view your licenses and usage. Nothing else.
+- **Viewer** — meant for looking, not changing: no licenses, operators or activation. Note that Central's server currently lets every customer role, Viewer included, manage Sites and Appliances, so give it knowingly.
+- **Billing** — a legacy role that is no longer granted. Operators who already hold it can read your licenses.
 
 ### Creating an operator
 

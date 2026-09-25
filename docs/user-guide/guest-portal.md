@@ -81,7 +81,8 @@ asked to sign in again.
 ## "You're online"
 
 A tick, **You're online**, the time remaining (or *No time limit*), a **Status** link and a **Disconnect**
-button. Where they apply:
+button. **Status** opens a branded, translated page that says whether the device is online and, for an
+online-time budget, how much time is left and when access ends; **Back** returns to this page. Where they apply:
 
 - **Time left** for online-time budgets: *"… of internet time left. This counts down only while you are
   connected."* and *"Your access ends on {date}, whether or not the time is used."*
