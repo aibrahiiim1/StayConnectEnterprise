@@ -16,14 +16,20 @@
 import { useCallback, useEffect, useState } from "react";
 import { ShieldAlert } from "lucide-react";
 import { api, GuestSignInProtection } from "@/lib/api";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardBody, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { ErrorBanner } from "@/components/ui/error-banner";
+import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { Skeleton } from "@/components/ui/misc";
+import { ReadOnlyNotice, SettingField } from "@/components/ui/patterns";
+import { useToast } from "@/components/ui/toast";
 import { formatDate } from "@/lib/utils";
 
 type Draft = { max: string; window: string; restriction: string };
+
+// The approved defaults a site runs on until it saves a policy of its own. The allowed range for each comes
+// from the SERVER's response, so the form and the thing that enforces it cannot drift apart.
+const STANDARD = { max: 5, window: 60, restriction: 60 } as const;
 
 function draftOf(p: GuestSignInProtection): Draft {
   return {
@@ -33,7 +39,15 @@ function draftOf(p: GuestSignInProtection): Draft {
   };
 }
 
+/** A whole number inside the server's bounds, or the sentence that says it is not. */
+function invalid(value: string, min: number, max: number): string | undefined {
+  const n = Number(value);
+  const bad = value.trim() === "" || !Number.isInteger(n) || n < min || n > max;
+  return bad ? `Enter a whole number between ${min} and ${max}.` : undefined;
+}
+
 export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
+  const toast = useToast();
   const [policy, setPolicy] = useState<GuestSignInProtection | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [err, setErr] = useState<unknown>(null);
@@ -54,13 +68,19 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
   useEffect(() => { void load(); }, [load]);
 
   if (err && !policy) return <ErrorBanner err={err} />;
-  if (!policy || !draft) return null;
+  if (!policy || !draft) return <Skeleton className="h-64 w-full" />;
 
   const lim = policy.limits;
   const dirty =
     draft.max !== String(policy.max_failed_attempts) ||
     draft.window !== String(policy.observation_window_seconds) ||
     draft.restriction !== String(policy.restriction_seconds);
+  const errors = {
+    max: invalid(draft.max, lim.min_failed_attempts, lim.max_failed_attempts),
+    window: invalid(draft.window, lim.min_observation_window_seconds, lim.max_observation_window_seconds),
+    restriction: invalid(draft.restriction, lim.min_restriction_seconds, lim.max_restriction_seconds),
+  };
+  const anyInvalid = !!(errors.max || errors.window || errors.restriction);
 
   async function save() {
     setSaving(true);
@@ -75,6 +95,7 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
       setDraft(draftOf(next));
       setErr(null);
       setNote("Saved. The next sign-in attempt is judged by these numbers — nothing needs restarting.");
+      toast.success("Protection settings saved", "The next sign-in attempt is judged by these numbers.");
     } catch (e) {
       setErr(e);
     } finally {
@@ -82,148 +103,113 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
     }
   }
 
+  const readOnly = !canWrite || saving;
+  const lc = policy.last_change;
+
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <ShieldAlert size={16} /> Guest sign-in protection
-          {policy.is_default && <Badge tone="default">Using the standard settings</Badge>}
-        </CardTitle>
+      <CardHeader className="items-start">
+        <div className="min-w-0 space-y-1">
+          <CardTitle className="flex flex-wrap items-center gap-2">
+            <ShieldAlert className="size-4 text-muted-foreground" aria-hidden /> Guest sign-in protection
+            {policy.is_default && <Badge tone="default">Using the standard settings</Badge>}
+          </CardTitle>
+          <CardDescription className="max-w-2xl">
+            After too many incorrect sign-in details from the <strong>same device</strong>, that device is asked
+            to wait before it can try again. It protects guests from someone working through room numbers, and it
+            is always on — these settings decide how strict it is, not whether it runs.
+          </CardDescription>
+        </div>
       </CardHeader>
-      <CardBody className="space-y-4">
-        <p className="text-sm text-muted-foreground max-w-2xl">
-          After too many incorrect sign-in details from the <strong>same device</strong>, that device is asked
-          to wait before it can try again. It protects guests from someone working through room numbers, and it
-          is always on — these settings decide how strict it is, not whether it runs.
-        </p>
+      <CardBody className="space-y-5">
+        {!canWrite && (
+          // The desk cannot retune protection: reception may release one device, only IT changes the thresholds.
+          <ReadOnlyNotice>Your role can see these settings but not change them.</ReadOnlyNotice>
+        )}
+        {err ? <ErrorBanner err={err} className="mb-0" /> : null}
+        {note && !dirty && <Callout tone="success">{note}</Callout>}
 
-        {err ? <ErrorBanner err={err} /> : null}
-        {note && <p className="text-sm text-success-subtle-foreground" role="status">{note}</p>}
-
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Field
+        <div className="grid gap-5 sm:grid-cols-3">
+          <SettingField
+            id="gsp-maximum-failed-attempts"
             label="Maximum failed attempts"
             unit="attempts"
             value={draft.max}
             min={lim.min_failed_attempts}
             max={lim.max_failed_attempts}
-            disabled={!canWrite || saving}
+            defaultValue={STANDARD.max}
+            readOnly={readOnly}
+            error={canWrite ? errors.max : undefined}
             onChange={(v) => setDraft({ ...draft, max: v })}
-            help={`How many incorrect sign-ins from one device are allowed before it has to wait. Standard: 5. Allowed: ${lim.min_failed_attempts}–${lim.max_failed_attempts}.`}
+            explanation="Incorrect sign-ins from one device before it has to wait."
           />
-          <Field
+          <SettingField
+            id="gsp-observation-window"
             label="Observation window"
             unit="seconds"
             value={draft.window}
             min={lim.min_observation_window_seconds}
             max={lim.max_observation_window_seconds}
-            disabled={!canWrite || saving}
+            defaultValue={STANDARD.window}
+            readOnly={readOnly}
+            error={canWrite ? errors.window : undefined}
             onChange={(v) => setDraft({ ...draft, window: v })}
-            help={`Attempts older than this stop counting. The window moves continuously, so it cannot be sidestepped by waiting for a clock boundary. Standard: 60. Allowed: ${lim.min_observation_window_seconds}–${lim.max_observation_window_seconds}.`}
+            explanation="Attempts older than this stop counting. The window moves continuously, so it cannot be sidestepped by waiting for a clock boundary."
           />
-          <Field
+          <SettingField
+            id="gsp-wait-after-too-many-attempts"
             label="Wait after too many attempts"
             unit="seconds"
             value={draft.restriction}
             min={lim.min_restriction_seconds}
             max={lim.max_restriction_seconds}
-            disabled={!canWrite || saving}
+            defaultValue={STANDARD.restriction}
+            readOnly={readOnly}
+            error={canWrite ? errors.restriction : undefined}
             onChange={(v) => setDraft({ ...draft, restriction: v })}
-            help={`How long the device is asked to wait. Further attempts during the wait do not extend it. Standard: 60. Allowed: ${lim.min_restriction_seconds}–${lim.max_restriction_seconds}.`}
+            explanation="How long the device is asked to wait. Further attempts during the wait do not extend it."
           />
         </div>
 
         {/* SAID PLAINLY, BECAUSE IT IS THE ONE THING AN OPERATOR WILL EXPECT TO WORK THE OTHER WAY. Somebody
             shortening the wait to help a guest who is waiting right now would otherwise watch nothing happen
             and assume the setting is broken. */}
-        <div className="rounded-md border border-border bg-muted-surface/30 p-3 text-sm text-muted-foreground">
+        <div className="space-y-1 rounded-md border border-border bg-surface px-3.5 py-3 text-sm text-muted-foreground">
           <p>
             New settings apply to <strong>what happens next</strong>. A device already waiting keeps the time it
             was given — shortening the wait here does not end a wait already running.
           </p>
-          <p className="mt-1">
+          <p>
             To let one guest try again now, use <strong>Release</strong> on the Active restrictions tab of Guest
             sign-in attempts. Releasing allows another attempt; it does not sign anyone in.
           </p>
         </div>
 
-        {policy.last_change && (
+        {lc && (
           <p className="text-xs text-muted-foreground">
-            Last changed {formatDate(policy.last_change.changed_at)} by {policy.last_change.changed_by}
-            {policy.last_change.old_max_failed_attempts != null && (
+            Last changed {formatDate(lc.changed_at)} by {lc.changed_by}
+            {lc.old_max_failed_attempts != null && (
               <>
-                {" "}— from {policy.last_change.old_max_failed_attempts} attempts /{" "}
-                {policy.last_change.old_observation_window_seconds}s /{" "}
-                {policy.last_change.old_restriction_seconds}s
+                {" "}— from {lc.old_max_failed_attempts} attempts / {lc.old_observation_window_seconds}s /{" "}
+                {lc.old_restriction_seconds}s
               </>
             )}
-            {" "}to {policy.last_change.new_max_failed_attempts} attempts /{" "}
-            {policy.last_change.new_observation_window_seconds}s /{" "}
-            {policy.last_change.new_restriction_seconds}s
-            {policy.last_change.reason ? ` — ${policy.last_change.reason}` : ""}
-          </p>
-        )}
-
-        {canWrite ? (
-          <div className="flex items-center gap-2">
-            <Button onClick={() => void save()} disabled={!dirty || saving}>
-              {saving ? "Saving…" : "Save protection settings"}
-            </Button>
-            {dirty && !saving && (
-              <Button variant="secondary" onClick={() => setDraft(draftOf(policy))}>Discard</Button>
-            )}
-          </div>
-        ) : (
-          // The server refuses the write regardless; this only avoids offering a button that 403s.
-          <p className="text-sm text-muted-foreground">
-            Your role can see these settings but not change them.
+            {" "}to {lc.new_max_failed_attempts} attempts / {lc.new_observation_window_seconds}s /{" "}
+            {lc.new_restriction_seconds}s
+            {lc.reason ? ` — ${lc.reason}` : ""}
           </p>
         )}
       </CardBody>
-    </Card>
-  );
-}
-
-// Field is a bounded number input. The bounds come from the SERVER's response rather than being written here,
-// so the form and the thing that enforces them cannot drift apart — and the unit is in the label because
-// "60" alone has been read as minutes more than once.
-function Field({
-  label, unit, value, min, max, disabled, onChange, help,
-}: {
-  label: string; unit: string; value: string; min: number; max: number;
-  disabled: boolean; onChange: (v: string) => void; help: string;
-}) {
-  const n = Number(value);
-  const bad = value.trim() === "" || !Number.isInteger(n) || n < min || n > max;
-  // The label is ASSOCIATED with the input, not merely printed above it. A number field whose label is
-  // decorative is a field a screen reader announces as "edit text, blank" — and on this screen the label is
-  // the only thing distinguishing three identical boxes of seconds and attempts.
-  const id = "gsp-" + label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-  return (
-    <div className="space-y-1">
-      <label htmlFor={id} className="block text-sm font-medium">
-        {label} <span className="font-normal text-muted-foreground">({unit})</span>
-      </label>
-      <Input
-        id={id}
-        type="number"
-        inputMode="numeric"
-        value={value}
-        min={min}
-        max={max}
-        step={1}
-        disabled={disabled}
-        aria-invalid={bad}
-        aria-describedby={`${id}-help`}
-        onChange={(e) => onChange(e.target.value)}
-        className={bad ? "border-danger" : ""}
-      />
-      <p id={`${id}-help`} className="text-xs text-muted-foreground">{help}</p>
-      {bad && (
-        <p className="text-xs text-danger" role="alert">
-          Enter a whole number between {min} and {max}.
-        </p>
+      {canWrite && (
+        <CardFooter className="justify-end">
+          {dirty && !saving && (
+            <Button variant="ghost" onClick={() => setDraft(draftOf(policy))}>Discard</Button>
+          )}
+          <Button onClick={() => void save()} disabled={!dirty || saving || anyInvalid}>
+            {saving ? "Saving…" : "Save protection settings"}
+          </Button>
+        </CardFooter>
       )}
-    </div>
+    </Card>
   );
 }

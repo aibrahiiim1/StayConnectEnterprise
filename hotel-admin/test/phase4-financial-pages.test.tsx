@@ -71,7 +71,7 @@ describe("financial health", () => {
       },
     });
     render(<FinancialHealthView />);
-    expect(await screen.findByText("ATTENTION REQUIRED")).toBeInTheDocument();
+    expect(await screen.findByText("Attention required")).toBeInTheDocument();
     // the fixed backend code is never shown raw; the operator gets a sentence
     expect(screen.queryByText("UNKNOWN_OUTCOMES_AWAITING_REVIEW")).not.toBeInTheDocument();
     expect(screen.getByText(/nobody knows yet whether the money moved/i)).toBeInTheDocument();
@@ -81,7 +81,7 @@ describe("financial health", () => {
   it("says plainly that provider egress is off and never implies a provider is live", async () => {
     route({ "/financial-ops/health": { health: HEALTHY } });
     render(<FinancialHealthView />);
-    expect(await screen.findByText("Disabled (DARK)")).toBeInTheDocument();
+    expect(await screen.findByText("Disabled")).toBeInTheDocument();
     expect(screen.getByText(/No payment provider has been integrated or verified/i)).toBeInTheDocument();
     // no real provider is ever named on this screen
     const body = document.body.textContent ?? "";
@@ -129,7 +129,7 @@ describe("financial recovery", () => {
       "/financial-ops/recovery/zero-attempt": NO_ZERO,
     });
     render(<FinancialRecoveryView />);
-    expect(await screen.findByText("FINANCIAL RECOVERY")).toBeInTheDocument();
+    expect(await screen.findByText("Financial recovery")).toBeInTheDocument();
     expect(screen.getByText(/Nothing has been replayed and nothing will be/i)).toBeInTheDocument();
     // the affordances that must NOT exist
     for (const forbidden of [/retry/i, /resend/i, /re-send/i, /replay/i, /resume now/i, /force/i]) {
@@ -174,7 +174,7 @@ describe("financial recovery", () => {
       return { resolved: true };
     });
     render(<FinancialRecoveryView />);
-    await screen.findByText("FINANCIAL RECOVERY");
+    await screen.findByText("Financial recovery");
 
     await userEvent.type(screen.getByLabelText(/your password/i), "hunter2");
     await userEvent.selectOptions(
@@ -206,7 +206,7 @@ describe("financial recovery", () => {
       "/financial-ops/recovery/zero-attempt": NO_ZERO,
     });
     const { unmount } = render(<FinancialRecoveryView />);
-    await screen.findByText("FINANCIAL RECOVERY");
+    await screen.findByText("Financial recovery");
     expect(screen.queryByRole("button", { name: /release financial recovery/i })).not.toBeInTheDocument();
     unmount();
 
@@ -226,8 +226,13 @@ describe("financial recovery", () => {
       "/financial-ops/recovery/zero-attempt": NO_ZERO,
     });
     render(<FinancialRecoveryView canAct={false} />);
-    const btn = await screen.findByRole("button", { name: /record/i });
-    expect(btn).toBeDisabled();
+    await screen.findByText("Financial recovery");
+    // The held item is shown, but a role that may not decide is offered no decision, no password field and
+    // no button that the server would refuse.
+    expect(screen.getByText("Payment")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /record/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/your password/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/can see the recovery state but not record decisions/i)).toBeInTheDocument();
   });
 
   it("labels every control, including the ones inside the table", async () => {
@@ -237,7 +242,7 @@ describe("financial recovery", () => {
       "/financial-ops/recovery/zero-attempt": NO_ZERO,
     });
     render(<FinancialRecoveryView />);
-    await screen.findByText("FINANCIAL RECOVERY");
+    await screen.findByText("Financial recovery");
     for (const el of [
       ...screen.getAllByRole("button"),
       ...screen.getAllByRole("combobox"),
@@ -259,7 +264,7 @@ describe("financial recovery", () => {
       "/financial-ops/recovery/zero-attempt": NO_ZERO,
     });
     render(<FinancialRecoveryView />);
-    expect(await screen.findByText("NOT IN RECOVERY")).toBeInTheDocument();
+    expect(await screen.findByText("Not in recovery")).toBeInTheDocument();
   });
 });
 
@@ -355,7 +360,7 @@ describe("zero-attempt recovery", () => {
     });
     render(<FinancialRecoveryView />);
     await screen.findByText(/Never transmitted/);
-    expect(screen.getByText("NOT YET RECONCILED")).toBeInTheDocument();
+    expect(screen.getByText("Not yet reconciled")).toBeInTheDocument();
     expect(screen.getByText(/Reconcile this item above/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /authorize one attempt/i })).not.toBeInTheDocument();
   });
@@ -368,7 +373,7 @@ describe("zero-attempt recovery", () => {
     });
     render(<FinancialRecoveryView />);
     await screen.findByText(/Never transmitted/);
-    expect(screen.getByText("ATTEMPT 1 AUTHORIZED")).toBeInTheDocument();
+    expect(screen.getByText("Attempt 1 authorized")).toBeInTheDocument();
     expect(screen.getByText(/Exactly one is allowed/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /authorize one attempt/i })).not.toBeInTheDocument();
   });
@@ -391,13 +396,15 @@ describe("zero-attempt recovery", () => {
     zeroRoute(ZERO_ELIGIBLE);
     render(<FinancialRecoveryView canAct={false} />);
     await screen.findByText(/Never transmitted/);
-    expect(screen.getByRole("button", { name: /authorize one attempt/i })).toBeDisabled();
+    expect(screen.getByText("25.00 USD")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /authorize one attempt/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/why this charge must still go out/i)).not.toBeInTheDocument();
   });
 
   it("hides the section entirely when no posting is in that state", async () => {
     zeroRoute(NO_ZERO);
     render(<FinancialRecoveryView />);
-    await screen.findByText("FINANCIAL RECOVERY");
+    await screen.findByText("Financial recovery");
     expect(screen.queryByText(/Never transmitted/)).not.toBeInTheDocument();
   });
 

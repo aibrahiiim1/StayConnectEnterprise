@@ -19,17 +19,19 @@
 
 import { useCallback, useEffect, useMemo, useState, Fragment } from "react";
 import { AlertTriangle, CircleSlash, Gauge, Layers, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
-import { api, ApiError, ListResp } from "@/lib/api";
+import { api, ApiError, ListResp, Whoami } from "@/lib/api";
+import { canWrite } from "@/lib/roles";
+import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { deletePlan, getPlanDeletability, type RevisionInfo } from "@/lib/api/commerce";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Hint, Input, Label, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody, DialogFooter } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetBody, SheetFooter, SheetSection } from "@/components/ui/sheet";
 import { FilterChips, KeyValueGrid, MetricStrip, SearchInput, Timeline } from "@/components/ui/data";
 import { MonoId, SkeletonRows } from "@/components/ui/misc";
@@ -68,8 +70,6 @@ type Chip = "all" | "used" | "unused";
 //   maxKbps 10_000_000 · maxIdleSeconds 30d · maxSessionSeconds 365d · maxTimeQuotaSecond 10y
 const LIMITS = { mbps: 10000, idleMinutes: 43200, sessionHours: 8760, timeQuotaDays: 3650 } as const;
 
-const selectClass = "w-full rounded-md border border-input bg-background px-2 py-2 text-sm";
-
 export default function ServicePlansPage() {
   const toast = useToast();
   const [rows, setRows] = useState<PlanSummary[] | null>(null);
@@ -77,7 +77,13 @@ export default function ServicePlansPage() {
   const [err, setErr] = useState<unknown>(null);
   const [formErr, setFormErr] = useState<unknown>(null);
   const [unavailable, setUnavailable] = useState(false);
-  const writable = true; // edged enforces write permission server-side and answers 403 if the role lacks it.
+  // Fails closed while it loads, so Add / Edit / Delete appear only for a role the server accepts them from.
+  // edged still enforces the real gate on every request.
+  const [roles, setRoles] = useState<string[] | null>(null);
+  useEffect(() => {
+    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
+  }, []);
+  const writable = roles !== null && canWrite("commercial-packages", roles);
   const [showNew, setShowNew] = useState(false);
   const [prefill, setPrefill] = useState<PlanSummary | null>(null);
   const [busy, setBusy] = useState(false);
@@ -244,7 +250,10 @@ export default function ServicePlansPage() {
         actions={writable && !unavailable && <Button onClick={() => startNew()}><Plus /> Add plan</Button>}
       />
 
-      <ErrorBanner err={err} />
+      {!unavailable && roles !== null && !writable && (
+        <ReadOnlyNotice>Your role can see the service plans but not change them.</ReadOnlyNotice>
+      )}
+      <ErrorBanner err={err} className="mb-0" />
       {notice && <Callout tone="success">{notice}</Callout>}
 
       {!unavailable && (
@@ -488,15 +497,17 @@ export default function ServicePlansPage() {
                     <KeyValueGrid columns={1} items={[{ label: "Plan reference", value: <MonoId value={p.plan_id} /> }]} />
                   </SheetSection>
                 </SheetBody>
-                <SheetFooter>
-                  <Button variant="ghost" className="mr-auto text-destructive" onClick={() => setDeleting(p)}>
-                    <Trash2 /> Delete…
-                  </Button>
-                  {writable && stale.length > 0 && (
-                    <Button variant="secondary" onClick={() => startRepin(p)}><RefreshCw /> Apply current settings</Button>
-                  )}
-                  {writable && <Button onClick={() => { setSelected(null); startNew(p); }}><Pencil /> Edit</Button>}
-                </SheetFooter>
+                {writable && (
+                  <SheetFooter>
+                    <Button variant="ghost" className="me-auto text-destructive" onClick={() => setDeleting(p)}>
+                      <Trash2 /> Delete…
+                    </Button>
+                    {stale.length > 0 && (
+                      <Button variant="secondary" onClick={() => startRepin(p)}><RefreshCw /> Apply current settings</Button>
+                    )}
+                    <Button onClick={() => { setSelected(null); startNew(p); }}><Pencil /> Edit</Button>
+                  </SheetFooter>
+                )}
               </>
             );
           })()}
@@ -533,14 +544,14 @@ export default function ServicePlansPage() {
             <ErrorBanner err={formErr} />
             {/* Keyed on the plan being edited: these are uncontrolled inputs, and switching straight from one plan
                 to another would otherwise leave the first plan's numbers on screen — and publish them. */}
-            <form key={prefill?.plan_id ?? "new"} onSubmit={onPublish} className="grid gap-3 sm:grid-cols-2">
+            <form id="service-plan-form" key={prefill?.plan_id ?? "new"} onSubmit={onPublish} className="grid gap-4 sm:grid-cols-2">
               <div>
                 <Label htmlFor="plan-code">Plan code</Label>
                 <Input id="plan-code" name="code" required defaultValue={prefill?.code ?? ""} readOnly={!!prefill}
                   placeholder="GOLD" />
-                <p className="mt-1 text-xs text-muted">
+                <Hint>
                   {prefill ? "The code identifies this plan and cannot be changed." : "A short identifier that no other plan uses. It cannot be changed later."}
-                </p>
+                </Hint>
               </div>
               <div>
                 <Label htmlFor="plan-name">Display name</Label>
@@ -553,13 +564,13 @@ export default function ServicePlansPage() {
                 <Label htmlFor="plan-down">Download speed (Mbps)</Label>
                 <Input id="plan-down" name="down_mbps" type="number" min={0} max={LIMITS.mbps} step="0.1"
                   defaultValue={prefill?.down_kbps ? prefill.down_kbps / 1000 : ""} placeholder="Leave empty for unlimited" />
-                <p className="mt-1 text-xs text-muted">Up to {LIMITS.mbps} Mbps.</p>
+                <Hint>Up to {LIMITS.mbps} Mbps.</Hint>
               </div>
               <div>
                 <Label htmlFor="plan-up">Upload speed (Mbps)</Label>
                 <Input id="plan-up" name="up_mbps" type="number" min={0} max={LIMITS.mbps} step="0.1"
                   defaultValue={prefill?.up_kbps ? prefill.up_kbps / 1000 : ""} placeholder="Leave empty for unlimited" />
-                <p className="mt-1 text-xs text-muted">Up to {LIMITS.mbps} Mbps.</p>
+                <Hint>Up to {LIMITS.mbps} Mbps.</Hint>
               </div>
 
               <div>
@@ -569,12 +580,11 @@ export default function ServicePlansPage() {
               </div>
               <div>
                 <Label htmlFor="plan-device-policy">When the device limit is reached</Label>
-                <select id="plan-device-policy" name="device_limit_policy" defaultValue={prefill?.device_limit_policy ?? "REJECT_NEW_DEVICE"}
-                  className={selectClass}>
+                <Select id="plan-device-policy" name="device_limit_policy" defaultValue={prefill?.device_limit_policy ?? "REJECT_NEW_DEVICE"}>
                   {Object.entries(DEVICE_LIMIT_POLICIES).map(([v, label]) => (
                     <option key={v} value={v}>{label}</option>
                   ))}
-                </select>
+                </Select>
               </div>
 
               {/* PRE-FILLED, and that is a bug fix rather than a nicety: the form publishes a complete new version
@@ -584,13 +594,13 @@ export default function ServicePlansPage() {
                 <div className="flex gap-2">
                   <Input id="plan-time" name="time_quota" type="number" min={0} step="0.01" placeholder="Unlimited"
                     className="flex-1" defaultValue={timeQuota.value} />
-                  <select name="time_quota_unit" aria-label="Time allowance unit" defaultValue={timeQuota.unit}
-                    className="rounded-md border border-input bg-background px-2 text-sm">
+                  <Select name="time_quota_unit" aria-label="Time allowance unit" defaultValue={timeQuota.unit}
+                    className="w-28 shrink-0">
                     <option value="hours">hours</option>
                     <option value="days">days</option>
-                  </select>
+                  </Select>
                 </div>
-                <p className="mt-1 text-xs text-muted">Up to {LIMITS.timeQuotaDays} days.</p>
+                <Hint>Up to {LIMITS.timeQuotaDays} days.</Hint>
               </div>
               <div>
                 <Label htmlFor="plan-data">Data allowance (GB)</Label>
@@ -611,33 +621,32 @@ export default function ServicePlansPage() {
 
               <div className="sm:col-span-2">
                 <Label htmlFor="plan-sharing">How the speed is shared</Label>
-                <select id="plan-sharing" name="speed_allocation" defaultValue={prefill?.speed_allocation ?? "PER_DEVICE"}
-                  className={selectClass}>
+                <Select id="plan-sharing" name="speed_allocation" defaultValue={prefill?.speed_allocation ?? "PER_DEVICE"}>
                   <option value="PER_DEVICE">Per device — every device gets the full speed</option>
                   <option value="SHARED">Shared — all the guest&rsquo;s devices share the speed</option>
-                </select>
-                <p className="mt-1 text-xs text-muted">
+                </Select>
+                <Hint>
                   Shared gives the whole allowance to whichever devices are actually using it, so one device alone
                   still gets the full speed. It is not divided into fixed portions. Shared needs a download and
                   upload speed to share.
-                </p>
+                </Hint>
               </div>
 
               <div className="sm:col-span-2">
                 <Label htmlFor="plan-time-mode">How time is counted</Label>
-                <select id="plan-time-mode" name="time_accounting_mode" defaultValue="VALIDITY_WINDOW" className={selectClass}>
+                <Select id="plan-time-mode" name="time_accounting_mode" defaultValue="VALIDITY_WINDOW">
                   {/* Only VALIDITY_WINDOW is implemented end to end; offering the other would be a control that
                       silently does nothing. */}
                   <option value="VALIDITY_WINDOW">{TIME_ACCOUNTING_MODES.VALIDITY_WINDOW}</option>
-                </select>
+                </Select>
               </div>
 
-              <div className="flex gap-2 sm:col-span-2">
-                <Button type="submit" disabled={busy}>{busy ? "Saving…" : prefill ? "Save changes" : "Add plan"}</Button>
-                <Button type="button" variant="ghost" disabled={busy} onClick={() => { setShowNew(false); setPrefill(null); }}>Cancel</Button>
-              </div>
             </form>
           </DialogBody>
+          <DialogFooter>
+            <Button type="button" variant="ghost" disabled={busy} onClick={() => { setShowNew(false); setPrefill(null); }}>Cancel</Button>
+            <Button type="submit" form="service-plan-form" disabled={busy}>{busy ? "Saving…" : prefill ? "Save changes" : "Add plan"}</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </PageShell>

@@ -13,7 +13,7 @@ import { useEffect, useState } from "react";
 import { api, ListResp, Whoami, WalledGardenRule } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { Card, CardBody } from "@/components/ui/card";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
+import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input, Field, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -21,8 +21,10 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { DialogForm, ConfirmDialog } from "@/components/ui/dialog";
 import { SkeletonRows } from "@/components/ui/misc";
-import { Plus, Shield } from "lucide-react";
+import { Plus, Shield, Globe } from "lucide-react";
 import { canWrite } from "@/lib/roles";
+import { ReadOnlyNotice } from "@/components/ui/patterns";
+import { useToast } from "@/components/ui/toast";
 import { formatRelative, errMsg } from "@/lib/utils";
 
 function kindTone(kind: string): "info" | "default" | "warn" {
@@ -40,8 +42,9 @@ const KIND_LABELS: Record<string, string> = {
 };
 
 export default function WalledGardenPage() {
+  const toast = useToast();
   const [rows, setRows] = useState<WalledGardenRule[] | null>(null);
-  const [roles, setRoles] = useState<string[]>([]);
+  const [roles, setRoles] = useState<string[] | null>(null);
   const [err, setErr] = useState<unknown>(null);
   const [showNew, setShowNew] = useState(false);
   const [deleting, setDeleting] = useState<WalledGardenRule | null>(null);
@@ -56,7 +59,7 @@ export default function WalledGardenPage() {
   const [ports, setPorts] = useState("");
   const [description, setDescription] = useState("");
 
-  const writable = canWrite("walled-garden", roles);
+  const writable = roles !== null && canWrite("walled-garden", roles);
 
   async function load() {
     try { setRows((await api.get<ListResp<WalledGardenRule>>("/walled-garden")).data); }
@@ -64,7 +67,7 @@ export default function WalledGardenPage() {
   }
   useEffect(() => {
     load();
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => {});
+    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
   }, []);
 
   function openNew() {
@@ -87,6 +90,7 @@ export default function WalledGardenPage() {
         description: description.trim() || undefined,
       });
       setShowNew(false);
+      toast.success("Rule added", "Devices that have not signed in can reach it now.");
       await load();
     } catch (e) { setFormErr(e); }
     finally { setBusy(false); }
@@ -98,6 +102,7 @@ export default function WalledGardenPage() {
     try {
       await api.del(`/walled-garden/${deleting.id}`);
       setDeleting(null);
+      toast.success("Rule removed");
       await load();
     } catch (e) { setFormErr(e); }
     finally { setBusy(false); }
@@ -106,13 +111,15 @@ export default function WalledGardenPage() {
   return (
     <PageShell>
       <PageHeader
+        icon={<Globe />}
         eyebrow="Guest portal"
         title="Allowed sites"
         description="Addresses a guest's device may reach before it has signed in. Keep it to what the sign-in page itself needs — a captive-portal check, a payment provider, an identity provider — because everything listed here is reachable without any authentication at all."
         actions={writable && <Button onClick={openNew}><Plus /> Add rule</Button>}
       />
 
-      <ErrorBanner err={err} />
+      {roles !== null && !writable && <ReadOnlyNotice>Your role can see which sites are allowed before sign-in but not change them.</ReadOnlyNotice>}
+      <ErrorBanner err={err} className="mb-0" />
 
       <Card>
         <CardBody className="p-0">
@@ -130,7 +137,7 @@ export default function WalledGardenPage() {
               <THead>
                 <TR><TH>Type</TH><TH>Address</TH><TH>Ports</TH><TH>Why</TH><TH>Added</TH><TH /></TR>
               </THead>
-              <tbody>
+              <TBody>
                 {rows.map((r) => (
                   <TR key={r.id}>
                     <TD><Badge tone={kindTone(r.kind)}>{KIND_LABELS[r.kind] ?? r.kind}</Badge></TD>
@@ -149,7 +156,7 @@ export default function WalledGardenPage() {
                     </TD>
                   </TR>
                 ))}
-              </tbody>
+              </TBody>
             </Table>
           )}
         </CardBody>

@@ -252,7 +252,8 @@ describe("checkout grace states what is actually in force", () => {
   it("a read-only role sees the terms but cannot open the editor", async () => {
     mockGrace({ published: false, config_version: 0, effective: emergency, emergency_history: { count: 0 } });
     await renderScreen(false);
-    expect((screen.getByRole("button", { name: /Create hotel policy/i }) as HTMLButtonElement).disabled).toBe(true);
+    // The editor is not offered at all to a role the server would refuse.
+    expect(screen.queryByRole("button", { name: /Create hotel policy|Edit policy/i })).toBeNull();
     expect(screen.getByText(/can view this policy but not change it/i)).toBeTruthy();
   });
 

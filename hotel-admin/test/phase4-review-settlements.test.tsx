@@ -5,7 +5,7 @@
 // because both look like they worked.
 
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 import { ManualReviewView } from "@/components/phase4/manual-review-view";
@@ -127,8 +127,12 @@ describe("manual review", () => {
       "/financial-review/postings/p1": DETAIL });
     render(<ManualReviewView canAct={false} />);
     await userEvent.click(await screen.findByRole("button", { name: /review/i }));
-    await userEvent.selectOptions(await screen.findByLabelText(/what did you establish/i), "ESCALATE");
-    expect(screen.getByRole("button", { name: /record decision/i })).toBeDisabled();
+    // The evidence is visible; the decision form, its password field and its button are not offered at all.
+    expect(await screen.findByText("protel-fias (ACTIVE)")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/what did you establish/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/your password/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /record decision/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/can see this evidence but not record a decision/i)).toBeInTheDocument();
   });
 
   it("labels every control", async () => {
@@ -163,7 +167,7 @@ describe("settlement browser", () => {
     route({ "/financial-ops/settlements": SETTLEMENTS, "/financial-ops/settlements/s1": SETTLEMENT_DETAIL });
     render(<SettlementsView />);
     await userEvent.click(await screen.findByRole("button", { name: /open/i }));
-    expect(await screen.findByText("CAPTURED")).toBeInTheDocument();
+    expect(await screen.findByText("Captured")).toBeInTheDocument();
     for (const forbidden of [/refund/i, /chargeback/i, /reverse/i, /charge again/i]) {
       expect(screen.queryByRole("button", { name: forbidden })).not.toBeInTheDocument();
     }
@@ -176,9 +180,9 @@ describe("settlement browser", () => {
       "/financial-ops/settlements?status=MANUAL_REVIEW": { settlements: [] },
     });
     render(<SettlementsView />);
-    // the status appears in the badge AND in the filter dropdown, so target the badge specifically
-    await screen.findAllByText("SETTLED");
-    await userEvent.selectOptions(screen.getByLabelText(/^status$/i), "MANUAL_REVIEW");
+    // the status appears in the badge AND in the filter chips, so wait for either
+    await screen.findAllByText("Settled");
+    await userEvent.click(within(screen.getByRole("radiogroup", { name: /^status$/i })).getByRole("radio", { name: "Manual review" }));
     expect(await screen.findByText(/no settlements match/i)).toBeInTheDocument();
   });
 
@@ -186,7 +190,7 @@ describe("settlement browser", () => {
     route({ "/financial-ops/settlements": SETTLEMENTS, "/financial-ops/settlements/s1": SETTLEMENT_DETAIL });
     render(<SettlementsView />);
     await userEvent.click(await screen.findByRole("button", { name: /open/i }));
-    await screen.findByText("CAPTURED");
+    await screen.findByText("Captured");
     const body = document.body.textContent ?? "";
     for (const name of ["Stripe", "Adyen", "Checkout.com", "PayPal", "Braintree"]) {
       expect(body).not.toContain(name);

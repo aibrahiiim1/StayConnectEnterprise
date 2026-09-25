@@ -71,7 +71,7 @@ function Thumbnail({ html, design, name }: { html: string | null; design: Design
   }, []);
   const scale = width > 0 ? width / THUMB.w : 0.2;
   return (
-    <div ref={box} className="overflow-hidden rounded-md border bg-surface" style={{ height: THUMB.h * scale }} aria-hidden>
+    <div ref={box} className="overflow-hidden rounded-md border border-border bg-surface" style={{ height: THUMB.h * scale }} aria-hidden>
       {srcDoc
         ? <PortalFrame srcDoc={srcDoc} width={THUMB.w} height={THUMB.h} scale={scale}
             title={`Template thumbnail: ${name}`} interactive={false} />
