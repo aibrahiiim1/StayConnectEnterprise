@@ -5,7 +5,8 @@
 // cause codes never displayed raw, and no guest identity anywhere.
 
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 import { AggregateTimeView } from "@/components/phase6/aggregate-time-view";
 
@@ -36,8 +37,11 @@ describe("online-time budgets", () => {
     render(<AggregateTimeView />);
     expect(await screen.findByTestId("remaining")).toHaveTextContent("30 min");
     expect(screen.getByTestId("expiry")).not.toHaveTextContent("No end date");
-    expect(screen.getByText(/counts down only while a device is actually connected/i)).toBeInTheDocument();
-    expect(screen.getByText(/any time left at that point is lost/i)).toBeInTheDocument();
+    // The two-clocks explanation lives behind the page's lightbulb.
+    await userEvent.setup().click(screen.getByRole("button", { name: "Tips: Online-time budgets" }));
+    const tips = await screen.findByRole("dialog");
+    expect(within(tips).getByText(/counts down only while a device is actually connected/i)).toBeInTheDocument();
+    expect(within(tips).getByText(/any time left at that point is lost/i)).toBeInTheDocument();
   });
 
   it("does not show an ended budget as if it still had time", async () => {

@@ -27,6 +27,7 @@ import { CalendarClock, KeyRound, ShieldOff } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import { PageHeader, PageShell, StatCard } from "@/components/ui/page";
+import { HelpList, HelpSection } from "@/components/help";
 import { Card } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -160,15 +161,35 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
     };
   }, [rows]);
 
-  const actionable = canAct && (rows ?? []).some((r) => r.status === "ACTIVE");
-
   return (
     <PageShell>
       <PageHeader
         eyebrow="Guests"
         title="Post-stay access"
         icon={<CalendarClock />}
-        description="After checkout a guest can reconnect with a PIN for a limited time. Reset a lost PIN or end access here. A PIN belongs to one stay, never to a room: when the room is re-let, the previous PIN stops working on its own."
+        description="Reset a lost post-stay PIN, or end a guest's post-stay access."
+        help={
+          <>
+            <HelpSection title="What post-stay access is">
+              <p>
+                After checkout a guest can reconnect with a PIN for a limited time. A PIN belongs to one stay, never
+                to a room: when the room is re-let, the previous PIN stops working on its own.
+              </p>
+            </HelpSection>
+            <HelpSection title="Two different actions">
+              <HelpList items={[
+                <><strong>Reset PIN</strong> gives the guest a new PIN. They keep their post-stay access; only the secret changes. Use it when a guest lost the PIN or never received it.</>,
+                <><strong>End access</strong> ends post-stay access for that stay. It cannot be undone, and the guest gets a new post-stay PIN only after a new stay.</>,
+              ]} />
+            </HelpSection>
+            <HelpSection title="Why there is no &ldquo;show PIN&rdquo;">
+              <p>
+                The PIN itself is never stored, so it cannot be shown again. The only time a PIN appears is once,
+                right after a reset.
+              </p>
+            </HelpSection>
+          </>
+        }
       />
 
       {rolesKnown && !canAct && <ReadOnlyNotice />}
@@ -255,12 +276,6 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
         )}
       </Card>
 
-      {actionable && (
-        <p className="text-caption text-muted-foreground">
-          The PIN itself is never stored, so it cannot be shown again. A guest who lost it gets a new one with Reset PIN
-          and keeps their access.
-        </p>
-      )}
 
       {/* ------------------------------------------------------------------ details */}
       <DetailDialog

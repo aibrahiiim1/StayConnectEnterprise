@@ -19,6 +19,7 @@ import Link from "next/link";
 import { api, ListResp, Session, Whoami } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
 import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
+import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody } from "@/components/ui/card";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
 import { Badge, StatusDot } from "@/components/ui/badge";
@@ -166,7 +167,24 @@ export default function SessionsPage() {
         eyebrow="Guests"
         title="Active sessions"
         icon={<Monitor />}
-        description="Which devices are online, whose they are, and disconnect one. A session is one device; a guest may have several."
+        description="Which devices are online, and whose they are."
+        help={
+          <>
+            <HelpSection title="Sessions, devices and guests">
+              <p>
+                A session is one device; a guest may have several. A guest is counted by what the internet was
+                granted to &mdash; one room, account or voucher &mdash; so a family with four devices is one guest.
+              </p>
+            </HelpSection>
+            <HelpSection title="On this page">
+              <HelpList items={[
+                <><strong>Online now</strong> refreshes every 10 seconds; <strong>Recent</strong> also includes sessions that have ended.</>,
+                "Search by room, name, username, IP or MAC, or filter by how the guest signed in.",
+                "Open a session for its details, or disconnect a device. A disconnected guest can sign in again.",
+              ]} />
+            </HelpSection>
+          </>
+        }
         actions={
           <Segmented
             label="Which sessions"

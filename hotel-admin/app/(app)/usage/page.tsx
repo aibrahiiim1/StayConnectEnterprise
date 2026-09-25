@@ -25,6 +25,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Activity, ArrowLeft, ChevronRight, FileSearch, Search, Smartphone } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { PageHeader, PageShell } from "@/components/ui/page";
+import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,7 +33,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Meter, SkeletonRows } from "@/components/ui/misc";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { ErrorBanner } from "@/components/ui/error-banner";
 import { MetricStrip } from "@/components/ui/data";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { refreshingClass } from "@/components/ui/patterns";
@@ -149,7 +150,31 @@ export default function UsageExplorerPage() {
         eyebrow="Guests"
         title="Usage explorer"
         icon={<Activity />}
-        description="Settle a data-usage question: drill from a room or a device down to its sessions and the accounting samples behind them. Every total is the sum of recorded sessions."
+        description="Trace a room's or a device's data use down to the recorded samples."
+        help={
+          <>
+            <HelpSection title="Two ways in">
+              <HelpList items={[
+                <><strong>By room or stay</strong> &mdash; for &ldquo;Room 4202 says they never got the internet they paid for.&rdquo; Search a room number or reservation, or leave it empty for the heaviest users.</>,
+                <><strong>By device</strong> &mdash; for &ldquo;Something on our network downloaded 40 GB last night.&rdquo; Paste the device&rsquo;s MAC address.</>,
+              ]} />
+            </HelpSection>
+            <HelpSection title="Every figure is traceable">
+              <p>
+                Every total is the sum of recorded sessions. A session is one period of connected access; show its
+                evidence to see the recorded samples it was measured from, with their own total next to the
+                session&rsquo;s. Nothing here is estimated.
+              </p>
+              <p>Only stays that were given internet access appear. A stay with no access has nothing to measure.</p>
+            </HelpSection>
+            <HelpSection title="A device is not a person">
+              <p>
+                A device address identifies a piece of equipment. The device view shows what it used and which stays
+                it was connected under &mdash; it does not tell you who was holding it.
+              </p>
+            </HelpSection>
+          </>
+        }
       />
 
       <ErrorBanner err={err} />
@@ -181,7 +206,7 @@ export default function UsageExplorerPage() {
 
               {rows === null ? <SkeletonRows rows={4} cols={5} /> : rows.length === 0 ? (
                 <EmptyState icon={<Activity />} title={q.trim() ? "No stay matched" : "No usage recorded yet"}
-                  hint="Only stays that were given internet access appear here. A stay with no access has nothing to measure." />
+                  hint="Only stays that were given internet access appear here." />
               ) : (
                 <div className={cn(busy && refreshingClass)}>
                   <Table>
@@ -336,10 +361,6 @@ export default function UsageExplorerPage() {
                 </div>
                 <Button type="submit" disabled={busy || !q.trim()}>{busy ? "Looking…" : "Look up"}</Button>
               </form>
-              <Callout tone="neutral" title="A device is not a person">
-                A device address identifies a piece of equipment. This shows what the device used and which stays it
-                was connected under — it does not tell you who was holding it.
-              </Callout>
             </CardBody>
           </Card>
 
@@ -410,9 +431,7 @@ function SessionsCard({ sessions, samples, onOpenSamples }: {
       <CardHeader>
         <div className="space-y-1">
           <CardTitle>Sessions</CardTitle>
-          <CardDescription>
-            Each period of connected access. Show the evidence to see the recorded samples a total was measured from.
-          </CardDescription>
+          <CardDescription>Each period of connected access.</CardDescription>
         </div>
       </CardHeader>
       {sessions.length === 0 ? (

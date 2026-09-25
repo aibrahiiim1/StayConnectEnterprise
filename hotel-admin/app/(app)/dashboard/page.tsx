@@ -27,6 +27,7 @@ import {
   type OverviewRange, type OverviewSnapshot, OVERVIEW_RANGES, fetchOverview, fmtInt, normalizeOverview, reasonText,
 } from "@/lib/api/dashboard";
 import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
+import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge, StatusDot } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -139,6 +140,36 @@ export default function DashboardPage() {
         eyebrow={context ?? "Overview"}
         title="Overview"
         description={`Guests, traffic, sign-ins and the health of this appliance over ${rangeLong}${snap?.timezone ? `, in the appliance's local time (${snap.timezone})` : ""}.`}
+        help={
+          <>
+            <HelpSection title="Reading the overview">
+              <p>The page answers, top to bottom, the questions a shift asks:</p>
+              <HelpList items={[
+                <><strong>Does anything need me?</strong> A &ldquo;Needs attention&rdquo; list appears only when something does; otherwise one calm line.</>,
+                <><strong>How busy, how much?</strong> Guests online, sign-ins, data used and room sign-in readiness, each with its trend over the range.</>,
+                <><strong>The shape of the range.</strong> Traffic and devices connected at once.</>,
+                <><strong>Is anyone failing to get in?</strong> Sign-in outcomes, and when guests sign in.</>,
+                <><strong>Packages and the PMS</strong>, the guest networks, and the appliance itself.</>,
+              ]} />
+            </HelpSection>
+            <HelpSection title="Guests and devices">
+              <p>
+                A guest is one room, account or voucher &mdash; whatever the internet was granted to. One guest with
+                a phone and a laptop is one guest and two devices.
+              </p>
+            </HelpSection>
+            <HelpSection title="What is not drawn">
+              <p>
+                A figure that could not be measured is not drawn. An unavailable block says why in its own place,
+                nothing substitutes a zero for &ldquo;unknown&rdquo;, and what is not recorded on this appliance is
+                named as not recorded.
+              </p>
+            </HelpSection>
+            <HelpSection title="Range and refresh">
+              <p>Choose 24 hours, 7 days or 30 days. The page refreshes itself every 30 seconds.</p>
+            </HelpSection>
+          </>
+        }
         actions={
           <>
             <Segmented

@@ -27,9 +27,7 @@ export function AccessLogTab({ reveals, error }: { reveals: VoucherReveal[] | nu
       <CardHeader>
         <div className="space-y-0.5">
           <CardTitle>Who has read a code</CardTitle>
-          <CardDescription>
-            Every single-card reveal and every batch export, with the operator and their reason. Latest 200 records.
-          </CardDescription>
+          <CardDescription>Every reveal and batch export, with the operator and reason. Latest 200 records.</CardDescription>
         </div>
       </CardHeader>
       <div className="px-4 py-3">

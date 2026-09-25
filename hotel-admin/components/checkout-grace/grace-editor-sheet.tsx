@@ -8,7 +8,7 @@
 // compare it against the new policy instead of silently overwriting it.
 
 import * as React from "react";
-import { ArrowRight, Info, LogOut } from "lucide-react";
+import { ArrowRight, LogOut } from "lucide-react";
 import { api } from "@/lib/api";
 import {
   BOUNDS,
@@ -37,6 +37,7 @@ import { Field, Input, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { cn } from "@/lib/utils";
+import { HelpSection, HelpTip } from "@/components/help";
 
 const STEPS = ["Terms", "Review and publish"];
 
@@ -298,15 +299,27 @@ export function GraceEditorSheet({
                   </Field>
                 </SheetSection>
 
-                <SheetSection title="Eligibility">
-                  <Callout tone="neutral" icon={<Info />}>
-                    Every guest who still has active internet access when they check out qualifies — free, paid or
-                    included with the room. A guest with no active access at checkout gets no grace. Each stay
-                    receives grace once.
-                  </Callout>
+                <SheetSection
+                  title="Eligibility"
+                  actions={
+                    <HelpTip title="Eligibility">
+                      <HelpSection>
+                        <p>
+                          Every guest who still has active internet access when they check out qualifies — free, paid
+                          or included with the room. A guest with no active access at checkout gets no grace. Each stay
+                          receives grace once.
+                        </p>
+                        <p>
+                          &ldquo;Stay rules after checkout&rdquo; is how long after checkout the stay still counts for
+                          stay-based package rules.
+                        </p>
+                      </HelpSection>
+                    </HelpTip>
+                  }
+                >
                   <Field
                     label="Stay rules after checkout"
-                    hint="How long after checkout the stay still counts for stay-based package rules. It never removes grace from a guest who qualifies."
+                    hint="It never removes grace from a guest who qualifies."
                     error={err("eligibilityValue")}
                   >
                     <DurationInput
