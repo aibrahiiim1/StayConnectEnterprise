@@ -534,6 +534,10 @@ type successView struct {
 	DurationSeconds int
 	HumanRemaining  string
 	CommerceEnabled bool
+	// The commerce panel's own words (commerce_strings.go), for the server-rendered heading (CX) and the
+	// panel's script (CXJS). Set only when the panel is rendered.
+	CX   map[string]string
+	CXJS template.JS
 }
 
 // ---- the package choice ------------------------------------------------------------------------------------

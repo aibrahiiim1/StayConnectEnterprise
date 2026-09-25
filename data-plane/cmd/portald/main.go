@@ -343,14 +343,19 @@ func (h *handler) success(w http.ResponseWriter, r *http.Request) {
 	// Branded and in the guest's language like the sign-in page. The session id stays in the data (it is the
 	// page's own address) but is no longer printed: it meant nothing to a guest.
 	p := h.newGuestPage(r, nonce, "tl.", "dev.", "unit.")
-	_ = h.tmplSucc.Execute(w, successView{
+	v := successView{
 		guestPage:       p,
 		SessionID:       r.URL.Query().Get("s"),
 		DurationSeconds: int(dur.Seconds()),
 		HumanRemaining:  humanSpan(p.T, dur),
 		// Phase 2 DARK: the guest commerce panel renders only when the portal surface is ON.
 		CommerceEnabled: h.commerceCfg.PortalOn(),
-	})
+	}
+	if v.CommerceEnabled {
+		v.CX = commerceWords(p.Lang)
+		v.CXJS = jsData(v.CX)
+	}
+	_ = h.tmplSucc.Execute(w, v)
 }
 
 func (h *handler) logout(w http.ResponseWriter, r *http.Request) {

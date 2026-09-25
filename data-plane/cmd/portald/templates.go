@@ -1366,42 +1366,68 @@ const successHTML = guestHead + `
 
   {{if .CommerceEnabled}}
   <div id="commerce" class="section" data-commerce="on">
-    <h2>Available packages</h2>
-    <div id="cx-list">Loading…</div>
+    <h2 dir="auto">{{index .CX "cx.title"}}</h2>
+    <div id="cx-list" aria-busy="true">{{index .CX "cx.loading"}}</div>
     <div id="cx-quote" hidden></div>
-    <div id="cx-note"></div>
+    <div id="cx-note" role="status" aria-live="polite"></div>
   </div>
   <script nonce="{{.Nonce}}">
   (function(){
+    // The panel's words, in the guest's language with English underneath (commerce_strings.go). Portal-only:
+    // this table is not part of the dictionary a hotel overrides.
+    var CX = {{.CXJS}};
+    function cx(k){ return CX[k] || k; }
     var list = document.getElementById('cx-list');
     var quoteBox = document.getElementById('cx-quote');
     var note = document.getElementById('cx-note');
     var busy = false;
-    function fmtBytes(n){ if(!n) return '∞'; var u=['B','KB','MB','GB','TB']; var i=0; while(n>=1024&&i<u.length-1){n/=1024;i++;} return n.toFixed(n<10&&i>0?1:0)+u[i]; }
-    function fmtDur(s){ if(!s) return '∞'; var h=Math.floor(s/3600),m=Math.floor((s%3600)/60); return h>0?(h+'h'+(m?(' '+m+'m'):'')):(m+'m'); }
-    function unavailable(msg){ note.className='cx-err'; note.textContent = msg||'This option is unavailable right now.'; }
+    function num(n){ return String(n); }
+    function fmtBytes(n){
+      if(!n) return cx('cx.unlimited');
+      var u=['cx.b','cx.kb','cx.mb','cx.gb','cx.tb']; var i=0;
+      while(n>=1024&&i<u.length-1){n/=1024;i++;}
+      return fill(cx(u[i]), 'n', n.toFixed(n<10&&i>0?1:0));
+    }
+    function fmtDur(s){
+      if(!s) return cx('cx.unlimited');
+      var h=Math.floor(s/3600), m=Math.floor((s%3600)/60), out=[];
+      if(h>0) out.push(fill(t('unit.h'), 'n', h));
+      if(m>0 || h===0) out.push(fill(t('unit.min'), 'n', m));
+      return out.join(' ');
+    }
+    // An end-mode CODE is never shown: each known code has its words, and one this page does not know reads
+    // as the hotel's own arrangement.
+    function endWords(code){ var k = 'cx.end.' + String(code || 'MANUAL_END'); return CX[k] || cx('cx.end.other'); }
+    function devices(d){ return fill(cx('cx.devices'), 'n', num(d.max_concurrent_devices||1)); }
+    function unavailable(msg){ note.className='cx-err'; note.textContent = msg||cx('cx.unavailable'); }
     function clearNote(){ note.className=''; note.textContent=''; }
     function loadPackages(){
       clearNote();
       fetch('/api/commerce/packages', {headers:{'Accept':'application/json'}}).then(function(r){
-        if(!r.ok){ list.textContent=''; unavailable(); return null; }
+        if(!r.ok){ list.textContent=''; list.removeAttribute('aria-busy'); unavailable(); return null; }
         return r.json();
       }).then(function(data){
         if(!data){ return; }
+        list.removeAttribute('aria-busy');
         var pkgs = (data.packages||[]);
-        if(pkgs.length===0){ list.textContent='No packages are available for you right now.'; return; }
+        if(pkgs.length===0){ list.textContent=cx('cx.none'); return; }
         list.innerHTML='';
         pkgs.forEach(function(p){
           var d = p.display||{};
           var el = document.createElement('div'); el.className='pkg';
-          var speed = (d.down_kbps? (Math.round(d.down_kbps/1000)+' Mbps down'):'')+(d.up_kbps? (' / '+Math.round(d.up_kbps/1000)+' up'):'');
-          el.innerHTML = '<h3></h3><div class="meta"></div>';
-          el.querySelector('h3').textContent = d.name || 'Package';
-          el.querySelector('.meta').textContent =
-            (speed? (speed+' · '):'') +
-            'Data: '+fmtBytes(d.data_quota_bytes)+' · Time: '+fmtDur(d.time_quota_seconds)+
-            ' · Devices: '+(d.max_concurrent_devices||1)+' · Ends: '+(d.end_mode||'MANUAL_END');
-          var btn = document.createElement('button'); btn.textContent='Select'; btn.className='btn btn--sm';
+          var speed = (d.down_kbps? fill(cx('cx.down'), 'n', Math.round(d.down_kbps/1000)):'')+
+                      (d.up_kbps? (' / '+fill(cx('cx.up'), 'n', Math.round(d.up_kbps/1000))):'');
+          // The name is the hotel's, in whatever script it was written: isolated, but aligned with the page.
+          el.innerHTML = '<h3><bdi></bdi></h3><div class="meta"></div>';
+          el.querySelector('bdi').textContent = d.name || cx('cx.default');
+          el.querySelector('.meta').textContent = [
+            speed,
+            fill(cx('cx.data'), 'v', fmtBytes(d.data_quota_bytes)),
+            fill(cx('cx.time'), 'v', fmtDur(d.time_quota_seconds)),
+            devices(d),
+            fill(cx('cx.ends'), 'v', endWords(d.end_mode)),
+          ].filter(Boolean).join(' · ');
+          var btn = document.createElement('button'); btn.type='button'; btn.textContent=cx('cx.select'); btn.className='btn btn--sm';
           btn.addEventListener('click', function(){ requestQuote(p.package_id, btn); });
           el.appendChild(btn);
           list.appendChild(el);
@@ -1422,14 +1448,22 @@ const successHTML = guestHead + `
       var d = q.display||{};
       quoteBox.hidden=false;
       quoteBox.innerHTML =
-        '<div class="pkg"><h3>Confirm your package</h3>'+
+        '<div class="pkg"><h3></h3>'+
         '<div class="meta"></div>'+
         '<div class="meta"></div>'+
-        '<button id="cx-confirm" class="btn btn--sm">Confirm</button></div>';
+        '<button type="button" id="cx-confirm" class="btn btn--sm"></button></div>';
+      quoteBox.querySelector('h3').textContent = cx('cx.confirm.title');
       var metas = quoteBox.querySelectorAll('.meta');
-      metas[0].textContent = (d.name||'Package')+' — free · Devices: '+(d.max_concurrent_devices||1)+' · Ends: '+(d.end_mode||'MANUAL_END');
-      metas[1].textContent = 'Offer expires: '+ (q.expires_at||'');
+      metas[0].textContent = (d.name||cx('cx.default'))+' — '+cx('cx.free')+' · '+devices(d)+' · '+
+        fill(cx('cx.ends'), 'v', endWords(d.end_mode));
+      // The offer's expiry, in the device's own clock and the page's language; nothing if it is not a time.
+      var ts = Date.parse(q.expires_at || ''), when = '';
+      if(!isNaN(ts)){
+        try { when = new Date(ts).toLocaleString(document.documentElement.lang || undefined); } catch (e) { when = new Date(ts).toLocaleString(); }
+      }
+      if(when) metas[1].textContent = fill(cx('cx.expires'), 'date', when); else metas[1].hidden = true;
       var cbtn = document.getElementById('cx-confirm');
+      cbtn.textContent = cx('cx.confirm');
       cbtn.addEventListener('click', function(){ confirmQuote(q.quote_id, cbtn); });
       list.hidden = true;
     }
@@ -1439,8 +1473,10 @@ const successHTML = guestHead + `
         .then(function(r){ return r.ok? r.json() : null; })
         .then(function(res){
           busy=false;
-          if(!res || !res.entitlement_id){ cbtn.disabled=false; unavailable('That offer expired or is no longer available.'); return; }
-          quoteBox.innerHTML = '<div class="pkg"><h3>Package active</h3><div class="meta">Your package is now active. Enjoy your connection.</div></div>';
+          if(!res || !res.entitlement_id){ cbtn.disabled=false; unavailable(cx('cx.expired')); return; }
+          quoteBox.innerHTML = '<div class="pkg"><h3></h3><div class="meta"></div></div>';
+          quoteBox.querySelector('h3').textContent = cx('cx.active.title');
+          quoteBox.querySelector('.meta').textContent = cx('cx.active');
         }).catch(function(){ busy=false; cbtn.disabled=false; unavailable(); });
     }
     loadPackages();

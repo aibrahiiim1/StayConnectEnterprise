@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/portaldesign"
 )
 
@@ -133,5 +134,13 @@ func TestRenderPortalShots(t *testing.T) {
 		w = httptest.NewRecorder()
 		sh.renderPackages(w, req("/packages", lang), pkgs)
 		write("hotelcss-packages-"+lang+".html", w.Body.String())
+
+		// The online page with the (dark) commerce panel switched on.
+		ch := designHandler(t, shotsDesign("classic"))
+		ch.tmplSucc = mustParse(t, "succ", successHTML)
+		ch.commerceCfg = iamv2.CommerceConfig{MasterEnabled: true, PortalEnabled: true}
+		w = httptest.NewRecorder()
+		ch.routes().ServeHTTP(w, req("/success?s=abc&t=8100", lang))
+		write("commerce-success-"+lang+".html", w.Body.String())
 	}
 }

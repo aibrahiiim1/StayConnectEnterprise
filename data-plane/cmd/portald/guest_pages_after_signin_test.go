@@ -19,6 +19,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/portaldesign"
 )
 
@@ -338,6 +339,75 @@ func TestNoHotelCSSMeansNoHotelSheet(t *testing.T) {
 	}
 	if got := hotelSheet(map[string]any{"custom_css": "a{color:red}</style><script>x</script>"}); got != "" {
 		t.Errorf("a sheet that could close its element was served: %q", got)
+	}
+}
+
+// THE COMMERCE PANEL'S WORDS: every key, non-empty, in every shipped language; none of them in the dictionary a
+// hotel overrides (so neither counted against the cap nor offered in Hotel Admin); and a page in Arabic that
+// carries them in Arabic.
+func TestCommercePanelIsTranslatedInEveryShippedLanguage(t *testing.T) {
+	en := commerceStrings["en"]
+	for _, l := range portalLanguages {
+		words := commerceStrings[l.Code]
+		for _, k := range commerceKeys {
+			if strings.TrimSpace(words[k]) == "" {
+				t.Errorf("%s: commerce key %s is missing or empty", l.Code, k)
+			}
+		}
+		if len(words) != len(commerceKeys) {
+			t.Errorf("%s has %d commerce strings, want exactly the %d keys the panel reads", l.Code, len(words), len(commerceKeys))
+		}
+		if l.Code != "en" {
+			same := 0
+			for _, k := range commerceKeys {
+				if words[k] == en[k] {
+					same++
+				}
+			}
+			if same > len(commerceKeys)/4 {
+				t.Errorf("%s repeats the English for %d of %d commerce strings", l.Code, same, len(commerceKeys))
+			}
+		}
+	}
+	for _, k := range commerceKeys {
+		if _, ok := builtinStrings["en"][k]; ok {
+			t.Errorf("%s is in the hotel-overridable dictionary; the commerce table is portal-only", k)
+		}
+	}
+	// The English the browser tests read.
+	for k, want := range map[string]string{"cx.select": "Select", "cx.confirm": "Confirm", "cx.devices": "Devices: {n}", "cx.active.title": "Package active"} {
+		if en[k] != want {
+			t.Errorf("%s reads %q, the guest-portal e2e spec expects %q", k, en[k], want)
+		}
+	}
+
+	h := designHandler(t, map[string]any{})
+	h.tmplSucc = mustParse(t, "succ", successHTML)
+	h.commerceCfg = iamv2.CommerceConfig{MasterEnabled: true, PortalEnabled: true}
+	for _, lang := range []string{"ar", "en"} {
+		r := httptest.NewRequest(http.MethodGet, "/success?s=a&t=60", nil)
+		r.RemoteAddr = "10.77.0.42:51000"
+		r.Header.Set("Accept-Language", lang)
+		w := httptest.NewRecorder()
+		h.routes().ServeHTTP(w, r)
+		page := w.Body.String()
+		words := commerceWords(lang)
+		if !strings.Contains(page, `id="commerce"`) || !strings.Contains(page, words["cx.title"]) || !strings.Contains(page, words["cx.loading"]) {
+			t.Errorf("%s: the panel heading is not in the guest's language", lang)
+		}
+		// The script's table is this language's, not English's.
+		if !strings.Contains(page, `"cx.select":"`+words["cx.select"]+`"`) || !strings.Contains(page, `"cx.end.MANUAL_END":"`+words["cx.end.MANUAL_END"]+`"`) {
+			t.Errorf("%s: the panel script does not carry this language's words", lang)
+		}
+		if lang == "ar" && (!strings.Contains(page, `dir="rtl"`) || strings.Contains(page, ">Available packages<")) {
+			t.Error("the Arabic panel is not right to left, or its heading is English")
+		}
+		// No English string and no raw code is left in the panel's script.
+		for _, raw := range []string{"'Select'", "'Confirm'", "Devices: '", "Ends: '", "end_mode||'MANUAL_END'", "Package active<", "Offer expires: '"} {
+			if strings.Contains(page, raw) {
+				t.Errorf("%s: the panel still hard-codes %q", lang, raw)
+			}
+		}
 	}
 }
 
