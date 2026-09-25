@@ -131,7 +131,7 @@ func TestAdvancedFieldsAreExactlyTheMarkupFields(t *testing.T) {
 
 func TestForGuestsServesOnlyWhatIsSafe(t *testing.T) {
 	stored := map[string]any{
-		"hotel_name":       "Coral Sea",
+		"hotel_name":       "Semantics Demo Hotel",
 		"brand_color":      "red; background:url(//evil)",
 		"logo_url":         "javascript:alert(1)",
 		"background_url":   "/assets/bg.jpg",
@@ -143,7 +143,7 @@ func TestForGuestsServesOnlyWhatIsSafe(t *testing.T) {
 		"draft_secret":     "never served",
 	}
 	g := ForGuests(stored)
-	if g["hotel_name"] != "Coral Sea" || g["background_url"] != "/assets/bg.jpg" || g["template_id"] != "split" {
+	if g["hotel_name"] != "Semantics Demo Hotel" || g["background_url"] != "/assets/bg.jpg" || g["template_id"] != "split" {
 		t.Errorf("valid fields were not served: %v", g)
 	}
 	for _, k := range []string{"brand_color", "logo_url", "terms_url", "draft_secret"} {

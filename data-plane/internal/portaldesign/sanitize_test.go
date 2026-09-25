@@ -116,7 +116,7 @@ func TestHTMLKeepsWhatAHotelActuallyWrites(t *testing.T) {
 		`<section class="amenities"><h2>Around the resort</h2><ul><li>Pool <em>08:00–20:00</em></li><li>Spa</li></ul></section>`,
 		`<table class="hours"><thead><tr><th scope="col">Venue</th><th>Hours</th></tr></thead><tbody><tr><td>Pool</td><td colspan="2">08:00–20:00</td></tr></tbody></table>`,
 		`<figure><img src="/assets/0a1b2c.png" alt="Pool" width="320" height="200"><figcaption>Our pool</figcaption></figure>`,
-		`<a href="https://coralsea.example/terms" target="_blank">Terms</a>`,
+		`<a href="https://semantics-demo.example/terms" target="_blank">Terms</a>`,
 		`<a href="/assets/menu.pdf">Menu</a> <a href="tel:+201000000">Call us</a> <a href="mailto:frontdesk@hotel.example">Email</a> <a href="#top">Top</a>`,
 		`<div role="note" aria-label="Wi-Fi help" style="padding: 12px; border-radius: 8px; background: url(/assets/tile.png)">Need help? Dial 9.</div>`,
 		`<p dir="rtl" lang="ar">مرحبا</p>`,

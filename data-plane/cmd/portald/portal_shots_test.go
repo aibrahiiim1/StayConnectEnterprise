@@ -22,7 +22,7 @@ import (
 
 func shotsDesign(template string) map[string]any {
 	return map[string]any{
-		"hotel_name":       "Coral Bay Resort",
+		"hotel_name":       "Semantics Demo Hotel",
 		"welcome_text":     "Welcome to paradise. Connect in seconds and enjoy your stay.",
 		"help_text":        "Need a hand? Dial 9 from your room or visit the front desk, open 24 hours.",
 		"terms_url":        "/assets/terms.html",
