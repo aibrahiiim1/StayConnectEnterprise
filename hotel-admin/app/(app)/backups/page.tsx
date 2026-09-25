@@ -25,6 +25,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { Skeleton, SkeletonRows } from "@/components/ui/misc";
 import { ConsequenceList, ReadOnlyNotice, SettingField } from "@/components/ui/patterns";
+import { HelpList, HelpSection } from "@/components/help";
 import { useToast } from "@/components/ui/toast";
 import { canWrite } from "@/lib/roles";
 import { cn, errMsg, formatDate } from "@/lib/utils";
@@ -119,7 +120,40 @@ export default function BackupsPage() {
         icon={<Archive />}
         eyebrow="System"
         title="Backups"
-        description="A complete copy of this property’s data, taken nightly and on demand. Verify a backup to prove it can be restored."
+        description="A complete copy of this property’s data, taken nightly and on demand."
+        help={
+          <>
+            <HelpSection title="Back up, verify, download, restore">
+              <HelpList
+                items={[
+                  <><strong>Back up now</strong> writes a complete copy of this property&rsquo;s data to the appliance. It takes a moment and guests are not affected. A nightly job also takes one.</>,
+                  <><strong>Verify</strong> proves a backup can actually be loaded back. Only a verified backup can be restored.</>,
+                  <><strong>Download</strong> keeps a copy off the appliance. Every role that can open this page can download.</>,
+                  <><strong>Restore</strong> replaces the current data with the backup. It asks for the backup&rsquo;s name typed out and your password.</>,
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="How a restore protects you">
+              <p>
+                The appliance takes a fresh safety copy first, loads the backup into a separate database, swaps the two
+                while keeping the current one, checks the result and puts the original back if the check fails. The
+                outcome is recorded on the appliance, so it is shown here even if this page disconnects while the
+                services restart.
+              </p>
+            </HelpSection>
+            <HelpSection title="Storage & retention">
+              <p>
+                The nightly sweep keeps the disk from filling up; the retention values decide how far back you can
+                recover. Each value has a unit, a default and an allowed range, and changing them is recorded against
+                your account.
+              </p>
+              <p>
+                The sweep never removes the current or previous release, the newest database backup, identity,
+                certificates and trust material, or anything an operator pinned.
+              </p>
+            </HelpSection>
+          </>
+        }
         actions={writable && <Button onClick={openBackup}><Archive /> Back up now</Button>}
       />
 
@@ -620,10 +654,9 @@ function StorageAndRetention({ writable }: { writable: boolean }) {
 
               <p className="text-caption text-muted-foreground">
                 {String(ret.retained ?? 0)} artefacts retained, {String(ret.protected ?? 0)} protected and never
-                deleted (identity, certificates and trust material), {String(ret.pinned ?? 0)} pinned by an
-                operator. The sweep never removes the current or previous release, the newest database backup,
-                or anything pinned — whatever these numbers say.
+                deleted, {String(ret.pinned ?? 0)} pinned by an operator.
               </p>
+
             </>
           )}
         </div>

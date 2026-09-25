@@ -15,6 +15,7 @@ import { PageShell, PageHeader } from "@/components/ui/page";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ApplianceSetupSection } from "./setup-section";
 import { LicenseSection } from "./license-section";
+import { HelpList, HelpSection } from "@/components/help";
 
 type Section = "setup" | "license";
 
@@ -34,7 +35,52 @@ export default function ApplianceAndLicensePage() {
         icon={<ServerCog />}
         eyebrow="System"
         title="Appliance & licence"
-        description="Whether this appliance is activated and connected to OneGate Central, and what its licence allows."
+        description="Activation, the connection to OneGate Central, and what the licence allows."
+        help={
+          <>
+            <HelpSection title="Appliance setup">
+              <p>
+                Activation brings this appliance online in OneGate Central. Choose <strong>Online</strong> (the
+                default, nothing to type) or <strong>Offline</strong> (activate with a file). Claiming, assignment and
+                certificates then happen on their own; the page follows along every few seconds.
+              </p>
+              <p>
+                <strong>Advanced / recovery</strong> holds the enrollment token and the detailed onboarding checks for
+                support. Secrets — the enrollment token, private keys, channel credentials — are never displayed.
+              </p>
+            </HelpSection>
+            <HelpSection title="What the licence limits">
+              <HelpList
+                items={[
+                  "The number of concurrent online guests across all guest networks.",
+                  "The validity window, and the grace period after it ends.",
+                  "A standard licence includes every product feature; per-feature entitlements exist in the signed format for future editions.",
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="When the licence is not in good standing">
+              <p>
+                New guest sign-ins are refused; guests already online are <strong>not</strong> dropped. DHCP, DNS, the
+                sign-in page and this admin stay available.
+              </p>
+            </HelpSection>
+            <HelpSection title="Renewing">
+              <p>
+                Semantics generates the licence file for this appliance&rsquo;s serial number and WAN MAC address. Upload
+                it on the <strong>Licence</strong> tab. The appliance checks that it is bound to this exact hardware and
+                refuses a licence older than the one installed, so a renewal can never roll you backwards.
+              </p>
+            </HelpSection>
+            <HelpSection title="Connection to Central">
+              <p>
+                Central is used for licensing only: registration, certificates, the licence and its enforcement, and the
+                signed customer/site binding. Guests are authorised by this appliance from its own data, so a Central
+                outage does not interrupt service — it only delays licence renewal. The real-time channel is
+                intentionally closed at this site; that is not a fault.
+              </p>
+            </HelpSection>
+          </>
+        }
       />
 
       <Tabs value={section} onValueChange={(v) => setSection(v as Section)}>

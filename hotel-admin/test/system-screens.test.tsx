@@ -132,7 +132,10 @@ describe("Activity", () => {
     expect(await screen.findByText("1 entry")).toBeTruthy();
 
     // Expand the row: the exact record is there, and the payload sits behind "Raw payload".
-    const row = screen.getAllByRole("button", { expanded: false })[0];
+    // (The page's Tips lightbulb is also a collapsed disclosure; the first ROW is what is wanted here.)
+    const row = screen
+      .getAllByRole("button", { expanded: false })
+      .filter((b) => !(b.getAttribute("aria-label") ?? "").startsWith("Tips"))[0];
     await userEvent.click(row);
     expect(screen.getByText("backup.downloaded")).toBeTruthy();
     const disclosure = screen.getByText("Raw payload");

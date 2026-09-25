@@ -20,6 +20,7 @@ import { Skeleton } from "@/components/ui/misc";
 import { OptionCard, Stepper } from "@/components/ui/data";
 import { CopyButton, LiveStatus, ReadOnlyNotice } from "@/components/ui/patterns";
 import { canWrite } from "@/lib/roles";
+import { HelpList, HelpSection, HelpTip } from "@/components/help";
 import { cn, errMsg } from "@/lib/utils";
 import {
   ServerCog, CheckCircle2, XCircle, Fingerprint, ShieldCheck, Radio, BadgeCheck, Network, Loader2,
@@ -358,11 +359,35 @@ export function ApplianceSetupSection() {
         <Card>
           <CardHeader>
             <div className="space-y-0.5">
-              <CardTitle>Activate this appliance</CardTitle>
-              <CardDescription>
-                Choose how this appliance reaches OneGate Central. Everything else — claiming, assignment,
-                certificates — happens on its own and is shown under Advanced / recovery.
-              </CardDescription>
+              <div className="flex items-center gap-2">
+                <CardTitle>Activate this appliance</CardTitle>
+                <HelpTip title="Activating this appliance">
+                  <HelpSection title="Online (recommended)">
+                    <p>
+                      This appliance registers itself as soon as it reaches OneGate Central. Ask your Semantics contact
+                      to open <strong>Onboarding</strong> there, find it under <em>Pending activation</em> by its serial,
+                      choose the customer, site and licence terms, and press <strong>Activate</strong> once. This page
+                      then follows along by itself.
+                    </p>
+                  </HelpSection>
+                  <HelpSection title="Offline">
+                    <HelpList
+                      items={[
+                        "Download the activation request. This appliance creates its own identity; the request contains no secret and the private key never leaves the appliance.",
+                        <>In OneGate Central, open <strong>Onboarding → Offline activation</strong>, import the request, choose the customer, site and licence terms, and generate the activation package.</>,
+                        "Upload the package here. One file carries the signed assignment, the trust material and the signed licence. It is bound to this appliance, single-use and expiring; anything else — another appliance, a replay, a tampered or older file — is refused and nothing is changed.",
+                      ]}
+                    />
+                  </HelpSection>
+                  <HelpSection title="After you choose">
+                    <p>
+                      Claiming, assignment and certificates happen on their own. The detail is under{" "}
+                      <strong>Advanced / recovery</strong>.
+                    </p>
+                  </HelpSection>
+                </HelpTip>
+              </div>
+              <CardDescription>Choose how this appliance reaches OneGate Central.</CardDescription>
             </div>
           </CardHeader>
           <CardBody className="space-y-4">
@@ -392,10 +417,7 @@ export function ApplianceSetupSection() {
               <div className="space-y-3 rounded-md border border-border bg-surface p-4">
                 <div className="text-emphasis">Nothing to do here.</div>
                 <p className="text-sm text-muted-foreground">
-                  This appliance registers itself as soon as it reaches OneGate Central. Ask your Semantics contact
-                  to open <strong>Onboarding</strong> there, find it under <em>Pending activation</em> by its
-                  serial, choose the customer, site and licence terms, and press <strong>Activate</strong> once.
-                  This page then follows along by itself.
+                  Your Semantics contact activates it in OneGate Central by this serial.
                 </p>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-label text-muted-foreground">Serial</span>
@@ -416,10 +438,7 @@ export function ApplianceSetupSection() {
               <ol className="space-y-4 rounded-md border border-border bg-surface p-4">
                 <li className="space-y-1.5">
                   <div className="text-emphasis">Step 1 — download the activation request</div>
-                  <p className="text-sm text-muted-foreground">
-                    This appliance creates its own identity and writes a request describing it. The request
-                    contains no secret: the private key stays on this appliance and never leaves it.
-                  </p>
+                  <p className="text-sm text-muted-foreground">The request contains no secret.</p>
                   {writable && (
                     <Button className="mt-1" variant="secondary" onClick={() => void downloadActivationRequest()}>
                       <Download /> Download activation request
@@ -429,16 +448,13 @@ export function ApplianceSetupSection() {
                 <li className="space-y-1.5 border-t border-border pt-4">
                   <div className="text-emphasis">Step 2 — in OneGate Central</div>
                   <p className="text-sm text-muted-foreground">
-                    Open <strong>Onboarding → Offline activation</strong>, import the request, choose the customer,
-                    site and licence terms, then generate the activation package.
+                    Import the request under <strong>Onboarding → Offline activation</strong> and generate the package.
                   </p>
                 </li>
                 <li className="space-y-1.5 border-t border-border pt-4">
                   <div className="text-emphasis">Step 3 — upload the activation package</div>
                   <p className="text-sm text-muted-foreground">
-                    One file completes activation: the signed assignment, the trust material and the signed
-                    licence. It is bound to this appliance, single-use and expiring. Anything else — another
-                    appliance, a replay, a tampered or older file — is refused and nothing is changed.
+                    One file completes activation. It is bound to this appliance, single-use and expiring.
                   </p>
                   {writable && (
                     <Field label="Activation package file" className="max-w-md pt-1">
@@ -482,17 +498,15 @@ export function ApplianceSetupSection() {
             </div>
             {complete ? (
               <p className="text-sm text-muted-foreground">
-                This appliance is activated, so renewals happen in one place: the{" "}
+                Renewals are uploaded on the{" "}
                 <Link href="/appliance?section=license" className="text-primary underline underline-offset-2">Licence</Link>{" "}
-                tab. Semantics generates the new licence file; upload it there. An older licence than the one installed
-                is refused, so a renewal can never roll you backwards.
+                tab.
               </p>
             ) : (
               <>
                 <p className="text-sm text-muted-foreground">
-                  Onboarding is not finished, so the licence half of it can still be completed here. OneGate
-                  generates the licence file in Central; upload it below. An older licence than the one installed is
-                  refused.
+                  Onboarding is not finished, so the licence file can still be uploaded here. An older licence than the
+                  one installed is refused.
                 </p>
                 {writable && (
                   <Field label="Licence file" className="max-w-md">
@@ -547,12 +561,24 @@ export function ApplianceSetupSection() {
               <Card>
                 <CardHeader>
                   <div className="space-y-0.5">
-                    <CardTitle>Enrollment token</CardTitle>
+                    <div className="flex items-center gap-2">
+                      <CardTitle>Enrollment token</CardTitle>
+                      <HelpTip title="Enrollment token">
+                        <HelpSection>
+                          <p>
+                            An appliance normally registers itself online and is activated from OneGate Central. A token
+                            is for recovery — an appliance that cannot self-register, or one being re-attached
+                            deliberately.
+                          </p>
+                          <p>
+                            It is created in Central under <strong>Appliances → Enrollment token</strong> and should be
+                            locked to this appliance&rsquo;s serial.
+                          </p>
+                        </HelpSection>
+                      </HelpTip>
+                    </div>
                     <CardDescription>
-                      <strong>Not part of normal activation.</strong> An appliance registers itself online and is
-                      activated from OneGate Central. A token is for recovery — an appliance that cannot
-                      self-register, or one being re-attached deliberately. It is created in Central under{" "}
-                      <strong>Appliances → Enrollment token</strong> and should be locked to this serial.
+                      <strong>Not part of normal activation.</strong> For recovery only.
                     </CardDescription>
                   </div>
                 </CardHeader>
@@ -717,9 +743,9 @@ export function ApplianceSetupSection() {
                 </Card>
 
                 <p className="text-caption text-muted-foreground">
-                  Every field is read live from the appliance every {POLL_SECONDS}s. Secrets (enrollment token,
-                  private keys, channel credentials) are never displayed.
+                  Read live from the appliance every {POLL_SECONDS}s.
                 </p>
+
               </div>
             )}
           </div>
