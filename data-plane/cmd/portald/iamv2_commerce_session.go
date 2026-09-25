@@ -24,7 +24,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"html/template"
 	"io"
 	"net/http"
@@ -136,7 +135,7 @@ func (h *handler) packagesPage(w http.ResponseWriter, r *http.Request) {
 		h.landing(w, r, "No internet packages are available for you right now.")
 		return
 	}
-	h.renderPackages(w, out.Packages)
+	h.renderPackages(w, r, out.Packages)
 }
 
 // acquirePackage runs quote -> confirm -> activate server-side.
@@ -218,61 +217,22 @@ func (h *handler) acquirePackage(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/success?s="+url.QueryEscape(sid), http.StatusSeeOther)
 }
 
-// renderPackages draws the selection page. Deliberately plain: the guest has no access yet, so nothing here
-// may reference an external stylesheet, font or script -- only the walled garden is reachable.
+// renderPackages draws the selection page: branded and in the guest's language, like every guest page. The
+// guest has no access yet, so nothing here references an external stylesheet, font or script.
 //
 // Every value that reaches the page goes through html/template, which escapes it. Package display text is
 // operator-authored, but it arrives here through the database and an API, and treating it as trusted markup
 // would make the package name an injection point into a page shown to every guest.
-func (h *handler) renderPackages(w http.ResponseWriter, pkgs []struct {
+func (h *handler) renderPackages(w http.ResponseWriter, r *http.Request, pkgs []struct {
 	PackageID string         `json:"package_id"`
 	Display   map[string]any `json:"display"`
 }) {
-	type row struct {
-		ID, Name, Detail string
-	}
-	rows := make([]row, 0, len(pkgs))
-	for _, p := range pkgs {
-		name, _ := p.Display["name"].(string)
-		if name == "" {
-			name = "Internet access"
-		}
-		detail := ""
-		if d, ok := p.Display["down_kbps"].(float64); ok && d > 0 {
-			detail = fmt.Sprintf("%.0f Kbps", d)
-		}
-		if t, ok := p.Display["time_quota_seconds"].(float64); ok && t > 0 {
-			if detail != "" {
-				detail += " · "
-			}
-			detail += fmt.Sprintf("%.0f minutes", t/60)
-		}
-		rows = append(rows, row{ID: p.PackageID, Name: name, Detail: detail})
-	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	// The same policy as the sign-in page. This page runs no script at all, so the nonce is simply unused.
-	setPortalCSP(w)
-	_ = packagesTmpl.Execute(w, rows)
+	w.Header().Set("Cache-Control", "no-store")
+	// The same policy as the sign-in page; the page's only scripts carry this nonce.
+	nonce := setPortalCSP(w)
+	p := h.newGuestPage(r, nonce)
+	_ = packagesTmpl.Execute(w, packagesView{guestPage: p, Packages: packageRows(p.T, pkgs)})
 }
 
-var packagesTmpl = template.Must(template.New("packages").Parse(`<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Choose your internet package</title>
-<style>
- :root { color-scheme: light dark; font-family: -apple-system, system-ui, sans-serif; }
- body { max-width: 440px; margin: 8vh auto; padding: 24px; }
- h1 { font-size: 1.4rem; margin: 0 0 8px; }
- p.sub { color: #666; margin: 0 0 20px; }
- button { display:block; width:100%; text-align:left; padding:14px 16px; margin:0 0 12px;
-          border:1px solid #ccc; border-radius:10px; background:transparent; font-size:1rem; cursor:pointer; }
- button:hover { border-color:#888; }
- .n { font-weight:600; } .d { color:#666; font-size:.9rem; }
-</style></head><body>
-<h1>Choose your package</h1>
-<p class="sub">You're signed in. Select a package to get online.</p>
-{{range .}}<form method="post" action="/packages/acquire">
-<input type="hidden" name="package_id" value="{{.ID}}">
-<button type="submit"><span class="n">{{.Name}}</span>{{if .Detail}}<br><span class="d">{{.Detail}}</span>{{end}}</button>
-</form>{{end}}
-</body></html>`))
+var packagesTmpl = template.Must(template.New("packages").Parse(compactMarkup(packagesHTML)))

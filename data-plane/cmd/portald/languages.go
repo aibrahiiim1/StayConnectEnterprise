@@ -131,7 +131,7 @@ var builtinStrings = map[string]map[string]string{
 		"poststay.hint":          "الرمز الذي تسلمته عند المغادرة",
 		"poststay.pin":           "رمز ما بعد المغادرة",
 		"sms.dest":               "رقم الهاتف",
-		"sms.hint":               "أدرج رمز الدولة، مثل +44 20 7946 0958",
+		"sms.hint":               "أدرج رمز الدولة، مثل ⁦+44 20 7946 0958⁩", // the number isolated left-to-right, or it reads backwards
 		"social.apple":           "المتابعة باستخدام Apple",
 		"social.facebook":        "المتابعة باستخدام Facebook",
 		"social.google":          "المتابعة باستخدام Google",
