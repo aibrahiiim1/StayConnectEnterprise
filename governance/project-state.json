@@ -1704,8 +1704,8 @@
     "manifest": "docs/manifests/VelonetPreLive-change-manifest.md",
     "base": "38d2ab7995661e1838fa2803c669b1d64411d0e5",
     "base_note": "Master after the merge of PR #186 -- the deployed source (T0193).",
-    "head": "38d2ab79",
-    "head_note": "Set to this lineage's record commit in the commit that follows it.",
+    "head": "86c3dfdf",
+    "head_note": "The record commit of this lineage (86c3dfdf): T0193 and the corrected current_state_facts. The deployed source is master 38d2ab79.",
     "transition": "T0193",
     "previous_delivery": "T0192",
     "note": "T0193. The Velonet front-end redesign runs on PRE-LIVE: portald and the Hotel Admin bundle were built from master 38d2ab79 and deployed on 2026-09-26, verified live. Central's console (cloud-admin) was not deployed; it is a separate target outside this authorisation."
