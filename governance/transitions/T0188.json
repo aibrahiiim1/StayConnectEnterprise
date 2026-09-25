@@ -1,0 +1,33 @@
+{
+  "transition_id": "T0188",
+  "seq": 188,
+  "timestamp": "2026-09-25T17:05:43+03:00",
+  "timestamp_derivation": "The committer date of the last CONTENT commit of this delivery (a35e7870), so the receipt cannot post-date the commit that introduces it; it is after T0187's content head (d03ea887).",
+  "record_type": "VELONET_FRONTEND_REDESIGN",
+  "authorisation": "Product-Owner mission of 2026-09-25 (Velonet UI/UX redesign handoff) and its continuation the same day, authorising a complete redesign of the Guest Portal, Hotel Admin and Central front-ends on the Velonet design system, pushing the redesign branch and creating its PR, with directly related fixes, tests, documentation, manifests and governance artifacts. It did NOT authorise deployment to the appliance or PRE-LIVE, Go-Live, or any change to product semantics, authentication, authorization, permissions, security controls, password confirmation, mandatory reasons, one-time secrets, network apply/confirm/rollback, licensing, PMS, financial behaviour or Appliance/Central responsibilities.",
+  "what_was_delivered": "The Velonet design system (design-system/tokens.css copied into both consoles by tools/sync-design-tokens.mjs, with sync and contrast tests; Inter self-hosted; a ten-role type scale; 7/9/12px radius scale; restrained elevation; light, dark and system themes; the shared product patterns: one-time reveal, pending network-change banner with countdown, live status, read-only notice, not-available block, consequence list, setting field, typed-confirmation dialog). Hotel Admin: every screen of the handoff on the kit, page titles equal to menu labels, native browser dialogs replaced, actions hidden from roles the server refuses, a new printed voucher card. Central: rebuilt with themes, designed dialogs for every native prompt, a role-aware UI that mirrors ctrlapi's real authorization (lib/permissions.ts cites each rule), and a licensing-only dashboard. Guest portal: every page and state redesigned on one token set across six layouts, branded and translated after sign-in in six languages with Arabic right to left, raw server codes mapped to friendly messages (room failures stay uniform), a branded Status page for navigation while the JSON contract is unchanged, hotel CSS on every page behind the same sanitiser, CSP nonce and cascade guard. Operator documentation (docs/user-guide) rewritten for the delivered consoles.",
+  "verification_repository": "Hotel Admin: tsc clean, vitest 44 files / 533 tests pass, next build passes (preflight stage 6 PASS); Playwright 170 of 171 pass, the one failure being the WebKit captive-sheet test, which cannot launch in this sandbox (no WebKit browser installed) and fails identically on the base branch. Central: npm ci on Linux, tsc clean, vitest 8 files / 113 tests pass, next build passes. data-plane: gofmt clean, go vet ./cmd/portald, go test ./cmd/portald/... and ./cmd/edged pass, full data-plane build passes; TestE2EPortalFixtures keeps the browser fixtures identical to what portald renders.",
+  "behaviour_preserved": "No endpoint, request body, authorization rule, permission, password confirmation, mandatory reason, typed confirmation, one-time secret, apply/confirm/rollback, rate limit, the fixed 2.5 s room-failure timing or JSON contract was changed. UI-only additions: a confirmation before adding a Hotel Admin operator role (same request), save disabled for out-of-range setting values the server already refuses, and failed refreshes keep the last data on screen.",
+  "deployment_provenance": "NONE. Not deployed to PRE-LIVE or any appliance, by the mission's explicit instruction.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. The previous delivery (T0187) is the Hotel Admin overhaul this redesign is built on."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. THIS delivery changes front-end presentation only; it changed no phase, applied no migration, deployed nothing, performed no cutover and enabled no capability. PRE-LIVE remains PRE-LIVE."
+  },
+  "state_note": "The redesign depends on the unmerged Hotel Admin overhaul delivery (T0187): its PR targets delivery/hotel-admin-ux-overhaul and is held out of the nightly merge. When that delivery reaches master, the PR is retargeted to master and current_delivery.base is moved to the merge commit in a new commit, without rewriting history.",
+  "base": "91b308d4860aefe3dfe6d5aea3cde2442b0c1349",
+  "base_note": "The head of delivery/hotel-admin-ux-overhaul (T0187 packs and manifest), which this delivery branch was created from and its PR targets.",
+  "head": "a35e7870",
+  "head_note": "The last CONTENT commit of this delivery: the design-system decisions on record.",
+  "previous_delivery": "T0187",
+  "go_live": "NOT authorised. Guest activation remains DEFERRED by D41."
+}

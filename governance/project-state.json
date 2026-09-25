@@ -1203,7 +1203,7 @@
     "nightly_authoritative_validation": "The four authoritative gates no longer run on pull_request. One COMPLETE FRESH run of all four (governance, phase3-full-software-gate, phase4-financial-core-gate, phase5-post-stay-transfer-gate) is dispatched at 03:10 Africa/Cairo against the EXACT head of the single active delivery candidate, and an all-green result on that exact head is merged automatically through the protected path.\n\nTHE SCHEDULE IS ONE LINE: `- cron: '10 3 * * *'` with `timezone: \"Africa/Cairo\"`. GitHub Actions accepts an IANA timezone beside cron, so Egypt's DST -- UTC+2 in winter, UTC+3 from late April to late October -- is the platform's arithmetic and no offset is written down anywhere. What this repository still checks is that the platform HONOURED it: if the timezone were dropped or mistyped the same cron would mean 03:10 UTC, which is 05:10 or 06:10 in Cairo, and nothing else would notice because the gates would still run and the merge would still happen. Drift beyond 105 minutes refuses -- a late scheduler drifts by minutes, a UTC misreading by 120 (winter) or 180 (summer) -- and a manual workflow_dispatch is exempt because manual means any hour.\n\nNothing was removed, shortened or made unable to fail. The nightly run DECLINES evidence reuse outright, so no daytime, pull-request, master or previous-night verdict can substitute for it, and a commit pushed during the run makes the pass stale -- the next night judges the new head. Zero candidates is a quiet no-op; two or more is a hard refusal. Fail-closed behaviour is proven by 71 assertions in tools/tests/nightly_delivery/run_negative.py, which the governance gate runs and the orchestrator re-runs before deciding anything.",
     "session_start_check": "EVERY agent session runs `python tools/nightly-status.py` FIRST. Exit 1 / UNRESOLVED_FAILURE means the latest nightly authoritative validation failed and has not been superseded: diagnose and repair that on the same delivery branch before starting new work. UNKNOWN (exit 2) is not the same as clear. Nothing else notifies anyone -- the push that caused the failure succeeded and the evidence sits in a workflow run nobody has opened."
   },
-  "latest_transition_id": "T0187",
+  "latest_transition_id": "T0188",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1698,17 +1698,17 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "HOTEL_ADMIN_UX_OVERHAUL_WITH_SAFE_CATALOGUE_DELETION",
-    "decision": "Standing PRE-LIVE deployment decision (CLAUDE.md 0F), the Product-Owner mission of 2026-09-24, and its continuation of 2026-09-25 authorising migration 0091 and the removal of two PRE-LIVE scaffold records",
-    "decision_note": "One Product-Owner mission on one branch and PR #184. The continuation explicitly authorised a controlled schema change (safe deletion of unused packages and plans) and the removal of exactly two scaffold records; no other product, architecture, trust or topology decision was taken inside it.",
-    "manifest": "docs/manifests/PostClosure-change-manifest.md",
-    "base": "31f0dfe1b6622031a3c3f7c9c53c607b4fc80b18",
-    "base_note": "The master merge commit of PR #182, which the delivery branch was created from.",
-    "head": "d03ea887",
-    "head_note": "The last CONTENT commit of this delivery: the factory-clean baseline regenerated through migration 0091 after the nightly Phase 3 gate refused db36200f.",
-    "transition": "T0187",
-    "previous_delivery": "T0186",
-    "note": "T0187. The Hotel Admin overhaul (T0186) plus safe real deletion. Migration 0091 lets an Internet package or Service plan be deleted permanently only when nothing has ever used it: the database counts every reference and refuses on any, without cascade, and the runtime role holds EXECUTE on the kernels and DELETE on no catalogue table. 0091 is applied to PRE-LIVE (schema_migrations head 0091). The never-configured PMS connection and the p6-validation package -- both scaffold from an earlier validation script -- are removed from PRE-LIVE, with every dependent row proven scaffold and backed up first. Protel is unchanged and remains the only PMS interface."
+    "kind": "VELONET_FRONTEND_REDESIGN",
+    "decision": "Product-Owner mission of 2026-09-25 (Velonet UI/UX redesign) and its continuation of the same day authorising push, PR, directly related fixes, tests, documentation, manifests and governance; no deployment and no Go-Live.",
+    "decision_note": "One Product-Owner mission on one branch, delivery/velonet-frontend-redesign, stacked on the unmerged Hotel Admin overhaul (T0187). Front-end presentation only: no product, architecture, trust, permission or topology decision was taken inside it.",
+    "manifest": "docs/manifests/VelonetRedesign-change-manifest.md",
+    "base": "91b308d4860aefe3dfe6d5aea3cde2442b0c1349",
+    "base_note": "The head of delivery/hotel-admin-ux-overhaul, which this branch was created from and its PR targets. Moved to the master merge commit, in a new commit, once that delivery reaches master.",
+    "head": "a35e7870",
+    "head_note": "The last CONTENT commit of this delivery: the design-system decisions on record.",
+    "transition": "T0188",
+    "previous_delivery": "T0187",
+    "note": "T0188. The Velonet front-end redesign of the Guest Portal, Hotel Admin and Central on one design system (design-system/). Presentation only; nothing deployed."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
