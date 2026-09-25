@@ -1203,7 +1203,7 @@
     "nightly_authoritative_validation": "The four authoritative gates no longer run on pull_request. One COMPLETE FRESH run of all four (governance, phase3-full-software-gate, phase4-financial-core-gate, phase5-post-stay-transfer-gate) is dispatched at 03:10 Africa/Cairo against the EXACT head of the single active delivery candidate, and an all-green result on that exact head is merged automatically through the protected path.\n\nTHE SCHEDULE IS ONE LINE: `- cron: '10 3 * * *'` with `timezone: \"Africa/Cairo\"`. GitHub Actions accepts an IANA timezone beside cron, so Egypt's DST -- UTC+2 in winter, UTC+3 from late April to late October -- is the platform's arithmetic and no offset is written down anywhere. What this repository still checks is that the platform HONOURED it: if the timezone were dropped or mistyped the same cron would mean 03:10 UTC, which is 05:10 or 06:10 in Cairo, and nothing else would notice because the gates would still run and the merge would still happen. Drift beyond 105 minutes refuses -- a late scheduler drifts by minutes, a UTC misreading by 120 (winter) or 180 (summer) -- and a manual workflow_dispatch is exempt because manual means any hour.\n\nNothing was removed, shortened or made unable to fail. The nightly run DECLINES evidence reuse outright, so no daytime, pull-request, master or previous-night verdict can substitute for it, and a commit pushed during the run makes the pass stale -- the next night judges the new head. Zero candidates is a quiet no-op; two or more is a hard refusal. Fail-closed behaviour is proven by 71 assertions in tools/tests/nightly_delivery/run_negative.py, which the governance gate runs and the orchestrator re-runs before deciding anything.",
     "session_start_check": "EVERY agent session runs `python tools/nightly-status.py` FIRST. Exit 1 / UNRESOLVED_FAILURE means the latest nightly authoritative validation failed and has not been superseded: diagnose and repair that on the same delivery branch before starting new work. UNKNOWN (exit 2) is not the same as clear. Nothing else notifies anyone -- the push that caused the failure succeeded and the evidence sits in a workflow run nobody has opened."
   },
-  "latest_transition_id": "T0190",
+  "latest_transition_id": "T0192",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1698,17 +1698,17 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "VELONET_FRONTEND_REDESIGN",
-    "decision": "Product-Owner mission of 2026-09-25 (Velonet UI/UX redesign) and its continuation of the same day authorising push, PR, directly related fixes, tests, documentation, manifests and governance; no deployment and no Go-Live.",
-    "decision_note": "One Product-Owner mission on one branch, delivery/velonet-frontend-redesign, built on the Hotel Admin overhaul (T0187), which reached master as 017b1b5a (T0189). Front-end presentation only: no product, architecture, trust, permission or topology decision was taken inside it.",
-    "manifest": "docs/manifests/VelonetRedesign-change-manifest.md",
-    "base": "017b1b5a645b10285f68657162abf5c622b97c21",
-    "base_note": "The master merge commit of PR #184 (the Hotel Admin overhaul, T0187), taken into this branch by an ordinary merge commit and recorded by T0189. The branch was created from delivery/hotel-admin-ux-overhaul at 91b308d4, whose tree master carries unchanged.",
-    "head": "a23210e5",
-    "head_note": "The last CONTENT commit of this delivery: the review correction recorded by T0190 (the Central dashboard asks for no customer-scoped data when the role has no customer). The redesign content itself ended at a35e7870 (T0188).",
-    "transition": "T0188",
-    "previous_delivery": "T0187",
-    "note": "T0188. The Velonet front-end redesign of the Guest Portal, Hotel Admin and Central on one design system (design-system/). Presentation only; nothing deployed."
+    "kind": "VELONET_DELIVERY_CLOSED",
+    "decision": "Product-Owner mission of 2026-09-25 to complete PR #184 and PR #185 and carry the delivery to administrative closure; no deployment and no Go-Live.",
+    "decision_note": "Closure lineage for the Velonet front-end redesign (T0188-T0190), merged to master as 15730cd4 at tested head f3561a2b. Governance only: no product, architecture, trust, permission or topology decision was taken inside it.",
+    "manifest": "docs/manifests/VelonetClosure-change-manifest.md",
+    "base": "15730cd466120263d8927476257e83970d74c7bb",
+    "base_note": "Master after the merge of PR #185 (T0191).",
+    "head": "afbd2639",
+    "head_note": "The CONTENT commit of this closure lineage, recorded by T0192: the edge-migrate selftest case 7m waits until its lock is actually held (a CI fixture race, test only). The closed redesign's last content commit is a23210e5 (T0190).",
+    "transition": "T0191",
+    "previous_delivery": "T0190",
+    "note": "T0191. The Velonet front-end redesign is merged to master (PR #185 as 15730cd4, tested head f3561a2b, all four gates fresh green) after the Hotel Admin overhaul (PR #184 as 017b1b5a). Nothing deployed; PRE-LIVE does not run the redesign."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
@@ -1810,7 +1810,8 @@
     }
   ],
   "observations": [
-    "DATA-HYGIENE OBSERVATION, NON-BLOCKING, NOTHING MODIFIED (2026-09-09). The dataset carries additional IN_HOUSE Stay rows for room 4202 (an 11-night 2026-08-28 to 2026-09-08 and an earlier 11-night) and separate rows for room 14202, whose number merely contains '4202'. The room-4202 acceptance was unambiguous: only the current 4-night stay holds an Entitlement. No Stay was edited, deleted or reclassified, and none should be on the strength of this note; it is recorded so the rows are not mistaken later for a double grant."
+    "DATA-HYGIENE OBSERVATION, NON-BLOCKING, NOTHING MODIFIED (2026-09-09). The dataset carries additional IN_HOUSE Stay rows for room 4202 (an 11-night 2026-08-28 to 2026-09-08 and an earlier 11-night) and separate rows for room 14202, whose number merely contains '4202'. The room-4202 acceptance was unambiguous: only the current 4-night stay holds an Entitlement. No Stay was edited, deleted or reclassified, and none should be on the strength of this note; it is recorded so the rows are not mistaken later for a double grant.",
+    "UI-DRIFT OBSERVATION, NON-BLOCKING, NOTHING MODIFIED (2026-09-25, T0191). edged grants hotel_it_manager WRITE on commercial-packages (data-plane/cmd/edged/auth.go), but hotel-admin/lib/roles.ts omits that key for the role, so Hotel Admin hides Internet packages and Service plans from the IT manager although the server would accept the role's requests. This is a UI table that disagrees with the server, not a Product-Owner question; the server is authoritative. Left unchanged by the closure, which changes no behaviour."
   ],
   "central_relationship": {
     "_note": "STANDING PRODUCT-OWNER DECISION, 2026-09-13: Central serves this appliance for LICENSING ONLY. It supersedes the earlier authorisation to activate operational telemetry. The telemetry link was built, completed and verified (87,742 records delivered, both sides reconciled, zero orphaned) and was then DISABLED BY DECISION. It is not a defect, and reconnecting telemetry must never be proposed as a repair.",
@@ -1841,6 +1842,26 @@
       "when_it_returns": "If and when the Product Owner declares functional completeness and authorizes guest activation, the three options above are still the shape of the choice and should be re-read from T0170.",
       "reconfirmed_at_T0179": "MEASURED AGAIN, and this entry was already right. The Central-outage drill needed a guest sign-in, and it reproduced exactly what is described above: /v1/sessions/authorize validates the voucher and returns an auth context and a device -- with the iam_v2.auth_contexts and iam_v2.devices rows to show it, and with Central unreachable -- while /v1/sessions/activate needs an entitlement_id from the commerce grant, which is dark, so no session is created and the voucher correctly stays UNUSED. Recorded here rather than raised as a new finding, because it is not one: the decision already covers it and the behaviour is what the flags say. What the drill DID newly find is unrelated to this question and is a real defect, now fixed: the deployed scd was built without -tags stayconnect_production, so the iam_v2 guest authority lock never engaged and the VOUCHER method was OFF -- a guest got IAMV2_UNAVAILABLE rather than the honest refusal this entry describes."
     },
-    "device_self_service_acceptance": "RESOLVED 2026-09-23 by explicit Product-Owner authorisation, and then CLOSED by the run it authorised. The question was how to accept Guest Device Self-Service end to end when the only thing in Phase 6 that can enable it refused to run on the only appliance that exists -- its compiled allow-list named the RETIRED development appliance, and that refusal was deliberately not overridable. The answer was neither of the two options recorded at T0179 (authorise PRE-LIVE, or provide a replacement development appliance) taken loosely: PRE-LIVE was admitted through a STRONGER check than the one it replaced -- a compiled host -> (appliance_id, serial) map confirmed against the signed assignment and the site database, proven to fail closed five ways -- and the run was scope-bounded to the authorised capability alone. Result: pass=36 fail=0, capability returned to default OFF, appliance verified DARK. See T0180."
+    "device_self_service_acceptance": "RESOLVED 2026-09-23 by explicit Product-Owner authorisation, and then CLOSED by the run it authorised. The question was how to accept Guest Device Self-Service end to end when the only thing in Phase 6 that can enable it refused to run on the only appliance that exists -- its compiled allow-list named the RETIRED development appliance, and that refusal was deliberately not overridable. The answer was neither of the two options recorded at T0179 (authorise PRE-LIVE, or provide a replacement development appliance) taken loosely: PRE-LIVE was admitted through a STRONGER check than the one it replaced -- a compiled host -> (appliance_id, serial) map confirmed against the signed assignment and the site database, proven to fail closed five ways -- and the run was scope-bounded to the authorised capability alone. Result: pass=36 fail=0, capability returned to default OFF, appliance verified DARK. See T0180.",
+    "role_permission_scope": {
+      "status": "OPEN. Not authorized, not declined. Non-blocking: nothing depends on it.",
+      "question": "Should the servers narrow two role scopes to what the role descriptions say, or should the descriptions be changed to what the servers grant?",
+      "facts": [
+        "Central: ctrlapi applies only the customer-scope check to Sites, Appliances and Customer rename, so every customer role -- including viewer -- can create, edit, archive and delete Sites, create and delete Appliances, and rename its own Customer. The handoff describes viewer as read-only. Recorded in cloud-admin/lib/permissions.ts; the UI mirrors the server and does not hide those controls.",
+        "Hotel Admin: edged grants voucher_operator guest-accounts write and sessions, reports, license and diagnostics read in addition to vouchers, while docs/ROLE_AND_SCOPE_MATRIX.md describes the role as vouchers only with no other read access. The UI mirrors the server."
+      ],
+      "options": "Narrow the server grants (an authorization change), or keep them and correct the role descriptions (a documentation change).",
+      "raised_at": "T0191, from the Velonet redesign (T0188), which mirrored server authorization in the UI and changed none of it."
+    },
+    "step_up_consistency": {
+      "status": "OPEN. Not authorized, not declined. Non-blocking: nothing depends on it.",
+      "question": "Should password confirmation be required for the actions that currently do not ask for it, so that step-up follows one rule per risk level?",
+      "facts": [
+        "Networking: WAN / LAN apply and rollback require the operator's password on the server (edged resources_sysnetwork.go); guest-network validate, apply, confirm, rollback, disable and delete do not (resources_network.go has no step-up).",
+        "Vouchers: revealing or exporting codes, cancelling a card and retiring a code key require the password; issuing a batch does not."
+      ],
+      "options": "Add step-up to the unconfirmed actions (a security-control change), or record the current split as intended.",
+      "raised_at": "T0191, from the Velonet redesign (T0188), which preserved every existing password confirmation and added none."
+    }
   }
 }

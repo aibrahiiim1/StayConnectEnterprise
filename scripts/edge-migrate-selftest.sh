@@ -534,7 +534,19 @@ ledger_add 0098_selftest_fails
 # to outlast the pre-lock phase, not merely overlap it.
 docker exec -d "$C" psql -U postgres -d "$DB" -c \
   "SELECT pg_advisory_lock($LKEY7M); SELECT pg_sleep(25); DELETE FROM public.schema_migrations WHERE version='0096_selftest_predecessor'; SELECT pg_advisory_unlock($LKEY7M);" >/dev/null 2>&1
-sleep 1
+# WAIT UNTIL THE LOCK IS ACTUALLY HELD, NOT FOR A FIXED SECOND. `docker exec -d` returns before its psql has
+# connected, and on a loaded CI runner that took longer than the one second this used to sleep: the runner then
+# took the ledger lock FIRST, committed before the holder could delete the predecessor, and the case reported
+# the guard as broken (rc=0 ledger=1) when the fixture had simply lost the race. Poll pg_locks for the advisory
+# lock this case holds (its 64-bit key is split into classid/objid) and fail loudly if it never appears.
+held7m=0
+for _ in $(seq 1 100); do
+  if [ "$(Q "SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND granted AND ((classid::bigint << 32) | objid::bigint) = ($LKEY7M)")" -ge 1 ] 2>/dev/null; then
+    held7m=1; break
+  fi
+  sleep 0.2
+done
+[ "$held7m" = "1" ] || no "7m fixture: the ledger lock holder never acquired its lock, so this case could not run"
 
 out="$(EDGE_PSQL="$PSQL" bash "$RUN" --apply-role edge_apply --only 0099_selftest_noop \
   --expect-db "$DB" --target-kind live-site --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION \

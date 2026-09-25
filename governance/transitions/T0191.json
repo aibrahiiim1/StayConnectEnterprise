@@ -1,0 +1,53 @@
+{
+  "transition_id": "T0191",
+  "seq": 191,
+  "timestamp": "2026-09-25T21:52:51+03:00",
+  "timestamp_derivation": "Written after GitHub merged PR #185 (15730cd4, committer date 2026-09-25T18:18:10Z) and before the commit that introduces this receipt, so it neither pre-dates the merge it records nor post-dates its own commit.",
+  "record_type": "VELONET_REDESIGN_MERGED_TO_MASTER_AND_CLOSED",
+  "authorisation": "Product-Owner mission of 2026-09-25 to complete PR #184 and PR #185 immediately, and its continuation of the same day to carry that delivery to administrative closure: record the final merge and master provenance, classify the two reported product questions without changing behaviour, clean up merged branches, and carry the synchronisation through the protected PR path. It did NOT authorise deployment, Go-Live, or any change to product semantics, permissions, authentication, security, PMS, financial behaviour, networking or architecture.",
+  "merge": {
+    "pull_request": 185,
+    "merge_commit": "15730cd466120263d8927476257e83970d74c7bb",
+    "merged_at": "2026-09-25T18:18:10Z",
+    "parents": [
+      "017b1b5a645b10285f68657162abf5c622b97c21",
+      "f3561a2bc75a374e0db53a5b657a0f8c12d8c9c3"
+    ],
+    "tested_head": "f3561a2bc75a374e0db53a5b657a0f8c12d8c9c3",
+    "merge_introduced_no_content": "The tree of master at 15730cd4 is identical to the tree of the tested head f3561a2b.",
+    "how": "The existing nightly-authoritative-validation workflow, started by workflow_dispatch with ignore_schedule_check (which changes only WHEN, never WHAT). It re-ran each gate's own pull_request run at the exact head; all four returned on attempt 2 green (governance, phase3-full-software-gate, phase4-financial-core-gate, phase5-post-stay-transfer-gate), no review thread was unresolved, mergeable_state was clean, and the orchestrator merged. Verdict MERGED."
+  },
+  "delivery_chain": {
+    "pr_184": "Hotel Admin overhaul (T0187): tested head 91b308d4, all four gates fresh green, merged as 017b1b5a (T0189).",
+    "pr_185": "Velonet front-end redesign (T0188, review correction T0190): an earlier authoritative run at a31af2a3 found all four gates green and refused on one unresolved automated review thread; after the correction the tested head f3561a2b passed all four fresh and was merged as 15730cd4 (this receipt).",
+    "final_master": "15730cd466120263d8927476257e83970d74c7bb"
+  },
+  "deployment_provenance": "NONE. Neither delivery was deployed to PRE-LIVE or any appliance. PRE-LIVE does not run the Velonet redesign; deploying it is not part of this mission.",
+  "product_questions_classified": {
+    "role_permission_scope": "OPEN Product-Owner decision, non-blocking; recorded in open_product_owner_decisions.role_permission_scope. No behaviour changed.",
+    "step_up_consistency": "OPEN Product-Owner decision, non-blocking; recorded in open_product_owner_decisions.step_up_consistency. No behaviour changed.",
+    "hotel_it_manager_packages_ui_drift": "OBSERVATION, not a decision: a UI table disagrees with the server; recorded in observations. Not fixed here, because this closure changes no behaviour."
+  },
+  "cleanup": "The merged branches delivery/hotel-admin-ux-overhaul (tip 91b308d4) and delivery/velonet-frontend-redesign (tip f3561a2b) were verified to be contained in master, had no open pull request, and were deleted on GitHub; their local copies were deleted too.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. THIS transition records a merge to master and moves a delivery base; it changed no phase, applied no migration, deployed nothing, performed no cutover and enabled no capability. PRE-LIVE remains PRE-LIVE."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. THIS transition records a merge to master and closes a delivery; it changed no phase, applied no migration, deployed nothing, performed no cutover and enabled no capability. PRE-LIVE remains PRE-LIVE."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Phase 7 remains ACCEPTED_AND_CLOSED under D41, Guest activation remains DEFERRED by D41, Go-Live remains unauthorised.",
+  "base": "15730cd466120263d8927476257e83970d74c7bb",
+  "base_note": "Master after the merge of PR #185; this closure lineage is built on it.",
+  "head": "15730cd4",
+  "head_note": "No content commit: this lineage is governance only. The closed delivery's last content commit is a23210e5 (T0190).",
+  "previous_delivery": "T0190",
+  "go_live": "NOT authorised. Guest activation remains DEFERRED by D41."
+}
