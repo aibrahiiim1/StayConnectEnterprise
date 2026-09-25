@@ -20,18 +20,20 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, ListResp, StayEvent } from "@/lib/api";
 import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
 import { Card, CardBody } from "@/components/ui/card";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
+import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
+import { Select } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { Explain } from "@/components/ui/tooltip";
 import { MonoId, SkeletonRows } from "@/components/ui/misc";
 import { DetailDialog } from "@/components/ui/dialog";
 import { DList } from "@/components/ui/misc";
-import { formatRelative, formatDate } from "@/lib/utils";
-import { Send, Search, RefreshCw } from "lucide-react";
+import { SearchInput } from "@/components/ui/data";
+import { LiveStatus, refreshingClass } from "@/components/ui/patterns";
+import { cn, formatRelative, formatDate } from "@/lib/utils";
+import { Inbox, Send } from "lucide-react";
 
 // THE STATUS, IN CONSEQUENCES. Each one says what it means for the guest list, because that is what an operator
 // is deciding about. The raw token stays available on the detail panel.
@@ -100,6 +102,7 @@ export default function StayEventsPage() {
   const [query, setQuery] = useState("");
   const [detail, setDetail] = useState<StayEvent | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
 
   const load = useCallback(async (manual = false) => {
     if (manual) setRefreshing(true);
@@ -108,9 +111,11 @@ export default function StayEventsPage() {
       const r = await api.get<ListResp<StayEvent>>("/pms-events" + q);
       setRows(r.data ?? []);
       setErr(null);
+      setUpdatedAt(Date.now());
     } catch (e) {
       setErr(e);
-      setRows([]);
+      // A failed refresh keeps the rows the operator was reading; only a first load has nothing to keep.
+      setRows((prev) => prev ?? []);
     } finally {
       if (manual) setRefreshing(false);
     }
@@ -147,11 +152,10 @@ export default function StayEventsPage() {
       <PageHeader
         eyebrow="Property management system"
         title="PMS activity"
-        description="Every message the property management system has sent this appliance — check-ins, check-outs and stay changes — and whether the guest list was updated from it."
+        icon={<Inbox />}
+        description="Every message the PMS has sent this appliance — check-ins, check-outs and stay changes — and whether the guest list was updated from it. Answers “has the Wi-Fi seen that check-in yet?”"
         actions={
-          <Button variant="secondary" size="sm" onClick={() => void load(true)} disabled={refreshing}>
-            <RefreshCw className={refreshing ? "animate-spin" : undefined} /> Refresh
-          </Button>
+          <LiveStatus updatedAt={updatedAt} refreshing={refreshing} error={!!err && !!rows?.length} onRefresh={() => void load(true)} />
         }
       />
 
@@ -193,34 +197,27 @@ export default function StayEventsPage() {
         <Callout tone="warning" title={`${counts.review} message${counts.review === 1 ? "" : "s"} need a decision`}>
           These could not be applied without guessing, so the appliance stopped. Until they are resolved the guest
           list may not reflect what the front desk has done.{" "}
-          <button
-            type="button"
-            className="font-medium underline underline-offset-2"
-            onClick={() => setStatus("MANUAL_REVIEW")}
-          >
+          <Button variant="link" size="xs" className="h-auto p-0 font-medium" onClick={() => setStatus("MANUAL_REVIEW")}>
             Show only those
-          </button>
+          </Button>
         </Callout>
       )}
 
       <Card>
         <CardBody className="border-b border-border py-3">
           <Toolbar>
-            <div className="relative w-full max-w-xs">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Room, guest or reservation…"
-                aria-label="Search PMS activity"
-                className="pl-8"
-              />
-            </div>
+            <SearchInput
+              value={query}
+              onChange={setQuery}
+              placeholder="Room, guest or reservation…"
+              label="Search PMS activity"
+              className="sm:max-w-xs"
+            />
             <Select
               value={status}
               onChange={(e) => setStatus(e.target.value)}
               aria-label="Filter by what happened to the message"
-              className="w-64"
+              className="w-full sm:w-64"
             >
               {FILTERS.map((f) => (
                 <option key={f.value || "all"} value={f.value}>{f.label}</option>
@@ -228,7 +225,7 @@ export default function StayEventsPage() {
             </Select>
           </Toolbar>
         </CardBody>
-        <CardBody className="p-0">
+        <CardBody className={cn("p-0", refreshing && refreshingClass)}>
           {filtered === null ? (
             <SkeletonRows rows={6} cols={5} />
           ) : filtered.length === 0 ? (
@@ -254,12 +251,12 @@ export default function StayEventsPage() {
                   <TH>About</TH>
                   <TH>What happened</TH>
                   <TH>Result</TH>
-                  <TH>PMS time</TH>
-                  <TH>Received</TH>
-                  <TH />
+                  <TH className="hidden lg:table-cell">PMS time</TH>
+                  <TH className="hidden md:table-cell">Received</TH>
+                  <TH><span className="sr-only">Details</span></TH>
                 </TR>
               </THead>
-              <tbody>
+              <TBody>
                 {filtered.map((e) => {
                   const st = STATUS_WORDS[e.processing_status] ?? {
                     label: e.processing_status.replace(/_/g, " ").toLowerCase(),
@@ -301,17 +298,17 @@ export default function StayEventsPage() {
                           </div>
                         )}
                       </TD>
-                      <TD className="text-sm text-muted-foreground">
+                      <TD className="hidden text-sm text-muted-foreground lg:table-cell" title={e.pms_timestamp_utc ? formatDate(e.pms_timestamp_utc) : undefined}>
                         {e.pms_timestamp_utc ? formatRelative(e.pms_timestamp_utc) : "—"}
                       </TD>
-                      <TD className="text-sm text-muted-foreground">{formatRelative(e.received_at)}</TD>
-                      <TD className="text-right">
+                      <TD className="hidden text-sm text-muted-foreground md:table-cell" title={formatDate(e.received_at)}>{formatRelative(e.received_at)}</TD>
+                      <TD className="text-end">
                         <Button size="sm" variant="ghost" onClick={() => setDetail(e)}>Details</Button>
                       </TD>
                     </TR>
                   );
                 })}
-              </tbody>
+              </TBody>
             </Table>
           )}
         </CardBody>
@@ -352,11 +349,7 @@ export default function StayEventsPage() {
                   span: true,
                   // Kept, and kept here rather than in the table: this is the string to quote when raising a
                   // message with the PMS vendor, and it is useful for nothing else.
-                  value: (
-                    <span className="break-all font-mono text-xs text-muted-foreground">
-                      {detail.external_event_identity}
-                    </span>
-                  ),
+                  value: <MonoId value={detail.external_event_identity} head={24} title="PMS message id" />,
                 },
                 { label: "Event id", value: <MonoId value={detail.id} title="Event" /> },
               ]}

@@ -26,15 +26,15 @@ import Link from "next/link";
 import { api, ListResp, PmsResolution } from "@/lib/api";
 import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
+import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { SplitBar } from "@/components/ui/chart";
 import { MonoId, SkeletonRows, Meter } from "@/components/ui/misc";
-import { formatRelative } from "@/lib/utils";
-import { ShieldCheck, RefreshCw } from "lucide-react";
+import { LiveStatus, refreshingClass } from "@/components/ui/patterns";
+import { cn, formatDate, formatRelative } from "@/lib/utils";
+import { ShieldCheck } from "lucide-react";
 
 // EVERY OUTCOME, IN WORDS, WITH THE ACTION IT IMPLIES.
 //
@@ -113,6 +113,7 @@ export default function PMSResolutionsPage() {
   const [rows, setRows] = useState<PmsResolution[] | null>(null);
   const [err, setErr] = useState<unknown>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
 
   const load = useCallback(async (manual = false) => {
     if (manual) setRefreshing(true);
@@ -120,9 +121,10 @@ export default function PMSResolutionsPage() {
       const r = await api.get<ListResp<PmsResolution>>("/pms-resolutions");
       setRows(r.data ?? []);
       setErr(null);
+      setUpdatedAt(Date.now());
     } catch (e) {
       setErr(e);
-      setRows([]);
+      setRows((prev) => prev ?? []);
     } finally {
       if (manual) setRefreshing(false);
     }
@@ -176,11 +178,10 @@ export default function PMSResolutionsPage() {
       <PageHeader
         eyebrow="Property management system"
         title="Guest sign-in checks"
-        description="Every recent attempt to verify a guest against the property management system, and what the appliance concluded. This is where to look when guests say they cannot get online with their room number."
+        icon={<ShieldCheck />}
+        description="Recent room sign-in checks against the PMS and why they were refused. Where to look when guests say they cannot get online with their room number. Deliberately names no guest or room."
         actions={
-          <Button variant="secondary" size="sm" onClick={() => void load(true)} disabled={refreshing}>
-            <RefreshCw className={refreshing ? "animate-spin" : undefined} /> Refresh
-          </Button>
+          <LiveStatus updatedAt={updatedAt} refreshing={refreshing} error={!!err && !!rows?.length} onRefresh={() => void load(true)} />
         }
       />
 
@@ -304,7 +305,7 @@ export default function PMSResolutionsPage() {
         </div>
       )}
 
-      <Card>
+      <Card className={cn("overflow-hidden", refreshing && refreshingClass)}>
         <CardHeader>
           <CardTitle>Recent attempts</CardTitle>
           <span className="text-xs text-muted-foreground">Newest first · up to 200</span>
@@ -339,12 +340,12 @@ export default function PMSResolutionsPage() {
                   <TH>Result</TH>
                 </TR>
               </THead>
-              <tbody>
+              <TBody>
                 {rows.map((r) => {
                   const o = outcome(r.outcome_code);
                   return (
                     <TR key={r.id}>
-                      <TD className="whitespace-nowrap text-sm text-muted-foreground">
+                      <TD className="whitespace-nowrap text-sm text-muted-foreground" title={formatDate(r.resolved_at)}>
                         {formatRelative(r.resolved_at)}
                       </TD>
                       <TD>
@@ -365,7 +366,7 @@ export default function PMSResolutionsPage() {
                     </TR>
                   );
                 })}
-              </tbody>
+              </TBody>
             </Table>
           )}
         </CardBody>

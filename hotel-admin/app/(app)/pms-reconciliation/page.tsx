@@ -28,20 +28,22 @@
 // anything. Every case says which evidence it is waiting for.
 
 import { useCallback, useEffect, useState } from "react";
-import { ClipboardCheck, DoorOpen, CalendarClock, RefreshCw, Users } from "lucide-react";
+import { ClipboardCheck, DoorOpen, CalendarClock, Users } from "lucide-react";
 import {
   api, ReconciliationCase, ReconciliationState, ReconciliationSummary,
   MultiOccupancyRoom, StayPastDeparture, Whoami,
 } from "@/lib/api";
-import { formatDate } from "@/lib/utils";
-import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
+import { cn, formatDate } from "@/lib/utils";
+import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
 import { Card, CardBody } from "@/components/ui/card";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
+import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner, Callout } from "@/components/ui/error-banner";
 import { SkeletonRows } from "@/components/ui/misc";
+import { FilterChips } from "@/components/ui/data";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { LiveStatus, refreshingClass } from "@/components/ui/patterns";
 
 // STATE_WORDS is the vocabulary. Each entry says what the state means and, for the ones that cannot be
 // acted on, WHAT EVIDENCE IS MISSING — because "we can't do anything" without a reason is indistinguishable
@@ -107,9 +109,13 @@ export default function PMSReconciliationPage() {
   const [tab, setTab] = useState<"cases" | "rooms" | "past">("cases");
   const [filter, setFilter] = useState<ReconciliationState | "">("");
   const [err, setErr] = useState<unknown>(null);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
+  // Roles are read, and deliberately used for nothing: this page offers no action to any role.
 
   const load = useCallback(async () => {
+    setRefreshing(true);
     try {
       const q = filter ? `?state=${encodeURIComponent(filter)}` : "";
       const [s, c, r, p] = await Promise.all([
@@ -123,9 +129,13 @@ export default function PMSReconciliationPage() {
       setRooms(r.rooms ?? []);
       setStays(p.stays ?? []);
       setErr(null);
+      setUpdatedAt(Date.now());
     } catch (e) {
       setErr(e);
-      setCases([]);
+      // Keep the last answer under the error rather than blanking it.
+      setCases((prev) => prev ?? []);
+    } finally {
+      setRefreshing(false);
     }
   }, [filter]);
 
@@ -139,8 +149,13 @@ export default function PMSReconciliationPage() {
   return (
     <PageShell>
       <PageHeader
-        title="PMS reconciliation"
-        description="Departures the appliance received but could not match to exactly one stay."
+        eyebrow="Property management system"
+        title="Unresolved departures"
+        icon={<ClipboardCheck />}
+        description="Departures the appliance received but could not match to exactly one stay. Read-only: the PMS resolves these, not this screen."
+        actions={
+          <LiveStatus updatedAt={updatedAt} refreshing={refreshing} error={!!err && cases !== null} onRefresh={() => void load()} />
+        }
       />
 
       <ErrorBanner err={err} />
@@ -177,46 +192,33 @@ export default function PMSReconciliationPage() {
         room today. A case it cannot answer stays on this list and says which evidence is missing.
       </Callout>
 
-      <Toolbar>
-        <Button variant={tab === "cases" ? "primary" : "ghost"} size="sm" onClick={() => setTab("cases")}>
-          <ClipboardCheck className="mr-1 h-4 w-4" /> Unresolved departures
-        </Button>
-        <Button variant={tab === "rooms" ? "primary" : "ghost"} size="sm" onClick={() => setTab("rooms")}>
-          <Users className="mr-1 h-4 w-4" /> Rooms with several stays ({rooms.length})
-        </Button>
-        <Button variant={tab === "past" ? "primary" : "ghost"} size="sm" onClick={() => setTab("past")}>
-          <CalendarClock className="mr-1 h-4 w-4" /> Past their departure date ({stays.length})
-        </Button>
-        <Button variant="ghost" size="sm" onClick={() => void load()}>
-          <RefreshCw className="mr-1 h-4 w-4" /> Refresh
-        </Button>
-      </Toolbar>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
+        <TabsList aria-label="Which view">
+          <TabsTrigger value="cases"><ClipboardCheck className="size-4" aria-hidden /> Unresolved departures</TabsTrigger>
+          <TabsTrigger value="rooms"><Users className="size-4" aria-hidden /> Rooms with several stays ({rooms.length})</TabsTrigger>
+          <TabsTrigger value="past"><CalendarClock className="size-4" aria-hidden /> Past their departure date ({stays.length})</TabsTrigger>
+        </TabsList>
 
-      {tab === "cases" && (
-        <>
+      <div className={cn("mt-5 space-y-4", refreshing && cases !== null && refreshingClass)}>
+      <TabsContent value="cases" className="space-y-4">
           {summary && summary.by_state.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                variant={filter === "" ? "secondary" : "ghost"}
-                onClick={() => setFilter("")}
-              >
-                All ({num(summary.cases)})
-              </Button>
-              {summary.by_state.map((b) => (
-                <Button
-                  key={b.state}
-                  size="sm"
-                  variant={filter === b.state ? "secondary" : "ghost"}
-                  onClick={() => setFilter(b.state)}
-                >
-                  {STATE_WORDS[b.state]?.label ?? b.state} ({num(b.cases)})
-                </Button>
-              ))}
-            </div>
+            <FilterChips
+              label="Filter by state"
+              value={filter}
+              onChange={(v) => setFilter(v as ReconciliationState | "")}
+              options={[
+                { value: "" as ReconciliationState | "", label: "All", count: summary.cases },
+                ...summary.by_state.map((b) => ({
+                  value: b.state as ReconciliationState | "",
+                  label: STATE_WORDS[b.state]?.label ?? b.state.replace(/_/g, " ").toLowerCase(),
+                  count: b.cases,
+                  tone: (STATE_WORDS[b.state]?.tone === "neutral" ? undefined : STATE_WORDS[b.state]?.tone) as "ok" | "warn" | "err" | "info" | undefined,
+                })),
+              ]}
+            />
           )}
 
-          <Card>
+          <Card className="overflow-hidden">
             {cases === null ? (
               <SkeletonRows rows={6} cols={6} />
             ) : cases.length === 0 ? (
@@ -236,7 +238,7 @@ export default function PMSReconciliationPage() {
                     <TH>State</TH>
                   </TR>
                 </THead>
-                <tbody>
+                <TBody>
                   {cases.map((c) => {
                     const w = STATE_WORDS[c.resolution_state];
                     return (
@@ -261,15 +263,14 @@ export default function PMSReconciliationPage() {
                       </TR>
                     );
                   })}
-                </tbody>
+                </TBody>
               </Table>
             )}
           </Card>
-        </>
-      )}
+      </TabsContent>
 
-      {tab === "rooms" && (
-        <Card>
+      <TabsContent value="rooms">
+        <Card className="overflow-hidden">
           <CardBody className="pb-0">
             {/* TITLED AS A FACT, NOT A FAULT. */}
             <Callout tone="neutral" title="Sharing a room is ordinary">
@@ -290,7 +291,7 @@ export default function PMSReconciliationPage() {
                   <TH>Latest planned departure</TH>
                 </TR>
               </THead>
-              <tbody>
+              <TBody>
                 {rooms.map((r) => (
                   <TR key={r.room}>
                     <TD className="font-mono text-xs">{r.room}</TD>
@@ -303,18 +304,18 @@ export default function PMSReconciliationPage() {
                     </TD>
                   </TR>
                 ))}
-              </tbody>
+              </TBody>
             </Table>
           )}
         </Card>
-      )}
+      </TabsContent>
 
-      {tab === "past" && (
-        <Card>
+      <TabsContent value="past">
+        <Card className="overflow-hidden">
           <CardBody className="pb-0">
             {/* THE SENTENCE THAT KEEPS THIS TAB HONEST. */}
             <Callout tone="neutral" title="A planned departure date is not a checkout">
-              These stays are still in house in our mirror and their planned departure date has passed.
+              These stays are still in house in this appliance&apos;s guest list and their planned departure date has passed.
               Nothing here is closed on that basis — guests extend, and a PMS can process a departure late.
               The column that decides what it means is the one beside it: whether the stay still appears on
               the PMS&apos;s own latest complete in-house list.
@@ -333,7 +334,7 @@ export default function PMSReconciliationPage() {
                   <TH>On the PMS&apos;s current list</TH>
                 </TR>
               </THead>
-              <tbody>
+              <TBody>
                 {stays.map((s) => (
                   <TR key={s.stay_id}>
                     <TD className="font-mono text-xs">{s.room || "—"}</TD>
@@ -356,18 +357,19 @@ export default function PMSReconciliationPage() {
                         </Badge>
                       ) : (
                         <Badge tone="warn" dot>
-                          Not listed — our mirror may be behind
+                          Not listed — this appliance&apos;s guest list may be behind
                         </Badge>
                       )}
                     </TD>
                   </TR>
                 ))}
-              </tbody>
+              </TBody>
             </Table>
           )}
         </Card>
-      )}
-
+      </TabsContent>
+      </div>
+      </Tabs>
     </PageShell>
   );
 }

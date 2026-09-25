@@ -17,16 +17,19 @@
 import { useCallback, useEffect, useState } from "react";
 import { ShieldCheck, Timer } from "lucide-react";
 import { api, GuestSignInRestriction } from "@/lib/api";
-import { Card, CardBody } from "@/components/ui/card";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
+import { Card } from "@/components/ui/card";
+import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
+import { Field, Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner, Callout } from "@/components/ui/error-banner";
 import { SkeletonRows } from "@/components/ui/misc";
 import { DialogForm } from "@/components/ui/dialog";
-import { formatDate } from "@/lib/utils";
+import { KeyValueGrid } from "@/components/ui/data";
+import { LiveStatus, formatCountdown, refreshingClass } from "@/components/ui/patterns";
+import { useToast } from "@/components/ui/toast";
+import { cn, formatDate } from "@/lib/utils";
 
 // countdown renders the remaining wait. The number it counts from is the SERVER's, taken at the moment of the
 // read; this only makes it tick so the screen is not stale between refreshes. When it reaches zero the row is
@@ -45,6 +48,8 @@ function remaining(r: GuestSignInRestriction, loadedAt: number, _tick: number): 
   return Math.max(0, r.remaining_seconds - elapsed);
 }
 
+const POLL_SECONDS = 15;
+
 export function ActiveRestrictions({
   canRelease,
   onShowAttempts,
@@ -52,10 +57,11 @@ export function ActiveRestrictions({
   canRelease: boolean;
   onShowAttempts: (deviceMAC: string) => void;
 }) {
+  const toast = useToast();
   const [rows, setRows] = useState<GuestSignInRestriction[] | null>(null);
   const [loadedAt, setLoadedAt] = useState(Date.now());
   const [err, setErr] = useState<unknown>(null);
-  const [note, setNote] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
 
   const [target, setTarget] = useState<GuestSignInRestriction | null>(null);
   const [reason, setReason] = useState("");
@@ -65,6 +71,7 @@ export function ActiveRestrictions({
   const tick = useTicker();
 
   const load = useCallback(async () => {
+    setRefreshing(true);
     try {
       const r = await api.get<{ restrictions: GuestSignInRestriction[] }>("/guest-signin-restrictions");
       setRows(r.restrictions ?? []);
@@ -72,7 +79,9 @@ export function ActiveRestrictions({
       setErr(null);
     } catch (e) {
       setErr(e);
-      setRows([]);
+      setRows((prev) => prev ?? []);
+    } finally {
+      setRefreshing(false);
     }
   }, []);
 
@@ -81,20 +90,19 @@ export function ActiveRestrictions({
   // A restriction is a minute long by default, so the list re-reads itself periodically. Without it an
   // operator watching the screen would see a countdown reach zero and the row stay there.
   useEffect(() => {
-    const t = setInterval(() => { void load(); }, 15_000);
+    const t = setInterval(() => { void load(); }, POLL_SECONDS * 1000);
     return () => clearInterval(t);
   }, [load]);
 
-  async function release(e: React.FormEvent) {
-    e.preventDefault();
+  async function release() {
     if (!target) return;
     setReleasing(true);
     setReleaseErr(null);
     try {
       await api.post(`/guest-signin-restrictions/${target.id}/release`, { reason: reason.trim() });
-      setNote(
-        `The wait was ended for ${target.device_mac}. That device may try to sign in again — it has not been ` +
-        `given access.`,
+      toast.success(
+        "Wait ended — the guest is not signed in",
+        `${target.device_mac} may try to sign in again. It has not been given access.`,
       );
       setTarget(null);
       setReason("");
@@ -107,9 +115,18 @@ export function ActiveRestrictions({
   }
 
   return (
-    <>
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <LiveStatus
+          updatedAt={rows === null ? null : loadedAt}
+          refreshing={refreshing && rows !== null}
+          intervalSeconds={POLL_SECONDS}
+          error={!!err && !!rows?.length}
+          onRefresh={() => void load()}
+        />
+      </div>
+
       <ErrorBanner err={err} />
-      {note && <p className="text-sm text-success-subtle-foreground" role="status">{note}</p>}
 
       <Callout tone="neutral" title="What this list is">
         Devices currently being asked to wait after too many incorrect sign-in details. A device disappears from
@@ -117,7 +134,7 @@ export function ActiveRestrictions({
         <strong>typed</strong> — it is not a statement about who is using it or where they are staying.
       </Callout>
 
-      <Card>
+      <Card className={cn("overflow-hidden", refreshing && rows !== null && refreshingClass)}>
         {rows === null ? (
           <SkeletonRows rows={4} cols={6} />
         ) : rows.length === 0 ? (
@@ -131,54 +148,58 @@ export function ActiveRestrictions({
             <THead>
               <TR>
                 <TH>Device</TH>
-                <TH>Guest network</TH>
-                <TH>Last room typed (unverified)</TH>
-                <TH>Why</TH>
-                <TH>Started</TH>
+                <TH className="hidden md:table-cell">Guest network</TH>
+                <TH className="hidden sm:table-cell">Last room typed</TH>
+                <TH className="hidden lg:table-cell">Why</TH>
+                <TH className="hidden lg:table-cell">Started</TH>
                 <TH>Time left</TH>
-                <TH />
+                <TH><span className="sr-only">Actions</span></TH>
               </TR>
             </THead>
-            <tbody>
+            <TBody>
               {rows.map((r) => {
                 const left = remaining(r, loadedAt, tick);
                 return (
                   <TR key={r.id}>
                     <TD className="font-mono text-xs">{r.device_mac}</TD>
-                    <TD className="text-sm text-muted-foreground">{r.guest_network || "—"}</TD>
-                    <TD className="text-sm">
+                    <TD className="hidden text-sm text-muted-foreground md:table-cell">{r.guest_network || "—"}</TD>
+                    <TD className="hidden text-sm sm:table-cell">
                       {r.last_submitted_room ? (
-                        <span title="What this device typed. Not a verified room.">{r.last_submitted_room}</span>
+                        <span className="inline-flex flex-wrap items-center gap-1.5" title="What this device typed. Not a verified room.">
+                          {r.last_submitted_room}
+                          <Badge tone="neutral">unverified</Badge>
+                        </span>
                       ) : "—"}
                     </TD>
-                    <TD className="text-sm">
+                    <TD className="hidden text-sm lg:table-cell">
                       {r.failure_count} incorrect sign-in{r.failure_count === 1 ? "" : "s"}
                     </TD>
-                    <TD className="whitespace-nowrap text-sm text-muted-foreground" title={formatDate(r.restricted_at)}>
+                    <TD className="hidden whitespace-nowrap text-sm text-muted-foreground lg:table-cell">
                       {formatDate(r.restricted_at)}
                     </TD>
                     <TD className="whitespace-nowrap">
                       <Badge tone={left > 0 ? "info" : "default"} dot>
-                        <Timer size={11} aria-hidden /> {left > 0 ? `${left}s` : "ending"}
+                        <Timer size={11} aria-hidden />{" "}
+                        <span className="tabular">{left > 0 ? formatCountdown(left) : "ending"}</span>
                       </Badge>
-                      <span className="ml-2 text-xs text-muted-foreground" title={formatDate(r.expires_at)}>
-                        until {formatDate(r.expires_at)}
-                      </span>
+                      <div className="mt-0.5 text-caption text-muted-foreground">until {formatDate(r.expires_at)}</div>
                     </TD>
-                    <TD className="whitespace-nowrap">
-                      <Button size="sm" variant="ghost" onClick={() => onShowAttempts(r.device_mac)}>
-                        Sign-in attempts
-                      </Button>
-                      {canRelease && (
-                        <Button size="sm" variant="secondary" onClick={() => { setTarget(r); setReason(""); setReleaseErr(null); }}>
-                          Release
+                    <TD className="whitespace-nowrap text-end">
+                      <div className="flex flex-wrap justify-end gap-1.5">
+                        <Button size="sm" variant="ghost" onClick={() => onShowAttempts(r.device_mac)}>
+                          Sign-in attempts
                         </Button>
-                      )}
+                        {canRelease && (
+                          <Button size="sm" variant="secondary" onClick={() => { setTarget(r); setReason(""); setReleaseErr(null); }}>
+                            Release
+                          </Button>
+                        )}
+                      </div>
                     </TD>
                   </TR>
                 );
               })}
-            </tbody>
+            </TBody>
           </Table>
         )}
       </Card>
@@ -188,6 +209,7 @@ export function ActiveRestrictions({
         onOpenChange={(v) => { if (!v && !releasing) { setTarget(null); setReleaseErr(null); } }}
         title="Release this restriction"
         description="The device will be able to try signing in again. It is not being given access."
+        size="sm"
         submitLabel="Release"
         busy={releasing}
         busyLabel="Releasing…"
@@ -197,35 +219,34 @@ export function ActiveRestrictions({
       >
         {target && (
           <>
-            <dl className="grid grid-cols-2 gap-2 text-sm">
-              <dt className="text-muted-foreground">Device</dt>
-              <dd className="font-mono text-xs">{target.device_mac}</dd>
-              <dt className="text-muted-foreground">Guest network</dt>
-              <dd>{target.guest_network || "—"}</dd>
-              <dt className="text-muted-foreground">Last room typed</dt>
-              <dd>
-                {target.last_submitted_room || "—"}{" "}
-                <span className="text-xs text-muted-foreground">(unverified — what was typed)</span>
-              </dd>
-              <dt className="text-muted-foreground">Wait ends</dt>
-              <dd>{formatDate(target.expires_at)}</dd>
-            </dl>
-            <div className="space-y-1">
-              <label htmlFor="release-reason" className="block text-sm font-medium">
-                Reason <span className="font-normal text-muted-foreground">(recorded with your name)</span>
-              </label>
+            <KeyValueGrid
+              items={[
+                { label: "Device", value: <span className="font-mono text-xs">{target.device_mac}</span> },
+                { label: "Guest network", value: target.guest_network || "—" },
+                {
+                  label: "Last room typed",
+                  value: (
+                    <>
+                      {target.last_submitted_room || "—"}{" "}
+                      <span className="text-caption text-muted-foreground">(unverified — what was typed)</span>
+                    </>
+                  ),
+                },
+                { label: "Wait ends", value: formatDate(target.expires_at) },
+              ]}
+            />
+            <Field
+              label="Reason"
+              required
+              hint="Recorded with your name. At least 3 characters. Who released the restriction, which device, when and why are all recorded."
+            >
               <Input
-                id="release-reason"
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
                 maxLength={200}
                 placeholder="e.g. guest at the desk, identity confirmed from their passport"
-                aria-describedby="release-reason-help"
               />
-              <p id="release-reason-help" className="text-xs text-muted-foreground">
-                At least 3 characters. Who released the restriction, which device, when and why are all recorded.
-              </p>
-            </div>
+            </Field>
             <Callout tone="warning" title="Releasing does not sign the guest in">
               The guest still has to enter details the property accepts. If they do not know them, the answer is
               the PMS record — not this button.
@@ -233,6 +254,6 @@ export function ActiveRestrictions({
           </>
         )}
       </DialogForm>
-    </>
+    </div>
   );
 }

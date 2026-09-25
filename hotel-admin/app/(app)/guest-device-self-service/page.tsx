@@ -20,6 +20,7 @@ export default function GuestDeviceSelfServicePage() {
   return (
     <GuestDeviceSelfServiceView
       canAct={roles === null ? false : canWrite("guest-device-self-service", roles)}
+      rolesKnown={roles !== null}
     />
   );
 }

@@ -21,13 +21,17 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ShieldCheck, Building2, RefreshCw, AlertTriangle, BookMarked } from "lucide-react";
+import { ShieldCheck, Building2, AlertTriangle, BookMarked, ListChecks, History } from "lucide-react";
 import { api, RosterReconciliationState, ReconcileRunRecord } from "@/lib/api";
-import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
-import { Card, CardBody } from "@/components/ui/card";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
+import { cn, formatDate } from "@/lib/utils";
+import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
+import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorBanner } from "@/components/ui/error-banner";
+import { Skeleton } from "@/components/ui/misc";
+import { LiveStatus, refreshingClass } from "@/components/ui/patterns";
 
 const REFUSAL_MEANING: Record<string, string> = {
   REFUSED_ROSTER_INCOMPLETE:
@@ -46,14 +50,20 @@ const REFUSAL_MEANING: Record<string, string> = {
     "More stays would close than one run is allowed to close. This is deliberate: a surprise stops for a person.",
 };
 
+// The run outcome in words: "completed" or the refusal, without the REFUSED_ prefix the table already implies.
+const outcomeWords = (o: string) =>
+  o === "COMPLETED" ? "will complete" : `will refuse: ${o.replace(/^REFUSED_/, "").replace(/_/g, " ").toLowerCase()}`;
+
 export default function RosterReconciliationPage() {
   const [state, setState] = useState<RosterReconciliationState | null>(null);
   const [runs, setRuns] = useState<ReconcileRunRecord[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setErr(null);
+    setBusy(true);
     try {
       const [s, r] = await Promise.all([
         api.get<RosterReconciliationState>("/pms-roster-reconciliation"),
@@ -61,15 +71,15 @@ export default function RosterReconciliationPage() {
       ]);
       setState(s);
       setRuns(r.runs ?? []);
+      setUpdatedAt(Date.now());
     } catch (e: any) {
       setErr(e?.message ?? "could not read the reconciliation state");
+    } finally {
+      setBusy(false);
     }
   }, []);
 
   useEffect(() => { void load(); }, [load]);
-
-
-
 
   // A blocker either clears itself or it does not, and the screen must not imply the wrong one.
   const operational = (state?.blockers ?? []).filter((b) => b.blocker !== "DEPARTURE_FOR_UNKNOWN_STAY");
@@ -82,8 +92,11 @@ export default function RosterReconciliationPage() {
   return (
     <PageShell>
       <PageHeader
+        eyebrow="Property management system"
         title="Roster reconciliation"
-        description="Keeping this appliance's guest list identical to the hotel's — automatically."
+        icon={<ListChecks />}
+        description="Keeping this appliance's guest list identical to the hotel's — automatically. Read-only: there is nothing here to press."
+        actions={<LiveStatus updatedAt={updatedAt} refreshing={busy} error={!!err && state !== null} onRefresh={() => void load()} />}
       />
 
       {/* WHAT THE PAGE IS FOR, in the words an operator would use. Written because the previous heading
@@ -107,7 +120,14 @@ export default function RosterReconciliationPage() {
         </CardBody>
       </Card>
 
-      {err && <Card><CardBody><p className="text-sm text-err">{err}</p></CardBody></Card>}
+      <ErrorBanner err={err} />
+
+      <div className={cn("space-y-5", busy && state !== null && refreshingClass)}>
+      {state === null && !err && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-busy="true">
+          <Skeleton className="h-28" /><Skeleton className="h-28" /><Skeleton className="h-28" /><Skeleton className="h-28" />
+        </div>
+      )}
 
       {/* TWO KINDS OF THING, AND THEY MUST NOT SHARE A FOOTER.
           The operational blockers below describe conditions that end -- a link that comes back, a feed that
@@ -116,18 +136,19 @@ export default function RosterReconciliationPage() {
           exception's own text, three lines apart, on the same card. */}
       {operational.length > 0 && (
         <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <AlertTriangle className="size-4 text-warning-subtle-foreground" aria-hidden /> Needs attention
+            </CardTitle>
+          </CardHeader>
           <CardBody className="space-y-3">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5" />
-              <h2 className="text-base font-semibold">Needs attention</h2>
-            </div>
             {operational.map((b, i) => (
               <div key={i} className="rounded-md border border-warning/30 bg-warning-subtle p-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge tone="warn">{b.blocker.replace(/_/g, " ").toLowerCase()}</Badge>
                   {b.since && (
                     <span className="text-xs text-muted-foreground">
-                      since {new Date(b.since).toLocaleString()}
+                      since {formatDate(b.since)}
                     </span>
                   )}
                   <Badge tone={b.guests_affected ? "err" : "ok"}>
@@ -146,18 +167,19 @@ export default function RosterReconciliationPage() {
 
       {historical.length > 0 && (
         <Card id="historical-exception">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <BookMarked className="size-4 text-muted-foreground" aria-hidden /> Historical exception — for information
+            </CardTitle>
+          </CardHeader>
           <CardBody className="space-y-3">
-            <div className="flex items-center gap-2">
-              <BookMarked className="h-5 w-5" />
-              <h2 className="text-base font-semibold">Historical exception — for information</h2>
-            </div>
             {historical.map((b, i) => (
-              <div key={i} className="rounded-md border p-3">
+              <div key={i} className="rounded-md border border-border p-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge tone="neutral">{b.blocker.replace(/_/g, " ").toLowerCase()}</Badge>
                   {b.since && (
                     <span className="text-xs text-muted-foreground">
-                      recorded {new Date(b.since).toLocaleString()}
+                      recorded {formatDate(b.since)}
                     </span>
                   )}
                   <Badge tone="ok">guests not affected</Badge>
@@ -165,7 +187,7 @@ export default function RosterReconciliationPage() {
                 <p className="mt-2 text-sm">{b.detail}</p>
               </div>
             ))}
-            <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+            <div className="rounded-md border border-dashed border-border-strong p-3 text-sm text-muted-foreground">
               <p className="font-medium text-foreground">What this is, and what to do about it</p>
               <p className="mt-1">
                 When this appliance was first connected it joined a hotel that was already running, and its
@@ -188,24 +210,19 @@ export default function RosterReconciliationPage() {
         </Card>
       )}
 
-      <Toolbar>
-        <Button variant="secondary" onClick={() => void load()} disabled={busy}>
-          <RefreshCw className="h-4 w-4" /> Refresh
-        </Button>
-      </Toolbar>
-
       {/* THE PROOF, BEFORE THE ACTION. */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
-          icon={<Building2 className="h-5 w-5" />}
+          icon={<Building2 />}
           label="Rooms named by this sweep"
           value={p ? `${p.rooms_enumerated} of ${p.rooms_expected}` : "—"}
+          tone={p ? (complete ? "ok" : "warn") : "default"}
           hint={complete ? "The sweep covered the property" : "Incomplete — the run will refuse"}
         />
-        <StatCard label="Occupied per the PMS" value={p?.roster_size ?? "—"} hint={`Generation ${state?.generation ?? "—"}`} />
+        <StatCard label="Occupied per the PMS" value={p?.roster_size ?? "—"} hint={`Guest-list refresh #${state?.generation ?? "—"}`} />
         <StatCard label="In house per this appliance" value={p?.mirror_in_house ?? "—"} />
         <StatCard
-          icon={<ShieldCheck className="h-5 w-5" />}
+          icon={<ShieldCheck />}
           label="Held back — PMS spoke since"
           value={p?.protected_by_newer_events ?? "—"}
           hint="Arrivals and changes after the snapshot are never closed"
@@ -217,11 +234,11 @@ export default function RosterReconciliationPage() {
           control for work that is not outstanding. This card exists so an operator can SEE the decision
           before it is taken, and see why it was refused when it is. */}
       <Card>
+        <CardHeader>
+          <CardTitle>What the next automatic run will do</CardTitle>
+          {p && <Badge tone={refused ? "warn" : "ok"} dot>{outcomeWords(p.outcome)}</Badge>}
+        </CardHeader>
         <CardBody className="space-y-4">
-          <div className="flex items-center gap-3">
-            <h2 className="text-base font-semibold">What the next automatic run will do</h2>
-            {p && <Badge tone={refused ? "warn" : "ok"}>{p.outcome.replace(/_/g, " ").toLowerCase()}</Badge>}
-          </div>
 
           {refused && p && (
             <p className="text-sm text-muted-foreground">
@@ -249,8 +266,8 @@ export default function RosterReconciliationPage() {
           every room and an empty one has no booking to name. There is no button because there is nothing
           left to answer and nothing new can arrive: the connector no longer admits those records at all. */}
       <Card>
+        <CardHeader><CardTitle>Historical roster-snapshot artifacts</CardTitle></CardHeader>
         <CardBody className="space-y-2">
-          <h2 className="text-base font-semibold">Historical roster-snapshot artifacts</h2>
           {(state?.undisposed_cases ?? 0) === 0 ? (
             <p className="text-sm text-muted-foreground">
               None outstanding. The recorded roster snapshots were answered as what they actually were — a
@@ -271,8 +288,8 @@ export default function RosterReconciliationPage() {
           They are reconnect bounds for the PMS link, which is configured on PMS connection, not here. An
           administrator changing how the link retries was being asked to find a diagnostic page to do it. */}
       <Card>
+        <CardHeader><CardTitle>Connection recovery</CardTitle></CardHeader>
         <CardBody className="space-y-1">
-          <h2 className="text-base font-semibold">Connection recovery</h2>
           <p className="text-sm text-muted-foreground">
             How the PMS link retries after a drop, and how long a problem may last before it is reported, are
             configured with the connection itself on{" "}
@@ -284,39 +301,52 @@ export default function RosterReconciliationPage() {
         </CardBody>
       </Card>
 
-      <Card>
-        <CardBody>
-          <h2 className="mb-3 text-base font-semibold">Every run, including the refusals</h2>
+      <Card className="overflow-hidden">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <History className="size-4 text-muted-foreground" aria-hidden /> Every run, including the refusals
+          </CardTitle>
+        </CardHeader>
+        {runs.length === 0 ? (
+          <EmptyState icon={<History />} title="No runs yet" hint="A run is recorded each time the PMS publishes a complete guest list." />
+        ) : (
           <Table>
             <THead>
               <TR>
-                <TH>When</TH><TH>Mode</TH><TH>Outcome</TH><TH>Rooms</TH>
-                <TH>Absent</TH><TH>Closed</TH><TH>Held back</TH><TH>By</TH><TH>Reason</TH>
+                <TH>When</TH>
+                <TH className="hidden sm:table-cell">Mode</TH>
+                <TH>Outcome</TH>
+                <TH className="hidden md:table-cell">Rooms</TH>
+                <TH className="hidden md:table-cell text-end">Absent</TH>
+                <TH className="text-end">Closed</TH>
+                <TH className="hidden lg:table-cell text-end">Held back</TH>
+                <TH className="hidden lg:table-cell">By</TH>
+                <TH className="hidden xl:table-cell">Reason</TH>
               </TR>
             </THead>
-            <tbody>
-              {runs.length === 0 && (
-                <TR><TD colSpan={9} className="text-sm text-muted-foreground">No runs yet.</TD></TR>
-              )}
+            <TBody>
               {runs.map((r, i) => (
                 <TR key={i}>
-                  <TD>{new Date(r.run_at).toLocaleString()}</TD>
-                  <TD>{r.mode === "APPLY" ? "Applied" : "Preview"}</TD>
-                  <TD><Badge tone={r.outcome === "COMPLETED" ? "ok" : "warn"}>
-                    {r.outcome.replace(/^REFUSED_/, "").replace(/_/g, " ").toLowerCase()}
-                  </Badge></TD>
-                  <TD>{r.rooms_enumerated}/{r.rooms_expected}</TD>
-                  <TD>{r.absent_from_roster}</TD>
-                  <TD>{r.stays_closed}</TD>
-                  <TD>{r.protected_by_newer_events}</TD>
-                  <TD>{r.run_by}</TD>
-                  <TD>{r.reason}</TD>
+                  <TD className="whitespace-nowrap text-sm">{formatDate(r.run_at)}</TD>
+                  <TD className="hidden text-sm sm:table-cell">{r.mode === "APPLY" ? "Applied" : "Preview"}</TD>
+                  <TD>
+                    <Badge tone={r.outcome === "COMPLETED" ? "ok" : "warn"} dot>
+                      {r.outcome.replace(/^REFUSED_/, "").replace(/_/g, " ").toLowerCase()}
+                    </Badge>
+                  </TD>
+                  <TD className="hidden tabular md:table-cell">{r.rooms_enumerated}/{r.rooms_expected}</TD>
+                  <TD className="hidden text-end tabular md:table-cell">{r.absent_from_roster}</TD>
+                  <TD className="text-end tabular">{r.stays_closed}</TD>
+                  <TD className="hidden text-end tabular lg:table-cell">{r.protected_by_newer_events}</TD>
+                  <TD className="hidden text-sm text-muted-foreground lg:table-cell">{r.run_by}</TD>
+                  <TD className="hidden text-sm text-muted-foreground xl:table-cell">{r.reason}</TD>
                 </TR>
               ))}
-            </tbody>
+            </TBody>
           </Table>
-        </CardBody>
+        )}
       </Card>
+      </div>
     </PageShell>
   );
 }

@@ -18,6 +18,11 @@ import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 import { GuestDeviceSelfServiceView } from "@/components/phase6/guest-device-self-service-view";
 import { canRead, canWrite } from "@/lib/roles";
+import { ToastProvider } from "@/components/ui/toast";
+
+// Save feedback is a toast now (the kit's standard for "saved"), so the change tests render inside the
+// provider the app shell supplies. The toast carries role="status", which is what they assert.
+const withToasts = (ui: React.ReactElement) => render(<ToastProvider>{ui}</ToastProvider>);
 
 const get = vi.fn();
 const put = vi.fn();
@@ -125,7 +130,7 @@ describe("changing the setting", () => {
     setting(false, true);
     put.mockResolvedValue({ enabled: true, changed: true, phase_gate_enabled: true });
     const user = userEvent.setup();
-    render(<GuestDeviceSelfServiceView canAct />);
+    withToasts(<GuestDeviceSelfServiceView canAct />);
 
     await user.click(await screen.findByRole("button", { name: /switch on/i }));
     // A confirmation step, so the switch is not a single stray click on a guest-facing capability.
@@ -142,7 +147,7 @@ describe("changing the setting", () => {
     setting(false, true);
     put.mockResolvedValue({ enabled: true, changed: true, phase_gate_enabled: true });
     const user = userEvent.setup();
-    render(<GuestDeviceSelfServiceView canAct />);
+    withToasts(<GuestDeviceSelfServiceView canAct />);
     await user.click(await screen.findByRole("button", { name: /switch on/i }));
     await user.click(screen.getByRole("button", { name: "Switch on" }));
     await waitFor(() => expect(put).toHaveBeenCalled());
@@ -157,7 +162,7 @@ describe("changing the setting", () => {
     setting(true, true);
     put.mockResolvedValue({ enabled: true, changed: false, phase_gate_enabled: true });
     const user = userEvent.setup();
-    render(<GuestDeviceSelfServiceView canAct />);
+    withToasts(<GuestDeviceSelfServiceView canAct />);
     await user.click(await screen.findByRole("button", { name: /switch off/i }));
     await user.click(screen.getByRole("button", { name: "Switch off" }));
     await waitFor(() => expect(put).toHaveBeenCalled());
@@ -168,7 +173,7 @@ describe("changing the setting", () => {
     setting(false, true);
     put.mockRejectedValue(Object.assign(new Error("forbidden"), { status: 403 }));
     const user = userEvent.setup();
-    render(<GuestDeviceSelfServiceView canAct />);
+    withToasts(<GuestDeviceSelfServiceView canAct />);
     await user.click(await screen.findByRole("button", { name: /switch on/i }));
     await user.click(screen.getByRole("button", { name: "Switch on" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/forbidden/i);
