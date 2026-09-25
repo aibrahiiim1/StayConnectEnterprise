@@ -15,7 +15,7 @@ import type { Whoami } from "@/lib/api";
 
 beforeEach(() => {
   window.localStorage.clear();
-  mockFetch([{ match: "/api/v1/tenants", body: { data: [{ id: "t-acme", slug: "acme", name: "Acme Hotels" }] } }]);
+  mockFetch([{ match: "/api/v1/tenants", body: { data: [{ id: "t-semantics", slug: "semantics", name: "Semantics" }] } }]);
 });
 
 describe("Central navigation", () => {
@@ -50,10 +50,12 @@ describe("Central navigation", () => {
       expect(screen.getByText(g)).toBeInTheDocument();
     }
     expect(screen.getByText("Central")).toBeInTheDocument();
+    expect(screen.getByLabelText("OneGate")).toBeInTheDocument();
+    expect(screen.getByText("OneGate by Semantics")).toBeInTheDocument();
     expect(screen.queryByText("Fleet")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Licenses" })).toHaveAttribute("aria-current", "page");
     expect(screen.queryByText(/StayConnect/i)).not.toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("option", { name: "Acme Hotels" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("option", { name: "Semantics" })).toBeInTheDocument());
   });
 });
 
@@ -65,7 +67,7 @@ describe("Customer context selector", () => {
       </CustomerProvider>,
     );
     const select = screen.getByLabelText("Customer context");
-    await waitFor(() => expect(within(select).getByRole("option", { name: "Acme Hotels" })).toBeInTheDocument());
+    await waitFor(() => expect(within(select).getByRole("option", { name: "Semantics" })).toBeInTheDocument());
     expect(within(select).getByRole("option", { name: "All customers" })).toBeInTheDocument();
   });
 

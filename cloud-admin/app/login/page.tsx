@@ -5,7 +5,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { KeyRound, ShieldCheck } from "lucide-react";
-import { OneGateLockup, OneGateMark } from "@/components/brand";
+import { BySemantics, OneGateLockup, OneGateMark } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import { Input, Field } from "@/components/ui/input";
 import { ErrorBanner } from "@/components/ui/error-banner";
@@ -83,7 +83,7 @@ function LoginInner() {
             own appliance.
           </p>
         </div>
-        <div className="text-caption text-sidebar-muted">OneGate · Central</div>
+        <BySemantics className="relative z-10 text-sidebar-muted" />
         <OneGateMark className="pointer-events-none absolute -bottom-16 -end-24 size-[26rem] opacity-[0.07]" />
       </aside>
 
@@ -98,6 +98,7 @@ function LoginInner() {
         <main className="flex flex-1 items-center justify-center px-4 pb-16 sm:px-6">
           <div className="w-full max-w-[25rem]">
             <div className="mb-7 space-y-1.5">
+              <OneGateMark className="mb-3 size-10" />
               <h1 className="text-title">OneGate Central</h1>
               <p className="text-sm text-muted-foreground">Admin sign-in. Use your Central operator account.</p>
             </div>
@@ -197,6 +198,10 @@ function LoginInner() {
                 Hotel Admin account does not work here.
               </p>
             </div>
+
+            <p className="mt-8 text-center">
+              <BySemantics className="text-muted-foreground" />
+            </p>
           </div>
         </main>
       </div>

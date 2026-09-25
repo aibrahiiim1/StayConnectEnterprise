@@ -40,9 +40,9 @@ export const PLATFORM_ME = {
 
 export const TENANT_ME = {
   operator_id: "op-2",
-  email: "ops@acme.test",
+  email: "ops@semantics.test",
   is_super_admin: false,
-  default_tenant_id: "t-acme",
+  default_tenant_id: "t-semantics",
   roles: ["tenant_admin"],
   expires_at: "2099-01-01T00:00:00Z",
 };

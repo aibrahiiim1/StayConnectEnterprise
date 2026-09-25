@@ -18,6 +18,7 @@ import { statusWord } from "@/lib/license-state";
 import { formatDate, formatRelative } from "@/lib/utils";
 import { RoleRestricted } from "@/components/role-restricted";
 import { usePermissions } from "@/lib/permissions";
+import { HelpList, HelpSection } from "@/components/help";
 
 type Alert = {
   id: string;
@@ -123,7 +124,30 @@ export default function SecurityPage() {
         eyebrow="Administration"
         title="Security alerts"
         icon={<ShieldAlert />}
-        description="Raised when an appliance registration looks wrong — a cloned identity, a reused serial, or a WAN MAC that does not match the signed license. Activation is blocked while an alert is open."
+        description="Suspicious appliance registrations. An open alert blocks activation."
+        help={
+          <>
+            <HelpSection title="When an alert is raised">
+              <HelpList
+                items={[
+                  <><strong>Identity / hardware mismatch</strong>: a known identity key seen from different hardware, for example a cloned appliance.</>,
+                  <><strong>Hardware reused</strong>: a new identity on a serial that is already in use.</>,
+                  <><strong>WAN MAC mismatch</strong>: the WAN MAC does not match the signed license.</>,
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="Triage">
+              <HelpList
+                items={[
+                  <><strong>Investigate</strong> and <strong>Acknowledge</strong> record that someone is looking at it.</>,
+                  <><strong>Resolve</strong> or <strong>False positive</strong> close the alert and ask for a reason, which goes into the audit log.</>,
+                  <><strong>Reopen</strong> returns a closed alert to Open.</>,
+                  <>Resolved alerts are hidden until you turn on <strong>Show resolved</strong>.</>,
+                ]}
+              />
+            </HelpSection>
+          </>
+        }
       />
 
       {!canRead ? (

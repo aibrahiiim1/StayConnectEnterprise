@@ -13,6 +13,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { Skeleton } from "@/components/ui/misc";
 import { CustomerScope } from "@/components/customer-scope";
+import { HelpList, HelpSection } from "@/components/help";
 
 // FleetLicenseSummary counts the licenses the Platform has ISSUED to managed
 // customers/sites, by state. Counting is authoritative and OWNERSHIP-AWARE: it is
@@ -114,7 +115,33 @@ export default function DashboardPage() {
         eyebrow="Overview"
         title="Dashboard"
         icon={<LayoutDashboard />}
-        description="Licenses issued by state, the sites and appliances they cover, and what needs attention. Guest activity is on each hotel's own appliance."
+        description="Licenses by state and what needs attention."
+        help={
+          <>
+            <HelpSection title="What this page shows">
+              <p>
+                The licenses Central has issued, by state, the sites and appliances they cover, and the licenses
+                that need attention soonest.
+              </p>
+            </HelpSection>
+            <HelpSection title="Central is used for licensing only">
+              <p>
+                Guests, sessions, usage and network health are managed on each hotel&apos;s appliance, in Hotel
+                Admin, and keep working when Central is unreachable. That is why no guest figures appear here.
+              </p>
+            </HelpSection>
+            <HelpSection title="Reading the figures">
+              <HelpList
+                items={[
+                  <><strong>Fleet license summary</strong> counts licenses Central issued to customers and sites. Central is the issuer and holds no license of its own.</>,
+                  <><strong>Orphaned</strong> licenses are bound to an appliance or site that was deleted. They never count as Active and should be reconciled.</>,
+                  <><strong>Need attention</strong> lists licenses expiring within 30 days, in grace, expired, suspended or unbound, soonest first.</>,
+                  <>A license state change never drops existing guest sessions.</>,
+                ]}
+              />
+            </HelpSection>
+          </>
+        }
         actions={
           <Link
             href="/licenses"
@@ -187,7 +214,7 @@ export default function DashboardPage() {
         <CardHeader>
           <div className="space-y-0.5">
             <CardTitle>Licenses that need attention</CardTitle>
-            <CardDescription>Soonest first. Existing guest sessions are never dropped by a license state change.</CardDescription>
+            <CardDescription>Soonest first.</CardDescription>
           </div>
         </CardHeader>
         <CardBody>
@@ -225,10 +252,6 @@ export default function DashboardPage() {
         </CardBody>
       </Card>
 
-      <Callout tone="info" title="Central is used for licensing only">
-        Guests, sessions, usage and network health are managed on each hotel&apos;s appliance, in Hotel Admin, and
-        keep working when Central is unreachable.
-      </Callout>
     </PageShell>
   );
 }
@@ -254,10 +277,7 @@ function FleetLicenseSummaryCard({ summary, loaded }: { summary: FleetLicenseSum
       <CardHeader>
         <div className="space-y-0.5">
           <CardTitle>Fleet license summary</CardTitle>
-          <CardDescription>
-            Licenses Central has issued to customers and sites. Central is the license issuer and holds no license
-            of its own.
-          </CardDescription>
+          <CardDescription>Licenses issued to customers and sites.</CardDescription>
         </div>
         <Link href="/licenses" className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">
           View licenses <ArrowRight className="size-3.5 rtl:-scale-x-100" aria-hidden />

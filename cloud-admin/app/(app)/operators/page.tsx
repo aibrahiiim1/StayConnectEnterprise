@@ -19,6 +19,7 @@ import { useToast } from "@/components/ui/toast";
 import { CustomerScope, SelectCustomerCard } from "@/components/customer-scope";
 import { RoleRestricted } from "@/components/role-restricted";
 import { usePermissions } from "@/lib/permissions";
+import { HelpList, HelpSection } from "@/components/help";
 
 // "billing" is NOT offered. ctrlapi's operators API still accepts the legacy name, but the operator_roles CHECK
 // constraint has not allowed it since migration 0021, so granting it always failed with a server error. Offering
@@ -185,7 +186,36 @@ export default function OperatorsPage() {
         eyebrow="Administration"
         title="Operators"
         icon={<Users />}
-        description="A customer's own staff sign-ins to Central, and the roles each one holds."
+        description="A customer's staff sign-ins to Central and their roles."
+        help={
+          <>
+            <HelpSection title="Who operators are">
+              <p>
+                Operators are a customer&apos;s own staff sign-ins to Central. Select a customer in the sidebar to
+                list and manage its operators.
+              </p>
+            </HelpSection>
+            <HelpSection title="Roles">
+              <HelpList
+                items={[
+                  <><strong>Customer admin</strong>: manages the customer&apos;s operators and data.</>,
+                  <><strong>Customer operator</strong>: day-to-day work for the customer.</>,
+                  <><strong>Viewer</strong>: read-only.</>,
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="Managing operators">
+              <HelpList
+                items={[
+                  <>Select a role badge to remove that role; <strong>Role</strong> adds another.</>,
+                  <>Passwords must be at least 10 characters.</>,
+                  <><strong>Disable</strong> stops an operator from signing in.</>,
+                  <>You cannot disable yourself or change your own roles.</>,
+                ]}
+              />
+            </HelpSection>
+          </>
+        }
         actions={
           canRead && canWrite ? (
             <Button onClick={() => { setCreateErr(null); setShowNew(true); }} disabled={allCustomers}>
@@ -300,9 +330,6 @@ export default function OperatorsPage() {
               </Table>
             )}
           </Card>
-          <p className="text-caption text-muted-foreground">
-            You cannot disable yourself or change your own roles. Select a role badge to remove it.
-          </p>
         </>
       )}
 
