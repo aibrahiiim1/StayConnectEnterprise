@@ -59,7 +59,8 @@ describe("backup retention is editable, not just visible", () => {
     const field = await screen.findByLabelText(/Database backups/i);
     expect((field as HTMLInputElement).value).toBe("7");
     // An operator cannot set a value responsibly without knowing what it does and what it may be.
-    expect(screen.getByText(/Allowed 1–365; default 7/)).toBeTruthy();
+    // (SettingField states it as "Default 7 backups; allowed 1–365.")
+    expect(screen.getByText(/Default 7 backups; allowed 1–365/)).toBeTruthy();
     expect(await screen.findByLabelText(/Nightly sweep runs at/i)).toBeTruthy();
   });
 

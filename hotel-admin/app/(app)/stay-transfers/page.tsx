@@ -16,5 +16,5 @@ export default function StayTransfersPage() {
       .then((m) => setRoles(m.roles ?? []))
       .catch(() => setRoles([]));
   }, []);
-  return <StayTransferView canAct={roles === null ? false : canWrite("stay-transfers", roles)} />;
+  return <StayTransferView canAct={roles === null ? false : canWrite("stay-transfers", roles)} rolesKnown={roles !== null} />;
 }

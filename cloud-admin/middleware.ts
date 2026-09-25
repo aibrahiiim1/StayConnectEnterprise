@@ -7,7 +7,7 @@ export function middleware(req: NextRequest) {
   const hasSession = req.cookies.has("sc_session");
 
   const isLogin = pathname === "/login";
-  const isPublic = isLogin || pathname.startsWith("/_next") || pathname.startsWith("/favicon");
+  const isPublic = isLogin || pathname.startsWith("/_next") || pathname.startsWith("/favicon") || pathname.startsWith("/icon");
 
   if (!hasSession && !isPublic) {
     const url = req.nextUrl.clone();

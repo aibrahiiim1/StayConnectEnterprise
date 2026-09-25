@@ -85,7 +85,7 @@ func TestLandingSaysNotDetectedRatherThanGuessing(t *testing.T) {
 	// No ARP entry is an ordinary state on a device that has only just appeared. The panel must say so
 	// instead of rendering an empty row that reads as a broken page.
 	html := renderLanding(t, "10.77.0.42", "")
-	if !strings.Contains(html, "not detected") {
+	if !strings.Contains(strings.ToLower(html), "not detected") {
 		t.Error("a missing MAC address should be reported as 'not detected'")
 	}
 }

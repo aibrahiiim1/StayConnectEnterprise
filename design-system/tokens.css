@@ -1,0 +1,208 @@
+/*
+  VELONET DESIGN TOKENS — the single source of truth for colour, radius, elevation and motion.
+
+  This file is canonical. `node tools/sync-design-tokens.mjs` copies it into each admin console
+  (hotel-admin/app/tokens.css, cloud-admin/app/tokens.css); a unit test in each console fails if a copy
+  drifts. The guest portal cannot import a stylesheet (it is served by portald with no external resources),
+  so its default look mirrors these values in data-plane/cmd/portald/templates.go — see
+  design-system/README.md, "Guest portal".
+
+  Every colour is an HSL triple behind a ROLE name, consumed as `hsl(var(--role) / <alpha>)` by Tailwind.
+  A theme is a set of token values and nothing else: no component names a colour.
+
+  PALETTE ORIGIN (light theme hex, for reference):
+    brand        #1773bd  hover #125c97  press #0f4b7b  tint #e8f1f8  tint text #0f4b7b   (Velonet blue)
+    ink          #14161a  slate #5a6270                                                   (text)
+    canvas       #f1f2f4  surface #ffffff  recessed #f6f7f9                               (layers)
+    hairline     #dcdfe4  (dividers, no meaning)   edge #7f8795 (control borders, >= 3:1)
+    inverse      #1e1e21  (navigation column, dark panels)
+    waiting      #9a5b0a / #fbf0dd   owned #157a52 / #e6f4ee   info #245d92 / #eaf2f8
+    danger       #b42318 / #fdeceb / #8f1c13   (added: the brand book had no error colour)
+
+  CONTRAST (checked, WCAG 2.1): every text token >= 4.5:1 on the grounds it is used on, in BOTH themes;
+  control borders and the focus ring >= 3:1. Re-run the check when a value changes.
+*/
+
+:root {
+  /* ---- layers ---------------------------------------------------------------------------------------- */
+  --background: 220 12% 95%;          /* app canvas, behind cards */
+  --foreground: 220 13% 9%;           /* ink: primary text and headings */
+  --card: 0 0% 100%;
+  --card-foreground: 220 13% 9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 220 13% 9%;
+  --surface: 220 20% 97%;             /* recessed: table headers, inset panels, row hover */
+  --surface-foreground: 220 13% 9%;
+  --muted: 220 20% 97%;               /* a quiet PANEL */
+  --muted-foreground: 218 11% 40%;    /* slate: a quiet LABEL (5.5:1 on canvas, 6.2:1 on card) */
+  --accent: 220 12% 93%;              /* hover / selection fill */
+  --accent-foreground: 220 13% 9%;
+
+  /* ---- brand (the ONE primary action per screen, active navigation, the logo) ------------------------ */
+  --primary: 207 78% 42%;
+  --primary-foreground: 0 0% 100%;    /* 5.0:1 on primary */
+  --primary-hover: 207 79% 33%;
+  --primary-press: 207 78% 27%;
+  --primary-subtle: 206 53% 94%;
+  --primary-subtle-foreground: 207 78% 27%;
+
+  --secondary: 220 12% 95%;
+  --secondary-foreground: 220 13% 9%;
+
+  /* ---- state (never decorative; every badge also carries its word) ----------------------------------- */
+  --success: 156 71% 28%;
+  --success-foreground: 0 0% 100%;
+  --success-subtle: 154 39% 93%;
+  --success-subtle-foreground: 156 71% 24%;
+  --warning: 34 88% 32%;
+  --warning-foreground: 0 0% 100%;
+  --warning-subtle: 38 79% 93%;
+  --warning-subtle-foreground: 34 88% 28%;
+  --destructive: 4 76% 40%;
+  --destructive-foreground: 0 0% 100%;
+  --destructive-subtle: 3 82% 96%;
+  --destructive-subtle-foreground: 4 77% 32%;
+  --info: 209 60% 36%;
+  --info-foreground: 0 0% 100%;
+  --info-subtle: 206 50% 95%;
+  --info-subtle-foreground: 209 60% 30%;
+
+  /* ---- lines ----------------------------------------------------------------------------------------- */
+  --border: 218 13% 88%;              /* hairline: dividers, card edges */
+  --border-strong: 217 12% 79%;
+  --input: 218 9% 54%;                /* edge: control boundaries, 3.6:1 on card */
+  --ring: 220 13% 9%;                 /* focus: 2px ink, never brand, so focus never reads as a primary */
+
+  /* ---- navigation column: inverse in BOTH themes ------------------------------------------------------ */
+  --sidebar: 240 5% 12%;
+  --sidebar-foreground: 214 8% 84%;
+  --sidebar-muted: 217 7% 65%;
+  --sidebar-accent: 240 5% 18%;
+  --sidebar-accent-foreground: 0 0% 100%;
+  --sidebar-border: 240 6% 20%;
+  --sidebar-active: 208 66% 65%;      /* the accent bar and icon of the current item */
+
+  /* ---- charts (categorical, fixed order, none is a state colour) ------------------------------------- */
+  --chart-1: 207 78% 42%;
+  --chart-2: 173 62% 34%;
+  --chart-3: 271 50% 52%;
+  --chart-4: 28 88% 38%;
+  --chart-5: 199 82% 38%;
+  --chart-6: 330 60% 48%;
+
+  /* ---- shape ------------------------------------------------------------------------------------------ */
+  --radius-flat: 0px;                 /* queue rows, status channels, dividers */
+  --radius-control: 7px;              /* buttons, inputs, chips */
+  --radius-card: 9px;                 /* cards, settings sections, sheets */
+  --radius-overlay: 12px;             /* dialogs, command palette, menus */
+  --radius-pill: 999px;               /* badges, switches, the launcher */
+  --radius: 9px;
+
+  /* ---- elevation: only what floats or responds -------------------------------------------------------- */
+  --shadow-control: 0 1px 2px rgba(18, 22, 28, 0.06);
+  --shadow-control-hover: 0 1px 2px rgba(18, 22, 28, 0.10);
+  --shadow-control-press: inset 0 1px 2px rgba(18, 22, 28, 0.18);
+  --shadow-card: 0 1px 2px rgba(18, 22, 28, 0.04);
+  --shadow-card-hover: 0 5px 14px rgba(22, 28, 32, 0.06);
+  --shadow-overlay: 0 16px 40px rgba(18, 22, 28, 0.16);
+
+  /* ---- motion ----------------------------------------------------------------------------------------- */
+  --motion-press: 80ms;
+  --motion-base: 160ms;
+  --motion-ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* ---- layout ----------------------------------------------------------------------------------------- */
+  --sidebar-width: 16rem;
+  --sidebar-width-rail: 3.75rem;
+  --topbar-height: 3.5rem;
+}
+
+/* The console that renders a product accent other than Velonet blue sets data-product on <html>. Central
+   is teal so an operator can never mistake the vendor console for a hotel's appliance. Only the accent
+   moves; every other token is shared, which is what keeps the two consoles one family. */
+[data-product="central"] {
+  --primary: 185 81% 29%;
+  --primary-hover: 185 82% 23%;
+  --primary-press: 185 82% 18%;
+  --primary-subtle: 184 44% 92%;
+  --primary-subtle-foreground: 185 81% 21%;
+  --sidebar-active: 184 60% 58%;
+  --chart-1: 185 81% 29%;
+}
+
+.dark {
+  --background: 225 12% 7%;
+  --foreground: 216 15% 94%;
+  --card: 228 10% 10%;
+  --card-foreground: 216 15% 94%;
+  --popover: 228 10% 12%;
+  --popover-foreground: 216 15% 94%;
+  --surface: 223 10% 14%;
+  --surface-foreground: 216 15% 94%;
+  --muted: 223 10% 14%;
+  --muted-foreground: 218 10% 67%;    /* 7.5:1 on card */
+  --accent: 222 9% 18%;
+  --accent-foreground: 216 15% 96%;
+
+  --primary: 208 74% 63%;
+  --primary-foreground: 208 76% 13%;  /* dark text on the lightened fill, 6.1:1 */
+  --primary-hover: 208 75% 70%;
+  --primary-press: 208 75% 76%;
+  --primary-subtle: 208 48% 16%;
+  --primary-subtle-foreground: 209 74% 81%;
+
+  --secondary: 222 9% 16%;
+  --secondary-foreground: 216 15% 94%;
+
+  --success: 151 50% 53%;
+  --success-foreground: 154 60% 8%;
+  --success-subtle: 154 39% 12%;
+  --success-subtle-foreground: 151 54% 67%;
+  --warning: 35 77% 60%;
+  --warning-foreground: 35 70% 9%;
+  --warning-subtle: 35 46% 12%;
+  --warning-subtle-foreground: 35 82% 72%;
+  --destructive: 6 81% 69%;
+  --destructive-foreground: 6 60% 10%;
+  --destructive-subtle: 4 42% 14%;
+  --destructive-subtle-foreground: 6 83% 79%;
+  --info: 208 66% 65%;
+  --info-foreground: 212 60% 10%;
+  --info-subtle: 212 51% 15%;
+  --info-subtle-foreground: 209 74% 81%;
+
+  --border: 220 9% 19%;
+  --border-strong: 220 9% 25%;
+  --input: 218 7% 50%;                /* 4.3:1 on card */
+  --ring: 216 15% 94%;
+
+  --sidebar: 225 11% 8%;
+  --sidebar-foreground: 214 8% 84%;
+  --sidebar-muted: 217 7% 62%;
+  --sidebar-accent: 225 9% 15%;
+  --sidebar-accent-foreground: 0 0% 100%;
+  --sidebar-border: 225 9% 14%;
+  --sidebar-active: 208 66% 65%;
+
+  --chart-1: 208 74% 63%;
+  --chart-2: 172 60% 45%;
+  --chart-3: 270 56% 68%;
+  --chart-4: 38 90% 55%;
+  --chart-5: 198 80% 55%;
+  --chart-6: 330 60% 64%;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-card-hover: 0 6px 16px rgba(0, 0, 0, 0.45);
+  --shadow-overlay: 0 18px 44px rgba(0, 0, 0, 0.6);
+}
+
+.dark[data-product="central"] {
+  --primary: 184 60% 52%;
+  --primary-foreground: 185 80% 9%;
+  --primary-hover: 184 60% 60%;
+  --primary-press: 184 60% 66%;
+  --primary-subtle: 185 50% 14%;
+  --primary-subtle-foreground: 184 60% 74%;
+  --sidebar-active: 184 60% 58%;
+  --chart-1: 184 60% 52%;
+}

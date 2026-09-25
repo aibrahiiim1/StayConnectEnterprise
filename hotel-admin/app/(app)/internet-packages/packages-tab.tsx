@@ -43,8 +43,8 @@ type Chip = "active" | "disabled" | "all";
 export type TabProps = { guard: (e: unknown) => boolean; setErr: (s: string | null) => void };
 
 export function PackagesTab({
-  guard, setErr, addRequest = 0, onAddHandled,
-}: TabProps & { addRequest?: number; onAddHandled?: () => void }) {
+  guard, setErr, addRequest = 0, onAddHandled, writable = true,
+}: TabProps & { addRequest?: number; onAddHandled?: () => void; writable?: boolean }) {
   const toast = useToast();
   const [rows, setRows] = useState<PackageSummary[] | null>(null);
   const [plans, setPlans] = useState<PlanSummary[]>([]);
@@ -119,7 +119,7 @@ export function PackagesTab({
 
   // "Add package" lives in the page header; each press arrives here as a new request number.
   useEffect(() => {
-    if (addRequest > 0) { setFormErr(null); setEditing(null); setAdding(true); onAddHandled?.(); }
+    if (addRequest > 0 && writable) { setFormErr(null); setEditing(null); setAdding(true); onAddHandled?.(); }
   }, [addRequest]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The record's history loads when its sheet opens.
@@ -272,7 +272,7 @@ export function PackagesTab({
           ) : rows.length === 0 ? (
             <EmptyState icon={<Package />} title="No internet packages yet"
               hint="Until a package exists, a verified guest has nothing to be given and cannot get online."
-              action={<Button onClick={() => { setFormErr(null); setAdding(true); }}><Plus /> Add the first package</Button>} />
+              action={writable ? <Button onClick={() => { setFormErr(null); setAdding(true); }}><Plus /> Add the first package</Button> : undefined} />
           ) : shown.length === 0 ? (
             <EmptyState icon={<Package />} title="No package matches"
               hint="Clear the search or choose another filter to see the rest." />
@@ -317,11 +317,15 @@ export function PackagesTab({
                     <TD>{formatDevices(p.max_concurrent_devices)}</TD>
                     <TD className="tabular">{activeBy ? (activeBy[p.package_id] ?? 0) : "—"}</TD>
                     <TD className="whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
-                      <Button size="sm" variant="ghost" disabled={busy} onClick={() => startEdit(p)}>Edit</Button>
-                      <Button size="sm" variant="ghost" disabled={busy}
-                        onClick={() => { setActionErr(null); if (p.active) setDisabling(p); else void enable(p); }}>
-                        {p.active ? "Disable" : "Enable"}
-                      </Button>
+                      {writable && (
+                        <>
+                          <Button size="sm" variant="ghost" disabled={busy} onClick={() => startEdit(p)}>Edit</Button>
+                          <Button size="sm" variant="ghost" disabled={busy}
+                            onClick={() => { setActionErr(null); if (p.active) setDisabling(p); else void enable(p); }}>
+                            {p.active ? "Disable" : "Enable"}
+                          </Button>
+                        </>
+                      )}
                     </TD>
                   </TR>
                 ))}
@@ -411,17 +415,19 @@ export function PackagesTab({
                     ]} />
                   </SheetSection>
                 </SheetBody>
-                <SheetFooter>
-                  <Button variant="ghost" className="mr-auto text-destructive"
-                    onClick={() => { setDeleting(p); }}>
-                    <Trash2 /> Delete…
-                  </Button>
-                  <Button variant="secondary" disabled={busy}
-                    onClick={() => { setActionErr(null); if (p.active) setDisabling(p); else void enable(p); }}>
-                    {p.active ? <><Ban /> Disable</> : <><CheckCircle2 /> Enable</>}
-                  </Button>
-                  <Button disabled={busy} onClick={() => startEdit(p)}><Pencil /> Edit</Button>
-                </SheetFooter>
+                {writable && (
+                  <SheetFooter>
+                    <Button variant="ghost" className="me-auto text-destructive"
+                      onClick={() => { setDeleting(p); }}>
+                      <Trash2 /> Delete…
+                    </Button>
+                    <Button variant="secondary" disabled={busy}
+                      onClick={() => { setActionErr(null); if (p.active) setDisabling(p); else void enable(p); }}>
+                      {p.active ? <><Ban /> Disable</> : <><CheckCircle2 /> Enable</>}
+                    </Button>
+                    <Button disabled={busy} onClick={() => startEdit(p)}><Pencil /> Edit</Button>
+                  </SheetFooter>
+                )}
               </>
             );
           })()}

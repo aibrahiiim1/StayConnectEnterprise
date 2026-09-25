@@ -132,7 +132,7 @@ describe("guest sign-in attempts", () => {
     await user.click(await screen.findByRole("button", { name: "Details" }));
 
     expect(await screen.findByText(/do not have permission/i)).toBeTruthy();
-    expect(screen.getByText(/View_Guest_SignIn_Credentials/)).toBeTruthy();
+    expect(screen.getByText(/allowed to see guest sign-in details/)).toBeTruthy();
     for (const secret of ["Nottheguest", "MARIA DEL CARMEN", "OKONKWO", "RES-4001"]) {
       expect(screen.queryByText(secret)).toBeNull();
     }
@@ -154,7 +154,7 @@ describe("guest sign-in attempts", () => {
 
     await user.click(await screen.findByRole("button", { name: "Details" }));
 
-    expect(await screen.findByText(/No eligible stay for this room exists in the local mirror/i)).toBeTruthy();
+    expect(await screen.findByText(/No eligible stay for this room exists in the appliance's guest list/i)).toBeTruthy();
     expect(screen.getByText(/Changes made in the PMS after the displayed last-sync time/i)).toBeTruthy();
     // What the guest typed IS still shown — it is the one thing that is genuinely known here.
     expect(screen.getByText("Nottheguest")).toBeTruthy();

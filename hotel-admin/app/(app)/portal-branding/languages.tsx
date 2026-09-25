@@ -20,9 +20,12 @@ import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input, Label } from "@/components/ui/input";
+import { Callout } from "@/components/ui/error-banner";
+import { SearchInput } from "@/components/ui/data";
+import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Search, RotateCcw, Check } from "lucide-react";
+import { RotateCcw, Check } from "lucide-react";
 import {
   Design, PORTAL_STRINGS, STRING_GROUPS, SHIPPED_LANGUAGES, offeredLanguages,
 } from "./strings";
@@ -148,37 +151,42 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
   const showOffered = part !== "wording";
   const showWording = part !== "offered";
 
-  const addLanguage = (
-    <div className="flex flex-wrap items-end gap-2 border-t pt-4">
-      <label className="block text-sm">
-        <span className="block font-medium">Add another language</span>
-        <span className="mb-1.5 block text-xs text-muted-foreground">
+  // Adding a language is a change, so a role that cannot save is not offered it at all.
+  const addLanguage = !writable ? null : (
+    <div className="space-y-2 border-t border-border pt-4">
+      <div>
+        <div className="text-label">Add another language</div>
+        <p className="text-xs text-muted-foreground">
           One the portal does not ship. You supply its wording; anything you leave empty shows English.
-        </span>
-        <span className="flex flex-wrap gap-2">
-          <Input value={newCode} className="w-20" placeholder="es" disabled={!writable}
-            aria-label="Language code"
+        </p>
+      </div>
+      <div className="flex flex-wrap items-end gap-2">
+        <div>
+          <Label htmlFor="add-language-code" className="text-xs">Language code</Label>
+          <Input id="add-language-code" value={newCode} className="w-24" placeholder="es"
             onChange={(e) => setNewCode(e.target.value.toLowerCase().slice(0, 5))} />
-          <Input value={newLabel} className="w-40" placeholder="Español" disabled={!writable}
-            aria-label="Shown as"
+        </div>
+        <div>
+          <Label htmlFor="add-language-label" className="text-xs">Shown as</Label>
+          <Input id="add-language-label" value={newLabel} className="w-44" placeholder="Español"
             onChange={(e) => setNewLabel(e.target.value)} />
-          <Button variant="secondary" disabled={!newCode.trim() || !writable}
-            onClick={() => {
-              const code = newCode.trim();
-              setD((p) => ({
-                ...p,
-                languages: [
-                  ...offeredLanguages(p).filter((l) => l.code !== code),
-                  { code, label: newLabel.trim() || code.toUpperCase() },
-                ],
-              }));
-              setEditing(code); setNewCode(""); setNewLabel("");
-              onEditWording?.(code);
-            }}>
-            Add
-          </Button>
-        </span>
-      </label>
+        </div>
+        <Button variant="secondary" className="h-10" disabled={!newCode.trim()}
+          onClick={() => {
+            const code = newCode.trim();
+            setD((p) => ({
+              ...p,
+              languages: [
+                ...offeredLanguages(p).filter((l) => l.code !== code),
+                { code, label: newLabel.trim() || code.toUpperCase() },
+              ],
+            }));
+            setEditing(code); setNewCode(""); setNewLabel("");
+            onEditWording?.(code);
+          }}>
+          Add
+        </Button>
+      </div>
     </div>
   );
 
@@ -201,10 +209,13 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
               const fixed = l.code === "en";
               return (
                 <label key={l.code}
-                  className={`inline-flex cursor-pointer items-center gap-2 rounded-full border px-3.5 py-2 text-sm ${
-                    on ? "border-primary bg-primary/5 text-primary" : "text-muted-foreground"
-                  } ${fixed ? "cursor-default" : ""}`}>
-                  <input type="checkbox" className="h-4 w-4" checked={on}
+                  className={cn(
+                    "inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-full border px-3.5 py-2 text-sm transition-colors",
+                    "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2",
+                    on ? "border-primary/40 bg-primary-subtle text-primary-subtle-foreground" : "border-border text-muted-foreground hover:border-border-strong",
+                    (fixed || !writable) && "cursor-default",
+                  )}>
+                  <input type="checkbox" className="size-4 accent-primary" checked={on}
                     disabled={fixed || !writable}
                     aria-label={`Offer ${l.label} to guests`}
                     onChange={(e) => setOffered(l.code, e.target.checked)} />
@@ -225,22 +236,34 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
         <CardHeader><CardTitle>Wording</CardTitle></CardHeader>
         <CardBody className="space-y-4">
           {shippedErr && (
-            <p role="alert" className="rounded-lg border border-warning/30 bg-warning-subtle p-3 text-sm text-warning-subtle-foreground">
-              {shippedErr}
-            </p>
+            <Callout tone="warning">{shippedErr}</Callout>
           )}
 
-          <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Language being edited">
+          <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Language being edited"
+            onKeyDown={(e) => {
+              const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+              if (!step || known.length === 0) return;
+              e.preventDefault();
+              const i = Math.max(0, known.findIndex((l) => l.code === current?.code));
+              const next = known[(i + step + known.length) % known.length];
+              setEditing(next.code);
+              document.getElementById(`wording-tab-${next.code}`)?.focus();
+            }}>
             {known.map((l) => {
               const custom = countCustom(l.code);
               const missing = countMissing(l.code);
               return (
-                <button key={l.code} type="button" role="tab"
+                <button key={l.code} id={`wording-tab-${l.code}`} type="button" role="tab"
                   aria-selected={current?.code === l.code}
+                  tabIndex={current?.code === l.code ? 0 : -1}
                   onClick={() => setEditing(l.code)}
-                  className={`inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${
-                    current?.code === l.code ? "border-primary bg-primary/5 text-primary" : "text-muted-foreground"
-                  }`}>
+                  className={cn(
+                    "inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                    current?.code === l.code
+                      ? "border-primary/40 bg-primary-subtle font-medium text-primary-subtle-foreground"
+                      : "border-border text-muted-foreground hover:border-border-strong hover:text-foreground",
+                  )}>
                   {l.label}
                   {missing > 0
                     ? <Badge tone="warn">{missing} in English</Badge>
@@ -253,7 +276,7 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
           </div>
 
           {current && (
-            <div className="space-y-3 rounded-lg border p-4">
+            <div className="space-y-3 rounded-lg border border-border p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <strong className="text-sm">{current.label}</strong>
@@ -266,14 +289,11 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
                   </p>
                 </div>
                 <span className="flex items-center gap-2">
-                  <label className="relative">
-                    <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input value={filter} onChange={(e) => setFilter(e.target.value)}
-                      aria-label="Find a string" placeholder="Find a string…" className="w-48 pl-8" />
-                  </label>
+                  <SearchInput value={filter} onChange={setFilter} label="Find a string"
+                    placeholder="Find a string…" className="sm:w-56" />
                   {countCustom(current.code) > 0 && writable && (
                     <Button size="sm" variant="secondary" onClick={() => resetLanguage(current.code)}>
-                      <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                      <RotateCcw aria-hidden />
                       Reset all to built-in
                     </Button>
                   )}
@@ -290,8 +310,8 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
                 const changed = rows.filter((s) => customised(current.code, s.key)).length;
                 return (
                   <details key={g} open={!!needle || !isBuiltIn(current.code) || g === STRING_GROUPS[0]}
-                    className="rounded-md border">
-                    <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm font-medium">
+                    className="rounded-md border border-border">
+                    <summary className="flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                       {g}
                       <span className="text-xs font-normal text-muted-foreground">{rows.length}</span>
                       {changed > 0 && <Badge tone="accent">{changed} customised</Badge>}
@@ -323,7 +343,7 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
                                 <Button size="sm" variant="secondary"
                                   aria-label={`Reset ${st.english} in ${current.label} to the built-in wording`}
                                   onClick={() => write(current.code, st.key, "")}>
-                                  <RotateCcw className="h-3.5 w-3.5" />
+                                  <RotateCcw aria-hidden />
                                 </Button>
                               )}
                             </span>
@@ -341,7 +361,7 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
           {part === "all" && addLanguage}
 
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Check className="h-3.5 w-3.5" />
+            <Check className="size-3.5 shrink-0" aria-hidden />
             Only the strings you actually change are stored. Everything else follows the portal, so improved
             wording reaches your guests without you re-entering anything.
           </p>

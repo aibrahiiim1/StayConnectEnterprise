@@ -22,7 +22,10 @@ export type ShippedWording = {
 
 /** The shipped wording, parsed out of languages.go — the same map the appliance compiles in. */
 export function shippedWording(): ShippedWording {
-  const src = readFileSync(resolve(DIR, "languages.go"), "utf8");
+  // languages.go holds the sign-in page's words and languages_pages.go every page after it and the server's
+  // messages; portald merges the two into one dictionary at start-up, and so does this.
+  const src =
+    readFileSync(resolve(DIR, "languages.go"), "utf8") + "\n" + readFileSync(resolve(DIR, "languages_pages.go"), "utf8");
   const languages: ShippedWording["languages"] = [];
   for (const m of src.matchAll(/\{Code: "([a-z]{2})", Label: "([^"]+)"(, RTL: true)?\}/g)) {
     languages.push({ code: m[1], label: m[2], ...(m[3] ? { rtl: true } : {}) });
@@ -36,7 +39,7 @@ export function shippedWording(): ShippedWording {
     for (const km of block[2].matchAll(/"([a-z][a-zA-Z0-9.]*)":\s*"((?:[^"\\]|\\.)*)"/g)) {
       d[km[1]] = km[2].replace(/\\"/g, '"').replace(/\\\\/g, "\\");
     }
-    strings[block[1]] = d;
+    strings[block[1]] = { ...(strings[block[1]] ?? {}), ...d };
   }
   if (!languages.length || languages.some((l) => !Object.keys(strings[l.code] ?? {}).length)) {
     // Every offered language must have arrived with words. Checking only that the MAP is non-empty is what
@@ -46,35 +49,20 @@ export function shippedWording(): ShippedWording {
   return { languages, strings };
 }
 
-/** The landing page as portald renders it for a device it has no ARP entry for.
+/** The landing page as portald renders it for an arriving device it has no ARP entry for, with no published
+ *  design.
  *
- *  `template` is what portald renders onto <html> from the PUBLISHED design (the page's own script then
- *  re-applies whatever /api/branding answers). The nonce is a fixed placeholder: these specs serve the page
- *  through page.route with no Content-Security-Policy header, so it is inert here -- the Go tests assert the
- *  real header and that every script carries it. */
+ *  RENDERED BY PORTALD ITSELF, not imitated here. The page is assembled from shared Go pieces and carries
+ *  template actions a regular expression cannot render faithfully, so data-plane/cmd/portald renders it with
+ *  the real handler into e2e/fixtures/portal-landing.html, and a Go test (TestE2EPortalFixtures) fails when that
+ *  fixture is stale. `template` is what portald stamps onto <html> from the PUBLISHED design; the page's own
+ *  script then re-applies whatever /api/branding answers. The nonce is the fixed placeholder "e2e-nonce": these
+ *  specs serve the page through page.route with no Content-Security-Policy header, so it is inert here. */
 export function portalHTML(template = "classic"): string {
-  const src = readFileSync(resolve(DIR, "templates.go"), "utf8");
-  const tmpl = src.match(/const landingHTML = `([\s\S]*?)`\n/);
-  if (!tmpl) throw new Error("the landing template could not be found in templates.go");
-  const shipped = shippedWording();
-  const html = tmpl[1]
-    .replace(/\{\{if \.ClientIP\}\}\{\{\.ClientIP\}\}\{\{else\}\}([^{]*)\{\{end\}\}/g, "$1")
-    .replace(/\{\{if \.ClientMAC\}\}\{\{\.ClientMAC\}\}\{\{else\}\}([^{]*)\{\{end\}\}/g, "$1")
-    // The refusal banner, which landing() fills only when it has something to tell the guest. These specs
-    // exercise the page a guest meets on ARRIVAL, so the block is dropped exactly as html/template drops it
-    // when .Error is empty — rendering an empty banner here would put markup on the page that a real first
-    // visit never carries. The Go tests cover the branch where there IS a message.
-    .replace(/\{\{if \.Error\}\}[\s\S]*?\{\{end\}\}/g, "")
-    .replace(/\{\{\.Languages\}\}/g, JSON.stringify(shipped.languages))
-    .replace(/\{\{\.Strings\}\}/g, JSON.stringify(shipped.strings))
-    .replace(/\{\{\.Nonce\}\}/g, "e2e-nonce")
-    .replace(/\{\{\.Template\}\}/g, template)
-    .replace(/\{\{\.(Density|Panel|HeroHeight|Surface)\}\}/g, "");
+  const html = readFileSync(resolve(__dirname, "fixtures", "portal-landing.html"), "utf8");
   if (html.includes("{{")) {
-    // A template action nobody rendered is a syntax error waiting to happen inside a <script>. Fail here,
-    // where the message names the cause, rather than in six tests that each report a different symptom.
-    const left = html.match(/\{\{[^}]*\}\}/g);
-    throw new Error(`the landing template still contains unrendered actions: ${left?.join(", ")}`);
+    throw new Error("the portal fixture contains unrendered template actions; regenerate it from data-plane");
   }
-  return html;
+  // Only the document element's attribute: the first occurrence is <html>.
+  return html.replace(/data-template="[^"]*"/, `data-template="${template}"`);
 }

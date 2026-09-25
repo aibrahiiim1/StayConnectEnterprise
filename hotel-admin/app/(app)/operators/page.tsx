@@ -16,14 +16,16 @@ import { useEffect, useState } from "react";
 import { api, ListResp, Whoami, EdgeOperator } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { Card, CardBody } from "@/components/ui/card";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
+import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input, Field, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { ErrorBanner } from "@/components/ui/error-banner";
 import { DialogForm, ConfirmDialog } from "@/components/ui/dialog";
 import { SkeletonRows } from "@/components/ui/misc";
+import { ReadOnlyNotice } from "@/components/ui/patterns";
+import { useToast } from "@/components/ui/toast";
 import { Plus, X, Users } from "lucide-react";
 import { canWrite, SITE_ROLES, ROLE_LABELS, SiteRole } from "@/lib/roles";
 import { formatRelative } from "@/lib/utils";
@@ -31,10 +33,10 @@ import { formatRelative } from "@/lib/utils";
 const MIN_PASSWORD = 10;
 
 export default function OperatorsPage() {
+  const toast = useToast();
   const [rows, setRows] = useState<EdgeOperator[] | null>(null);
   const [me, setMe] = useState<Whoami | null>(null);
   const [err, setErr] = useState<unknown>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [formErr, setFormErr] = useState<unknown>(null);
 
@@ -64,7 +66,7 @@ export default function OperatorsPage() {
 
   function openNew() {
     setEmail(""); setDisplayName(""); setPassword(""); setRole("site_viewer");
-    setFormErr(null); setNotice(null);
+    setFormErr(null);
     setShowNew(true);
   }
 
@@ -82,7 +84,7 @@ export default function OperatorsPage() {
       });
       setShowNew(false);
       setPassword("");
-      setNotice(`${email.trim()} can now sign in as ${ROLE_LABELS[role as SiteRole] ?? role}.`);
+      toast.success("Operator added", `${email.trim()} can now sign in as ${ROLE_LABELS[role as SiteRole] ?? role}.`);
       await load();
     } catch (e) { setFormErr(e); }
     finally { setBusy(false); }
@@ -101,7 +103,7 @@ export default function OperatorsPage() {
     }
     try {
       await api.post(`/operators/${pwFor.id}/set-password`, { password: newPw });
-      setNotice(`The password for ${pwFor.email} has been changed.`);
+      toast.success("Password changed", `The password for ${pwFor.email} has been changed.`);
       setPwFor(null);
       setNewPw(""); setConfirmPw("");
     } catch (e) { setFormErr(e); }
@@ -113,18 +115,28 @@ export default function OperatorsPage() {
     setBusy(true); setFormErr(null);
     try {
       await api.del(`/operators/${disabling.id}`);
-      setNotice(`${disabling.email} can no longer sign in.`);
+      toast.success("Operator disabled", `${disabling.email} can no longer sign in.`);
       setDisabling(null);
       await load();
     } catch (e) { setFormErr(e); }
     finally { setBusy(false); }
   }
 
-  async function onAddRole(op: EdgeOperator, role: string) {
-    if (!role) return;
-    setErr(null);
-    try { await api.post(`/operators/${op.id}/roles`, { role }); await load(); }
-    catch (e) { setErr(e); }
+  // ADDING A ROLE WIDENS WHAT SOMEONE CAN DO, so it is confirmed like removing one. Choosing from the menu used to
+  // grant the role on the spot: one slip of a select widened a colleague's access with nothing to catch it. The
+  // request is the same one, sent only after the operator confirms.
+  const [addingRole, setAddingRole] = useState<{ op: EdgeOperator; role: string } | null>(null);
+  async function onAddRole() {
+    if (!addingRole) return;
+    const { op, role } = addingRole;
+    setBusy(true); setFormErr(null);
+    try {
+      await api.post(`/operators/${op.id}/roles`, { role });
+      toast.success("Role added", `${op.email} is now also ${ROLE_LABELS[role as SiteRole] ?? role}.`);
+      setAddingRole(null);
+      await load();
+    } catch (e) { setFormErr(e); }
+    finally { setBusy(false); }
   }
 
   async function onRemoveRole() {
@@ -132,6 +144,7 @@ export default function OperatorsPage() {
     setBusy(true); setFormErr(null);
     try {
       await api.del(`/operators/${removingRole.op.id}/roles/${removingRole.role}`);
+      toast.success("Role removed");
       setRemovingRole(null);
       await load();
     } catch (e) { setFormErr(e); }
@@ -141,16 +154,17 @@ export default function OperatorsPage() {
   return (
     <PageShell>
       <PageHeader
+        icon={<Users />}
         eyebrow="System"
         title="Operators"
         description="Staff accounts for this appliance. They are local to this property — they are not cloud accounts and do not exist on any other site."
         actions={writable && <Button onClick={openNew}><Plus /> Add operator</Button>}
       />
 
-      <ErrorBanner err={err} />
-      {notice && <Callout tone="success">{notice}</Callout>}
+      {me && !writable && <ReadOnlyNotice>Your role can see who can sign in, but not add or change operators.</ReadOnlyNotice>}
+      <ErrorBanner err={err} className="mb-0" />
 
-      <Card>
+      <Card className="overflow-hidden">
         <CardBody className="p-0">
           {rows === null ? (
             <SkeletonRows rows={4} cols={5} />
@@ -159,19 +173,29 @@ export default function OperatorsPage() {
           ) : (
             <Table>
               <THead>
-                <TR><TH>Operator</TH><TH>What they can do</TH><TH>Status</TH><TH>Added</TH><TH /></TR>
+                <TR>
+                  <TH>Operator</TH>
+                  <TH>Roles</TH>
+                  <TH className="hidden sm:table-cell">Status</TH>
+                  <TH className="hidden md:table-cell">Added</TH>
+                  {writable && <TH className="text-end"><span className="sr-only">Actions</span></TH>}
+                </TR>
               </THead>
-              <tbody>
+              <TBody>
                 {rows.map((op) => {
                   const isMe = op.id === me?.operator_id;
                   return (
                     <TR key={op.id}>
                       <TD>
-                        <div className="font-medium">
+                        <div className="flex flex-wrap items-center gap-1.5 font-medium">
                           {op.display_name || op.email}
-                          {isMe && <span className="ml-1.5 text-xs font-normal text-primary">(you)</span>}
+                          {isMe && <Badge tone="accent">You</Badge>}
                         </div>
                         <div className="text-xs text-muted-foreground">{op.email}</div>
+                        {/* On a phone the status column is hidden; a disabled account still says so here. */}
+                        {op.status !== "active" && (
+                          <Badge tone="neutral" className="mt-1 sm:hidden">Disabled</Badge>
+                        )}
                       </TD>
                       <TD>
                         <div className="flex flex-wrap items-center gap-1.5">
@@ -184,7 +208,7 @@ export default function OperatorsPage() {
                               {writable && (
                                 <button
                                   type="button"
-                                  className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-surface hover:text-destructive"
+                                  className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-surface hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                   title={`Remove ${ROLE_LABELS[r as SiteRole] ?? r}`}
                                   aria-label={`Remove ${ROLE_LABELS[r as SiteRole] ?? r} from ${op.email}`}
                                   onClick={() => {
@@ -203,8 +227,12 @@ export default function OperatorsPage() {
                             <Select
                               value=""
                               aria-label={`Give ${op.email} another role`}
-                              onChange={(e) => { void onAddRole(op, e.target.value); e.currentTarget.value = ""; }}
-                              className="h-7 w-auto pr-8 text-xs"
+                              onChange={(e) => {
+                                const role = e.target.value;
+                                e.currentTarget.value = "";
+                                if (role) { setFormErr(null); setAddingRole({ op, role }); }
+                              }}
+                              className="h-7 w-auto pe-8 text-xs"
                             >
                               <option value="" disabled>+ role</option>
                               {SITE_ROLES.filter((r) => !op.roles.includes(r)).map((r) => (
@@ -214,32 +242,35 @@ export default function OperatorsPage() {
                           )}
                         </div>
                       </TD>
-                      <TD>
-                        <Badge tone={op.status === "active" ? "ok" : "err"} dot>
+                      <TD className="hidden sm:table-cell">
+                        <Badge tone={op.status === "active" ? "ok" : "neutral"} dot>
                           {op.status === "active" ? "Can sign in" : "Disabled"}
                         </Badge>
                       </TD>
-                      <TD className="text-sm text-muted-foreground">{formatRelative(op.created_at)}</TD>
-                      <TD className="whitespace-nowrap text-right">
-                        {writable && (
+                      <TD className="hidden text-sm text-muted-foreground md:table-cell">{formatRelative(op.created_at)}</TD>
+                      {writable && (
+                      <TD className="text-end">
+                        <div className="flex flex-wrap justify-end gap-1">
                           <Button
                             size="sm"
                             variant="ghost"
+                            aria-label={`Change the password for ${op.email}`}
                             onClick={() => { setFormErr(null); setNewPw(""); setConfirmPw(""); setPwFor(op); }}
                           >
                             Change password
                           </Button>
-                        )}
                         {writable && op.status === "active" && !isMe && (
-                          <Button size="sm" variant="ghost" onClick={() => { setFormErr(null); setDisabling(op); }}>
+                          <Button size="sm" variant="ghost" aria-label={`Disable ${op.email}`} onClick={() => { setFormErr(null); setDisabling(op); }}>
                             Disable
                           </Button>
                         )}
+                        </div>
                       </TD>
+                      )}
                     </TR>
                   );
                 })}
-              </tbody>
+              </TBody>
             </Table>
           )}
         </CardBody>
@@ -332,7 +363,7 @@ export default function OperatorsPage() {
         title="Stop this operator signing in?"
         description={
           disabling
-            ? `${disabling.display_name || disabling.email} will no longer be able to sign in to this appliance. Their account and everything they have done is kept, and the account can be re-enabled.`
+            ? `${disabling.display_name || disabling.email} will no longer be able to sign in to this appliance. Their account and everything they have done is kept. There is no way to re-enable a disabled operator from this screen.`
             : undefined
         }
         confirmLabel="Disable account"
@@ -340,6 +371,22 @@ export default function OperatorsPage() {
         busy={busy}
         error={formErr}
         onConfirm={onDisable}
+      />
+
+      {/* ------------------------------------------------------------------ add role */}
+      <ConfirmDialog
+        open={addingRole !== null}
+        onOpenChange={(v) => !v && setAddingRole(null)}
+        title="Give this role?"
+        description={
+          addingRole
+            ? `${addingRole.op.display_name || addingRole.op.email} will also be able to do everything the ${ROLE_LABELS[addingRole.role as SiteRole] ?? addingRole.role} role allows, from their next action.`
+            : undefined
+        }
+        confirmLabel="Add role"
+        busy={busy}
+        error={formErr}
+        onConfirm={onAddRole}
       />
 
       {/* ------------------------------------------------------------------ remove role */}

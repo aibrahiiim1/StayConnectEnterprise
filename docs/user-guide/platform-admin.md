@@ -1,88 +1,81 @@
 # Platform Admin — User Guide
 
-You run the StayConnect platform itself. You are not a hotel; your customers are hotels (tenants). Your job is to onboard new tenants, keep the platform healthy, and step in when a tenant admin has a problem they can't solve themselves.
+You run Velonet Central for the vendor. You are not a hotel; your customers are hotel groups. Your job is to create customers and sites, activate their appliances, issue and manage each appliance's signed license, and step in when a customer admin has a problem they can't solve themselves. Central is used for licensing only: a hotel's networks, sign-in methods, packages and guests are run by the hotel's own staff in **Velonet Hotel Admin** on the appliance.
 
 ## What only you can do
 
-- Create, rename, and delete **tenants**.
-- Assign the **first tenant admin** for a new tenant.
-- See **any tenant's data** (everyone else is locked to their own tenant).
-- Manage **subscription plans** at the catalog level (the list of plans tenants can choose from — managed directly in the database, not in the UI yet).
-
-Everything else — sites, appliances, staff, PMS, guest sessions — is normally done by the tenant's own staff. You only touch these if a customer asks for help.
+- Create, rename, archive and delete **customers**.
+- Choose **All customers** or any one customer in the **Customer context** selector (everyone else is locked to their own customer).
+- See the **Fleet license summary** on the Dashboard.
+- Activate appliances and issue, renew, suspend, resume and revoke **licenses**. The signed license (max concurrent online guests, validity, grace period, entitled features) is the only entitlement; there are no plans or subscriptions to manage.
 
 ## Your daily navigation
 
-Because you're platform-scoped, most pages show a **"Tenant:"** selector at the top. Pick a tenant and the page scopes to that tenant. Without a selection, you see platform-wide data (e.g., all tenants listed on the Tenants view).
+Because you're platform-scoped, the sidebar has a **Customer context** selector under the Velonet mark. Pick a customer and Dashboard, Sites, Appliances, Licenses, Operators and Audit log scope to that customer. With **All customers** selected, Sites, Appliances and Licenses list every customer (with a Customer column), while Operators and Audit log ask you to select a customer first. Security alerts, Certificates, Assignment keys and Backup health are always fleet-wide.
 
 ## Common tasks
 
-### Onboarding a new tenant (hotel chain signs up)
+### Onboarding a new customer (hotel group signs up)
 
-1. Go to **Dashboard → Tenants** (or `/tenants`).
-2. Click **New tenant**. Fill in:
+1. Go to **Commercial → Customers** (`/tenants`).
+2. Click **New customer**. Fill in:
+   - **Slug** — short identifier, e.g. `coral-sea`
    - **Name** — e.g. "Coral Sea Resorts"
-   - **Slug** — short URL-safe identifier, e.g. `coral-sea`
-   - **Plan** — pick one from the plan catalog (usually starts on "Starter" or "Trial")
-3. Save. The tenant is created with no sites, no operators, no appliances.
-4. Go to **Operators**, switch the tenant selector to the new tenant, and click **New operator**:
+3. Save. The customer is created with no sites, operators or appliances.
+4. Create its **sites** (**Infrastructure → Sites**) and **activate** its appliances (**Infrastructure → Onboarding**) — see [control-panel-config-manual.md](control-panel-config-manual.md). You can also create the customer and site directly from the Activate form.
+5. If the customer should have its own Central login: select the customer, go to **Administration → Operators**, click **New operator**:
    - Email of the customer's primary contact
-   - Role: **tenant_admin**
-   - Send them the temporary password out-of-band (encrypted email, phone, etc.)
-5. Tell them to log in at `https://admin.stayconnect.local/` and change their password, then follow the [tenant-admin guide](tenant-admin.md).
+   - Role: **Customer admin**
+   - Send them the initial password out-of-band (encrypted email, phone, etc.)
+6. Tell them to sign in at your Central address, then follow the [customer admin guide](tenant-admin.md).
 
-From this point the tenant admin runs their own setup. You don't need to create their sites or appliances.
+Hotel staff never sign in to Central to run their hotel; they use the operator accounts created on their appliance in Hotel Admin.
 
-### Checking on a tenant's health
+### Checking on a customer's health
 
-1. Use the **Tenant:** dropdown to scope into a tenant.
-2. **Dashboard** shows their sessions, online appliances, recent errors.
-3. **Appliances** shows last-seen time for each gateway. Red / stale = the tenant has a site in trouble.
-4. **Audit log** shows everything their staff has done lately.
+1. Select the customer in the **Customer context**.
+2. **Dashboard** shows its licenses by state and its busiest sites.
+3. **Appliances** shows each appliance's status and last-seen time.
+4. **Licenses** shows online guests against each license's limit, expiry and grace.
+5. **Audit log** shows what was changed in Central for that customer lately.
 
-If an appliance is offline you'd usually ping the tenant admin rather than fix it yourself — you don't have physical access anyway.
+If an appliance is offline you'd usually contact the hotel rather than fix it yourself — you don't have physical access, and an appliance that cannot reach Central keeps serving guests.
 
-### Impersonating a tenant to reproduce a bug
+### Acting on a customer's behalf
 
-Use the **Tenant:** selector on any page. All read operations show that tenant's data. Writes are audited as **you** making the change, so the tenant's audit log will show platform support took the action.
+Select the customer in the **Customer context**. Everything you do is recorded as **you** in the audit log, so the customer can see that vendor staff took the action.
 
-### Revoking a tenant (offboarding)
+### Offboarding a customer
 
-1. **Tenants** → pick the tenant → **Disable** (soft-delete; data retained per retention policy).
-2. All their operators lose admin access immediately.
-3. Their appliances stop authorising new sessions (data plane reads tenant.enabled).
-4. After retention period, hard-delete via the database or a maintenance script — there's no UI for permanent deletion yet.
+1. **Suspend** or **Revoke** its licenses (**Licenses**) — new guest sign-ins stop; existing sessions are not dropped.
+2. **Customers** → **Archive** — hidden from active lists; sites, appliances, licenses and the audit log are kept. **Restore** reverses it.
+3. To remove it permanently, delete bottom-up: appliances (Onboarding) → sites → the customer. Each delete asks you to type the name, code or serial and give a reason.
 
-### Creating / editing subscription plans
+### Changing what a hotel may serve
 
-There is no admin UI for plan catalog management yet. Edit the `plans` table directly via SQL on the control-plane database:
-
-```sql
-INSERT INTO plans (slug, name, price_cents, max_concurrent_devices, max_sites, ...)
-VALUES ('pro', 'Pro', 9900, 500, 10, ...);
-```
-
-Changes take effect immediately. Existing tenants keep their assigned plan until their tenant_admin changes it.
+Use **Licenses → Renew** to change max concurrent online guests, validity or grace period; it issues a new signed license version and supersedes the old one. For an appliance with no route to Central, **Download for offline** and send the file to the hotel to upload in Hotel Admin under **Appliance & licence**.
 
 ## What you should NOT do
 
-- **Don't** create operators inside a tenant unless the tenant admin asked. It shows up in their audit log and confuses them.
-- **Don't** change a tenant's subscription plan without their billing contact's explicit request.
-- **Don't** edit PMS credentials, walled garden rules, or site configs for a tenant unprompted — these are operational decisions owned by the hotel.
-- **Don't** share another tenant's data with a tenant. Each tenant is isolated from every other tenant.
+- **Don't** create operators inside a customer unless the customer admin asked. It shows up in their audit log and confuses them.
+- **Don't** suspend or revoke a customer's license without the agreed commercial decision behind it.
+- **Don't** expect to change a hotel's PMS, allowed sites, guest networks or portal from Central — these are operational decisions owned by the hotel and made in Hotel Admin.
+- **Don't** share one customer's data with another. Each customer is isolated from every other customer.
 
 ## Monitoring the platform
 
-Admin UI gives per-tenant views. For platform-wide health use:
+Central's pages give you the licensing view of the fleet:
 
-- **Grafana** — dashboards for all tenants combined (sessions/sec, appliance heartbeat, error rates)
-- **Alertmanager** — critical alerts route to your on-call channel
-- **Postgres/TimescaleDB direct queries** for custom reports
+- **Dashboard** — the Fleet license summary (active, expiring in 30 days, expired, suspended, revoked, orphaned).
+- **Appliances** — which appliances have been heard from recently.
+- **Security alerts** — cloned or reused hardware; activation is blocked while an alert is open.
+- **Certificates** and **Assignment keys** — expiry and state of the trust material.
+- **Backup health** — Central's own backup and rollback storage.
 
-See `deploy/observability/README.md` for the observability stack. (If that doesn't exist yet, ask the engineering team.)
+Appliance service health, guest sessions and usage are watched on each appliance in Hotel Admin; appliances do not send telemetry to Central. For monitoring of the Central host itself, see `deploy/observability/README.md`.
 
 ## Who to escalate to
 
-- **Billing / legal / contract issues** → your ops / finance team.
-- **Engineering bugs** — file an issue with repro steps. Prefer: `audit log entry id`, `tenant slug`, `appliance id`, `approx timestamp`.
-- **Security incident** — follow your incident response runbook. Rotate the affected tenant's operator credentials first, then investigate.
+- **Commercial / legal / contract issues** → your operations or finance team.
+- **Engineering bugs** — file an issue with repro steps. Prefer: `audit log entry`, `customer slug`, `appliance serial`, `approx timestamp`.
+- **Security incident** — follow your incident response runbook. Disable the affected customer's operator accounts first, then investigate.

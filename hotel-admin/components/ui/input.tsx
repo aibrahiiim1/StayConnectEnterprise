@@ -6,17 +6,17 @@ import { cn } from "@/lib/utils";
 // screen ends up with a bordered box and no background colour, invisible against a dark card.
 
 const CONTROL = cn(
-  "w-full rounded-md border border-input bg-card text-foreground shadow-xs",
-  "transition-[border-color,box-shadow] duration-150",
-  "placeholder:text-muted-foreground/70",
-  "focus:outline-none focus-visible:outline-none focus:border-ring focus:ring-2 focus:ring-ring/25",
+  "w-full rounded-md border border-input bg-card text-foreground",
+  "transition-[border-color,box-shadow] duration-base ease-velonet",
+  "placeholder:text-muted-foreground/80",
+  "focus:outline-none focus-visible:outline-none focus:border-foreground focus:ring-2 focus:ring-ring/20",
   "disabled:cursor-not-allowed disabled:bg-surface disabled:text-muted-foreground",
   "aria-[invalid=true]:border-destructive aria-[invalid=true]:ring-destructive/25",
 );
 
 export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
   function Input({ className, ...p }, ref) {
-    return <input ref={ref} className={cn(CONTROL, "h-9 px-3 text-sm", className)} {...p} />;
+    return <input ref={ref} className={cn(CONTROL, "h-10 px-3 text-sm", className)} {...p} />;
   },
 );
 
@@ -35,12 +35,9 @@ export const Select = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttrib
         ref={ref}
         className={cn(
           CONTROL,
-          "h-9 cursor-pointer appearance-none bg-no-repeat py-0 pl-3 pr-9 text-sm",
-          // The chevron is an inline data-URI so it needs no asset and no extra element, and `currentColor`
-          // cannot be used in a background image — hence the two theme-matched strokes below.
-          "bg-[length:16px] bg-[right_0.625rem_center]",
-          "bg-[url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")]",
-          "dark:bg-[url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")]",
+          // The chevron and the fill live in the .select-chevron component class (globals.css): as arbitrary
+          // utilities they collided inside tailwind-merge and cost the control its background colour.
+          "h-10 cursor-pointer appearance-none py-0 ps-3 pe-9 text-sm select-chevron",
           className,
         )}
         {...p}
@@ -52,7 +49,7 @@ export const Select = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttrib
 export function Label({ className, ...p }: React.LabelHTMLAttributes<HTMLLabelElement>) {
   return (
     <label
-      className={cn("mb-1.5 block text-xs font-medium text-muted-foreground", className)}
+      className={cn("mb-1.5 block text-label text-foreground", className)}
       {...p}
     />
   );

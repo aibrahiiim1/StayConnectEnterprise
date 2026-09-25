@@ -1,19 +1,32 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { Eye, Key, Plus, Server, Trash2 } from "lucide-react";
 import {
   api, ApiError, Appliance, ListResp, Site,
   BootstrapToken, BootstrapTokenCreated, EffectiveConfig,
 } from "@/lib/api";
 import { useCustomer } from "@/lib/customer-context";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Field, Input, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Plus, X, Key, Copy, Trash2, Eye, Building2 } from "lucide-react";
-import { formatRelative, errMsg } from "@/lib/utils";
+import { ErrorBanner, Callout } from "@/components/ui/error-banner";
+import { ConfirmDialog, DetailDialog, DialogForm } from "@/components/ui/dialog";
+import { PageHeader, PageShell, StatCard, Toolbar } from "@/components/ui/page";
+import { SearchInput } from "@/components/ui/data";
+import { MonoId, Skeleton, SkeletonRows } from "@/components/ui/misc";
+import { LiveStatus, OneTimeReveal, refreshingClass } from "@/components/ui/patterns";
+import { useToast } from "@/components/ui/toast";
+import { CustomerScope } from "@/components/customer-scope";
+import { DeleteDialog } from "@/components/delete-dialog";
+import { RoleRestricted } from "@/components/role-restricted";
+import { usePermissions } from "@/lib/permissions";
+import { statusWord } from "@/lib/license-state";
+import { cn, formatRelative, errMsg } from "@/lib/utils";
 
 const toneFor = (status: string) =>
   status === "online" ? "ok" :
@@ -21,56 +34,58 @@ const toneFor = (status: string) =>
   status === "pending" ? "info" :
   status === "retired" ? "default" : "warn";
 
-// LivePulse renders a small colored dot — solid green for fresh online,
-// amber when last_seen is older than ~30s (about to be flipped to offline
-// by the sweeper), grey otherwise.
+// LivePulse — solid green for a fresh online heartbeat, amber when last_seen is older than ~25 s (about to be
+// flipped to offline by the sweeper). The word beside it carries the state; the dot only adds liveness.
 function LivePulse({ status, lastSeen }: { status: string; lastSeen?: string }) {
   if (status !== "online" || !lastSeen) return null;
   const ageMs = Date.now() - new Date(lastSeen).getTime();
   const stale = ageMs > 25_000; // ahead of the 30s sweeper threshold
-  const color = stale ? "bg-warn" : "bg-ok";
   return (
-    <span title={`last beat ${Math.round(ageMs / 1000)}s ago`}
-          className={`inline-block w-2 h-2 rounded-full mr-1 ${color} ${stale ? "" : "animate-pulse"}`} />
+    <span className="relative inline-flex size-2" title={`Last heartbeat ${Math.round(ageMs / 1000)} s ago`}>
+      {!stale && <span className="absolute inline-flex size-full animate-ping rounded-full bg-success/60 motion-reduce:hidden" aria-hidden />}
+      <span className={cn("relative inline-flex size-2 rounded-full", stale ? "bg-warning" : "bg-success")} aria-hidden />
+      <span className="sr-only">{stale ? "Heartbeat is late" : "Heartbeat is fresh"}</span>
+    </span>
   );
 }
 
 export default function AppliancesPage() {
-  // Appliances are owned via Site → Customer. The Global Customer Context scopes
-  // the list; "All Customers" ("") fans out. Manual create / token mint require a
-  // concrete customer (and a Site under it).
+  // Appliances are owned via Site → Customer. The Customer context scopes the list; "All customers" ("") fans
+  // out. Manual create / token mint require a concrete customer (and a Site under it).
   const { selectedTenantId, selectedTenantName, ready, tenants } = useCustomer();
+  // Roles (lib/permissions.ts): the /v1/appliances routes apply only the tenant-scope check, so manual create,
+  // Config and Delete stay for every role that can list. Enrollment tokens are catalog-gated
+  // (platform.enrollment_tokens.create / .revoke, api/enrollment.go TokenRoutes) and are hidden otherwise.
+  const { can } = usePermissions();
+  const canWrite = can["appliances.write"];
+  const canMint = can["enrollmentTokens.create"];
+  const canRevokeToken = can["enrollmentTokens.revoke"];
   const allCustomers = selectedTenantId === "";
   const custName = (tid?: string) => tenants.find((t) => t.id === tid)?.name ?? tid ?? "—";
+  const toast = useToast();
   const [rows, setRows] = useState<Appliance[] | null>(null);
   const [sites, setSites] = useState<Site[]>([]);
   const [tokens, setTokens] = useState<BootstrapToken[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [showNew, setShowNew] = useState(false);
-  const [showMint, setShowMint] = useState(false);
-  const [mintedToken, setMintedToken] = useState<BootstrapTokenCreated | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [loadedAt, setLoadedAt] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [query, setQuery] = useState("");
 
-  // Effective-config drawer (5.7.D).
-  const [effOpen, setEffOpen] = useState<Appliance | null>(null);
-  const [effData, setEffData] = useState<EffectiveConfig | null>(null);
-
-  // Re-render every 10s so the LivePulse component reflects updated
-  // last_seen ages without a fresh API roundtrip.
+  // Re-render every 10s so the LivePulse reflects updated last_seen ages without an API round trip.
   const [, setTick] = useState(0);
   useEffect(() => {
     const i = setInterval(() => setTick((n) => n + 1), 10_000);
     return () => clearInterval(i);
   }, []);
 
-  async function load() {
+  async function load(keep = false) {
     if (!ready) return;
-    setRows(null); setErr(null);
+    if (!keep) setRows(null);
+    setErr(null); setLoading(true);
     try {
-      // Appliances + sites fan out across customers (super-admin, no tenant_id).
-      // Enrollment tokens are strictly tenant-scoped and are only used by the
-      // per-customer create/mint forms, so skip them in All-Customers mode and
-      // never let a tokens failure blank the appliance list.
+      // Appliances + sites fan out across customers (super-admin, no tenant_id). Enrollment tokens are strictly
+      // customer-scoped and only used by the per-customer forms, so skip them in All-customers mode and never let
+      // a tokens failure blank the appliance list.
       const [apps, st, tk] = await Promise.all([
         api.get<ListResp<Appliance>>(`/v1/appliances?tenant_id=${selectedTenantId}`),
         api.get<ListResp<Site>>(`/v1/sites?tenant_id=${selectedTenantId}`).catch(() => ({ data: [] as Site[] })),
@@ -81,20 +96,26 @@ export default function AppliancesPage() {
       setRows(apps.data ?? []);
       setSites(st.data ?? []);
       setTokens(tk.data ?? []);
+      setLoadedAt(Date.now());
     } catch (e: any) {
       setErr(e?.message ?? "Failed to load");
+    } finally {
+      setLoading(false);
     }
   }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { setShowNew(false); setShowMint(false); load(); }, [ready, selectedTenantId]);
 
+  // ---- mint enrollment token ----
+  const [showMint, setShowMint] = useState(false);
+  const [mintedToken, setMintedToken] = useState<BootstrapTokenCreated | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [formErr, setFormErr] = useState<string | null>(null);
+
   async function onMintToken(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
     if (allCustomers) return;
-    setBusy(true); setErr(null);
+    setBusy(true); setFormErr(null);
     const form = new FormData(e.currentTarget);
-    // Capture before awaiting: React nulls e.currentTarget after the first await,
-    // so a later .reset() throws and shows a bogus error on a successful action.
-    const el = e.currentTarget;
     try {
       const res = await api.post<BootstrapTokenCreated>(
         `/v1/appliance-bootstrap-tokens?tenant_id=${selectedTenantId}`,
@@ -104,21 +125,33 @@ export default function AppliancesPage() {
           ttl_hours: Number(form.get("ttl_hours")) || 24,
         },
       );
-      setMintedToken(res);
       setShowMint(false);
-      el.reset();
-      load();
-    } catch (e) { setErr(errMsg(e)); }
+      setMintedToken(res);
+      load(true);
+    } catch (e) { setFormErr(errMsg(e)); }
     finally { setBusy(false); }
   }
 
-  async function onRevokeToken(id: string) {
-    if (!confirm("Revoke this bootstrap token?")) return;
+  // ---- revoke token ----
+  const [revokeTok, setRevokeTok] = useState<BootstrapToken | null>(null);
+  const [actBusy, setActBusy] = useState(false);
+  const [actErr, setActErr] = useState<string | null>(null);
+
+  async function onRevokeToken() {
+    const t = revokeTok; if (!t) return;
+    setActBusy(true); setActErr(null);
     try {
-      await api.del(`/v1/appliance-bootstrap-tokens/${id}?tenant_id=${selectedTenantId}`);
-      load();
-    } catch (e) { setErr(errMsg(e)); }
+      await api.del(`/v1/appliance-bootstrap-tokens/${t.id}?tenant_id=${selectedTenantId}`);
+      setRevokeTok(null);
+      toast.success("Enrollment token revoked");
+      load(true);
+    } catch (e) { setActErr(errMsg(e)); }
+    finally { setActBusy(false); }
   }
+
+  // ---- effective config ----
+  const [effOpen, setEffOpen] = useState<Appliance | null>(null);
+  const [effData, setEffData] = useState<EffectiveConfig | null>(null);
 
   async function onShowEffective(a: Appliance) {
     setEffOpen(a);
@@ -131,15 +164,13 @@ export default function AppliancesPage() {
     } catch (e) { setErr(errMsg(e)); setEffOpen(null); }
   }
 
+  // ---- create ----
+  const [showNew, setShowNew] = useState(false);
 
   async function onCreate(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
     if (allCustomers) return;
-    setBusy(true); setErr(null);
+    setBusy(true); setFormErr(null);
     const form = new FormData(e.currentTarget);
-    // Capture before awaiting: React nulls e.currentTarget after the first await,
-    // so a later .reset() throws and shows a bogus error on a successful action.
-    const el = e.currentTarget;
     try {
       await api.post(`/v1/appliances?tenant_id=${selectedTenantId}`, {
         site_id: form.get("site_id"),
@@ -148,304 +179,373 @@ export default function AppliancesPage() {
         model: (form.get("model") as string) || undefined,
       });
       setShowNew(false);
-      el.reset();
-      load();
+      toast.success("Appliance created", String(form.get("serial") ?? ""));
+      load(true);
     } catch (e: any) {
       if (e instanceof ApiError && e.body?.error === "limit_exceeded") {
-        setErr(`License limit reached: ${e.body.limit_key} (${e.body.current}/${e.body.limit})`);
-      } else setErr(e?.message ?? "Create failed");
+        setFormErr(`License limit reached: ${e.body.limit_key} (${e.body.current}/${e.body.limit})`);
+      } else setFormErr(e?.message ?? "Create failed");
     } finally { setBusy(false); }
   }
 
-  async function onDelete(a: Appliance) {
-    if (!confirm("Delete this appliance?")) return;
-    try {
-      await api.del(`/v1/appliances/${a.id}?tenant_id=${a.tenant_id ?? selectedTenantId}`);
-      load();
-    } catch (e: any) { setErr(e?.message ?? "Delete failed"); }
-  }
+  // ---- delete ----
+  // DELETE /v1/appliances/{id} takes no body and no password step-up (api/appliances.go deleteAppliance), so the
+  // shared DeleteDialog runs without a reason field and without withStepUp — same request as before.
+  const [delApp, setDelApp] = useState<Appliance | null>(null);
 
   const siteName = (sid: string) => sites.find((s) => s.id === sid)?.name ?? sid.slice(0, 8);
+  const canCreate = !allCustomers && sites.length > 0;
+
+  const counts = useMemo(() => {
+    const all = rows ?? [];
+    const online = all.filter((a) => a.status === "online").length;
+    const waiting = all.filter((a) => a.status === "enrolled" || a.status === "pending").length;
+    const retired = all.filter((a) => a.status === "retired").length;
+    return { total: all.length, online, waiting, other: all.length - online - waiting - retired };
+  }, [rows]);
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return (rows ?? []).filter((a) =>
+      !q || [a.name, a.serial, a.status, a.version ?? "", a.site_id ? siteName(a.site_id) : "", allCustomers ? custName(a.tenant_id) : ""]
+        .join(" ").toLowerCase().includes(q));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, query, sites, tenants, allCustomers]);
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="flex items-baseline justify-between mb-4">
-        <div>
-          <div className="text-xs text-muted uppercase tracking-wider">Infrastructure</div>
-          <h1 className="text-2xl font-semibold">Appliances</h1>
-          <div className="mt-1 flex items-center gap-1.5 text-sm text-muted">
-            <Building2 size={13} /> {allCustomers ? "All Customers" : <>Customer: <span className="text-text font-medium">{selectedTenantName}</span></>}
-          </div>
+    <PageShell>
+      <PageHeader
+        eyebrow="Infrastructure"
+        title="Appliances"
+        icon={<Server />}
+        description="Every appliance, where it is and whether it is online. Appliances normally arrive by themselves under Onboarding; the tools here are for recovery."
+        actions={
+          can["appliances.read"] ? (
+            <>
+              {canMint && (
+                <Button variant="secondary" onClick={() => { setFormErr(null); setShowMint(true); }} disabled={!canCreate}>
+                  <Key /> Enrollment token
+                </Button>
+              )}
+              {canWrite && (
+                <Button onClick={() => { setFormErr(null); setShowNew(true); }} disabled={!canCreate}>
+                  <Plus /> New appliance
+                </Button>
+              )}
+            </>
+          ) : undefined
+        }
+      >
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <CustomerScope />
+          <LiveStatus updatedAt={loadedAt} refreshing={loading && rows !== null} onRefresh={() => load(true)} />
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={() => { setShowMint((s) => !s); setShowNew(false); }} disabled={allCustomers || sites.length === 0}>
-            {showMint ? <><X size={14} /> Cancel</> : <><Key size={14} /> Enrollment token</>}
-          </Button>
-          <Button onClick={() => { setShowNew((s) => !s); setShowMint(false); }} disabled={allCustomers || sites.length === 0}>
-            {showNew ? <><X size={14} /> Cancel</> : <><Plus size={14} /> New appliance</>}
-          </Button>
-        </div>
-      </div>
+      </PageHeader>
 
-      <p className="text-sm text-muted mb-4">
-        Most appliances install <strong>zero-touch</strong>: a factory-clean box with internet self-registers and
-        appears under <a href="/onboarding" className="text-brand hover:underline">Onboarding</a> as
-        <em> Pending activation</em>, where you pick its customer, site and license terms and click Activate — no token.
-        <strong>Enrollment tokens are not part of normal activation.</strong> An appliance registers itself
-        and is activated from <strong>Onboarding</strong>. Mint a token below only as a recovery lever — a box
-        that cannot self-register, or one being deliberately re-attached.
-      </p>
-      {allCustomers && (
-        <div className="text-sm text-warn mb-4">
-          Select a customer in the <strong>Customer context</strong> selector (top-left) to add or enroll an appliance —
-          an appliance is created under a Site that belongs to one customer.
-        </div>
+      {!can["appliances.read"] ? (
+        <RoleRestricted what="Appliances belong to a customer, and your sign-in has none." />
+      ) : (
+      <>
+      <Callout tone="info" title="Most appliances install zero-touch">
+        A factory-clean appliance with internet registers itself and appears under{" "}
+        <Link href="/onboarding" className="font-medium underline underline-offset-2">Onboarding</Link> as Pending
+        activation, where you choose its customer, site and license terms and click Activate — no token. Enrollment
+        tokens are only a recovery lever: an appliance that cannot register itself, or one being deliberately
+        re-attached.
+      </Callout>
+      {allCustomers && (canWrite || canMint) && (
+        <Callout tone="neutral">
+          Select a customer in the sidebar to add or enroll an appliance — an appliance is created under a site that
+          belongs to one customer.
+        </Callout>
       )}
-      {!allCustomers && sites.length === 0 && (
-        <div className="text-sm text-warn mb-4">
-          Create a site under <strong>{selectedTenantName}</strong> first — appliances belong to a site.
-        </div>
+      {!allCustomers && rows !== null && sites.length === 0 && (
+        <Callout tone="warning">Create a site under <strong>{selectedTenantName}</strong> first — appliances belong to a site.</Callout>
       )}
-      {err && <div className="text-err text-sm mb-4">{err}</div>}
+      <ErrorBanner err={err} />
 
-      {mintedToken && (
-        <Card className="mb-6 border-ok">
-          <CardHeader>
-            <CardTitle className="text-ok">New enrollment token — copy it now</CardTitle>
-          </CardHeader>
-          <CardBody>
-            <div className="text-sm text-muted mb-2">
-              This is the only time the full token is shown. Enter it in the appliance&apos;s{" "}
-              <span className="font-mono">Hotel Admin → /setup/enrollment</span> wizard. Never edit files on
-              the appliance: a factory unit has no customer identity and adopts its tenant/site only from the
-              signed assignment you issue after claiming it.
-            </div>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 bg-panel2 border border-border rounded px-3 py-2 font-mono text-sm break-all">
-                {mintedToken.token}
-              </code>
-              <Button size="sm" variant="secondary"
-                onClick={() => navigator.clipboard?.writeText(mintedToken.token)}>
-                <Copy size={12} /> Copy
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setMintedToken(null)}>
-                <X size={14} /> Dismiss
-              </Button>
-            </div>
-            <div className="text-xs text-muted mt-3">
-              Site: {siteName(mintedToken.row.site_id)}
-              {mintedToken.row.expected_serial ? <> · Serial lock: <span className="font-mono">{mintedToken.row.expected_serial}</span></> : null}
-              {" "}· Expires: {formatRelative(mintedToken.row.expires_at)}
-            </div>
-          </CardBody>
-        </Card>
-      )}
+      <section aria-label="Appliance counts" className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard label="Appliances" value={rows ? counts.total : <Skeleton className="h-7 w-10" />} icon={<Server />} />
+        <StatCard label="Online" value={rows ? counts.online : <Skeleton className="h-7 w-10" />} tone="ok" hint="Heard from recently" />
+        <StatCard label="Enrolled or pending" value={rows ? counts.waiting : <Skeleton className="h-7 w-10" />} tone="info" />
+        <StatCard label="Offline or other" value={rows ? counts.other : <Skeleton className="h-7 w-10" />} tone="warn" />
+      </section>
 
-      {showMint && (
-        <Card className="mb-6">
-          <CardHeader><CardTitle>Mint enrollment token</CardTitle></CardHeader>
-          <CardBody>
-            <form onSubmit={onMintToken} className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <Label>Site</Label>
-                <select name="site_id" required
-                  className="h-9 w-full rounded-md bg-panel2 border border-border px-3 text-sm">
-                  {sites.map((s) => <option key={s.id} value={s.id}>{s.name} — {s.code}</option>)}
-                </select>
-              </div>
-              <div>
-                <Label>Serial (optional)</Label>
-                <Input name="expected_serial" placeholder="APP-HQ-0001 (locks token to this serial)" />
-              </div>
-              <div>
-                <Label>TTL (hours)</Label>
-                <Input name="ttl_hours" type="number" defaultValue={24} min={1} max={168} />
-              </div>
-              <div className="sm:col-span-3 flex justify-end">
-                <Button type="submit" disabled={busy}>{busy ? "Minting…" : "Mint token"}</Button>
-              </div>
-            </form>
-          </CardBody>
-        </Card>
-      )}
-
-      {showNew && (
-        <Card className="mb-6">
-          <CardHeader><CardTitle>New appliance</CardTitle></CardHeader>
-          <CardBody>
-            <form onSubmit={onCreate} className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-              <div>
-                <Label>Site</Label>
-                <select
-                  name="site_id" required
-                  className="h-9 w-full rounded-md bg-panel2 border border-border px-3 text-sm"
-                >
-                  {sites.map((s) => <option key={s.id} value={s.id}>{s.name} — {s.code}</option>)}
-                </select>
-              </div>
-              <div><Label>Serial</Label><Input name="serial" required placeholder="APP-HQ-0001" /></div>
-              <div><Label>Name</Label><Input name="name" required placeholder="hq-gateway" /></div>
-              <div><Label>Model</Label><Input name="model" placeholder="Protectli VP2410" /></div>
-              <div className="sm:col-span-4 flex justify-end">
-                <Button type="submit" disabled={busy}>{busy ? "Creating…" : "Create"}</Button>
-              </div>
-            </form>
-          </CardBody>
-        </Card>
-      )}
-
-      <Card className="mb-6">
-        <CardBody className="p-0">
-          {rows === null ? <EmptyState title="Loading…" /> : rows.length === 0 ? (
-            <EmptyState title="No appliances yet" hint="Factory-clean appliances self-register under Onboarding; activate them there. Or mint a token above for a manual install." />
-          ) : (
-            <Table>
-              <THead>
-                <TR>
-                  {allCustomers && <TH>Customer</TH>}
-                  <TH>Name</TH><TH>Site</TH><TH>Serial</TH>
-                  <TH>Status</TH><TH>Version</TH><TH>Last seen</TH><TH></TH>
-                </TR>
-              </THead>
-              <tbody>
-                {rows.map((a) => (
-                  <TR key={a.id}>
-                    {allCustomers && <TD className="text-muted">{custName(a.tenant_id)}</TD>}
-                    <TD>{a.name}<div className="text-xs text-muted font-mono">{a.id.slice(0, 8)}</div></TD>
-                    <TD className="text-muted">{a.site_id ? siteName(a.site_id) : <span className="text-warn">unassigned</span>}</TD>
-                    <TD className="font-mono">{a.serial}</TD>
-                    <TD>
+      <Card className={cn(loading && rows !== null && refreshingClass)}>
+        <Toolbar className="border-b border-border px-4 py-3">
+          <SearchInput value={query} onChange={setQuery} placeholder="Search name, serial, site" label="Search appliances" />
+        </Toolbar>
+        {rows === null ? (
+          <SkeletonRows rows={4} cols={allCustomers ? 8 : 7} />
+        ) : rows.length === 0 ? (
+          <EmptyState
+            icon={<Server />}
+            title="No appliances yet"
+            hint="Factory-clean appliances register themselves under Onboarding; activate them there."
+            action={<Link href="/onboarding" className="text-sm font-medium text-primary hover:underline">Go to Onboarding</Link>}
+          />
+        ) : visible.length === 0 ? (
+          <EmptyState title="No appliances match" hint="Nothing matches the search."
+            action={<Button variant="secondary" onClick={() => setQuery("")}>Clear search</Button>} />
+        ) : (
+          <Table>
+            <THead>
+              <TR>
+                {allCustomers && <TH>Customer</TH>}
+                <TH>Name</TH><TH>Site</TH><TH>Serial</TH>
+                <TH>Status</TH><TH className="hidden md:table-cell">Version</TH><TH className="hidden md:table-cell">Last seen</TH>
+                <TH><span className="sr-only">Actions</span></TH>
+              </TR>
+            </THead>
+            <tbody>
+              {visible.map((a) => (
+                <TR key={a.id}>
+                  {allCustomers && <TD className="text-muted-foreground">{custName(a.tenant_id)}</TD>}
+                  <TD>
+                    <div className="font-medium">{a.name}</div>
+                    <MonoId value={a.id} title="Appliance id" />
+                  </TD>
+                  <TD className="text-muted-foreground">{a.site_id ? siteName(a.site_id) : <Badge tone="warn">Unassigned</Badge>}</TD>
+                  <TD className="font-mono text-xs">{a.serial}</TD>
+                  <TD>
+                    <span className="inline-flex items-center gap-2">
                       <LivePulse status={a.status} lastSeen={a.last_seen_at} />
-                      <Badge tone={toneFor(a.status) as any}>{a.status}</Badge>
-                    </TD>
-                    <TD className="text-muted text-xs font-mono">{a.version || "—"}</TD>
-                    <TD className="text-muted">{a.last_seen_at ? formatRelative(a.last_seen_at) : "—"}</TD>
-                    <TD className="text-right whitespace-nowrap">
-                      <Button size="sm" variant="ghost" onClick={() => onShowEffective(a)}><Eye size={12} /> Config</Button>
-                      <Button size="sm" variant="ghost" onClick={() => onDelete(a)}>Delete</Button>
-                    </TD>
-                  </TR>
-                ))}
-              </tbody>
-            </Table>
-          )}
-        </CardBody>
+                      <Badge tone={toneFor(a.status) as any}>{statusWord(a.status)}</Badge>
+                    </span>
+                  </TD>
+                  <TD className="hidden font-mono text-xs text-muted-foreground md:table-cell">{a.version || "—"}</TD>
+                  <TD className="hidden text-muted-foreground md:table-cell">{a.last_seen_at ? formatRelative(a.last_seen_at) : "—"}</TD>
+                  <TD>
+                    <div className="flex justify-end gap-1">
+                      <Button size="sm" variant="ghost" onClick={() => onShowEffective(a)}><Eye /> Config</Button>
+                      {canWrite && (
+                        <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive"
+                          onClick={() => setDelApp(a)} aria-label={`Delete appliance ${a.serial}`}>
+                          <Trash2 /> <span className="hidden sm:inline">Delete</span>
+                        </Button>
+                      )}
+                    </div>
+                  </TD>
+                </TR>
+              ))}
+            </tbody>
+          </Table>
+        )}
       </Card>
 
       {tokens && tokens.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Enrollment tokens</CardTitle>
+            <div className="space-y-0.5">
+              <CardTitle>Enrollment tokens</CardTitle>
+              <CardDescription>Recovery tokens minted for this customer. The full token is shown only once, when it is created.</CardDescription>
+            </div>
           </CardHeader>
-          <CardBody className="p-0">
-            <Table>
-              <THead>
-                <TR>
-                  <TH>Hint</TH><TH>Site</TH><TH>Serial lock</TH>
-                  <TH>Status</TH><TH>Expires</TH><TH>Created</TH><TH></TH>
-                </TR>
-              </THead>
-              <tbody>
-                {tokens.map((t) => {
-                  const consumed = !!t.consumed_at;
-                  const expired = !consumed && new Date(t.expires_at) < new Date();
-                  const tone = consumed ? "default" : expired ? "warn" : "info";
-                  const label = consumed ? "consumed" : expired ? "expired" : "pending";
-                  return (
-                    <TR key={t.id}>
-                      <TD className="font-mono">…{t.token_hint}</TD>
-                      <TD className="text-muted">{siteName(t.site_id)}</TD>
-                      <TD className="font-mono text-xs">{t.expected_serial || "—"}</TD>
-                      <TD><Badge tone={tone as any}>{label}</Badge></TD>
-                      <TD className="text-muted text-xs">{formatRelative(t.expires_at)}</TD>
-                      <TD className="text-muted text-xs">{formatRelative(t.created_at)}</TD>
-                      <TD className="text-right">
-                        {!consumed && (
-                          <Button size="sm" variant="ghost" onClick={() => onRevokeToken(t.id)}>
-                            <Trash2 size={12} /> Revoke
-                          </Button>
-                        )}
-                      </TD>
-                    </TR>
-                  );
-                })}
-              </tbody>
-            </Table>
-          </CardBody>
+          <Table>
+            <THead>
+              <TR>
+                <TH>Hint</TH><TH>Site</TH><TH className="hidden md:table-cell">Serial lock</TH>
+                <TH>Status</TH><TH className="hidden sm:table-cell">Expires</TH><TH className="hidden md:table-cell">Created</TH>
+                <TH><span className="sr-only">Actions</span></TH>
+              </TR>
+            </THead>
+            <tbody>
+              {tokens.map((t) => {
+                const consumed = !!t.consumed_at;
+                const expired = !consumed && new Date(t.expires_at) < new Date();
+                const tone = consumed ? "default" : expired ? "warn" : "info";
+                const label = consumed ? "Consumed" : expired ? "Expired" : "Pending";
+                return (
+                  <TR key={t.id}>
+                    <TD className="font-mono text-xs">…{t.token_hint}</TD>
+                    <TD className="text-muted-foreground">{siteName(t.site_id)}</TD>
+                    <TD className="hidden font-mono text-xs md:table-cell">{t.expected_serial || "—"}</TD>
+                    <TD><Badge tone={tone as any}>{label}</Badge></TD>
+                    <TD className="hidden text-xs text-muted-foreground sm:table-cell">{formatRelative(t.expires_at)}</TD>
+                    <TD className="hidden text-xs text-muted-foreground md:table-cell">{formatRelative(t.created_at)}</TD>
+                    <TD className="text-end">
+                      {!consumed && canRevokeToken && (
+                        <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive"
+                          onClick={() => { setActErr(null); setRevokeTok(t); }}>
+                          <Trash2 /> Revoke
+                        </Button>
+                      )}
+                    </TD>
+                  </TR>
+                );
+              })}
+            </tbody>
+          </Table>
         </Card>
       )}
-
-      {effOpen && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-6 z-50"
-             onClick={() => setEffOpen(null)}>
-          <div className="bg-panel border border-border rounded-md max-w-4xl w-full max-h-[85vh] overflow-auto"
-               onClick={(e) => e.stopPropagation()}>
-            <div className="p-4 border-b border-border flex items-center justify-between">
-              <div>
-                <div className="font-semibold">Effective config — {effOpen.name}</div>
-                <div className="text-xs text-muted">
-                  What scd at site <span className="font-mono">{siteName(effOpen.site_id)}</span> should be enforcing.
-                </div>
-              </div>
-              <Button size="sm" variant="ghost" onClick={() => setEffOpen(null)}><X size={14} /></Button>
-            </div>
-            <div className="p-4 space-y-6">
-              {!effData ? <EmptyState title="Loading…" /> : (
-                <>
-                  <div>
-                    <div className="text-xs text-muted uppercase tracking-wider mb-2">
-                      PMS providers ({effData.pms_providers?.length ?? 0})
-                    </div>
-                    {!effData.pms_providers || effData.pms_providers.length === 0 ? (
-                      <div className="text-sm text-muted">No PMS providers configured.</div>
-                    ) : (
-                      <Table>
-                        <THead><TR><TH>Name</TH><TH>Kind</TH><TH>Scope</TH><TH>Status</TH></TR></THead>
-                        <tbody>
-                          {effData.pms_providers.map((p) => (
-                            <TR key={p.id}>
-                              <TD>{p.display_name || p.name}</TD>
-                              <TD className="text-muted">{p.kind}</TD>
-                              <TD>{p.site_id
-                                ? <Badge tone="info">site override</Badge>
-                                : <Badge tone="default">tenant-wide</Badge>}</TD>
-                              <TD><Badge tone={(p.status === "connected" ? "ok" : p.status === "down" ? "err" : "warn") as any}>{p.status}</Badge></TD>
-                            </TR>
-                          ))}
-                        </tbody>
-                      </Table>
-                    )}
-                  </div>
-                  <div>
-                    <div className="text-xs text-muted uppercase tracking-wider mb-2">
-                      Walled-garden rules ({effData.walled_garden?.length ?? 0})
-                    </div>
-                    {!effData.walled_garden || effData.walled_garden.length === 0 ? (
-                      <div className="text-sm text-muted">No walled-garden rules configured.</div>
-                    ) : (
-                      <Table>
-                        <THead><TR><TH>Kind</TH><TH>Value</TH><TH>Ports</TH><TH>Scope</TH></TR></THead>
-                        <tbody>
-                          {effData.walled_garden.map((w) => (
-                            <TR key={w.id}>
-                              <TD className="text-muted">{w.kind}</TD>
-                              <TD className="font-mono text-xs">{w.value}</TD>
-                              <TD className="text-muted text-xs">{w.ports?.join(", ") || "any"}</TD>
-                              <TD>{w.site_id
-                                ? <Badge tone="info">site</Badge>
-                                : <Badge tone="default">tenant-wide</Badge>}</TD>
-                            </TR>
-                          ))}
-                        </tbody>
-                      </Table>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
+      </>
       )}
-    </div>
+
+      <DialogForm
+        open={showMint}
+        onOpenChange={setShowMint}
+        title="Mint enrollment token"
+        description="Only for an appliance that cannot register itself. The token is shown once."
+        submitLabel="Mint token"
+        busyLabel="Minting…"
+        busy={busy}
+        error={formErr}
+        onSubmit={onMintToken}
+      >
+        <Field label="Site" required>
+          <Select name="site_id" required>
+            {sites.map((s) => <option key={s.id} value={s.id}>{s.name} — {s.code}</option>)}
+          </Select>
+        </Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Serial" hint="Optional. Locks the token to this serial.">
+            <Input name="expected_serial" placeholder="APP-HQ-0001" />
+          </Field>
+          <Field label="Valid for (hours)" hint="1 to 168. Default 24.">
+            <Input name="ttl_hours" type="number" defaultValue={24} min={1} max={168} />
+          </Field>
+        </div>
+      </DialogForm>
+
+      <DialogForm
+        open={showNew}
+        onOpenChange={setShowNew}
+        title="New appliance"
+        description="Manual registration. Most appliances register themselves under Onboarding instead."
+        submitLabel="Create appliance"
+        busyLabel="Creating…"
+        busy={busy}
+        error={formErr}
+        onSubmit={onCreate}
+      >
+        <Field label="Site" required>
+          <Select name="site_id" required>
+            {sites.map((s) => <option key={s.id} value={s.id}>{s.name} — {s.code}</option>)}
+          </Select>
+        </Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Serial" required><Input name="serial" required placeholder="APP-HQ-0001" /></Field>
+          <Field label="Name" required><Input name="name" required placeholder="hq-gateway" /></Field>
+          <Field label="Model" className="sm:col-span-2"><Input name="model" placeholder="Protectli VP2410" /></Field>
+        </div>
+      </DialogForm>
+
+      <OneTimeReveal
+        open={!!mintedToken}
+        title="New enrollment token"
+        description="Enter it in the appliance's Hotel Admin, under Appliance & licence → Advanced / recovery."
+        valueLabel="Enrollment token"
+        value={mintedToken?.token ?? ""}
+        onAcknowledge={() => setMintedToken(null)}
+      >
+        {mintedToken && (
+          <div className="space-y-2 text-sm text-muted-foreground">
+            <p>
+              Never edit files on the appliance: a factory unit has no customer identity and adopts its customer and
+              site only from the signed assignment issued after it is claimed.
+            </p>
+            <p className="text-xs">
+              Site: {siteName(mintedToken.row.site_id)}
+              {mintedToken.row.expected_serial ? <> · Serial lock: <span className="font-mono">{mintedToken.row.expected_serial}</span></> : null}
+              {" "}· Expires: {formatRelative(mintedToken.row.expires_at)}
+            </p>
+          </div>
+        )}
+      </OneTimeReveal>
+
+      <ConfirmDialog
+        open={!!revokeTok}
+        onOpenChange={(v) => { if (!v) setRevokeTok(null); }}
+        title="Revoke this enrollment token?"
+        description={revokeTok ? <>Token ending <span className="font-mono">…{revokeTok.token_hint}</span>.</> : undefined}
+        confirmLabel="Revoke token"
+        confirmVariant="danger"
+        busy={actBusy}
+        error={actErr}
+        consequences={["An appliance can no longer enroll with this token."]}
+        onConfirm={onRevokeToken}
+      />
+
+      <DeleteDialog
+        open={!!delApp}
+        onClose={() => setDelApp(null)}
+        onDeleted={() => { toast.success("Appliance deleted", delApp?.serial); load(true); }}
+        title={`Delete appliance ${delApp?.serial ?? ""}`}
+        what="Appliance"
+        expected={delApp?.serial ?? ""}
+        confirmHint="Type the appliance serial"
+        deleteUrl={`/v1/appliances/${delApp?.id}?tenant_id=${delApp?.tenant_id ?? selectedTenantId}`}
+        takesReason={false}
+        stepUp={false}
+        consequences={[
+          "The appliance record is removed from this customer.",
+          "Any license bound to this appliance is revoked.",
+          "It cannot be undone.",
+        ]}
+      />
+
+      <DetailDialog
+        open={!!effOpen}
+        onOpenChange={(v) => { if (!v) setEffOpen(null); }}
+        title={`Effective config — ${effOpen?.name ?? ""}`}
+        description={effOpen ? <>What the appliance at site <span className="font-mono">{siteName(effOpen.site_id)}</span> should be enforcing.</> : undefined}
+        size="xl"
+      >
+        {!effData ? (
+          <div className="space-y-3" aria-busy="true"><span className="sr-only">Loading</span><Skeleton className="h-24" /><Skeleton className="h-24" /></div>
+        ) : (
+          <>
+            <section className="space-y-2">
+              <h3 className="text-micro uppercase tracking-[0.06em] text-muted-foreground">
+                PMS connections ({effData.pms_providers?.length ?? 0})
+              </h3>
+              {!effData.pms_providers || effData.pms_providers.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No PMS connections configured.</p>
+              ) : (
+                <div className="overflow-hidden rounded-md border border-border">
+                  <Table>
+                    <THead><TR><TH>Name</TH><TH>Kind</TH><TH>Scope</TH><TH>Status</TH></TR></THead>
+                    <tbody>
+                      {effData.pms_providers.map((p) => (
+                        <TR key={p.id}>
+                          <TD>{p.display_name || p.name}</TD>
+                          <TD className="text-muted-foreground">{p.kind}</TD>
+                          <TD>{p.site_id ? <Badge tone="info">Site override</Badge> : <Badge>Customer-wide</Badge>}</TD>
+                          <TD><Badge tone={(p.status === "connected" ? "ok" : p.status === "down" ? "err" : "warn") as any}>{statusWord(p.status)}</Badge></TD>
+                        </TR>
+                      ))}
+                    </tbody>
+                  </Table>
+                </div>
+              )}
+            </section>
+            <section className="space-y-2">
+              <h3 className="text-micro uppercase tracking-[0.06em] text-muted-foreground">
+                Allowed sites ({effData.walled_garden?.length ?? 0})
+              </h3>
+              {!effData.walled_garden || effData.walled_garden.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No allowed-site rules configured.</p>
+              ) : (
+                <div className="overflow-hidden rounded-md border border-border">
+                  <Table>
+                    <THead><TR><TH>Kind</TH><TH>Value</TH><TH>Ports</TH><TH>Scope</TH></TR></THead>
+                    <tbody>
+                      {effData.walled_garden.map((w) => (
+                        <TR key={w.id}>
+                          <TD className="text-muted-foreground">{w.kind}</TD>
+                          <TD className="font-mono text-xs">{w.value}</TD>
+                          <TD className="text-xs text-muted-foreground">{w.ports?.join(", ") || "any"}</TD>
+                          <TD>{w.site_id ? <Badge tone="info">Site</Badge> : <Badge>Customer-wide</Badge>}</TD>
+                        </TR>
+                      ))}
+                    </tbody>
+                  </Table>
+                </div>
+              )}
+            </section>
+          </>
+        )}
+      </DetailDialog>
+    </PageShell>
   );
 }

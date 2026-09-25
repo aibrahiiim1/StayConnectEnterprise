@@ -4,25 +4,50 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  api, ListResp, Whoami, Interface, Pool,
+  api, ListResp, Interface, Pool, NetRevision,
   GuestNetworkInput, ValidateResult, ApplyResult, ValidationIssue,
 } from "@/lib/api";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Card, CardBody, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Field, Input, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Plus, X } from "lucide-react";
-import { canWrite } from "@/lib/roles";
-import { errMsg } from "@/lib/utils";
+import { ErrorBanner, Callout } from "@/components/ui/error-banner";
+import { PageShell, PageHeader } from "@/components/ui/page";
+import { KeyValueGrid, OptionCard, Stepper } from "@/components/ui/data";
+import { Skeleton } from "@/components/ui/misc";
+import { NotAvailable, PendingChangeBanner } from "@/components/ui/patterns";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ArrowLeft, ArrowRight, Cable, Network, Plus, Radio, X } from "lucide-react";
+import { cn, errMsg } from "@/lib/utils";
+import { HealthCheckList, SwitchRow, ValidationIssueList, useNetworkAccess } from "@/components/network/shared";
 
 const STEPS = ["Identity", "Interface / VLAN", "Subnet & gateway", "DHCP & DNS", "Captive portal", "Review", "Apply"];
+
+const STEP_HINT = [
+  "What the network is called here, and the SSID your wireless controller broadcasts for it.",
+  "The port the guest traffic arrives on, and whether it is tagged with a VLAN.",
+  "The address range guests get, and the gateway address the appliance takes on it.",
+  "Which addresses are handed out, which DNS guests use, and for how long an address is kept.",
+  "What guests see and can reach once they join.",
+  "Check everything before it is created.",
+  "Create the network, validate the whole configuration, then apply it with an automatic rollback.",
+];
 
 // interfaces whose role permits a guest network as parent
 const SELECTABLE = new Set(["guest_access", "guest_trunk", "unused"]);
 
+const ROLE_LABEL: Record<string, string> = {
+  guest_access: "Guest access",
+  guest_trunk: "Guest trunk",
+  unused: "Unused",
+  management: "Management",
+  wan: "Uplink (WAN)",
+  ha_sync: "HA sync",
+};
+
 export default function NewGuestNetworkPage() {
   const router = useRouter();
-  const [roles, setRoles] = useState<string[]>([]);
+  const { known, writable } = useNetworkAccess();
   const [step, setStep] = useState(0);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -57,12 +82,8 @@ export default function NewGuestNetworkPage() {
   const [created, setCreated] = useState<{ id: string; bridge_name: string; portal_url: string } | null>(null);
   const [issues, setIssues] = useState<ValidationIssue[] | null>(null);
   const [applied, setApplied] = useState<ApplyResult | null>(null);
-
-  const writable = canWrite("network", roles);
-
-  useEffect(() => {
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => {});
-  }, []);
+  const [deadline, setDeadline] = useState<string | null>(null);
+  const [acting, setActing] = useState<"confirm" | "rollback" | null>(null);
 
   // fetch interfaces when entering step 1
   useEffect(() => {
@@ -131,6 +152,16 @@ export default function NewGuestNetworkPage() {
     };
   }
 
+  // The apply response carries no deadline; the revision list does. Read it so the countdown is the appliance's
+  // real one rather than a guess. Best-effort: without it the banner still offers Keep / Roll back.
+  async function readDeadline(revisionId: string) {
+    try {
+      const r = await api.get<ListResp<NetRevision>>("/network/revisions");
+      const rev = (r.data ?? []).find((x) => x.id === revisionId);
+      setDeadline(rev?.confirm_deadline ?? null);
+    } catch { /* the banner works without it */ }
+  }
+
   async function onRunApply() {
     setBusy(true); setErr(null); setIssues(null);
     try {
@@ -148,332 +179,363 @@ export default function NewGuestNetworkPage() {
       }
       const a = await api.post<ApplyResult>("/network/apply", { summary: `create guest network ${name}` });
       setApplied(a);
+      if (a.state === "pending_confirmation") void readDeadline(a.revision_id);
     } catch (e) { setErr(errMsg(e)); }
     finally { setBusy(false); }
   }
 
   async function onConfirm() {
     if (!applied) return;
-    setBusy(true); setErr(null);
+    setActing("confirm"); setErr(null);
     try { await api.post(`/network/revisions/${applied.revision_id}/confirm`); router.push("/network"); }
     catch (e) { setErr(errMsg(e)); }
-    finally { setBusy(false); }
+    finally { setActing(null); }
   }
 
   async function onRollback() {
     if (!applied) return;
-    setBusy(true); setErr(null);
-    try { await api.post(`/network/revisions/${applied.revision_id}/rollback`); setApplied(null); }
+    setActing("rollback"); setErr(null);
+    try { await api.post(`/network/revisions/${applied.revision_id}/rollback`); setApplied(null); setDeadline(null); }
     catch (e) { setErr(errMsg(e)); }
-    finally { setBusy(false); }
+    finally { setActing(null); }
   }
 
   const portalNote = gatewayIp ? `http://${gatewayIp}:8380` : "the gateway IP on port 8380";
+  const poolText = pools.filter((p) => p.start_ip).map((p) => `${p.start_ip}–${p.end_ip}`).join(", ") || "—";
+  const onOff = (b: boolean) => (b ? <Badge tone="ok">On</Badge> : <Badge tone="default">Off</Badge>);
+
+  const backLink = (
+    <Link href="/network" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "-ms-3 self-start")}>
+      <ArrowLeft /> Guest networks
+    </Link>
+  );
+
+  if (!known) {
+    return (
+      <PageShell width="narrow">
+        {backLink}
+        <PageHeader icon={<Network />} eyebrow="Networking" title="New guest network" />
+        <Skeleton className="h-8 w-full" />
+        <Skeleton className="h-72 w-full" />
+      </PageShell>
+    );
+  }
 
   if (!writable) {
     return (
-      <div className="mx-auto w-full max-w-3xl space-y-5">
-        <Link href="/network" className="text-sm text-muted hover:text-text inline-flex items-center gap-1 mb-4">
-          <ArrowLeft size={14} /> Back to guest networks
-        </Link>
-        <Card><CardBody>You do not have permission to create guest networks.</CardBody></Card>
-      </div>
+      <PageShell width="narrow">
+        {backLink}
+        <PageHeader icon={<Network />} eyebrow="Networking" title="New guest network" />
+        <NotAvailable
+          title="You cannot create guest networks"
+          reason="Your role can view guest networks but not change them. Ask a Hotel IT manager or site admin."
+        />
+      </PageShell>
     );
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-5">
-      <Link href="/network" className="text-sm text-muted hover:text-text inline-flex items-center gap-1 mb-4">
-        <ArrowLeft size={14} /> Back to guest networks
-      </Link>
+    <PageShell width="narrow">
+      {backLink}
+      <PageHeader
+        icon={<Network />}
+        eyebrow="Networking"
+        title="New guest network"
+        description="Seven short steps. Nothing reaches guests until the last one, and even then the change rolls back on its own unless you keep it."
+      />
 
-      <div className="mb-4">
-        <div className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground">Networking</div>
-        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">New guest network</h1>
-      </div>
+      <nav aria-label="Steps">
+        <Stepper steps={STEPS} current={step} onStep={applied ? undefined : (i) => { setErr(null); setStep(i); }} />
+      </nav>
 
-      {/* stepper */}
-      <div className="flex flex-wrap gap-2 mb-6 text-xs">
-        {STEPS.map((label, i) => (
-          <div
-            key={label}
-            className={
-              "px-2 py-1 rounded border " +
-              (i === step
-                ? "bg-brand text-white border-brand"
-                : i < step
-                ? "bg-panel2 text-text border-border"
-                : "bg-panel2 text-muted border-border")
-            }
-          >
-            {i + 1}. {label}
-          </div>
-        ))}
-      </div>
-
-      {err && <div className="text-err text-sm mb-4">{err}</div>}
+      <ErrorBanner err={err} className="mb-0" />
 
       <Card>
-        <CardHeader><CardTitle>{STEPS[step]}</CardTitle></CardHeader>
+        <CardHeader>
+          <div className="space-y-1">
+            <CardTitle>
+              <span className="text-muted-foreground">Step {step + 1} of {STEPS.length} · </span>{STEPS[step]}
+            </CardTitle>
+            <CardDescription>{STEP_HINT[step]}</CardDescription>
+          </div>
+        </CardHeader>
         <CardBody className="space-y-4">
           {step === 0 && (
             <>
-              <div><Label>Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Guest WiFi" /></div>
-              <div><Label>Description</Label><Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional" /></div>
-              <div>
-                <Label>SSID label</Label>
-                <Input value={ssidLabel} onChange={(e) => setSsidLabel(e.target.value)} placeholder="Broadcast SSID name (for reference)" />
-                <div className="text-xs text-muted mt-1">StayConnect does not broadcast WiFi — this label maps the SSID your controller broadcasts to this gateway.</div>
-              </div>
+              <Field label="Name" required>
+                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Guest Wi-Fi" autoFocus />
+              </Field>
+              <Field label="Description" hint="Optional. Shown under the name in the list.">
+                <Input value={description} onChange={(e) => setDescription(e.target.value)} />
+              </Field>
+              <Field
+                label="SSID label"
+                hint="For reference only. Velonet does not broadcast Wi-Fi — this label records which SSID your wireless controller maps to this network."
+              >
+                <Input value={ssidLabel} onChange={(e) => setSsidLabel(e.target.value)} placeholder="Hotel Guest" />
+              </Field>
             </>
           )}
 
           {step === 1 && (
             <>
-              <div>
-                <Label>Parent interface</Label>
+              <fieldset className="space-y-2">
+                <legend className="mb-1.5 text-label">
+                  Parent interface<span className="ms-0.5 text-destructive">*</span>
+                </legend>
+                <p className="text-caption text-muted-foreground">
+                  Only ports set aside for guest traffic can carry a guest network. The others are shown so you can
+                  see why they are not offered.
+                </p>
                 {interfaces === null ? (
-                  <div className="text-sm text-muted-foreground">Loading interfaces…</div>
+                  <div className="space-y-2" aria-busy="true">
+                    <span className="sr-only">Loading interfaces</span>
+                    <Skeleton className="h-16 w-full" />
+                    <Skeleton className="h-16 w-full" />
+                  </div>
+                ) : interfaces.length === 0 ? (
+                  <EmptyState icon={<Cable />} title="No interfaces discovered" hint="The appliance reported no network ports." />
                 ) : (
-                  <div className="space-y-2">
+                  <div className="grid gap-2">
                     {interfaces.map((n) => {
                       const selectable = SELECTABLE.has(n.role ?? "");
                       return (
-                        <label
+                        <OptionCard
                           key={n.name}
-                          className={
-                            "flex items-center justify-between gap-3 rounded-md border px-3 py-2 " +
-                            (selectable ? "border-border cursor-pointer hover:bg-panel2" : "border-border opacity-50 cursor-not-allowed")
+                          name="parent"
+                          value={n.name}
+                          checked={parentInterface === n.name}
+                          onChange={setParentInterface}
+                          disabled={!selectable}
+                          icon={<Cable />}
+                          title={<span className="font-mono">{n.name}</span>}
+                          badge={
+                            <>
+                              <Badge tone={selectable ? "info" : "default"}>{ROLE_LABEL[n.role ?? ""] ?? n.role ?? "Unknown role"}</Badge>
+                              <Badge tone={n.link_state === "up" ? "ok" : "default"}>
+                                {n.link_state === "up" ? "Link up" : n.link_state === "down" ? "Link down" : "Link unknown"}
+                              </Badge>
+                            </>
                           }
-                        >
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="radio" name="parent" disabled={!selectable}
-                              checked={parentInterface === n.name}
-                              onChange={() => setParentInterface(n.name)}
-                            />
-                            <span className="font-mono text-sm">{n.name}</span>
-                            <span className="text-xs text-muted-foreground">{n.mac} · {n.link_state} · mtu {n.mtu}</span>
-                          </div>
-                          <Badge tone={selectable ? "info" : "default"}>{n.role ?? "unknown"}</Badge>
-                        </label>
+                          description={
+                            <>
+                              <span className="font-mono">{n.mac}</span> · MTU {n.mtu}
+                              {!selectable && " · Not available for guest networks"}
+                            </>
+                          }
+                        />
                       );
                     })}
-                    {interfaces.length === 0 && <div className="text-sm text-muted-foreground">No interfaces discovered.</div>}
                   </div>
                 )}
-              </div>
-              <label className="flex items-center gap-2 text-sm text-muted">
-                <input type="checkbox" checked={vlanTagged} onChange={(e) => setVlanTagged(e.target.checked)} /> VLAN tagged (802.1Q)
-              </label>
+              </fieldset>
+              <SwitchRow
+                label="VLAN tagged (802.1Q)"
+                hint="Turn on when the switch port carries several networks and this one arrives tagged."
+                checked={vlanTagged}
+                onChange={setVlanTagged}
+              />
               {vlanTagged && (
-                <div className="max-w-[12rem]">
-                  <Label>VLAN id</Label>
-                  <Input type="number" min={1} max={4094} value={vlanId} onChange={(e) => setVlanId(e.target.value)} placeholder="e.g. 20" />
-                </div>
+                <Field label="VLAN id" required hint="1 to 4094. Must match the VLAN your wireless controller uses for the SSID." className="max-w-48">
+                  <Input type="number" min={1} max={4094} value={vlanId} onChange={(e) => setVlanId(e.target.value)} placeholder="20" />
+                </Field>
               )}
             </>
           )}
 
           {step === 2 && (
             <>
-              <div>
-                <Label>Subnet CIDR</Label>
-                <Input value={subnetCidr} onChange={(e) => setSubnetCidr(e.target.value)} placeholder="10.20.0.0/22" />
-              </div>
-              <div>
-                <Label>Gateway IP</Label>
-                <Input value={gatewayIp} onChange={(e) => setGatewayIp(e.target.value)} placeholder="10.20.0.1" />
-                <div className="text-xs text-muted mt-1">
-                  The appliance owns this address on the bridge; guests use it as their default gateway and DNS.
-                </div>
-              </div>
+              <Field label="Subnet (CIDR)" required hint="The whole address range of this network, e.g. 10.20.0.0/22.">
+                <Input value={subnetCidr} onChange={(e) => setSubnetCidr(e.target.value)} placeholder="10.20.0.0/22" className="font-mono" />
+              </Field>
+              <Field
+                label="Gateway IP"
+                required
+                hint="The appliance owns this address on the network; guests use it as their default gateway and DNS."
+              >
+                <Input value={gatewayIp} onChange={(e) => setGatewayIp(e.target.value)} placeholder="10.20.0.1" className="font-mono" />
+              </Field>
             </>
           )}
 
           {step === 3 && (
             <>
-              <div>
-                <Label>DHCP pools</Label>
-                <div className="space-y-2">
-                  {pools.map((p, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                      <Input placeholder="start (10.20.0.100)" value={p.start_ip}
-                        onChange={(e) => setPools((ps) => ps.map((x, k) => k === i ? { ...x, start_ip: e.target.value } : x))} />
-                      <span className="text-muted-foreground">–</span>
-                      <Input placeholder="end (10.20.3.250)" value={p.end_ip}
-                        onChange={(e) => setPools((ps) => ps.map((x, k) => k === i ? { ...x, end_ip: e.target.value } : x))} />
-                      <Button size="sm" variant="ghost" disabled={pools.length === 1}
-                        onClick={() => setPools((ps) => ps.filter((_, k) => k !== i))}><X size={14} /></Button>
-                    </div>
-                  ))}
-                </div>
-                <Button size="sm" variant="secondary" className="mt-2"
-                  onClick={() => setPools((ps) => [...ps, { start_ip: "", end_ip: "" }])}>
-                  <Plus size={14} /> Add pool
+              <fieldset className="space-y-2">
+                <legend className="mb-1.5 text-label">
+                  Address pools<span className="ms-0.5 text-destructive">*</span>
+                </legend>
+                {pools.map((p, i) => (
+                  <div key={i} className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
+                    <Input
+                      aria-label={`Pool ${i + 1} start`} placeholder="10.20.0.100" value={p.start_ip} className="min-w-0 flex-1 font-mono"
+                      onChange={(e) => setPools((ps) => ps.map((x, k) => k === i ? { ...x, start_ip: e.target.value } : x))}
+                    />
+                    <span className="text-muted-foreground" aria-hidden>–</span>
+                    <Input
+                      aria-label={`Pool ${i + 1} end`} placeholder="10.20.3.250" value={p.end_ip} className="min-w-0 flex-1 font-mono"
+                      onChange={(e) => setPools((ps) => ps.map((x, k) => k === i ? { ...x, end_ip: e.target.value } : x))}
+                    />
+                    <Button
+                      size="icon" variant="ghost" disabled={pools.length === 1} aria-label={`Remove pool ${i + 1}`}
+                      onClick={() => setPools((ps) => ps.filter((_, k) => k !== i))}
+                    >
+                      <X />
+                    </Button>
+                  </div>
+                ))}
+                <Button size="sm" variant="secondary" onClick={() => setPools((ps) => [...ps, { start_ip: "", end_ip: "" }])}>
+                  <Plus /> Add pool
                 </Button>
-              </div>
-              <div>
-                <Label>DNS mode</Label>
-                <select value={dnsMode} onChange={(e) => setDnsMode(e.target.value as "appliance" | "custom")}
-                  className="h-9 w-full rounded-md bg-panel2 border border-border px-3 text-sm">
-                  <option value="appliance">appliance (resolve on the gateway)</option>
-                  <option value="custom">custom servers</option>
-                </select>
-              </div>
+              </fieldset>
+              <Field label="DNS for guests">
+                <Select value={dnsMode} onChange={(e) => setDnsMode(e.target.value as "appliance" | "custom")}>
+                  <option value="appliance">The appliance (resolve on the gateway)</option>
+                  <option value="custom">Custom servers</option>
+                </Select>
+              </Field>
               {dnsMode === "custom" && (
-                <div><Label>DNS servers (comma)</Label><Input value={dnsServers} onChange={(e) => setDnsServers(e.target.value)} placeholder="1.1.1.1, 9.9.9.9" /></div>
+                <Field label="DNS servers" required hint="Separate several with commas.">
+                  <Input value={dnsServers} onChange={(e) => setDnsServers(e.target.value)} placeholder="1.1.1.1, 9.9.9.9" className="font-mono" />
+                </Field>
               )}
-              <div><Label>Domain name</Label><Input value={domainName} onChange={(e) => setDomainName(e.target.value)} placeholder="guest.local" /></div>
-              <div className="grid grid-cols-3 gap-3">
-                <div><Label>Lease default (s)</Label><Input type="number" value={leaseDefault} onChange={(e) => setLeaseDefault(e.target.value)} /></div>
-                <div><Label>Lease min (s)</Label><Input type="number" value={leaseMin} onChange={(e) => setLeaseMin(e.target.value)} /></div>
-                <div><Label>Lease max (s)</Label><Input type="number" value={leaseMax} onChange={(e) => setLeaseMax(e.target.value)} /></div>
+              <Field label="Domain name">
+                <Input value={domainName} onChange={(e) => setDomainName(e.target.value)} placeholder="guest.local" />
+              </Field>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <Field label="Lease time (seconds)"><Input type="number" value={leaseDefault} onChange={(e) => setLeaseDefault(e.target.value)} /></Field>
+                <Field label="Shortest lease (seconds)"><Input type="number" value={leaseMin} onChange={(e) => setLeaseMin(e.target.value)} /></Field>
+                <Field label="Longest lease (seconds)"><Input type="number" value={leaseMax} onChange={(e) => setLeaseMax(e.target.value)} /></Field>
               </div>
             </>
           )}
 
           {step === 4 && (
-            <>
-              <label className="flex items-center gap-2 text-sm text-muted">
-                <input type="checkbox" checked={captivePortal} onChange={(e) => setCaptivePortal(e.target.checked)} /> Captive portal enabled
-              </label>
-              <label className="flex items-center gap-2 text-sm text-muted">
-                <input type="checkbox" checked={internetAccess} onChange={(e) => setInternetAccess(e.target.checked)} /> Internet access enabled
-              </label>
-              <label className="flex items-center gap-2 text-sm text-muted">
-                <input type="checkbox" checked={nat} onChange={(e) => setNat(e.target.checked)} /> NAT (masquerade) enabled
-              </label>
-              <label className="flex items-center gap-2 text-sm text-muted">
-                <input type="checkbox" checked={clientIsolation} onChange={(e) => setClientIsolation(e.target.checked)} /> Client isolation
-              </label>
-              <div className="text-xs text-muted-foreground">
-                The captive portal will be served automatically at <span className="font-mono">{portalNote}</span> once applied.
-              </div>
-            </>
+            <div className="space-y-4">
+              <SwitchRow label="Captive portal" hint="Guests see the sign-in page before they get online." checked={captivePortal} onChange={setCaptivePortal} />
+              <SwitchRow label="Internet access" hint="Guests can reach the internet once signed in." checked={internetAccess} onChange={setInternetAccess} />
+              <SwitchRow label="NAT (masquerade)" hint="Guest traffic leaves through the appliance's own address." checked={nat} onChange={setNat} />
+              <SwitchRow label="Client isolation" hint="Guest devices cannot reach each other." checked={clientIsolation} onChange={setClientIsolation} />
+              <Callout tone="info">
+                The sign-in page will be served at <span className="font-mono">{portalNote}</span> once the network is applied.
+              </Callout>
+            </div>
           )}
 
           {step === 5 && (
-            <div className="space-y-3 text-sm">
-              <Summary label="Name" value={name} />
-              <Summary label="SSID label" value={ssidLabel || "—"} />
-              <Summary label="Type" value={vlanTagged ? `VLAN ${vlanId}` : "untagged"} />
-              <Summary label="Parent interface" value={parentInterface} />
-              <Summary label="Subnet" value={subnetCidr} />
-              <Summary label="Gateway" value={gatewayIp} />
-              <Summary label="Pools" value={pools.filter((p) => p.start_ip).map((p) => `${p.start_ip}–${p.end_ip}`).join(", ") || "—"} />
-              <Summary label="DNS" value={dnsMode === "custom" ? dnsServers : "appliance"} />
-              <Summary label="Captive portal" value={captivePortal ? "on" : "off"} />
-              <Summary label="Internet / NAT / isolation" value={`${internetAccess ? "internet" : "no-internet"} · ${nat ? "nat" : "no-nat"} · ${clientIsolation ? "isolated" : "open"}`} />
-              <div className="mt-4 rounded-md border border-warning/30 bg-warning-subtle px-4 py-3 text-sm text-warning-subtle-foreground">
-                <div className="font-medium">Wireless controller action required</div>
-                <div className="text-xs mt-1">
-                  Map the &lsquo;{ssidLabel || name}&rsquo; SSID to VLAN {vlanTagged ? vlanId : "(untagged)"} on your wireless controller.
-                  StayConnect manages the gateway, DHCP and captive portal.
-                </div>
-              </div>
+            <div className="space-y-5">
+              <KeyValueGrid
+                items={[
+                  { label: "Name", value: name },
+                  { label: "SSID label", value: ssidLabel || "—" },
+                  { label: "Type", value: vlanTagged ? `VLAN ${vlanId}` : "Untagged" },
+                  { label: "Parent interface", value: <span className="font-mono">{parentInterface}</span> },
+                  { label: "Subnet", value: <span className="font-mono">{subnetCidr}</span> },
+                  { label: "Gateway", value: <span className="font-mono">{gatewayIp}</span> },
+                  { label: "Address pools", value: <span className="font-mono">{poolText}</span>, wide: true },
+                  { label: "DNS", value: dnsMode === "custom" ? <span className="font-mono">{dnsServers}</span> : "The appliance" },
+                  { label: "Domain name", value: domainName || "guest.local" },
+                  { label: "Captive portal", value: onOff(captivePortal) },
+                  { label: "Internet access", value: onOff(internetAccess) },
+                  { label: "NAT", value: onOff(nat) },
+                  { label: "Client isolation", value: onOff(clientIsolation) },
+                ]}
+              />
+              <Callout tone="warning" title="Wireless controller action required" icon={<Radio className="size-4" />}>
+                Map the &lsquo;{ssidLabel || name}&rsquo; SSID to VLAN {vlanTagged ? vlanId : "(untagged)"} on your wireless
+                controller. Velonet manages the gateway, DHCP and captive portal; it does not broadcast Wi-Fi.
+              </Callout>
             </div>
           )}
 
           {step === 6 && (
-            <div className="space-y-4 text-sm">
+            <div className="space-y-4">
               {!created && !applied && (
-                <div className="text-muted-foreground">
-                  Ready to create the guest network, validate the full configuration, then apply it.
-                </div>
+                <p className="text-sm text-muted-foreground">
+                  Ready to create the guest network, validate the full configuration, then apply it. After applying you
+                  have a short window to keep the change; if you do not, it rolls back automatically.
+                </p>
               )}
               {created && (
-                <div className="rounded-md border border-border bg-panel2 px-4 py-3 space-y-1">
-                  <div className="text-ok">Guest network created.</div>
-                  <div className="text-xs">Bridge <span className="font-mono">{created.bridge_name}</span></div>
-                  <div className="text-xs">Portal <span className="font-mono">{created.portal_url}</span></div>
-                </div>
+                <Callout tone="success" title="Guest network created">
+                  <KeyValueGrid
+                    className="mt-2"
+                    items={[
+                      { label: "Bridge", value: <span className="font-mono">{created.bridge_name}</span> },
+                      { label: "Sign-in page", value: <span className="font-mono">{created.portal_url}</span> },
+                    ]}
+                  />
+                </Callout>
               )}
               {issues && issues.length > 0 && (
-                <div className="rounded-md border border-destructive/25 bg-destructive-subtle px-4 py-3">
-                  <div className="text-err font-medium mb-1">Validation failed</div>
-                  <ul className="space-y-1">
-                    {issues.map((i, k) => (
-                      <li key={k} className="text-err text-xs">
-                        <span className="font-mono">{i.field}</span> — {i.message} <span className="text-muted-foreground">({i.code})</span>
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="text-xs text-muted mt-2">Go back to fix these, then save again (the network is already created — editing it from the list applies the fixes).</div>
-                </div>
+                <Callout tone="danger" title="Validation failed">
+                  <ValidationIssueList issues={issues} className="mt-1" />
+                  <p className="mt-2">
+                    The network is already created. Fix these on{" "}
+                    {created ? (
+                      <Link href={`/network/${created.id}`} className="font-medium underline">its own page</Link>
+                    ) : "its own page"}
+                    , then apply the changes from Guest networks.
+                  </p>
+                </Callout>
               )}
-              {applied && (
-                <div className={
-                  "rounded-md border px-4 py-3 " +
-                  (applied.state === "pending_confirmation"
-                    ? "border-warning/30 bg-warning-subtle text-warning-subtle-foreground"
-                    : applied.state === "rolled_back" || applied.state === "failed"
-                    ? "border-destructive/25 bg-destructive-subtle text-destructive-subtle-foreground"
-                    : "border-success/25 bg-success-subtle text-success-subtle-foreground")
-                }>
-                  <div className="font-medium">
-                    {applied.state === "pending_confirmation" ? "Applied — pending confirmation" : `Apply state: ${applied.state}`}
-                  </div>
-                  {applied.state === "pending_confirmation" && (
-                    <div className="text-xs mt-1">Confirm within 120s or the configuration rolls back automatically.</div>
-                  )}
-                  {applied.message && <div className="text-xs mt-1">{applied.message}</div>}
-                  {applied.health && applied.health.length > 0 && (
-                    <ul className="mt-2 space-y-1">
-                      {applied.health.map((h, k) => (
-                        <li key={k} className="flex items-center gap-2 text-xs">
-                          <Badge tone={h.ok ? "ok" : "err"}>{h.ok ? "ok" : "fail"}</Badge>
-                          <span className="font-mono">{h.name}</span>
-                          {h.detail && <span className="text-muted-foreground">{h.detail}</span>}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
+              {applied && applied.state === "pending_confirmation" && (
+                <PendingChangeBanner
+                  title={`Applied — revision #${applied.seq} is waiting for confirmation`}
+                  description={
+                    applied.message ||
+                    "The new network is live now. Keep it to make it permanent; if nobody does before the timer runs out, the appliance puts the previous configuration back on its own."
+                  }
+                  deadline={deadline}
+                  busy={acting}
+                  onConfirm={onConfirm}
+                  onRollback={onRollback}
+                >
+                  {applied.health && applied.health.length > 0 ? (
+                    <div className="space-y-2">
+                      <div className="text-label">Health checks</div>
+                      <HealthCheckList checks={applied.health} />
+                    </div>
+                  ) : undefined}
+                </PendingChangeBanner>
               )}
-              <div className="flex gap-2">
-                {!applied && (
-                  <Button disabled={busy} onClick={onRunApply}>
-                    {busy ? "Working…" : created ? "Re-validate & apply" : "Create, validate & apply"}
-                  </Button>
-                )}
-                {applied?.state === "pending_confirmation" && (
-                  <>
-                    <Button disabled={busy} onClick={onConfirm}>Confirm</Button>
-                    <Button variant="secondary" disabled={busy} onClick={onRollback}>Rollback</Button>
-                  </>
-                )}
-                {applied && applied.state !== "pending_confirmation" && (
-                  <Link href="/network" className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-card px-4 text-sm font-medium shadow-xs hover:bg-surface">
-                    Back to guest networks
-                  </Link>
-                )}
-              </div>
+              {applied && applied.state !== "pending_confirmation" && (
+                <Callout
+                  tone={applied.state === "rolled_back" || applied.state === "failed" ? "danger" : "success"}
+                  title={
+                    applied.state === "rolled_back" ? "Apply rolled back"
+                      : applied.state === "failed" ? "Apply failed"
+                        : `Apply state: ${applied.state}`
+                  }
+                >
+                  {applied.message && <p>{applied.message}</p>}
+                  {applied.health && applied.health.length > 0 && <HealthCheckList checks={applied.health} className="mt-2 bg-card" />}
+                </Callout>
+              )}
             </div>
           )}
         </CardBody>
+        <CardFooter className="justify-between">
+          {step < 6 ? (
+            <>
+              <Button variant="ghost" onClick={back} disabled={step === 0}><ArrowLeft /> Back</Button>
+              <Button onClick={next}>{step === 5 ? "Continue to apply" : "Next"} <ArrowRight /></Button>
+            </>
+          ) : !applied ? (
+            <>
+              <Button variant="ghost" onClick={back} disabled={busy}><ArrowLeft /> Back</Button>
+              <Button disabled={busy} onClick={onRunApply}>
+                {busy ? "Working…" : created ? "Re-validate & apply" : "Create, validate & apply"}
+              </Button>
+            </>
+          ) : applied.state !== "pending_confirmation" ? (
+            <Link href="/network" className={cn(buttonVariants({ variant: "secondary" }), "ms-auto")}>
+              Back to guest networks
+            </Link>
+          ) : (
+            <span className="text-caption text-muted-foreground">Keep or roll back the change above.</span>
+          )}
+        </CardFooter>
       </Card>
-
-      {step < 6 && (
-        <div className="flex justify-between mt-4">
-          <Button variant="secondary" onClick={back} disabled={step === 0}>Back</Button>
-          <Button onClick={next}>Next</Button>
-        </div>
-      )}
-      {step === 6 && !applied && (
-        <div className="flex justify-between mt-4">
-          <Button variant="secondary" onClick={back} disabled={busy}>Back</Button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Summary({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex justify-between border-b border-border py-1">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-mono text-xs text-right">{value}</span>
-    </div>
+    </PageShell>
   );
 }

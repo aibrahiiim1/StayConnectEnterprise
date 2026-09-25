@@ -29,7 +29,7 @@ describe("the dashboard states licensing once", () => {
   it("still shows the cloud as a service when it IS a live dependency", () => {
     // If the mode is ever something other than licensing-only, the cloud is a real runtime dependency and
     // belongs in the list like any other.
-    expect(src).toContain('<ServiceRow title="Reporting to the StayConnect cloud"');
+    expect(src).toContain('<ServiceRow title="Reporting to the Velonet cloud"');
   });
 
   it("keeps the real runtime dependencies", () => {
@@ -72,6 +72,6 @@ describe("an activated appliance has one place to install a licence", () => {
   });
 
   it("Licence remains the one place a licence file is installed after activation", () => {
-    expect(license).toContain("Upload license file");
+    expect(license).toContain("Upload licence file");
   });
 });

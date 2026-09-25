@@ -1,31 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  api, ListResp, Whoami,
+  api, ListResp,
   GuestNetwork, GuestNetworkStatus, NetRevision,
   ValidateResult, ApplyResult, ValidationIssue, HealthCheck,
 } from "@/lib/api";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
+import { Card, CardBody, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/dialog";
-import { Plus } from "lucide-react";
-import { canWrite } from "@/lib/roles";
+import { ErrorBanner } from "@/components/ui/error-banner";
+import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
+import { SkeletonRows } from "@/components/ui/misc";
+import { useToast } from "@/components/ui/toast";
+import { PendingChangeBanner, ReadOnlyNotice, useSecondsLeft } from "@/components/ui/patterns";
+import { CheckCircle2, Network, Pencil, Plus, Power, Trash2, Users, Wifi } from "lucide-react";
 import { errMsg } from "@/lib/utils";
-
-function dhcpTone(mode: string): "ok" | "warn" | "err" | "info" | "default" {
-  switch (mode) {
-    case "local":    return "ok";
-    case "relay":    return "info";
-    case "external": return "warn";
-    case "disabled": return "err";
-    default:         return "default";
-  }
-}
+import {
+  ApplyResults, DhcpModeBadge, networkTypeLabel, useNetworkAccess,
+} from "@/components/network/shared";
 
 function poolSummary(net: GuestNetwork): string {
   if (!net.pools || net.pools.length === 0) return "—";
@@ -35,16 +32,15 @@ function poolSummary(net: GuestNetwork): string {
 export default function NetworkPage() {
   const [rows, setRows] = useState<GuestNetwork[] | null>(null);
   const [status, setStatus] = useState<Record<string, GuestNetworkStatus>>({});
-  const [roles, setRoles] = useState<string[]>([]);
   const [pending, setPending] = useState<NetRevision | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<null | "validate" | "apply" | "confirm" | "rollback">(null);
   const [acting, setActing] = useState<string | null>(null);
   const [validation, setValidation] = useState<{ ok: boolean; issues?: ValidationIssue[] } | null>(null);
   const [health, setHealth] = useState<HealthCheck[] | null>(null);
+  const toast = useToast();
 
-  const writable = canWrite("network", roles);
+  const { known, writable } = useNetworkAccess();
 
   async function loadNetworks() {
     try {
@@ -76,205 +72,261 @@ export default function NetworkPage() {
 
   useEffect(() => {
     reload();
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // THESE TWO TOOK A window.confirm, for actions that take a property's Wi-Fi offline.
-  //
-  // "Delete this guest network permanently?" was the entire explanation offered before removing the network every
-  // guest on a VLAN is connected through. A browser confirm also cannot say the thing that matters most here: in
-  // this product a network change is STAGED, and nothing happens to a guest until it is applied — which is the
-  // difference between a scary button and a safe one, and it was nowhere on screen.
+  // When the confirmation window runs out the appliance rolls back on its own; re-read once so the banner does
+  // not sit at 0:00 offering buttons for a revision that no longer waits for anyone.
+  const left = useSecondsLeft(pending?.confirm_deadline ?? null);
+  const reloadedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (pending && left === 0 && reloadedFor.current !== pending.id) {
+      reloadedFor.current = pending.id;
+      const t = setTimeout(reload, 2000);
+      return () => clearTimeout(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [left, pending]);
+
+  // "Take offline" and "Delete" are STAGED changes: nothing happens to a guest until the configuration is applied.
+  // The confirmation says so, because that is the difference between a scary button and a safe one.
   const [confirming, setConfirming] = useState<{ kind: "disable" | "delete"; net: GuestNetwork } | null>(null);
+  const [confirmErr, setConfirmErr] = useState<string | null>(null);
 
   async function applyStagedRemoval() {
     if (!confirming) return;
     const { kind, net } = confirming;
-    setActing(net.id); setErr(null);
+    setActing(net.id); setConfirmErr(null);
     try {
       if (kind === "disable") await api.post(`/network/guest-networks/${net.id}/disable`);
       else await api.del(`/network/guest-networks/${net.id}`);
       setConfirming(null);
+      toast.success(
+        kind === "disable" ? `${net.name} is staged to go offline` : `${net.name} is staged for deletion`,
+        "Nothing changes for guests until you apply the changes.",
+      );
       reload();
     }
-    catch (e) { setErr(errMsg(e)); }
+    catch (e) { setConfirmErr(errMsg(e)); }
     finally { setActing(null); }
   }
 
   async function onValidate() {
-    setBusy(true); setErr(null); setMsg(null); setHealth(null);
+    setBusy("validate"); setErr(null); setHealth(null);
     try {
       const r = await api.post<ValidateResult>("/network/validate");
       setValidation(r.validation);
-      setMsg(r.validation.ok ? "Validation passed." : null);
+      if (r.validation.ok) toast.success("Validation passed", "The staged configuration can be applied.");
     } catch (e) { setErr(errMsg(e)); }
-    finally { setBusy(false); }
+    finally { setBusy(null); }
   }
 
   async function onApply() {
-    setBusy(true); setErr(null); setMsg(null);
+    setBusy("apply"); setErr(null);
     try {
       const r = await api.post<ApplyResult>("/network/apply", { summary: "apply from guest networks" });
       setValidation(r.validation ?? null);
       setHealth(r.health ?? null);
       if (r.state === "pending_confirmation") {
-        setMsg("Applied — confirm within 120s or it rolls back automatically.");
+        toast.success("Applied — confirmation required", "Keep the change before the timer runs out, or it rolls back automatically.");
       } else if (r.state === "rolled_back") {
         setErr(r.message || "Apply rolled back after health checks failed.");
       } else if (r.state === "failed") {
         setErr(r.message || "Apply failed.");
       } else {
-        setMsg(r.message || `Apply state: ${r.state}`);
+        toast.success(r.message || `Apply state: ${r.state}`);
       }
       reload();
     } catch (e) { setErr(errMsg(e)); }
-    finally { setBusy(false); }
+    finally { setBusy(null); }
   }
 
   async function onConfirm(id: string) {
-    setBusy(true); setErr(null);
-    try { await api.post(`/network/revisions/${id}/confirm`); setMsg("Configuration confirmed."); reload(); }
+    setBusy("confirm"); setErr(null);
+    try { await api.post(`/network/revisions/${id}/confirm`); toast.success("Configuration confirmed", "The applied change is now the active configuration."); reload(); }
     catch (e) { setErr(errMsg(e)); }
-    finally { setBusy(false); }
+    finally { setBusy(null); }
   }
 
   async function onRollback(id: string) {
-    setBusy(true); setErr(null);
-    try { await api.post(`/network/revisions/${id}/rollback`); setMsg("Configuration rolled back."); reload(); }
+    setBusy("rollback"); setErr(null);
+    try { await api.post(`/network/revisions/${id}/rollback`); toast.success("Configuration rolled back", "The previous configuration is back in place."); reload(); }
     catch (e) { setErr(errMsg(e)); }
-    finally { setBusy(false); }
+    finally { setBusy(null); }
   }
 
-  return (
-    <div className="mx-auto w-full max-w-7xl space-y-5">
-      <div className="flex items-baseline justify-between mb-4">
-        <div>
-          <div className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground">Networking</div>
-          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Guest networks</h1>
-        </div>
-        {writable && (
-          <div className="flex gap-2">
-            <Button variant="secondary" disabled={busy} onClick={onValidate}>Validate</Button>
-            <Button variant="secondary" disabled={busy} onClick={onApply}>Apply changes</Button>
-            <Link
-              href="/network/new"
-              className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
-            >
-              <Plus size={14} /> New guest network
-            </Link>
-          </div>
-        )}
-      </div>
+  const enabledCount = (rows ?? []).filter((n) => n.enabled).length;
+  const knownClients = Object.values(status);
+  const clientTotal = knownClients.reduce((s, x) => s + (x.active_clients ?? 0), 0);
+  const hasResults = !!validation || !!(health && health.length);
 
-      {err && <div className="text-err text-sm mb-4">{err}</div>}
-      {msg && <div className="text-ok text-sm mb-4">{msg}</div>}
+  const newButton = (
+    <Link href="/network/new" className={buttonVariants({ variant: "primary" })}>
+      <Plus /> New guest network
+    </Link>
+  );
+
+  return (
+    <PageShell width="wide">
+      <PageHeader
+        icon={<Network />}
+        eyebrow="Networking"
+        title="Guest networks"
+        description="The Wi-Fi networks guests join. Each one is a VLAN your wireless controller maps an SSID to, with its own addresses and sign-in page. Changes are staged, then applied with an automatic rollback."
+        actions={writable && (
+          <>
+            <Button variant="secondary" disabled={busy !== null} onClick={onValidate}>
+              <CheckCircle2 /> {busy === "validate" ? "Validating…" : "Validate"}
+            </Button>
+            <Button variant="secondary" disabled={busy !== null} onClick={onApply}>
+              <Power /> {busy === "apply" ? "Applying…" : "Apply changes"}
+            </Button>
+            {newButton}
+          </>
+        )}
+      />
+
+      {known && !writable && <ReadOnlyNotice>Your role can view guest networks but not change them.</ReadOnlyNotice>}
+
+      <ErrorBanner err={err} className="mb-0" />
 
       {pending && (
-        <div className="mb-6 rounded-md border border-warning/30 bg-warning-subtle px-4 py-3 text-sm text-warning-subtle-foreground flex items-center justify-between gap-4">
-          <div>
-            <div className="font-medium">Configuration pending confirmation</div>
-            <div className="text-xs mt-0.5">
-              Revision #{pending.seq} — confirm or it rolls back automatically
-              {pending.confirm_deadline ? ` (deadline ${new Date(pending.confirm_deadline).toLocaleTimeString()})` : ""}.
-            </div>
-          </div>
-          {writable && (
-            <div className="flex gap-2 shrink-0">
-              <Button size="sm" disabled={busy} onClick={() => onConfirm(pending.id)}>Confirm</Button>
-              <Button size="sm" variant="secondary" disabled={busy} onClick={() => onRollback(pending.id)}>Rollback</Button>
-            </div>
-          )}
-        </div>
+        <PendingChangeBanner
+          title={`Revision #${pending.seq} — confirm or it rolls back automatically`}
+          description={
+            <>
+              The change is live now. Keep it to make it the active configuration; if nobody does
+              {pending.confirm_deadline ? ` by ${new Date(pending.confirm_deadline).toLocaleTimeString()}` : " in time"},
+              the appliance puts the previous configuration back on its own.
+            </>
+          }
+          deadline={pending.confirm_deadline ?? null}
+          canAct={writable}
+          busy={busy === "confirm" ? "confirm" : busy === "rollback" ? "rollback" : null}
+          onConfirm={() => onConfirm(pending.id)}
+          onRollback={() => onRollback(pending.id)}
+        >
+          {hasResults ? <ApplyResults validation={validation} health={health} /> : undefined}
+        </PendingChangeBanner>
       )}
 
-      {(validation || health) && (
-        <Card className="mb-6">
-          <CardHeader><CardTitle>Validation &amp; health</CardTitle></CardHeader>
-          <CardBody className="space-y-3 text-sm">
-            {validation && (
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-muted-foreground">Validation</span>
-                  <Badge tone={validation.ok ? "ok" : "err"}>{validation.ok ? "ok" : "issues"}</Badge>
-                </div>
-                {validation.issues && validation.issues.length > 0 && (
-                  <ul className="space-y-1">
-                    {validation.issues.map((i, k) => (
-                      <li key={k} className="text-err text-xs">
-                        <span className="font-mono">{i.field}</span> — {i.message} <span className="text-muted-foreground">({i.code})</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-            {health && health.length > 0 && (
-              <div>
-                <div className="text-muted mb-1">Health checks</div>
-                <ul className="space-y-1">
-                  {health.map((h, k) => (
-                    <li key={k} className="flex items-center gap-2 text-xs">
-                      <Badge tone={h.ok ? "ok" : "err"}>{h.ok ? "ok" : "fail"}</Badge>
-                      <span className="font-mono">{h.name}</span>
-                      {h.detail && <span className="text-muted-foreground">{h.detail}</span>}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </CardBody>
+      {!pending && hasResults && (
+        <Card>
+          <CardHeader>
+            <div className="space-y-1">
+              <CardTitle>Validation &amp; health</CardTitle>
+              <CardDescription>The result of the last Validate or Apply on this screen.</CardDescription>
+            </div>
+          </CardHeader>
+          <CardBody><ApplyResults validation={validation} health={health} /></CardBody>
         </Card>
       )}
 
+      {rows !== null && rows.length > 0 && (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <StatCard label="Guest networks" value={rows.length} icon={<Network />} />
+          <StatCard
+            label="Enabled"
+            value={enabledCount}
+            hint={rows.length - enabledCount > 0 ? `${rows.length - enabledCount} disabled` : "All enabled"}
+            icon={<Wifi />}
+            tone={enabledCount === 0 ? "warn" : "ok"}
+          />
+          <StatCard
+            label="Devices connected"
+            value={knownClients.length ? clientTotal : "—"}
+            hint="Across all guest networks, now"
+            icon={<Users />}
+            tone="info"
+          />
+        </div>
+      )}
+
       <Card>
-        <CardBody className="p-0">
-          {rows === null ? <EmptyState title="Loading…" /> : rows.length === 0 ? (
-            <EmptyState title="No guest networks" hint="Create a guest network to broadcast WiFi with captive portal, DHCP and NAT." />
-          ) : (
-            <Table>
-              <THead>
-                <TR>
-                  <TH>Name</TH><TH>SSID label</TH><TH>Type</TH><TH>Parent</TH>
-                  <TH>Gateway</TH><TH>Subnet</TH><TH>DHCP</TH><TH>Pool</TH>
-                  <TH>Portal</TH><TH>Enabled</TH><TH>Clients</TH><TH></TH>
-                </TR>
-              </THead>
-              <tbody>
-                {rows.map((n) => (
-                  <TR key={n.id}>
-                    <TD>
-                      <Link href={`/network/${n.id}`} className="hover:text-brand">{n.name}</Link>
-                      {n.description && <div className="text-xs text-muted-foreground">{n.description}</div>}
-                    </TD>
-                    <TD className="text-muted-foreground">{n.ssid_label || "—"}</TD>
-                    <TD>
-                      {n.network_type === "vlan"
-                        ? <Badge tone="info">VLAN {n.vlan_id ?? "?"}</Badge>
-                        : <Badge tone="default">untagged</Badge>}
-                    </TD>
-                    <TD className="font-mono text-xs">{n.parent_interface}</TD>
-                    <TD className="font-mono text-xs">{n.gateway_ip}</TD>
-                    <TD className="font-mono text-xs">{n.subnet_cidr}</TD>
-                    <TD><Badge tone={dhcpTone(n.dhcp_mode)}>{n.dhcp_mode}</Badge></TD>
-                    <TD className="font-mono text-xs text-muted">{poolSummary(n)}</TD>
-                    <TD>{n.captive_portal_enabled ? <Badge tone="info">portal</Badge> : <Badge tone="default">open</Badge>}</TD>
-                    <TD>{n.enabled ? <Badge tone="ok">on</Badge> : <Badge tone="default">off</Badge>}</TD>
-                    <TD className="text-muted-foreground">{status[n.id]?.active_clients ?? "—"}</TD>
-                    <TD className="text-right space-x-2 whitespace-nowrap">
-                      <Link href={`/network/${n.id}`} className="text-sm text-muted hover:text-text">Edit</Link>
+        {rows === null ? (
+          <SkeletonRows rows={4} cols={6} />
+        ) : rows.length === 0 ? (
+          <EmptyState
+            icon={<Network />}
+            title="No guest networks yet"
+            hint="Create a guest network to give guests Wi-Fi with a sign-in page, addresses and internet access."
+            action={writable ? newButton : undefined}
+          />
+        ) : (
+          <Table>
+            <THead>
+              <TR>
+                <TH>Name</TH>
+                <TH className="hidden lg:table-cell">SSID label</TH>
+                <TH>Type</TH>
+                <TH className="hidden xl:table-cell">Parent interface</TH>
+                <TH className="hidden md:table-cell">Gateway</TH>
+                <TH className="hidden lg:table-cell">Subnet</TH>
+                <TH className="hidden md:table-cell">DHCP</TH>
+                <TH className="hidden xl:table-cell">Pool</TH>
+                <TH className="hidden sm:table-cell">Portal</TH>
+                <TH>Status</TH>
+                <TH className="text-end">Clients</TH>
+                <TH><span className="sr-only">Actions</span></TH>
+              </TR>
+            </THead>
+            <TBody>
+              {rows.map((n) => (
+                <TR key={n.id}>
+                  <TD className="min-w-40">
+                    <Link href={`/network/${n.id}`} className="font-medium text-foreground hover:text-primary hover:underline">
+                      {n.name}
+                    </Link>
+                    {n.description && <div className="text-caption text-muted-foreground">{n.description}</div>}
+                  </TD>
+                  <TD className="hidden text-muted-foreground lg:table-cell">{n.ssid_label || "—"}</TD>
+                  <TD>
+                    <Badge tone={n.network_type === "vlan" ? "info" : "default"}>{networkTypeLabel(n)}</Badge>
+                  </TD>
+                  <TD className="hidden font-mono text-xs xl:table-cell">{n.parent_interface}</TD>
+                  <TD className="hidden font-mono text-xs md:table-cell">{n.gateway_ip}</TD>
+                  <TD className="hidden font-mono text-xs lg:table-cell">{n.subnet_cidr}</TD>
+                  <TD className="hidden md:table-cell"><DhcpModeBadge mode={n.dhcp_mode} /></TD>
+                  <TD className="hidden font-mono text-xs text-muted-foreground xl:table-cell">{poolSummary(n)}</TD>
+                  <TD className="hidden sm:table-cell">
+                    {n.captive_portal_enabled ? <Badge tone="info">Sign-in page</Badge> : <Badge tone="default">Open</Badge>}
+                  </TD>
+                  <TD>{n.enabled ? <Badge tone="ok" dot>Enabled</Badge> : <Badge tone="default">Disabled</Badge>}</TD>
+                  <TD className="text-end tabular text-muted-foreground">{status[n.id]?.active_clients ?? "—"}</TD>
+                  <TD className="whitespace-nowrap text-end">
+                    <div className="inline-flex items-center gap-1">
+                      <Link
+                        href={`/network/${n.id}`}
+                        className={buttonVariants({ variant: "ghost", size: "sm" })}
+                        aria-label={writable ? `Edit ${n.name}` : `View ${n.name}`}
+                      >
+                        <Pencil /> <span className="hidden sm:inline">{writable ? "Edit" : "View"}</span>
+                      </Link>
                       {writable && n.enabled && (
-                        <Button size="sm" variant="ghost" disabled={acting === n.id} onClick={() => setConfirming({ kind: "disable", net: n })}>Disable</Button>
+                        <Button
+                          size="sm" variant="ghost" disabled={acting === n.id}
+                          aria-label={`Disable ${n.name}`}
+                          onClick={() => { setConfirmErr(null); setConfirming({ kind: "disable", net: n }); }}
+                        >
+                          <Power /> <span className="hidden sm:inline">Disable</span>
+                        </Button>
                       )}
                       {writable && !n.enabled && (
-                        <Button size="sm" variant="ghost" disabled={acting === n.id} onClick={() => setConfirming({ kind: "delete", net: n })}>Delete</Button>
+                        <Button
+                          size="sm" variant="ghost" disabled={acting === n.id}
+                          aria-label={`Delete ${n.name}`}
+                          onClick={() => { setConfirmErr(null); setConfirming({ kind: "delete", net: n }); }}
+                        >
+                          <Trash2 /> <span className="hidden sm:inline">Delete</span>
+                        </Button>
                       )}
-                    </TD>
-                  </TR>
-                ))}
-              </tbody>
-            </Table>
-          )}
-        </CardBody>
+                    </div>
+                  </TD>
+                </TR>
+              ))}
+            </TBody>
+          </Table>
+        )}
       </Card>
 
       <ConfirmDialog
@@ -282,19 +334,28 @@ export default function NetworkPage() {
         onOpenChange={(v) => !v && setConfirming(null)}
         title={
           confirming?.kind === "delete"
-            ? `Delete the network "${confirming.net.name}"?`
-            : `Take "${confirming?.net.name}" offline?`
+            ? `Delete the network ${confirming.net.name}?`
+            : `Take ${confirming?.net.name ?? ""} offline?`
         }
-        description={
+        description="This only stages the change. Nothing happens to guests until you apply the changes on this screen."
+        consequences={
           confirming?.kind === "delete"
-            ? "The network and its address ranges are removed from the staged configuration. Nothing happens to guests until you apply the change — and once applied, any device on this network loses its connection and cannot reconnect."
-            : "The network is marked disabled in the staged configuration. Guests on it stay connected until you apply the change; after that, nobody can join it."
+            ? [
+                "The network and its address ranges are removed from the staged configuration.",
+                "Once applied, any device on this network loses its connection and cannot reconnect.",
+                "The SSID on your wireless controller is not changed; remove or remap it there.",
+              ]
+            : [
+                "The network is marked disabled in the staged configuration.",
+                "Guests on it stay connected until you apply the change; after that, nobody can join it.",
+              ]
         }
-        confirmLabel={confirming?.kind === "delete" ? "Delete network" : "Disable network"}
+        confirmLabel={confirming?.kind === "delete" ? "Delete network" : "Take offline"}
         confirmVariant="danger"
-        busy={acting === confirming?.net.id}
+        busy={acting !== null && acting === confirming?.net.id}
+        error={confirmErr}
         onConfirm={applyStagedRemoval}
       />
-    </div>
+    </PageShell>
   );
 }

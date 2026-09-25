@@ -38,6 +38,7 @@ import {
   termsFromEffective,
 } from "@/lib/api/checkout-grace";
 import { PageHeader, PageShell, StatCard } from "@/components/ui/page";
+import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { KeyValueGrid, MetricStrip } from "@/components/ui/data";
 import { Badge } from "@/components/ui/badge";
@@ -118,15 +119,17 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
         title="Checkout grace"
         description="Keeps a guest online for a short, capped period after they check out, so leaving the hotel does not cut them off mid-journey."
         actions={
-          <Button onClick={() => setEditing(true)} disabled={!canWrite || !state}>
-            {published ? <Pencil /> : <Plus />}
-            {editLabel}
-          </Button>
+          canWrite ? (
+            <Button onClick={() => setEditing(true)} disabled={!state}>
+              {published ? <Pencil /> : <Plus />}
+              {editLabel}
+            </Button>
+          ) : undefined
         }
       />
 
       {!canWrite && state && (
-        <Callout tone="neutral">Your role can view this policy but not change it.</Callout>
+        <ReadOnlyNotice>Your role can view this policy but not change it.</ReadOnlyNotice>
       )}
 
       {loadError && (

@@ -332,7 +332,7 @@ export default function DashboardPage() {
                     back as an ordinary row.
                   */}
                   {outbox.headline !== "Licensing only" && (
-                    <ServiceRow title="Reporting to the StayConnect cloud" info={outbox} href="/appliance?section=license" />
+                    <ServiceRow title="Reporting to the Velonet cloud" info={outbox} href="/appliance?section=license" />
                   )}
                 </>
               )}

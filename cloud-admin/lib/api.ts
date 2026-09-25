@@ -58,14 +58,28 @@ export async function reauth(password: string): Promise<void> {
   await api.post("/v1/auth/reauth", { password });
 }
 
-/** Runs fn; on a server step-up demand, prompts for the password, re-authenticates and retries once. */
+// The password is asked for by a designed dialog (components/step-up.tsx), not the browser's prompt box: a
+// native prompt shows the password in clear text and cannot say what it is for. The app shell registers the
+// dialog here; the contract is unchanged — resolve with the password, or null when the operator cancels.
+type StepUpPrompter = (message: string) => Promise<string | null>;
+let stepUpPrompter: StepUpPrompter | null = null;
+
+/** Registers the password-confirmation dialog. Returns an unregister function. */
+export function setStepUpPrompter(fn: StepUpPrompter | null): () => void {
+  stepUpPrompter = fn;
+  return () => {
+    if (stepUpPrompter === fn) stepUpPrompter = null;
+  };
+}
+
+/** Runs fn; on a server step-up demand, asks for the password, re-authenticates and retries once. */
 export async function withStepUp<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (e: any) {
     if (!(e instanceof ApiError) || e.status !== 403 || e.code !== "reauth_required") throw e;
-    const pw = typeof window !== "undefined"
-      ? window.prompt("This action requires confirming your password.")
+    const pw = stepUpPrompter
+      ? await stepUpPrompter("This action requires confirming your password.")
       : null;
     if (!pw) throw e;
     await reauth(pw);

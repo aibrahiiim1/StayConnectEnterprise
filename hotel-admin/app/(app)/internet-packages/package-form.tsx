@@ -184,7 +184,7 @@ export function PackageForm({
         {plans.length === 0 ? (
           // A PACKAGE CANNOT BE CREATED WITHOUT ONE, so this says what to do rather than presenting an empty
           // dropdown that looks like a loading state.
-          <div className="text-sm rounded-md border border-border bg-panel2 px-3 py-2" role="status">
+          <div className="text-sm rounded-md border border-border bg-surface px-3 py-2" role="status">
             There are no service plans yet. A service plan defines the speed, allowances and device limit a
             package hands out, so one has to exist first.{" "}
             <a href="/service-plans" className="underline">Create a service plan</a>, then come back.
@@ -193,7 +193,7 @@ export function PackageForm({
           <>
             <select aria-label="service-plan" required value={planID}
               onChange={(e) => setPlanID(e.target.value)}
-              className="w-full bg-panel2 border border-border rounded-md px-2 py-2 text-sm">
+              className="h-10 w-full rounded-md border border-input bg-card text-foreground focus:border-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 px-3 text-sm">
               <option value="">Choose a service plan…</option>
               {plans.filter((p) => p.current_revision_id).map((p) => (
                 <option key={p.plan_id} value={p.plan_id}>{p.name || p.code}</option>
@@ -218,7 +218,7 @@ export function PackageForm({
         <h3 className="text-sm font-medium mb-2">How long access lasts</h3>
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
-            <select aria-label="end-mode" className="w-full bg-panel2 border border-border rounded-md px-2 py-2 text-sm"
+            <select aria-label="end-mode" className="h-10 w-full rounded-md border border-input bg-card text-foreground focus:border-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 px-3 text-sm"
               value={duration.end_mode} onChange={(e) => setDuration({ end_mode: e.target.value as DurationForm["end_mode"] })}>
               {SUPPORTED_END_MODES.map((m) => <option key={m} value={m}>{END_MODE_LABELS[m]}</option>)}
             </select>
@@ -251,7 +251,7 @@ export function PackageForm({
           and the revision this publishes cannot be edited afterwards. */}
       <div>
         <h3 className="mb-1.5 text-sm font-semibold">Data allowance</h3>
-        <select aria-label="allocation-mode" className="w-full bg-panel2 border border-border rounded-md px-2 py-2 text-sm"
+        <select aria-label="allocation-mode" className="h-10 w-full rounded-md border border-input bg-card text-foreground focus:border-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 px-3 text-sm"
           value={alloc.mode}
           onChange={(e) => setAlloc((a) => ({ ...a, mode: e.target.value as AllocationForm["mode"] }))}>
           {(Object.keys(ALLOCATION_MODE_LABELS) as (keyof typeof ALLOCATION_MODE_LABELS)[]).map((m) => (
@@ -301,7 +301,7 @@ export function PackageForm({
             role="note"
             className={
               notice.emphasis
-                ? "mt-2 text-sm rounded-md border border-border bg-panel2 px-3 py-2 space-y-1"
+                ? "mt-2 text-sm rounded-md border border-border bg-surface px-3 py-2 space-y-1"
                 : "mt-2 text-xs text-muted"
             }
           >
@@ -364,7 +364,7 @@ export function PackageForm({
         )}
         {rules.map((r, i) => (
           <div key={i} className="flex gap-2 items-center mb-2" data-testid={`rule-${i}`}>
-            <select aria-label={`rule-type-${i}`} className="bg-panel2 border border-border rounded-md px-2 py-1.5 text-sm"
+            <select aria-label={`rule-type-${i}`} className="h-9 rounded-md border border-input bg-card text-foreground focus:border-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 px-2.5 text-sm"
               value={r.type} onChange={(e) => setRules((rs) => rs.map((x, j) => (j === i ? emptyRule(e.target.value as RuleType) : x)))}>
               {SUPPORTED_RULE_TYPES.map((t) => <option key={t} value={t}>{RULE_TYPE_LABELS[t]}</option>)}
             </select>
@@ -375,7 +375,7 @@ export function PackageForm({
               <Input aria-label={`rule-until-${i}`} type="datetime-local" value={r.until} onChange={(e) => setRule(i, { until: e.target.value })} />
             </>}
             {r.type === "PRIOR_PURCHASE" && (
-              <select aria-label={`rule-mode-${i}`} className="bg-panel2 border border-border rounded-md px-2 py-1.5 text-sm"
+              <select aria-label={`rule-mode-${i}`} className="h-9 rounded-md border border-input bg-card text-foreground focus:border-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 px-2.5 text-sm"
                 value={r.mode} onChange={(e) => setRule(i, { mode: e.target.value as "requires_prior" | "forbids_prior" })}>
                 <option value="forbids_prior">forbids prior</option>
                 <option value="requires_prior">requires prior</option>
@@ -393,7 +393,7 @@ export function PackageForm({
             {r.type === "ROOM_TYPE" && <Input aria-label={`rule-room-types-${i}`} placeholder="DLX, SUITE" value={r.room_types} onChange={(e) => setRule(i, { room_types: e.target.value })} />}
             {r.type === "RATE_PLAN" && <Input aria-label={`rule-rate-plans-${i}`} placeholder="BAR, CORP" value={r.rate_plans} onChange={(e) => setRule(i, { rate_plans: e.target.value })} />}
             {r.type === "VIP" && (
-              <select aria-label={`rule-vip-${i}`} className="bg-panel2 border border-border rounded-md px-2 py-1.5 text-sm"
+              <select aria-label={`rule-vip-${i}`} className="h-9 rounded-md border border-input bg-card text-foreground focus:border-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 px-2.5 text-sm"
                 value={r.is_vip} onChange={(e) => setRule(i, { is_vip: e.target.value as "true" | "false" })}>
                 <option value="true">VIP guests only</option>
                 <option value="false">Non-VIP guests only</option>

@@ -56,6 +56,7 @@ const config: Config = {
           DEFAULT: token("--primary"),
           foreground: token("--primary-foreground"),
           hover: token("--primary-hover"),
+          press: token("--primary-press"),
           subtle: token("--primary-subtle"),
           "subtle-foreground": token("--primary-subtle-foreground"),
         },
@@ -102,6 +103,7 @@ const config: Config = {
           accent: token("--sidebar-accent"),
           "accent-foreground": token("--sidebar-accent-foreground"),
           border: token("--sidebar-border"),
+          active: token("--sidebar-active"),
         },
 
         chart: {
@@ -130,11 +132,17 @@ const config: Config = {
         warn: token("--warning"),
         err: token("--destructive"),
       },
+      // THE VELONET RADIUS SCALE, by role (design-system/tokens.css). `md` is every control, `lg` every card
+      // and sheet, `xl` every overlay. Screens written against the old scale keep working because the names
+      // did not change -- only what they mean became the brand's.
       borderRadius: {
-        lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)",
-        xl: "calc(var(--radius) + 4px)",
+        sm: "5px",
+        md: "var(--radius-control)",
+        lg: "var(--radius-card)",
+        xl: "var(--radius-overlay)",
+        control: "var(--radius-control)",
+        card: "var(--radius-card)",
+        overlay: "var(--radius-overlay)",
       },
       fontFamily: {
         sans: [
@@ -146,20 +154,37 @@ const config: Config = {
           "Consolas", "monospace",
         ],
       },
+      // THE VELONET TYPE SCALE, by role. One family (Inter), ten roles; nothing in between.
       fontSize: {
-        // A label scale the product did not have. Screens reached for text-[10px] and text-[11px] inline,
-        // which is how six different "small" sizes ended up on one page.
         "2xs": ["0.6875rem", { lineHeight: "1rem", letterSpacing: "0.02em" }],
+        title: ["1.625rem", { lineHeight: "1.3", letterSpacing: "-0.025em", fontWeight: "700" }],
+        metric: ["1.5rem", { lineHeight: "1.2", letterSpacing: "-0.02em", fontWeight: "700" }],
+        subtitle: ["1.25rem", { lineHeight: "1.4", letterSpacing: "-0.02em", fontWeight: "700" }],
+        headline: ["1.125rem", { lineHeight: "1.4", letterSpacing: "-0.015em", fontWeight: "700" }],
+        emphasis: ["0.9375rem", { lineHeight: "1.5", fontWeight: "650" }],
+        body: ["0.875rem", { lineHeight: "1.45" }],
+        label: ["0.8125rem", { lineHeight: "1.45", fontWeight: "600" }],
+        caption: ["0.75rem", { lineHeight: "1.45" }],
+        micro: ["0.6875rem", { lineHeight: "1.45", fontWeight: "700" }],
+        nano: ["0.625rem", { lineHeight: "1.45", fontWeight: "700" }],
       },
+      // ELEVATION IS ONLY FOR WHAT FLOATS OR RESPONDS (design-system/tokens.css). Flat lists get none: their
+      // depth comes from hairlines and tonal layers, so urgency reads without shadows competing for it.
       boxShadow: {
-        // Elevation is deliberately restrained: an admin surface that floats everywhere reads as unfinished.
-        xs: "0 1px 2px 0 hsl(222 24% 13% / 0.04)",
-        sm: "0 1px 3px 0 hsl(222 24% 13% / 0.06), 0 1px 2px -1px hsl(222 24% 13% / 0.06)",
-        md: "0 4px 12px -2px hsl(222 24% 13% / 0.08), 0 2px 4px -2px hsl(222 24% 13% / 0.06)",
-        lg: "0 12px 32px -8px hsl(222 24% 13% / 0.16), 0 4px 10px -4px hsl(222 24% 13% / 0.08)",
-        // Retained so `shadow-panel` in existing pages stays valid.
-        panel: "0 1px 2px 0 hsl(222 24% 13% / 0.04)",
+        xs: "var(--shadow-card)",
+        sm: "var(--shadow-card)",
+        md: "var(--shadow-card-hover)",
+        lg: "var(--shadow-overlay)",
+        card: "var(--shadow-card)",
+        "card-hover": "var(--shadow-card-hover)",
+        overlay: "var(--shadow-overlay)",
+        control: "var(--shadow-control)",
+        "control-hover": "var(--shadow-control-hover)",
+        "control-press": "var(--shadow-control-press)",
+        panel: "var(--shadow-card)",
       },
+      transitionTimingFunction: { velonet: "var(--motion-ease)" },
+      transitionDuration: { press: "80ms", base: "160ms" },
       keyframes: {
         "fade-in": { from: { opacity: "0" }, to: { opacity: "1" } },
         "slide-up": {

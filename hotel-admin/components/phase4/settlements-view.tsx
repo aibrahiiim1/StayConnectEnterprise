@@ -1,6 +1,6 @@
 "use client";
 
-// Phase 4 (DARK) — Settlement browser and detail.
+// Phase 4 (DARK) — Settlements: browser and detail.
 //
 // The question this screen answers is "was this guest actually charged, and what has been given back". So
 // the list is filterable by status and the detail shows the charge together with every refund or chargeback
@@ -14,12 +14,19 @@
 // changes.
 
 import { useCallback, useEffect, useState } from "react";
+import { Receipt } from "lucide-react";
 import { api, FinancialPayment, FinancialSettlement, surfaceUnavailableMessage } from "@/lib/api";
 import { Card, CardBody } from "@/components/ui/card";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
+import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorBanner } from "@/components/ui/error-banner";
+import { PageHeader, PageShell } from "@/components/ui/page";
+import { FilterChips, KeyValueGrid } from "@/components/ui/data";
+import { Skeleton, SkeletonRows } from "@/components/ui/misc";
+import { Sheet, SheetBody, SheetContent, SheetFooter, SheetHeader, SheetSection } from "@/components/ui/sheet";
+import { humanize, money } from "./format";
 
 const STATUS_TONE = (s: string) =>
   s === "SETTLED"
@@ -40,22 +47,20 @@ const STATUSES = [
   "REVERSED",
 ];
 
-function money(minor: number, currency: string, exponent = 2): string {
-  if (!currency) return String(minor);
-  return `${(minor / Math.pow(10, exponent)).toFixed(exponent)} ${currency}`;
-}
+type Detail = {
+  settlement: FinancialSettlement;
+  payments: FinancialPayment[];
+  available_actions: string[];
+  note: string;
+};
 
 export function SettlementsView() {
   const [rows, setRows] = useState<FinancialSettlement[] | null>(null);
   const [status, setStatus] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
-  const [detail, setDetail] = useState<{
-    settlement: FinancialSettlement;
-    payments: FinancialPayment[];
-    available_actions: string[];
-    note: string;
-  } | null>(null);
+  const [detail, setDetail] = useState<Detail | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [detailErr, setDetailErr] = useState<string | null>(null);
 
   const load = useCallback(async (st: string) => {
     try {
@@ -75,125 +80,160 @@ export function SettlementsView() {
   async function open(id: string) {
     setSelected(id);
     setDetail(null);
+    setDetailErr(null);
     try {
       setDetail(await api.get(`/financial-ops/settlements/${id}`));
     } catch (e: any) {
-      setErr(e?.message ?? "Could not load that settlement");
+      setDetailErr(e?.message ?? "Could not load that settlement");
     }
   }
 
-  // The error is rendered BEFORE the loading guard. When the load fails the state variable is never set,
-  // so a guard placed first returns "Loading…" forever and the alert further down is unreachable -- the
-  // screen tells the operator it is still working when it has already given up.
-  if (err) return <p role="alert" className="text-sm text-destructive">{err}</p>;
-  if (!rows) return <p role="status">Loading settlements…</p>;
+  const s = detail?.settlement;
 
   return (
-    <div className="space-y-4">
-      {err ? <p role="alert" className="text-sm text-destructive">{err}</p> : null}
+    <PageShell>
+      <PageHeader
+        icon={<Receipt />}
+        eyebrow="Charges"
+        title="Settlements"
+        description="Whether a guest was actually charged for internet, and what has been given back since."
+      />
+
+      <ErrorBanner err={err} className="mb-0" />
 
       <Card>
-        <CardBody>
-          <div className="mb-3 flex items-end gap-3">
-            <div>
-              <label className="block text-sm font-medium" htmlFor="settlement-status">
-                Status
-              </label>
-              <select
-                id="settlement-status"
-                className="mt-1 rounded-md border border-border px-2 py-1"
-                value={status}
-                onChange={(e) => setStatus(e.target.value)}
-              >
-                <option value="">All</option>
-                {STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {s.replace(/_/g, " ")}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <p className="pb-1 text-sm text-muted-foreground">{rows.length} shown (newest 200)</p>
-          </div>
-
-          {rows.length === 0 ? (
-            <EmptyState title="No settlements match" hint="Try a different status, or clear the filter." />
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+          <FilterChips
+            label="Status"
+            value={status}
+            onChange={setStatus}
+            options={[{ value: "", label: "All" }, ...STATUSES.map((v) => ({ value: v, label: humanize(v) }))]}
+          />
+          {rows && <p className="text-xs text-muted-foreground tabular">{rows.length} shown (newest 200)</p>}
+        </div>
+        <CardBody className="p-0">
+          {!rows ? (
+            err ? null : <SkeletonRows rows={4} cols={5} />
+          ) : rows.length === 0 ? (
+            <EmptyState
+              icon={<Receipt />}
+              title="No settlements match"
+              hint="Try a different status, or clear the filter."
+              action={status ? <Button variant="secondary" size="sm" onClick={() => setStatus("")}>Show all</Button> : undefined}
+            />
           ) : (
             <Table>
               <THead>
                 <TR>
                   <TH>Amount</TH>
-                  <TH>Method</TH>
+                  <TH className="hidden sm:table-cell">Method</TH>
                   <TH>Settlement</TH>
-                  <TH>Purchase</TH>
-                  <TH> </TH>
+                  <TH className="hidden md:table-cell">Purchase</TH>
+                  <TH>
+                    <span className="sr-only">Actions</span>
+                  </TH>
                 </TR>
               </THead>
-              <tbody>
+              <TBody>
                 {rows.map((r) => (
                   <TR key={r.settlement_id}>
-                    <TD>{money(r.amount_minor, r.currency, r.currency_exponent)}</TD>
-                    <TD>{r.method.replace(/_/g, " ")}</TD>
+                    <TD className="font-medium tabular">{money(r.amount_minor, r.currency, r.currency_exponent)}</TD>
+                    <TD className="hidden sm:table-cell">{humanize(r.method)}</TD>
                     <TD>
-                      <Badge tone={STATUS_TONE(r.status)}>{r.status.replace(/_/g, " ")}</Badge>
+                      <Badge tone={STATUS_TONE(r.status)} dot>{humanize(r.status)}</Badge>
                     </TD>
-                    <TD>{r.purchase_state}</TD>
-                    <TD>
-                      <Button onClick={() => void open(r.settlement_id)}>Open</Button>
+                    <TD className="hidden text-muted-foreground md:table-cell">{humanize(r.purchase_state)}</TD>
+                    <TD className="text-right">
+                      <Button size="sm" variant="secondary" onClick={() => void open(r.settlement_id)}>
+                        Open
+                      </Button>
                     </TD>
                   </TR>
                 ))}
-              </tbody>
+              </TBody>
             </Table>
           )}
         </CardBody>
       </Card>
 
-      {selected && detail ? (
-        <Card>
-          <CardBody>
-            <h3 className="mb-3 text-sm font-medium text-muted-foreground">Payment history</h3>
-            {detail.payments.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No payment has been attempted against this settlement.
-              </p>
+      <Sheet open={selected !== null} onOpenChange={(v) => { if (!v) { setSelected(null); setDetail(null); } }}>
+        <SheetContent width="md">
+          <SheetHeader
+            icon={<Receipt />}
+            eyebrow="Settlement"
+            title={s ? money(s.amount_minor, s.currency, s.currency_exponent) : "Settlement"}
+            description="The charge and everything that followed it."
+            badges={s ? <Badge tone={STATUS_TONE(s.status)} dot>{humanize(s.status)}</Badge> : undefined}
+          />
+          <SheetBody>
+            <ErrorBanner err={detailErr} className="mb-0" />
+            {!detail ? (
+              detailErr ? null : (
+                <div className="space-y-3" aria-busy="true">
+                  <span className="sr-only">Loading the settlement</span>
+                  <Skeleton className="h-20 w-full" />
+                  <Skeleton className="h-28 w-full" />
+                </div>
+              )
             ) : (
-              <Table>
-                <THead>
-                  <TR>
-                    <TH>Type</TH>
-                    <TH>Amount</TH>
-                    <TH>Status</TH>
-                    <TH>Provider</TH>
-                  </TR>
-                </THead>
-                <tbody>
-                  {detail.payments.map((p) => (
-                    <TR key={p.payment_id}>
-                      <TD>{p.transaction_type}</TD>
-                      <TD>{money(p.amount_minor, p.currency, p.currency_exponent)}</TD>
-                      <TD>
-                        <Badge tone={p.status === "CAPTURED" ? "ok" : p.status === "UNKNOWN" ? "err" : "info"}>
-                          {p.status}
-                        </Badge>
-                      </TD>
-                      <TD>{p.provider}</TD>
-                    </TR>
-                  ))}
-                </tbody>
-              </Table>
+              <>
+                <SheetSection title="Details">
+                  <KeyValueGrid
+                    items={[
+                      { label: "Amount", value: money(detail.settlement.amount_minor, detail.settlement.currency, detail.settlement.currency_exponent) },
+                      { label: "Method", value: humanize(detail.settlement.method) },
+                      { label: "Settlement", value: humanize(detail.settlement.status) },
+                      { label: "Purchase", value: humanize(detail.settlement.purchase_state) },
+                    ]}
+                  />
+                </SheetSection>
+                <SheetSection title="Payment history">
+                  {detail.payments.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No payment has been attempted against this settlement.</p>
+                  ) : (
+                    <div className="overflow-hidden rounded-md border border-border">
+                      <Table>
+                        <THead>
+                          <TR>
+                            <TH>Type</TH>
+                            <TH>Amount</TH>
+                            <TH>Status</TH>
+                            <TH>Provider</TH>
+                          </TR>
+                        </THead>
+                        <TBody>
+                          {detail.payments.map((p) => (
+                            <TR key={p.payment_id}>
+                              <TD>{humanize(p.transaction_type)}</TD>
+                              <TD className="tabular">{money(p.amount_minor, p.currency, p.currency_exponent)}</TD>
+                              <TD>
+                                <Badge tone={p.status === "CAPTURED" ? "ok" : p.status === "UNKNOWN" ? "err" : "info"}>
+                                  {humanize(p.status)}
+                                </Badge>
+                              </TD>
+                              <TD className="text-muted-foreground">{p.provider}</TD>
+                            </TR>
+                          ))}
+                        </TBody>
+                      </Table>
+                    </div>
+                  )}
+                </SheetSection>
+                <p className="text-sm text-muted-foreground">
+                  {detail.available_actions.length === 0
+                    ? detail.note
+                    : `Available actions: ${detail.available_actions.join(", ")}`}
+                </p>
+              </>
             )}
-
-            {detail.available_actions.length === 0 ? (
-              <p className="mt-3 text-sm text-muted-foreground">{detail.note}</p>
-            ) : (
-              <p className="mt-3 text-sm text-muted-foreground">
-                Available actions: {detail.available_actions.join(", ")}
-              </p>
-            )}
-          </CardBody>
-        </Card>
-      ) : null}
-    </div>
+          </SheetBody>
+          <SheetFooter>
+            <Button variant="ghost" onClick={() => { setSelected(null); setDetail(null); }}>
+              Close
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
+    </PageShell>
   );
 }

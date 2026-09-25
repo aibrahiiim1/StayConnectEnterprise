@@ -1,24 +1,36 @@
 "use client";
 
+// LICENCE — what this appliance is allowed to do, and the two values Velonet needs to issue a licence for it.
+//
+// The one licence rule an operator must never be misled about is at the top, in words: when a licence stops
+// being in good standing NEW guest sign-ins are refused and existing guest sessions are NOT dropped. Central
+// serves this appliance for licensing only; a switched-off reporting link is a decision and is never shown as a
+// broken connection.
+
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError, SetupStatus, LicenseStatus, LicenseFeatures } from "@/lib/api";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
+import { Card, CardBody, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { Meter, Skeleton } from "@/components/ui/misc";
+import { KeyValueGrid } from "@/components/ui/data";
+import { CopyButton, LiveStatus, ReadOnlyNotice } from "@/components/ui/patterns";
+import { useToast } from "@/components/ui/toast";
 import { errMsg, formatDate } from "@/lib/utils";
 import { canWrite } from "@/lib/roles";
-import {
-  BadgeCheck, Copy, Check, Cpu, Upload, ChevronRight, ShieldCheck, Building2, Cloud,
-} from "lucide-react";
+import { Cpu, Upload, ShieldCheck, Cloud, Wrench } from "lucide-react";
+
+type Tone = "ok" | "warn" | "err" | "default";
 
 function fp(s?: string): string {
   if (!s) return "—";
   return s.length > 20 ? `${s.slice(0, 20)}…` : s;
 }
 
-function activationTone(a?: string): "ok" | "warn" | "err" | "default" {
+function activationTone(a?: string): Tone {
   switch (a) {
     case "activated": case "licensed": return "ok";
     case "pending_activation": case "mismatch": return "warn";
@@ -30,13 +42,13 @@ function activationLabel(a?: string): string {
   switch (a) {
     case "activated": return "Active";
     case "licensed": return "Licensed";
-    case "pending_activation": return "Pending";
+    case "pending_activation": return "Pending activation";
     case "mismatch": return "Hardware mismatch";
     case "unlicensed": return "Not activated";
-    default: return a || "unknown";
+    default: return a || "Unknown";
   }
 }
-function licenseTone(state?: string): "ok" | "warn" | "err" | "default" {
+function licenseTone(state?: string): Tone {
   switch (state) {
     case "Active": return "ok";
     case "GracePeriod": case "Restricted": case "Suspended": return "warn";
@@ -44,54 +56,53 @@ function licenseTone(state?: string): "ok" | "warn" | "err" | "default" {
     default: return "default";
   }
 }
+function licenseWord(state?: string): string {
+  if (!state) return "—";
+  return state === "GracePeriod" ? "Grace period" : state;
+}
 
-// CopyField — a labelled value with a one-click copy button (Serial, MACs).
-function CopyField({ label, value, big }: { label: string; value?: string; big?: boolean }) {
-  const [copied, setCopied] = useState(false);
-  const v = value || "—";
+/** A large, copyable identifier — the two values an operator reads out to Velonet. */
+function Identifier({ label, value, big }: { label: string; value?: string; big?: boolean }) {
   return (
-    <div className="space-y-1">
-      <div className="text-xs uppercase tracking-wide text-muted">{label}</div>
-      <div className="flex items-center gap-2">
-        <code className={(big ? "text-lg " : "text-sm ") + "font-mono break-all rounded-md border border-border bg-panel2 px-3 py-1.5"}>{v}</code>
-        {value && (
-          <Button size="sm" variant="ghost" onClick={() => { navigator.clipboard?.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1400); }}>
-            {copied ? <Check className="h-4 w-4 text-ok" /> : <Copy className="h-4 w-4" />}
-          </Button>
-        )}
+    <div className="min-w-0 space-y-1.5">
+      <div className="text-label text-muted-foreground">{label}</div>
+      <div className="flex flex-wrap items-center gap-2">
+        <code
+          className={
+            (big ? "text-lg font-semibold tracking-wide sm:text-xl " : "text-sm ") +
+            "min-w-0 break-all rounded-md border border-border bg-surface px-3 py-1.5 font-mono"
+          }
+        >
+          {value || "—"}
+        </code>
+        {value && <CopyButton value={value} label={`Copy`} size="sm" />}
       </div>
     </div>
   );
 }
 
-function Row({ k, v }: { k: string; v: React.ReactNode }) {
-  return (
-    <div className="flex justify-between gap-4 border-b border-border py-1.5 text-sm last:border-0">
-      <span className="text-muted-foreground">{k}</span>
-      <span className="text-right text-text">{v ?? "—"}</span>
-    </div>
-  );
-}
-
 const FEATURE_LABELS: Record<keyof LicenseFeatures, string> = {
-  pms: "PMS integration", paid_wifi: "Paid WiFi", sms_otp: "SMS OTP", email_otp: "Email OTP",
+  pms: "PMS integration", paid_wifi: "Paid Wi-Fi", sms_otp: "SMS one-time code", email_otp: "Email one-time code",
   social_login: "Social login", ha: "High availability", white_label: "White label",
 };
 
+const POLL_SECONDS = 5;
+
 export function LicenseSection() {
   const router = useRouter();
-  const [roles, setRoles] = useState<string[]>([]);
+  const toast = useToast();
+  const [roles, setRoles] = useState<string[] | null>(null);
   const [st, setSt] = useState<SetupStatus | null>(null);
   const [ls, setLs] = useState<LicenseStatus | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [uploadMsg, setUploadMsg] = useState<string | null>(null);
   const [uploadErr, setUploadErr] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const authGone = useRef(false);
-  const writable = canWrite("license", roles) || canWrite("network", roles);
+  const writable = roles ? canWrite("license", roles) || canWrite("network", roles) : false;
 
   async function load() {
     try {
@@ -104,6 +115,7 @@ export function LicenseSection() {
         api.get<LicenseStatus>("/license").catch(() => null),
       ]);
       setSt(s); if (l) setLs(l); setErr(null);
+      setUpdatedAt(Date.now());
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
         if (!authGone.current) { authGone.current = true; try { await api.post("/auth/logout"); } catch {} router.replace("/login"); }
@@ -114,9 +126,9 @@ export function LicenseSection() {
   }
 
   useEffect(() => {
-    api.get<{ roles?: string[] }>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => {});
+    api.get<{ roles?: string[] }>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
     load();
-    const t = setInterval(load, 5000);
+    const t = setInterval(load, POLL_SECONDS * 1000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -130,7 +142,8 @@ export function LicenseSection() {
       // Install is POST "/license", not "/license/install". Uploading a real licence file answered 404,
       // so the operator saw an upload failure with no reason that pointed anywhere useful.
       await api.postRaw("/license", text.trim());
-      setUploadMsg("License file accepted and installed.");
+      setUploadMsg("Licence file accepted and installed.");
+      toast.success("Licence installed");
       await load();
     } catch (err) {
       setUploadErr(errMsg(err));
@@ -140,239 +153,296 @@ export function LicenseSection() {
     }
   }
 
-  if (!loaded) return <div className="p-6 text-sm text-muted">Loading license…</div>;
+  if (!loaded) {
+    return (
+      <div className="space-y-5" aria-busy="true">
+        <span className="sr-only">Loading the licence</span>
+        <Skeleton className="h-36 w-full rounded-lg" />
+        <Skeleton className="h-48 w-full rounded-lg" />
+        <Skeleton className="h-28 w-full rounded-lg" />
+      </div>
+    );
+  }
 
   const hw = st?.hardware;
   const activation = st?.activation_status;
   const lic = st?.license;
   const asg = st?.assignment;
   const activated = activation === "activated" || activation === "licensed";
+  const state = ls?.state ?? lic?.state;
+
+  const max = lic?.max_concurrent_online_guests;
+  const limited = max != null && max > 0;
+  const current = lic?.current_online_guests;
+  const pct = limited
+    ? (lic?.usage_percent ?? (current != null ? (current / max!) * 100 : 0))
+    : 0;
+  // The capacity bar's colour is the licence's own rule: green under 80%, amber from 80%, red when full.
+  const meterTone = pct >= 100 ? "err" : pct >= 80 ? "warn" : "ok";
+  const capacityReached = limited && current != null && current >= max!;
 
   return (
-    <div className="w-full max-w-3xl space-y-6">
-      <div className="flex items-center justify-between">
-        
-        <Badge tone={activationTone(activation)}>{activationLabel(activation)}</Badge>
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Activation</span>
+          <Badge tone={activationTone(activation)} dot>{activationLabel(activation)}</Badge>
+        </div>
+        <LiveStatus updatedAt={updatedAt} intervalSeconds={POLL_SECONDS} error={!!err && st !== null} onRefresh={() => void load()} />
       </div>
 
-      {err && <div className="rounded-md border border-destructive/25 bg-destructive-subtle p-3 text-sm text-destructive-subtle-foreground">Couldn&apos;t read status (retrying): {err}</div>}
+      <ErrorBanner err={err ? `Couldn't read the licence status (retrying): ${err}` : null} className="mb-0" />
 
+      {/* ---- STATE BANNERS: what the licence currently stops, in words ---- */}
       {st?.permissive_blocked && (
-        <div className="rounded-md border border-destructive/25 bg-destructive-subtle p-3 text-sm text-destructive-subtle-foreground">
-          <b>Critical: blocked attempt to disable license enforcement.</b> This production appliance
-          rejected an attempt to run in permissive/unlicensed mode ({st.permissive_blocked}). Guest
-          Internet authorization remains gated on a real signed license. Remove the misconfiguration
-          and investigate — this was audited and reported to Central.
-        </div>
+        <Callout tone="danger" title="A blocked attempt to switch off licence enforcement">
+          This production appliance refused to run in an unlicensed mode ({st.permissive_blocked}). Guest
+          internet still requires a real signed licence. Remove the misconfiguration and investigate — the attempt
+          was recorded in Activity and reported to Velonet Central.
+        </Callout>
       )}
 
-      {activation === "mismatch" && (
-        <div className="rounded-md border border-warning/30 bg-warning-subtle p-3 text-sm text-warning-subtle-foreground">
-          <b>Hardware Binding Mismatch.</b> This license is bound to a different WAN network adapter than the one now present
-          {st?.hardware_mismatch ? <> ({st.hardware_mismatch})</> : null}. The hotel keeps running on a time-limited grace.
-          If the WAN NIC was genuinely replaced, ask StayConnect to authorize a <b>Rebind</b> — a new license will be issued.
-        </div>
-      )}
-
-      {/* ---- Activate: the two values the operator sends to StayConnect ---- */}
-      <Card>
-        <CardHeader><CardTitle className="flex items-center gap-2"><Cpu className="h-4 w-4" /> Appliance identity</CardTitle></CardHeader>
-        <CardBody className="space-y-4">
-          {!activated && (
-            <p className="text-sm text-muted-foreground">
-              To activate this appliance, send these two values to StayConnect:
-              your <b>Serial Number</b> and <b>WAN MAC Address</b>.
-            </p>
-          )}
-          <div className="grid gap-4 sm:grid-cols-2">
-            <CopyField label="StayConnect Serial Number" value={hw?.serial || st?.serial} big />
-            <CopyField label="WAN MAC Address" value={hw?.wan_mac} big />
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <CopyField label="LAN MAC Address" value={hw?.lan_mac} />
-            <div className="space-y-1">
-              <div className="text-xs uppercase tracking-wide text-muted">Appliance</div>
-              <div className="text-sm">
-                <div>{hw?.model || "—"}</div>
-                <div className="text-muted-foreground">host: {hw?.hostname || "—"} · WAN {hw?.wan_interface || "—"} · LAN {hw?.lan_interface || "—"}</div>
-              </div>
-            </div>
-          </div>
-        </CardBody>
-      </Card>
-
-      {/* ---- Grace / expiry / capacity warnings ---- */}
-      {(lic?.state === "GracePeriod") && (
-        <div className="rounded-md border border-warning/30 bg-warning-subtle p-3 text-sm text-warning-subtle-foreground">
-          <b>License in grace period.</b> It expired {lic?.valid_until ? formatDate(lic.valid_until) : ""} and guests keep
-          working until <b>{lic?.grace_ends_at ? formatDate(lic.grace_ends_at) : "the grace end"}</b>. Renew now to avoid interruption.
-        </div>
+      {lic?.state === "GracePeriod" && (
+        <Callout tone="warning" title="Licence in its grace period">
+          It expired {lic?.valid_until ? formatDate(lic.valid_until) : ""} and guests keep signing in until{" "}
+          <strong>{lic?.grace_ends_at ? formatDate(lic.grace_ends_at) : "the grace period ends"}</strong>. Renew
+          now to avoid interruption.
+        </Callout>
       )}
       {(lic?.state === "Expired" || lic?.state === "Revoked" || lic?.state === "Suspended") && (
-        <div className="rounded-md border border-destructive/25 bg-destructive-subtle p-3 text-sm text-destructive-subtle-foreground">
-          <b>License {lic?.state}.</b> New guest logins are refused; existing guest sessions are not dropped.
-          DHCP, DNS, the captive portal and this admin stay available.
+        <Callout tone="danger" title={`Licence ${lic.state.toLowerCase()}`}>
+          New guest logins are refused; existing guest sessions are not dropped. DHCP, DNS, the sign-in page and
+          this admin stay available.
           {lic?.valid_until ? <> Expired {formatDate(lic.valid_until)}{lic?.grace_ends_at ? <>; grace ended {formatDate(lic.grace_ends_at)}</> : null}.</> : null}
-        </div>
+        </Callout>
       )}
-      {lic?.max_concurrent_online_guests != null && lic.max_concurrent_online_guests > 0 &&
-        lic.current_online_guests != null && lic.current_online_guests >= lic.max_concurrent_online_guests && (
-        <div className="rounded-md border border-warning/30 bg-warning-subtle p-3 text-sm text-warning-subtle-foreground">
-          <b>Licensed capacity reached.</b> {lic.current_online_guests} of {lic.max_concurrent_online_guests} concurrent
-          online guests in use — new logins receive LICENSE_CAPACITY_REACHED until a slot frees up.
-        </div>
+      {capacityReached && (
+        <Callout tone="warning" title="Licensed capacity reached">
+          {current} of {max} concurrent online guests. New guest logins are refused until someone goes offline;
+          guests already online are not affected.
+        </Callout>
+      )}
+      {activation === "mismatch" && (
+        <Callout tone="warning" title="Hardware mismatch">
+          This licence is bound to a different WAN network adapter than the one now present
+          {st?.hardware_mismatch ? <> ({st.hardware_mismatch})</> : null}. The hotel keeps running on a
+          time-limited grace. If the WAN adapter was genuinely replaced, ask Velonet to authorise a{" "}
+          <strong>rebind</strong> — a new licence will be issued.
+        </Callout>
       )}
 
-      {/* ---- License status (simple model: one appliance, one cap, one window) ---- */}
+      {/* ---- IDENTITY: the two values the operator sends to Velonet ---- */}
       <Card>
-        <CardHeader><CardTitle className="flex items-center gap-2"><ShieldCheck className="h-4 w-4" /> License</CardTitle></CardHeader>
-        <CardBody className="space-y-4">
-          {/* Concurrent online guests — the licensed cap and live usage. */}
-          <div>
-            <div className="mb-1 flex items-baseline justify-between text-sm">
-              <span className="text-muted-foreground">Online guests (all guest networks)</span>
-              <span className="font-mono">
-                {lic?.current_online_guests ?? "—"} / {lic?.max_concurrent_online_guests && lic.max_concurrent_online_guests > 0 ? lic.max_concurrent_online_guests : "∞"}
-                {lic?.remaining_capacity != null && <span className="text-muted-foreground"> · {lic.remaining_capacity} free</span>}
-                {lic?.usage_percent != null && <span className="text-muted-foreground"> · {Math.round(lic.usage_percent)}%</span>}
+        <CardHeader>
+          <div className="space-y-0.5">
+            <CardTitle className="flex items-center gap-2"><Cpu className="size-4" aria-hidden /> Appliance identity</CardTitle>
+            <CardDescription>
+              {activated
+                ? "The licence is bound to these values."
+                : "To activate this appliance, send these two values to Velonet."}
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardBody className="space-y-5">
+          <div className="grid gap-5 md:grid-cols-2">
+            <Identifier label="Serial number" value={hw?.serial || st?.serial} big />
+            <Identifier label="WAN MAC address" value={hw?.wan_mac} big />
+          </div>
+          <KeyValueGrid
+            columns={2}
+            items={[
+              { label: "LAN MAC address", value: hw?.lan_mac ? <span className="font-mono">{hw.lan_mac}</span> : "—" },
+              {
+                label: "Appliance",
+                value: hw?.model || "—",
+                hint: `Host ${hw?.hostname || "—"} · WAN ${hw?.wan_interface || "—"} · LAN ${hw?.lan_interface || "—"}`,
+              },
+            ]}
+          />
+        </CardBody>
+      </Card>
+
+      {/* ---- LICENCE: one appliance, one cap, one window ---- */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><ShieldCheck className="size-4" aria-hidden /> Licence</CardTitle>
+          <Badge tone={licenseTone(state)} dot>{licenseWord(state)}</Badge>
+        </CardHeader>
+        <CardBody className="space-y-5">
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <span className="text-sm text-muted-foreground">Online guests, all guest networks</span>
+              <span className="text-metric tabular">
+                {current ?? "—"}
+                <span className="text-sm font-normal text-muted-foreground"> / {limited ? max : "Unlimited"}</span>
               </span>
             </div>
-            {lic?.max_concurrent_online_guests != null && lic.max_concurrent_online_guests > 0 && (
-              <div className="h-2 overflow-hidden rounded bg-panel2">
-                <div className={`h-full ${((lic.usage_percent ?? 0) >= 100) ? "bg-err" : (lic.usage_percent ?? 0) >= 80 ? "bg-warn" : "bg-ok"}`}
-                  style={{ width: `${Math.min(100, lic.usage_percent ?? 0)}%` }} />
-              </div>
+            {limited && (
+              <Meter
+                value={current ?? 0}
+                max={max!}
+                tone={meterTone}
+                caption={
+                  <>
+                    {Math.round(pct)}% in use
+                    {lic?.remaining_capacity != null ? ` · ${lic.remaining_capacity} free` : ""}
+                    {meterTone === "err" ? " · full" : meterTone === "warn" ? " · nearly full" : ""}
+                  </>
+                }
+              />
             )}
           </div>
-          <div className="grid gap-x-8 md:grid-cols-2">
-            <div>
-              <Row k="Activation" v={<Badge tone={activationTone(activation)}>{activationLabel(activation)}</Badge>} />
-              <Row k="License status" v={<Badge tone={licenseTone(ls?.state ?? lic?.state)}>{ls?.state ?? lic?.state ?? "—"}</Badge>} />
-              <Row k="Max concurrent online guests" v={lic?.max_concurrent_online_guests && lic.max_concurrent_online_guests > 0 ? String(lic.max_concurrent_online_guests) : "Unlimited"} />
-              <Row k="Valid from" v={lic?.valid_from ? formatDate(lic.valid_from) : (ls?.issued_at ? formatDate(ls.issued_at) : "—")} />
-              <Row k="Valid until" v={lic?.valid_until ? formatDate(lic.valid_until) : (ls?.valid_until ? formatDate(ls.valid_until) : "—")} />
-            </div>
-            <div>
-              <Row k="Grace period" v={lic?.grace_period_days != null ? `${lic.grace_period_days} days` : "—"} />
-              <Row k="Grace ends" v={lic?.grace_ends_at ? formatDate(lic.grace_ends_at) : "—"} />
-              <Row k="Customer" v={<span className="inline-flex items-center gap-1"><Building2 className="h-3.5 w-3.5 text-muted" />{asg?.tenant_name || "—"}</span>} />
-              <Row k="Hotel / Site" v={asg?.site_name || "—"} />
-            </div>
-          </div>
+          <KeyValueGrid
+            columns={2}
+            items={[
+              { label: "Licence state", value: <Badge tone={licenseTone(state)}>{licenseWord(state)}</Badge> },
+              { label: "Max concurrent online guests", value: limited ? String(max) : "Unlimited" },
+              { label: "Valid from", value: lic?.valid_from ? formatDate(lic.valid_from) : (ls?.issued_at ? formatDate(ls.issued_at) : "—") },
+              { label: "Valid until", value: lic?.valid_until ? formatDate(lic.valid_until) : (ls?.valid_until ? formatDate(ls.valid_until) : "—") },
+              { label: "Grace period", value: lic?.grace_period_days != null ? `${lic.grace_period_days} days` : "—" },
+              { label: "Grace ends", value: lic?.grace_ends_at ? formatDate(lic.grace_ends_at) : "—" },
+              { label: "Customer", value: asg?.tenant_name || "—" },
+              { label: "Site", value: asg?.site_name || "—" },
+            ]}
+          />
         </CardBody>
       </Card>
 
-      {/* ---- Offline activation: upload a signed license file ---- */}
+      {/* ---- UPLOAD: the one place a licence file is installed after activation ---- */}
       <Card>
-        <CardHeader><CardTitle className="flex items-center gap-2"><Upload className="h-4 w-4" /> Offline activation</CardTitle></CardHeader>
+        <CardHeader>
+          <div className="space-y-0.5">
+            <CardTitle className="flex items-center gap-2"><Upload className="size-4" aria-hidden /> Upload licence file</CardTitle>
+            <CardDescription>
+              For renewals, or when this appliance has no connection to Velonet Central. Velonet generates the file
+              for this serial and WAN MAC; the appliance checks it is bound to this exact hardware before accepting it,
+              and refuses an older licence than the one installed.
+            </CardDescription>
+          </div>
+        </CardHeader>
         <CardBody className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            No connection to Central? Get a signed license file from StayConnect (generated for this Serial + WAN MAC) and upload it here.
-            The appliance verifies it is bound to this exact hardware before accepting.
-          </p>
-          <input ref={fileRef} type="file" accept=".license,.json,application/json" onChange={onUpload} disabled={!writable || uploading} className="hidden" id="lic-file" />
-          <Button variant="secondary" disabled={!writable || uploading} onClick={() => fileRef.current?.click()}>
-            {uploading ? "Installing…" : "Upload license file"}
-          </Button>
-          {uploadMsg && <div className="rounded border border-success/25 bg-success-subtle p-2 text-sm text-success-subtle-foreground">{uploadMsg}</div>}
-          {uploadErr && <div className="rounded border border-destructive/25 bg-destructive-subtle p-2 text-sm text-destructive-subtle-foreground">{uploadErr}</div>}
-          {!writable && <p className="text-xs text-muted-foreground">Your role cannot install a license.</p>}
+          {roles !== null && !writable ? (
+            <ReadOnlyNotice>Your role can view the licence but not install one.</ReadOnlyNotice>
+          ) : writable ? (
+            <>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".license,.json,application/json"
+                onChange={onUpload}
+                disabled={uploading}
+                className="sr-only"
+                id="lic-file"
+                aria-label="Licence file"
+                tabIndex={-1}
+              />
+              <Button variant="secondary" disabled={uploading} onClick={() => fileRef.current?.click()}>
+                <Upload /> {uploading ? "Installing…" : "Upload licence file"}
+              </Button>
+            </>
+          ) : null}
+          {uploadMsg && <Callout tone="success">{uploadMsg}</Callout>}
+          <ErrorBanner err={uploadErr} className="mb-0" />
         </CardBody>
       </Card>
-
-      {/* ---- Advanced (technical details) ---- */}
-      <div>
-        <button className="inline-flex items-center gap-1 text-sm text-muted hover:text-text" onClick={() => setShowAdvanced((v) => !v)}>
-          <ChevronRight className={"h-4 w-4 transition-transform " + (showAdvanced ? "rotate-90" : "")} />
-          {showAdvanced ? "Hide technical details" : "Show technical details"}
-        </button>
-      </div>
 
       {/* CONNECTION TO CENTRAL — what the separate "Cloud connection" page used to show.
           It is on THIS page because licensing is the only thing the link serves. The appliance talks to
           Central for registration, certificates, the licence itself, licence enforcement and the signed
           tenant/site binding; the NATS transport is not opened and the telemetry outbox is stopped, both by
-          decision (T0071). A separate page implied a second subsystem to administer, and there is not one. */}
+          decision (T0071). Nothing here is shown as broken because reporting is off. */}
       <Card>
-        <CardHeader><CardTitle className="flex items-center gap-2"><Cloud className="h-4 w-4" /> Connection to Central</CardTitle></CardHeader>
-        <CardBody>
-          <p className="mb-3 text-sm text-muted">
-            Central issues and renews this appliance&apos;s licence and certificate. Guests are authorised by
-            this appliance from its own data, so a Central outage does not interrupt service — it only delays
-            licence renewal.
-          </p>
-          <div className="grid gap-x-8 md:grid-cols-2">
-            <div>
-              <Row k="Reachable now" v={
-                st?.network?.central_https_443 === false
-                  ? <Badge tone="warn">not reachable</Badge>
-                  : <Badge tone="ok">yes</Badge>} />
-              <Row k="Secure channel (mTLS)" v={<Badge tone={st?.api_mtls?.mtls_ready ? "ok" : "warn"}>{st?.api_mtls?.mtls_ready ? "established" : "not ready"}</Badge>} />
-              <Row k="Certificate expires" v={st?.api_mtls?.not_after || "—"} />
-            </div>
-            <div>
-              <Row k="Enrollment" v={<Badge tone={st?.enrolled ? "ok" : "err"}>{st?.enrolled ? "enrolled" : "not enrolled"}</Badge>} />
-              <Row k="Site binding" v={<Badge tone={asg?.assigned ? "ok" : "warn"}>{asg?.assigned ? "signed and adopted" : "not assigned"}</Badge>} />
-              <Row k="Used for" v={<span className="text-sm">Licensing only</span>} />
-            </div>
+        <CardHeader>
+          <div className="space-y-0.5">
+            <CardTitle className="flex items-center gap-2"><Cloud className="size-4" aria-hidden /> Connection to Central</CardTitle>
+            <CardDescription>
+              Velonet Central issues and renews this appliance&apos;s licence and certificate. Guests are authorised
+              by this appliance from its own data, so a Central outage does not interrupt service — it only delays
+              licence renewal.
+            </CardDescription>
           </div>
+        </CardHeader>
+        <CardBody>
+          <KeyValueGrid
+            columns={2}
+            items={[
+              { label: "Used for", value: <span className="text-emphasis">Licensing only</span> },
+              {
+                label: "Reachable now",
+                value: st?.network?.central_https_443 === false
+                  ? <Badge tone="warn">Not reachable</Badge>
+                  : <Badge tone="ok">Yes</Badge>,
+              },
+              {
+                label: "Secure channel",
+                value: <Badge tone={st?.api_mtls?.mtls_ready ? "ok" : "warn"}>{st?.api_mtls?.mtls_ready ? "Established" : "Not ready"}</Badge>,
+              },
+              { label: "Certificate expires", value: st?.api_mtls?.not_after || "—" },
+              {
+                label: "Enrolment",
+                value: <Badge tone={st?.enrolled ? "ok" : "err"}>{st?.enrolled ? "Enrolled" : "Not enrolled"}</Badge>,
+              },
+              {
+                label: "Site binding",
+                value: <Badge tone={asg?.assigned ? "ok" : "warn"}>{asg?.assigned ? "Signed and adopted" : "Not assigned"}</Badge>,
+              },
+            ]}
+          />
         </CardBody>
       </Card>
 
-      {showAdvanced && (
-        <div className="space-y-4">
-          <Card>
-            <CardHeader><CardTitle>Identity &amp; transport</CardTitle></CardHeader>
-            <CardBody className="grid gap-x-8 md:grid-cols-2">
-              <div>
-                <Row k="Appliance ID" v={<code>{st?.appliance_id || "—"}</code>} />
-                <Row k="Identity key fingerprint" v={<code title={st?.identity_key_fingerprint}>{fp(st?.identity_key_fingerprint)}</code>} />
-                <Row k="mTLS cert fingerprint" v={<code title={st?.api_mtls?.cert_fingerprint}>{fp(st?.api_mtls?.cert_fingerprint)}</code>} />
-                <Row k="License ID" v={<code>{lic?.license_id || ls?.license_id || "—"}</code>} />
-              </div>
-              <div>
-                <Row k="API mTLS" v={<Badge tone={st?.api_mtls?.mtls_ready ? "ok" : "warn"}>{st?.api_mtls?.mtls_ready ? "ready" : "not ready"}</Badge>} />
-                {/* NOT "down". The real-time channel is deliberately closed at a licensing-only site; a red
-                    badge here described a decision as a fault. */}
-                <Row k="Real-time channel" v={<Badge tone={st?.nats_mtls?.connected ? "ok" : "default"}>{st?.nats_mtls?.connected ? "connected" : "not used at this site"}</Badge>} />
-                <Row k="Assignment version" v={asg?.version ?? "—"} />
-                <Row k="Tenant / Site id" v={<code className="text-xs">{(st?.tenant_id || "—") + " / " + (st?.site_id || "—")}</code>} />
-              </div>
-            </CardBody>
-          </Card>
+      {/* ---- TECHNICAL DETAILS: for support, collapsed ---- */}
+      <Card>
+        <details className="group">
+          <summary className="flex cursor-pointer select-none items-center gap-2 rounded-lg px-5 py-4 text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <Wrench className="size-4 text-muted-foreground" aria-hidden />
+            Technical details
+            <span className="ms-auto text-caption font-normal text-muted-foreground group-open:hidden">Show</span>
+            <span className="ms-auto hidden text-caption font-normal text-muted-foreground group-open:inline">Hide</span>
+          </summary>
+          <div className="space-y-5 border-t border-border px-5 py-4">
+            <KeyValueGrid
+              columns={2}
+              items={[
+                { label: "Appliance ID", value: <code className="break-all text-xs">{st?.appliance_id || "—"}</code> },
+                { label: "Licence ID", value: <code className="break-all text-xs">{lic?.license_id || ls?.license_id || "—"}</code> },
+                { label: "Identity key fingerprint", value: <code className="text-xs" title={st?.identity_key_fingerprint}>{fp(st?.identity_key_fingerprint)}</code> },
+                { label: "Certificate fingerprint", value: <code className="text-xs" title={st?.api_mtls?.cert_fingerprint}>{fp(st?.api_mtls?.cert_fingerprint)}</code> },
+                { label: "API mTLS", value: <Badge tone={st?.api_mtls?.mtls_ready ? "ok" : "warn"}>{st?.api_mtls?.mtls_ready ? "Ready" : "Not ready"}</Badge> },
+                // NOT "down". The real-time channel is deliberately closed at a licensing-only site; a red badge
+                // here described a decision as a fault.
+                { label: "Real-time channel", value: <Badge tone={st?.nats_mtls?.connected ? "ok" : "default"}>{st?.nats_mtls?.connected ? "Connected" : "Not used at this site"}</Badge> },
+                { label: "Assignment version", value: asg?.version ?? "—" },
+                { label: "Customer / site id", value: <code className="break-all text-xs">{(st?.tenant_id || "—") + " / " + (st?.site_id || "—")}</code> },
+              ]}
+            />
 
-          {ls?.features && (
-            <Card>
-              <CardBody>
-                <details>
-                  <summary className="cursor-pointer text-sm font-medium select-none">
-                    Technical details — feature entitlements
-                  </summary>
-                  <p className="mt-2 text-xs text-muted">
-                    A standard StayConnect license includes <strong>all product features</strong>. The commercial
-                    controls are the concurrent-guest capacity, validity window and grace period above — you do
-                    not configure features. This table is shown for support/diagnostics; per-feature entitlements
-                    exist in the signed-license format for future editions.
-                  </p>
-                  <div className="mt-3">
-                    <Table>
-                      <THead><TR><TH>Feature</TH><TH>Included</TH></TR></THead>
-                      <tbody>
-                        {(Object.keys(FEATURE_LABELS) as (keyof LicenseFeatures)[]).map((k) => (
-                          <TR key={k}>
-                            <TD>{FEATURE_LABELS[k]}</TD>
-                            <TD>{ls.features?.[k] ? <Badge tone="ok">yes</Badge> : <span className="text-muted-foreground">—</span>}</TD>
-                          </TR>
-                        ))}
-                      </tbody>
-                    </Table>
-                  </div>
-                </details>
-              </CardBody>
-            </Card>
-          )}
-        </div>
-      )}
+            {ls?.features && (
+              <div className="space-y-2">
+                <div className="text-label">Feature entitlements</div>
+                <p className="text-caption text-muted-foreground">
+                  A standard Velonet licence includes every product feature. What a licence limits is the number of
+                  concurrent online guests, the validity window and the grace period shown above. This table is shown
+                  for support; per-feature entitlements exist in the signed licence format for future editions.
+                </p>
+                <div className="overflow-hidden rounded-md border border-border">
+                  <Table>
+                    <THead><TR><TH>Feature</TH><TH>Included</TH></TR></THead>
+                    <TBody>
+                      {(Object.keys(FEATURE_LABELS) as (keyof LicenseFeatures)[]).map((k) => (
+                        <TR key={k}>
+                          <TD>{FEATURE_LABELS[k]}</TD>
+                          <TD>{ls.features?.[k] ? <Badge tone="ok">Included</Badge> : <span className="text-muted-foreground">Not included</span>}</TD>
+                        </TR>
+                      ))}
+                    </TBody>
+                  </Table>
+                </div>
+              </div>
+            )}
+          </div>
+        </details>
+      </Card>
     </div>
   );
 }

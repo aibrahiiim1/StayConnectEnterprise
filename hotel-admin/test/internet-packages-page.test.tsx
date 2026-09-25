@@ -57,6 +57,8 @@ function routes(map: Record<string, unknown>) {
       }
     }
     if (path.startsWith("/commercial-packages/activity")) return Promise.resolve(activity());
+    // A role that may change packages, unless a test routes whoami itself.
+    if (path === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
     return Promise.resolve(list([]));
   });
 }

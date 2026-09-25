@@ -1,6 +1,6 @@
 "use client";
 
-// Phase 4 (DARK) — Financial Manual Review.
+// Phase 4 (DARK) — Manual review.
 //
 // This is where an operator decides what happened to money the system could not determine for itself. The
 // screen is built around one idea: it must show the EVIDENCE the decision has to rest on, and it must offer
@@ -14,8 +14,13 @@
 // There is deliberately no generic "approve". Programmatic PMS reversal is capability=false in v1, so
 // CREATE_REVERSAL records an audited ledger row and the folio correction stays a manual Front Office job;
 // the screen says so rather than implying the button fixes the folio.
+//
+// LAYOUT. The queue is the page; one charge opens in a side sheet with what it was attached to, every
+// attempt, the decisions already recorded and the decision form, so the queue stays in view behind it.
+// A role that may not decide sees the evidence and no form at all.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
+import { ClipboardCheck, Inbox } from "lucide-react";
 import {
   api,
   ReviewActionDoc,
@@ -23,25 +28,34 @@ import {
   ReviewQueueRow,
   surfaceUnavailableMessage,
 } from "@/lib/api";
-import { Card, CardBody } from "@/components/ui/card";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
+import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-
-function money(minor: number, currency: string, exponent = 2): string {
-  return `${(minor / Math.pow(10, exponent)).toFixed(exponent)} ${currency}`;
-}
+import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { Field, Input, Select, Textarea } from "@/components/ui/input";
+import { PageHeader, PageShell } from "@/components/ui/page";
+import { KeyValueGrid, Timeline } from "@/components/ui/data";
+import { Skeleton, SkeletonRows } from "@/components/ui/misc";
+import { ReadOnlyNotice } from "@/components/ui/patterns";
+import { Sheet, SheetBody, SheetContent, SheetFooter, SheetHeader, SheetSection } from "@/components/ui/sheet";
+import { useToast } from "@/components/ui/toast";
+import { formatDate } from "@/lib/utils";
+import { humanize, money } from "./format";
 
 const OUTCOME_TONE = (o: string) =>
   o === "UNKNOWN" ? "err" : o === "FAILED" ? "warn" : o === "ACKED" ? "ok" : "info";
 
 export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
+  const toast = useToast();
+  const formId = useId();
   const [rows, setRows] = useState<ReviewQueueRow[] | null>(null);
   const [actions, setActions] = useState<ReviewActionDoc[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<ReviewPostingDetail | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [sheetErr, setSheetErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -78,17 +92,28 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
     setReason("");
     setEvSource("");
     setEvRef("");
+    setSheetErr(null);
     try {
       setDetail(await api.get<ReviewPostingDetail>(`/financial-review/postings/${postingID}`));
     } catch (e: any) {
-      setErr(e?.message ?? "Could not load that posting");
+      setSheetErr(e?.message ?? "Could not load that posting");
     }
   }, []);
+
+  function close() {
+    setSelected(null);
+    setDetail(null);
+    setNote(null);
+    setSheetErr(null);
+    // A password must not outlive the sheet that collected it.
+    setPassword("");
+  }
 
   async function decide() {
     if (!selected || !detail) return;
     setBusy(true);
-    setErr(null);
+    setSheetErr(null);
+    setNote(null);
     try {
       await api.post(`/financial-review/postings/${selected}/actions`, {
         action,
@@ -98,36 +123,43 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
         password,
       });
       setNote("Decision recorded.");
+      toast.success("Decision recorded");
       await loadQueue();
       await open(selected);
     } catch (e: any) {
-      setErr(e?.message ?? "Could not record that decision");
+      setSheetErr(e?.message ?? "Could not record that decision");
     } finally {
       setBusy(false);
     }
   }
 
-  // The error is rendered BEFORE the loading guard. When the load fails the state variable is never set,
-  // so a guard placed first returns "Loading…" forever and the alert further down is unreachable -- the
-  // screen tells the operator it is still working when it has already given up.
-  if (err) return <p role="alert" className="text-sm text-destructive">{err}</p>;
-  if (!rows) return <p role="status">Loading the review queue…</p>;
-
   const spec = actions.find((a) => a.action === action);
   const allowed = detail?.available_actions ?? [];
+  const canDecide = canAct && !!detail && allowed.length > 0;
 
   return (
-    <div className="space-y-4">
-      {err ? <p role="alert" className="text-sm text-destructive">{err}</p> : null}
-      {note ? <p role="status" className="text-sm text-success-subtle-foreground">{note}</p> : null}
+    <PageShell>
+      <PageHeader
+        icon={<ClipboardCheck />}
+        eyebrow="Charges"
+        title="Manual review"
+        description="Decide what happened to a room charge whose outcome is unknown. Every decision is an audited statement about real money."
+      />
+
+      {!canAct && rows && <ReadOnlyNotice>Your role can see the review queue but not record decisions.</ReadOnlyNotice>}
+
+      <ErrorBanner err={err} className="mb-0" />
 
       <Card>
-        <CardBody>
-          <h2 className="mb-3 text-sm font-medium text-muted-foreground">
-            Awaiting a decision ({rows.length})
-          </h2>
-          {rows.length === 0 ? (
+        <CardHeader>
+          <CardTitle>Awaiting a decision{rows ? ` (${rows.length})` : ""}</CardTitle>
+        </CardHeader>
+        <CardBody className="p-0">
+          {!rows ? (
+            err ? null : <SkeletonRows rows={3} cols={5} />
+          ) : rows.length === 0 ? (
             <EmptyState
+              icon={<Inbox />}
               title="Nothing is waiting on you"
               hint="Postings appear here when their outcome could not be determined, or when someone escalated them."
             />
@@ -137,247 +169,262 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
                 <TR>
                   <TH>Amount</TH>
                   <TH>State</TH>
-                  <TH>Last attempt</TH>
-                  <TH>PMS answer</TH>
-                  <TH> </TH>
+                  <TH className="hidden sm:table-cell">Last attempt</TH>
+                  <TH className="hidden md:table-cell">PMS answer</TH>
+                  <TH>
+                    <span className="sr-only">Actions</span>
+                  </TH>
                 </TR>
               </THead>
-              <tbody>
+              <TBody>
                 {rows.map((r) => (
                   <TR key={r.posting_id}>
-                    <TD>{money(r.amount_minor, r.currency, r.currency_exponent)}</TD>
+                    <TD className="font-medium tabular">{money(r.amount_minor, r.currency, r.currency_exponent)}</TD>
                     <TD>
-                      <Badge tone={r.awaiting_manual_review ? "err" : "warn"}>{r.execution_state}</Badge>
+                      <Badge tone={r.awaiting_manual_review ? "err" : "warn"} dot>
+                        {humanize(r.execution_state)}
+                      </Badge>
                     </TD>
-                    <TD>{r.latest_attempt_no ?? "—"}</TD>
-                    <TD>{r.latest_pa_as_status ?? "no answer"}</TD>
-                    <TD>
-                      <Button onClick={() => void open(r.posting_id)}>Review</Button>
+                    <TD className="hidden tabular sm:table-cell">
+                      {r.latest_attempt_no != null ? `#${r.latest_attempt_no}` : "—"}
+                    </TD>
+                    <TD className="hidden text-muted-foreground md:table-cell">{r.latest_pa_as_status ?? "no answer"}</TD>
+                    <TD className="text-right">
+                      <Button size="sm" variant="secondary" onClick={() => void open(r.posting_id)}>
+                        Review
+                      </Button>
                     </TD>
                   </TR>
                 ))}
-              </tbody>
+              </TBody>
             </Table>
           )}
         </CardBody>
       </Card>
 
-      {detail ? (
-        <>
-          <Card>
-            <CardBody>
-              <h3 className="mb-2 text-sm font-medium text-muted-foreground">What this charge was attached to</h3>
-              <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
-                <div>
-                  <dt className="text-muted-foreground">Amount</dt>
-                  <dd>{money(detail.posting.amount_minor, detail.posting.currency, detail.posting.currency_exponent)}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">Settlement</dt>
-                  <dd>{detail.pinned_evidence.settlement_status}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">Purchase</dt>
-                  <dd>{detail.pinned_evidence.purchase_state}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">Interface</dt>
-                  <dd>
-                    {detail.pinned_evidence.connector_kind} ({detail.pinned_evidence.interface_lifecycle_state})
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">Folio identity</dt>
-                  <dd>{detail.pinned_evidence.folio_identity_strategy}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">Interface freshness</dt>
-                  <dd>{detail.diagnostics.interface_freshness_block ?? "OK"}</dd>
-                </div>
-              </dl>
-            </CardBody>
-          </Card>
+      <Sheet open={selected !== null} onOpenChange={(v) => !v && !busy && close()}>
+        <SheetContent width="lg">
+          <SheetHeader
+            icon={<ClipboardCheck />}
+            eyebrow="Room charge"
+            title={detail ? money(detail.posting.amount_minor, detail.posting.currency, detail.posting.currency_exponent) : "Room charge"}
+            description="What it was attached to, every attempt to post it, and what has been decided."
+            badges={
+              detail ? (
+                <>
+                  <Badge tone={detail.posting.awaiting_manual_review ? "err" : "warn"} dot>
+                    {humanize(detail.posting.execution_state)}
+                  </Badge>
+                  {detail.review.terminal_action && (
+                    <Badge tone="neutral">Decided: {humanize(detail.review.terminal_action)}</Badge>
+                  )}
+                </>
+              ) : undefined
+            }
+          />
+          <SheetBody>
+            <ErrorBanner err={sheetErr} className="mb-0" />
+            {note && <Callout tone="success">{note}</Callout>}
 
-          <Card>
-            <CardBody>
-              <h3 className="mb-3 text-sm font-medium text-muted-foreground">
-                Attempts ({detail.diagnostics.attempt_count}, of which UNKNOWN:{" "}
-                {detail.diagnostics.unknown_attempt_count})
-              </h3>
-              {detail.attempts.length === 0 ? (
-                <p className="text-sm text-muted-foreground">This posting has never been transmitted.</p>
-              ) : (
-                <Table>
-                  <THead>
-                    <TR>
-                      <TH>#</TH>
-                      <TH>P#</TH>
-                      <TH>Room / Guest</TH>
-                      <TH>Outcome</TH>
-                      <TH>PMS answer</TH>
-                      <TH>Sent</TH>
-                    </TR>
-                  </THead>
-                  <tbody>
-                    {detail.attempts.map((a) => (
-                      <TR key={a.attempt_no}>
-                        <TD>{a.attempt_no}</TD>
-                        <TD>{a.p_number}</TD>
-                        <TD>
-                          {a.rn}
-                          {a.g_number ? ` / ${a.g_number}` : ""}
-                        </TD>
-                        <TD>
-                          <Badge tone={OUTCOME_TONE(a.outcome)}>{a.outcome}</Badge>
-                        </TD>
-                        <TD>{a.pa_as_status ?? "—"}</TD>
-                        <TD>{a.sent_at}</TD>
-                      </TR>
-                    ))}
-                  </tbody>
-                </Table>
-              )}
-              {detail.diagnostics.has_unknown_history ? (
-                <p className="mt-3 text-sm text-warning-subtle-foreground">
-                  An attempt ended UNKNOWN. Nobody knows whether the folio was charged, and nothing has been
-                  retried automatically — that is what this decision is for.
-                </p>
-              ) : null}
-            </CardBody>
-          </Card>
+            {!detail ? (
+              sheetErr ? null : (
+                <div className="space-y-3" aria-busy="true">
+                  <span className="sr-only">Loading the posting</span>
+                  <Skeleton className="h-24 w-full" />
+                  <Skeleton className="h-32 w-full" />
+                </div>
+              )
+            ) : (
+              <>
+                <SheetSection title="What this charge was attached to">
+                  <KeyValueGrid
+                    columns={3}
+                    items={[
+                      {
+                        label: "Amount",
+                        value: money(detail.posting.amount_minor, detail.posting.currency, detail.posting.currency_exponent),
+                      },
+                      { label: "Settlement", value: detail.pinned_evidence.settlement_status },
+                      { label: "Purchase", value: detail.pinned_evidence.purchase_state },
+                      {
+                        label: "Interface",
+                        value: `${detail.pinned_evidence.connector_kind} (${detail.pinned_evidence.interface_lifecycle_state})`,
+                      },
+                      { label: "Folio identity", value: detail.pinned_evidence.folio_identity_strategy },
+                      { label: "Interface freshness", value: detail.diagnostics.interface_freshness_block ?? "OK" },
+                    ]}
+                  />
+                </SheetSection>
 
-          {detail.review.history.length > 0 ? (
-            <Card>
-              <CardBody>
-                <h3 className="mb-3 text-sm font-medium text-muted-foreground">Decisions already recorded</h3>
-                <ul className="space-y-2 text-sm">
-                  {detail.review.history.map((h, i) => (
-                    <li key={i} className="rounded-md border border-border p-2">
-                      <span className="font-medium">{h.action}</span> · {h.created_at}
-                      <p className="mt-1 text-foreground">{h.reason}</p>
-                    </li>
-                  ))}
-                </ul>
-              </CardBody>
-            </Card>
-          ) : null}
-
-          <Card>
-            <CardBody>
-              <h3 className="mb-3 text-sm font-medium text-muted-foreground">Record a decision</h3>
-              {allowed.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  This posting has a terminal decision already. Nothing further can be recorded against it.
-                </p>
-              ) : (
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-sm font-medium" htmlFor="review-action">
-                      What did you establish?
-                    </label>
-                    <select
-                      id="review-action"
-                      className="mt-1 w-full max-w-xl rounded-md border border-border px-2 py-1"
-                      value={action}
-                      onChange={(e) => setAction(e.target.value)}
-                    >
-                      <option value="">Choose…</option>
-                      {actions
-                        .filter((a) => allowed.includes(a.action))
-                        .map((a) => (
-                          <option key={a.action} value={a.action}>
-                            {a.action} — {a.summary}
-                          </option>
-                        ))}
-                    </select>
-                    {spec?.terminal ? (
-                      <p className="mt-1 text-xs text-warning-subtle-foreground">
-                        This is a terminal decision. It can be recorded once and never revised.
-                      </p>
-                    ) : null}
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium" htmlFor="review-reason">
-                      Why
-                    </label>
-                    <textarea
-                      id="review-reason"
-                      rows={2}
-                      className="mt-1 w-full rounded-md border border-border px-3 py-2"
-                      value={reason}
-                      onChange={(e) => setReason(e.target.value)}
-                    />
-                  </div>
-
-                  {spec?.needs_evidence ? (
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div>
-                        <label className="block text-sm font-medium" htmlFor="review-ev-source">
-                          Evidence source
-                        </label>
-                        <select
-                          id="review-ev-source"
-                          className="mt-1 w-full rounded-md border border-border px-2 py-1"
-                          value={evSource}
-                          onChange={(e) => setEvSource(e.target.value)}
-                        >
-                          <option value="">Choose…</option>
-                          {(detail.evidence_contract?.source_types ?? []).map((s) => (
-                            <option key={s} value={s}>
-                              {s}
-                            </option>
+                <SheetSection
+                  title={`Attempts (${detail.diagnostics.attempt_count}, of which unknown: ${detail.diagnostics.unknown_attempt_count})`}
+                >
+                  {detail.attempts.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">This posting has never been transmitted.</p>
+                  ) : (
+                    <div className="overflow-hidden rounded-md border border-border">
+                      <Table>
+                        <THead>
+                          <TR>
+                            <TH>#</TH>
+                            <TH>P#</TH>
+                            <TH>Room / Guest</TH>
+                            <TH>Outcome</TH>
+                            <TH>PMS answer</TH>
+                            <TH>Sent</TH>
+                          </TR>
+                        </THead>
+                        <TBody>
+                          {detail.attempts.map((a) => (
+                            <TR key={a.attempt_no}>
+                              <TD className="tabular">{a.attempt_no}</TD>
+                              <TD className="tabular">{a.p_number}</TD>
+                              <TD>
+                                {a.rn}
+                                {a.g_number ? ` / ${a.g_number}` : ""}
+                              </TD>
+                              <TD>
+                                <Badge tone={OUTCOME_TONE(a.outcome)}>{a.outcome}</Badge>
+                              </TD>
+                              <TD>{a.pa_as_status ?? "—"}</TD>
+                              <TD className="whitespace-nowrap text-muted-foreground">{formatDate(a.sent_at)}</TD>
+                            </TR>
                           ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium" htmlFor="review-ev-ref">
-                          Reference to it
-                        </label>
-                        <input
-                          id="review-ev-ref"
-                          className="mt-1 w-full rounded-md border border-border px-3 py-2"
-                          placeholder="e.g. PMS folio screen, 14:22"
-                          value={evRef}
-                          onChange={(e) => setEvRef(e.target.value)}
-                        />
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Record a REFERENCE to the artefact, never its contents. This goes into an immutable
-                          audit record.
-                        </p>
-                      </div>
+                        </TBody>
+                      </Table>
+                    </div>
+                  )}
+                  {detail.diagnostics.has_unknown_history ? (
+                    <div className="rounded-md border border-warning/30 bg-warning-subtle px-3.5 py-2.5 text-sm text-warning-subtle-foreground">
+                      An attempt ended UNKNOWN. Nobody knows whether the folio was charged, and nothing has been
+                      retried automatically — that is what this decision is for.
                     </div>
                   ) : null}
+                </SheetSection>
 
-                  <div>
-                    <label className="block text-sm font-medium" htmlFor="review-password">
-                      Your password
-                    </label>
-                    <input
-                      id="review-password"
-                      type="password"
-                      autoComplete="current-password"
-                      className="mt-1 w-full max-w-sm rounded-md border border-border px-3 py-2"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
+                {detail.review.history.length > 0 ? (
+                  <SheetSection title="Decisions already recorded">
+                    <Timeline
+                      items={detail.review.history.map((h, i) => ({
+                        key: String(i),
+                        title: humanize(h.action),
+                        when: formatDate(h.created_at),
+                        body: (
+                          <>
+                            <span className="block text-foreground">{h.reason}</span>
+                            {h.actor && <span className="text-xs">by {h.actor}</span>}
+                          </>
+                        ),
+                      }))}
                     />
-                  </div>
+                  </SheetSection>
+                ) : null}
 
-                  <Button disabled={!canAct || busy || !action} onClick={() => void decide()}>
-                    {busy ? "Recording…" : "Record decision"}
-                  </Button>
+                <SheetSection title="Record a decision">
+                  {allowed.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      This posting has a terminal decision already. Nothing further can be recorded against it.
+                    </p>
+                  ) : !canAct ? (
+                    <ReadOnlyNotice>Your role can see this evidence but not record a decision.</ReadOnlyNotice>
+                  ) : (
+                    <form
+                      id={formId}
+                      className="space-y-4"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void decide();
+                      }}
+                    >
+                      <Field
+                        label="What did you establish?"
+                        htmlFor="review-action"
+                        hint="Only the decisions this posting can still take are offered."
+                      >
+                        <Select id="review-action" value={action} onChange={(e) => setAction(e.target.value)}>
+                          <option value="">Choose…</option>
+                          {actions
+                            .filter((a) => allowed.includes(a.action))
+                            .map((a) => (
+                              <option key={a.action} value={a.action}>
+                                {a.action} — {a.summary}
+                              </option>
+                            ))}
+                        </Select>
+                      </Field>
+                      {spec?.terminal ? (
+                        <Callout tone="warning">
+                          This is a terminal decision. It can be recorded once and never revised.
+                        </Callout>
+                      ) : null}
 
-                  <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
-                    {(detail.limitations ?? []).map((l, i) => (
-                      <li key={i}>{l}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </CardBody>
-          </Card>
-        </>
-      ) : null}
-    </div>
+                      <Field label="Why" htmlFor="review-reason" hint="Recorded in the audit log.">
+                        <Textarea id="review-reason" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
+                      </Field>
+
+                      {spec?.needs_evidence ? (
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <Field label="Evidence source" htmlFor="review-ev-source">
+                            <Select id="review-ev-source" value={evSource} onChange={(e) => setEvSource(e.target.value)}>
+                              <option value="">Choose…</option>
+                              {(detail.evidence_contract?.source_types ?? []).map((s) => (
+                                <option key={s} value={s}>
+                                  {s}
+                                </option>
+                              ))}
+                            </Select>
+                          </Field>
+                          <Field
+                            label="Reference to it"
+                            htmlFor="review-ev-ref"
+                            hint="Record a REFERENCE to the artefact, never its contents. This goes into an immutable audit record."
+                          >
+                            <Input
+                              id="review-ev-ref"
+                              placeholder="e.g. PMS folio screen, 14:22"
+                              value={evRef}
+                              onChange={(e) => setEvRef(e.target.value)}
+                            />
+                          </Field>
+                        </div>
+                      ) : null}
+
+                      <Field label="Your password" htmlFor="review-password" hint="Every decision is confirmed with your password.">
+                        <Input
+                          id="review-password"
+                          type="password"
+                          autoComplete="current-password"
+                          className="max-w-sm"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                        />
+                      </Field>
+
+                      {(detail.limitations ?? []).length > 0 && (
+                        <ul className="list-disc space-y-1 ps-5 text-xs text-muted-foreground">
+                          {(detail.limitations ?? []).map((l, i) => (
+                            <li key={i}>{l}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </form>
+                  )}
+                </SheetSection>
+              </>
+            )}
+          </SheetBody>
+          <SheetFooter>
+            <Button variant="ghost" disabled={busy} onClick={close}>
+              Close
+            </Button>
+            {canDecide && (
+              <Button type="submit" form={formId} disabled={busy || !action}>
+                {busy ? "Recording…" : "Record decision"}
+              </Button>
+            )}
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
+    </PageShell>
   );
 }

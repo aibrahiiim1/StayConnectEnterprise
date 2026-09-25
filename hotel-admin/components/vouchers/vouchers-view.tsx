@@ -30,6 +30,7 @@ import { FilterChips, Pagination, SearchInput } from "@/components/ui/data";
 import { Explain } from "@/components/ui/tooltip";
 import { Field, Select } from "@/components/ui/input";
 import { SkeletonRows } from "@/components/ui/misc";
+import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { PageHeader, PageShell, StatCard, Toolbar } from "@/components/ui/page";
 import { Table, TableWrap, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -79,8 +80,10 @@ export function VouchersView(props: {
   canEditFormat: boolean;
   /** Whether the portal settings can be read, for the hotel name printed on cards. */
   canReadBranding?: boolean;
+  /** The role is known and may look but not print, cancel or reveal: say so once, under the header. */
+  readOnly?: boolean;
 }) {
-  const { canIssue, canRevealCodes, canReadFormat, canEditFormat, canReadBranding = false } = props;
+  const { canIssue, canRevealCodes, canReadFormat, canEditFormat, canReadBranding = false, readOnly = false } = props;
 
   const [tab, setTab] = React.useState<Tab>("vouchers");
   const [reloadKey, setReloadKey] = React.useState(0);
@@ -223,6 +226,7 @@ export function VouchersView(props: {
     <PageShell width="wide">
       <PageHeader
         icon={<Ticket />}
+        eyebrow="Internet offering"
         title="Vouchers"
         description="Printed cards a guest redeems for internet access. Showing or exporting a code needs your password and is recorded."
         actions={
@@ -241,6 +245,7 @@ export function VouchersView(props: {
         }
       />
 
+      {readOnly && <ReadOnlyNotice>Your role can see the voucher cards but not issue, cancel or reveal them.</ReadOnlyNotice>}
       <ErrorBanner err={summaryErr} />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <StatCard

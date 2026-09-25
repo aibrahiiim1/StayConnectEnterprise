@@ -18,19 +18,26 @@
 // ROOM IS NOT IDENTITY and MAC IS NOT A PERSON. Every room is shown with the PMS connection that gives it
 // meaning, and the device view says "device" throughout — it lists the stays a device was associated with,
 // which is what the data supports, rather than naming a guest, which it does not.
+//
+// Read-only for every role that can open it: there is nothing to change here, only evidence to read.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { Activity, ArrowLeft, ChevronRight, FileSearch, Search, Smartphone } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader, PageShell } from "@/components/ui/page";
+import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
-import { SkeletonRows } from "@/components/ui/misc";
+import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { Meter, SkeletonRows } from "@/components/ui/misc";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { MetricStrip } from "@/components/ui/data";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { refreshingClass } from "@/components/ui/patterns";
 import { formatBytes, quotaPercent, endReasonWords } from "@/lib/bytes";
-import { formatDate } from "@/lib/utils";
-import { Search, Activity, Smartphone, ChevronRight, ArrowLeft } from "lucide-react";
+import { cn, formatDate } from "@/lib/utils";
 
 type Totals = { bytes_down: number; bytes_up: number; bytes_total: number; sessions: number; devices: number };
 type StayRow = {
@@ -54,6 +61,31 @@ type DeviceDetail = {
 };
 
 type Tab = "stays" | "devices";
+
+// The stay lifecycle in the words Stays uses.
+const STAY_WORDS: Record<string, string> = {
+  IN_HOUSE: "In house",
+  RESERVED: "Arriving",
+  CHECKED_OUT: "Checked out",
+  POST_STAY_ACTIVE: "Post-stay access",
+  CANCELLED: "Cancelled",
+  NO_SHOW: "No show",
+};
+const stayWords = (s: string) => STAY_WORDS[s] ?? s.replace(/_/g, " ").toLowerCase();
+
+function AllowanceCell({ consumed, quota }: { consumed?: number | null; quota?: number | null }) {
+  const pct = quotaPercent(consumed, quota);
+  if (pct === null) return <span className="text-sm text-muted-foreground">No limit</span>;
+  return (
+    <Meter
+      className="min-w-32"
+      value={Math.min(pct, 100)}
+      max={100}
+      label={pct >= 100 ? "Allowance used up" : undefined}
+      caption={`${pct}% of ${formatBytes(quota)}`}
+    />
+  );
+}
 
 export default function UsageExplorerPage() {
   const [tab, setTab] = useState<Tab>("stays");
@@ -112,228 +144,231 @@ export default function UsageExplorerPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-5">
-      <header>
-        <div className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground">Guests</div>
-        <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight sm:text-2xl">
-          <Activity className="h-5 w-5" /> Usage explorer
-        </h1>
-        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-          What a room or a device actually used, measured by this appliance. Every total here is the sum of
-          recorded sessions, and every session can be opened to show the accounting samples behind it.
-        </p>
-      </header>
+    <PageShell>
+      <PageHeader
+        eyebrow="Guests"
+        title="Usage explorer"
+        icon={<Activity />}
+        description="Settle a data-usage question: drill from a room or a device down to its sessions and the accounting samples behind them. Every total is the sum of recorded sessions."
+      />
 
-      {err && (
-        <div role="alert" className="rounded-lg border border-destructive/25 bg-destructive-subtle p-3 text-sm text-destructive-subtle-foreground">
-          {err}
-        </div>
-      )}
+      <ErrorBanner err={err} />
 
-      <div className="flex flex-wrap gap-1 border-b" role="tablist" aria-label="What to investigate">
-        {([["stays", "By room or stay", Activity], ["devices", "By device", Smartphone]] as const).map(([id, label, Icon]) => (
-          <button key={id} role="tab" type="button" aria-selected={tab === id}
-            onClick={() => { setTab(id); setStay(null); setDevice(null); setErr(null); }}
-            className={`-mb-px inline-flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm ${
-              tab === id ? "border-primary font-medium text-primary" : "border-transparent text-muted-foreground"
-            }`}>
-            <Icon className="h-4 w-4" /> {label}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        value={tab}
+        onValueChange={(v) => { setTab(v as Tab); setStay(null); setDevice(null); setErr(null); }}
+      >
+        <TabsList aria-label="What to investigate">
+          <TabsTrigger value="stays"><Activity className="size-4" aria-hidden /> By room or stay</TabsTrigger>
+          <TabsTrigger value="devices"><Smartphone className="size-4" aria-hidden /> By device</TabsTrigger>
+        </TabsList>
 
-      {/* ---------------------------------------------------------------- BY ROOM OR STAY ---------------- */}
-      {tab === "stays" && !stay && (
-        <Card>
-          <CardHeader><CardTitle>Find a stay</CardTitle></CardHeader>
-          <CardBody className="space-y-4">
-            <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); search(); }}>
-              <label className="relative min-w-0 flex-1">
-                <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input value={q} onChange={(e) => setQ(e.target.value)} className="pl-8"
-                  aria-label="Room number or reservation"
-                  placeholder="Room number or reservation — or leave empty for the heaviest users" />
-              </label>
-              <Button type="submit" disabled={busy}>{busy ? "Searching…" : "Search"}</Button>
-            </form>
+        {/* ---------------------------------------------------------------- BY ROOM OR STAY ---------------- */}
+        <TabsContent value="stays" className="mt-5 space-y-5">
+          {!stay && (
+            <Card className="overflow-hidden">
+              <CardBody className="border-b border-border py-3">
+                <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); search(); }}>
+                  <div className="relative min-w-0 flex-1">
+                    <Search className="pointer-events-none absolute start-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                    <Input value={q} onChange={(e) => setQ(e.target.value)} className="ps-8"
+                      aria-label="Room number or reservation"
+                      placeholder="Room number or reservation — or leave empty for the heaviest users" />
+                  </div>
+                  <Button type="submit" disabled={busy}>{busy ? "Searching…" : "Search"}</Button>
+                </form>
+              </CardBody>
 
-            {rows === null ? <SkeletonRows rows={4} cols={5} /> : rows.length === 0 ? (
-              <EmptyState icon={<Activity />} title="No stay matched"
-                hint="Only stays that were given internet access appear here. A stay with no access has nothing to measure." />
-            ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <THead>
-                    <TR>
-                      <TH>Room</TH><TH>Stay</TH><TH className="text-right">Downloaded</TH>
-                      <TH className="text-right">Uploaded</TH><TH className="text-right">Total</TH>
-                      <TH>Allowance</TH><TH />
-                    </TR>
-                  </THead>
-                  <tbody>
-                    {rows.map((r) => {
-                      const pct = quotaPercent(r.consumed_bytes, r.quota_bytes);
-                      return (
+              {rows === null ? <SkeletonRows rows={4} cols={5} /> : rows.length === 0 ? (
+                <EmptyState icon={<Activity />} title={q.trim() ? "No stay matched" : "No usage recorded yet"}
+                  hint="Only stays that were given internet access appear here. A stay with no access has nothing to measure." />
+              ) : (
+                <div className={cn(busy && refreshingClass)}>
+                  <Table>
+                    <THead>
+                      <TR>
+                        <TH>Room</TH>
+                        <TH className="hidden md:table-cell">Stay</TH>
+                        <TH className="hidden text-end sm:table-cell">Downloaded</TH>
+                        <TH className="hidden text-end sm:table-cell">Uploaded</TH>
+                        <TH className="text-end">Total</TH>
+                        <TH className="hidden lg:table-cell">Allowance</TH>
+                        <TH><span className="sr-only">Open</span></TH>
+                      </TR>
+                    </THead>
+                    <TBody>
+                      {rows.map((r) => (
                         <TR key={r.stay_id}>
                           <TD>
-                            <div className="font-medium">{r.room || "—"}</div>
-                            {/* The interface is not decoration: a room number only means something inside one. */}
-                            <div className="text-2xs text-muted-foreground">{r.pms_interface}</div>
+                            <div className="font-medium">{r.room ? `Room ${r.room}` : "—"}</div>
+                            {/* The connection is not decoration: a room number only means something inside one. */}
+                            <div className="text-caption text-muted-foreground">{r.pms_interface}</div>
                           </TD>
-                          <TD className="text-sm">
-                            <div>{r.reservation || "—"}</div>
-                            <div className="text-2xs text-muted-foreground">
-                              {r.stay_status.replace(/_/g, " ").toLowerCase()}
+                          <TD className="hidden text-sm md:table-cell">
+                            <div>{r.reservation ? `Reservation ${r.reservation}` : "—"}</div>
+                            <div className="text-caption text-muted-foreground">
+                              {stayWords(r.stay_status)}
                               {r.arrival ? ` · ${formatDate(r.arrival)}` : ""}
                             </div>
                           </TD>
-                          <TD className="text-right tabular-nums">{formatBytes(r.totals.bytes_down)}</TD>
-                          <TD className="text-right tabular-nums">{formatBytes(r.totals.bytes_up)}</TD>
-                          <TD className="text-right font-medium tabular-nums">{formatBytes(r.totals.bytes_total)}</TD>
-                          <TD className="text-sm">
-                            {pct === null ? <span className="text-muted-foreground">No limit</span> : (
-                              <span className={pct >= 100 ? "text-warning-subtle-foreground" : ""}>
-                                {pct}% of {formatBytes(r.quota_bytes)}
-                              </span>
-                            )}
+                          <TD className="hidden text-end tabular sm:table-cell">{formatBytes(r.totals.bytes_down)}</TD>
+                          <TD className="hidden text-end tabular sm:table-cell">{formatBytes(r.totals.bytes_up)}</TD>
+                          <TD className="text-end font-medium tabular">{formatBytes(r.totals.bytes_total)}</TD>
+                          <TD className="hidden lg:table-cell">
+                            <AllowanceCell consumed={r.consumed_bytes} quota={r.quota_bytes} />
                           </TD>
-                          <TD className="text-right">
+                          <TD className="text-end">
                             <Button size="sm" variant="ghost" onClick={() => openStay(r.stay_id)}>
-                              Details <ChevronRight className="ml-1 h-3.5 w-3.5" />
+                              Details <ChevronRight className="rtl:rotate-180" />
                             </Button>
                           </TD>
                         </TR>
-                      );
-                    })}
-                  </tbody>
-                </Table>
-              </div>
-            )}
-          </CardBody>
-        </Card>
-      )}
+                      ))}
+                    </TBody>
+                  </Table>
+                </div>
+              )}
+            </Card>
+          )}
 
-      {/* ---------------------------------------------------------------- ONE STAY ----------------------- */}
-      {tab === "stays" && stay && (
-        <div className="space-y-5">
-          <Button variant="ghost" size="sm" onClick={() => setStay(null)}>
-            <ArrowLeft className="mr-1 h-4 w-4" /> Back to stays
-          </Button>
+          {/* ---------------------------------------------------------------- ONE STAY ----------------------- */}
+          {stay && (
+            <div className="space-y-5">
+              <Button variant="ghost" size="sm" onClick={() => setStay(null)}>
+                <ArrowLeft className="rtl:rotate-180" /> Back to stays
+              </Button>
 
-          <Card>
-            <CardHeader>
-              <div>
-                <CardTitle>Room {stay.stay.room || "—"}</CardTitle>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  {stay.stay.pms_interface}
-                  {stay.stay.reservation ? ` · reservation ${stay.stay.reservation}` : ""}
-                  {stay.stay.arrival ? ` · ${formatDate(stay.stay.arrival)}` : ""}
-                  {stay.stay.departure ? ` → ${formatDate(stay.stay.departure)}` : ""}
-                </p>
-              </div>
-            </CardHeader>
-            <CardBody className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-4">
-                <Figure label="Downloaded" value={formatBytes(stay.stay.totals.bytes_down)} />
-                <Figure label="Uploaded" value={formatBytes(stay.stay.totals.bytes_up)} />
-                <Figure label="Total used" value={formatBytes(stay.stay.totals.bytes_total)} strong />
-                <Figure
-                  label="Allowance"
-                  value={stay.stay.quota_bytes ? formatBytes(stay.stay.quota_bytes) : "No limit"}
-                  hint={quotaPercent(stay.stay.consumed_bytes, stay.stay.quota_bytes) !== null
-                    ? `${quotaPercent(stay.stay.consumed_bytes, stay.stay.quota_bytes)}% used`
-                    : undefined}
-                />
-              </div>
-              <div className="flex flex-wrap gap-2 text-sm">
-                {stay.service_plan && <Badge tone="neutral">Plan: {stay.service_plan}</Badge>}
-                {endReasonWords(stay.stay.end_reason) && (
-                  <Badge tone="warn">{endReasonWords(stay.stay.end_reason)}</Badge>
-                )}
-                <Badge tone="default">{stay.stay.totals.sessions} sessions</Badge>
-                <Badge tone="default">{stay.stay.totals.devices} devices</Badge>
-              </div>
-            </CardBody>
-          </Card>
+              <Card>
+                <CardHeader>
+                  <div className="min-w-0 space-y-1">
+                    <CardTitle>{stay.stay.room ? `Room ${stay.stay.room}` : "Stay"}</CardTitle>
+                    <CardDescription>
+                      {stay.stay.pms_interface}
+                      {stay.stay.reservation ? ` · reservation ${stay.stay.reservation}` : ""}
+                      {stay.stay.arrival ? ` · ${formatDate(stay.stay.arrival)}` : ""}
+                      {stay.stay.departure ? ` → ${formatDate(stay.stay.departure)}` : ""}
+                    </CardDescription>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    <Badge tone="neutral">{stayWords(stay.stay.stay_status)}</Badge>
+                    {endReasonWords(stay.stay.end_reason) && (
+                      <Badge tone="warn">{endReasonWords(stay.stay.end_reason)}</Badge>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardBody className="space-y-4">
+                  <MetricStrip
+                    items={[
+                      { label: "Downloaded", value: formatBytes(stay.stay.totals.bytes_down) },
+                      { label: "Uploaded", value: formatBytes(stay.stay.totals.bytes_up) },
+                      { label: "Total used", value: formatBytes(stay.stay.totals.bytes_total) },
+                      {
+                        label: "Allowance",
+                        value: stay.stay.quota_bytes
+                          ? `${formatBytes(stay.stay.quota_bytes)}${quotaPercent(stay.stay.consumed_bytes, stay.stay.quota_bytes) !== null ? ` · ${quotaPercent(stay.stay.consumed_bytes, stay.stay.quota_bytes)}% used` : ""}`
+                          : "No limit",
+                        tone: (quotaPercent(stay.stay.consumed_bytes, stay.stay.quota_bytes) ?? 0) >= 100 ? "warn" : undefined,
+                      },
+                    ]}
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    {stay.service_plan && <Badge tone="neutral">Service plan: {stay.service_plan}</Badge>}
+                    <Badge tone="default">{stay.stay.totals.sessions} sessions</Badge>
+                    <Badge tone="default">{stay.stay.totals.devices} devices</Badge>
+                  </div>
+                </CardBody>
+              </Card>
 
-          <Card>
-            <CardHeader><CardTitle>Devices used during this stay</CardTitle></CardHeader>
-            <CardBody>
-              {stay.devices.length === 0 ? (
-                <EmptyState icon={<Smartphone />} title="No device recorded"
-                  hint="Nothing connected under this stay's access." />
-              ) : (
-                <div className="overflow-x-auto">
+              <Card className="overflow-hidden">
+                <CardHeader><CardTitle>Devices used during this stay</CardTitle></CardHeader>
+                {stay.devices.length === 0 ? (
+                  <EmptyState icon={<Smartphone />} title="No device recorded"
+                    hint="Nothing connected under this stay's access." />
+                ) : (
                   <Table>
-                    <THead><TR><TH>Device</TH><TH className="text-right">Downloaded</TH><TH className="text-right">Uploaded</TH><TH className="text-right">Total</TH><TH>Sessions</TH><TH /></TR></THead>
-                    <tbody>
+                    <THead>
+                      <TR>
+                        <TH>Device</TH>
+                        <TH className="hidden text-end sm:table-cell">Downloaded</TH>
+                        <TH className="hidden text-end sm:table-cell">Uploaded</TH>
+                        <TH className="text-end">Total</TH>
+                        <TH className="hidden sm:table-cell">Sessions</TH>
+                        <TH><span className="sr-only">Open</span></TH>
+                      </TR>
+                    </THead>
+                    <TBody>
                       {stay.devices.map((d) => (
                         <TR key={d.mac || "unknown"}>
-                          <TD className="font-mono text-sm">{d.mac || "unknown"}</TD>
-                          <TD className="text-right tabular-nums">{formatBytes(d.bytes_down)}</TD>
-                          <TD className="text-right tabular-nums">{formatBytes(d.bytes_up)}</TD>
-                          <TD className="text-right font-medium tabular-nums">{formatBytes(d.bytes_total)}</TD>
-                          <TD>{d.sessions}</TD>
-                          <TD className="text-right">
+                          <TD className="font-mono text-xs">{d.mac || "unknown"}</TD>
+                          <TD className="hidden text-end tabular sm:table-cell">{formatBytes(d.bytes_down)}</TD>
+                          <TD className="hidden text-end tabular sm:table-cell">{formatBytes(d.bytes_up)}</TD>
+                          <TD className="text-end font-medium tabular">{formatBytes(d.bytes_total)}</TD>
+                          <TD className="hidden sm:table-cell">{d.sessions}</TD>
+                          <TD className="text-end">
                             {d.mac && (
                               <Button size="sm" variant="ghost" onClick={() => lookUpDevice(d.mac)}>
-                                This device
+                                This device <ChevronRight className="rtl:rotate-180" />
                               </Button>
                             )}
                           </TD>
                         </TR>
                       ))}
-                    </tbody>
+                    </TBody>
                   </Table>
-                </div>
-              )}
-            </CardBody>
-          </Card>
+                )}
+              </Card>
 
-          <SessionsCard sessions={stay.sessions} samples={samples} onOpenSamples={openSamples} />
-        </div>
-      )}
+              <SessionsCard sessions={stay.sessions} samples={samples} onOpenSamples={openSamples} />
+            </div>
+          )}
+        </TabsContent>
 
-      {/* ---------------------------------------------------------------- BY DEVICE ---------------------- */}
-      {tab === "devices" && (
-        <div className="space-y-5">
+        {/* ---------------------------------------------------------------- BY DEVICE ---------------------- */}
+        <TabsContent value="devices" className="mt-5 space-y-5">
           <Card>
             <CardHeader><CardTitle>Look up a device</CardTitle></CardHeader>
             <CardBody className="space-y-3">
               <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); lookUpDevice(q); }}>
-                <label className="relative min-w-0 flex-1">
-                  <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input value={q} onChange={(e) => setQ(e.target.value)} className="pl-8 font-mono"
+                <div className="relative min-w-0 flex-1">
+                  <Search className="pointer-events-none absolute start-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                  <Input value={q} onChange={(e) => setQ(e.target.value)} className="ps-8 font-mono"
                     aria-label="Device MAC address" placeholder="aa:bb:cc:dd:ee:ff" />
-                </label>
+                </div>
                 <Button type="submit" disabled={busy || !q.trim()}>{busy ? "Looking…" : "Look up"}</Button>
               </form>
-              <p className="text-xs text-muted-foreground">
-                A device address identifies a piece of equipment, not a person. This shows what the device
-                used and which stays it was connected under — it does not tell you who was holding it.
-              </p>
+              <Callout tone="neutral" title="A device is not a person">
+                A device address identifies a piece of equipment. This shows what the device used and which stays it
+                was connected under — it does not tell you who was holding it.
+              </Callout>
             </CardBody>
           </Card>
+
+          {!device && !busy && (
+            <EmptyState icon={<FileSearch />} title="Look up a device to see its usage"
+              hint="Paste the device's MAC address from the handset or from Active sessions." />
+          )}
 
           {device && (
             <>
               <Card>
                 <CardHeader>
-                  <div>
+                  <div className="min-w-0 space-y-1">
                     <CardTitle className="font-mono">{device.mac}</CardTitle>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
+                    <CardDescription>
                       {formatDate(device.from)} → {formatDate(device.to)}
                       {device.first_seen ? ` · first seen ${formatDate(device.first_seen)}` : ""}
-                    </p>
+                    </CardDescription>
                   </div>
                 </CardHeader>
                 <CardBody>
-                  <div className="grid gap-4 sm:grid-cols-4">
-                    <Figure label="Downloaded" value={formatBytes(device.totals.bytes_down)} />
-                    <Figure label="Uploaded" value={formatBytes(device.totals.bytes_up)} />
-                    <Figure label="Total" value={formatBytes(device.totals.bytes_total)} strong />
-                    <Figure label="Sessions" value={String(device.totals.sessions)} />
-                  </div>
+                  <MetricStrip
+                    items={[
+                      { label: "Downloaded", value: formatBytes(device.totals.bytes_down) },
+                      { label: "Uploaded", value: formatBytes(device.totals.bytes_up) },
+                      { label: "Total", value: formatBytes(device.totals.bytes_total) },
+                      { label: "Sessions", value: String(device.totals.sessions) },
+                    ]}
+                  />
                 </CardBody>
               </Card>
 
@@ -344,7 +379,7 @@ export default function UsageExplorerPage() {
                     {device.stays.map((s) => (
                       <Button key={s.stay_id} size="sm" variant="secondary"
                         onClick={() => { setTab("stays"); openStay(s.stay_id); }}>
-                        Room {s.room || "—"} <span className="ml-1 text-2xs text-muted-foreground">{s.pms_interface}</span>
+                        Room {s.room || "—"} <span className="text-caption text-muted-foreground">{s.pms_interface}</span>
                       </Button>
                     ))}
                   </CardBody>
@@ -354,19 +389,9 @@ export default function UsageExplorerPage() {
               <SessionsCard sessions={device.sessions} samples={samples} onOpenSamples={openSamples} />
             </>
           )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Figure({ label, value, hint, strong }: { label: string; value: string; hint?: string; strong?: boolean }) {
-  return (
-    <div>
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={`tabular-nums ${strong ? "text-2xl font-semibold" : "text-xl"}`}>{value}</div>
-      {hint && <div className="text-xs text-muted-foreground">{hint}</div>}
-    </div>
+        </TabsContent>
+      </Tabs>
+    </PageShell>
   );
 }
 
@@ -381,63 +406,63 @@ function SessionsCard({ sessions, samples, onOpenSamples }: {
   onOpenSamples: (id: string) => void;
 }) {
   return (
-    <Card>
+    <Card className="overflow-hidden">
       <CardHeader>
-        <div>
+        <div className="space-y-1">
           <CardTitle>Sessions</CardTitle>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Each period of connected access. Open one to see the recorded samples its total was measured from.
-          </p>
+          <CardDescription>
+            Each period of connected access. Show the evidence to see the recorded samples a total was measured from.
+          </CardDescription>
         </div>
       </CardHeader>
-      <CardBody>
-        {sessions.length === 0 ? (
-          <EmptyState icon={<Activity />} title="No sessions recorded"
-            hint="Nothing was measured in this period. That is not the same as zero usage — it means no session exists." />
-        ) : (
-          <div className="overflow-x-auto">
-            <Table>
-              <THead>
-                <TR>
-                  <TH>Started</TH><TH>Ended</TH><TH>Device</TH>
-                  <TH className="text-right">Total</TH><TH>How it ended</TH><TH />
+      {sessions.length === 0 ? (
+        <EmptyState icon={<Activity />} title="No sessions recorded"
+          hint="Nothing was measured in this period. That is not the same as zero usage — it means no session exists." />
+      ) : (
+        <Table>
+          <THead>
+            <TR>
+              <TH>Started</TH>
+              <TH className="hidden sm:table-cell">Ended</TH>
+              <TH className="hidden md:table-cell">Device</TH>
+              <TH className="text-end">Total</TH>
+              <TH className="hidden lg:table-cell">How it ended</TH>
+              <TH><span className="sr-only">Evidence</span></TH>
+            </TR>
+          </THead>
+          <TBody>
+            {sessions.map((s) => {
+              const sm = samples[s.session_id];
+              return (
+                <TR key={s.session_id}>
+                  <TD className="whitespace-nowrap text-sm">{s.started ? formatDate(s.started) : "—"}</TD>
+                  <TD className="hidden whitespace-nowrap text-sm sm:table-cell">
+                    {s.ended ? formatDate(s.ended) : <Badge tone="ok" dot>Still connected</Badge>}
+                  </TD>
+                  <TD className="hidden font-mono text-xs md:table-cell">{s.mac || "—"}</TD>
+                  <TD className="text-end tabular">
+                    {formatBytes(s.bytes_total)}
+                    {sm && sm !== "loading" && (
+                      <div className="text-caption text-muted-foreground">
+                        {sm.sample_count.toLocaleString()} samples · {formatBytes(sm.bytes_total)}
+                      </div>
+                    )}
+                  </TD>
+                  <TD className="hidden text-sm lg:table-cell">{endReasonWords(s.end_reason) ?? "—"}</TD>
+                  <TD className="text-end">
+                    {!sm && (
+                      <Button size="sm" variant="ghost" onClick={() => onOpenSamples(s.session_id)}>
+                        Show evidence
+                      </Button>
+                    )}
+                    {sm === "loading" && <span className="text-caption text-muted-foreground" aria-live="polite">Reading…</span>}
+                  </TD>
                 </TR>
-              </THead>
-              <tbody>
-                {sessions.map((s) => {
-                  const sm = samples[s.session_id];
-                  return (
-                    <TR key={s.session_id}>
-                      <TD className="whitespace-nowrap text-sm">{s.started ? formatDate(s.started) : "—"}</TD>
-                      <TD className="whitespace-nowrap text-sm">
-                        {s.ended ? formatDate(s.ended) : <Badge tone="ok">Still connected</Badge>}
-                      </TD>
-                      <TD className="font-mono text-2xs">{s.mac || "—"}</TD>
-                      <TD className="text-right tabular-nums">
-                        {formatBytes(s.bytes_total)}
-                        {sm && sm !== "loading" && (
-                          <div className="text-2xs text-muted-foreground">
-                            {sm.sample_count} samples · {formatBytes(sm.bytes_total)}
-                          </div>
-                        )}
-                      </TD>
-                      <TD className="text-sm">{endReasonWords(s.end_reason) ?? "—"}</TD>
-                      <TD className="text-right">
-                        {!sm && (
-                          <Button size="sm" variant="ghost" onClick={() => onOpenSamples(s.session_id)}>
-                            Show evidence
-                          </Button>
-                        )}
-                        {sm === "loading" && <span className="text-2xs text-muted-foreground">Reading…</span>}
-                      </TD>
-                    </TR>
-                  );
-                })}
-              </tbody>
-            </Table>
-          </div>
-        )}
-      </CardBody>
+              );
+            })}
+          </TBody>
+        </Table>
+      )}
     </Card>
   );
 }

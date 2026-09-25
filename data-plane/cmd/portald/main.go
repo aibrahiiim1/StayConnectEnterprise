@@ -80,11 +80,11 @@ type handler struct {
 }
 
 func newHandler(c cfg) (*handler, error) {
-	tland, err := template.New("land").Parse(landingHTML)
+	tland, err := template.New("land").Parse(compactMarkup(landingHTML))
 	if err != nil {
 		return nil, err
 	}
-	tsucc, err := template.New("succ").Parse(successHTML)
+	tsucc, err := template.New("succ").Parse(compactMarkup(successHTML))
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +171,6 @@ func (h *handler) landing(w http.ResponseWriter, r *http.Request, errMsg string)
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	nonce := setPortalCSP(w)
-	tpl := h.templateData(r.Context())
 	// THE DEVICE'S OWN ADDRESSES, from the connection and the ARP table -- never from a header a guest can
 	// set. Both are legitimately available to a captive portal (the portal must already know them to
 	// authorise the device at all) and both are shown only in the information panel the guest opens
@@ -187,23 +186,14 @@ func (h *handler) landing(w http.ResponseWriter, r *http.Request, errMsg string)
 			}
 		}
 	}
-	_ = h.tmplLand.Execute(w, map[string]any{
-		"Error":     errMsg,
-		"ClientIP":  ipStr,
-		"ClientMAC": macStr,
-		// The shipped wording, from languages.go. html/template marshals both to JSON in a script context,
-		// so the page carries the same words /api/languages serves and there is no second copy to drift.
-		"Languages": portalLanguages,
-		"Strings":   builtinStrings,
-		// The per-response script nonce the Content-Security-Policy names, and the published template, so the
-		// first paint is already the hotel's layout.
-		"Nonce":      nonce,
-		"Template":   tpl["Template"],
-		"Density":    tpl["Density"],
-		"Panel":      tpl["Panel"],
-		"HeroHeight": tpl["HeroHeight"],
-		"Surface":    tpl["Surface"],
-	})
+	// The published design, so the first paint is already the hotel's layout, name and colours, in the
+	// guest's language (portal_page.go). The message the handler composed is shown in that language; the
+	// handler's choice of message is untouched.
+	d, ok := h.guestDesign(r.Context())
+	if !ok || d == nil {
+		d = map[string]any{}
+	}
+	_ = h.tmplLand.Execute(w, newLandingView(r, d, nonce, errMsg, ipStr, macStr))
 }
 
 func (h *handler) index(w http.ResponseWriter, r *http.Request) {
@@ -350,19 +340,33 @@ func (h *handler) success(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	nonce := setPortalCSP(w)
 	dur, _ := time.ParseDuration(r.URL.Query().Get("t") + "s")
-	_ = h.tmplSucc.Execute(w, map[string]any{
-		"SessionID":       r.URL.Query().Get("s"),
-		"DurationSeconds": int(dur.Seconds()),
-		"HumanRemaining":  humanDuration(dur),
+	// Branded and in the guest's language like the sign-in page. The session id stays in the data (it is the
+	// page's own address) but is no longer printed: it meant nothing to a guest.
+	p := h.newGuestPage(r, nonce, "tl.", "dev.", "unit.")
+	v := successView{
+		guestPage:       p,
+		SessionID:       r.URL.Query().Get("s"),
+		DurationSeconds: int(dur.Seconds()),
+		HumanRemaining:  humanSpan(p.T, dur),
 		// Phase 2 DARK: the guest commerce panel renders only when the portal surface is ON.
-		"CommerceEnabled": h.commerceCfg.PortalOn(),
-		"Nonce":           nonce,
-	})
+		CommerceEnabled: h.commerceCfg.PortalOn(),
+	}
+	if v.CommerceEnabled {
+		v.CX = commerceWords(p.Lang)
+		v.CXJS = jsData(v.CX)
+	}
+	_ = h.tmplSucc.Execute(w, v)
 }
 
 func (h *handler) logout(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r)
 	if ip == nil {
+		// Disconnect is a plain form post, so the browser lands on whatever this answers. Same status code; a
+		// page in words for a browser, the old plain answer for anything else.
+		if wantsHTML(r) {
+			h.renderGuestNotice(w, r, 400, "online.disconnect", "err.device.detect", "/", "errpage.back")
+			return
+		}
 		http.Error(w, "bad ip", 400)
 		return
 	}
@@ -373,21 +377,51 @@ func (h *handler) logout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
+// status answers two different callers from the same scd lookup.
+//
+// A SCRIPT (the online page's own fetch, or any client that does not prefer HTML) gets exactly what it always
+// got: scd's JSON, copied through, and the same plain errors. A BROWSER NAVIGATING HERE -- the guest who taps
+// "Status" -- gets a page: branded, in their language, saying in words what scd said, with the online page's
+// own actions. The lookup, and what it is keyed on (the connection's address), are the same for both.
 func (h *handler) status(w http.ResponseWriter, r *http.Request) {
+	page := wantsHTML(r)
 	ip := clientIP(r)
 	if ip == nil {
+		if page {
+			h.renderGuestNotice(w, r, 400, "online.status", "err.device.detect", onlinePageHref(r, ""), "online.back")
+			return
+		}
 		http.Error(w, "bad ip", 400)
 		return
 	}
 	req, _ := http.NewRequestWithContext(r.Context(), "GET", "http://unix/v1/sessions/status?ip="+ip.String(), nil)
 	resp, err := h.scd.Do(req)
 	if err != nil {
+		if page {
+			h.renderGuestNotice(w, r, 500, "online.status", "err.service", onlinePageHref(r, ""), "online.back")
+			return
+		}
 		http.Error(w, "scd unreachable", 500)
 		return
 	}
 	defer resp.Body.Close()
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = io.Copy(w, resp.Body)
+	if !page {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.Copy(w, resp.Body)
+		return
+	}
+	var st scdStatus
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &st) != nil {
+		h.renderGuestNotice(w, r, http.StatusBadGateway, "online.status", "err.service", onlinePageHref(r, ""), "online.back")
+		return
+	}
+	if !st.Active {
+		// Not online: the sign-in page is where this device belongs, and it says so in the guest's language.
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	h.renderStatus(w, r, st)
 }
 
 // Well-known captive-detect probes.

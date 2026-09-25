@@ -147,7 +147,7 @@ export default function PMSInterfacesPage() {
       <PageHeader
         icon={<Hotel />}
         eyebrow="Property management system"
-        title="PMS connections"
+        title="PMS connection"
         description="The links to the hotel's property management systems. They let a guest get online with their room number and name, and they are where the appliance's copy of the guest list comes from."
         actions={
           <>

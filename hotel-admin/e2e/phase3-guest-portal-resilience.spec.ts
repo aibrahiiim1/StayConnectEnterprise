@@ -285,7 +285,7 @@ test("the choice step is announced as a labelled group and the error as a live r
   await submitStay(page, "412", "Okonkwo");
   const group = page.locator("#pms-choices");
   await expect(group).toHaveAttribute("role", "group");
-  await expect(group).toHaveAttribute("aria-label", "Internet packages");
+  await expect(group).toHaveAttribute("aria-label", "Choose your internet package");
   // every choice is a real, named control
   for (const b of await group.locator("button.choice").all()) {
     expect((await b.innerText()).trim().length).toBeGreaterThan(0);

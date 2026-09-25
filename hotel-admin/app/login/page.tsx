@@ -7,10 +7,10 @@
 
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Wifi } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
+import { VelonetLockup, VelonetMark } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import { Input, Field } from "@/components/ui/input";
-import { Card, CardBody } from "@/components/ui/card";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { api } from "@/lib/api";
@@ -52,59 +52,78 @@ function LoginInner() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-background">
-      <div className="flex justify-end p-4">
-        <ThemeToggle />
-      </div>
-
-      <main className="flex flex-1 items-center justify-center px-4 pb-20">
-        <div className="w-full max-w-sm">
-          <div className="mb-6 flex flex-col items-center text-center">
-            <span className="mb-3 flex size-11 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-              <Wifi className="size-5" />
-            </span>
-            <h1 className="text-lg font-semibold tracking-tight">StayConnect Hotel Admin</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Sign in with your account for this property.
-            </p>
-          </div>
-
-          <Card>
-            <CardBody className="space-y-4">
-              <ErrorBanner err={err} className="mb-0" />
-              <form onSubmit={onSubmit} className="space-y-4">
-                <Field label="Email or username">
-                  <Input
-                    type="text"
-                    required
-                    autoFocus
-                    autoComplete="username"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </Field>
-                <Field label="Password">
-                  <Input
-                    type="password"
-                    required
-                    autoComplete="current-password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                  />
-                </Field>
-                <Button type="submit" disabled={loading} className="w-full" size="lg">
-                  {loading ? "Signing in…" : "Sign in"}
-                </Button>
-              </form>
-            </CardBody>
-          </Card>
-
-          <p className="mt-4 text-center text-xs leading-relaxed text-muted-foreground">
-            This account is managed on this appliance. It is not a StayConnect cloud account and does not work at
-            any other property.
+    <div className="grid min-h-screen bg-background lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+      {/* THE INVERSE PANEL. Desktop only: it carries the product identity and the one fact an operator needs
+          before typing a password here -- that this login belongs to this building. Phones get the form. */}
+      <aside className="relative hidden flex-col justify-between overflow-hidden bg-sidebar p-10 text-sidebar-foreground lg:flex">
+        <VelonetLockup product="Hotel Admin" inverse />
+        <div className="relative z-10 max-w-md space-y-4">
+          <div className="text-micro uppercase tracking-[0.14em] text-sidebar-active">On-appliance console</div>
+          <p className="text-[1.75rem] font-bold leading-tight tracking-[-0.02em] text-white">
+            Guest Wi-Fi for this property: who is online, how they got there, and whether everything is healthy.
+          </p>
+          <p className="text-sm leading-relaxed text-sidebar-muted">
+            Runs on the appliance in the hotel and keeps working when the internet link or Velonet Central is
+            unreachable.
           </p>
         </div>
-      </main>
+        <div className="text-caption text-sidebar-muted">Velonet · Hotel Admin</div>
+        <VelonetMark className="pointer-events-none absolute -right-24 -bottom-16 size-[26rem] text-white/[0.035]" />
+      </aside>
+
+      <div className="flex min-h-screen flex-col">
+        <div className="flex items-center justify-between p-4 sm:p-6">
+          <div className="lg:invisible">
+            <VelonetLockup product="Hotel Admin" />
+          </div>
+          <ThemeToggle />
+        </div>
+
+        <main className="flex flex-1 items-center justify-center px-4 pb-16 sm:px-6">
+          <div className="w-full max-w-[25rem]">
+            <div className="mb-7 space-y-1.5">
+              <h1 className="text-title">Velonet Hotel Admin</h1>
+              <p className="text-sm text-muted-foreground">Sign in with your account for this property.</p>
+            </div>
+
+            <form onSubmit={onSubmit} className="space-y-4" noValidate={false}>
+              <div aria-live="assertive">
+                <ErrorBanner err={err} className="mb-0" />
+              </div>
+              <Field label="Email or username">
+                <Input
+                  type="text"
+                  required
+                  autoFocus
+                  autoComplete="username"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </Field>
+              <Field label="Password">
+                <Input
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </Field>
+              <Button type="submit" disabled={loading} className="w-full" size="lg">
+                {loading ? "Signing in…" : "Sign in"}
+              </Button>
+            </form>
+
+            <div className="mt-6 flex gap-2.5 rounded-lg border border-border bg-card px-3.5 py-3 text-caption leading-relaxed text-muted-foreground">
+              <ShieldCheck className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+              <p>
+                This account is managed on this appliance. It is not a Velonet cloud account and does not work at
+                any other property.
+              </p>
+            </div>
+          </div>
+        </main>
+      </div>
     </div>
   );
 }

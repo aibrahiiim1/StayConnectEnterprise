@@ -144,11 +144,11 @@ test.describe("Phase 4 financial operator surface", () => {
     await page.goto("/financial-health");
 
     // exact: the metric label "Held (recovery)" also contains the word, and the assertion is about the badge
-    await expect(page.getByText("HELD", { exact: true })).toBeVisible();
+    await expect(page.getByText("Held", { exact: true })).toBeVisible();
     await expect(
       page.getByText(/money movement is deliberately held until every item in flight has been reconciled/i),
     ).toBeVisible();
-    await expect(page.getByText("Disabled (DARK)")).toBeVisible();
+    await expect(page.getByText("Disabled", { exact: true }).first()).toBeVisible();
 
     // No real provider may be named anywhere on a screen that has not integrated one.
     const body = (await page.locator("body").innerText()).toLowerCase();

@@ -16,19 +16,29 @@ import (
 // ---- /auth/social/start?provider=google -------------------------------------
 
 func (h *handler) socialStart(w http.ResponseWriter, r *http.Request) {
+	// The sign-in page reaches this route with a LINK, so every refusal below is a page the guest's browser
+	// lands on. A browser gets the branded, translated failure page with the same status code; any other
+	// client keeps the JSON it always had.
+	fail := func(status int, key, msg string) {
+		if wantsHTML(r) {
+			h.renderGuestError(w, r, status, key)
+			return
+		}
+		jsonErr(w, status, msg)
+	}
 	provider := r.URL.Query().Get("provider")
 	if provider == "" {
-		jsonErr(w, 400, "provider required")
+		fail(400, "errpage.social", "provider required")
 		return
 	}
 	ip := clientIP(r)
 	if ip == nil {
-		jsonErr(w, 400, "bad ip")
+		fail(400, "err.device.detect", "bad ip")
 		return
 	}
 	mac, ok := h.arpCache(ip)
 	if !ok {
-		jsonErr(w, 400, "device not on guest network")
+		fail(400, "err.device.network", "device not on guest network")
 		return
 	}
 
@@ -54,11 +64,17 @@ func (h *handler) socialStart(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.scd.Do(req)
 	if err != nil {
 		slog.Error("scd social start", "err", err)
-		jsonErr(w, 502, "service unavailable")
+		fail(502, "err.service", "service unavailable")
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
+		if wantsHTML(r) {
+			// scd's reason ("provider not enabled") is for the log, not for the guest.
+			slog.Info("social sign-in start refused", "provider", provider, "status", resp.StatusCode)
+			h.renderGuestError(w, r, resp.StatusCode, "errpage.social")
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(resp.StatusCode)
 		_, _ = io.Copy(w, resp.Body)
@@ -68,7 +84,7 @@ func (h *handler) socialStart(w http.ResponseWriter, r *http.Request) {
 		AuthorizeURL string `json:"authorize_url"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&sr); err != nil || sr.AuthorizeURL == "" {
-		jsonErr(w, 502, "bad scd response")
+		fail(502, "err.service", "bad scd response")
 		return
 	}
 	http.Redirect(w, r, sr.AuthorizeURL, http.StatusFound)
@@ -79,18 +95,20 @@ func (h *handler) socialStart(w http.ResponseWriter, r *http.Request) {
 func (h *handler) socialCallback(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	provider, state, code := q.Get("provider"), q.Get("state"), q.Get("code")
+	// Every refusal on this return leg is a page the guest's browser lands on, so each is the branded,
+	// translated failure page. The status codes are the ones this handler has always sent.
 	if provider == "" || state == "" || code == "" {
-		http.Error(w, "missing provider/state/code", http.StatusBadRequest)
+		h.renderGuestError(w, r, http.StatusBadRequest, "errpage.social")
 		return
 	}
 	ip := clientIP(r)
 	if ip == nil {
-		http.Error(w, "bad ip", http.StatusBadRequest)
+		h.renderGuestError(w, r, http.StatusBadRequest, "err.device.detect")
 		return
 	}
 	mac, ok := h.arpCache(ip)
 	if !ok {
-		http.Error(w, "device not on guest network", http.StatusBadRequest)
+		h.renderGuestError(w, r, http.StatusBadRequest, "err.device.network")
 		return
 	}
 
@@ -107,23 +125,21 @@ func (h *handler) socialCallback(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.scd.Do(req)
 	if err != nil {
 		slog.Error("scd authorize-social", "err", err)
-		http.Error(w, "service unavailable", http.StatusBadGateway)
+		h.renderGuestError(w, r, http.StatusBadGateway, "err.service")
 		return
 	}
 	defer resp.Body.Close()
 
 	payload, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
-		// Render an error page so the captive browser shows something useful.
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(resp.StatusCode)
+		// A page the captive browser can show: branded, in the guest's language, and in words -- scd's reason
+		// ("state expired", "provider mismatch") is for the log, not for the guest.
 		var e struct {
 			Error string `json:"error"`
 		}
 		_ = json.Unmarshal(payload, &e)
-		fmt.Fprintf(w, `<!doctype html><html><body style="font-family:system-ui;max-width:400px;margin:10vh auto;padding:24px">
-<h2>Sign-in failed</h2><p>%s</p><p><a href="/">Try another method</a></p></body></html>`,
-			htmlEscape(e.Error))
+		slog.Info("social sign-in refused", "provider", provider, "status", resp.StatusCode, "reason", e.Error)
+		h.renderGuestError(w, r, resp.StatusCode, "errpage.social")
 		return
 	}
 	var ok2 struct {

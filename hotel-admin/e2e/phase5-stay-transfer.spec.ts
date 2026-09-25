@@ -73,7 +73,8 @@ test.describe("the cross-PMS transfer screen", () => {
     // The API's own words, rendered rather than paraphrased.
     await expect(page.getByTestId("signal-notice")).toContainText("not transfers");
     await expect(page.getByTestId("signal-notice")).toContainText("never evidence");
-    await expect(page.getByRole("cell", { name: "AMBIGUOUS" })).toBeVisible();
+    // Shown in the hotel's words ("More than one match"), not as the API's code.
+    await expect(page.getByRole("cell", { name: "More than one match" })).toBeVisible();
 
     // No control INSIDE the signals section performs anything. Counting the page's buttons would count the
     // navigation too, and the claim is about this section: an operator cannot act from a signal.
@@ -95,15 +96,18 @@ test.describe("the cross-PMS transfer screen", () => {
 
     await expect(page.getByTestId("preview-summary")).toContainText("RES-A");
     await expect(page.getByTestId("preview-summary")).toContainText("RES-B");
-    // The operator is told what moves and what ends, in the same place they confirm it.
-    await expect(page.getByText(/2 device\(s\) and 1 live session\(s\) will move/i)).toBeVisible();
-    await expect(page.getByText(/access on the origin stay ends/i)).toBeVisible();
+    // The confirmation opens only from a successful preview, and it says what moves and what ends in the
+    // same place the operator confirms it.
+    await page.getByRole("button", { name: /transfer access…/i }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByText(/2 devices and 1 live session move to the new stay/i)).toBeVisible();
+    await expect(dialog.getByText(/access on the origin stay ends/i)).toBeVisible();
 
-    const submit = page.getByRole("button", { name: /transfer access/i });
+    const submit = dialog.getByRole("button", { name: "Transfer access", exact: true });
     await expect(submit).toBeDisabled();
-    await page.getByLabel(/reason/i).fill("Guest moved to the sister property");
+    await dialog.getByLabel(/reason/i).fill("Guest moved to the sister property");
     await expect(submit).toBeDisabled();
-    await page.getByLabel(/your password/i).fill("operator-pw");
+    await dialog.getByLabel(/your password/i).fill("operator-pw");
     await expect(submit).toBeEnabled();
     await submit.click();
 
@@ -134,7 +138,9 @@ test.describe("the cross-PMS transfer screen", () => {
   test("a read-only operator sees the evidence and cannot preview or transfer", async ({ page }) => {
     await installBackend(page, [], GOOD_PREVIEW, ["site_viewer"]);
     await page.goto("/stay-transfers");
-    await expect(page.getByRole("cell", { name: "AMBIGUOUS" })).toBeVisible();
-    await expect(page.getByRole("button", { name: /preview/i })).toBeDisabled();
+    await expect(page.getByRole("cell", { name: "More than one match" })).toBeVisible();
+    // The UI never shows a control the role cannot use: no preview, no transfer, no password field.
+    await expect(page.getByRole("button", { name: /preview/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /transfer access/i })).toHaveCount(0);
   });
 });

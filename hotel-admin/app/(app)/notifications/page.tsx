@@ -14,7 +14,7 @@ import { useEffect, useState } from "react";
 import { api, ListResp, Whoami, NotificationProvider } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { Card, CardBody } from "@/components/ui/card";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
+import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input, Field, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -22,8 +22,10 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { DialogForm, ConfirmDialog } from "@/components/ui/dialog";
 import { Switch, SkeletonRows } from "@/components/ui/misc";
-import { Plus, Send } from "lucide-react";
+import { Plus, Send, MessageSquare } from "lucide-react";
 import { canWrite } from "@/lib/roles";
+import { ReadOnlyNotice } from "@/components/ui/patterns";
+import { useToast } from "@/components/ui/toast";
 import { formatRelative } from "@/lib/utils";
 
 const KINDS: Record<string, string[]> = {
@@ -65,8 +67,9 @@ const EMPTY: FormState = {
 };
 
 export default function NotificationsPage() {
+  const toast = useToast();
   const [rows, setRows] = useState<NotificationProvider[] | null>(null);
-  const [roles, setRoles] = useState<string[]>([]);
+  const [roles, setRoles] = useState<string[] | null>(null);
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [formErr, setFormErr] = useState<unknown>(null);
@@ -76,7 +79,7 @@ export default function NotificationsPage() {
   const [f, setF] = useState<FormState>(EMPTY);
   const [deleting, setDeleting] = useState<NotificationProvider | null>(null);
 
-  const writable = canWrite("notification-providers", roles);
+  const writable = roles !== null && canWrite("notification-providers", roles);
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((p) => ({ ...p, [k]: v }));
 
   async function load() {
@@ -85,7 +88,7 @@ export default function NotificationsPage() {
   }
   useEffect(() => {
     load();
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => {});
+    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
   }, []);
 
   function openNew() { setF(EMPTY); setEditing(null); setFormErr(null); setMode("new"); }
@@ -128,6 +131,7 @@ export default function NotificationsPage() {
         if (f.api_key) body.api_key = f.api_key; // blank keeps the existing secret
         await api.patch(`/notification-providers/${editing.id}`, body);
       }
+      toast.success(mode === "new" ? "Sender added" : "Sender saved");
       setMode("closed"); setEditing(null);
       await load();
     } catch (e) { setFormErr(e); }
@@ -140,6 +144,7 @@ export default function NotificationsPage() {
     try {
       await api.del(`/notification-providers/${deleting.id}`);
       setDeleting(null);
+      toast.success("Sender removed");
       await load();
     } catch (e) { setFormErr(e); }
     finally { setBusy(false); }
@@ -154,13 +159,15 @@ export default function NotificationsPage() {
   return (
     <PageShell>
       <PageHeader
+        icon={<MessageSquare />}
         eyebrow="Guest portal"
         title="Email & SMS"
         description="How the appliance delivers one-time sign-in codes to guests. Without a working sender, any sign-in method that needs a code cannot be used."
         actions={writable && <Button onClick={openNew}><Plus /> Add sender</Button>}
       />
 
-      <ErrorBanner err={err} />
+      {roles !== null && !writable && <ReadOnlyNotice>Your role can see the senders but not change them.</ReadOnlyNotice>}
+      <ErrorBanner err={err} className="mb-0" />
 
       <Card>
         <CardBody className="p-0">
@@ -178,7 +185,7 @@ export default function NotificationsPage() {
               <THead>
                 <TR><TH>Sender</TH><TH>Service</TH><TH>Sends as</TH><TH>Delivery</TH><TH>Offered</TH><TH /></TR>
               </THead>
-              <tbody>
+              <TBody>
                 {rows.map((n) => {
                   const h = health(n);
                   return (
@@ -221,7 +228,7 @@ export default function NotificationsPage() {
                     </TR>
                   );
                 })}
-              </tbody>
+              </TBody>
             </Table>
           )}
         </CardBody>

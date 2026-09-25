@@ -1,0 +1,38 @@
+{
+  "transition_id": "T0189",
+  "seq": 189,
+  "timestamp": "2026-09-25T19:31:40+03:00",
+  "timestamp_derivation": "Written after GitHub merged PR #184 (017b1b5a, committer date 2026-09-25T16:30:51Z) and before the commit that introduces this receipt, so it neither pre-dates the merge it records nor post-dates its own commit.",
+  "record_type": "HOTEL_ADMIN_OVERHAUL_MERGED_TO_MASTER_AND_VELONET_BASE_MOVED",
+  "authorisation": "Product-Owner mission of 2026-09-25 to complete the delivery chain immediately instead of waiting for the scheduled night: run the existing authoritative validation for PR #184 on its exact head and merge it through the protected path, then update the Velonet branch from master with non-rewriting history, move its base, regenerate governance and manifests, retarget PR #185 to master, mark it ready, validate its exact final head the same way and merge it. It did NOT authorise deployment of the redesign to PRE-LIVE, Go-Live, or any change to product semantics, permissions, authentication, security, PMS, financial behaviour, networking or architecture.",
+  "merge": {
+    "pull_request": 184,
+    "merge_commit": "017b1b5a645b10285f68657162abf5c622b97c21",
+    "merged_at": "2026-09-25T16:30:51Z",
+    "tested_head": "91b308d4860aefe3dfe6d5aea3cde2442b0c1349",
+    "how": "The existing nightly-authoritative-validation workflow, started by workflow_dispatch with ignore_schedule_check (which changes only WHEN, never WHAT). It re-ran each gate's own pull_request run at the exact head; all four returned on attempt 2 green (governance, phase3-full-software-gate, phase4-financial-core-gate, phase5-post-stay-transfer-gate), mergeable_state was clean, and the orchestrator merged. Verdict MERGED."
+  },
+  "velonet_base_moved": "delivery/velonet-frontend-redesign took master by an ordinary merge commit (no rebase, no force push). master's tree at 017b1b5a is identical to 91b308d4, so the merge brought in no file content. current_delivery.base moves from 91b308d4 to 017b1b5a and the Velonet change manifest is regenerated against it; PR #185 is retargeted from delivery/hotel-admin-ux-overhaul to master.",
+  "deployment_provenance": "NONE. Nothing was deployed to PRE-LIVE or any appliance by this transition.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. THIS delivery changes front-end presentation only; it changed no phase, applied no migration, deployed nothing, performed no cutover and enabled no capability. PRE-LIVE remains PRE-LIVE."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. THIS transition records a merge to master and moves a delivery base; it changed no phase, applied no migration, deployed nothing, performed no cutover and enabled no capability. PRE-LIVE remains PRE-LIVE."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Phase 7 remains ACCEPTED_AND_CLOSED under D41, Guest activation remains DEFERRED by D41, Go-Live remains unauthorised.",
+  "base": "017b1b5a645b10285f68657162abf5c622b97c21",
+  "base_note": "The master merge commit of PR #184 (the Hotel Admin overhaul, T0187), on which the Velonet delivery now rests.",
+  "head": "a35e7870",
+  "head_note": "Unchanged: the last CONTENT commit of the Velonet delivery.",
+  "previous_delivery": "T0188",
+  "go_live": "NOT authorised. Guest activation remains DEFERRED by D41."
+}

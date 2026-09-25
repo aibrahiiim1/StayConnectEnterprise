@@ -114,14 +114,16 @@ test.describe("guest sign-in protection settings", () => {
     const card = page.locator("div").filter({ hasText: /guest sign-in protection/i }).first();
     await expect(page.getByText(/guest sign-in protection/i).first()).toBeVisible();
 
-    // The units are in the LABELS, not only in the help text.
-    await expect(page.getByText(/maximum failed attempts.*\(attempts\)/i)).toBeVisible();
-    await expect(page.getByText(/observation window.*\(seconds\)/i)).toBeVisible();
-    await expect(page.getByText(/wait after too many attempts.*\(seconds\)/i)).toBeVisible();
+    // Each value is a labelled setting with its unit printed beside the field, not only in the help text.
+    await expect(page.getByLabel(/maximum failed attempts/i)).toBeVisible();
+    await expect(page.getByLabel(/observation window/i)).toBeVisible();
+    await expect(page.getByLabel(/wait after too many attempts/i)).toBeVisible();
+    await expect(page.getByText("attempts", { exact: true })).toBeVisible();
+    await expect(page.getByText("seconds", { exact: true }).first()).toBeVisible();
 
     // The standard value and the range an operator may choose within.
-    await expect(page.getByText(/standard: 5\. allowed: 3–20/i)).toBeVisible();
-    await expect(page.getByText(/standard: 60\. allowed: 30–3600/i).first()).toBeVisible();
+    await expect(page.getByText(/default 5 attempts; allowed 3–20/i)).toBeVisible();
+    await expect(page.getByText(/default 60 seconds; allowed 30–3600/i).first()).toBeVisible();
 
     // "Using the standard settings" must not read as "protection is off".
     await expect(page.getByText(/using the standard settings/i)).toBeVisible();

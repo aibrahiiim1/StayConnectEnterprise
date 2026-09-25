@@ -144,7 +144,7 @@ test("the connections page shows what is running, how it is doing, and how far b
   await installBackend(page, { mutations });
   await page.goto("/pms-interfaces");
 
-  await expect(page.getByRole("heading", { name: "PMS connections" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "PMS connection", exact: true })).toBeVisible();
   await expect(page.getByText("Main PMS")).toBeVisible();
   await openSheet(page);
 
@@ -292,7 +292,7 @@ test("source conflicts name both interfaces by their labels", async ({ page }) =
 
   await expect(page.getByText("Main PMS")).toBeVisible();
   await expect(page.getByText("Spa PMS")).toBeVisible();
-  await expect(page.getByText("high")).toBeVisible();
+  await expect(page.getByText("high", { exact: true })).toBeVisible();
 });
 
 test("resolution evidence summarises outcomes and names no guest", async ({ page }) => {

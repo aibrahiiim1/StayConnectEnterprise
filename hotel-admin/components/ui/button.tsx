@@ -11,8 +11,8 @@ import { cn } from "@/lib/utils";
 const buttonVariants = cva(
   cn(
     "inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium",
-    "transition-[background-color,border-color,color,box-shadow] duration-150",
-    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+    "transition-[background-color,border-color,color,box-shadow] duration-press ease-velonet",
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
     "disabled:pointer-events-none disabled:opacity-50",
     // Icons sent in as children should never be squashed by a flex parent.
     "[&_svg]:pointer-events-none [&_svg]:shrink-0",
@@ -20,20 +20,26 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        primary: "bg-primary text-primary-foreground shadow-xs hover:bg-primary-hover active:bg-primary-hover",
+        // THE VELONET BUTTON FAMILY. primary: the brand fill, the ONE main action a screen exists for.
+        // secondary: surface with an ink border, every other real action. quiet (ghost): transparent with a
+        // slate label, for dismiss/cancel/tertiary. Hover lifts with a short shallow shadow; press sinks
+        // with an inset one over 80ms. No bounce, no spring.
+        primary:
+          "bg-primary text-primary-foreground shadow-control hover:bg-primary-hover hover:shadow-control-hover active:bg-primary-press active:shadow-control-press",
         secondary:
-          "border border-border bg-card text-foreground shadow-xs hover:bg-surface hover:border-border-strong",
-        outline: "border border-border-strong bg-transparent text-foreground hover:bg-surface",
-        ghost: "bg-transparent text-muted-foreground hover:bg-surface hover:text-foreground",
-        subtle: "bg-surface text-foreground hover:bg-accent",
-        danger: "bg-destructive text-destructive-foreground shadow-xs hover:bg-destructive/90",
+          "border border-foreground/85 bg-card text-foreground hover:bg-accent hover:shadow-control-hover active:shadow-control-press",
+        outline: "border border-input bg-transparent text-foreground hover:bg-accent active:shadow-control-press",
+        ghost: "bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
+        subtle: "bg-accent text-foreground hover:bg-border/70",
+        danger:
+          "bg-destructive text-destructive-foreground shadow-control hover:bg-destructive/90 hover:shadow-control-hover active:shadow-control-press",
         link: "bg-transparent text-primary underline-offset-4 hover:underline px-0",
       },
       size: {
         xs: "h-7 px-2 text-xs [&_svg]:size-3.5",
-        sm: "h-8 px-3 text-sm [&_svg]:size-4",
-        md: "h-9 px-3.5 text-sm [&_svg]:size-4",
-        lg: "h-10 px-4 text-sm [&_svg]:size-4",
+        sm: "h-8 px-3 text-[0.8125rem] font-semibold [&_svg]:size-4",
+        md: "h-9 px-3.5 text-[0.8125rem] font-semibold [&_svg]:size-4",
+        lg: "h-11 px-5 text-sm font-semibold [&_svg]:size-4",
         icon: "h-9 w-9 p-0 [&_svg]:size-4",
         "icon-sm": "h-8 w-8 p-0 [&_svg]:size-4",
       },

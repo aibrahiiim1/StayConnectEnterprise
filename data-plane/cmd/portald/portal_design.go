@@ -131,22 +131,3 @@ func (h *handler) fetchGuestDesign(ctx context.Context) (map[string]any, bool) {
 	}
 	return portaldesign.ForGuests(doc.Design), true
 }
-
-// templateData is what the landing page renders onto <html> so the FIRST paint is already the hotel's
-// layout, instead of the classic card snapping into another shape when the branding fetch returns.
-func (h *handler) templateData(ctx context.Context) map[string]string {
-	out := map[string]string{"Template": portaldesign.DefaultTemplate, "Density": "", "Panel": "", "HeroHeight": "", "Surface": ""}
-	d, ok := h.guestDesign(ctx)
-	if !ok {
-		return out
-	}
-	out["Template"] = portaldesign.TemplateID(d)
-	if o, ok := d["template_options"].(map[string]any); ok {
-		for key, opt := range map[string]string{"Density": "density", "Panel": "panel_position", "HeroHeight": "hero_height", "Surface": "surface"} {
-			if v, ok := o[opt].(string); ok {
-				out[key] = v
-			}
-		}
-	}
-	return out
-}

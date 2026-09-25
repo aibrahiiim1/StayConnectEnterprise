@@ -1,46 +1,49 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
-  api, ListResp, Whoami,
+  api, ListResp,
   NetRevision, NetRevisionDetail,
 } from "@/lib/api";
-import { Card, CardBody } from "@/components/ui/card";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
+import { Card } from "@/components/ui/card";
+import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { canWrite } from "@/lib/roles";
+import { ErrorBanner } from "@/components/ui/error-banner";
+import { PageShell, PageHeader, Toolbar } from "@/components/ui/page";
+import { FilterChips, KeyValueGrid, Timeline } from "@/components/ui/data";
+import { Skeleton, SkeletonRows } from "@/components/ui/misc";
+import { Sheet, SheetBody, SheetContent, SheetFooter, SheetHeader, SheetSection } from "@/components/ui/sheet";
+import { PendingChangeBanner, ReadOnlyNotice } from "@/components/ui/patterns";
+import { useToast } from "@/components/ui/toast";
+import { ChevronRight, History } from "lucide-react";
 import { errMsg, formatDate } from "@/lib/utils";
+import {
+  HealthCheckList, REVISION_STATE, RevisionStateBadge, ValidationIssueList, useNetworkAccess,
+} from "@/components/network/shared";
 
-function stateTone(state: string): "ok" | "warn" | "err" | "default" {
-  switch (state) {
-    case "active":               return "ok";
-    case "pending_confirmation": return "warn";
-    case "rolled_back":
-    case "failed":               return "err";
-    default:                     return "default";
-  }
-}
+/** Presentation only: which states a person should look at. */
+const NEEDS = new Set(["pending_confirmation", "rolled_back", "failed"]);
+const PREVIEW = 15;
 
 export default function RevisionsPage() {
   const [rows, setRows] = useState<NetRevision[] | null>(null);
-  const [roles, setRoles] = useState<string[]>([]);
+  const { known, writable } = useNetworkAccess();
   const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [busy, setBusy] = useState<{ id: string; kind: "confirm" | "rollback" } | null>(null);
+  const [open, setOpen] = useState<NetRevision | null>(null);
   const [detail, setDetail] = useState<Record<string, NetRevisionDetail>>({});
-  /** Clutter control. Nothing here removes a revision -- see the note in the header for why it must not. */
+  const [detailErr, setDetailErr] = useState<string | null>(null);
+  /** Clutter control. Nothing here removes a revision -- see the note below for why it must not. */
   const [filter, setFilter] = useState<"needs-attention" | "all">("all");
   const [showAll, setShowAll] = useState(false);
+  const toast = useToast();
 
-  const writable = canWrite("network", roles);
-
-  /** What the table actually renders: the chosen filter, then a preview cap. Both are presentation only. */
-  const NEEDS = new Set(["pending_confirmation", "rolled_back", "failed"]);
   const filtered = (rows ?? []).filter((r) => filter === "all" || NEEDS.has(r.state));
-  const PREVIEW = 15;
   const visible = showAll ? filtered : filtered.slice(0, PREVIEW);
+  const needsCount = (rows ?? []).filter((r) => NEEDS.has(r.state)).length;
+  const pending = (rows ?? []).find((r) => r.state === "pending_confirmation") ?? null;
 
   async function load() {
     try { setRows((await api.get<ListResp<NetRevision>>("/network/revisions")).data ?? []); }
@@ -49,41 +52,57 @@ export default function RevisionsPage() {
 
   useEffect(() => {
     load();
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => {});
   }, []);
 
-  async function toggle(id: string) {
-    if (expanded === id) { setExpanded(null); return; }
-    setExpanded(id);
-    if (!detail[id]) {
+  async function openDetail(r: NetRevision) {
+    setOpen(r); setDetailErr(null);
+    if (!detail[r.id]) {
       try {
-        const d = await api.get<NetRevisionDetail>(`/network/revisions/${id}`);
-        setDetail((m) => ({ ...m, [id]: d }));
-      } catch (e) { setErr(errMsg(e)); }
+        const d = await api.get<NetRevisionDetail>(`/network/revisions/${r.id}`);
+        setDetail((m) => ({ ...m, [r.id]: d }));
+      } catch (e) { setDetailErr(errMsg(e)); }
     }
   }
 
   async function onConfirm(id: string) {
-    setBusy(true); setErr(null);
-    try { await api.post(`/network/revisions/${id}/confirm`); load(); }
+    setBusy({ id, kind: "confirm" }); setErr(null);
+    try { await api.post(`/network/revisions/${id}/confirm`); toast.success("Configuration confirmed"); load(); }
     catch (e) { setErr(errMsg(e)); }
-    finally { setBusy(false); }
+    finally { setBusy(null); }
   }
   async function onRollback(id: string) {
-    setBusy(true); setErr(null);
-    try { await api.post(`/network/revisions/${id}/rollback`); load(); }
+    setBusy({ id, kind: "rollback" }); setErr(null);
+    try { await api.post(`/network/revisions/${id}/rollback`); toast.success("Configuration rolled back"); load(); }
     catch (e) { setErr(errMsg(e)); }
-    finally { setBusy(false); }
+    finally { setBusy(null); }
   }
 
-  return (
-    <div className="mx-auto w-full max-w-7xl space-y-5">
-      <div className="mb-4">
-        <div className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground">Networking</div>
-        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Config history</h1>
-      </div>
+  const d = open ? detail[open.id] : undefined;
 
-      {err && <div className="text-err text-sm mb-4">{err}</div>}
+  return (
+    <PageShell width="wide">
+      <PageHeader
+        icon={<History />}
+        eyebrow="Networking"
+        title="Config history"
+        description="Every network validate and apply ever made, with what it checked and how it ended. Nothing here is ever deleted — rollback and the current configuration's history depend on it."
+      />
+
+      {known && !writable && <ReadOnlyNotice>Your role can view the history but not keep or roll back a change.</ReadOnlyNotice>}
+
+      <ErrorBanner err={err} className="mb-0" />
+
+      {pending && (
+        <PendingChangeBanner
+          title={`Revision #${pending.seq} — confirm or it rolls back automatically`}
+          description={pending.summary || undefined}
+          deadline={pending.confirm_deadline ?? null}
+          canAct={writable}
+          busy={busy?.id === pending.id ? busy.kind : null}
+          onConfirm={() => onConfirm(pending.id)}
+          onRollback={() => onRollback(pending.id)}
+        />
+      )}
 
       {/* WHY THERE IS NO DELETE HERE.
           A revision is what rollback rolls back TO, and what the current configuration's provenance points
@@ -91,144 +110,163 @@ export default function RevisionsPage() {
           "nothing happened" and a rollback target that no longer exists fails at the worst possible moment.
           So the clutter is handled by filtering and folding, and every revision stays. */}
       {rows !== null && rows.length > 0 && (
-        <div className="flex flex-wrap items-center gap-3 text-sm">
-          <div className="inline-flex rounded border" role="group" aria-label="Filter revisions">
-            {(["needs-attention", "all"] as const).map((f) => (
-              <button
-                key={f}
-                type="button"
-                aria-pressed={filter === f}
-                onClick={() => { setFilter(f); setShowAll(false); }}
-                className={
-                  "px-3 py-1 " +
-                  (filter === f ? "bg-brand text-white" : "text-muted hover:text-text")
-                }
-              >
-                {f === "needs-attention" ? "Needs attention" : `All (${rows.length})`}
-              </button>
-            ))}
-          </div>
-          <span className="text-muted">
+        <Toolbar className="items-center">
+          <FilterChips
+            label="Filter revisions"
+            value={filter}
+            onChange={(v) => { setFilter(v); setShowAll(false); }}
+            options={[
+              { value: "needs-attention", label: "Needs attention", count: needsCount, tone: needsCount ? "warn" : undefined },
+              { value: "all", label: "All", count: rows.length },
+            ]}
+          />
+          <span className="text-caption text-muted-foreground">
             {filter === "needs-attention"
-              ? "Revisions awaiting confirmation, rolled back or failed."
-              : "Every recorded validate/apply. Nothing is ever deleted — rollback and provenance depend on it."}
+              ? "Awaiting confirmation, rolled back or failed."
+              : "Newest first. Select a row for its checks and events."}
           </span>
-        </div>
+        </Toolbar>
       )}
 
       <Card>
-        <CardBody className="p-0">
-          {rows === null ? <EmptyState title="Loading…" /> : rows.length === 0 ? (
-            <EmptyState title="No revisions yet" hint="Every validate/apply of the network configuration is recorded here." />
-          ) : (
+        {rows === null ? (
+          <SkeletonRows rows={6} cols={5} />
+        ) : rows.length === 0 ? (
+          <EmptyState icon={<History />} title="No revisions yet" hint="Every validate and apply of the network configuration is recorded here." />
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            title="Nothing needs attention"
+            hint="No revision is awaiting confirmation, rolled back or failed."
+            action={<Button variant="secondary" size="sm" onClick={() => setFilter("all")}>Show all</Button>}
+          />
+        ) : (
+          <>
             <Table>
               <THead>
-                <TR><TH>Seq</TH><TH>State</TH><TH>Summary</TH><TH>Applied</TH><TH>Confirmed</TH><TH>Failure</TH><TH></TH></TR>
+                <TR>
+                  <TH>#</TH>
+                  <TH>State</TH>
+                  <TH className="hidden sm:table-cell">Summary</TH>
+                  <TH className="hidden md:table-cell">Applied</TH>
+                  <TH className="hidden lg:table-cell">Confirmed</TH>
+                  <TH className="hidden lg:table-cell">Failure</TH>
+                  <TH><span className="sr-only">Actions</span></TH>
+                </TR>
               </THead>
-              <tbody>
+              <TBody>
                 {visible.map((r) => (
-                  <Fragment key={r.id}>
-                    <TR className="cursor-pointer" onClick={() => toggle(r.id)}>
-                      <TD className="font-mono">#{r.seq}</TD>
-                      <TD><Badge tone={stateTone(r.state)}>{r.state}</Badge></TD>
-                      <TD>{r.summary || "—"}</TD>
-                      <TD className="text-muted-foreground">{r.applied_at ? formatDate(r.applied_at) : "—"}</TD>
-                      <TD className="text-muted-foreground">{r.confirmed_at ? formatDate(r.confirmed_at) : "—"}</TD>
-                      <TD className="text-err text-xs max-w-xs truncate" title={r.failure_reason ?? ""}>{r.failure_reason || "—"}</TD>
-                      <TD className="text-right space-x-2 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                        {writable && r.state === "pending_confirmation" && (
-                          <>
-                            <Button size="sm" disabled={busy} onClick={() => onConfirm(r.id)}>Confirm</Button>
-                            <Button size="sm" variant="secondary" disabled={busy} onClick={() => onRollback(r.id)}>Rollback</Button>
-                          </>
-                        )}
-                        <Button size="sm" variant="ghost" onClick={() => toggle(r.id)}>{expanded === r.id ? "Hide" : "Details"}</Button>
-                      </TD>
-                    </TR>
-                    {expanded === r.id && (
-                      <TR>
-                        <TD colSpan={7} className="bg-panel2">
-                          <RevisionDetailView d={detail[r.id]} />
-                        </TD>
-                      </TR>
-                    )}
-                  </Fragment>
+                  <TR key={r.id} className="cursor-pointer" onClick={() => openDetail(r)}>
+                    <TD className="font-mono tabular">#{r.seq}</TD>
+                    <TD><RevisionStateBadge state={r.state} /></TD>
+                    <TD className="hidden max-w-sm sm:table-cell">{r.summary || "—"}</TD>
+                    <TD className="hidden whitespace-nowrap text-muted-foreground md:table-cell">{r.applied_at ? formatDate(r.applied_at) : "—"}</TD>
+                    <TD className="hidden whitespace-nowrap text-muted-foreground lg:table-cell">{r.confirmed_at ? formatDate(r.confirmed_at) : "—"}</TD>
+                    <TD className="hidden max-w-xs truncate text-caption text-destructive lg:table-cell" title={r.failure_reason ?? ""}>
+                      {r.failure_reason || <span className="text-muted-foreground">—</span>}
+                    </TD>
+                    <TD className="whitespace-nowrap text-end" onClick={(e) => e.stopPropagation()}>
+                      <Button size="sm" variant="ghost" onClick={() => openDetail(r)} aria-label={`Details for revision ${r.seq}`}>
+                        <span className="hidden sm:inline">Details</span> <ChevronRight className="rtl:rotate-180" />
+                      </Button>
+                    </TD>
+                  </TR>
                 ))}
-              </tbody>
+              </TBody>
             </Table>
-          )}
-          {filtered.length > visible.length && (
-            <div className="border-t p-3">
-              <Button size="sm" variant="secondary" onClick={() => setShowAll(true)}>
-                Show {filtered.length - visible.length} older revision{filtered.length - visible.length === 1 ? "" : "s"}
-              </Button>
-            </div>
-          )}
-          {rows !== null && rows.length > 0 && filtered.length === 0 && (
-            <EmptyState
-              title="Nothing needs attention"
-              hint="No revision is awaiting confirmation, rolled back or failed. Switch to All to see the full history."
-            />
-          )}
-        </CardBody>
-      </Card>
-    </div>
-  );
-}
-
-function RevisionDetailView({ d }: { d?: NetRevisionDetail }) {
-  if (!d) return <div className="text-sm text-muted py-2">Loading…</div>;
-  return (
-    <div className="space-y-4 py-2 text-sm">
-      <div>
-        <div className="text-muted text-xs uppercase tracking-wider mb-1">Validation</div>
-        {d.validation ? (
-          <>
-            <Badge tone={d.validation.ok ? "ok" : "err"}>{d.validation.ok ? "ok" : "issues"}</Badge>
-            {d.validation.issues && d.validation.issues.length > 0 && (
-              <ul className="mt-1 space-y-1">
-                {d.validation.issues.map((i, k) => (
-                  <li key={k} className="text-err text-xs">
-                    <span className="font-mono">{i.field}</span> — {i.message} <span className="text-muted-foreground">({i.code})</span>
-                  </li>
-                ))}
-              </ul>
+            {filtered.length > visible.length && (
+              <div className="border-t border-border p-3">
+                <Button size="sm" variant="secondary" onClick={() => setShowAll(true)}>
+                  Show {filtered.length - visible.length} older revision{filtered.length - visible.length === 1 ? "" : "s"}
+                </Button>
+              </div>
             )}
           </>
-        ) : <span className="text-xs text-muted-foreground">—</span>}
-      </div>
+        )}
+      </Card>
 
-      <div>
-        <div className="text-muted text-xs uppercase tracking-wider mb-1">Apply events</div>
-        {d.events && d.events.length > 0 ? (
-          <ul className="space-y-1">
-            {d.events.map((e, k) => (
-              <li key={k} className="flex items-center gap-2 text-xs">
-                <Badge tone={e.ok ? "ok" : "err"}>{e.ok ? "ok" : "fail"}</Badge>
-                <span className="font-mono">{e.phase}</span>
-                {e.at && <span className="text-muted-foreground">{formatDate(e.at)}</span>}
-                {e.detail != null && <span className="text-muted-foreground">{typeof e.detail === "string" ? e.detail : JSON.stringify(e.detail)}</span>}
-              </li>
-            ))}
-          </ul>
-        ) : <span className="text-xs text-muted-foreground">—</span>}
-      </div>
-
-      <div>
-        <div className="text-muted text-xs uppercase tracking-wider mb-1">Health checks</div>
-        {d.health && d.health.length > 0 ? (
-          <ul className="space-y-1">
-            {d.health.map((h, k) => (
-              <li key={k} className="flex items-center gap-2 text-xs">
-                <Badge tone={h.ok ? "ok" : "err"}>{h.ok ? "ok" : "fail"}</Badge>
-                <span className="font-mono">{h.check_name}</span>
-                {h.detail && <span className="text-muted-foreground">{h.detail}</span>}
-                {h.at && <span className="text-muted-foreground">{formatDate(h.at)}</span>}
-              </li>
-            ))}
-          </ul>
-        ) : <span className="text-xs text-muted-foreground">—</span>}
-      </div>
-    </div>
+      <Sheet open={open !== null} onOpenChange={(v) => !v && setOpen(null)}>
+        <SheetContent width="lg">
+          {open && (
+            <>
+              <SheetHeader
+                eyebrow="Config history"
+                title={`Revision #${open.seq}`}
+                description={open.summary || undefined}
+                badges={<RevisionStateBadge state={open.state} />}
+                icon={<History />}
+              />
+              <SheetBody>
+                <ErrorBanner err={detailErr} className="mb-0" />
+                <KeyValueGrid
+                  items={[
+                    { label: "State", value: REVISION_STATE[open.state]?.label ?? open.state },
+                    { label: "Created", value: open.created_at ? formatDate(open.created_at) : "—" },
+                    { label: "Applied", value: open.applied_at ? formatDate(open.applied_at) : "—" },
+                    { label: "Confirmed", value: open.confirmed_at ? formatDate(open.confirmed_at) : "—" },
+                    ...(open.confirm_deadline && open.state === "pending_confirmation"
+                      ? [{ label: "Rolls back at", value: formatDate(open.confirm_deadline) }] : []),
+                    ...(open.failure_reason ? [{ label: "Failure", value: <span className="text-destructive">{open.failure_reason}</span>, wide: true }] : []),
+                  ]}
+                />
+                {!d && !detailErr ? (
+                  <div className="space-y-3" aria-busy="true">
+                    <span className="sr-only">Loading</span>
+                    <Skeleton className="h-16 w-full" />
+                    <Skeleton className="h-24 w-full" />
+                  </div>
+                ) : d ? (
+                  <>
+                    <SheetSection title="Validation">
+                      {d.validation ? (
+                        <div className="space-y-2">
+                          <Badge tone={d.validation.ok ? "ok" : "err"}>{d.validation.ok ? "Passed" : "Issues found"}</Badge>
+                          {d.validation.issues && <ValidationIssueList issues={d.validation.issues} />}
+                        </div>
+                      ) : <p className="text-sm text-muted-foreground">Not recorded.</p>}
+                    </SheetSection>
+                    <SheetSection title="Apply events">
+                      <Timeline
+                        emptyLabel="No apply events recorded."
+                        items={(d.events ?? []).map((e, k) => ({
+                          key: String(k),
+                          tone: e.ok ? "ok" : "err",
+                          title: (
+                            <span className="inline-flex items-center gap-2">
+                              <span className="font-mono text-xs">{e.phase}</span>
+                              <Badge tone={e.ok ? "ok" : "err"}>{e.ok ? "OK" : "Failed"}</Badge>
+                            </span>
+                          ),
+                          when: e.at ? formatDate(e.at) : undefined,
+                          body: e.detail != null
+                            ? <span className="break-words font-mono text-caption">{typeof e.detail === "string" ? e.detail : JSON.stringify(e.detail)}</span>
+                            : undefined,
+                        }))}
+                      />
+                    </SheetSection>
+                    <SheetSection title="Health checks">
+                      {d.health && d.health.length > 0 ? (
+                        <HealthCheckList
+                          checks={d.health.map((h) => ({ name: h.check_name, ok: h.ok, detail: h.detail, at: h.at ? formatDate(h.at) : undefined }))}
+                        />
+                      ) : <p className="text-sm text-muted-foreground">No health checks recorded.</p>}
+                    </SheetSection>
+                  </>
+                ) : null}
+              </SheetBody>
+              {writable && open.state === "pending_confirmation" && (
+                <SheetFooter>
+                  <Button variant="secondary" disabled={busy !== null} onClick={() => { void onRollback(open.id); setOpen(null); }}>
+                    Roll back now
+                  </Button>
+                  <Button disabled={busy !== null} onClick={() => { void onConfirm(open.id); setOpen(null); }}>
+                    Keep this change
+                  </Button>
+                </SheetFooter>
+              )}
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
+    </PageShell>
   );
 }

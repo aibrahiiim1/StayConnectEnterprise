@@ -1,19 +1,29 @@
 "use client";
 
+// APPLIANCE SETUP — bring the appliance online in Velonet Central, and follow it until it is ready.
+//
+// Two ways to activate (Online, the default, needs nothing typed; Offline uses a file), one 3-phase progress
+// while it happens, and "Advanced / recovery" collapsed underneath for the enrollment token and the 15-check
+// diagnostics view. The page polls the appliance every 5 seconds (backing off while it cannot reach it).
+
 import Link from "next/link";
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError, EnrollResult, SetupStatus, Whoami } from "@/lib/api";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardBody, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input, Label } from "@/components/ui/input";
+import { Field, Input } from "@/components/ui/input";
+import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { Skeleton } from "@/components/ui/misc";
+import { OptionCard, Stepper } from "@/components/ui/data";
+import { CopyButton, LiveStatus, ReadOnlyNotice } from "@/components/ui/patterns";
 import { canWrite } from "@/lib/roles";
-import { errMsg } from "@/lib/utils";
+import { cn, errMsg } from "@/lib/utils";
 import {
-  ServerCog, RefreshCw, CheckCircle2, XCircle, Fingerprint, ShieldCheck,
-  Radio, BadgeCheck, Network, Lock, Loader2, ChevronRight, Wifi, PartyPopper,
+  ServerCog, CheckCircle2, XCircle, Fingerprint, ShieldCheck, Radio, BadgeCheck, Network, Loader2,
+  ChevronRight, Globe, FileUp, Download,
 } from "lucide-react";
 
 function fp(s?: string): string {
@@ -23,21 +33,22 @@ function fp(s?: string): string {
 
 function Row({ k, v }: { k: string; v: React.ReactNode }) {
   return (
-    <div className="flex justify-between gap-4 border-b border-border py-1.5 text-sm last:border-0">
+    <div className="flex flex-wrap justify-between gap-x-4 gap-y-0.5 border-b border-border py-2 text-sm last:border-0">
       <span className="text-muted-foreground">{k}</span>
-      <span className="text-right text-text">{v ?? "—"}</span>
+      <span className="min-w-0 text-end text-foreground">{v ?? "—"}</span>
     </div>
   );
 }
 
+/** A pass/fail check. The word is always there; the colour and icon only repeat it. */
 function Check({ label, ok }: { label: string; ok?: boolean }) {
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-border py-1.5 text-sm last:border-0">
+    <div className="flex items-center justify-between gap-4 border-b border-border py-2 text-sm last:border-0">
       <span className="text-muted-foreground">{label}</span>
       {ok ? (
-        <span className="inline-flex items-center gap-1 text-ok"><CheckCircle2 size={15} /> pass</span>
+        <span className="inline-flex items-center gap-1 font-medium text-success"><CheckCircle2 className="size-4" aria-hidden /> Pass</span>
       ) : (
-        <span className="inline-flex items-center gap-1 text-err"><XCircle size={15} /> fail</span>
+        <span className="inline-flex items-center gap-1 font-medium text-destructive"><XCircle className="size-4" aria-hidden /> Fail</span>
       )}
     </div>
   );
@@ -59,7 +70,7 @@ function licenseTone(state?: string): "ok" | "warn" | "err" | "default" {
   return "default";
 }
 
-// The detailed 15-stage lifecycle stays available behind "Show technical details".
+// The detailed 15-stage lifecycle stays available under Advanced / recovery.
 //
 // STAGE 12 IS NOT A STEP TOWARD COMPLETION, and treating it as one is what made this page hang forever.
 //
@@ -68,12 +79,7 @@ function licenseTone(state?: string): "ok" | "warn" | "err" | "default" {
 // hotel's appliance. `nats_mtls.connected` is therefore false on a correctly activated appliance and will
 // stay false forever.
 //
-// currentStage() used to require `licOk && mtls && nats` to reach 15, so PRE-LIVE -- enrolled, assigned,
-// adopted, certificate issued, API mTLS ready, licence Active -- sat permanently on stage 14, telling the
-// operator "License active - finishing up..." about a setup that had finished. The appliance was right and
-// the page was wrong.
-//
-// Completion now follows the SAME rule the backend already uses for activation_status: enrolled + licensed +
+// Completion follows the SAME rule the backend already uses for activation_status: enrolled + licensed +
 // API mTLS. scd has always computed it that way; only this page disagreed.
 const STAGES = [
   "Awaiting enrollment", "Enrollment submitted", "Identity generated", "Enrollment accepted",
@@ -108,9 +114,9 @@ function currentStage(st: SetupStatus | null, tokenSubmitted: boolean): number {
 
 // The 15 technical stages roll up into 3 friendly phases the operator actually cares about.
 const PHASES = [
-  { title: "Connect", icon: Wifi, blurb: "Sending your code and registering with the control panel" },
-  { title: "Verify", icon: ShieldCheck, blurb: "Issuing the security certificate and securing the connection" },
-  { title: "Ready", icon: PartyPopper, blurb: "License active — this appliance is connected" },
+  { title: "Connect", blurb: "Registering this appliance with Velonet Central" },
+  { title: "Verify", blurb: "Issuing the security certificate and securing the link" },
+  { title: "Ready", blurb: "The licence is arriving" },
 ];
 // stage → phase index (0/1/2); stage 1 = not started (the form)
 function phaseOf(stage: number): number {
@@ -120,31 +126,34 @@ function phaseOf(stage: number): number {
 }
 function friendlyStatus(stage: number): string {
   switch (stage) {
-    case 2: return "Sending your code to the control panel…";
+    case 2: return "Sending your code to Velonet Central…";
     case 3: return "Creating this appliance's secure identity…";
     case 4:
-    case 5: return "Waiting for the control panel to approve this appliance…";
+    case 5: return "Waiting for Velonet Central to approve this appliance…";
     case 6: return "Approved — claiming the appliance…";
     case 7:
-    case 8: return "Assigning to your hotel…";
+    case 8: return "Assigning it to your hotel…";
     case 9:
     case 10: return "Issuing the security certificate…";
-    case 11: return "Securing the connection (mTLS)…";
-    case 12: return "Connecting the real-time channel…";
-    case 13: return "Activating your license…";
-    case 14: return "License active — finishing up…";
+    case 11: return "Securing the link (mTLS)…";
+    case 12: return "Opening the real-time channel…";
+    case 13: return "Activating your licence…";
+    case 14: return "Licence active — finishing up…";
     case 15: return "All set — this appliance is connected.";
     default: return "Starting…";
   }
 }
 
+const POLL_SECONDS = 5;
+
 export function ApplianceSetupSection() {
   const router = useRouter();
   const authGone = useRef(false);
-  const [roles, setRoles] = useState<string[]>([]);
+  const [roles, setRoles] = useState<string[] | null>(null);
   const [st, setSt] = useState<SetupStatus | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [showDetails, setShowDetails] = useState(false);
 
   const [token, setToken] = useState("");
@@ -152,11 +161,11 @@ export function ApplianceSetupSection() {
   const [busy, setBusy] = useState(false);
   const [tokenSubmitted, setTokenSubmitted] = useState(false);
   // TWO PATHS, AND ONLY TWO. Online is the default and needs nothing typed. Offline is for an appliance with
-  // no route to the control panel. The enrollment token is neither: it is a recovery lever, so it lives
-  // under Advanced rather than in front of every installer.
+  // no route to Central. The enrollment token is neither: it is a recovery lever, so it lives under Advanced
+  // rather than in front of every installer.
   const [mode, setMode] = useState<"online" | "offline">("online");
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [pkgText, setPkgText] = useState("");
+  const [, setPkgText] = useState("");
   const [pkgBusy, setPkgBusy] = useState(false);
   const [pkgErr, setPkgErr] = useState<string | null>(null);
   const [pkgOk, setPkgOk] = useState<string | null>(null);
@@ -166,13 +175,14 @@ export function ApplianceSetupSection() {
   const failCount = useRef(0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const writable = canWrite("network", roles);
+  const writable = roles ? canWrite("network", roles) : false;
 
   async function load() {
     try {
       const s = await api.get<SetupStatus>("/setup/status");
       setSt(s);
       setErr(null);
+      setUpdatedAt(Date.now());
       failCount.current = 0;
       if (!serialPrefilled.current && s.serial) { setSerial(s.serial); serialPrefilled.current = true; }
     } catch (e) {
@@ -195,7 +205,7 @@ export function ApplianceSetupSection() {
   }
 
   useEffect(() => {
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => {});
+    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
     let stopped = false;
     const tick = async () => {
       await load();
@@ -211,11 +221,8 @@ export function ApplianceSetupSection() {
   const enrolled = st?.enrolled === true;
   const locked = st?.locked === true || enrolled;
 
-  // Applies a signed Activation Package / signed licence produced by the control panel. The appliance
-  // verifies the vendor signature, the binding to THIS appliance, expiry and single-use before anything is
-  // written; a wrong-appliance, replayed or older file is refused and nothing changes.
-  // FIRST ACTIVATION, OFFLINE. Downloads the request this appliance emits; the operator carries it to the
-  // control panel and brings back one package.
+  // FIRST ACTIVATION, OFFLINE. Downloads the request this appliance emits; the operator carries it to
+  // Central and brings back one package.
   async function downloadActivationRequest() {
     setPkgErr(null); setPkgOk(null);
     try {
@@ -227,7 +234,7 @@ export function ApplianceSetupSection() {
       a.download = `activation-request-${st?.serial || "appliance"}.json`;
       a.click();
       URL.revokeObjectURL(url);
-      setPkgOk("Activation request downloaded. Import it in the control panel under Onboarding → Offline.");
+      setPkgOk("Activation request downloaded. Import it in Velonet Central under Onboarding → Offline.");
     } catch (e: unknown) {
       setPkgErr(e instanceof Error ? e.message : String(e));
     }
@@ -246,23 +253,6 @@ export function ApplianceSetupSection() {
       setPkgOk(isFirstActivation
         ? "Activated. Assignment, trust material and licence installed; the appliance is restarting."
         : (r.license_installed ? "Signed licence applied." : "Package applied."));
-      setPkgText("");
-      await load();
-    } catch (e: unknown) {
-      const m = e instanceof Error ? e.message : String(e);
-      setPkgErr(m.includes("JSON") ? "That file is not a valid activation package." : m);
-    } finally {
-      setPkgBusy(false);
-    }
-  }
-
-  async function applyPackage(text: string) {
-    setPkgErr(null); setPkgOk(null); setPkgBusy(true);
-    try {
-      const pkg = JSON.parse(text);
-      const r = await api.post<{ status?: string; package_id?: string; license_installed?: boolean }>(
-        "/setup/offline-import", pkg);
-      setPkgOk(r.license_installed ? "Signed licence applied." : "Package applied.");
       setPkgText("");
       await load();
     } catch (e: unknown) {
@@ -296,7 +286,15 @@ export function ApplianceSetupSection() {
     } finally { setBusy(false); }
   }
 
-  if (!loaded) return <div className="p-6 text-sm text-muted">Loading appliance setup…</div>;
+  if (!loaded) {
+    return (
+      <div className="space-y-5" aria-busy="true">
+        <span className="sr-only">Loading appliance setup</span>
+        <Skeleton className="h-40 w-full rounded-lg" />
+        <Skeleton className="h-24 w-full rounded-lg" />
+      </div>
+    );
+  }
 
   const api_mtls = st?.api_mtls;
   const nats = st?.nats_mtls;
@@ -312,31 +310,45 @@ export function ApplianceSetupSection() {
   const inProgress = stage >= 2 && !complete;
   const activePhase = phaseOf(stage);
 
+  const packageFeedback = (
+    <>
+      <ErrorBanner err={pkgErr} className="mb-0" />
+      {pkgOk && <Callout tone="success">{pkgOk}</Callout>}
+      {pkgBusy && (
+        <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden /> Checking and applying&hellip;
+        </div>
+      )}
+    </>
+  );
+
   return (
-    <div className="w-full max-w-2xl space-y-6">
-      <div className="flex items-center justify-between">
-        <Button variant="ghost" onClick={load}><RefreshCw className="mr-1 h-4 w-4" /> Refresh</Button>
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        <LiveStatus updatedAt={updatedAt} intervalSeconds={POLL_SECONDS} error={!!err && st !== null} onRefresh={() => void load()} />
       </div>
 
-      {err && (
-        <div className="rounded-md border border-destructive/25 bg-destructive-subtle p-3 text-sm text-destructive-subtle-foreground">
-          Couldn&apos;t reach the appliance (retrying): {err}
-        </div>
+      <ErrorBanner err={err ? `Couldn't reach the appliance (retrying): ${err}` : null} className="mb-0" />
+
+      {roles !== null && !writable && !complete && (
+        <ReadOnlyNotice>Your role can follow this appliance&apos;s setup but not activate it.</ReadOnlyNotice>
       )}
 
       {/* ---------- SUCCESS ---------- */}
       {complete && (
         <Card>
           <CardBody className="flex flex-col items-center gap-3 py-8 text-center">
-            <PartyPopper className="h-10 w-10 text-ok" />
-            <div className="text-lg font-semibold">This appliance is connected</div>
-            <div className="text-sm text-muted-foreground">
+            <span className="inline-flex size-12 items-center justify-center rounded-full bg-success-subtle text-success" aria-hidden>
+              <CheckCircle2 className="size-6" />
+            </span>
+            <div className="text-subtitle">This appliance is connected</div>
+            <p className="max-w-md text-sm text-muted-foreground">
               {st?.assignment?.tenant_name && st?.assignment?.site_name
-                ? <>Bound to <b>{st.assignment.tenant_name}</b> · {st.assignment.site_name}. </>
+                ? <>Bound to <strong>{st.assignment.tenant_name}</strong> · {st.assignment.site_name}. </>
                 : null}
-              License is active and the secure connection is up. You can now create your guest networks.
-            </div>
-            <Badge tone="ok">Setup complete</Badge>
+              The licence is active and the secure link is up. You can now create your guest networks.
+            </p>
+            <Badge tone="ok" dot>Setup complete</Badge>
           </CardBody>
         </Card>
       )}
@@ -344,85 +356,100 @@ export function ApplianceSetupSection() {
       {/* ---------- ACTIVATION: TWO PATHS ---------- */}
       {!enrolled && !locked && (
         <Card>
-          <CardBody className="space-y-4">
-            <div>
-              <div className="text-base font-semibold">Activate this appliance</div>
-              <p className="text-sm text-muted-foreground">
-                Choose how this appliance reaches the control panel. Everything else — claiming, assignment,
-                certificates and convergence — happens on its own and is shown under Advanced.
-              </p>
+          <CardHeader>
+            <div className="space-y-0.5">
+              <CardTitle>Activate this appliance</CardTitle>
+              <CardDescription>
+                Choose how this appliance reaches Velonet Central. Everything else — claiming, assignment,
+                certificates — happens on its own and is shown under Advanced / recovery.
+              </CardDescription>
             </div>
-
-            <div className="flex gap-2">
-              <button type="button" onClick={() => setMode("online")}
-                className={"flex-1 rounded-md border px-4 py-3 text-left " +
-                  (mode === "online" ? "border-brand bg-brand/10" : "border-border bg-surface hover:bg-accent")}>
-                <div className="text-sm font-medium">Online <span className="text-xs text-muted-foreground">· recommended</span></div>
-                <div className="text-xs text-muted-foreground">This appliance can reach the control panel.</div>
-              </button>
-              <button type="button" onClick={() => setMode("offline")}
-                className={"flex-1 rounded-md border px-4 py-3 text-left " +
-                  (mode === "offline" ? "border-brand bg-brand/10" : "border-border bg-surface hover:bg-accent")}>
-                <div className="text-sm font-medium">Offline</div>
-                <div className="text-xs text-muted-foreground">No route to the control panel; use a file.</div>
-              </button>
+          </CardHeader>
+          <CardBody className="space-y-4">
+            <div role="radiogroup" aria-label="How this appliance reaches Velonet Central" className="grid gap-3 sm:grid-cols-2">
+              <OptionCard
+                name="activation-mode"
+                value="online"
+                checked={mode === "online"}
+                onChange={() => setMode("online")}
+                icon={<Globe />}
+                title="Online"
+                badge={<Badge tone="accent">Recommended</Badge>}
+                description="This appliance can reach Velonet Central. Nothing to type."
+              />
+              <OptionCard
+                name="activation-mode"
+                value="offline"
+                checked={mode === "offline"}
+                onChange={() => setMode("offline")}
+                icon={<FileUp />}
+                title="Offline"
+                description="No route to Velonet Central; activate with a file."
+              />
             </div>
 
             {mode === "online" ? (
-              <div className="rounded-md border border-border bg-panel2 p-4 space-y-2">
-                <div className="text-sm font-medium">Nothing to do here.</div>
+              <div className="space-y-3 rounded-md border border-border bg-surface p-4">
+                <div className="text-emphasis">Nothing to do here.</div>
                 <p className="text-sm text-muted-foreground">
-                  This appliance registers itself as soon as it reaches the control panel. Ask your operator
-                  to open <b>Onboarding</b> there, find it under <em>Pending activation</em> by its serial{" "}
-                  <code className="text-xs">{st?.serial || "—"}</code>, choose the customer, site and licence
-                  terms, and press <b>Activate</b> once. This page then follows along by itself.
+                  This appliance registers itself as soon as it reaches Velonet Central. Ask your Velonet contact
+                  to open <strong>Onboarding</strong> there, find it under <em>Pending activation</em> by its
+                  serial, choose the customer, site and licence terms, and press <strong>Activate</strong> once.
+                  This page then follows along by itself.
                 </p>
-                <div className="flex items-center gap-2 pt-1 text-xs text-muted">
-                  <Check label="Control panel reachable" ok={net?.central_https_443} />
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-label text-muted-foreground">Serial</span>
+                  <code className="rounded-md border border-border bg-card px-2.5 py-1 font-mono text-sm">{st?.serial || "—"}</code>
+                  {st?.serial && <CopyButton value={st.serial} size="xs" />}
+                </div>
+                <div className="max-w-sm">
+                  <Check label="Velonet Central reachable" ok={net?.central_https_443} />
                 </div>
                 {net?.central_https_443 === false && (
-                  <p className="text-xs text-warning-subtle-foreground">
-                    This appliance cannot reach the control panel right now. Fix connectivity under
-                    <b> WAN / LAN settings</b>, or use the Offline path.
-                  </p>
+                  <Callout tone="warning">
+                    This appliance cannot reach Velonet Central right now. Fix connectivity under{" "}
+                    <strong>WAN / LAN settings</strong>, or use the Offline path.
+                  </Callout>
                 )}
               </div>
             ) : (
-              <div className="rounded-md border border-border bg-panel2 p-4 space-y-4">
-                <div>
-                  <div className="text-sm font-medium">Step 1 — download the activation request</div>
+              <ol className="space-y-4 rounded-md border border-border bg-surface p-4">
+                <li className="space-y-1.5">
+                  <div className="text-emphasis">Step 1 — download the activation request</div>
                   <p className="text-sm text-muted-foreground">
                     This appliance creates its own identity and writes a request describing it. The request
                     contains no secret: the private key stays on this appliance and never leaves it.
                   </p>
-                  <Button className="mt-2" variant="secondary" disabled={!writable}
-                    onClick={() => void downloadActivationRequest()}>
-                    Download activation request
-                  </Button>
-                </div>
-                <div className="border-t border-border pt-3">
-                  <div className="text-sm font-medium">Step 2 — in the control panel</div>
+                  {writable && (
+                    <Button className="mt-1" variant="secondary" onClick={() => void downloadActivationRequest()}>
+                      <Download /> Download activation request
+                    </Button>
+                  )}
+                </li>
+                <li className="space-y-1.5 border-t border-border pt-4">
+                  <div className="text-emphasis">Step 2 — in Velonet Central</div>
                   <p className="text-sm text-muted-foreground">
-                    Open <b>Onboarding → Offline activation</b>, import the request, choose the customer, site
-                    and licence terms, then generate the activation package.
+                    Open <strong>Onboarding → Offline activation</strong>, import the request, choose the customer,
+                    site and licence terms, then generate the activation package.
                   </p>
-                </div>
-                <div className="border-t border-border pt-3">
-                  <div className="text-sm font-medium">Step 3 — upload the activation package</div>
+                </li>
+                <li className="space-y-1.5 border-t border-border pt-4">
+                  <div className="text-emphasis">Step 3 — upload the activation package</div>
                   <p className="text-sm text-muted-foreground">
                     One file completes activation: the signed assignment, the trust material and the signed
                     licence. It is bound to this appliance, single-use and expiring. Anything else — another
                     appliance, a replay, a tampered or older file — is refused and nothing is changed.
                   </p>
-                  <Input className="mt-2" type="file" accept=".json,application/json" disabled={!writable || pkgBusy}
-                    onChange={(e) => onPackageFile(e.target.files?.[0] ?? null)} />
-                </div>
-                {pkgErr && <div className="rounded border border-destructive/25 bg-destructive-subtle p-2 text-sm text-destructive-subtle-foreground">{pkgErr}</div>}
-                {pkgOk && <div className="text-sm text-success-subtle-foreground">{pkgOk}</div>}
-                {pkgBusy && <div className="flex items-center gap-2 text-sm text-muted"><Loader2 className="h-4 w-4 animate-spin" /> Checking and applying…</div>}
-              </div>
+                  {writable && (
+                    <Field label="Activation package file" className="max-w-md pt-1">
+                      <Input type="file" accept=".json,application/json" disabled={pkgBusy} className="h-auto py-2"
+                        onChange={(e) => onPackageFile(e.target.files?.[0] ?? null)} />
+                    </Field>
+                  )}
+                </li>
+                <li className="list-none space-y-2">{packageFeedback}</li>
+              </ol>
             )}
-            {!writable && <p className="text-xs text-muted-foreground">Your role can&apos;t activate this appliance (network write required).</p>}
           </CardBody>
         </Card>
       )}
@@ -430,7 +457,7 @@ export function ApplianceSetupSection() {
       {/* ---------- LICENCE, ONCE ONBOARDING IS DONE ---------- */}
       {enrolled && (
         <Card>
-          <CardBody className="space-y-3">
+          <CardHeader>
             {/*
               TWO JOBS, AND ONLY ONE OF THEM IS THIS SCREEN'S.
 
@@ -438,46 +465,42 @@ export function ApplianceSetupSection() {
               which is why the offline path above accepts a signed activation package -- that package carries
               all three together and there is nowhere else it could go.
 
-              Renewing a licence afterwards is a different job, and it lived here too: a second file input
-              that installed a licence exactly as the Licence section's own upload does. Two controls that
-              install the same thing is not a convenience. It is two places to look when a renewal is
-              refused, two sets of wording to keep true, and a standing invitation to upload a renewal into
-              the onboarding flow of an appliance that finished onboarding months ago.
-
-              So once the appliance is ACTIVATED this becomes a status line and a pointer. Before activation
-              it stays, because an appliance part-way through onboarding may legitimately still need to
-              complete the licence half of it here.
+              Renewing a licence afterwards is a different job and belongs to the Licence tab. So once the
+              appliance is ACTIVATED this becomes a status line and a pointer. Before activation the upload
+              stays, because an appliance part-way through onboarding may legitimately still need to complete
+              the licence half of it here.
             */}
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-base font-semibold">Licence</div>
-              <Link href="/appliance?section=license" className="text-xs text-muted-foreground hover:text-foreground">
-                Capacity, expiry and identity &rarr;
-              </Link>
-            </div>
-            <div className="flex items-center gap-2 text-sm">
-              <Badge tone={licenseTone(lic?.state)}>{lic?.state || "unknown"}</Badge>
+            <CardTitle className="flex items-center gap-2"><BadgeCheck className="size-4" aria-hidden /> Licence</CardTitle>
+            <Link href="/appliance?section=license" className="text-label text-primary hover:underline">
+              Capacity, expiry and identity <span aria-hidden>&rarr;</span>
+            </Link>
+          </CardHeader>
+          <CardBody className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <Badge tone={licenseTone(lic?.state)} dot>{lic?.state === "GracePeriod" ? "Grace period" : lic?.state || "Unknown"}</Badge>
               {lic?.valid_until && <span className="text-muted-foreground">valid until {lic.valid_until}</span>}
             </div>
             {complete ? (
               <p className="text-sm text-muted-foreground">
-                This appliance is activated, so renewals happen in one place:{" "}
-                <Link href="/appliance?section=license" className="underline underline-offset-2">Licence</Link>.
-                Generate the new licence in the control panel under <b>Commercial &rarr; Licenses</b>,
-                download it, and upload it there. An older licence than the one installed is refused, so a
-                renewal can never roll you backwards.
+                This appliance is activated, so renewals happen in one place: the{" "}
+                <Link href="/appliance?section=license" className="text-primary underline underline-offset-2">Licence</Link>{" "}
+                tab. Velonet generates the new licence file; upload it there. An older licence than the one installed
+                is refused, so a renewal can never roll you backwards.
               </p>
             ) : (
               <>
                 <p className="text-sm text-muted-foreground">
-                  Onboarding is not finished, so the licence half of it can still be completed here. Generate
-                  the licence in the control panel under <b>Commercial &rarr; Licenses</b>, download it, and
-                  upload it below. An older licence than the one installed is refused.
+                  Onboarding is not finished, so the licence half of it can still be completed here. Velonet
+                  generates the licence file in Central; upload it below. An older licence than the one installed is
+                  refused.
                 </p>
-                <Input type="file" accept=".json,application/json" disabled={!writable || pkgBusy}
-                  onChange={(e) => onPackageFile(e.target.files?.[0] ?? null)} />
-                {pkgErr && <div className="rounded border border-destructive/25 bg-destructive-subtle p-2 text-sm text-destructive-subtle-foreground">{pkgErr}</div>}
-                {pkgOk && <div className="text-sm text-success-subtle-foreground">{pkgOk}</div>}
-                {pkgBusy && <div className="flex items-center gap-2 text-sm text-muted"><Loader2 className="h-4 w-4 animate-spin" /> Checking and applying&hellip;</div>}
+                {writable && (
+                  <Field label="Licence file" className="max-w-md">
+                    <Input type="file" accept=".json,application/json" disabled={pkgBusy} className="h-auto py-2"
+                      onChange={(e) => onPackageFile(e.target.files?.[0] ?? null)} />
+                  </Field>
+                )}
+                {packageFeedback}
               </>
             )}
           </CardBody>
@@ -487,226 +510,221 @@ export function ApplianceSetupSection() {
       {/* ---------- 3-PHASE PROGRESS ---------- */}
       {inProgress && (
         <Card>
-          <CardBody className="space-y-5">
-            <div className="flex items-center justify-between">
-              {PHASES.map((p, i) => {
-                const done = i < activePhase;
-                const active = i === activePhase;
-                const Icon = p.icon;
-                return (
-                  <div key={p.title} className="flex flex-1 items-center">
-                    <div className="flex flex-col items-center gap-1 text-center">
-                      <span className={"inline-flex h-10 w-10 items-center justify-center rounded-full " +
-                        (done ? "bg-ok/20 text-ok" : active ? "bg-brand/25 text-brand" : "bg-panel2 text-muted")}>
-                        {done ? <CheckCircle2 className="h-5 w-5" /> : active ? <Loader2 className="h-5 w-5 animate-spin" /> : <Icon className="h-5 w-5" />}
-                      </span>
-                      <span className={"text-xs " + (active ? "font-medium text-text" : "text-muted")}>{p.title}</span>
-                    </div>
-                    {i < PHASES.length - 1 && <ChevronRight className="mx-1 h-4 w-4 shrink-0 text-muted/40" />}
-                  </div>
-                );
-              })}
-            </div>
-            <div className="rounded-md border border-border bg-panel2 px-4 py-3 text-center">
-              <div className="flex items-center justify-center gap-2 text-sm">
-                <Loader2 className="h-4 w-4 animate-spin text-brand" />
+          <CardBody className="space-y-4">
+            <Stepper steps={PHASES.map((p) => p.title)} current={activePhase} />
+            <div role="status" aria-live="polite" className="rounded-md border border-border bg-surface px-4 py-3">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <Loader2 className="size-4 animate-spin text-primary motion-reduce:animate-none" aria-hidden />
                 {friendlyStatus(stage)}
               </div>
-              <div className="mt-1 text-xs text-muted">{PHASES[activePhase]?.blurb}</div>
+              <div className="mt-1 text-caption text-muted-foreground">{PHASES[activePhase]?.blurb}</div>
             </div>
-            {enrollNote && <div className="text-center text-xs text-muted">{enrollNote}</div>}
+            {enrollNote && <p className="text-caption text-muted-foreground">{enrollNote}</p>}
           </CardBody>
         </Card>
       )}
 
       {/* ---------- ALREADY ENROLLED but form locked & not in-progress edge ---------- */}
       {locked && !inProgress && !complete && (
-        <Card><CardBody className="text-sm text-muted-foreground">This appliance is enrolled; waiting on the control panel to finish setup…</CardBody></Card>
+        <Callout tone="neutral">This appliance is enrolled; waiting on Velonet Central to finish setup…</Callout>
       )}
 
       {/* ---------- ADVANCED / RECOVERY ---------- */}
-      <div>
-        <button className="inline-flex items-center gap-1 text-sm text-muted hover:text-text" onClick={() => setShowAdvanced((v) => !v)}>
-          <ChevronRight className={"h-4 w-4 transition-transform " + (showAdvanced ? "rotate-90" : "")} />
-          {showAdvanced ? "Hide advanced" : "Advanced / recovery"}
+      <div className="rounded-lg border border-border bg-card">
+        <button
+          type="button"
+          aria-expanded={showAdvanced}
+          className="flex w-full items-center gap-2 rounded-lg px-5 py-3.5 text-start text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={() => setShowAdvanced((v) => !v)}
+        >
+          <ChevronRight className={cn("size-4 text-muted-foreground transition-transform rtl:-scale-x-100", showAdvanced && "rotate-90 rtl:rotate-90")} aria-hidden />
+          Advanced / recovery
         </button>
-      </div>
 
-      {showAdvanced && !enrolled && (
-        <Card>
-          <CardBody className="space-y-4">
-            <div>
-              <div className="text-base font-semibold">Enrollment token</div>
-              <p className="text-sm text-muted-foreground">
-                <b>Not part of normal activation.</b> An appliance registers itself online, and an operator
-                activates it from the control panel. A token is for recovery — a box that cannot self-register,
-                or one being re-attached deliberately. It is minted in the control panel under
-                <b> Appliances → Enrollment token</b> and should be locked to this serial.
-              </p>
-            </div>
-            <div>
-              <Label htmlFor="enroll-token">Enrollment code</Label>
-              <Input id="enroll-token" type="password" autoComplete="off" placeholder="paste the token"
-                value={token} onChange={(e) => setToken(e.target.value)} disabled={!writable || busy} />
-            </div>
-            <div>
-              <Label htmlFor="enroll-serial">Serial</Label>
-              <Input id="enroll-serial" autoComplete="off" placeholder="appliance serial"
-                value={serial} onChange={(e) => setSerial(e.target.value)} disabled={!writable || busy} />
-              <p className="mt-1 text-xs text-muted">Give this serial to whoever mints the token so it locks to this box.</p>
-            </div>
-            {enrollErr && <div className="rounded border border-destructive/25 bg-destructive-subtle p-2 text-sm text-destructive-subtle-foreground">{enrollErr}</div>}
-            <Button onClick={submitEnroll} disabled={!writable || busy || !token.trim() || !serial.trim()} className="w-full">
-              {busy ? <><Loader2 className="mr-1 h-4 w-4 animate-spin" /> Connecting…</> : "Connect with token"}
-            </Button>
-          </CardBody>
-        </Card>
-      )}
-
-      {showAdvanced && (
-        <div>
-          <button className="inline-flex items-center gap-1 text-sm text-muted hover:text-text" onClick={() => setShowDetails((v) => !v)}>
-            <ChevronRight className={"h-4 w-4 transition-transform " + (showDetails ? "rotate-90" : "")} />
-            {showDetails ? "Hide diagnostics" : `Diagnostics (${STAGES.length} checks)`}
-          </button>
-        </div>
-      )}
-
-      {showAdvanced && showDetails && (
-        <div className="space-y-4">
-          <Card>
-            <StepHeader title="Onboarding progress" icon={<ServerCog className="h-4 w-4" />} />
-            <CardBody>
-              <ol className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
-                {STAGES.map((label, i) => {
-                  const n = i + 1; const done = n < stage; const active = n === stage;
-                  return (
-                    <li key={label} className="flex items-center gap-2 text-sm">
-                      <span className={"inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] " +
-                        (done ? "bg-ok/20 text-ok" : active ? "bg-brand/25 text-brand" : "bg-panel2 text-muted")}>
-                        {done ? "✓" : n}
-                      </span>
-                      <span className={done ? "text-muted line-through" : active ? "text-text font-medium" : "text-muted"}>{label}</span>
-                    </li>
-                  );
-                })}
-              </ol>
-            </CardBody>
-          </Card>
-
-          <Card>
-            <StepHeader title="Appliance identity" icon={<Fingerprint className="h-4 w-4" />} />
-            <CardBody className="grid gap-x-8 md:grid-cols-2">
-              <div>
-                <Row k="Serial" v={<code>{st?.serial || "—"}</code>} />
-                <Row k="Appliance ID" v={<code>{st?.appliance_id || "—"}</code>} />
-                <Row k="Version" v={<code>{st?.version || "—"}</code>} />
-              </div>
-              <div>
-                <Row k="Identity key fingerprint" v={<code title={st?.identity_key_fingerprint}>{fp(st?.identity_key_fingerprint)}</code>} />
-                <Row k="mTLS cert fingerprint" v={<code title={api_mtls?.cert_fingerprint}>{fp(api_mtls?.cert_fingerprint)}</code>} />
-              </div>
-            </CardBody>
-          </Card>
-
-          <Card>
-            <StepHeader title="Network & Central checks" icon={<Network className="h-4 w-4" />} />
-            <CardBody className="grid gap-x-8 md:grid-cols-2">
-              <div>
-                <Check label="DNS resolution" ok={net?.dns_ok} />
-                <Check label="Central HTTPS :443" ok={net?.central_https_443} />
-                <Check label="Clock in sync" ok={net?.clock} />
-              </div>
-              <div>
-                <Check label="API mTLS :9443" ok={net?.mtls_9443} />
-                <Check label="NATS mTLS :4223" ok={net?.nats_4223} />
-              </div>
-            </CardBody>
-          </Card>
-
-          <Card>
-            <StepHeader title="Certificate (API mTLS)" icon={<ShieldCheck className="h-4 w-4" />} />
-            <CardBody>
-              <Row k="Status" v={api_mtls?.mtls_ready ? <Badge tone="ok">API mTLS ready</Badge> : <Badge tone="warn">Not ready</Badge>} />
-              <Row k="Cert fingerprint" v={<code title={api_mtls?.cert_fingerprint}>{fp(api_mtls?.cert_fingerprint)}</code>} />
-              <Row k="Expires (not after)" v={api_mtls?.not_after || "—"} />
-            </CardBody>
-          </Card>
-
-          <Card>
-            <StepHeader title="Real-time channel" icon={<Radio className="h-4 w-4" />} />
-            <CardBody>
-              {/* NOT AN ERROR, AND IT MUST NOT LOOK LIKE ONE. This appliance serves Central for licensing
-                  only; the NATS transport is deliberately not opened. A red "Disconnected" badge here sent
-                  operators looking for a network fault that does not exist. */}
-              <Row
-                k="Status"
-                v={
-                  nats?.connected ? (
-                    <Badge tone="ok">Connected</Badge>
+        {showAdvanced && (
+          <div className="space-y-4 border-t border-border p-4 sm:p-5">
+            {!enrolled && (
+              <Card>
+                <CardHeader>
+                  <div className="space-y-0.5">
+                    <CardTitle>Enrollment token</CardTitle>
+                    <CardDescription>
+                      <strong>Not part of normal activation.</strong> An appliance registers itself online and is
+                      activated from Velonet Central. A token is for recovery — an appliance that cannot
+                      self-register, or one being re-attached deliberately. It is created in Central under{" "}
+                      <strong>Appliances → Enrollment token</strong> and should be locked to this serial.
+                    </CardDescription>
+                  </div>
+                </CardHeader>
+                <CardBody className="space-y-4">
+                  {writable ? (
+                    <>
+                      <Field label="Enrollment code">
+                        <Input id="enroll-token" type="password" autoComplete="off" placeholder="Paste the token"
+                          value={token} onChange={(e) => setToken(e.target.value)} disabled={busy} />
+                      </Field>
+                      <Field label="Serial" hint="Give this serial to whoever creates the token so it locks to this appliance.">
+                        <Input id="enroll-serial" autoComplete="off" placeholder="Appliance serial"
+                          value={serial} onChange={(e) => setSerial(e.target.value)} disabled={busy} />
+                      </Field>
+                      <ErrorBanner err={enrollErr} className="mb-0" />
+                      <Button onClick={submitEnroll} disabled={busy || !token.trim() || !serial.trim()} className="w-full sm:w-auto">
+                        {busy ? <><Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden /> Connecting…</> : "Connect with token"}
+                      </Button>
+                    </>
                   ) : (
-                    <Badge tone="default">Not used at this site</Badge>
-                  )
-                }
-              />
-              <Row
-                k="Why"
-                v={
-                  <span className="text-sm">
-                    {nats?.connected
-                      ? "The real-time channel is open."
-                      : "This hotel's operations run on this appliance. Central is used for licensing only, so the real-time channel is intentionally closed — nothing is wrong and nothing is pending."}
-                  </span>
-                }
-              />
-            </CardBody>
-          </Card>
+                    <ReadOnlyNotice>Your role cannot connect this appliance with a token.</ReadOnlyNotice>
+                  )}
+                </CardBody>
+              </Card>
+            )}
 
-          <Card>
-            <StepHeader title="License" icon={<BadgeCheck className="h-4 w-4" />} />
-            <CardBody>
-              <Row k="State" v={<Badge tone={licenseTone(lic?.state)}>{lic?.state || "unknown"}</Badge>} />
-              <Row k="Max online guests" v={lic?.max_concurrent_online_guests == null ? "—" : lic.max_concurrent_online_guests === -1 ? "Unlimited" : String(lic.max_concurrent_online_guests)} />
-              <Row k="Valid until" v={lic?.valid_until || "—"} />
-              <Row k="Offline grace" v={lic?.offline_grace_days != null ? `${lic.offline_grace_days} days` : "—"} />
-            </CardBody>
-          </Card>
+            <button
+              type="button"
+              aria-expanded={showDetails}
+              className="inline-flex items-center gap-1.5 rounded-md text-label text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => setShowDetails((v) => !v)}
+            >
+              <ChevronRight className={cn("size-4 transition-transform rtl:-scale-x-100", showDetails && "rotate-90 rtl:rotate-90")} aria-hidden />
+              {`Diagnostics (${STAGES.length} checks)`}
+            </button>
 
-          <Card>
-            <StepHeader title="Completion" icon={<CheckCircle2 className="h-4 w-4" />} />
-            <CardBody className="grid gap-x-8 md:grid-cols-2">
-              <div>
-                <Row k="Customer" v={st?.assignment?.tenant_name || "—"} />
-                <Row k="Site" v={st?.assignment?.site_name || "—"} />
-                <Row k="Assignment version" v={st?.assignment?.version ?? "—"} />
+            {showDetails && (
+              <div className="space-y-4">
+                <Card>
+                  <StepHeader title="Onboarding progress" icon={<ServerCog className="size-4" aria-hidden />} />
+                  <CardBody>
+                    <ol className="grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
+                      {STAGES.map((label, i) => {
+                        const n = i + 1; const done = n < stage; const active = n === stage;
+                        return (
+                          <li key={label} className="flex items-center gap-2 text-sm" aria-current={active ? "step" : undefined}>
+                            <span className={cn(
+                              "inline-flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] tabular",
+                              done ? "bg-success-subtle text-success-subtle-foreground"
+                                : active ? "bg-primary text-primary-foreground" : "bg-surface text-muted-foreground",
+                            )}>
+                              {done ? "✓" : n}
+                            </span>
+                            <span className={done ? "text-muted-foreground line-through" : active ? "font-medium text-foreground" : "text-muted-foreground"}>
+                              {label}
+                              {done && <span className="sr-only"> (done)</span>}
+                              {active && <span className="sr-only"> (current)</span>}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  </CardBody>
+                </Card>
+
+                <Card>
+                  <StepHeader title="Appliance identity" icon={<Fingerprint className="size-4" aria-hidden />} />
+                  <CardBody className="grid gap-x-8 md:grid-cols-2">
+                    <div>
+                      <Row k="Serial" v={<code>{st?.serial || "—"}</code>} />
+                      <Row k="Appliance ID" v={<code className="break-all">{st?.appliance_id || "—"}</code>} />
+                      <Row k="Version" v={<code>{st?.version || "—"}</code>} />
+                    </div>
+                    <div>
+                      <Row k="Identity key fingerprint" v={<code title={st?.identity_key_fingerprint}>{fp(st?.identity_key_fingerprint)}</code>} />
+                      <Row k="Certificate fingerprint" v={<code title={api_mtls?.cert_fingerprint}>{fp(api_mtls?.cert_fingerprint)}</code>} />
+                    </div>
+                  </CardBody>
+                </Card>
+
+                <Card>
+                  <StepHeader title="Network & Central checks" icon={<Network className="size-4" aria-hidden />} />
+                  <CardBody className="grid gap-x-8 md:grid-cols-2">
+                    <div>
+                      <Check label="DNS resolution" ok={net?.dns_ok} />
+                      <Check label="Central HTTPS :443" ok={net?.central_https_443} />
+                      <Check label="Clock in sync" ok={net?.clock} />
+                    </div>
+                    <div>
+                      <Check label="API mTLS :9443" ok={net?.mtls_9443} />
+                      <Check label="NATS mTLS :4223" ok={net?.nats_4223} />
+                    </div>
+                  </CardBody>
+                </Card>
+
+                <Card>
+                  <StepHeader title="Certificate (API mTLS)" icon={<ShieldCheck className="size-4" aria-hidden />} />
+                  <CardBody>
+                    <Row k="Status" v={api_mtls?.mtls_ready ? <Badge tone="ok">API mTLS ready</Badge> : <Badge tone="warn">Not ready</Badge>} />
+                    <Row k="Certificate fingerprint" v={<code title={api_mtls?.cert_fingerprint}>{fp(api_mtls?.cert_fingerprint)}</code>} />
+                    <Row k="Expires (not after)" v={api_mtls?.not_after || "—"} />
+                  </CardBody>
+                </Card>
+
+                <Card>
+                  <StepHeader title="Real-time channel" icon={<Radio className="size-4" aria-hidden />} />
+                  <CardBody>
+                    {/* NOT AN ERROR, AND IT MUST NOT LOOK LIKE ONE. This appliance serves Central for licensing
+                        only; the NATS transport is deliberately not opened. A red "Disconnected" badge here sent
+                        operators looking for a network fault that does not exist. */}
+                    <Row
+                      k="Status"
+                      v={
+                        nats?.connected ? (
+                          <Badge tone="ok">Connected</Badge>
+                        ) : (
+                          <Badge tone="default">Not used at this site</Badge>
+                        )
+                      }
+                    />
+                    <Row
+                      k="Why"
+                      v={
+                        <span className="text-sm">
+                          {nats?.connected
+                            ? "The real-time channel is open."
+                            : "This hotel's operations run on this appliance. Central is used for licensing only, so the real-time channel is intentionally closed — nothing is wrong and nothing is pending."}
+                        </span>
+                      }
+                    />
+                  </CardBody>
+                </Card>
+
+                <Card>
+                  <StepHeader title="Licence" icon={<BadgeCheck className="size-4" aria-hidden />} />
+                  <CardBody>
+                    <Row k="State" v={<Badge tone={licenseTone(lic?.state)}>{lic?.state || "unknown"}</Badge>} />
+                    <Row k="Max online guests" v={lic?.max_concurrent_online_guests == null ? "—" : lic.max_concurrent_online_guests === -1 ? "Unlimited" : String(lic.max_concurrent_online_guests)} />
+                    <Row k="Valid until" v={lic?.valid_until || "—"} />
+                    <Row k="Offline grace" v={lic?.offline_grace_days != null ? `${lic.offline_grace_days} days` : "—"} />
+                  </CardBody>
+                </Card>
+
+                <Card>
+                  <StepHeader title="Completion" icon={<CheckCircle2 className="size-4" aria-hidden />} />
+                  <CardBody className="grid gap-x-8 md:grid-cols-2">
+                    <div>
+                      <Row k="Customer" v={st?.assignment?.tenant_name || "—"} />
+                      <Row k="Site" v={st?.assignment?.site_name || "—"} />
+                      <Row k="Assignment version" v={st?.assignment?.version ?? "—"} />
+                    </div>
+                    {/*
+                      COMPLETION MEANS COMPLETE, AND MUST NOT ARGUE WITH THE SCREEN IT IS ON. What completion
+                      consists of is the two facts below: this appliance has an identity Central recognises, and
+                      a licence that authorises guests. Neither depends on a transport this property does not use.
+                    */}
+                    <div>
+                      <Row k="Enrolled" v={<Badge tone={enrolled ? "ok" : "err"}>{enrolled ? "Yes" : "No"}</Badge>} />
+                      <Row k="Licensed" v={<Badge tone={licOk ? "ok" : "err"}>{licOk ? "Yes" : "No"}</Badge>} />
+                    </div>
+                  </CardBody>
+                </Card>
+
+                <p className="text-caption text-muted-foreground">
+                  Every field is read live from the appliance every {POLL_SECONDS}s. Secrets (enrollment token,
+                  private keys, channel credentials) are never displayed.
+                </p>
               </div>
-              {/*
-                COMPLETION MEANS COMPLETE, AND MUST NOT ARGUE WITH THE SCREEN IT IS ON.
-
-                This block used to carry `Connected: no` in red, and a count of a queue nothing fills. Both
-                described the real-time channel, which under the licensing-only model is deliberately never
-                opened -- the card two above this one says exactly that, in those words. So the appliance
-                announced "Setup complete" at the top of the page and "Connected: no" in red at the bottom,
-                and an operator had to know which one to believe.
-
-                What completion actually consists of is the two facts below: this appliance has an identity
-                Central recognises, and a licence that authorises guests. Neither depends on a transport this
-                property does not use. The real-time channel keeps its own card, where it is explained rather
-                than scored.
-              */}
-              <div>
-                <Row k="Enrolled" v={<Badge tone={enrolled ? "ok" : "err"}>{enrolled ? "yes" : "no"}</Badge>} />
-                <Row k="Licensed" v={<Badge tone={licOk ? "ok" : "err"}>{licOk ? "yes" : "no"}</Badge>} />
-              </div>
-            </CardBody>
-          </Card>
-
-          <p className="text-xs text-muted-foreground">
-            Every field is read live from the appliance every 5s and reflects real state. Secrets
-            (enrollment token, private keys, NATS credentials) are never displayed.
-          </p>
-        </div>
-      )}
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

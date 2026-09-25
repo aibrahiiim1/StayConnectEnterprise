@@ -19,14 +19,15 @@ import (
 
 func renderSuccess(t *testing.T) string {
 	t.Helper()
-	tpl, err := template.New("succ").Parse(successHTML)
+	tpl, err := template.New("succ").Parse(compactMarkup(successHTML))
 	if err != nil {
 		t.Fatalf("the success page does not parse: %v", err)
 	}
 	var buf bytes.Buffer
-	if err := tpl.Execute(&buf, map[string]any{
-		"SessionID": "sess-1", "DurationSeconds": 3600, "HumanRemaining": "1h",
-		"CommerceEnabled": false,
+	p := buildGuestPage(nil, map[string]any{}, "n0nce", "tl.", "dev.", "unit.")
+	if err := tpl.Execute(&buf, successView{
+		guestPage: p, SessionID: "sess-1", DurationSeconds: 3600, HumanRemaining: "1 h",
+		CommerceEnabled: false,
 	}); err != nil {
 		t.Fatalf("render: %v", err)
 	}
@@ -87,27 +88,48 @@ func TestGuestDevicePanelMarksOnlineDevicesNonRemovable(t *testing.T) {
 	if !strings.Contains(panel, "d.removable") {
 		t.Fatal("the panel does not consult the removable flag at all")
 	}
-	if !strings.Contains(panel, "can’t be removed") {
+	// The words live in the dictionary (every language); the panel must use them.
+	en := builtinStrings["en"]
+	if !strings.Contains(panel, "t('dev.inuse')") || !strings.Contains(en["dev.inuse"], "can’t be removed") {
 		t.Fatal("an online device is not explained to the guest")
 	}
-	if !strings.Contains(panel, "Disconnect it from the Wi‑Fi first") {
+	if !strings.Contains(en["dev.inuse"], "Disconnect it from the Wi‑Fi first") {
 		t.Fatal("the guest is not told how to make the device removable")
 	}
-	if !strings.Contains(panel, "Connected now") || !strings.Contains(panel, "Not connected") {
+	if !strings.Contains(panel, "t('dev.online')") || !strings.Contains(panel, "t('dev.offline')") ||
+		en["dev.online"] != "Connected now" || en["dev.offline"] != "Not connected" {
 		t.Fatal("the panel does not show whether a device is connected")
 	}
 }
 
-// The removal is confirmed, states its consequence, and reports a clear result.
+// The removal is confirmed IN THE PAGE (in the guest's language, focus on the safe answer, Escape keeps the
+// device -- not the browser's own dialog), states its consequence, and reports a clear result.
 func TestGuestDeviceRemovalIsConfirmedAndItsResultIsClear(t *testing.T) {
 	panel := devicesPanel(t, renderSuccess(t))
-	if !strings.Contains(panel, "window.confirm(") {
-		t.Fatal("a device is removed without confirmation")
+	if strings.Contains(panel, "window.confirm(") {
+		t.Fatal("the removal still uses the browser's own confirm dialog")
 	}
-	if !strings.Contains(panel, "can connect again at any time") {
+	// The release call is reachable only from the confirmation's own "Remove" button.
+	ask := panel[strings.Index(panel, "function ask("):]
+	ask = ask[:strings.Index(ask, "function load(")]
+	for _, want := range []string{"t('dev.confirm')", "t('dev.yes')", "t('dev.keep')", "release(id, btn, row)", "no.focus()", "'Escape'"} {
+		if !strings.Contains(ask, want) {
+			t.Fatalf("the in-page confirmation is missing %q", want)
+		}
+	}
+	if strings.Count(panel, "release(") != 2 { // the definition and the confirmation's call -- no other caller
+		t.Fatalf("release is called from somewhere other than the confirmation")
+	}
+	for code, words := range builtinStrings {
+		if !strings.Contains(words["dev.confirm"], "{n}") {
+			t.Fatalf("%s: the confirmation does not name the device", code)
+		}
+	}
+	if !strings.Contains(builtinStrings["en"]["dev.confirm"], "can connect again at any time") {
 		t.Fatal("the confirmation does not say the device can come back")
 	}
-	if !strings.Contains(panel, "dv-done") || !strings.Contains(panel, "its place is free") {
+	if !strings.Contains(panel, "dv-done") || !strings.Contains(panel, "t('dev.removed')") ||
+		!strings.Contains(builtinStrings["en"]["dev.removed"], "its place is free") {
 		t.Fatal("a successful removal has no clear result")
 	}
 	// The list is refreshed afterwards, so the screen and the appliance agree.
@@ -120,11 +142,21 @@ func TestGuestDeviceRemovalIsConfirmedAndItsResultIsClear(t *testing.T) {
 // and "switched off" into one answer; a page that guessed between them would undo that.
 func TestGuestDeviceRefusalSaysNothing(t *testing.T) {
 	panel := devicesPanel(t, renderSuccess(t))
-	if !strings.Contains(panel, "That didn’t work. Please try again in a moment.") {
+	if !strings.Contains(panel, "t('dev.refused')") ||
+		builtinStrings["en"]["dev.refused"] != "That didn’t work. Please try again in a moment." {
 		t.Fatal("the refusal message is missing")
 	}
-	if strings.Count(panel, "note.className='dv-err'") != 1 {
+	if strings.Count(panel, "note.className='dv-err'") != 1 || strings.Count(panel, "t('dev.refused')") != 1 {
 		t.Fatal("there is more than one refusal message, so refusals are distinguishable")
+	}
+	// ...and in no language does the one refusal sentence explain itself.
+	for code, words := range builtinStrings {
+		low := strings.ToLower(words["dev.refused"])
+		for _, leak := range []string{"too many", "already", "online", "disabled", "switched off", "not yours"} {
+			if strings.Contains(low, leak) {
+				t.Fatalf("%s: the refusal explains itself (%q)", code, leak)
+			}
+		}
 	}
 	// Scanned over what the guest can READ -- the lines that put words on the screen -- rather than over the
 	// whole script, so that `btn.disabled = true` is not mistaken for the word "disabled" being shown.
@@ -192,16 +224,18 @@ func TestRemainingTimePanelIsHiddenForOrdinaryPackages(t *testing.T) {
 // is about to stop mattering.
 func TestRemainingTimePanelShowsBothClocks(t *testing.T) {
 	panel := timePanel(t, renderSuccess(t))
-	if !strings.Contains(panel, "of internet time left") {
+	en := builtinStrings["en"]
+	if !strings.Contains(panel, "t('tl.left')") || !strings.Contains(en["tl.left"], "of internet time left") {
 		t.Fatal("the remaining online time is not shown")
 	}
 	if !strings.Contains(panel, "counts down only while you are connected") {
 		t.Fatal("the panel does not say that the budget only runs while connected")
 	}
-	if !strings.Contains(panel, "st.hard_expiry") || !strings.Contains(panel, "Your access ends on") {
+	if !strings.Contains(panel, "st.hard_expiry") || !strings.Contains(panel, "t('tl.ends')") ||
+		!strings.Contains(en["tl.ends"], "Your access ends on") {
 		t.Fatal("the immutable hard expiry is not shown")
 	}
-	if !strings.Contains(panel, "whether or not the time is used") {
+	if !strings.Contains(en["tl.ends"], "whether or not the time is used") {
 		t.Fatal("the panel does not say the expiry arrives regardless of use")
 	}
 }
@@ -218,7 +252,7 @@ func TestRemainingTimePanelUsesOnlyTheStatusEndpoint(t *testing.T) {
 		}
 	}
 	// A budget of zero is shown as "no time", never as a negative or a bare 0.
-	if !strings.Contains(panel, "if(s <= 0) return 'no time'") {
+	if !strings.Contains(panel, "if(s <= 0) return t('tl.none')") {
 		t.Fatal("an exhausted budget has no honest rendering")
 	}
 }

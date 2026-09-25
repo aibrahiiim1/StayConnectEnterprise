@@ -1,271 +1,238 @@
-# StayConnect Control Panel — Page-by-Page Reference
+# Velonet Central — Page-by-Page Reference
 
-The **Control Panel** (also called Cloud Admin / Central) is the vendor/platform
-console you use to run the whole fleet: create customers and sites, onboard and
-activate appliances, issue licenses, and monitor health. It runs at your Central
-URL (e.g. `https://admin.stayconnect.local/`).
+**Velonet Central** (also called the Control Panel or Cloud Admin) is the vendor's console in the cloud. It
+registers and licenses every appliance: which customer owns it, which site it is at, how many guests it may
+serve at once, and until when. **Central is used for licensing only.** It never configures a hotel's guest
+networks, sign-in methods, packages or guests — those are run from **Velonet Hotel Admin** on each appliance
+(see [hotel-admin-reference.md](hotel-admin-reference.md)).
 
-This document describes **every page**: what it shows, what each option does, and
-why you'd use it. For step-by-step "how do I create X" instructions, see
-[control-panel-config-manual.md](control-panel-config-manual.md).
+This document describes every page in the menu: what it is for, what it shows, what an operator can do, and
+which actions ask for a reason, password confirmation, typed confirmation or a one-time reveal. For
+step-by-step instructions see [control-panel-config-manual.md](control-panel-config-manual.md). The visual
+language is defined in the [Velonet design system](../../design-system/README.md).
 
 ---
 
 ## Things that apply to every page
 
-- **Login & session.** The whole console is gated by your operator login. Your
-  session is re-validated every ~30 seconds; if it expires you are returned to
-  the login screen. Your email and a **Sign out** button are at the bottom-left.
-- **Password step-up.** Sensitive actions (issuing/revoking licenses, activating
-  or deleting appliances, deleting customers/sites, etc.) ask you to **re-enter
-  your password** even if the page shows no password box — a small prompt appears
-  saying "This action requires confirming your password." This is a safety
-  confirmation and is recorded in the audit log.
-- **Customer context (Global Customer Selector).** At the top of the sidebar,
-  platform admins have a **Customer context** selector: **All Customers** or one
-  specific customer. The choice **persists across navigation and refresh** (stored
-  in your browser). It scopes every customer-owned page — **Sites, Appliances,
-  Licenses, Operators, Audit** and the Dashboard — to the selected customer.
-  Fleet-wide pages (Fleet, Security alerts, Certificates, Assignment keys, Backup
-  health, and the Customers list itself) stay global.
-  - In **All Customers** mode, list pages show every customer's rows (with a
-    **Customer** column) but **creating** a resource is disabled — you must first
-    pick the owning customer. This prevents accidentally creating a Site or
-    Appliance under the wrong customer.
-  - When a customer is selected, create forms show **"Owner: <Customer>"** so the
-    owning customer is always explicit.
-  - A **tenant operator** (not a platform admin) has no switcher — they are pinned
-    to their own customer, and the server enforces that regardless of the UI.
-- **The menu adapts to your role.** You only see the items your role can use.
-
-The sidebar has four groups: **Overview**, **Infrastructure**, **Commercial**,
-**Administration**.
+- **Sign-in.** The login page is titled *Velonet Central*: email and password, and a collapsed **single
+  sign-on** option that asks for an **Organisation slug** and then lists that organisation's providers. A
+  Central login opens nothing on an appliance, and a Hotel Admin login does not work here. The session is
+  re-checked every 30 seconds; if it has ended you are returned to the login page.
+- **The sidebar.** Four groups: **Overview · Infrastructure · Commercial · Administration**. The button
+  beside the Velonet mark collapses it to an icon rail (tooltips show each name) and expands it again; the
+  choice is remembered in that browser. On a narrow window the menu is a drawer behind the ☰ button. Your
+  email and **Sign out** are at the bottom. Central has no "Find a screen…" filter; its menu is short.
+- **Customer context.** Under the Velonet mark, a platform admin chooses **All customers** or one customer.
+  The choice is remembered across pages and refreshes. **Dashboard, Sites, Appliances, Licenses, Operators
+  and Audit log** follow it; each page repeats which customer it is showing under its title.
+  - In **All customers** mode, Sites, Appliances and Licenses list every customer's rows (with a Customer
+    column). Creating appliances and licenses is disabled until you pick a customer; **New site** asks you to
+    choose the owning customer in the form. Operators and Audit log show a *"Select a customer"* card
+    instead of data.
+  - Customer-level operators have no selector: they are always on their own customer, and the server
+    enforces it.
+- **Top bar.** Shows where you are (*Group / Page*) and the theme switch: **Light**, **Dark** or **System**
+  (the default, following your computer). The choice is remembered in that browser.
+- **Who can do what is decided by the server.** Central does not hide buttons by role (apart from the
+  customer selector and the fleet license summary, which are for platform admins). If your role may not
+  perform an action, the server refuses it and the page shows the error.
+- **Password confirmation.** License, certificate and appliance actions (issue, renew, suspend, resume,
+  revoke or download a license; activation packages; deactivating; the Advanced Support actions; deletes)
+  are protected by the server. When you have not confirmed your password recently, a **Confirm your
+  password** dialog appears, and the action continues once you enter it. **Activate** on Onboarding always
+  has its own password field.
+- **Confirmation dialogs.** Every destructive or license-changing action opens a dialog listing what will
+  happen. The heaviest deletes also require a **typed confirmation** (the customer's name, the site's code
+  or the appliance's serial) and a **reason** for the audit log; see *The Delete dialog* at the end. No
+  action uses a browser pop-up; results appear as short notifications.
+- **One-time reveals.** An enrollment token is shown **once**, with **Copy** and an acknowledgement.
+- **Live figures.** Onboarding and Appliances refresh on their own and show **"Updated x ago"** with a
+  refresh button.
 
 ---
 
 ## OVERVIEW
 
 ### Dashboard — `/dashboard`
-Your landing overview of licensing posture and this month's usage.
+Licenses issued by state, the sites and appliances they cover, and what needs attention. It follows the
+Customer context.
 
-- **Fleet License Summary** (platform admins only) — counts of the licenses the
-  Platform has issued across the fleet, by state:
-  - **Active** · **Expiring ≤30d** · **Expired** · **Suspended** · **Revoked**
-  - **Orphaned** (only appears when > 0) — a license whose bound appliance or
-    site was deleted; it should be reconciled.
-  - Header text reminds you: *"The Central Platform is the license issuer and
-    holds no license of its own."* A **View licenses →** link jumps to Licenses.
-- **KPI cards:**
-  - **Active sessions** — devices online right now.
-  - **Data this month** — total usage; shows `% of cap` if a monthly cap is set,
-    else "No monthly cap".
-  - **Sessions today** — since local midnight.
-  - **Licensed appliances** — count of live entitlements (active + expiring).
-- **Top sites (this month)** — a bar chart of the busiest sites by data volume.
-- Read-only page — no actions.
+- **Fleet license summary** (platform admins): *Active*, *Expiring in 30 days or less*, *Expired*,
+  *Suspended*, *Revoked*, and *Orphaned* (a license whose appliance or site was deleted). A link opens
+  Licenses.
+- **Tiles:** *Sites*, *Appliances* (with how many reached Central in the last 5 minutes), *Licensed
+  appliances* (licenses in force, grace included) and *Need attention*. Each opens its page.
+- **Licenses that need attention:** licenses expiring within 30 days, in grace, expired, suspended or not yet
+  bound to an appliance, soonest first.
+- Central is used for licensing only: guests, sessions, usage and network health are on each hotel's
+  appliance, in **Hotel Admin → Overview**. Central shows no guest activity.
+- **Actions:** none (the page links to Licenses).
 
 ---
 
 ## INFRASTRUCTURE
 
 ### Sites — `/sites`
-Create and manage **sites** (physical locations — a hotel, building, or floor)
-that own appliances, within the selected customer.
+A site is one physical property — one hotel or resort. It belongs to exactly one customer and holds one or
+more appliances. Buildings, floors, SSIDs and guest networks are configured on the appliance, not here.
 
-- **Columns:** Code · Name · Status · Timezone · Country · Created.
-- **New site** (top-right) opens a form: **Code** (e.g. `hq`), **Name**,
-  **Timezone** (default `UTC`), **Country** (optional).
-- **Row actions:**
-  - **Edit** — change name / timezone / country.
-  - **Archive / Restore** — soft-hide a site without deleting it.
-  - **Delete** — permanent; opens the Delete dialog (type the **site code** to
-    confirm + a reason + password step-up). Blocked if the site still has
-    appliances/licenses.
+- **Shows:** search, a status filter (Active / Archived), and the table Customer (All customers mode), Code,
+  Name, Status, Timezone, Country, Created.
+- **New site:** Owning customer, Code (short and unique), Name, Timezone (UTC if empty), Country (optional).
+- **Row actions:** **Edit** (name, timezone, country; the code cannot change), **Archive / Restore**,
+  **Delete** — the Delete dialog: **type the site code + reason**, password confirmation when asked. Blocked
+  while the site still holds appliances or licenses.
+
+### Onboarding — `/onboarding`
+Connect an appliance. A factory-clean appliance with internet registers itself and waits here as **Pending
+activation**; you select it, choose its customer, site and license terms, and activate it once.
+
+- **Pending activation** (refreshes every 5 seconds): Serial, WAN MAC, Model, Source IP, First seen. Select a
+  row to open the activate form.
+- **Activate** form: **Customer** (existing, or type a new name), **Site** (existing, or type a new name),
+  **Max concurrent online guests** (0 = unlimited; across the whole appliance), **Valid until** (empty = 365
+  days), **Grace period (days)** (after expiry guests are still served, with warnings), **Confirm your
+  password**, then **Activate**.
+- **Progress:** **Detected → Activating → Appliance converging → Active**, then **Activate another**.
+- **Offline activation:** for an appliance with no route to Central, upload the activation request file the
+  appliance saved (*Hotel Admin → Appliance & licence → Offline*). It then appears as pending; activate it as
+  usual, then download its activation package (below) and carry it back.
+- **Registered appliances:** Serial, State, WAN MAC, and per row:
+  - **Deactivate** — confirmation dialog: its license is revoked, new guest sign-ins are refused, existing
+    guest sessions are not dropped; it can be activated again later. Password confirmation when asked.
+  - **Activation package** — downloads the signed file that completes an offline activation (valid 7 days,
+    single use), to upload in Hotel Admin under Appliance & licence. Password confirmation when asked.
+  - **Delete** — the Delete dialog with an impact preview: **type the appliance serial + reason**. A
+    factory-clean appliance will then register again as pending.
+  - With **Advanced Support** switched on: **Reissue cert**, **Reconcile**, **Decommission** — each asks for a
+    **reason** (recorded) and password confirmation when asked.
 
 ### Appliances — `/appliances`
-The manual appliance registry and **enrollment-token** minting — the alternative
-to the zero-touch Onboarding flow, plus a way to inspect an appliance's effective
-config.
+Every appliance, where it is and whether it is online. Appliances normally arrive by themselves under
+Onboarding; the tools here are for recovery.
 
-- **Appliances table:** Name · Site · Serial · Status (with a live dot: green =
-  fresh, amber = last seen > 25s ago) · Version · Last seen.
-- **Enrollment tokens table** (when any exist): Hint · Site · Serial lock ·
-  Status · Expires · Created.
-- **Header buttons** (need at least one site first):
-  - **Enrollment token** → *Mint enrollment token* form: **Site**, **Serial
-    (optional, locks the token to one box)**, **TTL hours** (default 24, max
-    168). On success the full token is shown **once** with a **Copy** button —
-    paste it into the appliance's `Hotel Admin → Setup / Activation` wizard.
-  - **New appliance** → register a box by hand: **Site**, **Serial**, **Name**,
-    **Model** (optional).
-- **Row actions:**
-  - **Config** (eye icon) — a drawer showing the appliance's *effective config*:
-    **PMS providers** (Name · Kind · Scope · Status) and **Walled-garden rules**
-    (Kind · Value · Ports · Scope).
-  - **Delete** — remove the appliance record (simple confirm).
-  - **Revoke** (on a token row) — invalidate an unused enrollment token.
-
-### Onboarding — `/onboarding` ("Connect an Appliance")
-The **primary, zero-touch activation flow**. A factory-clean appliance with
-internet self-registers as *Pending*; you pick it, choose the customer/site and
-the license terms, and click **Activate** once — the server runs the whole
-lifecycle (claim → assign → signed assignment → certificate → hardware-bound
-license) and the box converges to **Active** on its own.
-
-- **Pending activation table** (auto-refreshes): select radio · Serial · WAN MAC
-  · Model · Source IP · First seen. A **Refresh** button is provided.
-- **Activate form** (after selecting a pending box):
-  - **Customer** — *Existing* (pick one) or *+ New* (type a name, creates the
-    customer).
-  - **Site** — *Existing* (pick one) or *+ New* (type a name).
-  - **Max concurrent online guests** (default 500; `0 = unlimited`,
-    appliance-wide across all guest VLANs).
-  - **Valid until** (empty = 365 days from now).
-  - **Grace period (days)** (default 30 — after expiry guests keep working with
-    warnings).
-  - **Confirm your password** — required; activation is a step-up action.
-- **Progress view:** four steps — **Detected → Activating (assign + certificate +
-  license) → Appliance converging (mTLS + assignment adoption) → Active**, then
-  **Activate another**.
-- **Registered appliances** card (all customers): Serial · State · WAN MAC.
-  - **Deactivate** — revoke the appliance's license (reversible; can re-activate).
-    Step-up.
-  - **Advanced Support** checkbox reveals elevated actions — **Reissue cert**,
-    **Reconcile**, **Decommission** — each asks for an audited reason + step-up.
-  - **Delete** — permanent; shows a delete-impact preview and requires typing the
-    **appliance serial**. After deletion a factory-clean box re-registers as
-    Pending.
-
-### Fleet — `/fleet`
-Live health/telemetry monitor for enrolled appliances (read-only; rows expand).
-
-- **Columns:** Appliance · Site · **Status** (online/offline) · **Health**
-  (overall service-health badge + "N affected") · Version · Last seen ·
-  **License** (state + "until <date>") · **TLS cert** (expiry/renewal badge).
-- **Expanded row:** per-service **health chips** (state + service name + restart
-  count "·Nr" + backoff level "·L#"), the worst failure reason, the raw last
-  health JSON, and a **Load telemetry** button for recent telemetry records.
-- Monitoring only — no mutating actions here.
+- **Shows:** tiles *Appliances*, *Online*, *Enrolled or pending*, *Offline or other*; search; table Customer
+  (All customers mode), Name, Site (or *unassigned*), Serial, Status (online with a live dot when heard from
+  recently), Version, Last seen. The list refreshes on its own.
+- **Header (needs a customer and a site):**
+  - **Enrollment token** — only for an appliance that cannot register itself: Site, Serial (optional; locks
+    the token to one appliance), Valid for 1–168 hours (default 24). The token is a **one-time reveal**:
+    enter it in the appliance's Hotel Admin under *Appliance & licence → Advanced / recovery*.
+  - **New appliance** — manual registration: Site, Serial, Name, Model.
+- **Row actions:** **Config** — a read-only view of the PMS connections and allowed-site rules Central holds
+  for that appliance's site; **Delete** — **type the appliance serial** to confirm.
+- **Enrollment tokens** table: Hint, Site, Serial lock, Status, Expires, Created; **Revoke** an unused token
+  (confirmation dialog).
 
 ---
 
 ## COMMERCIAL
 
 ### Customers — `/tenants`
-Step 1 of commercial onboarding — create/manage **customers** (hotel groups /
-brands / property owners). The page shows the recommended order: *Customer → Site
-→ enroll & assign an Appliance → issue a License.*
+The hotel groups and companies that own sites. Order of work: Customer, then Site, then activate an
+Appliance, which issues its License.
 
-- **Columns:** Slug · Name · Status · Created.
-- **New customer** form: **Slug** (e.g. `acme-hotels`) + **Name** (e.g. `Acme
-  Hotels Group`).
-- **Row actions:**
-  - **Rename**.
-  - **Archive / Restore** — the normal way to retire a customer while keeping its
-    sites/appliances/licenses/audit history.
-  - **Delete** — permanent; type the **customer name** + reason + password
-    step-up. Blocked (with a list) while the customer still has appliances,
-    sites, or licenses — remove those first.
+- **Shows:** search, a status filter (Active / Archived), and the table Slug, Name, Status, Created.
+- **New customer:** Slug (lower-case, unique, also used for single sign-on) and Name.
+- **Row actions:** **Rename**; **Archive** (confirmation dialog: hidden from active lists, everything kept)
+  and **Restore**; **Delete** — the Delete dialog: **type the customer name + reason**, blocked while the
+  customer still has sites, appliances or licenses.
 
 ### Licenses — `/licenses`
-Issue and manage the **signed, hardware-bound licenses**. Model: *a license binds
-to exactly one appliance and carries three controls — max concurrent online
-guests, validity window, grace period. No plan or subscription.*
+Each appliance's signed license: max concurrent online guests, validity window and grace period. The license
+is the only entitlement.
 
-- **Columns:** Customer · Site · Appliance (serial or "not bound") · **v#**
-  (version) · Status · **Online / Limit** · **Usage %** · **Valid** (from → until)
-  · **Grace ends** · **Last sync**.
-- **Issue license** form (step-up): **Site**, **Appliance** (filtered to the
-  site), **Max concurrent online guests** (0 = unlimited), **Valid from**, **Valid
-  until** (empty = 365 days), **Grace period days** (default 30).
-- **Row actions** (all password step-up):
-  - **Renew** — prompts for max guests, valid days, grace days; issues a **new
-    signed license with a higher version**; the previous one is superseded and
-    can never be replayed.
-  - **Suspend** — stops new guest authorization; existing sessions run out
-    naturally; portal/DHCP/DNS/Hotel Admin stay up.
-  - **Resume** — reactivate a suspended license.
-  - **Revoke** — the appliance permanently refuses new guest authorizations.
+- **Shows:** tiles *Active*, *In grace*, *Expired or revoked*, *Awaiting appliance binding*; search and a state
+  filter; table Customer, Site, Appliance (serial or *not bound*), Version, Status, Max online guests (*Unlimited*
+  for 0), validity, grace ends, and when the appliance was last seen. How many guests are online against the
+  limit is shown on the appliance, in Hotel Admin under Appliance & licence.
+- **Issue license** (needs a customer selected and a site): Site, Appliance, **Max concurrent online guests**
+  (0 = unlimited), Grace period (days), Valid from (empty = now), Valid until (empty = 365 days).
+- **Row actions** (each with password confirmation when asked):
+  - **Renew** — new max guests, days from now and grace days. Issues a new signed version; the previous one
+    becomes *Superseded* and can never be used again.
+  - **Download for offline** — the signed, appliance-bound file, to upload in Hotel Admin under Appliance &
+    license.
+  - **Suspend** — confirmation dialog: new guest sign-ins stop; existing sessions are not dropped; the portal,
+    DHCP, DNS and Hotel Admin stay up. **Resume** reverses it.
+  - **Revoke** — confirmation dialog: permanent; the appliance refuses new guest sign-ins; existing sessions
+    are not dropped; issue a new license to restore service.
+
+License states: **Active**, **Grace** (past valid-until, inside the grace days; guests still served with a
+warning), **Expired**, **Suspended**, **Revoked**, **Superseded** (replaced after Renew), **Awaiting appliance
+binding**.
 
 ---
 
 ## ADMINISTRATION
 
 ### Operators — `/operators`
-Manage operator accounts, roles, and passwords for the customer.
+A customer's own staff sign-ins to Central, and their roles. Requires a customer to be selected.
 
-- **Columns:** Email · Name · Status · Roles.
-- **Create operator** form: **Email**, **Display name**, **Initial password**
-  (min 10 chars), **Role** (`tenant_admin` / `tenant_operator` / `viewer` /
-  `billing`).
-- **Row actions:** **+ role** / remove role (click a role badge), **Reset**
-  password, **Disable** account. You cannot remove your own roles or disable
-  yourself.
+- **Shows:** tiles *Operators*, *Active*, *Invited*, *Disabled*; search; table Email (*you* marker), Name,
+  Status, Roles.
+- **New operator:** Email, Display name, Initial password (at least 10 characters), Role (**Customer admin**,
+  **Customer operator**, **Viewer**). The legacy *Billing* role is no longer offered: the database has refused
+  it since the role catalogue was expanded, so granting it could only fail.
+- **Row actions:** **Add a role** (dialog), remove a role (confirmation dialog), **Reset password** (new
+  password, at least 10 characters), **Disable** (confirmation dialog). You cannot disable yourself.
 
 ### Security alerts — `/security`
-Triage clone / registration-anomaly alerts (hardware-identity mismatch, hardware
-reuse, WAN-MAC mismatch, and — new — **license permissive-attempt** and appliance
-service-health alerts). Auto-licensing is denied while an alert is open.
+Raised when an appliance registration looks wrong — a cloned identity, a reused serial, or a WAN MAC that
+does not match the signed license. Activation is blocked while an alert is open.
 
-- **Show resolved** filter (resolved hidden by default).
-- **Columns:** When · Kind · Serial · Source IP · Detail · Status · Triage.
-- **Triage:** Investigate → Acknowledge → Resolve / False positive / Reopen.
-  Resolving asks for an audited reason.
+- **Shows:** tiles *Open*, *Investigating*, *Acknowledged*, *Resolved or false positive*; search and **Show
+  resolved**; table When, Kind, Serial, Source IP, Detail, Status.
+- **Actions:** **Investigate**, **Acknowledge**, **Resolve** and **False positive** (each of the last two asks
+  for a **reason**), **Reopen**.
 
 ### Certificates — `/certificates`
-Read-only inventory of appliance mTLS client certificates from the internal CA
-(metadata only — never private keys).
+Appliance certificates issued by Central's certificate authority. Read-only, metadata only.
 
-- **Show superseded** filter.
-- **Columns:** Appliance · Customer · Site · Fingerprint · Issuer · Issued ·
-  Expires · Status · Last rotation · Revocation (date + reason).
+- **Shows:** tiles *Active*, *Expiring in 30 days*, *Expired*, *Revoked*; search and **Show superseded**; table
+  Appliance, Customer, Site, Fingerprint, Issuer, Issued, Expires, Status, last rotation, revocation.
+- **Actions:** none.
 
 ### Assignment keys — `/assignment-keys`
-Read-only inventory of the keys that sign appliance→tenant/site assignment
-documents (public fingerprint + metadata only).
+The keys that sign the documents binding an appliance to its customer and site. Read-only.
 
-- **Columns:** Key ID · Fingerprint · State (active / verify_only / revoked, with
-  an "emergency" flag) · Rotation · Dependencies (current assignments) · Created ·
-  Retired · Reason.
+- **Shows:** tiles *Active*, *Verify-only*, *Revoked*, *Current assignments*; table Key ID, Fingerprint, State,
+  Rotation, Dependencies, Created, Retired, Reason.
+- **Actions:** none.
 
 ### Backup health — `/backup-health`
-Read-only retention/rollback health for the Central host.
+Whether Central's own backup and rollback storage is healthy. Read-only.
 
-- **KPI cards:** **Disk used** (with warn/crit thresholds) · **Rollback path**
-  (valid / INVALID) · **Last cleanup** · **Failures**.
-- **Policy line** + item tables: **Protected**, **Operator-pinned**, **Retained**,
-  **Delete candidates (next apply)**.
+- **Shows:** tiles *Disk used*, *Rollback path*, *Last cleanup*, *Failures*; the retention policy; lists
+  *Protected*, *Operator-pinned* (when any), *Retained* and *Delete candidates*.
+- **Actions:** none.
 
 ### Audit log — `/audit`
-The immutable audit trail (last 7 days) for the customer.
+Who did what for the selected customer in the last 7 days. Entries are never edited or removed.
 
-- **Filter** by action (comma-separated, e.g. `site.created,operator.disabled`).
-- **Columns:** When · Actor · Action · Target · IP · Payload.
-
----
-
-## Legacy pages (reachable by URL only, not in the sidebar)
-
-Plans and subscriptions were **retired** in the simple-license model — the license
-itself is the entitlement. These pages remain for viewing historical data:
-
-- **`/subscription`** — legacy view of a customer's subscription + effective
-  limits + plan catalog (can switch plans).
-- **`/commercial`** — full legacy entitlements console (plans, subscription terms,
-  tenant overrides, plan limits), each change reason-logged + step-up.
-
-You should not need these for the simple-license workflow.
+- **Shows:** table When, Actor, Action, Target, IP, Payload.
+- **Filter by action** (comma-separated action names) and **Apply**. No paging or date range.
 
 ---
 
-## The Delete dialog (Customers, Sites, Onboarding appliances)
+## Retired pages
 
-Permanent delete **never cascades**. It always requires all three of:
-1. a **typed confirmation** matching exactly — customer **name**, site **code**,
-   or appliance **serial**;
-2. a **reason** (recorded in the audit log);
-3. a **password step-up**.
+`/commercial` and `/subscription` are not in the menu and are labelled *retired*. They belong to a pricing
+model that is no longer part of Velonet; the signed appliance license is the only entitlement. Do not use
+them.
 
-If dependent records still exist, the dialog lists them ("cannot be deleted
-because it still contains: N …") with guidance to remove them first, in order:
-**Appliances → Site → Customer**.
+---
+
+## The Delete dialog (Customers, Sites, Onboarding)
+
+Deleting a customer, a site or an appliance (from Onboarding) opens one dialog that:
+
+1. states it **cannot be undone**;
+2. lists anything that blocks the delete — delete never cascades, so remove bottom-up: **appliances → sites →
+   customer**;
+3. requires **typing** the customer's name, the site's code or the appliance's serial exactly;
+4. requires a **reason**, recorded in the audit log;
+5. asks for **password confirmation** when the server requires it.
+
+Deleting an appliance from the **Appliances** page asks only for the typed serial.

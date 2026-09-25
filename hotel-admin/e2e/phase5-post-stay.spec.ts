@@ -106,10 +106,10 @@ test.describe("the post-stay identity screen", () => {
 
     await expect(page.getByRole("cell", { name: "RES-77" })).toBeVisible();
     await expect(page.getByText("Active", { exact: true })).toBeVisible();
-    await expect(page.getByText(/revoked — ended for this stay/i)).toBeVisible();
+    await expect(page.getByText(/access ended for this stay/i)).toBeVisible();
     // The stale one is the interesting row: ACTIVE, and useless. Saying only "Active" would send an operator
     // off to reset a PIN that cannot work whatever its value is.
-    await expect(page.getByText(/active, not usable/i)).toBeVisible();
+    await expect(page.getByRole("row", { name: /active, not usable/i })).toBeVisible();
   });
 
   test("a reset needs a reason and a password, and shows the new PIN exactly once", async ({ page }) => {
@@ -130,8 +130,8 @@ test.describe("the post-stay identity screen", () => {
 
     // The one-time reveal, and it says so.
     await expect(page.getByText("K7M4RTQX")).toBeVisible();
-    await expect(page.getByText(/shown once/i)).toBeVisible();
-    await expect(page.getByText(/cannot be shown again/i)).toBeVisible();
+    await expect(page.getByRole("heading", { name: /shown once/i })).toBeVisible();
+    await expect(page.getByText(/cannot be shown again/i).first()).toBeVisible();
 
     // What the network actually received is what the screen said it would send.
     expect(mutations).toHaveLength(1);
@@ -178,8 +178,10 @@ test.describe("the post-stay identity screen", () => {
     await installBackend(page, []);
     await page.goto("/post-stay");
     const row = page.getByRole("row", { name: /RES-78/ });
-    await expect(row.getByRole("button", { name: /reset pin/i })).toBeDisabled();
-    await expect(row.getByRole("button", { name: /end access/i })).toBeDisabled();
+    await expect(row).toBeVisible();
+    // Ended access offers nothing to do: the actions are absent, not merely greyed out.
+    await expect(row.getByRole("button", { name: /reset pin/i })).toHaveCount(0);
+    await expect(row.getByRole("button", { name: /end access/i })).toHaveCount(0);
   });
 
   test("a read-only operator sees the evidence and cannot act", async ({ page }) => {
@@ -187,7 +189,8 @@ test.describe("the post-stay identity screen", () => {
     await page.goto("/post-stay");
     await expect(page.getByRole("cell", { name: "RES-77" })).toBeVisible();
     const row = page.getByRole("row", { name: /RES-77/ });
-    await expect(row.getByRole("button", { name: /reset pin/i })).toBeDisabled();
-    await expect(row.getByRole("button", { name: /end access/i })).toBeDisabled();
+    // The UI never shows a button the role cannot use.
+    await expect(row.getByRole("button", { name: /reset pin/i })).toHaveCount(0);
+    await expect(row.getByRole("button", { name: /end access/i })).toHaveCount(0);
   });
 });

@@ -15,7 +15,7 @@ import { useEffect, useState } from "react";
 import { api, ListResp, Whoami, SocialOAuthProvider } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { Card, CardBody } from "@/components/ui/card";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
+import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input, Field, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -23,8 +23,10 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { DialogForm, ConfirmDialog } from "@/components/ui/dialog";
 import { Switch, SkeletonRows } from "@/components/ui/misc";
-import { Plus, KeyRound } from "lucide-react";
+import { Plus, KeyRound, AtSign } from "lucide-react";
 import { canWrite } from "@/lib/roles";
+import { ReadOnlyNotice } from "@/components/ui/patterns";
+import { useToast } from "@/components/ui/toast";
 import { formatRelative } from "@/lib/utils";
 
 const PROVIDERS = ["google", "apple", "facebook", "microsoft"] as const;
@@ -51,8 +53,9 @@ const EMPTY: FormState = {
 };
 
 export default function SocialProvidersPage() {
+  const toast = useToast();
   const [rows, setRows] = useState<SocialOAuthProvider[] | null>(null);
-  const [roles, setRoles] = useState<string[]>([]);
+  const [roles, setRoles] = useState<string[] | null>(null);
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [formErr, setFormErr] = useState<unknown>(null);
@@ -62,7 +65,7 @@ export default function SocialProvidersPage() {
   const [f, setF] = useState<FormState>(EMPTY);
   const [deleting, setDeleting] = useState<SocialOAuthProvider | null>(null);
 
-  const writable = canWrite("social-providers", roles);
+  const writable = roles !== null && canWrite("social-providers", roles);
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((p) => ({ ...p, [k]: v }));
 
   async function load() {
@@ -71,7 +74,7 @@ export default function SocialProvidersPage() {
   }
   useEffect(() => {
     load();
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => {});
+    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
   }, []);
 
   function openNew() {
@@ -115,6 +118,7 @@ export default function SocialProvidersPage() {
         if (f.client_secret) body.client_secret = f.client_secret; // blank keeps the existing secret
         await api.patch(`/social-providers/${editing.id}`, body);
       }
+      toast.success(mode === "new" ? "Provider added" : "Provider saved");
       setMode("closed"); setEditing(null);
       await load();
     } catch (e) { setFormErr(e); }
@@ -127,6 +131,7 @@ export default function SocialProvidersPage() {
     try {
       await api.del(`/social-providers/${deleting.id}`);
       setDeleting(null);
+      toast.success("Provider removed");
       await load();
     } catch (e) { setFormErr(e); }
     finally { setBusy(false); }
@@ -140,13 +145,15 @@ export default function SocialProvidersPage() {
   return (
     <PageShell>
       <PageHeader
+        icon={<AtSign />}
         eyebrow="Guest portal"
         title="Social login"
         description="Let guests sign in with an account they already have. Each entry is an OAuth application you register with that provider; the client secret is stored write-only and is never shown again."
         actions={writable && <Button onClick={openNew}><Plus /> Add provider</Button>}
       />
 
-      <ErrorBanner err={err} />
+      {roles !== null && !writable && <ReadOnlyNotice>Your role can see the social login providers but not change them.</ReadOnlyNotice>}
+      <ErrorBanner err={err} className="mb-0" />
 
       <Card>
         <CardBody className="p-0">
@@ -164,7 +171,7 @@ export default function SocialProvidersPage() {
               <THead>
                 <TR><TH>Provider</TH><TH>Client ID</TH><TH>Redirect URI</TH><TH>Last used</TH><TH>Offered</TH><TH /></TR>
               </THead>
-              <tbody>
+              <TBody>
                 {rows.map((p) => (
                   <TR key={p.id}>
                     <TD className="font-medium">{p.display_name || PROVIDER_LABELS[p.provider] || p.provider}</TD>
@@ -188,7 +195,7 @@ export default function SocialProvidersPage() {
                     </TD>
                   </TR>
                 ))}
-              </tbody>
+              </TBody>
             </Table>
           )}
         </CardBody>
@@ -214,9 +221,7 @@ export default function SocialProvidersPage() {
             </Field>
           ) : (
             <Field label="Provider" hint="The provider cannot be changed; remove and re-add instead.">
-              <div className="flex h-9 items-center rounded-md border border-border bg-surface px-3 text-sm">
-                {PROVIDER_LABELS[f.provider] ?? f.provider}
-              </div>
+              <Input value={PROVIDER_LABELS[f.provider] ?? f.provider} readOnly disabled />
             </Field>
           )}
           <Field label="Name on the portal" hint="Leave empty to use the provider's own name.">

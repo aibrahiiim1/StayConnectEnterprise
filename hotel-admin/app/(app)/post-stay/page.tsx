@@ -17,5 +17,5 @@ export default function PostStayPage() {
       .then((m) => setRoles(m.roles ?? []))
       .catch(() => setRoles([]));
   }, []);
-  return <PostStayView canAct={roles === null ? false : canWrite("post-stay-profiles", roles)} />;
+  return <PostStayView canAct={roles === null ? false : canWrite("post-stay-profiles", roles)} rolesKnown={roles !== null} />;
 }
