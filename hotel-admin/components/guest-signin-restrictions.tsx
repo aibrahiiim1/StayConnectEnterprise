@@ -128,12 +128,6 @@ export function ActiveRestrictions({
 
       <ErrorBanner err={err} />
 
-      <Callout tone="neutral" title="What this list is">
-        Devices currently being asked to wait after too many incorrect sign-in details. A device disappears from
-        this list on its own when its wait ends. The room shown is the last room that device{" "}
-        <strong>typed</strong> — it is not a statement about who is using it or where they are staying.
-      </Callout>
-
       <Card className={cn("overflow-hidden", refreshing && rows !== null && refreshingClass)}>
         {rows === null ? (
           <SkeletonRows rows={4} cols={6} />

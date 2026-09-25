@@ -36,6 +36,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { PageHeader, PageShell } from "@/components/ui/page";
+import { HelpList, HelpSection } from "@/components/help";
 import { KeyValueGrid, Timeline } from "@/components/ui/data";
 import { Skeleton, SkeletonRows } from "@/components/ui/misc";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
@@ -143,7 +144,26 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
         icon={<ClipboardCheck />}
         eyebrow="Charges"
         title="Manual review"
-        description="Decide what happened to a room charge whose outcome is unknown. Every decision is an audited statement about real money."
+        description="Decide what happened to a room charge whose outcome is unknown."
+        help={
+          <>
+            <HelpSection title="What this queue is">
+              <p>
+                Room charges whose outcome could not be determined, or that someone escalated. Open one to see what
+                it was attached to, every attempt to post it, and what has been decided.
+              </p>
+            </HelpSection>
+            <HelpSection title="Recording a decision">
+              <HelpList
+                items={[
+                  <>Every decision is an audited statement about real money, and is confirmed with your password.</>,
+                  <>Only the decisions a posting can still take are offered. A terminal decision is recorded once and never revised.</>,
+                  <>Where evidence is needed, record a <strong>reference</strong> to the artefact (for example &ldquo;PMS folio screen, 14:22&rdquo;), never its contents — it goes into an immutable audit record.</>,
+                ]}
+              />
+            </HelpSection>
+          </>
+        }
       />
 
       {!canAct && rows && <ReadOnlyNotice>Your role can see the review queue but not record decisions.</ReadOnlyNotice>}
@@ -377,7 +397,7 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
                           <Field
                             label="Reference to it"
                             htmlFor="review-ev-ref"
-                            hint="Record a REFERENCE to the artefact, never its contents. This goes into an immutable audit record."
+                            hint="A reference to the artefact, never its contents. It goes into an immutable audit record."
                           >
                             <Input
                               id="review-ev-ref"

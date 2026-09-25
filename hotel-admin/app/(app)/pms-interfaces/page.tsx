@@ -36,6 +36,7 @@ import {
 import { ConnectionCard, ProviderTile, providerLabel } from "./connection-card";
 import { ConnectionSheet, type SheetTab } from "./connection-sheet";
 import { AddConnectionWizard } from "./add-connection-wizard";
+import { HelpList, HelpSection } from "@/components/help";
 import { ChevronDown, ChevronRight, Hotel, Plus, RefreshCw } from "lucide-react";
 
 type Filter = "all" | "attention" | "working";
@@ -148,7 +149,39 @@ export default function PMSInterfacesPage() {
         icon={<Hotel />}
         eyebrow="Property management system"
         title="PMS connection"
-        description="The links to the hotel's property management systems. They let a guest get online with their room number and name, and they are where the appliance's copy of the guest list comes from."
+        description="Links to the hotel's property management systems."
+        help={
+          <>
+            <HelpSection title="What a PMS connection does">
+              <p>
+                The links to the hotel&rsquo;s property management systems. They let a guest get online with their
+                room number and name, and they are where the appliance&rsquo;s copy of the guest list comes from.
+              </p>
+            </HelpSection>
+            <HelpSection title="Reading this page">
+              <HelpList
+                items={[
+                  <><strong>Room sign-in</strong> says whether guests can sign in with a room number right now, per guest network where the routing is known.</>,
+                  <><strong>Guests in house</strong> is the guest list mirrored from the PMS.</>,
+                  <>Each card shows one connection: which system, whether it is on, which check room sign-in depends on is failing, which Wi-Fi networks use it and what configuration is live. Open a card for details.</>,
+                  <>Connections that were started but never configured, or retired, are kept apart under <strong>Inactive / not configured</strong> so a half-finished setup is never read as a PMS link that is down.</>,
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="Advanced diagnostics">
+              <p>
+                The links at the bottom are for investigating the PMS integration. Normal operation needs none of
+                them — the cards already say whether guests can sign in and whether anything needs attention.
+              </p>
+              <HelpList
+                items={[
+                  <><strong>Roster reconciliation</strong> — how the guest list is kept identical to the hotel&rsquo;s: what the last comparison found, why a comparison was refused, and every run that has happened.</>,
+                  <><strong>Unresolved departures</strong> — individual PMS messages that could not be matched to a stay, with the evidence each one is waiting for.</>,
+                ]}
+              />
+            </HelpSection>
+          </>
+        }
         actions={
           <>
             <Button variant="secondary" size="sm" onClick={() => void load()}>
@@ -336,10 +369,7 @@ function AdvancedDiagnostics({ reviewEvents }: { reviewEvents: number }) {
       <CardBody className="space-y-3">
         <div>
           <h2 className="text-sm font-semibold">Advanced diagnostics</h2>
-          <p className="text-sm text-muted-foreground">
-            For investigating the PMS integration. Normal operation needs none of these — the cards above already
-            say whether guests can sign in and whether anything needs attention.
-          </p>
+          <p className="text-sm text-muted-foreground">For investigating the PMS integration.</p>
         </div>
         {reviewEvents > 0 && (
           <Callout tone="warning" title="Reconciliation needs investigation">
@@ -353,18 +383,13 @@ function AdvancedDiagnostics({ reviewEvents }: { reviewEvents: number }) {
             <Link href="/roster-reconciliation" className="text-sm font-medium underline underline-offset-2">
               Roster reconciliation
             </Link>
-            <p className="text-xs text-muted-foreground">
-              How the guest list is kept identical to the hotel&rsquo;s: what the last comparison found, why a
-              comparison was refused, and every run that has happened.
-            </p>
+            <p className="text-xs text-muted-foreground">How the guest list is kept identical to the hotel&rsquo;s.</p>
           </li>
           <li>
             <Link href="/pms-reconciliation" className="text-sm font-medium underline underline-offset-2">
               Unresolved departures
             </Link>
-            <p className="text-xs text-muted-foreground">
-              Individual PMS messages that could not be matched to a stay, with the evidence each one is waiting for.
-            </p>
+            <p className="text-xs text-muted-foreground">PMS messages that could not be matched to a stay.</p>
           </li>
         </ul>
       </CardBody>

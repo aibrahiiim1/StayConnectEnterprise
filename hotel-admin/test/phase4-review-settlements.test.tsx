@@ -77,7 +77,7 @@ describe("manual review", () => {
     route({ "/financial-review/queue": QUEUE, "/financial-review/actions": ACTIONS,
       "/financial-review/postings/p1": DETAIL });
     render(<ManualReviewView />);
-    await userEvent.click(await screen.findByRole("button", { name: /review/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /^review$/i }));
 
     const select = await screen.findByLabelText(/what did you establish/i);
     const offered = Array.from(select.querySelectorAll("option")).map((o) => o.getAttribute("value"));
@@ -94,7 +94,7 @@ describe("manual review", () => {
     route({ "/financial-review/queue": QUEUE, "/financial-review/actions": ACTIONS,
       "/financial-review/postings/p1": DETAIL });
     render(<ManualReviewView />);
-    await userEvent.click(await screen.findByRole("button", { name: /review/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /^review$/i }));
     expect(await screen.findByText(/nobody knows whether the folio was charged/i)).toBeInTheDocument();
     expect(screen.getByText("protel-fias (ACTIVE)")).toBeInTheDocument();
     expect(screen.getByText(/programmatic pms reversal is capability=false/i)).toBeInTheDocument();
@@ -106,7 +106,7 @@ describe("manual review", () => {
     let sent: any = null;
     post.mockImplementation(async (_p: string, body: any) => { sent = body; return {}; });
     render(<ManualReviewView />);
-    await userEvent.click(await screen.findByRole("button", { name: /review/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /^review$/i }));
     await userEvent.selectOptions(await screen.findByLabelText(/what did you establish/i), "CONFIRM_POSTED");
     await userEvent.type(screen.getByLabelText(/^why$/i), "the folio shows the charge");
     await userEvent.selectOptions(screen.getByLabelText(/evidence source/i), "PMS_SCREEN");
@@ -126,7 +126,7 @@ describe("manual review", () => {
     route({ "/financial-review/queue": QUEUE, "/financial-review/actions": ACTIONS,
       "/financial-review/postings/p1": DETAIL });
     render(<ManualReviewView canAct={false} />);
-    await userEvent.click(await screen.findByRole("button", { name: /review/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /^review$/i }));
     // The evidence is visible; the decision form, its password field and its button are not offered at all.
     expect(await screen.findByText("protel-fias (ACTIVE)")).toBeInTheDocument();
     expect(screen.queryByLabelText(/what did you establish/i)).not.toBeInTheDocument();
@@ -139,7 +139,7 @@ describe("manual review", () => {
     route({ "/financial-review/queue": QUEUE, "/financial-review/actions": ACTIONS,
       "/financial-review/postings/p1": DETAIL });
     render(<ManualReviewView />);
-    await userEvent.click(await screen.findByRole("button", { name: /review/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /^review$/i }));
     await screen.findByLabelText(/what did you establish/i);
     for (const el of [...screen.getAllByRole("button"), ...screen.getAllByRole("combobox"),
       ...screen.getAllByRole("textbox")]) {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 // ROSTER RECONCILIATION — that the screen offers no STATE-CHANGING action, and says the right thing about
 // the exception.
@@ -136,7 +136,9 @@ describe("roster reconciliation offers no state-changing action", () => {
   it("says the page needs no manual action, and what it is for", async () => {
     await renderPage();
     await waitFor(() => expect(screen.getAllByText(/happens on its own/i).length).toBeGreaterThan(0));
-    expect(screen.getByText(/nothing on this page to press/i)).toBeTruthy();
+    // The explanation of what the page is for lives behind the page's lightbulb.
+    fireEvent.click(screen.getByRole("button", { name: "Tips: Roster reconciliation" }));
+    expect(await screen.findByText(/nothing on this page to press/i)).toBeTruthy();
   });
 
 });

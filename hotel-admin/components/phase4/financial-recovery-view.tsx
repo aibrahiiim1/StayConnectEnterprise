@@ -34,6 +34,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { PageHeader, PageShell } from "@/components/ui/page";
+import { HelpList, HelpSection } from "@/components/help";
 import { MonoId, Skeleton } from "@/components/ui/misc";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { formatDate } from "@/lib/utils";
@@ -168,6 +169,27 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
       eyebrow="Charges"
       title="Recovery"
       description="After a database restore, reconcile the money that was in flight before charging resumes. Nothing here re-sends anything."
+      help={
+        <>
+          <HelpSection title="What recovery is">
+            <p>
+              After a database restore, money movement for this site is held until the money that was in flight
+              before the restore has been reconciled. Nothing is replayed: after a restore, a correct retry is how a
+              guest gets charged twice. Guest internet access is unaffected throughout.
+            </p>
+          </HelpSection>
+          <HelpSection title="How to work through it">
+            <HelpList
+              items={[
+                <>For each held item, record what you established and how. Recording a decision never re-sends anything.</>,
+                <>Every reconciliation decision is an audited statement about real money, so each one is confirmed with your password.</>,
+                <><strong>Never transmitted</strong> charges were held before anything was sent to the PMS, so there is no attempt to review on Manual review. Once one is reconciled as &ldquo;It never completed&rdquo;, exactly one further attempt can be authorized; authorizing sends nothing immediately.</>,
+                <>When no held items remain, releasing recovery resumes money movement for this site. The reason you give is recorded in the audit log with your name.</>,
+              ]}
+            />
+          </HelpSection>
+        </>
+      }
     />
   );
 
@@ -244,7 +266,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
             <Field
               label="Your password"
               htmlFor="recovery-password"
-              hint="Every reconciliation decision is an audited statement about real money, so each one is confirmed with your password."
+              hint="Each decision is confirmed with your password."
             >
               <Input
                 id="recovery-password"

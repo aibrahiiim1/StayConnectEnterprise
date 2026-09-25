@@ -24,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { HelpSection, HelpTip } from "@/components/help";
 import { ConfirmDialog, DialogForm } from "@/components/ui/dialog";
 import { KeyValueGrid, MetricStrip, Timeline } from "@/components/ui/data";
 import { Skeleton } from "@/components/ui/misc";
@@ -680,7 +681,22 @@ function ConnectionRecovery({ id, writable }: { id: string; writable: boolean })
   return (
     <SheetSection
       title="Connection recovery"
-      description="The link reconnects by itself and retries for as long as it takes. These bound how fast it retries and how long a problem may last before it is reported. Most properties never change them."
+      actions={
+        <HelpTip title="Connection recovery">
+          <HelpSection>
+            <p>
+              The link reconnects by itself and retries for as long as it takes. These bound how fast it retries and
+              how long a problem may last before it is reported. Most properties never change them.
+            </p>
+          </HelpSection>
+          {CONN_FIELDS.map((f) => (
+            <HelpSection key={f.key} title={`${f.label} (${f.unit})`}>
+              <p>{f.what}</p>
+              <p><strong>Change it when:</strong> {f.when}</p>
+            </HelpSection>
+          ))}
+        </HelpTip>
+      }
     >
       <ErrorBanner err={pmsErrorText(err)} />
       <p className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
@@ -690,7 +706,7 @@ function ConnectionRecovery({ id, writable }: { id: string; writable: boolean })
       <div className="grid gap-3 lg:grid-cols-2">
         {CONN_FIELDS.map((f) => (
           <div key={f.key} className="space-y-2 rounded-md border border-border p-3">
-            <Field label={`${f.label} (${f.unit})`} hint={f.what}>
+            <Field label={`${f.label} (${f.unit})`}>
               <Input
                 type="number"
                 className="w-40"
@@ -703,7 +719,6 @@ function ConnectionRecovery({ id, writable }: { id: string; writable: boolean })
               <strong>Currently:</strong> {settings[f.key]} {f.unit}
               {settings.is_default ? " (nobody has changed this one)" : ""}
             </p>
-            <p className="text-xs text-muted-foreground"><strong>Change it when:</strong> {f.when}</p>
           </div>
         ))}
       </div>

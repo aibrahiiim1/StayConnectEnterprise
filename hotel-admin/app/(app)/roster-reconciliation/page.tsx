@@ -25,6 +25,7 @@ import { ShieldCheck, Building2, AlertTriangle, BookMarked, ListChecks, History 
 import { api, RosterReconciliationState, ReconcileRunRecord } from "@/lib/api";
 import { cn, formatDate } from "@/lib/utils";
 import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
+import { HelpList, HelpSection, HelpTip } from "@/components/help";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -95,30 +96,40 @@ export default function RosterReconciliationPage() {
         eyebrow="Property management system"
         title="Roster reconciliation"
         icon={<ListChecks />}
-        description="Keeping this appliance's guest list identical to the hotel's — automatically. Read-only: there is nothing here to press."
+        description="Keeps this appliance's guest list identical to the hotel's, automatically."
+        help={
+          <>
+            <HelpSection title="What reconciliation does">
+              <p>
+                The hotel&rsquo;s PMS sends this appliance a full list of who is in the building, many times a day.
+                Reconciliation compares that list with the guest list this appliance is using and closes any stay
+                the hotel no longer has — which is how somebody who checked out stops being able to sign in.
+              </p>
+            </HelpSection>
+            <HelpSection title="This happens on its own">
+              <p>
+                There is nothing on this page to press, no queue to work through and no routine task. Everything
+                here is so you can see what it did and why. The connection&rsquo;s recovery numbers are changed on
+                PMS connection, under Advanced configuration.
+              </p>
+              <p>
+                Guests are never affected while it waits: if the PMS list is incomplete or the link is down, the
+                appliance keeps using the last good list rather than guessing, and says so under Needs attention.
+              </p>
+            </HelpSection>
+            <HelpSection title="Reading the figures">
+              <HelpList
+                items={[
+                  <><strong>Rooms named by this sweep</strong> — how much of the property the PMS roster covered. An incomplete sweep makes the run refuse.</>,
+                  <><strong>Held back — PMS spoke since</strong> — stays absent from the roster that are not closed, because the PMS has said something about them after the snapshot. Arrivals and changes after the snapshot are never closed.</>,
+                  <><strong>Every run, including the refusals</strong> — a run is recorded each time the PMS publishes a complete guest list.</>,
+                ]}
+              />
+            </HelpSection>
+          </>
+        }
         actions={<LiveStatus updatedAt={updatedAt} refreshing={busy} error={!!err && state !== null} onRefresh={() => void load()} />}
       />
-
-      {/* WHAT THE PAGE IS FOR, in the words an operator would use. Written because the previous heading
-          described the MECHANISM to somebody who already understood it. */}
-      <Card>
-        <CardBody className="space-y-2 text-sm">
-          <p>
-            The hotel&rsquo;s PMS sends this appliance a full list of who is in the building, many times a
-            day. Reconciliation compares that list with the guest list this appliance is using and closes any
-            stay the hotel no longer has — which is how somebody who checked out stops being able to sign in.
-          </p>
-          <p>
-            <strong>This happens on its own.</strong> There is nothing on this page to press, no queue to work
-            through and no routine task. Everything below is here so you can see what it did and why, and
-            change the few numbers a hotel may reasonably want changed.
-          </p>
-          <p className="text-muted-foreground">
-            Guests are never affected while it waits: if the PMS list is incomplete or the link is down, the
-            appliance keeps using the last good list rather than guessing, and says so under Needs attention.
-          </p>
-        </CardBody>
-      </Card>
 
       <ErrorBanner err={err} />
 
@@ -170,6 +181,28 @@ export default function RosterReconciliationPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <BookMarked className="size-4 text-muted-foreground" aria-hidden /> Historical exception — for information
+              <HelpTip title="Historical exception">
+                <HelpSection title="What this is">
+                  <p>
+                    When this appliance was first connected it joined a hotel that was already running, and its
+                    first roster sweeps did not yet cover every room. A guest checked out during that window, so
+                    the PMS announced a departure for a stay this appliance had never been told about.
+                  </p>
+                  <p>
+                    Nobody is affected. No guest is online because of it, no stay is held open by it, and it will
+                    not grow — the connector has covered the whole property on every sweep since.
+                  </p>
+                </HelpSection>
+                <HelpSection title="What to do about it">
+                  <p>
+                    It stays on this list because closing it locally would mean inventing the arrival that was
+                    never received, and this system does not invent guest records. There are exactly two ways it
+                    ends: ask the hotel&rsquo;s PMS whether that reservation existed, or decide to leave it as a
+                    known gap from the appliance&rsquo;s first days. Either is a legitimate answer; doing nothing
+                    is also safe.
+                  </p>
+                </HelpSection>
+              </HelpTip>
             </CardTitle>
           </CardHeader>
           <CardBody className="space-y-3">
@@ -187,25 +220,6 @@ export default function RosterReconciliationPage() {
                 <p className="mt-2 text-sm">{b.detail}</p>
               </div>
             ))}
-            <div className="rounded-md border border-dashed border-border-strong p-3 text-sm text-muted-foreground">
-              <p className="font-medium text-foreground">What this is, and what to do about it</p>
-              <p className="mt-1">
-                When this appliance was first connected it joined a hotel that was already running, and its
-                first roster sweeps did not yet cover every room. A guest checked out during that window, so
-                the PMS announced a departure for a stay this appliance had never been told about.
-              </p>
-              <p className="mt-2">
-                Nobody is affected. No guest is online because of it, no stay is held open by it, and it will
-                not grow — the connector has covered the whole property on every sweep since.
-              </p>
-              <p className="mt-2">
-                It stays on this list because closing it locally would mean inventing the arrival that was
-                never received, and this system does not invent guest records. There are exactly two ways it
-                ends: ask the hotel&rsquo;s PMS whether that reservation existed, or decide to leave it as a
-                known gap from the appliance&rsquo;s first days. Either is a legitimate answer; doing nothing
-                is also safe.
-              </p>
-            </div>
           </CardBody>
         </Card>
       )}

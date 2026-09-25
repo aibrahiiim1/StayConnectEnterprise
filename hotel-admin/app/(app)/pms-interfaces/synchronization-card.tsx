@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Select, Field } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { HelpSection, HelpTip } from "@/components/help";
 import { Separator } from "@/components/ui/misc";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { RefreshCw } from "lucide-react";
@@ -138,11 +139,21 @@ export function SynchronizationCard({
     <Card>
       <CardHeader>
         <div>
-          <CardTitle>Guest list refresh</CardTitle>
-          <p className="mt-0.5 max-w-2xl text-xs text-muted-foreground">
-            The first successful connection loads the full guest list automatically. Refresh it again if the list
-            here looks out of date — after PMS maintenance, for example.
-          </p>
+          <div className="flex items-center gap-2">
+            <CardTitle>Guest list refresh</CardTitle>
+            <HelpTip title="Guest list refresh">
+              <HelpSection>
+                <p>
+                  The first successful connection loads the full guest list automatically. Refresh it again if the
+                  list here looks out of date — after PMS maintenance, for example.
+                </p>
+                <p>
+                  A refresh asks the PMS to send every in-house guest again. The current list stays in use until the
+                  new one is complete, so nobody online is interrupted.
+                </p>
+              </HelpSection>
+            </HelpTip>
+          </div>
         </div>
         <span aria-live="polite">
           {active ? (

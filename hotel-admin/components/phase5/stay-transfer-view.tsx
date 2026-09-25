@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { HelpList, HelpSection } from "@/components/help";
 import { DialogForm } from "@/components/ui/dialog";
 import { MetricStrip } from "@/components/ui/data";
 import { SkeletonRows } from "@/components/ui/misc";
@@ -185,7 +186,36 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
         eyebrow="Property management system"
         title="Cross-PMS transfer"
         icon={<ArrowLeftRight />}
-        description="Move a guest's live access from a stay on one PMS to a stay on another — for example, a guest moved to the sister property. Not for normal room moves: a guest changing rooms on the same PMS keeps their access automatically."
+        description="Move a guest's live access from a stay on one PMS to a stay on another."
+        help={
+          <>
+            <HelpSection title="When to use a transfer">
+              <p>
+                Move a guest&rsquo;s live access from a stay on one PMS to a stay on another — for example, a guest
+                moved to the sister property.
+              </p>
+              <p>
+                It is <strong>not</strong> for normal room moves: a guest changing rooms on the same PMS keeps their
+                access automatically.
+              </p>
+            </HelpSection>
+            <HelpSection title="How it works">
+              <HelpList
+                items={[
+                  <>Enter the stay reference on the PMS the guest is leaving and the one on the PMS they are moving to, then preview.</>,
+                  <>The preview shows the devices and live sessions that will move. Nothing moves until you confirm with a reason and your password.</>,
+                  <>The guest stays connected: no sign-out, no signing in again.</>,
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="Review signals">
+              <p>
+                Ambiguous authentication outcomes from the last 7 days. They are not transfers and are never
+                evidence that a guest moved.
+              </p>
+            </HelpSection>
+          </>
+        }
       />
 
       {rolesKnown && !canAct && <ReadOnlyNotice />}

@@ -35,11 +35,12 @@ import {
 } from "@/lib/api";
 import { cn, formatDate } from "@/lib/utils";
 import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
-import { Card, CardBody } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ErrorBanner, Callout } from "@/components/ui/error-banner";
+import { ErrorBanner } from "@/components/ui/error-banner";
+import { HelpSection } from "@/components/help";
 import { SkeletonRows } from "@/components/ui/misc";
 import { FilterChips } from "@/components/ui/data";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -152,7 +153,45 @@ export default function PMSReconciliationPage() {
         eyebrow="Property management system"
         title="Unresolved departures"
         icon={<ClipboardCheck />}
-        description="Departures the appliance received but could not match to exactly one stay. Read-only: the PMS resolves these, not this screen."
+        description="Departures the appliance received but could not match to exactly one stay."
+        help={
+          <>
+            <HelpSection title="How a case on this list is resolved">
+              <p>
+                <strong>By the PMS, not from here.</strong> This screen is read-only: there is no action on it. A
+                departure the appliance could not place is answered when the PMS sends one it can — that is why
+                there is no button on this page. The property&apos;s lever is the PMS record itself.
+              </p>
+              <p>
+                This screen does not close a stay because a planned departure date has passed, does not treat two
+                stays in one room as a duplicate, and never applies an old room-only departure to whoever is in that
+                room today. A case it cannot answer stays on this list and says which evidence is missing.
+              </p>
+            </HelpSection>
+            <HelpSection title="Recorded copies">
+              <p>
+                One departure is restaged every time the PMS connection is re-established, so a single departure
+                can have several recorded copies.
+              </p>
+            </HelpSection>
+            <HelpSection title="Rooms with several stays">
+              <p>
+                These rooms currently hold more than one in-house stay. That is legitimate — several occupants,
+                connecting rooms, a group booking. They are listed because it is the reason a departure that names
+                only a room cannot be matched to one guest.
+              </p>
+            </HelpSection>
+            <HelpSection title="Past their departure date">
+              <p>
+                A planned departure date is not a checkout. These stays are still in house in this
+                appliance&apos;s guest list and their planned departure date has passed. Nothing is closed on that
+                basis — guests extend, and a PMS can process a departure late. The column that decides what it
+                means is the one beside it: whether the stay still appears on the PMS&apos;s own latest complete
+                in-house list.
+              </p>
+            </HelpSection>
+          </>
+        }
         actions={
           <LiveStatus updatedAt={updatedAt} refreshing={refreshing} error={!!err && cases !== null} onRefresh={() => void load()} />
         }
@@ -180,17 +219,6 @@ export default function PMSReconciliationPage() {
           hint="Shared occupancy is ordinary — it is what makes a room-only departure undecidable."
         />
       </div>
-
-      <Callout tone="neutral" title="How a case on this list is resolved">
-        <strong>By the PMS, not from here.</strong> A departure the appliance could not place is answered when
-        the PMS sends one it can — that is why there is no button on this page. The property&apos;s lever is
-        the PMS record itself.
-        <br />
-        <br />
-        This screen does not close a stay because a planned departure date has passed, does not treat two
-        stays in one room as a duplicate, and never applies an old room-only departure to whoever is in that
-        room today. A case it cannot answer stays on this list and says which evidence is missing.
-      </Callout>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
         <TabsList aria-label="Which view">
@@ -271,14 +299,6 @@ export default function PMSReconciliationPage() {
 
       <TabsContent value="rooms">
         <Card className="overflow-hidden">
-          <CardBody className="pb-0">
-            {/* TITLED AS A FACT, NOT A FAULT. */}
-            <Callout tone="neutral" title="Sharing a room is ordinary">
-              These rooms currently hold more than one in-house stay. That is legitimate — several occupants,
-              connecting rooms, a group booking. It is listed here because it is the reason a departure that
-              names only a room cannot be matched to one guest.
-            </Callout>
-          </CardBody>
           {rooms.length === 0 ? (
             <EmptyState icon={<Users />} title="Every occupied room holds exactly one stay" />
           ) : (
@@ -312,15 +332,6 @@ export default function PMSReconciliationPage() {
 
       <TabsContent value="past">
         <Card className="overflow-hidden">
-          <CardBody className="pb-0">
-            {/* THE SENTENCE THAT KEEPS THIS TAB HONEST. */}
-            <Callout tone="neutral" title="A planned departure date is not a checkout">
-              These stays are still in house in this appliance&apos;s guest list and their planned departure date has passed.
-              Nothing here is closed on that basis — guests extend, and a PMS can process a departure late.
-              The column that decides what it means is the one beside it: whether the stay still appears on
-              the PMS&apos;s own latest complete in-house list.
-            </Callout>
-          </CardBody>
           {stays.length === 0 ? (
             <EmptyState icon={<DoorOpen />} title="No in-house stay is past its planned departure" />
           ) : (

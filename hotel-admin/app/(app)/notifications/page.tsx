@@ -13,6 +13,7 @@
 import { useEffect, useState } from "react";
 import { api, ListResp, Whoami, NotificationProvider } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
+import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -162,7 +163,28 @@ export default function NotificationsPage() {
         icon={<MessageSquare />}
         eyebrow="Guest portal"
         title="Email & SMS"
-        description="How the appliance delivers one-time sign-in codes to guests. Without a working sender, any sign-in method that needs a code cannot be used."
+        description="Without a working sender, sign-in methods that need a code cannot be used."
+        help={
+          <>
+            <HelpSection title="What a sender does">
+              <p>
+                How the appliance delivers one-time sign-in codes to guests, by email or text message. Without a
+                working sender, any sign-in method that needs a code cannot be used. Room numbers, vouchers and
+                accounts do not need one.
+              </p>
+            </HelpSection>
+            <HelpSection title="Setting one up">
+              <HelpList
+                items={[
+                  <>Credentials come from the sending service&apos;s own console.</>,
+                  <>The key is stored write-only and is never shown again. When editing, leave it blank to keep the one already stored.</>,
+                  <>The channel and service of a sender cannot be changed; remove it and add it again instead.</>,
+                  <>Whether guests are offered email or SMS codes is switched on in <strong>Sign-in methods</strong>.</>,
+                ]}
+              />
+            </HelpSection>
+          </>
+        }
         actions={writable && <Button onClick={openNew}><Plus /> Add sender</Button>}
       />
 
