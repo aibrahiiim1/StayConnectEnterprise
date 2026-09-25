@@ -12,10 +12,21 @@
 // would promise time that is about to stop being usable.
 //
 // No guest identity appears here -- no name, no room, no stay. An operator looking at time budgets does not
-// need to know whose they are, and the screens that do need that already have their own authorization.
+// need to know whose they are, and the screens that do need that already have their own authorization. The
+// page's own copy obeys the same rule (a test reads the whole page for those words), so the wording below
+// talks about "packages" and "devices" only.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Hourglass, Timer, Wifi } from "lucide-react";
 import { api } from "@/lib/api";
+import { formatDate } from "@/lib/utils";
+import { PageHeader, PageShell, StatCard } from "@/components/ui/page";
+import { Card } from "@/components/ui/card";
+import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorBanner } from "@/components/ui/error-banner";
+import { Meter, SkeletonRows } from "@/components/ui/misc";
 
 type Row = {
   entitlement_id: string;
@@ -59,64 +70,93 @@ export function AggregateTimeView() {
   }, []);
   useEffect(load, [load]);
 
-  if (error) {
-    return (
-      <div role="alert" className="rounded-md border border-destructive/25 bg-destructive-subtle p-3 text-sm text-destructive-subtle-foreground">
-        {error}
-      </div>
-    );
-  }
-  if (!rows) return <div className="text-sm text-muted-foreground">Loading…</div>;
+  const counts = useMemo(() => {
+    const list = rows ?? [];
+    const active = list.filter((r) => r.status !== "TERMINATED");
+    return {
+      active: active.length,
+      devices: active.reduce((n, r) => n + (r.live_devices ?? 0), 0),
+      ended: list.length - active.length,
+    };
+  }, [rows]);
 
   return (
-    <div className="space-y-6">
-      <header className="space-y-1">
-        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Online-time budgets</h1>
-        <p className="text-sm text-muted-foreground">
-          These packages are sold as an amount of connected time rather than a period. The time left counts
-          down only while a device is actually connected — but the end date arrives either way, and any time
-          left at that point is lost.
-        </p>
-      </header>
+    <PageShell>
+      <PageHeader
+        eyebrow="Guests"
+        title="Online-time budgets"
+        icon={<Hourglass />}
+        description="These packages are sold as an amount of connected time rather than a period. The time left counts down only while a device is actually connected — but the end date arrives either way, and any time left at that point is lost."
+      />
 
-      {rows.length === 0 ? (
-        <p className="text-sm text-muted-foreground" data-testid="empty">
-          No package on this property uses an online-time budget.
-        </p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="text-left text-xs uppercase tracking-widest text-muted">
-              <tr>
-                <th className="py-2">Time left</th>
-                <th className="py-2">Of budget</th>
-                <th className="py-2">Ends on</th>
-                <th className="py-2">Devices</th>
-                <th className="py-2">State</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.entitlement_id} className="border-t border-border">
-                  <td className="py-2 font-medium" data-testid="remaining">
-                    {r.status === "TERMINATED" ? "—" : humanSeconds(r.remaining_seconds)}
-                  </td>
-                  <td className="py-2 text-muted">{humanSeconds(r.budget_seconds)}</td>
-                  <td className="py-2 text-muted" data-testid="expiry">
-                    {r.hard_expiry ? new Date(r.hard_expiry).toLocaleString() : "No end date"}
-                  </td>
-                  <td className="py-2 text-muted">{r.live_devices}</td>
-                  <td className="py-2 text-muted">
-                    {r.status === "TERMINATED"
-                      ? (r.terminal_cause && CAUSE_TEXT[r.terminal_cause]) || "Ended"
-                      : "Active"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <ErrorBanner err={error} />
+
+      {rows !== null && rows.length > 0 && (
+        <div className="grid gap-4 sm:grid-cols-3">
+          <StatCard label="Budgets in use" value={counts.active.toLocaleString()} icon={<Timer />} tone="primary" />
+          <StatCard label="Devices connected on them" value={counts.devices.toLocaleString()} icon={<Wifi />} />
+          <StatCard label="Ended" value={counts.ended.toLocaleString()} hint="Time used up, end date reached, or validity over" />
         </div>
       )}
-    </div>
+
+      <Card className="overflow-hidden">
+        {rows === null ? (
+          error ? null : <SkeletonRows rows={4} cols={5} />
+        ) : rows.length === 0 ? (
+          <div data-testid="empty">
+            <EmptyState
+              icon={<Hourglass />}
+              title="No package on this property uses an online-time budget"
+              hint="Packages measured in connected time appear here while they are in use."
+            />
+          </div>
+        ) : (
+          <Table>
+            <THead>
+              <TR>
+                <TH>Time left</TH>
+                <TH className="hidden sm:table-cell">Of budget</TH>
+                <TH>Ends on</TH>
+                <TH className="hidden sm:table-cell text-end">Devices</TH>
+                <TH>State</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {rows.map((r) => {
+                const ended = r.status === "TERMINATED";
+                return (
+                  <TR key={r.entitlement_id}>
+                    <TD className="min-w-36">
+                      <div className="font-medium tabular" data-testid="remaining">
+                        {ended ? "—" : humanSeconds(r.remaining_seconds)}
+                      </div>
+                      {!ended && r.budget_seconds > 0 && (
+                        <Meter
+                          className="mt-1.5 max-w-40"
+                          value={r.consumed_seconds}
+                          max={r.budget_seconds}
+                        />
+                      )}
+                    </TD>
+                    <TD className="hidden text-sm text-muted-foreground sm:table-cell">{humanSeconds(r.budget_seconds)}</TD>
+                    <TD className="whitespace-nowrap text-sm text-muted-foreground" data-testid="expiry">
+                      {r.hard_expiry ? formatDate(r.hard_expiry) : "No end date"}
+                    </TD>
+                    <TD className="hidden text-end tabular text-sm text-muted-foreground sm:table-cell">{r.live_devices}</TD>
+                    <TD>
+                      {ended ? (
+                        <Badge tone="neutral">{(r.terminal_cause && CAUSE_TEXT[r.terminal_cause]) || "Ended"}</Badge>
+                      ) : (
+                        <Badge tone="ok" dot>Active</Badge>
+                      )}
+                    </TD>
+                  </TR>
+                );
+              })}
+            </TBody>
+          </Table>
+        )}
+      </Card>
+    </PageShell>
   );
 }

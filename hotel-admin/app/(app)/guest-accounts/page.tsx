@@ -3,92 +3,48 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   api, ApiError, GuestAccount, GuestAccountCreateResp,
-  GuestAccountPasswordResp, ListResp,
+  GuestAccountPasswordResp, ListResp, Whoami,
 } from "@/lib/api";
+import { canWrite } from "@/lib/roles";
 import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
 import { Card, CardBody } from "@/components/ui/card";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
+import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Field } from "@/components/ui/input";
+import { Input, Field } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody,
   ConfirmDialog,
 } from "@/components/ui/dialog";
+import { SearchInput } from "@/components/ui/data";
 import { Switch, SkeletonRows } from "@/components/ui/misc";
-import { Plus, KeyRound, Copy, Check, Eye, EyeOff, Pencil, Power, Users } from "lucide-react";
+import { OneTimeReveal, ReadOnlyNotice } from "@/components/ui/patterns";
+import { useToast } from "@/components/ui/toast";
+import { Plus, KeyRound, Eye, EyeOff, Pencil, Power, Users } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
 
 function weakPassword(pw: string): boolean {
   return pw.length > 0 && pw.length < 8;
 }
 
-/**
- * The one-time password reveal, shown once after create or reset. The password is NEVER retrievable afterwards.
- *
- * IT IS A MODAL NOW, and for this screen that is a correctness change rather than a presentation one. It used to
- * be a card inserted above the table: on a list of accounts the operator scrolled to find, creating an account
- * put the only copy of its password off-screen, and the next click anywhere could scroll it out of reach for good.
- * A password shown exactly once must be impossible to miss.
- */
-function PasswordReveal({ username, password, onClose }: { username: string; password: string; onClose: () => void }) {
-  const [copied, setCopied] = useState(false);
-  const [show, setShow] = useState(true);
-  return (
-    <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent size="sm">
-        <DialogHeader>
-          <DialogTitle>Password for {username}</DialogTitle>
-          <DialogDescription>
-            Write it down or hand it over now. It is shown this once and cannot be looked up again.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogBody className="space-y-3">
-          <div className="flex items-center gap-2">
-            <code className="flex-1 select-all rounded-md border border-border bg-surface px-3 py-2 font-mono text-lg">
-              {show ? password : "•".repeat(password.length)}
-            </code>
-            <Button
-              size="icon"
-              variant="ghost"
-              aria-label={show ? "Hide the password" : "Show the password"}
-              onClick={() => setShow((s) => !s)}
-            >
-              {show ? <EyeOff /> : <Eye />}
-            </Button>
-          </div>
-          <Button
-            variant="secondary"
-            className="w-full"
-            onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(password);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1500);
-              } catch { /* clipboard denied — the value is on screen */ }
-            }}
-          >
-            {copied ? <><Check /> Copied</> : <><Copy /> Copy password</>}
-          </Button>
-          <Callout tone="warning">
-            If this is lost, there is no way to recover it — you would set a new password instead.
-          </Callout>
-        </DialogBody>
-        <DialogFooter>
-          <Button onClick={onClose}>I have it</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
+// THE ONE-TIME PASSWORD REVEAL is the kit's OneTimeReveal, shown once after create or reset. The password is
+// NEVER retrievable afterwards.
+//
+// It is a modal, and for this screen that is a correctness property rather than a presentation one. It used to
+// be a card inserted above the table: on a list of accounts the operator scrolled to find, creating an account
+// put the only copy of its password off-screen, and the next click anywhere could scroll it out of reach for good.
+// A password shown exactly once must be impossible to miss.
 
 export default function GuestAccountsPage() {
+  const toast = useToast();
   const [rows, setRows] = useState<GuestAccount[] | null>(null);
   const [portalOn, setPortalOn] = useState<boolean>(false);
   const [err, setErr] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
+  // Errors of the open create / edit / password form, shown INSIDE that dialog: a failure reported on the page
+  // behind a modal is a failure nobody reads.
+  const [formErr, setFormErr] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [busy, setBusy] = useState(false);
   const [q, setQ] = useState("");
@@ -104,6 +60,16 @@ export default function GuestAccountsPage() {
   // load failed", so a failed load rendered the error banner AND "Loading…" underneath it forever -- the
   // screen contradicting itself.
   const [loadFailed, setLoadFailed] = useState(false);
+
+  // THE ROLE DECIDES WHICH CONTROLS EXIST. Every write on this screen is refused by edged to a role without
+  // write on guest-accounts (site_viewer, payments_operator); offering those roles an Add button, a switch and
+  // five row actions that all answer 403 was the "buttons shown to roles that cannot use them" the redesign
+  // handoff lists against this screen. Fails closed while the roles load.
+  const [roles, setRoles] = useState<string[] | null>(null);
+  useEffect(() => {
+    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
+  }, []);
+  const mayWrite = roles === null ? false : canWrite("guest-accounts", roles);
 
   // THERE IS NO AUTHORITY DIMENSION ANY MORE.
   //
@@ -146,17 +112,19 @@ export default function GuestAccountsPage() {
   }, [rows, q]);
 
   async function onTogglePortal() {
-    setErr(null); setMsg(null);
+    setErr(null);
     try {
       await api.post("/guest-accounts/portal", { enabled: !portalOn });
       setPortalOn((v) => !v);
-      setMsg(`Username & Password sign-in ${!portalOn ? "shown on" : "hidden from"} the captive portal.`);
+      toast.success(`Username & Password sign-in ${!portalOn ? "shown on" : "hidden from"} the captive portal.`);
     } catch (e: any) { setErr(e?.message ?? "Toggle failed"); }
   }
 
+  function openNew() { setFormErr(null); setShowNew(true); setEditing(null); setPwFor(null); }
+
   async function onCreate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setBusy(true); setErr(null); setMsg(null);
+    setBusy(true); setFormErr(null);
     const form = new FormData(e.currentTarget);
     const generate = form.get("generate") === "on";
     const password = (form.get("password") as string) || "";
@@ -174,18 +142,19 @@ export default function GuestAccountsPage() {
       (e.target as HTMLFormElement).reset();
       const shown = resp.generated_password ?? password;
       if (shown) setReveal({ username: resp.account.username, password: shown });
+      else toast.success(`Account "${resp.account.username}" created.`);
       load();
     } catch (e: any) {
-      if (e instanceof ApiError && e.code === "conflict") setErr("That username already exists.");
-      else if (e instanceof ApiError) setErr(e.body?.message ?? e.message);
-      else setErr(e?.message ?? "Create failed");
+      if (e instanceof ApiError && e.code === "conflict") setFormErr("That username already exists.");
+      else if (e instanceof ApiError) setFormErr(e.body?.message ?? e.message);
+      else setFormErr(e?.message ?? "Create failed");
     } finally { setBusy(false); }
   }
 
   async function onSaveEdit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!editing) return;
-    setBusy(true); setErr(null);
+    setBusy(true); setFormErr(null);
     const form = new FormData(e.currentTarget);
     try {
       await api.patch(`/guest-accounts/${editing.id}`, {
@@ -196,18 +165,18 @@ export default function GuestAccountsPage() {
         valid_until: (form.get("valid_until") as string) ? new Date(form.get("valid_until") as string).toISOString() : undefined,
       });
       setEditing(null);
-      setMsg("Account updated.");
+      toast.success("Account updated.");
       load();
     } catch (e: any) {
-      if (e instanceof ApiError && e.code === "conflict") setErr("That username already exists.");
-      else setErr(e?.message ?? "Update failed");
+      if (e instanceof ApiError && e.code === "conflict") setFormErr("That username already exists.");
+      else setFormErr(e?.message ?? "Update failed");
     } finally { setBusy(false); }
   }
 
   async function onSavePassword(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!pwFor) return;
-    setBusy(true); setErr(null);
+    setBusy(true); setFormErr(null);
     const form = new FormData(e.currentTarget);
     const generate = form.get("generate") === "on";
     const password = (form.get("password") as string) || "";
@@ -220,15 +189,22 @@ export default function GuestAccountsPage() {
       const uname = pwFor.username;
       setPwFor(null);
       if (shown) setReveal({ username: uname, password: shown });
-      setMsg(`Password updated for ${uname}.` + (resp.disconnected_sessions ? ` ${resp.disconnected_sessions} session(s) disconnected.` : ""));
+      toast.success(
+        `Password updated for ${uname}.`,
+        resp.disconnected_sessions ? `${resp.disconnected_sessions} session(s) disconnected.` : undefined,
+      );
       load();
     } catch (e: any) {
-      setErr(e instanceof ApiError ? (e.body?.message ?? e.message) : (e?.message ?? "Reset failed"));
+      setFormErr(e instanceof ApiError ? (e.body?.message ?? e.message) : (e?.message ?? "Reset failed"));
     } finally { setBusy(false); }
   }
 
   async function onToggle(a: GuestAccount) {
-    try { await api.patch(`/guest-accounts/${a.id}`, { enabled: !a.enabled }); load(); }
+    try {
+      await api.patch(`/guest-accounts/${a.id}`, { enabled: !a.enabled });
+      toast.success(a.enabled ? `"${a.username}" disabled.` : `"${a.username}" can sign in again.`);
+      load();
+    }
     catch (e: any) { setErr(e?.message ?? "Update failed"); }
   }
 
@@ -237,7 +213,7 @@ export default function GuestAccountsPage() {
     setBusy(true); setActionErr(null);
     try {
       const r = await api.post<{ disconnected_sessions: number }>(`/guest-accounts/${disconnecting.id}/disconnect`);
-      setMsg(`${r.disconnected_sessions} device${r.disconnected_sessions === 1 ? "" : "s"} disconnected.`);
+      toast.success(`${r.disconnected_sessions} device${r.disconnected_sessions === 1 ? "" : "s"} disconnected.`);
       setDisconnecting(null);
       load();
     } catch (e) { setActionErr(e); }
@@ -249,7 +225,7 @@ export default function GuestAccountsPage() {
     setBusy(true); setActionErr(null);
     try {
       await api.del(`/guest-accounts/${deleting.id}`);
-      setMsg(`The account "${deleting.username}" has been deleted.`);
+      toast.success(`The account "${deleting.username}" has been deleted.`);
       setDeleting(null);
       load();
     } catch (e) { setActionErr(e); }
@@ -273,20 +249,21 @@ export default function GuestAccountsPage() {
       <PageHeader
         eyebrow="Guests"
         title="Guest accounts"
-        description="A username and password a guest can sign in with, instead of a room number or a code. What each guest may then take is decided by package eligibility rules on the Internet packages screen, not by anything stored on the account."
+        icon={<KeyRound />}
+        description="A username and password a guest can sign in with, instead of a room number or a voucher. What each guest may then take is decided by the eligibility rules on Internet packages, not by anything stored on the account."
         actions={
           // This button used to be disabled whenever there were no active guest access plans, which under
-          // IAM-v2 meant permanently: a credential carries no plan there, so on a site with none an operator
-          // could never create a guest account at all, and the only symptom was a dead button. It is no longer
-          // gated on anything, and there is no longer a plan for it to be gated on.
-          <Button onClick={() => { setShowNew(true); setEditing(null); setPwFor(null); }}>
-            <Plus /> Add account
-          </Button>
+          // IAM-v2 meant permanently. It is no longer gated on anything but the operator's role.
+          mayWrite ? (
+            <Button onClick={openNew}>
+              <Plus /> Add account
+            </Button>
+          ) : undefined
         }
       />
 
+      {roles !== null && !mayWrite && <ReadOnlyNotice />}
       <ErrorBanner err={err} />
-      {msg && <Callout tone="success">{msg}</Callout>}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Accounts" value={rows ? totals.all.toLocaleString() : "—"} icon={<Users />} tone="primary" />
@@ -304,125 +281,157 @@ export default function GuestAccountsPage() {
         />
       </div>
 
-      {/* THE PORTAL SWITCH, as a switch. It was a button whose label was its state ("On"), which reads as the
-          action rather than the setting — so an operator could not tell whether pressing it would turn the tab on
-          or report that it already was. */}
+      {/* THE PORTAL SWITCH, as a switch card. It was a button whose label was its state ("On"), which reads as
+          the action rather than the setting — so an operator could not tell whether pressing it would turn the
+          tab on or report that it already was. The state is also stated in words, never by the switch alone. */}
       <Card>
         <CardBody className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <div className="text-sm font-medium">Offer username-and-password sign-in on the guest portal</div>
-            <p className="mt-0.5 text-xs text-muted-foreground">
+          <div className="min-w-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <label htmlFor="portal-offer" className="text-emphasis">
+                Offer username-and-password sign-in on the guest portal
+              </label>
+              <Badge tone={portalOn ? "ok" : "neutral"} dot>{portalOn ? "Shown on the portal" : "Hidden"}</Badge>
+            </div>
+            <p className="text-caption text-muted-foreground">
               {portalOn
                 ? "Guests see a Username & Password tab and can sign in with these accounts."
                 : "The tab is hidden, so these accounts cannot be used even though they exist."}
             </p>
           </div>
-          <Switch checked={portalOn} onCheckedChange={onTogglePortal} label="Offer username-and-password sign-in" />
+          <Switch
+            id="portal-offer"
+            checked={portalOn}
+            onCheckedChange={onTogglePortal}
+            disabled={!mayWrite}
+            label="Offer username-and-password sign-in"
+          />
         </CardBody>
       </Card>
 
-      {reveal && <PasswordReveal username={reveal.username} password={reveal.password} onClose={() => setReveal(null)} />}
+      <OneTimeReveal
+        open={reveal !== null}
+        title={`Password for ${reveal?.username ?? ""}`}
+        description="Write it down or hand it over now. It is shown this once and cannot be looked up again."
+        value={reveal?.password ?? ""}
+        valueLabel="Password"
+        concealable
+        onAcknowledge={() => setReveal(null)}
+      >
+        <p className="text-caption text-muted-foreground">
+          If this is lost, there is no way to recover it — you would set a new password instead.
+        </p>
+      </OneTimeReveal>
 
-      <Card>
+      <Card className="overflow-hidden">
         <CardBody className="border-b border-border py-3">
-          <Input
+          <SearchInput
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={setQ}
             placeholder="Search username or name…"
-            aria-label="Search guest accounts"
-            className="max-w-xs"
+            label="Search guest accounts"
           />
         </CardBody>
-        <CardBody className="p-0">
-          {loadFailed ? (
-            // A failed load is not an empty list and not a slow one. Saying so, and offering the one action
-            // that can help, beats a spinner that will never finish.
-            <EmptyState
-              title="Could not load guest accounts"
-              hint="The appliance did not answer. Nothing has been changed."
-              action={<Button onClick={() => void load()}>Try again</Button>}
-            />
-          ) : rows === null ? (
-            <SkeletonRows rows={5} cols={6} />
-          ) : filtered.length === 0 ? (
-            <EmptyState
-              icon={<KeyRound />}
-              title={q ? "No account matches that search" : "No guest accounts"}
-              hint={q ? undefined : "Create one to let a guest sign in with a username and password."}
-              action={q ? undefined : <Button onClick={() => setShowNew(true)}><Plus /> Add the first account</Button>}
-            />
-          ) : (
-            <Table>
-              <THead>
-                <TR>
-                  <TH>Account</TH><TH>Devices</TH><TH>Status</TH><TH>Valid until</TH>
-                  <TH>Last sign-in</TH><TH className="text-right">Sign-ins</TH><TH />
-                </TR>
-              </THead>
-              <tbody>
-                {filtered.map((a) => {
-                  const cap = a.max_devices;
-                  const atCap = cap ? (a.active_devices ?? 0) >= cap : false;
-                  return (
-                    <TR key={a.id}>
-                      <TD>
-                        <div className="font-mono text-sm font-medium">{a.username}</div>
-                        {a.display_name && (
-                          <div className="text-xs text-muted-foreground">{a.display_name}</div>
-                        )}
-                      </TD>
-                      <TD className={atCap ? "text-warning-subtle-foreground" : "text-muted-foreground"}>
-                        <span className="tabular">{a.active_devices ?? 0}</span>
-                        {cap ? <span className="tabular"> / {cap}</span> : ""}
-                        {atCap && <div className="text-2xs">At the limit</div>}
-                      </TD>
-                      <TD>
-                        <Badge tone={a.enabled ? "ok" : "err"} dot>
-                          {a.enabled ? "Can sign in" : "Disabled"}
-                        </Badge>
-                        {locked(a) && (
-                          <div className="mt-0.5">
-                            <Badge tone="warn">Locked until {formatRelative(a.locked_until)}</Badge>
-                          </div>
-                        )}
-                      </TD>
-                      <TD className="text-sm text-muted-foreground">
-                        {a.valid_until ? formatRelative(a.valid_until) : "No end date"}
-                      </TD>
-                      <TD className="text-sm text-muted-foreground">
-                        {a.last_login_at ? formatRelative(a.last_login_at) : "Never"}
-                      </TD>
-                      <TD className="text-right tabular text-muted-foreground">{a.login_count}</TD>
-                      <TD className="whitespace-nowrap text-right">
-                        <Button size="sm" variant="ghost" onClick={() => { setEditing(a); setPwFor(null); setShowNew(false); }}>
-                          <Pencil /> Edit
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => { setPwFor(a); setEditing(null); setShowNew(false); }}>
-                          <KeyRound /> Password
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => onToggle(a)}>
-                          {a.enabled ? "Disable" : "Enable"}
-                        </Button>
-                        {(a.active_devices ?? 0) > 0 && (
-                          <Button size="sm" variant="ghost" onClick={() => { setActionErr(null); setDisconnecting(a); }}>
-                            <Power /> Disconnect
+        {loadFailed ? (
+          // A failed load is not an empty list and not a slow one. Saying so, and offering the one action
+          // that can help, beats a spinner that will never finish.
+          <EmptyState
+            title="Could not load guest accounts"
+            hint="The appliance did not answer. Nothing has been changed."
+            action={<Button onClick={() => void load()}>Try again</Button>}
+          />
+        ) : rows === null ? (
+          <SkeletonRows rows={5} cols={6} />
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={<KeyRound />}
+            title={q ? "No account matches that search" : "No guest accounts"}
+            hint={q ? undefined : mayWrite ? "Create one to let a guest sign in with a username and password." : undefined}
+            action={
+              q ? <Button variant="secondary" onClick={() => setQ("")}>Clear search</Button>
+                : mayWrite ? <Button onClick={openNew}><Plus /> Add the first account</Button> : undefined
+            }
+          />
+        ) : (
+          <Table>
+            <THead>
+              <TR>
+                <TH>Account</TH>
+                <TH>Devices</TH>
+                <TH>Status</TH>
+                <TH className="hidden md:table-cell">Valid until</TH>
+                <TH className="hidden lg:table-cell">Last sign-in</TH>
+                <TH className="hidden text-end lg:table-cell">Sign-ins</TH>
+                {mayWrite && <TH><span className="sr-only">Actions</span></TH>}
+              </TR>
+            </THead>
+            <TBody>
+              {filtered.map((a) => {
+                const cap = a.max_devices;
+                const atCap = cap ? (a.active_devices ?? 0) >= cap : false;
+                return (
+                  <TR key={a.id}>
+                    <TD>
+                      <div className="font-mono text-sm font-medium">{a.username}</div>
+                      {a.display_name && (
+                        <div className="text-caption text-muted-foreground">{a.display_name}</div>
+                      )}
+                    </TD>
+                    <TD className={atCap ? "text-warning-subtle-foreground" : "text-muted-foreground"}>
+                      <span className="tabular">{a.active_devices ?? 0}</span>
+                      {cap ? <span className="tabular"> / {cap}</span> : ""}
+                      {atCap && <div className="text-caption">At the limit</div>}
+                    </TD>
+                    <TD>
+                      <Badge tone={a.enabled ? "ok" : "err"} dot>
+                        {a.enabled ? "Can sign in" : "Disabled"}
+                      </Badge>
+                      {locked(a) && (
+                        <div className="mt-0.5">
+                          <Badge tone="warn">Locked until {formatRelative(a.locked_until)}</Badge>
+                        </div>
+                      )}
+                    </TD>
+                    <TD className="hidden text-sm text-muted-foreground md:table-cell">
+                      {a.valid_until ? formatRelative(a.valid_until) : "No end date"}
+                    </TD>
+                    <TD className="hidden text-sm text-muted-foreground lg:table-cell">
+                      {a.last_login_at ? formatRelative(a.last_login_at) : "Never"}
+                    </TD>
+                    <TD className="hidden text-end tabular text-muted-foreground lg:table-cell">{a.login_count}</TD>
+                    {mayWrite && (
+                      <TD className="text-end">
+                        <div className="flex flex-wrap justify-end gap-1">
+                          <Button size="sm" variant="ghost" onClick={() => { setFormErr(null); setEditing(a); setPwFor(null); setShowNew(false); }}>
+                            <Pencil /> Edit
                           </Button>
-                        )}
-                        <Button size="sm" variant="ghost" onClick={() => { setActionErr(null); setDeleting(a); }}>
-                          Delete
-                        </Button>
+                          <Button size="sm" variant="ghost" onClick={() => { setFormErr(null); setPwFor(a); setEditing(null); setShowNew(false); }}>
+                            <KeyRound /> Password
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => onToggle(a)}>
+                            {a.enabled ? "Disable" : "Enable"}
+                          </Button>
+                          {(a.active_devices ?? 0) > 0 && (
+                            <Button size="sm" variant="ghost" onClick={() => { setActionErr(null); setDisconnecting(a); }}>
+                              <Power /> Disconnect
+                            </Button>
+                          )}
+                          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => { setActionErr(null); setDeleting(a); }}>
+                            Delete
+                          </Button>
+                        </div>
                       </TD>
-                    </TR>
-                  );
-                })}
-              </tbody>
-            </Table>
-          )}
-        </CardBody>
+                    )}
+                  </TR>
+                );
+              })}
+            </TBody>
+          </Table>
+        )}
       </Card>
 
       {/* ------------------------------------------------------------------ create / edit / password */}
-      <Dialog open={showNew} onOpenChange={(v) => !v && setShowNew(false)}>
+      <Dialog open={showNew} onOpenChange={(v) => !v && !busy && setShowNew(false)}>
         <DialogContent size="lg">
           <DialogHeader>
             <DialogTitle>Add a guest account</DialogTitle>
@@ -431,12 +440,13 @@ export default function GuestAccountsPage() {
             </DialogDescription>
           </DialogHeader>
           <DialogBody>
+            <ErrorBanner err={formErr} />
             <AccountForm onSubmit={onCreate} busy={busy} withPassword onCancel={() => setShowNew(false)} />
           </DialogBody>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={editing !== null} onOpenChange={(v) => !v && setEditing(null)}>
+      <Dialog open={editing !== null} onOpenChange={(v) => !v && !busy && setEditing(null)}>
         <DialogContent size="lg">
           <DialogHeader>
             <DialogTitle>Edit {editing?.username}</DialogTitle>
@@ -445,6 +455,7 @@ export default function GuestAccountsPage() {
             </DialogDescription>
           </DialogHeader>
           <DialogBody>
+            <ErrorBanner err={formErr} />
             {editing && (
               <AccountForm account={editing} onSubmit={onSaveEdit} busy={busy} onCancel={() => setEditing(null)} />
             )}
@@ -452,7 +463,7 @@ export default function GuestAccountsPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={pwFor !== null} onOpenChange={(v) => !v && setPwFor(null)}>
+      <Dialog open={pwFor !== null} onOpenChange={(v) => !v && !busy && setPwFor(null)}>
         <DialogContent size="md">
           <DialogHeader>
             <DialogTitle>Set a new password for {pwFor?.username}</DialogTitle>
@@ -461,6 +472,7 @@ export default function GuestAccountsPage() {
             </DialogDescription>
           </DialogHeader>
           <DialogBody>
+            <ErrorBanner err={formErr} />
             <PasswordForm onSubmit={onSavePassword} busy={busy} onCancel={() => setPwFor(null)} />
           </DialogBody>
         </DialogContent>
@@ -489,7 +501,15 @@ export default function GuestAccountsPage() {
         title="Delete this guest account?"
         description={
           deleting
-            ? `"${deleting.username}" will be removed permanently and anyone using it will be disconnected. This cannot be undone — if you only want to stop it being used for now, Disable it instead.`
+            ? `"${deleting.username}" will be removed permanently and anyone using it will be disconnected.`
+            : undefined
+        }
+        consequences={
+          deleting
+            ? [
+                "This cannot be undone.",
+                "If you only want to stop it being used for now, Disable it instead — that can be reversed.",
+              ]
             : undefined
         }
         confirmLabel="Delete permanently"

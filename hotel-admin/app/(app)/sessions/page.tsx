@@ -16,24 +16,29 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { api, ListResp, Session } from "@/lib/api";
+import { api, ListResp, Session, Whoami } from "@/lib/api";
+import { canWrite } from "@/lib/roles";
 import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
 import { Card, CardBody } from "@/components/ui/card";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
+import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
 import { Badge, StatusDot } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
+import { Select } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { Segmented } from "@/components/ui/tabs";
 import { ConfirmDialog, DetailDialog } from "@/components/ui/dialog";
 import { Explain } from "@/components/ui/tooltip";
 import { DList, Meter, MonoId, Metric, SkeletonRows } from "@/components/ui/misc";
+import { SearchInput } from "@/components/ui/data";
+import { LiveStatus, ReadOnlyNotice, refreshingClass } from "@/components/ui/patterns";
+import { useToast } from "@/components/ui/toast";
+import { cn } from "@/lib/utils";
 import { formatBytes, formatRelative, formatDate, errMsg } from "@/lib/utils";
 import {
   identifySession, methodLabel, stateWords, endReasonWords, speedPair,
 } from "@/lib/session-words";
-import { Users, Monitor, ArrowDownUp, Search, Hotel, KeyRound, Ticket, UserCircle, Power } from "lucide-react";
+import { Users, Monitor, ArrowDownUp, Hotel, KeyRound, Ticket, UserCircle, Power } from "lucide-react";
 
 type Tab = "active" | "recent";
 
@@ -64,17 +69,35 @@ export default function SessionsPage() {
   const [confirm, setConfirm] = useState<Session | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionErr, setActionErr] = useState<unknown>(null);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const toast = useToast();
+
+  // DISCONNECT IS OFFERED ONLY TO A ROLE THAT CAN USE IT. site_viewer, payments_operator and voucher_operator
+  // read this list; edged refuses them the disconnect. A button that 403s on click was the redesign handoff's
+  // complaint about this screen. Fails closed while the roles load.
+  const [roles, setRoles] = useState<string[] | null>(null);
+  useEffect(() => {
+    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
+  }, []);
+  const mayDisconnect = roles === null ? false : canWrite("sessions", roles);
 
   const load = useCallback(async () => {
     const q = new URLSearchParams();
     if (tab === "active") q.set("state", "active");
+    setRefreshing(true);
     try {
       const r = await api.get<ListResp<Session>>(`/sessions?${q.toString()}`);
       setRows(r.data ?? []);
       setErr(null);
+      setUpdatedAt(Date.now());
     } catch (e) {
       setErr(e);
-      setRows([]);
+      // The last good list stays on screen under the error: a poll that fails once must not blank the table
+      // the desk is reading. Only a first load that fails has nothing to keep.
+      setRows((prev) => prev ?? []);
+    } finally {
+      setRefreshing(false);
     }
   }, [tab]);
 
@@ -91,6 +114,7 @@ export default function SessionsPage() {
     setBusy(true); setActionErr(null);
     try {
       await api.post(`/sessions/${s.id}/disconnect`, { reason: "admin" });
+      toast.success(`${identifySession(s).title} — device disconnected.`);
       setConfirm(null);
       setDetail(null);
       // scd enforces asynchronously, so an immediate reload can still show the session as active. The short
@@ -140,8 +164,9 @@ export default function SessionsPage() {
     <PageShell width="wide">
       <PageHeader
         eyebrow="Guests"
-        title={tab === "active" ? "Active sessions" : "Recent sessions"}
-        description="Every device currently online, and which guest it belongs to. A session is one device; a guest may have several."
+        title="Active sessions"
+        icon={<Monitor />}
+        description="Which devices are online, whose they are, and disconnect one. A session is one device; a guest may have several."
         actions={
           <Segmented
             label="Which sessions"
@@ -154,6 +179,19 @@ export default function SessionsPage() {
           />
         }
       />
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <LiveStatus
+          updatedAt={updatedAt}
+          refreshing={refreshing && rows !== null}
+          intervalSeconds={tab === "active" ? 10 : undefined}
+          error={!!err && rows !== null && rows.length > 0}
+          onRefresh={() => void load()}
+        />
+        {roles !== null && !mayDisconnect && (
+          <ReadOnlyNotice className="py-1.5">Your role can see who is online but not disconnect a device.</ReadOnlyNotice>
+        )}
+      </div>
 
       <ErrorBanner err={err} />
 
@@ -192,22 +230,19 @@ export default function SessionsPage() {
       <Card>
         <CardBody className="border-b border-border py-3">
           <Toolbar>
-            <div className="relative w-full max-w-xs">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Room, name, username, IP or MAC…"
-                aria-label="Search sessions"
-                className="pl-8"
-              />
-            </div>
+            <SearchInput
+              value={query}
+              onChange={setQuery}
+              placeholder="Room, name, username, IP or MAC…"
+              label="Search sessions"
+              className="sm:max-w-xs"
+            />
             <div className="flex items-end gap-2">
               <Select
                 value={kind}
                 onChange={(e) => setKind(e.target.value)}
                 aria-label="Filter by how the guest signed in"
-                className="w-52"
+                className="w-full sm:w-52"
               >
                 <option value="">All sign-in types</option>
                 <option value="room">Room ({kindCounts.room ?? 0})</option>
@@ -224,7 +259,7 @@ export default function SessionsPage() {
           </Toolbar>
         </CardBody>
 
-        <CardBody className="p-0">
+        <CardBody className={cn("p-0", refreshing && rows !== null && refreshingClass)}>
           {filtered === null ? (
             <SkeletonRows rows={6} cols={6} />
           ) : filtered.length === 0 ? (
@@ -250,16 +285,16 @@ export default function SessionsPage() {
               <THead>
                 <TR>
                   <TH>Guest</TH>
-                  <TH>Signed in with</TH>
-                  <TH>Package</TH>
-                  <TH>Allowance used</TH>
-                  <TH>Network / device</TH>
-                  <TH className="text-right">Data</TH>
-                  <TH className="text-right">Status</TH>
-                  <TH />
+                  <TH className="hidden md:table-cell">Signed in with</TH>
+                  <TH className="hidden lg:table-cell">Package</TH>
+                  <TH className="hidden xl:table-cell">Allowance used</TH>
+                  <TH className="hidden lg:table-cell">Network / device</TH>
+                  <TH className="hidden text-end sm:table-cell">Data</TH>
+                  <TH className="text-end">Status</TH>
+                  {mayDisconnect && <TH><span className="sr-only">Actions</span></TH>}
                 </TR>
               </THead>
-              <tbody>
+              <TBody>
                 {filtered.map((s) => {
                   const id = identifySession(s);
                   const Icon = KIND_ICON[(s.subject_kind ?? "") as keyof typeof KIND_ICON] ?? Monitor;
@@ -270,7 +305,7 @@ export default function SessionsPage() {
                         <button
                           type="button"
                           onClick={() => { setDetail(s); setActionErr(null); }}
-                          className="group flex items-start gap-2.5 text-left"
+                          className="group flex items-start gap-2.5 text-start"
                         >
                           <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-surface text-muted-foreground">
                             <Icon className="size-3.5" />
@@ -296,11 +331,11 @@ export default function SessionsPage() {
                           </span>
                         </button>
                       </TD>
-                      <TD className="text-muted-foreground">
+                      <TD className="hidden text-muted-foreground md:table-cell">
                         <div className="text-xs">{methodLabel(s.credential_method)}</div>
                         <div className="text-2xs">{formatRelative(s.started_at)}</div>
                       </TD>
-                      <TD>
+                      <TD className="hidden lg:table-cell">
                         {s.package_name || s.package_code ? (
                           <>
                             <div className="text-sm">{s.package_name || s.package_code}</div>
@@ -312,20 +347,20 @@ export default function SessionsPage() {
                           <span className="text-xs text-muted-foreground">—</span>
                         )}
                       </TD>
-                      <TD className="min-w-40">
+                      <TD className="hidden min-w-40 xl:table-cell">
                         <AllowanceCell s={s} />
                       </TD>
-                      <TD>
+                      <TD className="hidden lg:table-cell">
                         <div className="text-xs">{s.guest_network_name ?? "—"}</div>
                         <div className="font-mono text-2xs text-muted-foreground">{s.ip}</div>
                       </TD>
-                      <TD className="text-right">
+                      <TD className="hidden text-end sm:table-cell">
                         <div className="tabular">{formatBytes(s.bytes_down)}</div>
                         <div className="text-2xs tabular text-muted-foreground">
                           {formatBytes(s.bytes_up)} up
                         </div>
                       </TD>
-                      <TD className="text-right">
+                      <TD className="text-end">
                         <Badge tone={st.tone} dot>{st.label}</Badge>
                         {s.end_reason && (
                           <div className="mt-0.5 text-2xs text-muted-foreground">
@@ -333,21 +368,23 @@ export default function SessionsPage() {
                           </div>
                         )}
                       </TD>
-                      <TD className="text-right">
-                        {s.state === "active" && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => { setConfirm(s); setActionErr(null); }}
-                          >
-                            <Power /> Disconnect
-                          </Button>
-                        )}
-                      </TD>
+                      {mayDisconnect && (
+                        <TD className="text-end">
+                          {s.state === "active" && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => { setConfirm(s); setActionErr(null); }}
+                            >
+                              <Power /> Disconnect
+                            </Button>
+                          )}
+                        </TD>
+                      )}
                     </TR>
                   );
                 })}
-              </tbody>
+              </TBody>
             </Table>
           )}
         </CardBody>
@@ -360,7 +397,7 @@ export default function SessionsPage() {
         title={detail ? identifySession(detail).title : ""}
         description={detail ? identifySession(detail).subtitle : undefined}
         footer={
-          detail?.state === "active" ? (
+          detail?.state === "active" && mayDisconnect ? (
             <>
               <Button variant="ghost" onClick={() => setDetail(null)}>Close</Button>
               <Button variant="danger" onClick={() => { setConfirm(detail); }}>
@@ -377,10 +414,14 @@ export default function SessionsPage() {
       <ConfirmDialog
         open={confirm !== null}
         onOpenChange={(v) => !v && setConfirm(null)}
-        title="Disconnect this device?"
+        title={confirm ? `Disconnect ${identifySession(confirm).title}'s device?` : "Disconnect this device?"}
         description={
           confirm
-            ? `${identifySession(confirm).title} will lose internet access on this device immediately. Their other devices stay online, and they can sign in again.`
+            ? `${identifySession(confirm).title} will lose internet access on this device immediately. ${
+                typeof confirm.active_devices === "number" && confirm.active_devices > 1
+                  ? `Their ${confirm.active_devices - 1} other device${confirm.active_devices - 1 === 1 ? "" : "s"} stay online`
+                  : "They have no other device online"
+              }, and they can sign in again.`
             : undefined
         }
         confirmLabel="Disconnect"

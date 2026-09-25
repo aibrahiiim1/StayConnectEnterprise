@@ -16,10 +16,29 @@
 //
 // There is no "show PIN" control anywhere here, and its absence is deliberate: the appliance does not store
 // the plaintext and cannot produce it. The only thing that ever returns one is a reset, once, in that
-// response — which is why the reveal panel says so and cannot be reopened.
+// response — which is why the reveal is the kit's OneTimeReveal and cannot be reopened.
+//
+// THE ROLE DECIDES WHETHER THE BUTTONS EXIST, not whether they are greyed out. A read-only operator sees the
+// list and a one-line notice; edged refuses the action anyway, so a disabled button was only ever a promise
+// the screen could not keep.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { CalendarClock, KeyRound, ShieldOff } from "lucide-react";
 import { api } from "@/lib/api";
+import { formatDate } from "@/lib/utils";
+import { PageHeader, PageShell, StatCard } from "@/components/ui/page";
+import { Card } from "@/components/ui/card";
+import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Field, Input } from "@/components/ui/input";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { DetailDialog, DialogForm } from "@/components/ui/dialog";
+import { KeyValueGrid } from "@/components/ui/data";
+import { MonoId, SkeletonRows } from "@/components/ui/misc";
+import { ConsequenceList, OneTimeReveal, ReadOnlyNotice } from "@/components/ui/patterns";
+import { useToast } from "@/components/ui/toast";
 
 type Profile = {
   id: string;
@@ -40,15 +59,40 @@ type Profile = {
 
 type Revealed = { profileId: string; pin: string; validUntil: string };
 
-export function PostStayView({ canAct }: { canAct: boolean }) {
+// The stay's lifecycle, in the words Stays uses. The wire value is kept for anything this table was not taught.
+const STAY_WORDS: Record<string, string> = {
+  IN_HOUSE: "In house",
+  RESERVED: "Arriving",
+  CHECKED_OUT: "Checked out",
+  POST_STAY_ACTIVE: "Post-stay access",
+  CANCELLED: "Cancelled",
+  NO_SHOW: "No show",
+};
+const stayWords = (s: string) => STAY_WORDS[s] ?? s.replace(/_/g, " ").toLowerCase();
+
+type StateWords = { label: string; tone: "ok" | "warn" | "err" | "default"; hint?: string };
+function stateOf(row: Profile): StateWords {
+  if (row.status === "REVOKED") return { label: "Ended", tone: "default", hint: "Access ended for this stay" };
+  if (row.authenticable) return { label: "Active", tone: "ok" };
+  // ACTIVE but not authenticable: expired, or the stay moved to a new episode. Saying which matters here —
+  // this is the operator's screen, and the guest sees nothing either way.
+  return { label: "Active, not usable", tone: "warn", hint: "Expired, or the stay moved on" };
+}
+
+/** `rolesKnown` is false while the route shell is still reading the operator's roles, so the read-only notice
+ *  does not flash at an operator who can act. */
+export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; rolesKnown?: boolean }) {
+  const toast = useToast();
   const [rows, setRows] = useState<Profile[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<{ kind: "reset" | "revoke"; row: Profile } | null>(null);
+  const [dialogError, setDialogError] = useState<string | null>(null);
   const [password, setPassword] = useState("");
   const [reason, setReason] = useState("");
   const [confirmWord, setConfirmWord] = useState("");
   const [revealed, setRevealed] = useState<Revealed | null>(null);
+  const [detail, setDetail] = useState<Profile | null>(null);
 
   const load = useCallback(() => {
     api
@@ -57,13 +101,18 @@ export function PostStayView({ canAct }: { canAct: boolean }) {
         setRows(m.profiles ?? []);
         setError(null);
       })
-      .catch((e) => setError(String(e?.message ?? e)));
+      .catch((e) => {
+        setError(String(e?.message ?? e));
+        // Keep the last good list: an error banner above real rows is honest, an empty table is not.
+        setRows((prev) => prev ?? []);
+      });
   }, []);
 
   useEffect(load, [load]);
 
   const closeDialog = () => {
     setDialog(null);
+    setDialogError(null);
     setPassword("");
     setReason("");
     setConfirmWord("");
@@ -81,7 +130,7 @@ export function PostStayView({ canAct }: { canAct: boolean }) {
   async function submit() {
     if (!dialog || !canSubmit) return;
     setBusy(true);
-    setError(null);
+    setDialogError(null);
     try {
       const path = `/post-stay-profiles/${dialog.row.id}/${dialog.kind}`;
       const res = await api.post<{ pin?: string; valid_until?: string }>(path, {
@@ -90,192 +139,238 @@ export function PostStayView({ canAct }: { canAct: boolean }) {
       });
       if (dialog.kind === "reset" && res.pin) {
         setRevealed({ profileId: dialog.row.id, pin: res.pin, validUntil: res.valid_until ?? "" });
+      } else if (dialog.kind === "revoke") {
+        toast.success("Post-stay access ended", `Room ${dialog.row.normalized_room_number ?? "—"} can no longer reconnect with a PIN.`);
       }
       closeDialog();
       load();
     } catch (e: unknown) {
-      setError(String((e as { message?: string })?.message ?? e));
+      setDialogError(String((e as { message?: string })?.message ?? e));
     } finally {
       setBusy(false);
     }
   }
 
+  const counts = useMemo(() => {
+    const list = rows ?? [];
+    return {
+      usable: list.filter((r) => r.status === "ACTIVE" && r.authenticable).length,
+      notUsable: list.filter((r) => r.status === "ACTIVE" && !r.authenticable).length,
+      ended: list.filter((r) => r.status === "REVOKED").length,
+    };
+  }, [rows]);
+
+  const actionable = canAct && (rows ?? []).some((r) => r.status === "ACTIVE");
+
   return (
-    <div className="space-y-6">
-      <header className="space-y-1">
-        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Post-stay access</h1>
-        <p className="text-sm text-muted-foreground">
-          A post-stay PIN belongs to one stay episode, never to a room. When a guest is reinstated or the room
-          is re-let, the previous PIN stops working on its own — nothing has to be revoked for that to happen.
+    <PageShell>
+      <PageHeader
+        eyebrow="Guests"
+        title="Post-stay access"
+        icon={<CalendarClock />}
+        description="After checkout a guest can reconnect with a PIN for a limited time. Reset a lost PIN or end access here. A PIN belongs to one stay, never to a room: when the room is re-let, the previous PIN stops working on its own."
+      />
+
+      {rolesKnown && !canAct && <ReadOnlyNotice />}
+      <ErrorBanner err={error} />
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        <StatCard label="Can reconnect now" value={rows ? counts.usable.toLocaleString() : "—"} tone="ok" icon={<KeyRound />} />
+        <StatCard
+          label="Active, not usable"
+          value={rows ? counts.notUsable.toLocaleString() : "—"}
+          hint="Expired, or the stay moved on"
+        />
+        <StatCard label="Ended by staff" value={rows ? counts.ended.toLocaleString() : "—"} icon={<ShieldOff />} />
+      </div>
+
+      <Card className="overflow-hidden">
+        {rows === null ? (
+          <SkeletonRows rows={4} cols={6} />
+        ) : rows.length === 0 ? (
+          <EmptyState
+            icon={<CalendarClock />}
+            title="No post-stay access yet"
+            hint="A departing guest who is given post-stay access appears here with their room and how long the PIN is valid."
+          />
+        ) : (
+          <Table>
+            <THead>
+              <TR>
+                <TH>Room</TH>
+                <TH className="hidden md:table-cell">Reservation</TH>
+                <TH className="hidden lg:table-cell">Stay</TH>
+                <TH>State</TH>
+                <TH className="hidden sm:table-cell">PIN</TH>
+                <TH>Valid until</TH>
+                <TH><span className="sr-only">Actions</span></TH>
+              </TR>
+            </THead>
+            <TBody>
+              {rows.map((row) => {
+                const st = stateOf(row);
+                return (
+                  <TR key={row.id}>
+                    <TD>
+                      <button
+                        type="button"
+                        onClick={() => setDetail(row)}
+                        className="text-start font-medium hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                      >
+                        {row.normalized_room_number ? `Room ${row.normalized_room_number}` : "No room"}
+                      </button>
+                    </TD>
+                    <TD className="hidden text-sm md:table-cell">{row.external_reservation_id || "—"}</TD>
+                    <TD className="hidden text-sm text-muted-foreground lg:table-cell">
+                      {stayWords(row.stay_status)}
+                      <div className="text-caption">Stay episode {row.origin_lifecycle_version}</div>
+                    </TD>
+                    <TD>
+                      <Badge tone={st.tone} dot>{st.label}</Badge>
+                      {st.hint && <div className="mt-0.5 text-caption text-muted-foreground">{st.hint}</div>}
+                    </TD>
+                    <TD className="hidden text-sm tabular text-muted-foreground sm:table-cell">
+                      {row.pin_generation === 1 ? "First PIN" : `Reset ${row.pin_generation - 1}×`}
+                    </TD>
+                    <TD className="whitespace-nowrap text-sm text-muted-foreground">{formatDate(row.valid_until)}</TD>
+                    <TD className="whitespace-nowrap text-end">
+                      {canAct && row.status === "ACTIVE" ? (
+                        <div className="flex justify-end gap-1.5">
+                          <Button size="sm" variant="secondary" onClick={() => setDialog({ kind: "reset", row })}>
+                            Reset PIN
+                          </Button>
+                          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setDialog({ kind: "revoke", row })}>
+                            End access
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button size="sm" variant="ghost" onClick={() => setDetail(row)}>Details</Button>
+                      )}
+                    </TD>
+                  </TR>
+                );
+              })}
+            </TBody>
+          </Table>
+        )}
+      </Card>
+
+      {actionable && (
+        <p className="text-caption text-muted-foreground">
+          The PIN itself is never stored, so it cannot be shown again. A guest who lost it gets a new one with Reset PIN
+          and keeps their access.
         </p>
-      </header>
-
-      {error && (
-        <div role="alert" className="rounded-md border border-destructive/25 bg-destructive-subtle p-3 text-sm text-destructive-subtle-foreground">
-          {error}
-        </div>
       )}
 
-      {revealed && (
-        // The one-time reveal. It is shown after a reset and cannot be reopened: the appliance never stored
-        // this value and cannot produce it again.
-        <div
-          role="status"
-          className="rounded-md border border-warning/30 bg-warning-subtle p-4 text-sm text-warning-subtle-foreground space-y-2"
-        >
-          <div className="font-semibold">New PIN — shown once</div>
-          <div className="font-mono text-2xl tracking-widest">{revealed.pin}</div>
-          <p>
-            Give this to the guest now. It is not stored and cannot be shown again — closing this panel loses
-            it. If that happens, reset again; the guest keeps their access either way.
-          </p>
-          {revealed.validUntil && <p>Valid until {revealed.validUntil}</p>}
-          <button
-            type="button"
-            className="rounded border border-warning/40 px-3 py-1"
-            onClick={() => setRevealed(null)}
-          >
-            I have given it to the guest
-          </button>
-        </div>
-      )}
-
-      <table className="w-full text-sm">
-        <thead className="text-left text-muted-foreground">
-          <tr>
-            <th className="py-2">Reservation</th>
-            <th>Room</th>
-            <th>Stay</th>
-            <th>Episode</th>
-            <th>State</th>
-            <th>PIN generation</th>
-            <th>Valid until</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {rows === null && (
-            <tr>
-              <td colSpan={8} className="py-4 text-muted-foreground">
-                Loading…
-              </td>
-            </tr>
-          )}
-          {rows?.length === 0 && (
-            <tr>
-              <td colSpan={8} className="py-4 text-muted-foreground">
-                No post-stay identities yet.
-              </td>
-            </tr>
-          )}
-          {rows?.map((row) => (
-            <tr key={row.id} className="border-t">
-              <td className="py-2">{row.external_reservation_id}</td>
-              <td>{row.normalized_room_number ?? "—"}</td>
-              <td>{row.stay_status}</td>
-              <td>{row.origin_lifecycle_version}</td>
-              <td>
-                {row.status === "REVOKED" ? (
-                  <span title={row.revoke_reason ?? undefined}>Revoked — ended for this stay</span>
-                ) : row.authenticable ? (
-                  <span>Active</span>
-                ) : (
-                  // ACTIVE but not authenticable: expired, or the stay moved to a new episode. Saying which
-                  // matters here — this is the operator's screen, and the guest sees nothing either way.
-                  <span>Active, not usable (expired or the stay moved on)</span>
-                )}
-              </td>
-              <td>{row.pin_generation}</td>
-              <td>{row.valid_until}</td>
-              <td className="space-x-2 text-right">
-                <button
-                  type="button"
-                  disabled={!canAct || row.status !== "ACTIVE"}
-                  className="rounded border px-2 py-1 disabled:opacity-40"
-                  onClick={() => setDialog({ kind: "reset", row })}
-                >
-                  Reset PIN
-                </button>
-                <button
-                  type="button"
-                  disabled={!canAct || row.status !== "ACTIVE"}
-                  className="rounded-md border border-destructive/40 px-2 py-1 text-destructive hover:bg-destructive-subtle disabled:opacity-50"
-                  onClick={() => setDialog({ kind: "revoke", row })}
-                >
-                  End access
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      {dialog && (
-        <div role="dialog" aria-modal="true" className="rounded border p-4 space-y-3">
-          <h2 className="text-lg font-semibold">
-            {dialog.kind === "reset" ? "Reset the PIN" : "End post-stay access"}
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            {dialog.kind === "reset" ? (
-              <>
-                A new PIN replaces the old one immediately. The guest keeps their post-stay access; only the
-                secret changes. The new PIN is shown once, on this screen.
-              </>
-            ) : (
-              <>
-                This ends post-stay access for reservation {dialog.row.external_reservation_id} (stay episode{" "}
-                {dialog.row.origin_lifecycle_version}). <strong>It cannot be undone</strong>, and this stay
-                gets no replacement PIN. If the guest only lost their PIN, reset it instead.
-              </>
+      {/* ------------------------------------------------------------------ details */}
+      <DetailDialog
+        open={detail !== null}
+        onOpenChange={(v) => !v && setDetail(null)}
+        title={detail?.normalized_room_number ? `Room ${detail.normalized_room_number}` : "Post-stay access"}
+        description={detail ? `Reservation ${detail.external_reservation_id || "—"}` : undefined}
+        size="md"
+      >
+        {detail && (
+          <>
+            <div className="flex flex-wrap gap-2">
+              <Badge tone={stateOf(detail).tone} dot>{stateOf(detail).label}</Badge>
+              <Badge tone="neutral">{stayWords(detail.stay_status)}</Badge>
+            </div>
+            {detail.status === "REVOKED" && (
+              <Callout tone="neutral" title="Access was ended for this stay">
+                {detail.revoke_reason ? <>Reason recorded: {detail.revoke_reason}</> : "No reason was recorded."}
+              </Callout>
             )}
-          </p>
-          <label className="block text-sm">
-            Reason (recorded in the audit log)
-            <input
-              className="mt-1 w-full rounded border px-2 py-1"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder={dialog.kind === "reset" ? "Guest lost the printout" : "Guest asked us to end it"}
+            <KeyValueGrid
+              items={[
+                { label: "Stay episode", value: String(detail.origin_lifecycle_version) },
+                { label: "PIN generation", value: String(detail.pin_generation) },
+                { label: "Issued", value: formatDate(detail.issued_at) },
+                { label: "Issued via", value: detail.issued_via ? detail.issued_via.replace(/_/g, " ").toLowerCase() : "—" },
+                { label: "Valid until", value: formatDate(detail.valid_until) },
+                { label: "Ended", value: detail.revoked_at ? formatDate(detail.revoked_at) : "—" },
+                { label: "Stay reference", value: <MonoId value={detail.stay_id} title="Stay" /> },
+                { label: "Access reference", value: <MonoId value={detail.id} title="Post-stay access" /> },
+              ]}
             />
-          </label>
-          <label className="block text-sm">
-            Your password
-            <input
-              type="password"
-              className="mt-1 w-full rounded border px-2 py-1"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
+          </>
+        )}
+      </DetailDialog>
+
+      {/* ------------------------------------------------------------------ reset / end access */}
+      <DialogForm
+        open={dialog !== null}
+        onOpenChange={(v) => { if (!v) closeDialog(); }}
+        title={dialog?.kind === "revoke" ? "End post-stay access" : "Reset the PIN"}
+        description={
+          dialog?.kind === "revoke"
+            ? `Room ${dialog.row.normalized_room_number ?? "—"} · reservation ${dialog.row.external_reservation_id}`
+            : "A new PIN replaces the old one immediately. The guest keeps their post-stay access; only the secret changes. The new PIN is shown once, on this screen."
+        }
+        size="sm"
+        submitLabel={dialog?.kind === "revoke" ? "End access permanently" : "Reset PIN"}
+        submitVariant={dialog?.kind === "revoke" ? "danger" : "primary"}
+        busy={busy}
+        busyLabel={dialog?.kind === "revoke" ? "Ending…" : "Resetting…"}
+        error={dialogError}
+        disabled={!canSubmit}
+        onSubmit={submit}
+      >
+        {dialog?.kind === "revoke" && (
+          <ConsequenceList
+            items={[
+              `Post-stay access ends for this stay (episode ${dialog.row.origin_lifecycle_version}).`,
+              "This stay gets no replacement PIN.",
+              "If the guest only lost their PIN, reset it instead.",
+            ]}
+          />
+        )}
+        <Field label="Reason" required hint="Recorded in the activity log. At least 4 characters.">
+          <Input
+            value={reason}
+            maxLength={500}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder={dialog?.kind === "reset" ? "Guest lost the printout" : "Guest asked us to end it"}
+          />
+        </Field>
+        {dialog?.kind === "revoke" && (
+          <Field label={<>Type <span className="font-mono font-bold">REVOKE</span> to confirm</>} required>
+            <Input
+              value={confirmWord}
+              autoComplete="off"
+              spellCheck={false}
+              className="font-mono"
+              onChange={(e) => setConfirmWord(e.target.value)}
             />
-          </label>
-          {dialog.kind === "revoke" && (
-            <label className="block text-sm">
-              Type REVOKE to confirm
-              <input
-                className="mt-1 w-full rounded border px-2 py-1"
-                value={confirmWord}
-                onChange={(e) => setConfirmWord(e.target.value)}
-              />
-            </label>
-          )}
-          <div className="flex gap-2">
-            <button
-              type="button"
-              disabled={!canSubmit || busy}
-              className={
-                dialog.kind === "revoke"
-                  ? "rounded-md bg-destructive px-3 py-1 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
-                  : "rounded-md bg-primary px-3 py-1 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-50"
-              }
-              onClick={submit}
-            >
-              {dialog.kind === "reset" ? "Reset PIN" : "End access permanently"}
-            </button>
-            <button type="button" className="rounded border px-3 py-1" onClick={closeDialog}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
+          </Field>
+        )}
+        <Field label="Confirm your password" required>
+          <Input
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </Field>
+      </DialogForm>
+
+      {/* ------------------------------------------------------------------ the one-time PIN */}
+      <OneTimeReveal
+        open={revealed !== null}
+        title="New PIN — shown once"
+        description="Give this to the guest now. It is not stored and cannot be shown again."
+        value={revealed?.pin ?? ""}
+        valueLabel="Post-stay PIN"
+        acknowledgeLabel="I have given it to the guest"
+        onAcknowledge={() => setRevealed(null)}
+      >
+        {revealed?.validUntil && (
+          <p className="text-sm text-muted-foreground">Valid until {formatDate(revealed.validUntil)}.</p>
+        )}
+        <p className="text-caption text-muted-foreground">
+          If it is lost before it reaches the guest, reset again — the guest keeps their access either way.
+        </p>
+      </OneTimeReveal>
+    </PageShell>
   );
 }
