@@ -1,16 +1,102 @@
+@import "@fontsource-variable/inter/index.css";
+@import "./tokens.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root { color-scheme: dark; }
+/*
+  THE VELONET DESIGN SYSTEM, in this console.
 
-html, body {
-  background: theme(colors.bg);
-  color: theme(colors.text);
+  The token VALUES live in design-system/tokens.css at the repository root and are copied here as
+  app/tokens.css by tools/sync-design-tokens.mjs (a unit test fails if the copy drifts). This file only
+  holds the base rules that consume them. See design-system/README.md for the whole system: palette,
+  type scale, radius, elevation, motion and the component patterns.
+
+  Central shares every token with Hotel Admin and differs only by its accent: app/layout.tsx sets
+  data-product="central" on <html>, which tokens.css turns into the teal accent.
+
+  Inter is self-hosted (@fontsource-variable/inter), exactly as in Hotel Admin: no font CDN, and a variable
+  face is what lets the 650 "emphasis" weight render.
+
+  THE LEGACY NAMES STILL WORK. tailwind.config.ts maps the old `bg / panel / panel2 / border / muted / text /
+  brand / ok / warn / err` onto these roles, so the two retired pages (/commercial, /subscription), which are
+  not redesigned, still render in both themes.
+*/
+
+@layer base {
+  /* color-scheme is set per theme rather than globally, so native controls — scrollbars, date pickers, the
+     form autofill tint — follow the operator's choice instead of always rendering dark. */
+  :root { color-scheme: light; --font-sans: "Inter Variable"; }
+  .dark { color-scheme: dark; }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  html, body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
+
+  body {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Tabular figures everywhere a number is compared against another number. A dashboard whose digits change
+     width makes a stable figure look like it is flickering. */
+  .tabular { font-variant-numeric: tabular-nums; }
+
+  ::-webkit-scrollbar { width: 11px; height: 11px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border-strong));
+    border-radius: 9999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.6); background-clip: content-box; }
+
+  /* One focus treatment for the whole product. Keyboard focus was previously visible on some controls and
+     invisible on others, which is the same as not having it. */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
 }
 
-* { border-color: theme(colors.border); }
+@layer base {
+  /* COLLAPSED IS AN ATTRIBUTE ON <html>, NOT A CLASS ON THE COLUMN.
+     The pre-paint script can only reach the document element, and the width has to be right on the very first
+     frame; anything scoped lower would need React to have run. Only the DESKTOP column reads it — the mobile
+     drawer is a fixed-width overlay and is deliberately unaffected, because a 3.5rem rail of unlabelled icons
+     is the wrong answer on a phone. */
+  html[data-sidebar="collapsed"] {
+    --sidebar-width: var(--sidebar-width-rail);
+  }
 
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: #2a2f3c; border-radius: 6px; }
-::-webkit-scrollbar-thumb:hover { background: #343a4a; }
+  /* RESTRAINED MOTION, AND NONE AT ALL WHEN THE OPERATOR HAS ASKED FOR NONE.
+     A width transition is the one animation here; it is short enough to read as a state change rather than an
+     effect. `prefers-reduced-motion` is honoured by removing the transition entirely rather than shortening
+     it: the setting means "do not animate", not "animate faster". */
+  @media (prefers-reduced-motion: reduce) {
+    .sidebar-motion,
+    .sidebar-motion * {
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer utilities {
+  /* The sidebar column keeps its own scrollbar tuned to its darker surface. */
+  .nav-scroll::-webkit-scrollbar-thumb {
+    background: hsl(var(--sidebar-border));
+    background-clip: content-box;
+  }
+  .nav-scroll::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--sidebar-muted) / 0.6);
+    background-clip: content-box;
+  }
+}

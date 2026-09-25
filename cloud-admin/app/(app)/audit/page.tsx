@@ -1,16 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Filter, ScrollText } from "lucide-react";
 import { api, AuditEntry, ListResp } from "@/lib/api";
 import { useCustomer } from "@/lib/customer-context";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Input, Label } from "@/components/ui/input";
+import { Field, Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
-import { errMsg, formatDate } from "@/lib/utils";
+import { PageHeader, PageShell } from "@/components/ui/page";
+import { MonoId, SkeletonRows } from "@/components/ui/misc";
+import { CustomerScope, SelectCustomerCard } from "@/components/customer-scope";
+import { formatDate } from "@/lib/utils";
 
 const ACTION_TONE: Record<string, "ok" | "warn" | "err" | "info" | "default"> = {
   created: "ok",
@@ -32,70 +36,70 @@ function tone(action: string) {
 }
 
 export default function AuditPage() {
-  // The audit log is per-customer. Requires a concrete customer in the Global
-  // Customer Context; "All Customers" shows a prompt.
-  const { selectedTenantId: tenantID, selectedTenantName, ready } = useCustomer();
+  // The audit log is per-customer. It requires a concrete customer in the Customer context; "All customers"
+  // shows a prompt.
+  const { selectedTenantId: tenantID, ready } = useCustomer();
   const allCustomers = tenantID === "";
   const [rows, setRows] = useState<AuditEntry[] | null>(null);
   const [err, setErr] = useState<unknown>(null);
   const [actionFilter, setActionFilter] = useState("");
 
-  async function load() {
+  async function load(filter: string = actionFilter) {
     if (!ready) return;
     if (allCustomers) { setRows(null); return; }
-    setRows(null);
+    setRows(null); setErr(null);
     const q = new URLSearchParams();
-    if (actionFilter) q.set("action", actionFilter);
+    if (filter) q.set("action", filter);
     try {
       const r = await api.get<ListResp<AuditEntry>>(`/v1/tenants/${tenantID}/audit?${q.toString()}`);
       setRows(r.data);
-    } catch (e) { setErr(e); }
+    } catch (e) { setErr(e); setRows([]); }
   }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [ready, tenantID]);
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="mb-4">
-        <div className="text-xs text-muted uppercase tracking-wider">Compliance</div>
-        <h1 className="text-2xl font-semibold">Audit log</h1>
-        <div className="mt-1 text-sm text-muted">{allCustomers ? "All Customers" : <>Customer: <span className="text-text font-medium">{selectedTenantName}</span></>}</div>
-      </div>
+    <PageShell width="wide">
+      <PageHeader
+        eyebrow="Administration"
+        title="Audit log"
+        icon={<ScrollText />}
+        description="Who did what for this customer in the last 7 days. Entries are never edited or removed."
+      >
+        <CustomerScope />
+      </PageHeader>
 
       <ErrorBanner err={err} />
 
-      {allCustomers && (
-        <Card><CardBody>
-          <div className="text-sm text-muted">
-            The audit log is per-customer. Select a customer in the <strong>Customer context</strong> selector
-            {" "}(top-left) to view its audit events.
-          </div>
-        </CardBody></Card>
-      )}
-
-      {!allCustomers && (<>
-      <Card className="mb-4">
-        <CardBody>
-          <form onSubmit={(e) => { e.preventDefault(); load(); }} className="flex items-end gap-3">
-            <div className="flex-1 max-w-md">
-              <Label>Filter actions (comma-separated, e.g. <span className="font-mono">site.created,operator.disabled</span>)</Label>
-              <Input
-                value={actionFilter}
-                onChange={(e) => setActionFilter(e.target.value)}
-                placeholder="leave blank for all"
-              />
+      {allCustomers ? (
+        <SelectCustomerCard what="The audit log is kept per customer." />
+      ) : (
+        <Card>
+          <CardHeader>
+            <div className="space-y-0.5">
+              <CardTitle>{rows ? `${rows.length} ${rows.length === 1 ? "event" : "events"}` : "Events"}</CardTitle>
+              <CardDescription>Last 7 days.</CardDescription>
             </div>
-            <Button type="submit">Apply</Button>
-          </form>
-        </CardBody>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{rows ? `${rows.length} events (last 7 days)` : "Loading…"}</CardTitle>
-        </CardHeader>
-        <CardBody className="p-0">
-          {rows === null ? <EmptyState title="Loading…" /> : rows.length === 0 ? (
-            <EmptyState title="No audit events in this window" />
+            <form
+              onSubmit={(e) => { e.preventDefault(); load(); }}
+              className="flex w-full flex-wrap items-end gap-2 sm:w-auto"
+              role="search"
+            >
+              <Field label="Filter by action" hint={<>Comma-separated, e.g. <span className="font-mono">site.created,operator.disabled</span></>} className="w-full sm:w-96">
+                <Input value={actionFilter} onChange={(e) => setActionFilter(e.target.value)} placeholder="Leave blank for all" />
+              </Field>
+              <Button type="submit" variant="secondary" className="mb-6"><Filter /> Apply</Button>
+            </form>
+          </CardHeader>
+          {rows === null ? (
+            <SkeletonRows rows={6} cols={6} />
+          ) : rows.length === 0 ? (
+            <EmptyState
+              icon={<ScrollText />}
+              title={actionFilter ? "No events match this filter" : "No audit events in this window"}
+              hint={actionFilter ? "Clear the filter to see every action." : "Actions on this customer's records appear here."}
+              action={actionFilter ? <Button variant="secondary" onClick={() => { setActionFilter(""); load(""); }}>Clear filter</Button> : undefined}
+            />
           ) : (
             <Table>
               <THead>
@@ -103,44 +107,48 @@ export default function AuditPage() {
                   <TH>When</TH>
                   <TH>Actor</TH>
                   <TH>Action</TH>
-                  <TH>Target</TH>
-                  <TH>IP</TH>
-                  <TH>Payload</TH>
+                  <TH className="hidden md:table-cell">Target</TH>
+                  <TH className="hidden lg:table-cell">IP</TH>
+                  <TH className="hidden md:table-cell">Payload</TH>
                 </TR>
               </THead>
               <tbody>
                 {rows.map((e, i) => (
                   <TR key={i}>
-                    <TD className="text-muted whitespace-nowrap">{formatDate(e.ts)}</TD>
+                    <TD className="whitespace-nowrap text-xs text-muted-foreground tabular">{formatDate(e.ts)}</TD>
                     <TD>
                       <div className="text-sm">{e.actor_type}</div>
-                      {e.actor_id && <div className="text-xs text-muted font-mono">{e.actor_id.slice(0, 8)}</div>}
+                      {e.actor_id && <MonoId value={e.actor_id} title="Actor id" />}
                     </TD>
-                    <TD>
-                      <Badge tone={tone(e.action)}>{e.action}</Badge>
-                    </TD>
-                    <TD>
+                    <TD><Badge tone={tone(e.action)} className="font-mono">{e.action}</Badge></TD>
+                    <TD className="hidden md:table-cell">
                       {e.target_type ? (
                         <>
                           <div className="text-sm">{e.target_type}</div>
-                          {e.target_id && <div className="text-xs text-muted font-mono">{e.target_id.slice(0, 8)}</div>}
+                          {e.target_id && <MonoId value={e.target_id} title="Target id" />}
                         </>
                       ) : "—"}
                     </TD>
-                    <TD className="text-muted font-mono text-xs">{e.ip ?? "—"}</TD>
-                    <TD>
-                      <pre className="text-xs text-muted font-mono max-w-md overflow-x-auto">
-                        {e.payload && Object.keys(e.payload).length > 0 ? JSON.stringify(e.payload) : "—"}
-                      </pre>
+                    <TD className="hidden font-mono text-xs text-muted-foreground lg:table-cell">{e.ip ?? "—"}</TD>
+                    <TD className="hidden max-w-md md:table-cell">
+                      {e.payload && Object.keys(e.payload).length > 0 ? (
+                        <details className="text-xs">
+                          <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                            {Object.keys(e.payload).length} {Object.keys(e.payload).length === 1 ? "field" : "fields"}
+                          </summary>
+                          <pre className="mt-1 max-h-48 overflow-auto rounded bg-surface p-2 font-mono text-muted-foreground">
+                            {JSON.stringify(e.payload, null, 2)}
+                          </pre>
+                        </details>
+                      ) : <span className="text-muted-foreground">—</span>}
                     </TD>
                   </TR>
                 ))}
               </tbody>
             </Table>
           )}
-        </CardBody>
-      </Card>
-      </>)}
-    </div>
+        </Card>
+      )}
+    </PageShell>
   );
 }

@@ -79,7 +79,7 @@ export function CustomerProvider({ me, children }: { me: Whoami; children: React
 
   const selectedTenantName =
     selectedTenantId === ""
-      ? "All Customers"
+      ? "All customers"
       : tenants.find((t) => t.id === selectedTenantId)?.name ?? "Unknown customer";
 
   return (
