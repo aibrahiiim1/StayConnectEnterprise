@@ -1,4 +1,0 @@
-commit 59d795b8f1eda868e10b01df44a540eadf091e7b
-Date:   Fri Sep 25 20:32:12 2026 +0300
-
-    Governance: T0190 records the review correction and moves the delivery head to it

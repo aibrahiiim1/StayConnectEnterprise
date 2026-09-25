@@ -1,0 +1,4 @@
+commit c81c4cdc610fa5f31d945457260aaca21b72f83e
+Date:   Fri Sep 25 21:59:43 2026 +0300
+
+    Delivery: the closure manifest exists before the packs are built
