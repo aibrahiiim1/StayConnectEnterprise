@@ -207,8 +207,7 @@ export function PackageForm({
                 : "Choose a plan to see the speed and allowances it gives."}
             </p>
             <p className="text-xs text-muted mt-1">
-              Speed, data, time and device limits are part of the service plan.{" "}
-              <a href="/service-plans" className="underline">Change them on Service plans</a>.
+              <a href="/service-plans" className="underline">Change speed and limits on Service plans</a>.
             </p>
           </>
         )}
@@ -284,9 +283,7 @@ export function PackageForm({
               </div>
             )}
             <p className="text-xs text-muted-foreground">
-              The allowance is worked out once, when the guest is given the package, and does not change
-              afterwards if their stay is extended or shortened. Guests who did not sign in with their room
-              are not offered this package, because their stay length is not known.
+              Guests who did not sign in with their room are not offered this package.
             </p>
           </div>
         )}
@@ -442,8 +439,7 @@ export function PackageForm({
       </div>
 
       <div className="text-xs text-muted-foreground">
-        This package is <strong>free to the guest</strong>. Selling packages to guests is not enabled on this
-        appliance, so there is no price to set here; the package is granted rather than sold.
+        This package is <strong>free to the guest</strong>.
       </div>
 
       <div className="flex gap-2">

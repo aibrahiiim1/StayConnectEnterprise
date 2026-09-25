@@ -26,6 +26,7 @@ import { CheckCircle2, CircleSlash, PackageCheck, Smartphone } from "lucide-reac
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { PageHeader, PageShell } from "@/components/ui/page";
+import { HelpSection } from "@/components/help";
 import { Card, CardBody, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
@@ -131,7 +132,28 @@ export function GuestDeviceSelfServiceView({ canAct, rolesKnown = true }: { canA
       eyebrow="Guests"
       title="Guest devices"
       icon={<Smartphone />}
-      description="Whether a signed-in guest may remove one of their own devices that is not connected, to free its place for another. A device that is online is never removable, and a guest only ever sees their own devices."
+      description="Whether guests may remove their own offline devices."
+      help={
+        <>
+          <HelpSection title="What this setting offers guests">
+            <p>
+              Whether a signed-in guest may remove one of their own devices that is not connected, to free its place
+              for another. A device that is online is never removable, and a guest only ever sees their own devices.
+            </p>
+          </HelpSection>
+          <HelpSection title="Two separate states">
+            <p>
+              <strong>This property offers it</strong> is your setting, stored on this appliance. It applies as soon
+              as it is saved and keeps working if the connection to OneGate Central is unavailable.
+            </p>
+            <p>
+              <strong>Available in this release</strong> is whether the guest feature is included in the software
+              running on this appliance. This is not a hotel setting and is not changed from this screen. Guests can
+              use device self-service only when both are on.
+            </p>
+          </HelpSection>
+        </>
+      }
     />
   );
 
@@ -177,8 +199,7 @@ export function GuestDeviceSelfServiceView({ canAct, rolesKnown = true }: { canA
           testId="setting-state"
           icon={on ? <CheckCircle2 /> : <CircleSlash />}
         >
-          Your setting, stored on this appliance. It applies as soon as it is saved and keeps working if the
-          connection to OneGate Central is unavailable.
+          Your setting, stored on this appliance.
         </StateTile>
         <StateTile
           label="Available in this release"
@@ -187,8 +208,7 @@ export function GuestDeviceSelfServiceView({ canAct, rolesKnown = true }: { canA
           testId="gate-state"
           icon={<PackageCheck />}
         >
-          Whether the guest feature is included in the software running on this appliance. This is not a hotel
-          setting and is not changed from this screen.
+          Included in the software on this appliance. Not changed from this screen.
         </StateTile>
       </div>
 
