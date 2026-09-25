@@ -2,7 +2,7 @@
 
 - **Base commit:** `38d2ab7995661e1838fa2803c669b1d64411d0e5`
 - **HEAD commit:** `86c3dfdf`
-- **Provenance (generation HEAD = inventory_head):** `7d79d8b94af234c74c370c43b7ace81c2eb30a61`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `9946c2a72f91c4cd650a02b914682e7873755089`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/velonet-prelive-deploy`
 - **Remote branch:** `origin/delivery/velonet-prelive-deploy`
 - **Changed files:** 25
@@ -16,26 +16,26 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0193 records the Velonet deployment to PRE-LIVE and its provenance |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0193 records the Velonet deployment to PRE-LIVE and its provenance |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0193 records the Velonet deployment to PRE-LIVE and its provenance |
-| `docs/manifests/VelonetPreLive-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery: the deployment record names its own head; the manifest exists before the packs |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/GIT_STAT_7d79d8b9.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/GIT_STAT_ffe48ba9.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
+| `docs/manifests/VelonetPreLive-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase-evidence/GIT_STAT_9946c2a7.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/GIT_STAT_ffe48ba9.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0193 records the Velonet deployment to PRE-LIVE and its provenance |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0193 records the Velonet deployment to PRE-LIVE and its provenance |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: the deployment record names its own head; the manifest exists before the packs |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: the provenance verification date moves with the T0193 re-read |
 | `governance/transitions/T0193.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0193 records the Velonet deployment to PRE-LIVE and its provenance |
 
 ## Total diff statistics (`git diff --stat`)
@@ -44,11 +44,11 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   4 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   4 +-
  docs/context/StayConnect-IAM-Handoff.md            |   4 +-
- docs/manifests/VelonetPreLive-change-manifest.md   |  96 +++++++++++++++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343106 -> 343108 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 149474 -> 149479 bytes
+ docs/manifests/VelonetPreLive-change-manifest.md   |  93 +++++++++++++++++++++
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343106 -> 343106 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 149474 -> 149469 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44032 -> 44033 bytes
- .../chatgpt/phase-evidence/GIT_STAT_7d79d8b9.txt   |   4 +
+ .../chatgpt/phase-evidence/GIT_STAT_9946c2a7.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_ffe48ba9.txt   |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   4 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
@@ -57,15 +57,15 @@
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |   4 +-
  .../chatgpt/stayconnectenterprise/00-START-HERE.md |   4 +-
- exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  62 ++++++-------
+ exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  62 +++++++-------
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   4 +-
  .../StayConnect-IAM-Handoff.md                     |   4 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   4 +-
  .../StayConnect-IAM-Phase1A-Plan.md                |   4 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |   4 +-
- governance/project-state.json                      |  48 +++++------
- governance/transitions/T0193.json                  |  52 +++++++++++
- 25 files changed, 239 insertions(+), 91 deletions(-)
+ governance/project-state.json                      |  50 +++++------
+ governance/transitions/T0193.json                  |  52 ++++++++++++
+ 25 files changed, 237 insertions(+), 92 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -74,23 +74,20 @@ M  docs/manifests/VelonetPreLive-change-manifest.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_7d79d8b9.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_ffe48ba9.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_7d79d8b9.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_9946c2a7.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
 M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md
 M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 9946c2a7 Governance: the provenance verification date moves with the T0193 re-read
+HISTORICAL: 0009cf03 Packs and manifest at the delivery head, in that order
 HISTORICAL: 7d79d8b9 Delivery: the deployment record names its own head; the manifest exists before the packs
 HISTORICAL: 86c3dfdf Governance: T0193 records the Velonet deployment to PRE-LIVE and its provenance
 ```

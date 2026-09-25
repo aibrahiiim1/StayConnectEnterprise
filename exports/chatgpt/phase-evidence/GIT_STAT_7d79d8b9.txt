@@ -1,4 +1,0 @@
-commit 7d79d8b94af234c74c370c43b7ace81c2eb30a61
-Date:   Sat Sep 26 00:13:21 2026 +0300
-
-    Delivery: the deployment record names its own head; the manifest exists before the packs
