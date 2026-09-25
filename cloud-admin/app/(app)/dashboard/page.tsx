@@ -44,6 +44,10 @@ export default function DashboardPage() {
   const [err, setErr] = useState<unknown>(null);
 
   const tenantID = selectedTenantId; // "" = All customers
+  // A platform role other than the super-admin (platform_support, platform_billing) has no customer of its own
+  // and no customer selector. ctrlapi refuses every customer-scoped list for it with 400 "tenant scope
+  // required", so asking would only paint an error over blank figures. Ask for nothing and say why instead.
+  const noCustomer = ready && !isPlatform && !tenantID;
 
   useEffect(() => {
     if (!isPlatform) return;
@@ -62,6 +66,12 @@ export default function DashboardPage() {
     if (!ready) return;
     let live = true;
     setErr(null);
+    if (noCustomer) {
+      setLicenses(null);
+      setSites(null);
+      setAppliances(null);
+      return;
+    }
     (async () => {
       const q = `tenant_id=${tenantID}`;
       const [l, s, a] = await Promise.allSettled([
@@ -77,7 +87,7 @@ export default function DashboardPage() {
       if (failed) setErr(failed.reason);
     })();
     return () => { live = false; };
-  }, [ready, tenantID]);
+  }, [ready, tenantID, noCustomer]);
 
   const now = Date.now();
   const current = (licenses ?? []).filter((l) => licenseState(l, now).key !== "superseded");
@@ -96,7 +106,7 @@ export default function DashboardPage() {
   const onlineRecently = (a: Appliance) =>
     a.last_seen_at ? now - new Date(a.last_seen_at).getTime() < 5 * 60 * 1000 : false;
   const dash = <span className="text-muted-foreground">—</span>;
-  const loading = licenses === null && sites === null && appliances === null && !err;
+  const loading = !noCustomer && licenses === null && sites === null && appliances === null && !err;
 
   return (
     <PageShell>
@@ -118,6 +128,13 @@ export default function DashboardPage() {
       </PageHeader>
 
       <ErrorBanner err={err} />
+
+      {noCustomer && (
+        <Callout tone="info" title="Your role is not tied to a customer">
+          The figures on this page belong to one customer at a time, so there is nothing to show here for your
+          role. The screens your role can open are in the menu.
+        </Callout>
+      )}
 
       {isPlatform && <FleetLicenseSummaryCard summary={fleetLicenses} loaded={fleetLoaded} />}
 
@@ -174,7 +191,9 @@ export default function DashboardPage() {
           </div>
         </CardHeader>
         <CardBody>
-          {licenses === null && !err ? (
+          {noCustomer ? (
+            <EmptyState icon={<BadgeCheck />} title="No customer in scope" hint="License figures are shown per customer." />
+          ) : licenses === null && !err ? (
             <div className="space-y-3" aria-busy="true">
               <span className="sr-only">Loading</span>
               {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-9" />)}

@@ -39,4 +39,20 @@ describe("the Central dashboard", () => {
     expect(calls.some((c) => /usage|\/cloud\/v1\/fleet\b/.test(c.url))).toBe(false);
     expect(calls.every((c) => !/404/.test(c.url))).toBe(true);
   });
+
+  it("asks for no customer-scoped data when the operator's role has no customer", async () => {
+    // platform_support / platform_billing: not the super-admin, no default customer. ctrlapi answers 400
+    // "tenant scope required" to every customer-scoped list for them, so the page must not ask.
+    const { calls } = mockFetch([]);
+    const me = { operator_id: "op-3", email: "support@example.test", is_super_admin: false,
+      roles: ["platform_support"], expires_at: "2099-01-01T00:00:00Z" };
+    render(
+      <CustomerProvider me={me as Whoami}>
+        <ToastProvider><DashboardPage /></ToastProvider>
+      </CustomerProvider>,
+    );
+    await waitFor(() => expect(screen.getByText("Your role is not tied to a customer")).toBeInTheDocument());
+    expect(calls.some((c) => /tenant_id=/.test(c.url))).toBe(false);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
 });
