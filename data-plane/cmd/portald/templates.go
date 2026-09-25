@@ -326,7 +326,7 @@ const landingHTML = `<!doctype html>
       social:  { id:'social',  label:'Social',  panel:'panel-social' },
       poststay:{ id:'poststay',label:'Post-stay',panel:'panel-poststay' },
     };
-    const ProviderLabels = { google: 'Continue with Google', apple: 'Continue with Apple', facebook: 'Continue with Facebook' };
+    const ProviderLabels = { google: 'Continue with Google', apple: 'Continue with Apple', facebook: 'Continue with Facebook', microsoft: 'Continue with Microsoft' };
     const PMSPrompts = {
       room_lastname:    "Last name on the reservation",
       room_firstname:   "First name on the reservation",

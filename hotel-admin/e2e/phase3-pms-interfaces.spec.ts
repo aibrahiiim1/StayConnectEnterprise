@@ -144,7 +144,7 @@ test("the connections page shows what is running, how it is doing, and how far b
   await installBackend(page, { mutations });
   await page.goto("/pms-interfaces");
 
-  await expect(page.getByRole("heading", { name: "PMS connections" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "PMS connection", exact: true })).toBeVisible();
   await expect(page.getByText("Main PMS")).toBeVisible();
   await openSheet(page);
 

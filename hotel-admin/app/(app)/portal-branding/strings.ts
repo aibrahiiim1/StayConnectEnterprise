@@ -104,6 +104,7 @@ export const PORTAL_STRINGS: { group: string; key: string; english: string }[] =
   { group: "Social sign-in", key: "social.google", english: "Continue with Google" },
   { group: "Social sign-in", key: "social.apple", english: "Continue with Apple" },
   { group: "Social sign-in", key: "social.facebook", english: "Continue with Facebook" },
+  { group: "Social sign-in", key: "social.microsoft", english: "Continue with Microsoft" },
 
   { group: "Device info", key: "info.device", english: "Your device" },
   { group: "Device info", key: "info.ip", english: "IP address" },

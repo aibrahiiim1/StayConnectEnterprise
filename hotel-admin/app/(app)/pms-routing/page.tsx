@@ -123,7 +123,7 @@ export default function PMSRoutingPage() {
     <PageShell>
       <PageHeader
         eyebrow="Property management system"
-        title="Which PMS each network checks"
+        title="Network routing"
         description="When a guest signs in with their room number, the appliance has to know which property management system to check that room against. It decides from the Wi-Fi network the device is connected to — and that is what this page sets."
       />
 
