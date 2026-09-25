@@ -74,7 +74,7 @@ var functionalIDs = []string{
 func TestEveryTemplateRendersEveryFunctionalElement(t *testing.T) {
 	for _, tp := range portaldesign.Templates {
 		t.Run(tp.ID, func(t *testing.T) {
-			h := designHandler(t, map[string]any{"template_id": tp.ID, "hotel_name": "Coral Sea"})
+			h := designHandler(t, map[string]any{"template_id": tp.ID, "hotel_name": "Semantics Demo Hotel"})
 			w := get(t, h, "/")
 			html := w.Body.String()
 			if !strings.Contains(html, `data-template="`+tp.ID+`"`) {
@@ -184,7 +184,7 @@ func TestBrandingIsSanitisedAgainOnTheWayToTheGuest(t *testing.T) {
 	// A design that reached the database without passing edged -- written before the allowlist existed,
 	// restored from a backup -- must still reach a guest only in its safe form.
 	h := designHandler(t, map[string]any{
-		"hotel_name":  "Coral Sea",
+		"hotel_name":  "Semantics Demo Hotel",
 		"terms_url":   "javascript:alert(1)",
 		"logo_url":    "//evil.example/logo.png",
 		"custom_html": `<p>Pool</p><img src=x onerror=alert(1)><base href="https://evil.example/"><form action="https://evil.example"><input name="room"></form>`,
@@ -205,7 +205,7 @@ func TestBrandingIsSanitisedAgainOnTheWayToTheGuest(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Design["hotel_name"] != "Coral Sea" || got.Design["template_id"] != "split" {
+	if got.Design["hotel_name"] != "Semantics Demo Hotel" || got.Design["template_id"] != "split" {
 		t.Errorf("valid fields were lost: %v", got.Design)
 	}
 	if h, _ := got.Design["custom_html"].(string); !strings.Contains(h, "<p>Pool</p>") {

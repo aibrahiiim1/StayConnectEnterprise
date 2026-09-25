@@ -369,6 +369,102 @@ const portalBaseCSS = `
   }
   .info-panel p { margin: 10px 0 0; }
 
+  /* ---- the lightbulb and its sheet ---------------------------------------------------------------------
+     A <details> first (the tips open in place with no script); guestHelpScript then moves the sheet to <body>
+     as a modal (.is-modal). The lightbulb sits beside the information button, at the end of the footer row. */
+  .sc-help { display: inline-block; margin: 0 0 0 auto; }
+  [dir="rtl"] .sc-help { margin: 0 auto 0 0; }
+  .sc-help + .info-btn { margin: 0 -8px 0 0; }
+  [dir="rtl"] .sc-help + .info-btn { margin: 0 0 0 -8px; }
+  .sc-foot--page .sc-help { margin: 0 -8px 0 auto; }
+  [dir="rtl"] .sc-foot--page .sc-help { margin: 0 auto 0 -8px; }
+  .sc-help > summary { list-style: none; }
+  .sc-help > summary::-webkit-details-marker { display: none; }
+  .sc-help > summary::marker { content: ""; }
+  .help-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 44px; height: 44px; padding: 0; border-radius: 999px;
+    background: transparent; color: var(--sc-muted); cursor: pointer;
+  }
+  .help-btn svg { width: 22px; height: 22px; }
+  .help-btn:hover, .sc-help[open] > .help-btn, .help-btn[aria-expanded="true"] { background: var(--sc-fill); color: var(--sc-ink); }
+  .help-btn:focus-visible, .help-close:focus-visible { outline: 2px solid var(--sc-brand); outline-offset: 2px; }
+  .sc-help[open]:not([data-modal]) { flex: 1 1 100%; }
+  .help-card {
+    margin: 4px 0 12px; padding: 18px 18px 16px;
+    border: 1px solid var(--sc-line); border-radius: var(--sc-radius);
+    background: var(--sc-card); color: var(--sc-ink); font-size: 0.9375rem; line-height: 1.5; text-align: left;
+  }
+  [dir="rtl"] .help-card { text-align: right; }
+  .help-head { display: flex; align-items: center; }
+  .help-title { flex: 1 1 auto; margin: 0; font-size: 1.125rem; font-weight: 700; line-height: 1.3; }
+  .help-close {
+    display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center;
+    width: 40px; height: 40px; margin: -6px -8px -6px 8px; padding: 0;
+    border: 0; border-radius: 999px; background: transparent; color: var(--sc-muted); cursor: pointer;
+  }
+  [dir="rtl"] .help-close { margin: -6px 8px -6px -8px; }
+  .help-close svg { width: 20px; height: 20px; }
+  .help-close:hover { background: var(--sc-fill); color: var(--sc-ink); }
+  .help-sheet:not(.is-modal) .help-close { display: none; }
+  .help-tips { list-style: none; margin: 12px 0 0; padding: 0; }
+  .help-tips li { padding: 10px 0; border-top: 1px solid var(--sc-line); }
+  .help-tips li:first-child { border-top: 0; padding-top: 2px; }
+  .help-tips li[hidden] { display: none; }
+  .help-tips strong { display: block; font-size: 0.875rem; font-weight: 650; }
+  .help-tips span { display: block; margin-top: 2px; color: var(--sc-muted); font-size: 0.875rem; }
+  .help-fail { margin: 12px 0 0; padding: 12px 14px; border-radius: var(--sc-r-ctl); background: var(--sc-recess); font-size: 0.875rem; }
+  .help-device { margin: 12px 0 0; color: var(--sc-muted); font-size: 0.875rem; }
+  .help-device strong { display: block; color: var(--sc-ink); }
+  .help-device dl { display: grid; grid-template-columns: auto 1fr; grid-gap: 4px 16px; gap: 4px 16px; margin: 8px 0 0; }
+  .help-device dt, .help-device dd { margin: 0; }
+  .help-device dd {
+    color: var(--sc-ink); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.8125rem; overflow-wrap: anywhere;
+  }
+  .help-device p { margin: 8px 0 0; }
+  .help-hotel { margin: 12px 0 0; color: var(--sc-muted); font-size: 0.875rem; white-space: pre-line; }
+  .help-hotel[hidden] { display: none; }
+  .help-sheet.is-modal {
+    position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 50;
+    display: flex; align-items: flex-end; justify-content: center;
+    padding: 12px; background: rgba(12, 16, 20, 0.5);
+  }
+  .help-sheet.is-modal .help-card {
+    width: 100%; max-width: 460px; max-height: 86vh; overflow: auto; margin: 0;
+    box-shadow: var(--sc-shadow-float);
+    -webkit-animation: sc-help-in 0.18s ease-out; animation: sc-help-in 0.18s ease-out;
+  }
+  @media (min-width: 560px) { .help-sheet.is-modal { align-items: center; } }
+  @-webkit-keyframes sc-help-in { from { opacity: 0; -webkit-transform: translateY(12px); } to { opacity: 1; -webkit-transform: none; } }
+  @keyframes sc-help-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .help-sheet.is-modal .help-card { -webkit-animation: none; animation: none; } }
+  .help-sheet.is-modal[hidden] { display: none; }
+  .sc-help-open body { overflow: hidden; }
+
+  /* ---- the product's one line: "Wi-Fi by OneGate" -------------------------------------------------------
+     Small and last, so the hotel's name stays the page's name. The wordmark is type, not an image: "One" in
+     the green gradient, "Gate" in solid black, on a light chip so it reads the same on any hotel surface. */
+  .sc-by {
+    flex: 1 1 100%; margin: 8px 0 2px; text-align: center;
+    color: var(--sc-muted); font-size: 0.75rem; line-height: 1.6;
+  }
+  .og-mark {
+    display: inline-block; padding: 0 7px; border-radius: 999px;
+    background: #ffffff; box-shadow: 0 0 0 1px rgba(10, 10, 10, 0.08);
+    font-size: 0.8125rem; letter-spacing: 0; white-space: nowrap; unicode-bidi: isolate;
+  }
+  .og-one, .og-gate { font-weight: 700; }
+  .og-one { color: #149c4a; }
+  .og-gate { color: #0a0a0a; }
+  @supports ((-webkit-background-clip: text) or (background-clip: text)) {
+    .og-one {
+      background-image: linear-gradient(95deg, #0b7a3b, #149c4a 38%, #3cc05a 70%, #8fdc5f);
+      -webkit-background-clip: text; background-clip: text;
+      -webkit-text-fill-color: transparent; color: transparent;
+    }
+  }
+
   .empty-state { padding: 8px 0 4px; text-align: center; }
   .empty-state svg { width: 40px; height: 40px; margin: 0 auto 10px; color: var(--sc-muted); display: block; }
   .empty-state p { color: var(--sc-ink); font-size: 0.9375rem; }

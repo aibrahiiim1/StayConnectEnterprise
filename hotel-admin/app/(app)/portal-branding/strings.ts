@@ -184,6 +184,17 @@ export const PORTAL_STRINGS: { group: string; key: string; english: string }[] =
   { group: "Sign-in failed page", key: "errpage.title", english: "Sign-in didn't work" },
   { group: "Sign-in failed page", key: "errpage.social", english: "We couldn't finish signing you in with that account. Please try again, or choose another way to sign in." },
   { group: "Sign-in failed page", key: "errpage.back", english: "Back to sign-in" },
+  { group: "Help and tips", key: "help.button", english: "Help and tips" },
+  { group: "Help and tips", key: "help.title", english: "Help with signing in" },
+  { group: "Help and tips", key: "help.close", english: "Close" },
+  { group: "Help and tips", key: "help.pms", english: "Enter your room number, then the detail asked for below it, exactly as it appears on your reservation." },
+  { group: "Help and tips", key: "help.poststay", english: "Already checked out? Enter the PIN you were given at checkout to reconnect." },
+  { group: "Help and tips", key: "help.voucher", english: "Type the code exactly as it is printed on your voucher, then tap Login." },
+  { group: "Help and tips", key: "help.account", english: "Enter the username and password you were given. If a voucher field is showing, switch on “Use Personal Account” first." },
+  { group: "Help and tips", key: "help.email", english: "Enter your email address and tap Send code, then type the 6-digit code from the email. Check your spam folder if it does not arrive." },
+  { group: "Help and tips", key: "help.sms", english: "Enter your phone number with the country code and tap Send code, then type the 6-digit code from the text message." },
+  { group: "Help and tips", key: "help.fail", english: "Something not working? Please contact reception — they are happy to help." },
+  { group: "Sign-in page", key: "brand.by", english: "Wi-Fi by" },
 ];
 
 export const STRING_GROUPS = Array.from(new Set(PORTAL_STRINGS.map((s) => s.group)));

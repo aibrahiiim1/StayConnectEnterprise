@@ -80,7 +80,7 @@ func TestEveryGuestPageRendersInArabicRightToLeft(t *testing.T) {
 		// The guest's own choice, remembered by the selector, outranks what the device asks for.
 		{"Accept-Language": {"en-GB,en"}, "Cookie": {"sc-lang=ar"}},
 	} {
-		pages := guestPages(t, map[string]any{"hotel_name": "Coral Bay"}, header)
+		pages := guestPages(t, map[string]any{"hotel_name": "Semantics Demo Hotel"}, header)
 		for name, keys := range want {
 			html := pages[name]
 			if !strings.Contains(html, `lang="ar"`) || !strings.Contains(html, `dir="rtl"`) {
@@ -134,10 +134,10 @@ func TestDefaultGuestPagesNameNothingOutsideTheAppliance(t *testing.T) {
 	}
 	// With a design, the only external addresses are the ones the hotel configured.
 	hotel := map[string]any{
-		"hotel_name": "Coral Bay", "logo_url": "https://cdn.coralbay.example/logo.png",
-		"terms_url": "https://coralbay.example/terms",
+		"hotel_name": "Semantics Demo Hotel", "logo_url": "https://cdn.semantics-demo.example/logo.png",
+		"terms_url": "https://semantics-demo.example/terms",
 	}
-	allowed := map[string]bool{"https://cdn.coralbay.example": true, "https://coralbay.example": true}
+	allowed := map[string]bool{"https://cdn.semantics-demo.example": true, "https://semantics-demo.example": true}
 	for name, html := range guestPages(t, hotel, nil) {
 		for _, m := range reAbsoluteURL.FindAllString(html, -1) {
 			if !allowed[m] {
@@ -262,7 +262,7 @@ func TestTheOnlinePageNoLongerPrintsTheSessionID(t *testing.T) {
 // words, or a plain-text "device not on guest network". It is now the branded failure page in the guest's
 // language -- with the status code the handler always sent.
 func TestSocialSignInFailuresAreFriendlyPages(t *testing.T) {
-	h := designHandler(t, map[string]any{"hotel_name": "Coral Bay"})
+	h := designHandler(t, map[string]any{"hotel_name": "Semantics Demo Hotel"})
 	for _, tc := range []struct {
 		path, lang string
 		status     int
