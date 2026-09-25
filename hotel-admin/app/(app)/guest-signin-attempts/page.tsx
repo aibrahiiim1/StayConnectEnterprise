@@ -48,11 +48,11 @@ const RESULT_WORDS: Record<string, { tone: "ok" | "warn" | "err" | "info" | "neu
   CREDENTIAL_MISMATCH: {
     tone: "warn",
     meaning:
-      "The room is in the local mirror and has an eligible stay, but the value entered matched none of the accepted ones.",
+      "The room is in the appliance's guest list and has an eligible stay, but the value entered matched none of the accepted ones.",
   },
   ROOM_NOT_IN_MIRROR: {
     tone: "warn",
-    meaning: "No stay on any mapped interface carries that room number in the local mirror.",
+    meaning: "No stay from any connected PMS carries that room number in the appliance's guest list.",
   },
   STAY_NOT_ELIGIBLE: {
     tone: "warn",
@@ -64,7 +64,7 @@ const RESULT_WORDS: Record<string, { tone: "ok" | "warn" | "err" | "info" | "neu
   },
   MIRROR_STALE_OR_MISSING_CHANGE: {
     tone: "err",
-    meaning: "The local mirror could not authorise anybody at that moment — this affected every guest, not just this one.",
+    meaning: "The appliance's guest list could not authorise anybody at that moment — this affected every guest, not just this one.",
   },
   RATE_LIMITED: { tone: "info", meaning: "Refused before any details were evaluated: too many recent attempts." },
   ROUTING_OR_INTERFACE_FAILURE: {
@@ -402,9 +402,9 @@ export default function GuestSignInAttemptsPage() {
                 title="You do not have permission to see what the guest typed"
                 reason={
                   <>
-                    What was entered and what would have been accepted are guest credentials. They need the
-                    View_Guest_SignIn_Credentials permission, which your role does not hold, and the appliance does
-                    not send them without it. Everything else about this attempt is below.
+                    What was entered and what would have been accepted are guest credentials. Only roles allowed to
+                    see guest sign-in details can view them; your role is not one of them, and
+                    the appliance does not send them without it. Everything else about this attempt is below.
                   </>
                 }
               />
@@ -418,7 +418,7 @@ export default function GuestSignInAttemptsPage() {
             ) : creds === null ? (
               <SkeletonRows rows={2} cols={2} />
             ) : detail.room_in_mirror === false ? (
-              <Callout tone="warning" title="No eligible stay for this room exists in the local mirror">
+              <Callout tone="warning" title="No eligible stay for this room exists in the appliance's guest list">
                 <p>
                   There is nothing this attempt could have matched, so no expected values are shown. Inventing them
                   would be worse than showing none.

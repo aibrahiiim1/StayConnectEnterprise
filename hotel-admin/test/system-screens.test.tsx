@@ -231,6 +231,21 @@ describe("Operators", () => {
     expect(within(dialog).getByText(/no way to re-enable/i)).toBeTruthy();
   });
 
+  it("adding a role is confirmed before the request is sent, and sends the same body", async () => {
+    routes({ "/operators": OPS }, ["site_admin"]);
+    post.mockResolvedValue({});
+    const Page = (await import("@/app/(app)/operators/page")).default;
+    render(<Page />);
+    const select = await screen.findByLabelText("Give desk@hotel another role");
+    await userEvent.selectOptions(select, "site_viewer");
+    // Nothing is granted by the choice alone.
+    expect(post).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/Give this role\?/)).toBeTruthy();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Add role" }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("/operators/o2/roles", { role: "site_viewer" }));
+  });
+
   it("new operators default to Site viewer", async () => {
     routes({ "/operators": OPS }, ["site_admin"]);
     const Page = (await import("@/app/(app)/operators/page")).default;

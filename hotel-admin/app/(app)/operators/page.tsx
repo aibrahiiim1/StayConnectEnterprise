@@ -122,16 +122,21 @@ export default function OperatorsPage() {
     finally { setBusy(false); }
   }
 
-  async function onAddRole(op: EdgeOperator, role: string) {
-    if (!role) return;
-    setErr(null);
-    // Applies immediately, with no confirmation -- unchanged behaviour. Adding a role only ever widens access.
+  // ADDING A ROLE WIDENS WHAT SOMEONE CAN DO, so it is confirmed like removing one. Choosing from the menu used to
+  // grant the role on the spot: one slip of a select widened a colleague's access with nothing to catch it. The
+  // request is the same one, sent only after the operator confirms.
+  const [addingRole, setAddingRole] = useState<{ op: EdgeOperator; role: string } | null>(null);
+  async function onAddRole() {
+    if (!addingRole) return;
+    const { op, role } = addingRole;
+    setBusy(true); setFormErr(null);
     try {
       await api.post(`/operators/${op.id}/roles`, { role });
       toast.success("Role added", `${op.email} is now also ${ROLE_LABELS[role as SiteRole] ?? role}.`);
+      setAddingRole(null);
       await load();
-    }
-    catch (e) { setErr(e); }
+    } catch (e) { setFormErr(e); }
+    finally { setBusy(false); }
   }
 
   async function onRemoveRole() {
@@ -222,7 +227,11 @@ export default function OperatorsPage() {
                             <Select
                               value=""
                               aria-label={`Give ${op.email} another role`}
-                              onChange={(e) => { void onAddRole(op, e.target.value); e.currentTarget.value = ""; }}
+                              onChange={(e) => {
+                                const role = e.target.value;
+                                e.currentTarget.value = "";
+                                if (role) { setFormErr(null); setAddingRole({ op, role }); }
+                              }}
                               className="h-7 w-auto pe-8 text-xs"
                             >
                               <option value="" disabled>+ role</option>
@@ -362,6 +371,22 @@ export default function OperatorsPage() {
         busy={busy}
         error={formErr}
         onConfirm={onDisable}
+      />
+
+      {/* ------------------------------------------------------------------ add role */}
+      <ConfirmDialog
+        open={addingRole !== null}
+        onOpenChange={(v) => !v && setAddingRole(null)}
+        title="Give this role?"
+        description={
+          addingRole
+            ? `${addingRole.op.display_name || addingRole.op.email} will also be able to do everything the ${ROLE_LABELS[addingRole.role as SiteRole] ?? addingRole.role} role allows, from their next action.`
+            : undefined
+        }
+        confirmLabel="Add role"
+        busy={busy}
+        error={formErr}
+        onConfirm={onAddRole}
       />
 
       {/* ------------------------------------------------------------------ remove role */}

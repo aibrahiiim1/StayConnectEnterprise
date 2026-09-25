@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { BadgeCheck, Ban, Download, PauseCircle, PlayCircle, Plus, RefreshCw } from "lucide-react";
-import { api, withStepUp, ListResp, License, Site, FleetAppliance } from "@/lib/api";
+import { api, withStepUp, ListResp, License, Site } from "@/lib/api";
 import { useCustomer } from "@/lib/customer-context";
 import { Card } from "@/components/ui/card";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
@@ -14,7 +14,7 @@ import { ErrorBanner, Callout } from "@/components/ui/error-banner";
 import { ConfirmDialog, DialogForm } from "@/components/ui/dialog";
 import { PageHeader, PageShell, StatCard, Toolbar } from "@/components/ui/page";
 import { FilterChips, SearchInput } from "@/components/ui/data";
-import { Meter, SkeletonRows } from "@/components/ui/misc";
+import { SkeletonRows } from "@/components/ui/misc";
 import { useToast } from "@/components/ui/toast";
 import { AllCustomersNotice, CustomerScope } from "@/components/customer-scope";
 import { RoleRestricted } from "@/components/role-restricted";
@@ -23,7 +23,7 @@ import { usePermissions } from "@/lib/permissions";
 import { formatDate, formatRelative, errMsg } from "@/lib/utils";
 import { graceEndOf, licenseState } from "@/lib/license-state";
 
-type ApplianceRow = { id: string; site_id: string; serial: string; name: string };
+type ApplianceRow = { id: string; site_id: string; serial: string; name: string; last_seen_at?: string };
 type StateFilter = "all" | "active" | "grace" | "expired" | "suspended" | "revoked" | "superseded" | "awaiting";
 
 /**
@@ -47,7 +47,6 @@ export default function LicensesPage() {
   const [rows, setRows] = useState<License[] | null>(null);
   const [sites, setSites] = useState<Site[]>([]);
   const [appliances, setAppliances] = useState<ApplianceRow[]>([]);
-  const [fleet, setFleet] = useState<FleetAppliance[]>([]);
   const [tenantList, setTenantList] = useState<{ id: string; name: string }[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -56,17 +55,18 @@ export default function LicensesPage() {
   async function load() {
     if (!ready) return;
     try {
-      const [lic, st, ap, fl, tn] = await Promise.all([
+      // No fleet/usage call: ctrlapi mounts none (Central is licensing-only, CLAUDE.md 0E), so the "online now"
+      // figure the old table showed was always "—". How many guests are online against the limit is shown on
+      // the appliance itself, in Hotel Admin under Appliance & license.
+      const [lic, st, ap, tn] = await Promise.all([
         api.get<ListResp<License>>(`/cloud/v1/licenses?tenant_id=${tenantID}`),
         api.get<ListResp<Site>>(`/v1/sites?tenant_id=${tenantID}`),
         api.get<ListResp<ApplianceRow>>(`/v1/appliances?tenant_id=${tenantID}`).catch(() => ({ data: [] as ApplianceRow[] })),
-        api.get<ListResp<FleetAppliance>>(`/cloud/v1/fleet?tenant_id=${tenantID}`).catch(() => ({ data: [] as FleetAppliance[] })),
         api.get<{ data: { id: string; name: string }[] }>(`/v1/tenants`).catch(() => ({ data: [] })),
       ]);
       setRows(lic.data ?? []);
       setSites(st.data ?? []);
       setAppliances(ap.data ?? []);
-      setFleet(fl.data ?? []);
       setTenantList(tn.data ?? []);
       setErr(null);
     } catch (e) { setErr(errMsg(e)); }
@@ -80,17 +80,6 @@ export default function LicensesPage() {
     const id = l.appliance_ids?.[0];
     return id ? appliances.find((a) => a.id === id) : undefined;
   };
-  const usageOf = (l: License): { current?: number; at?: string } => {
-    const id = l.appliance_ids?.[0];
-    if (!id) return {};
-    const f = fleet.find((x) => x.appliance_id === id);
-    if (!f?.last_usage) return { at: f?.last_usage_at ?? undefined };
-    try {
-      const u = typeof f.last_usage === "string" ? JSON.parse(f.last_usage) : f.last_usage;
-      return { current: u.active_sessions ?? undefined, at: f.last_usage_at ?? undefined };
-    } catch { return { at: f.last_usage_at ?? undefined }; }
-  };
-
   // ---- issue ----
   const [showNew, setShowNew] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -299,18 +288,16 @@ export default function LicensesPage() {
             <THead>
               <TR>
                 <TH>Customer</TH><TH>Site</TH><TH>Appliance</TH><TH className="hidden md:table-cell">Version</TH>
-                <TH>Status</TH><TH>Online / Limit</TH><TH className="hidden lg:table-cell">Usage</TH>
+                <TH>Status</TH><TH>Max online guests</TH>
                 <TH className="hidden xl:table-cell">Valid</TH><TH className="hidden xl:table-cell">Grace ends</TH>
-                <TH className="hidden lg:table-cell">Last sync</TH><TH><span className="sr-only">Actions</span></TH>
+                <TH className="hidden lg:table-cell">Appliance last seen</TH><TH><span className="sr-only">Actions</span></TH>
               </TR>
             </THead>
             <tbody>
               {visible.map((l) => {
                 const s = licenseState(l);
                 const ap = applianceOf(l);
-                const u = usageOf(l);
                 const limit = l.max_concurrent_online_guests ?? 0;
-                const pct = limit > 0 && u.current !== undefined ? Math.round((u.current / limit) * 100) : null;
                 return (
                   <TR key={l.id}>
                     <TD>{customerOf(l)}</TD>
@@ -318,17 +305,12 @@ export default function LicensesPage() {
                     <TD className="font-mono text-xs">{ap ? ap.serial : <span className="font-sans italic text-muted-foreground">Not bound</span>}</TD>
                     <TD className="hidden font-mono text-xs md:table-cell">v{l.license_version ?? 0}</TD>
                     <TD><Badge tone={s.tone} dot>{s.label}</Badge></TD>
-                    <TD className="font-mono text-xs tabular">
-                      {u.current !== undefined ? u.current : "—"} / {limit > 0 ? limit : <span aria-label="unlimited">∞</span>}
-                    </TD>
-                    <TD className="hidden min-w-24 lg:table-cell">
-                      {pct !== null ? <Meter value={pct} max={100} caption={`${pct}%`} /> : <span className="text-muted-foreground">—</span>}
-                    </TD>
+                    <TD className="text-sm tabular">{limit > 0 ? limit.toLocaleString() : "Unlimited"}</TD>
                     <TD className="hidden whitespace-nowrap text-xs text-muted-foreground xl:table-cell">
                       {l.valid_from ? formatDate(l.valid_from) : formatDate(l.issued_at)} → {formatDate(l.valid_until)}
                     </TD>
                     <TD className="hidden text-xs text-muted-foreground xl:table-cell">{formatDate(graceEndOf(l).toISOString())}</TD>
-                    <TD className="hidden text-xs text-muted-foreground lg:table-cell">{u.at ? formatRelative(u.at) : "—"}</TD>
+                    <TD className="hidden text-xs text-muted-foreground lg:table-cell">{ap?.last_seen_at ? formatRelative(ap.last_seen_at) : "—"}</TD>
                     <TD>
                       <div className="flex justify-end gap-1">
                         {canChange && (l.status === "active" || l.status === "suspended") && (

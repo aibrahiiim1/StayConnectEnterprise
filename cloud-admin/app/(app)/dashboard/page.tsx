@@ -2,18 +2,17 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import {
-  Activity, ArrowRight, BadgeCheck, BarChart3, CalendarClock, Database, LayoutDashboard, Server,
-} from "lucide-react";
-import { api, TopResp, UsageSummary } from "@/lib/api";
+import { ArrowRight, BadgeCheck, CalendarClock, LayoutDashboard, MapPin, Server } from "lucide-react";
+import { api, type Appliance, type License, type ListResp, type Site } from "@/lib/api";
+import { licenseState } from "@/lib/license-state";
+import { Badge } from "@/components/ui/badge";
 import { useCustomer } from "@/lib/customer-context";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader, PageShell, StatCard } from "@/components/ui/page";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ErrorBanner } from "@/components/ui/error-banner";
-import { Meter, Skeleton } from "@/components/ui/misc";
+import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { Skeleton } from "@/components/ui/misc";
 import { CustomerScope } from "@/components/customer-scope";
-import { formatBytes } from "@/lib/utils";
 
 // FleetLicenseSummary counts the licenses the Platform has ISSUED to managed
 // customers/sites, by state. Counting is authoritative and OWNERSHIP-AWARE: it is
@@ -31,18 +30,20 @@ type FleetLicenseSummary = {
 };
 
 export default function DashboardPage() {
-  // Dashboard follows the Customer context: a concrete customer shows that customer's usage; "All customers"
-  // (platform) shows the fleet-wide license roll-up and no single-customer usage.
+  // CENTRAL IS USED FOR LICENSING ONLY (CLAUDE.md 0E). The earlier dashboard asked ctrlapi for per-customer
+  // usage (/v1/tenants/{id}/usage/*): those routes do not exist, because appliances do not report guest
+  // activity to Central, so every figure on it was a permanent "—" behind a 404. This dashboard shows only what
+  // Central actually holds: the licenses it issued, the sites and appliances they are bound to, and what needs
+  // attention. Guest activity lives on each hotel's appliance, in Hotel Admin.
   const { isPlatform, selectedTenantId, ready } = useCustomer();
-  const [summary, setSummary] = useState<UsageSummary | null>(null);
-  const [top, setTop] = useState<TopResp | null>(null);
   const [fleetLicenses, setFleetLicenses] = useState<FleetLicenseSummary | null>(null);
   const [fleetLoaded, setFleetLoaded] = useState(false);
-  const [usageLoading, setUsageLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const [licenses, setLicenses] = useState<License[] | null>(null);
+  const [sites, setSites] = useState<Site[] | null>(null);
+  const [appliances, setAppliances] = useState<Appliance[] | null>(null);
+  const [err, setErr] = useState<unknown>(null);
 
   const tenantID = selectedTenantId; // "" = All customers
-  const allCustomers = tenantID === "";
 
   useEffect(() => {
     if (!isPlatform) return;
@@ -58,29 +59,44 @@ export default function DashboardPage() {
   }, [isPlatform]);
 
   useEffect(() => {
-    if (!ready || allCustomers) { setSummary(null); setTop(null); return; }
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-    const q = `tenant_id=${tenantID}&tz=${encodeURIComponent(tz)}`;
-    setUsageLoading(true);
+    if (!ready) return;
+    let live = true;
     setErr(null);
     (async () => {
-      try {
-        const [s, t] = await Promise.all([
-          api.get<UsageSummary>(`/v1/tenants/${tenantID}/usage/summary?tz=${encodeURIComponent(tz)}`),
-          api.get<TopResp>(`/v1/tenants/${tenantID}/usage/top-sites?top_n=5&${q}`),
-        ]);
-        setSummary(s);
-        setTop(t);
-      } catch (e: any) {
-        setErr(e?.message ?? "Failed to load dashboard");
-      } finally {
-        setUsageLoading(false);
-      }
+      const q = `tenant_id=${tenantID}`;
+      const [l, s, a] = await Promise.allSettled([
+        api.get<ListResp<License>>(`/cloud/v1/licenses?${q}`),
+        api.get<ListResp<Site>>(`/v1/sites?${q}`),
+        api.get<ListResp<Appliance>>(`/v1/appliances?${q}`),
+      ]);
+      if (!live) return;
+      setLicenses(l.status === "fulfilled" ? l.value.data ?? [] : null);
+      setSites(s.status === "fulfilled" ? s.value.data ?? [] : null);
+      setAppliances(a.status === "fulfilled" ? a.value.data ?? [] : null);
+      const failed = [l, s, a].find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
+      if (failed) setErr(failed.reason);
     })();
-  }, [ready, tenantID, allCustomers]);
+    return () => { live = false; };
+  }, [ready, tenantID]);
 
-  const kpiLoading = !allCustomers && usageLoading && !summary;
+  const now = Date.now();
+  const current = (licenses ?? []).filter((l) => licenseState(l, now).key !== "superseded");
+  const attention = current
+    .map((l) => ({ l, st: licenseState(l, now) }))
+    .filter(({ l, st }) => {
+      if (st.key === "active") {
+        const days = (new Date(l.valid_until).getTime() - now) / 86400000;
+        return days <= 30;
+      }
+      return st.key !== "revoked";
+    })
+    .sort((x, y) => new Date(x.l.valid_until).getTime() - new Date(y.l.valid_until).getTime())
+    .slice(0, 8);
+  const siteName = (id: string) => sites?.find((s) => s.id === id)?.name ?? "Unknown site";
+  const onlineRecently = (a: Appliance) =>
+    a.last_seen_at ? now - new Date(a.last_seen_at).getTime() < 5 * 60 * 1000 : false;
   const dash = <span className="text-muted-foreground">—</span>;
+  const loading = licenses === null && sites === null && appliances === null && !err;
 
   return (
     <PageShell>
@@ -88,16 +104,14 @@ export default function DashboardPage() {
         eyebrow="Overview"
         title="Dashboard"
         icon={<LayoutDashboard />}
-        description="Fleet health at a glance: licenses issued by state and, for one customer, how busy their sites are."
+        description="Licenses issued by state, the sites and appliances they cover, and what needs attention. Guest activity is on each hotel's own appliance."
         actions={
-          isPlatform ? (
-            <Link
-              href="/licenses"
-              className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3.5 text-[0.8125rem] font-semibold text-primary-foreground shadow-control transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            >
-              View licenses <ArrowRight className="size-4 rtl:-scale-x-100" aria-hidden />
-            </Link>
-          ) : undefined
+          <Link
+            href="/licenses"
+            className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3.5 text-[0.8125rem] font-semibold text-primary-foreground shadow-control transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          >
+            View licenses <ArrowRight className="size-4 rtl:-scale-x-100" aria-hidden />
+          </Link>
         }
       >
         <CustomerScope />
@@ -107,84 +121,95 @@ export default function DashboardPage() {
 
       {isPlatform && <FleetLicenseSummaryCard summary={fleetLicenses} loaded={fleetLoaded} />}
 
-      <section aria-label="Key figures" className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <section aria-label="Key figures" className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard
-          label="Active sessions"
-          icon={<Activity />}
-          tone="primary"
-          value={kpiLoading ? <Skeleton className="h-7 w-16" /> : summary?.active_sessions ?? dash}
-          hint={allCustomers ? "Select a customer to see this" : "Devices online right now"}
+          label="Sites"
+          icon={<MapPin />}
+          href="/sites"
+          value={loading ? <Skeleton className="h-7 w-12" /> : sites ? sites.filter((s) => s.status !== "archived").length : dash}
+          hint="Properties, one hotel each"
         />
         <StatCard
-          label="Data this month"
-          icon={<Database />}
-          tone="info"
-          value={kpiLoading ? <Skeleton className="h-7 w-20" /> : summary ? formatBytes(summary.total_bytes) : dash}
+          label="Appliances"
+          icon={<Server />}
+          href="/appliances"
+          value={loading ? <Skeleton className="h-7 w-12" /> : appliances ? appliances.length : dash}
           hint={
-            allCustomers
-              ? "Select a customer to see this"
-              : summary?.cap_bytes && summary.cap_used_percent !== undefined
-                ? `${summary.cap_used_percent.toFixed(1)}% of ${formatBytes(summary.cap_bytes)} cap`
-                : "No monthly cap"
-          }
-        />
-        <StatCard
-          label="Sessions today"
-          icon={<CalendarClock />}
-          value={kpiLoading ? <Skeleton className="h-7 w-16" /> : summary?.sessions_today ?? dash}
-          hint={
-            allCustomers
-              ? "Select a customer to see this"
-              : summary ? `Since ${new Date(summary.period_start).toLocaleDateString()}` : undefined
+            appliances
+              ? `${appliances.filter(onlineRecently).length} reached Central in the last 5 minutes`
+              : "Registered to these sites"
           }
         />
         <StatCard
           label="Licensed appliances"
-          icon={<Server />}
+          icon={<BadgeCheck />}
           tone="ok"
-          value={fleetLicenses ? fleetLicenses.active + fleetLicenses.expiring : dash}
-          hint="Live licenses issued to the fleet"
+          href="/licenses"
+          value={
+            loading ? (
+              <Skeleton className="h-7 w-12" />
+            ) : licenses ? (
+              current.filter((l) => ["active", "grace"].includes(licenseState(l, now).key)).length
+            ) : (
+              dash
+            )
+          }
+          hint="Licenses in force, grace included"
+        />
+        <StatCard
+          label="Need attention"
+          icon={<CalendarClock />}
+          tone={attention.length > 0 ? "warn" : "default"}
+          href="/licenses"
+          value={loading ? <Skeleton className="h-7 w-12" /> : licenses ? attention.length : dash}
+          hint="Expiring within 30 days, in grace, expired, suspended or unbound"
         />
       </section>
 
       <Card>
         <CardHeader>
           <div className="space-y-0.5">
-            <CardTitle>Top sites (this month)</CardTitle>
-            <CardDescription>The five sites that used the most data.</CardDescription>
+            <CardTitle>Licenses that need attention</CardTitle>
+            <CardDescription>Soonest first. Existing guest sessions are never dropped by a license state change.</CardDescription>
           </div>
         </CardHeader>
         <CardBody>
-          {allCustomers ? (
-            <EmptyState
-              icon={<BarChart3 />}
-              title="Select a customer"
-              hint="Choose a customer in the sidebar to see its per-site usage. The license summary above spans all customers."
-            />
-          ) : !top ? (
-            <div className="space-y-4" aria-busy="true">
+          {licenses === null && !err ? (
+            <div className="space-y-3" aria-busy="true">
               <span className="sr-only">Loading</span>
-              {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-7" />)}
+              {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-9" />)}
             </div>
-          ) : top.rows.length === 0 ? (
-            <EmptyState icon={<BarChart3 />} title="No usage yet" hint="Activity will appear here as guests connect." />
+          ) : licenses === null ? (
+            <EmptyState icon={<BadgeCheck />} title="Licenses could not be loaded" hint="Try again shortly." />
+          ) : attention.length === 0 ? (
+            <EmptyState icon={<BadgeCheck />} title="Nothing needs attention" hint="Every license is in force for more than 30 days." />
           ) : (
-            <ol className="space-y-3.5">
-              {top.rows.map((r) => (
-                <li key={r.id}>
-                  <Meter
-                    value={r.total_bytes}
-                    max={top.rows[0].total_bytes || 1}
-                    tone="info"
-                    label={<span className="text-sm text-foreground">{r.name}</span>}
-                    caption={formatBytes(r.total_bytes)}
-                  />
+            <ul className="divide-y divide-border">
+              {attention.map(({ l, st }) => (
+                <li key={l.id} className="flex flex-wrap items-center justify-between gap-3 py-2.5">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">{siteName(l.site_id)}</div>
+                    <div className="text-caption text-muted-foreground">
+                      Valid until {new Date(l.valid_until).toLocaleDateString()}
+                      {l.max_concurrent_online_guests !== undefined
+                        ? ` · ${l.max_concurrent_online_guests === 0 ? "unlimited" : l.max_concurrent_online_guests} guests online at once`
+                        : ""}
+                    </div>
+                  </div>
+                  <Badge tone={st.tone === "default" ? "neutral" : st.tone} dot>
+                    {st.key === "active" ? "Expiring soon" : st.label}
+                  </Badge>
                 </li>
               ))}
-            </ol>
+            </ul>
           )}
         </CardBody>
       </Card>
+
+      <Callout tone="info" title="Central is used for licensing only">
+        Guests, sessions, usage and network health are managed on each hotel&apos;s appliance, in Hotel Admin, and
+        keep working when Central is unreachable.
+      </Callout>
     </PageShell>
   );
 }

@@ -20,7 +20,10 @@ import { CustomerScope, SelectCustomerCard } from "@/components/customer-scope";
 import { RoleRestricted } from "@/components/role-restricted";
 import { usePermissions } from "@/lib/permissions";
 
-const ROLES = ["tenant_admin", "tenant_operator", "viewer", "billing"] as const;
+// "billing" is NOT offered. ctrlapi's operators API still accepts the legacy name, but the operator_roles CHECK
+// constraint has not allowed it since migration 0021, so granting it always failed with a server error. Offering
+// a choice that can only fail is a UI defect; the permission model itself is unchanged (see lib/permissions.ts).
+const ROLES = ["tenant_admin", "tenant_operator", "viewer"] as const;
 
 // The words shown for each role. The values sent to the API are unchanged.
 const ROLE_LABELS: Record<string, string> = {
