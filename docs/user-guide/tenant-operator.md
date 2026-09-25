@@ -1,142 +1,131 @@
-# Tenant Operator — User Guide
+# Customer Operator (Tenant Operator) — User Guide
 
-You handle day-to-day WiFi operations for your property. You can do everything operational — vouchers, sessions, walled garden, ticket design, monitoring — but you **cannot** add/remove other staff, change the subscription plan, or delete the tenant.
+You handle day-to-day Wi-Fi operations for your hotel group. In **Velonet Central** your role is day-to-day work for your customer; most guest-facing work happens on each hotel's appliance in **Velonet Hotel Admin**, with an operator account created for you on that appliance (usually the **Front office operator** or **Hotel IT manager** role). You **cannot** add or remove other staff, change licenses, or delete the customer.
 
-If you need any of those things, your tenant admin does it.
+If you need any of those things, your customer admin (or the Velonet platform admin, for licenses) does it.
 
 ## Your daily workflow
 
-Most days you'll touch three pages:
+Most days you'll touch three Hotel Admin pages:
 
-1. **Dashboard** — quick check that everything is healthy.
-2. **Sessions** — handle guest complaints in real time.
-3. **Voucher batches** — top up when reception runs low.
+1. **Overview** — quick check that everything is healthy.
+2. **Active sessions** and **Guest sign-in attempts** — handle guest complaints in real time.
+3. **Vouchers** — issue more cards when reception runs low.
 
-Everything else is setup-once-and-forget.
+Everything else is set up once and left alone.
 
 ## Vouchers
 
-**Menu: Voucher batches**
+**Hotel Admin → Internet offering → Vouchers**
 
-The most common task. Reception prints a stack of codes; when they run low you generate another batch.
+The most common task. Reception hands out printed cards; when they run low you issue another batch.
 
-### Generating a batch
+### Issuing a batch
 
-1. **New batch**:
-   - **Name** — something you'll recognise later (e.g. "Reception May 2026").
-   - **Site** — which property these are for.
-   - **Count** — how many codes to generate. 200–500 for a weekly restock is typical.
-   - **Duration** — how long each code lasts after first use (24 h is a sane default).
-   - **Data cap** — optional. Leave blank for unlimited.
-2. Click **Generate**. Takes a few seconds for large batches.
-3. Open the batch → **Download CSV** (for Excel / mail merge) or **Print** (for a receipt-style printout).
-4. Hand the sheet to reception.
+1. **Issue vouchers**:
+   - **Package** — which internet package the cards give (speed, time and data come from it).
+   - **How many cards** — 1 to 500 per batch.
+   - **Valid from / Valid until** — optional. Leave empty for cards usable now that never expire.
+   - **Note** — something you'll recognise later (e.g. "Conference desk, week 12").
+2. **Review** and issue.
+3. The codes are shown **once**: **Copy all**, **Download CSV**, or **Print cards** (set the heading printed on each card first).
+4. Hand the cards to reception.
 
-### When a guest reports their code doesn't work
+### When a guest reports their card doesn't work
 
-1. Open **Voucher batches** → find the batch → search for the code.
-2. Check: used? expired? revoked? attached to another device?
-3. If the code is burned and it's a reception mistake, generate one replacement from the batch and hand it over.
-4. If a whole batch is compromised (sheet stolen, PDF leaked), **Revoke batch** and re-print fresh ones.
+1. Open **Vouchers** → search by the last characters of the code.
+2. Check the status: *Available*, *Not yet valid*, *Expired never used*, *Used* or *Cancelled*; the card's history shows what happened.
+3. If the card is spent, hand the guest a fresh card.
+4. If a stack of cards is lost or stolen, open the batch (**Batches → View cards**) and **Cancel card** on each unused card (reason + your password). There is no whole-batch cancel.
 
-Individual code revocation: click the code → Revoke.
+Reading a full code again (**Show full code**) asks for a reason and your password, and is recorded.
 
 ## Guest sessions
 
-**Menu: Sessions**
+**Hotel Admin → Guests → Active sessions**
 
-The "who is online right now" view. Filter by site, auth method, or search by room number / name.
+The "who is online right now" view. Search by room, name, username, IP or MAC, or filter by how the guest signed in. It refreshes every 10 seconds.
 
 ### Typical requests from reception
 
-- **"Guest in 214 says their WiFi is gone"** → find their session → if it's disconnected, have them reconnect; if it's there, check data cap / time remaining.
-- **"Guest needs more data"** → **Quota reset** on their session.
-- **"Guest checked out but still connected"** → **Disconnect**. (PMS-based auth usually catches this automatically after the post-checkout grace window.)
-- **"Something weird is happening on room 310"** → click the session → see MAC, IP, appliance, data usage pattern. If the MAC keeps changing, someone is sharing the code.
+- **"Guest in 214 says their Wi-Fi is gone"** → find their session → if it has ended, the status gives the reason (time or data used up, checked out, idle…); if it's there, check the allowance meters.
+- **"Guest can't sign in with their room number"** → **Guest sign-in attempts**: read **Why**, and **Release** the device if it has been asked to wait (releasing lets it try again; it does not sign the guest in).
+- **"Guest checked out but still connected"** → **Disconnect**. (Checkout normally ends room access automatically, after any checkout grace.)
+- **"Something weird is happening on room 310"** → click the session → see MAC, IP, package and data. **Usage explorer** shows the room's full history.
 
 ### Signs of abuse to watch for
 
-- Same voucher code across >5 devices → code being shared in a WhatsApp group. Revoke.
-- Data usage 10x higher than average → likely torrenting or a hotspot being re-shared. Apply a stricter plan or disconnect.
-- Dozens of failed PMS attempts from the same IP → someone guessing. The system auto-locks, but tell your tenant admin so they can review the threshold.
+- A voucher or account constantly at its device limit → the code may be shared. Cancel the card or change the account's password.
+- Data usage far above average → likely a device re-sharing the connection. Disconnect it, and ask the Site admin about the service plan's limits.
+- Many failed room sign-ins from one device → someone guessing. The appliance makes the device wait automatically; tell your admin so they can review the thresholds under **Sign-in methods**.
 
 ## Walled garden
 
-**Menu: Walled garden**
+**Hotel Admin → Guest portal → Allowed sites**
 
-URLs guests can reach before logging in. Usually set up once by the tenant admin. You'll occasionally add entries when:
+Addresses guests can reach before signing in. Usually set up once by the hotel's Site admin or Hotel IT manager, who can add entries when a sign-in method needs a new address. Add entries sparingly — every entry is reachable without signing in.
 
-- Marketing launches a landing page and wants it reachable without login.
-- A payment / PMS / social login integration needs a new domain (often StayConnect auto-adds these, but sometimes manual).
+**To add an entry** (Site admin or Hotel IT manager): **Allow a site** → type (domain name, single address or address range), address, optional ports, why it is needed.
 
-Add entries sparingly. Every entry is a pre-auth bypass.
+## Portal settings
 
-**To add an entry**: **New rule** → hostname or IP/CIDR → optional port → **Save**. Takes effect within a minute on all appliances.
+**Hotel Admin → Guest portal → Portal settings**
 
-## Ticket templates
-
-**Menu: Ticket templates**
-
-The email / printed slip a guest gets when they log in via OTP email. You might update these when:
+The look and wording of the guest sign-in page: layout template, logo and photographs, colours, hotel name, welcome and help lines, terms link, and the wording in each language. You might update it when:
 
 - The hotel rebrands (new logo, new colours).
-- Legal asks you to change the T&Cs wording.
-- You want to promote something ("Enjoy your WiFi — try our rooftop bar tonight!").
+- Legal asks you to change the terms link.
+- You want to change the welcome or help line.
 
-Templates support variables like `{{guest_name}}`, `{{expires_at}}`, `{{site_name}}`. Preview before you save — a broken template means guests get broken emails.
+Check the live preview (desktop, tablet, mobile) before you **Save changes** — guests see it immediately. Changing it needs the Site admin or Hotel IT manager role.
 
-## PMS providers
+## PMS connection
 
-**Menu: PMS providers**
+**Hotel Admin → Property management system → PMS connection**
 
-Usually set up once by the tenant admin. You can **view** the config and **test connectivity**.
+Usually set up once by the Hotel IT manager. With a desk role you can **view** the connection's state and whether room sign-in is working.
 
-If the PMS page shows "disconnected" or many recent failures, it's usually:
+If it shows room sign-in not working or many recent failures, it's usually:
 
-- Your PMS is down or doing maintenance → wait / check with PMS support.
-- Someone rotated the PMS API key → ask your tenant admin to update it in StayConnect.
-- Network path changed → check with IT.
+- The PMS is down or in maintenance → wait / check with PMS support.
+- The PMS credential changed → ask the Hotel IT manager to replace it.
+- A guest network points at the wrong PMS → **Network routing** (Site admin).
 
-You cannot edit credentials — that's a tenant_admin action, and for good reason.
+You cannot edit the connection from a desk role — that's the Hotel IT manager's job, and for good reason.
 
-## Notifications & Social login
+## Email & SMS and Social login
 
-**View only** from your role in most cases. If you need to add a new provider, ask your tenant admin.
+**View only** from desk roles in most cases. If you need a new sender or provider, ask the Hotel IT manager.
 
-## Payments
+## Charges
 
-**Menu: Payments**
+**Hotel Admin → Charges**
 
-If your hotel offers paid WiFi plans, this is where you see transactions and issue refunds.
-
-- **Transactions** — search by guest name, room, date, amount.
-- **Refund** — pick a reason code (duplicate charge, service not delivered, goodwill) and click Refund. Goes through Stripe; the guest sees the refund on their card in 5–10 business days.
-
-Refunds are logged in the audit log under your name.
+Selling internet is not switched on today, so these pages are usually quiet or *Not enabled on this appliance*. Decisions about room charges belong to the Payments operator and Site admin; there is no refund button by design.
 
 ## Dashboard
 
-**Menu: Dashboard**
+**Hotel Admin → Overview**
 
 The morning check:
 
-1. **Active sessions** — roughly matches your expected occupancy? (200 rooms at 80% × 2 devices = ~320 sessions.)
-2. **Appliances online** — all green? If one is red, call the site.
-3. **Recent auth failures** — a spike suggests a broken integration or an attack.
-4. **Alerts** — open anything red and triage.
+1. **Needs attention** — anything listed? Each line links to the page that fixes it.
+2. **Guests online** — roughly matches your occupancy?
+3. **Room sign-in** — *Ready*? And **Sign-in outcomes** — a spike in refusals suggests a PMS or routing problem.
+4. **Services** and the health pill in the top bar — all healthy?
 
 ## What you cannot do
 
-- Create / remove / rename operators (including yourself). Ask your tenant admin.
-- Change the subscription plan. Ask your tenant admin or billing contact.
-- Delete the tenant or any site. Ask your tenant admin.
-- Edit PMS / OTP / social credentials. Ask your tenant admin.
+- Create / remove operators (including yourself). Ask your customer admin (Central) or the appliance's Site admin (Hotel Admin).
+- Change licenses. Ask your platform admin contact.
+- Delete the customer or any site. Ask your customer admin.
+- Change PMS, email/SMS or social-login credentials from a desk role. Ask the Hotel IT manager.
 
-## When to escalate to your tenant admin
+## When to escalate to your customer admin
 
 - Any structural change (new site, new appliance, new integration).
 - Recurring abuse patterns you can't shut down alone.
 - Any request involving staff accounts.
-- Appliance offline for >30 min and you've already checked the physical site's uplink.
+- Appliance offline for >30 min and you've already checked the site's uplink.
 
-When in doubt: your tenant admin sees everything you see plus more. Just ask.
+When in doubt: your customer admin sees more than you do. Just ask.
