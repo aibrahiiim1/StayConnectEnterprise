@@ -40,8 +40,7 @@ export function HelpTip({
         title={aria}
         className={cn(
           "inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-border bg-card text-muted-foreground",
-          "transition-colors hover:border-amber-300 hover:bg-amber-50 hover:text-amber-600",
-          "dark:hover:border-amber-400/40 dark:hover:bg-amber-400/10 dark:hover:text-amber-300",
+          "transition-colors hover:border-warning/40 hover:bg-warning-subtle hover:text-warning-subtle-foreground",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
           className,
         )}

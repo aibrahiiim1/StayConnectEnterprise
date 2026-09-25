@@ -64,9 +64,7 @@ describe("colour only ever comes from a theme token", () => {
   const LITERAL = /\b(?:text|bg|border|ring|from|to|via|fill|stroke)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}\b/g;
 
   it("no component uses a literal Tailwind palette colour", () => {
-    // The Tips lightbulb (components/help.tsx) warms to amber on hover in both themes, with a dark-mode variant
-    // of its own, so it is theme-aware by construction. Scoped to that one file; anywhere else still fails.
-    const EXEMPT = new Set(["components/help.tsx"]);
+    const EXEMPT = new Set<string>();
     const offenders: string[] = [];
     for (const f of SOURCES) {
       if (EXEMPT.has(rel(f))) continue;
