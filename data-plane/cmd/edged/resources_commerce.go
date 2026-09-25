@@ -31,6 +31,10 @@ func (s *server) commercialPackagesRoutes() http.Handler {
 	r.Get("/plans", s.listServicePlans)
 	r.Post("/plans", s.publishServicePlan)
 	r.Get("/plans/{id}/revisions", s.listServicePlanRevisions)
+	// What still references a plan, and why it cannot be deleted (read-only; see resources_commerce_activity.go).
+	r.Get("/plans/{id}/deletability", s.getServicePlanDeletability)
+	// Permanent deletion of a plan nothing has ever used (migration 0091). Step-up + reason; audited.
+	r.Delete("/plans/{id}", s.deleteServicePlan)
 	// site checkout-grace configuration
 	r.Get("/grace", s.getGraceConfig)
 	r.Put("/grace", s.setGraceConfig)
@@ -38,6 +42,9 @@ func (s *server) commercialPackagesRoutes() http.Handler {
 	// GUEST ACTIVITY, in words. The quote/purchase listings below stay for support; this is what the
 	// operator screen reads. See listGuestActivity.
 	r.Get("/guest-activity", s.listGuestActivity)
+	// THE PACKAGE ACTIVITY VIEW: every grant, whatever produced it, with paging, filters and a summary. The
+	// guest-activity route above stays for compatibility; this is what the operator screen now reads.
+	r.Get("/activity", s.listPackageActivity)
 	r.Get("/quotes", s.listCommerceQuotes)
 	r.Get("/purchases", s.listCommercePurchases)
 	// package-scoped
@@ -45,6 +52,8 @@ func (s *server) commercialPackagesRoutes() http.Handler {
 	// The CURRENT configuration, for the Edit form to load. Read-only: saving still goes through the ordinary
 	// publish route, which creates a new immutable revision.
 	r.Get("/{id}/current", s.getCommercialPackageCurrent)
+	r.Get("/{id}/deletability", s.getCommercialPackageDeletability)
+	r.Delete("/{id}", s.deleteCommercialPackage)
 	r.Post("/{id}/active", s.setCommercialPackageActive)
 	return r
 }
@@ -75,6 +84,8 @@ type publishPlanReq struct {
 	DataQuotaBytes              *int64 `json:"data_quota_bytes"`
 	TimeAccountingMode          string `json:"time_accounting_mode"`
 	SpeedAllocation             string `json:"speed_allocation"`
+	// CreateOnly is sent by "Add plan": refuse (409 code_exists) rather than revise an existing plan.
+	CreateOnly bool `json:"create_only"`
 }
 
 func (s *server) publishServicePlan(w http.ResponseWriter, r *http.Request) {
@@ -89,8 +100,13 @@ func (s *server) publishServicePlan(w http.ResponseWriter, r *http.Request) {
 		DeviceLimitPolicy: in.DeviceLimitPolicy, IdleTimeoutSeconds: in.IdleTimeoutSeconds,
 		MaxContinuousSessionSeconds: in.MaxContinuousSessionSeconds, TimeQuotaSeconds: in.TimeQuotaSeconds,
 		DataQuotaBytes: in.DataQuotaBytes, TimeAccountingMode: in.TimeAccountingMode,
-		SpeedAllocation: in.SpeedAllocation,
+		SpeedAllocation: in.SpeedAllocation, CreateOnly: in.CreateOnly,
 	})
+	if errors.Is(err, iamv2.ErrCodeExists) {
+		jsonErr(w, http.StatusConflict, "code_exists",
+			fmt.Sprintf("A service plan with the code %q already exists. Open it and choose Edit to change its settings.", in.Code))
+		return
+	}
 	if err != nil {
 		// A domain REFUSAL is not an internal error. Publishing onto a reserved system code is a policy
 		// decision the operator can act on ("that code is not yours"), and reporting it as 500 "internal"
@@ -386,6 +402,9 @@ type publishPackageReq struct {
 	// DataAllocationPolicy is optional and absent means FIXED, so every client that predates it -- and every
 	// package that stays on a flat allowance -- goes on publishing exactly what it published before.
 	DataAllocationPolicy map[string]any `json:"data_allocation_policy"`
+	// CreateOnly is sent by "Add package". Without it a code that already existed silently became a new
+	// revision of that package; with it the answer is 409 code_exists. Edit omits it and revises as before.
+	CreateOnly bool `json:"create_only"`
 }
 
 func (s *server) publishCommercialPackage(w http.ResponseWriter, r *http.Request) {
@@ -400,6 +419,7 @@ func (s *server) publishCommercialPackage(w http.ResponseWriter, r *http.Request
 		Display: in.Display, DurationPolicy: in.DurationPolicy,
 		VisibleFrom: in.VisibleFrom, VisibleUntil: in.VisibleUntil,
 		DataAllocationPolicy: in.DataAllocationPolicy,
+		CreateOnly:           in.CreateOnly,
 	}
 	for _, ru := range in.EligibilityRules {
 		spec.EligibilityRules = append(spec.EligibilityRules, iamv2.EligibilityRule{Type: ru.Type, Value: ru.Value})
@@ -408,6 +428,11 @@ func (s *server) publishCommercialPackage(w http.ResponseWriter, r *http.Request
 		spec.GrantTiers = append(spec.GrantTiers, iamv2.GrantTier{Order: ti.Order, Value: ti.Grant})
 	}
 	res, err := s.commerce.PublishRevision(r.Context(), spec)
+	if errors.Is(err, iamv2.ErrCodeExists) {
+		jsonErr(w, http.StatusConflict, "code_exists",
+			fmt.Sprintf("A package with the code %q already exists. Open it and choose Edit to change it.", in.Code))
+		return
+	}
 	if err != nil {
 		// A domain REFUSAL is not an internal error. Publishing onto a reserved system code is a policy
 		// decision the operator can act on ("that code is not yours"), and reporting it as 500 "internal"
@@ -636,7 +661,8 @@ func (s *server) listGuestActivity(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusInternalServerError, "internal", "guest activity could not be read")
 			return
 		}
-		x.OfferedAt = x.ExpiresAt // the offer's own timestamp is its expiry window; see the UI note
+		// OfferedAt is left EMPTY. offer_quotes records when an offer expires and when it was consumed, and no
+		// time it was made; this used to copy the expiry into it, which printed a fabricated offer time.
 		switch {
 		case state == "GRANTED":
 			x.Outcome = "TAKEN"

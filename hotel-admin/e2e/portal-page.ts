@@ -46,8 +46,13 @@ export function shippedWording(): ShippedWording {
   return { languages, strings };
 }
 
-/** The landing page as portald renders it for a device it has no ARP entry for. */
-export function portalHTML(): string {
+/** The landing page as portald renders it for a device it has no ARP entry for.
+ *
+ *  `template` is what portald renders onto <html> from the PUBLISHED design (the page's own script then
+ *  re-applies whatever /api/branding answers). The nonce is a fixed placeholder: these specs serve the page
+ *  through page.route with no Content-Security-Policy header, so it is inert here -- the Go tests assert the
+ *  real header and that every script carries it. */
+export function portalHTML(template = "classic"): string {
   const src = readFileSync(resolve(DIR, "templates.go"), "utf8");
   const tmpl = src.match(/const landingHTML = `([\s\S]*?)`\n/);
   if (!tmpl) throw new Error("the landing template could not be found in templates.go");
@@ -61,7 +66,10 @@ export function portalHTML(): string {
     // visit never carries. The Go tests cover the branch where there IS a message.
     .replace(/\{\{if \.Error\}\}[\s\S]*?\{\{end\}\}/g, "")
     .replace(/\{\{\.Languages\}\}/g, JSON.stringify(shipped.languages))
-    .replace(/\{\{\.Strings\}\}/g, JSON.stringify(shipped.strings));
+    .replace(/\{\{\.Strings\}\}/g, JSON.stringify(shipped.strings))
+    .replace(/\{\{\.Nonce\}\}/g, "e2e-nonce")
+    .replace(/\{\{\.Template\}\}/g, template)
+    .replace(/\{\{\.(Density|Panel|HeroHeight|Surface)\}\}/g, "");
   if (html.includes("{{")) {
     // A template action nobody rendered is a syntax error waiting to happen inside a <script>. Fail here,
     // where the message names the cause, rather than in six tests that each report a different symptom.

@@ -219,19 +219,31 @@ test("an operator acknowledges an operational alert", async ({ page }) => {
     .toBeTruthy();
 });
 
+// The checkout grace journey: open the editor sheet, set terms, review old → new, choose a reason, confirm the
+// password, publish. The operator authors the POLICY; the system derives the package.
+async function openGraceEditor(page: Page) {
+  await page.getByRole("button", { name: /^(Edit policy|Create hotel policy)$/ }).first().click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+}
+
+async function reviewAndPublish(page: Page, password = "operator-pw") {
+  await page.getByRole("button", { name: /Review changes/ }).click();
+  await expect(page.getByLabel("Policy changes")).toBeVisible();
+  await page.getByLabel("Confirm your password", { exact: true }).fill(password);
+  await page.getByRole("button", { name: /^Publish policy$/ }).click();
+}
+
 test("publishing the checkout-grace policy sends the COMPLETE policy and reports the new version", async ({ page }) => {
   const mutations: Mutations = [];
   await installBackend(page, { grace: graceCfg, mutations });
   await page.goto("/checkout-grace");
-  // The operator AUTHORS the policy. They no longer choose a package -- the system derives it -- so the
-  // journey is: open the editor, set terms, review the exact terms, confirm.
-  await page.getByRole("button", { name: /Change policy|Create hotel policy/ }).click();
-  await page.getByLabel("Grace duration (minutes)", { exact: true }).fill("60");
+  await expect(page.getByTestId("grace-sentence")).toContainText("1 hour after checkout");
+  await openGraceEditor(page);
+  await page.getByLabel("Grace time", { exact: true }).fill("90");
+  await page.getByLabel("Grace time unit", { exact: true }).selectOption("min");
   await page.getByLabel("Download speed (Mbps)", { exact: true }).fill("4");
-  await page.getByRole("button", { name: /Review before publishing/ }).click();
-  await expect(page.getByLabel("Policy to publish")).toBeVisible();
-  await page.getByLabel("Confirm your password", { exact: true }).fill("operator-pw");
-  await page.getByRole("button", { name: /^Publish policy$/ }).click();
+  await expect(page.getByTestId("grace-preview")).toContainText("1 hour 30 minutes after checkout");
+  await reviewAndPublish(page);
 
   await expect.poll(() => mutations.find((m) => m.path === "/checkout-grace" && m.method === "PUT")).toBeTruthy();
   const req = mutations.find((m) => m.path === "/checkout-grace" && m.method === "PUT")!;
@@ -242,42 +254,60 @@ test("publishing the checkout-grace policy sends the COMPLETE policy and reports
   }
   // NO PACKAGE IS SENT. The server derives the revision that expresses these terms exactly.
   expect(sent.grace_package_revision_id).toBeUndefined();
-  expect(sent.grace_duration_seconds).toBe(3600);
+  expect(sent.grace_duration_seconds).toBe(5400);
   expect(sent.grace_down_kbps).toBe(4000);
-  // governed publication: the version the operator read, a bounded reason and a password confirmation
+  // governed publication: the version the operator read, a VALID reason code and a password confirmation
   expect(sent.expected_config_version).toBe(7);
-  expect(sent.reason_code).toBeTruthy();
+  expect(String(sent.reason_code)).toMatch(/^[A-Z][A-Z0-9_]{0,63}$/);
   expect(sent.password).toBe("operator-pw");
-  await expect(page.getByRole("status")).toHaveText(/version 8/i);
+  await expect(page.getByText("Version 8 published")).toBeVisible();
+});
+
+test("a free-text reason with spaces is sent as a valid code, never as typed", async ({ page }) => {
+  const mutations: Mutations = [];
+  await installBackend(page, { grace: graceCfg, mutations });
+  await page.goto("/checkout-grace");
+  await openGraceEditor(page);
+  await page.getByLabel("Grace time", { exact: true }).fill("45");
+  await page.getByLabel("Grace time unit", { exact: true }).selectOption("min");
+  await page.getByRole("button", { name: /Review changes/ }).click();
+  await page.getByLabel("Reason", { exact: true }).selectOption({ label: "Other…" });
+  await page.getByLabel("Describe the reason", { exact: true }).fill("LATE CHECKOUT");
+  await expect(page.getByText("Recorded as LATE_CHECKOUT")).toBeVisible();
+  await page.getByLabel("Confirm your password", { exact: true }).fill("operator-pw");
+  await page.getByRole("button", { name: /^Publish policy$/ }).click();
+  await expect.poll(() => mutations.find((m) => m.path === "/checkout-grace" && m.method === "PUT")).toBeTruthy();
+  const sent = mutations.find((m) => m.path === "/checkout-grace" && m.method === "PUT")!.body as Record<string, unknown>;
+  expect(sent.reason_code).toBe("LATE_CHECKOUT");
 });
 
 test("a refused policy is surfaced, not silently swallowed", async ({ page }) => {
   const mutations: Mutations = [];
   await installBackend(page, { grace: graceCfg, gracePutStatus: 400, mutations });
   await page.goto("/checkout-grace");
-  await page.getByRole("button", { name: /Change policy|Create hotel policy/ }).click();
-  await page.getByRole("button", { name: /Review before publishing/ }).click();
-  await page.getByRole("button", { name: /^Publish policy$/ }).click();
-  // the refusal reaches the operator verbatim rather than being swallowed into a success state
-  await expect(page.getByText(/refused/i)).toBeVisible();
-  await expect(page.getByRole("status")).toHaveCount(0);
+  await openGraceEditor(page);
+  await page.getByLabel("Grace time", { exact: true }).fill("45");
+  await page.getByLabel("Grace time unit", { exact: true }).selectOption("min");
+  await reviewAndPublish(page);
+  // the refusal reaches the operator rather than being swallowed into a success state
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText(/refused/i);
+  await expect(page.getByText(/^Version \d+ published$/)).toHaveCount(0);
 });
 
 test("a site with no published policy starts from defaults rather than an error", async ({ page }) => {
   const mutations: Mutations = [];
   await installBackend(page, { unpublished: true, mutations });
   await page.goto("/checkout-grace");
-  // A STARTING POINT WITH A WAY OUT OF IT. The page used to say "nothing published yet" and then send the
-  // operator to the commercial catalog, which could not create a grace package -- a dead end. It now names
-  // what is actually in force and offers the action that leaves it.
-  await expect(page.getByText(/Emergency fallback/)).toBeVisible();
-  await expect(page.getByRole("button", { name: /Create hotel policy/ })).toBeVisible();
+  // A STARTING POINT WITH A WAY OUT OF IT: it names what is actually in force and offers the action that
+  // leaves it, instead of sending the operator to the commercial catalog.
+  await expect(page.getByText(/Departing guests are on the emergency fallback/)).toBeVisible();
+  await expect(page.getByRole("button", { name: /Create hotel policy/ }).first()).toBeVisible();
   await expect(page.getByText(/commercial catalog/i)).toHaveCount(0);
-  await expect(page.getByText(/Failed to load the checkout-grace policy/)).toHaveCount(0);
+  await expect(page.getByText(/could not be loaded/)).toHaveCount(0);
 });
 
-// Accessibility: the Phase-3 pages must be operable and understandable without sight — every control carries a
-// name, the page has one main heading, and the filters are labelled.
+// Accessibility: the pages must be operable and understandable without sight — every control carries a name,
+// the page has one main heading, and the filters are labelled.
 test("phase-3 pages are accessible: named controls, one heading, labelled filters", async ({ page }) => {
   const mutations: Mutations = [];
   await installBackend(page, { stays: [stay], events: [], alerts: [], grace: graceCfg, mutations });
@@ -292,19 +322,22 @@ test("phase-3 pages are accessible: named controls, one heading, labelled filter
 
   await page.goto("/checkout-grace");
   await expect(page.getByRole("heading", { level: 1, name: "Checkout grace" })).toBeVisible();
-  await page.getByRole("button", { name: /Change policy|Create hotel policy/ }).click();
+  await openGraceEditor(page);
   for (const label of [
-    "Grace duration (minutes)",
-    "Eligibility window (minutes)",
+    "Grace time",
+    "Grace time unit",
     "Download speed (Mbps)",
     "Upload speed (Mbps)",
     "Data allowance (MB)",
     "Device limit",
-    "Device policy",
+    "Stay rules after checkout",
+    "Stay rules after checkout unit",
   ]) {
     await expect(page.getByLabel(label, { exact: true })).toBeVisible();
   }
-  await page.getByRole("button", { name: /Review before publishing/ }).click();
+  await page.getByLabel("Grace time", { exact: true }).fill("45");
+  await page.getByLabel("Grace time unit", { exact: true }).selectOption("min");
+  await page.getByRole("button", { name: /Review changes/ }).click();
   for (const label of ["Reason", "Confirm your password"]) {
     await expect(page.getByLabel(label, { exact: true })).toBeVisible();
   }
@@ -322,15 +355,27 @@ test("phase-3 pages are accessible: named controls, one heading, labelled filter
   expect(unnamed).toBe(0);
 });
 
+test("checkout grace fits a 390px phone without horizontal scrolling", async ({ page }) => {
+  const mutations: Mutations = [];
+  await page.setViewportSize({ width: 390, height: 844 });
+  await installBackend(page, { grace: graceCfg, mutations });
+  await page.goto("/checkout-grace");
+  await expect(page.getByTestId("grace-sentence")).toBeVisible();
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+});
+
 test("a policy published by someone else is a conflict the operator can see, not an overwrite", async ({ page }) => {
   const mutations: Mutations = [];
   await installBackend(page, { grace: graceCfg, gracePutStatus: 409, mutations });
   await page.goto("/checkout-grace");
-  await page.getByRole("button", { name: /Change policy|Create hotel policy/ }).click();
-  await page.getByRole("button", { name: /Review before publishing/ }).click();
-  await page.getByLabel("Confirm your password", { exact: true }).fill("operator-pw");
-  await page.getByRole("button", { name: /^Publish policy$/ }).click();
-  await expect(page.getByText(/newer policy/i)).toBeVisible();
+  await openGraceEditor(page);
+  await page.getByLabel("Grace time", { exact: true }).fill("45");
+  await page.getByLabel("Grace time unit", { exact: true }).selectOption("min");
+  await reviewAndPublish(page);
+  await expect(page.getByText(/Someone else published a newer policy/i)).toBeVisible();
+  // the draft survives the reload
+  await expect(page.getByLabel("Grace time", { exact: true })).toHaveValue("45");
 });
 
 test("an alert changed by someone else refreshes the queue instead of overwriting it", async ({ page }) => {

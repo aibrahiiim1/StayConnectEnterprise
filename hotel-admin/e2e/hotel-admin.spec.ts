@@ -63,6 +63,48 @@ async function installBackend(page: Page, opts: {
       price_minor: 0, currency: "USD", outcome: "TAKEN", trigger: "GUEST_SELECTION",
       service_plan: "Free Internet", quota_bytes: 1000000000, entitlement_id: "e1",
     }])));
+    // THE PACKAGE ACTIVITY VIEW the Guest activity tab now reads: grants from purchases, with a summary.
+    if (path === "/commercial-packages/activity") return route.fulfill(json(200, {
+      data: [
+        {
+          purchase_id: "pu1", entitlement_id: "e1", package_id: "pk1", package_code: "FREEWIFI",
+          package_name: "Free Internet Package", package_revision_id: "r1", revision_no: 2,
+          price_minor: 0, currency: "USD", currency_exponent: 2,
+          source: "GUEST_SELECTION", source_label: "Chosen on the portal", purchase_state: "GRANTED", status: "ACTIVE",
+          sign_in_kind: "STAY", stay_id: "st1", room: "101", pms_interface: "Protel", reservation: "RES-1",
+          had_offer: true, offer_taken_at: "2026-08-01T00:05:00Z",
+          started_at: "2026-08-01T00:05:00Z", occurred_at: "2026-08-01T00:05:00Z",
+          service_plan: "Free Internet", quota_bytes: 1000000000,
+          sessions: 2, devices: 1, bytes_down: 5000000, bytes_up: 100000, online_now: true,
+          usage_href: "/usage?stay=st1",
+        },
+        {
+          purchase_id: "pu2", entitlement_id: "e2", package_id: "pk1", package_code: "FREEWIFI",
+          package_name: "Free Internet Package", package_revision_id: "r1", revision_no: 2,
+          price_minor: 0, currency: "USD", currency_exponent: 2,
+          source: "VOUCHER_REDEMPTION", source_label: "Voucher", purchase_state: "GRANTED", status: "TERMINATED",
+          end_reason: "TIME", sign_in_kind: "VOUCHER", had_offer: false,
+          started_at: "2026-08-01T01:00:00Z", ended_at: "2026-08-01T02:00:00Z", occurred_at: "2026-08-01T01:00:00Z",
+          sessions: 1, devices: 1, bytes_down: 1000, bytes_up: 1000, online_now: false,
+        },
+      ],
+      meta: { total: 2, limit: 25, offset: 0, has_more: false },
+      summary: {
+        in_range: 2, started_in_range: 2, status_counts: { active: 1, ended: 1, other: 0 },
+        data_bytes: 5102000, active_now: 1, undated: 0,
+        by_package: [{ package_id: "pk1", code: "FREEWIFI", name: "Free Internet Package", is_system: false, grants: 2 }],
+        by_source: [{ source: "GUEST_SELECTION", label: "Chosen on the portal", grants: 1 }, { source: "VOUCHER_REDEMPTION", label: "Voucher", grants: 1 }],
+        active_by_package: [{ package_id: "pk1", grants: 1 }],
+      },
+      range: { from: "2026-07-25T00:00:00Z", to: "2026-08-01T12:00:00Z" },
+    }));
+    // DELETE… asks what is attached; for a used package the answer is "no".
+    if (/^\/commercial-packages\/[^/]+\/deletability$/.test(path)) return route.fulfill(json(200, {
+      deletable: false,
+      reasons: [
+        { code: "ENTITLEMENTS", message: "2 internet grants given to guests record this package.", count: 2 },
+      ],
+    }));
     // inspection
     if (path === "/commercial-packages/quotes") return route.fulfill(json(200, list([{ id: "q1", package_revision_id: "r1", price_minor: 0, currency: "USD", expires_at: "2026-08-01T00:00:00Z", consumed_at: null }])));
     if (path === "/commercial-packages/purchases") return route.fulfill(json(200, list([{ id: "pu1", package_revision_id: "r1", state: "GRANTED", amount_minor: 0, currency: "USD" }])));
@@ -125,8 +167,8 @@ test("internet packages: publish via the plan selector, then step-up deactivate"
   // Published through the plan SELECTOR, which is keyed by PLAN -- the operator never sees, types or
   // selects a revision id. The revision the save pins is resolved from the chosen plan.
   await page.getByRole("button", { name: /add package/i }).click();
-  await page.getByLabel("code").fill("FREEWIFI2");
-  await page.getByLabel("service-plan").selectOption("p1");
+  await page.getByRole("dialog").getByLabel("code", { exact: true }).fill("FREEWIFI2");
+  await page.getByRole("dialog").getByLabel("service-plan", { exact: true }).selectOption("p1");
   // The per-tier speed step lives under Advanced now and is not what this test is about: the package's
   // speed comes from the chosen plan, and the form starts with the one grant tier a package needs.
   await page.locator('form button[type="submit"]').click();
@@ -135,6 +177,8 @@ test("internet packages: publish via the plan selector, then step-up deactivate"
   const pkgJson = JSON.stringify(pkgReq.body).toLowerCase();
   expect(pkgJson).not.toMatch(/price|settlement|pms|tax|currency/); // free-only, no PMS
   expect((pkgReq.body as { service_plan_revision_id: string }).service_plan_revision_id).toBe("rev-gold");
+  // ADD asks for a NEW package: a taken code is refused by the server instead of revising the existing one.
+  expect((pkgReq.body as { create_only?: boolean }).create_only).toBe(true);
 
   // Withdrawing a package still takes a reason AND the operator's password -- now in a confirmation dialog
   // that states what stops, with the password masked. No browser prompt is used anywhere.
@@ -162,11 +206,17 @@ test("internet packages: guest activity rows are sanitized and carry no guest PI
   await page.goto("/internet-packages");
   await page.getByRole("tab", { name: /guest activity/i }).click();
 
-  // WHAT THE ROW SAYS, not which uuids produced it. This assertion used to wait for the quote id to appear
-  // on screen; removing that id IS the journey, so a test demanding it was pinning the defect.
+  // WHAT THE ROW SAYS, not which uuids produced it. Every grant is listed however it was given — the voucher
+  // grant had no portal offer and the old offer-based view could not show it at all.
   await expect(page.getByText(/Room 101/)).toBeVisible();
-  await expect(page.getByText(/Free Internet Package/)).toBeVisible();
-  await expect(page.getByText(/Taken/i).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Free Internet Package" }).first()).toBeVisible();
+  await expect(page.getByText("A voucher guest")).toBeVisible();
+  await expect(page.getByText("In use").first()).toBeVisible();
+
+  // The record opens in a sheet and links to THIS stay's usage, not the general usage page.
+  await page.getByRole("button", { name: "Free Internet Package" }).first().click();
+  await expect(page.getByRole("link", { name: /open this stay/i })).toHaveAttribute("href", "/usage?stay=st1");
+  await page.keyboard.press("Escape");
 
   const html = (await page.content()).toLowerCase();
   for (const pii of ["auth_context", "device_id", "guest_network", "voucher_id", "guest_account", "password\"", "mac address"]) {
@@ -174,4 +224,22 @@ test("internet packages: guest activity rows are sanitized and carry no guest PI
   }
   // And no bare uuid-shaped identifier anywhere in the rendered rows.
   expect(html).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/);
+});
+
+test("internet packages: Delete… of a used package explains what is attached and never deletes", async ({ page }) => {
+  const mutations: Mutations = [];
+  await installBackend(page, {
+    packages: [{ package_id: "pk1", code: "FREEWIFI", name: "Free WiFi", active: true, current_revision_id: "r2", revision_count: 2 }],
+    mutations,
+  });
+  await page.goto("/internet-packages");
+  await page.getByRole("button", { name: "Free WiFi" }).click();
+  await page.getByRole("button", { name: /delete…/i }).click();
+  await expect(page.getByText("2 internet grants given to guests record this package.")).toBeVisible();
+  await expect(page.getByText(/why it can't be deleted/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /^delete package$/i })).toHaveCount(0);
+  await page.getByRole("button", { name: /disable instead/i }).click();
+  await expect(page.getByLabel(/why are you disabling it/i)).toBeVisible();
+  // Nothing was sent: the dialog reads, and the disable still waits for its own step-up.
+  expect(mutations).toHaveLength(0);
 });

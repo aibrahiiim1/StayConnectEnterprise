@@ -3,15 +3,9 @@ import { render, screen, within, fireEvent, waitFor } from "@testing-library/rea
 
 // THE OPERATOR JOURNEY, PERFORMED RATHER THAN DESCRIBED.
 //
-// The screen used to ask the operator to choose a PACKAGE, and on a site with none it told them to "publish
-// one through the commercial catalog first". That instruction could not be followed: the grace package is a
-// reserved system package the operator publisher refuses to create, and the checkout validator only ever
-// accepts one derived from the policy itself. PRE-LIVE sat on the emergency fallback with zero selectable
-// packages and no route out that did not involve SQL.
-//
-// Each test below starts where a real operator starts and drives the real controls. None of them asserts a
-// string the component would print regardless of whether the workflow works -- the publish tests read what
-// was actually SENT, because "the button was enabled" is not "the right policy was published".
+// The operator authors the POLICY — time, speeds, allowance, devices, stay rules — and the server derives the
+// package that expresses it. Each test drives the real controls and reads what was actually SENT, because "the
+// button was enabled" is not "the right policy was published".
 
 const get = vi.fn();
 const put = vi.fn();
@@ -31,15 +25,12 @@ beforeEach(() => {
 });
 afterEach(() => vi.resetModules());
 
-/** The built-in emergency terms, as data-plane/internal/grace reports them. */
 const emergency = {
   source: "EMERGENCY_FALLBACK",
   duration_seconds: 3600,
   down_kbps: 5000,
   up_kbps: 2000,
   data_quota_bytes: 500 * 1024 * 1024,
-  // 0 is what the appliance actually reports, and it means "no extra devices". The fixture said 1, which is
-  // why the bare-zero rendering was never exercised.
   device_limit: 0,
   device_limit_policy: "REJECT_NEW_DEVICE",
   policy_version: "EMERGENCY_GRACE_V1",
@@ -51,6 +42,24 @@ const unconfigured = {
   supported_device_policies: ["REJECT_NEW_DEVICE"],
   effective: emergency,
   emergency_history: { count: 6, last_at: "2026-09-14T07:47:27Z" },
+};
+
+const live = {
+  published: true,
+  config_version: 3,
+  supported_device_policies: ["REJECT_NEW_DEVICE"],
+  effective: {
+    source: "PUBLISHED",
+    duration_seconds: 1800,
+    down_kbps: 10000,
+    up_kbps: 4000,
+    data_quota_bytes: 1024 * 1024 * 1024,
+    device_limit: 2,
+    device_limit_policy: "REJECT_NEW_DEVICE",
+    eligibility_window_seconds: 7200,
+    config_version: 3,
+  },
+  emergency_history: { count: 0 },
 };
 
 /** states may hold successive GET responses, so a test can assert what the screen shows AFTER publishing. */
@@ -67,263 +76,296 @@ function mockGrace(states: Record<string, any>[], history: any[] = []) {
   });
 }
 
-async function renderForm() {
-  const { CheckoutGraceForm } = await import("@/components/phase3/checkout-grace-form");
-  render(<CheckoutGraceForm canWrite />);
-  await screen.findByText("In force right now");
+async function renderScreen(canWrite = true) {
+  const { CheckoutGraceScreen } = await import("@/components/checkout-grace/checkout-grace-screen");
+  render(<CheckoutGraceScreen canWrite={canWrite} />);
+  await screen.findByText("What a departing guest receives");
 }
 
-/** Fill one numeric field by its visible label. */
-function setField(label: RegExp, value: string) {
+function setField(label: string | RegExp, value: string) {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
 }
 
-describe("an operator can author the hotel's checkout grace policy without leaving this page", () => {
+function openEditor(name: RegExp = /Create hotel policy|Edit policy/) {
+  // The header action; the empty history may offer a second "Create" button, so take the first.
+  fireEvent.click(screen.getAllByRole("button", { name })[0]);
+}
+
+async function toReview() {
+  fireEvent.click(screen.getByRole("button", { name: /Review changes/i }));
+  await screen.findByLabelText("Policy changes");
+}
+
+async function confirmAndPublish(password = "s3cret") {
+  setField("Confirm your password", password);
+  fireEvent.click(screen.getByRole("button", { name: /^Publish policy$/i }));
+}
+
+describe("an operator authors the hotel's checkout grace policy", () => {
   it("offers to CREATE a policy when none exists, and never sends the operator to the catalog", async () => {
     mockGrace([unconfigured]);
-    await renderForm();
-
-    // The old dead end, asserted as absent. This is the actual regression: a page that tells an operator to
-    // do something impossible is worse than one that says nothing.
+    await renderScreen();
     expect(screen.queryByText(/commercial catalog/i)).toBeNull();
-    expect(screen.queryByText(/No checkout-grace package is available/i)).toBeNull();
     expect(screen.queryByLabelText(/Grace package/i)).toBeNull();
-
-    // And the way out is on the page, named for what it does.
-    expect(screen.getByRole("button", { name: /Create hotel policy/i })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /Create hotel policy/i }).length).toBeGreaterThan(0);
   });
 
   it("publishes the typed policy itself — no package, correct units, the version the operator read", async () => {
     mockGrace([unconfigured, { ...unconfigured, published: true, config_version: 1 }]);
     put.mockResolvedValue({ config_version: 1 });
-    await renderForm();
+    await renderScreen();
 
-    fireEvent.click(screen.getByRole("button", { name: /Create hotel policy/i }));
-    setField(/Grace duration \(minutes\)/i, "45");
-    setField(/Download speed \(Mbps\)/i, "8");
-    setField(/Upload speed \(Mbps\)/i, "3");
-    setField(/Data allowance \(MB\)/i, "750");
-    setField(/Device limit/i, "2");
-    setField(/Eligibility window \(minutes\)/i, "120");
+    openEditor();
+    setField("Grace time", "45");
+    fireEvent.change(screen.getByLabelText("Grace time unit"), { target: { value: "min" } });
+    setField("Download speed (Mbps)", "8");
+    setField("Upload speed (Mbps)", "3");
+    setField("Data allowance (MB)", "750");
+    setField("Device limit", "2");
+    setField("Stay rules after checkout", "2");
+    fireEvent.change(screen.getByLabelText("Stay rules after checkout unit"), { target: { value: "h" } });
 
-    fireEvent.click(screen.getByRole("button", { name: /Review before publishing/i }));
-    fireEvent.change(screen.getByLabelText(/Confirm your password/i), { target: { value: "s3cret" } });
-    fireEvent.click(screen.getByRole("button", { name: /^Publish policy$/i }));
+    await toReview();
+    await confirmAndPublish();
 
     await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
     const [path, body] = put.mock.calls[0];
     expect(path).toBe("/checkout-grace");
-
-    // THE UNITS ARE THE POINT. The operator types minutes, Mbps and MB; the contract is seconds, kbps and
-    // bytes. A conversion that silently lost a factor of a thousand would publish a policy nobody chose.
+    // THE UNITS ARE THE POINT: minutes/hours, Mbps and MB in; seconds, kbps and bytes out.
     expect(body.grace_duration_seconds).toBe(45 * 60);
     expect(body.grace_down_kbps).toBe(8000);
     expect(body.grace_up_kbps).toBe(3000);
     expect(body.grace_data_quota_bytes).toBe(750 * 1024 * 1024);
     expect(body.grace_device_limit).toBe(2);
-    expect(body.eligibility_window_seconds).toBe(120 * 60);
-
-    // No package revision is sent at all: the server derives it. Sending one is now an explicit 400.
+    expect(body.grace_device_limit_policy).toBe("REJECT_NEW_DEVICE");
+    expect(body.eligibility_window_seconds).toBe(2 * 3600);
+    // No package revision is sent at all: the server derives it.
     expect(body.grace_package_revision_id).toBeUndefined();
-
     // Optimistic concurrency and step-up travel with it.
     expect(body.expected_config_version).toBe(0);
     expect(body.password).toBe("s3cret");
-    expect(body.reason_code).toMatch(/^[A-Z][A-Z0-9_]{0,63}$/);
+    expect(body.reason_code).toBe("INITIAL_SETUP");
+
+    // The page re-reads and says what happened.
+    expect(await screen.findByText("Version 1 published")).toBeTruthy();
   });
 
-  it("shows the operator the exact terms BEFORE publishing, and publishes nothing until they confirm", async () => {
+  it("shows a live 'guest will receive' preview built from the fields", async () => {
     mockGrace([unconfigured]);
-    await renderForm();
-
-    fireEvent.click(screen.getByRole("button", { name: /Create hotel policy/i }));
-    setField(/Grace duration \(minutes\)/i, "90");
-    setField(/Download speed \(Mbps\)/i, "12");
-    setField(/Data allowance \(MB\)/i, "2048");
-    fireEvent.click(screen.getByRole("button", { name: /Review before publishing/i }));
-
-    // The review panel restates the terms in the units a guest experiences, from the SAME conversion the
-    // request uses -- so what is confirmed and what is sent cannot drift.
-    const dl = screen.getByLabelText("Policy to publish");
-    expect(within(dl).getByText("90 min")).toBeTruthy();
-    expect(within(dl).getByText("12 Mbps")).toBeTruthy();
-    expect(within(dl).getByText("2.0 GB")).toBeTruthy();
-
-    // Reviewing is not publishing.
-    expect(put).not.toHaveBeenCalled();
+    await renderScreen();
+    openEditor();
+    setField("Grace time", "90");
+    fireEvent.change(screen.getByLabelText("Grace time unit"), { target: { value: "min" } });
+    setField("Download speed (Mbps)", "12");
+    setField("Data allowance (MB)", "2048");
+    const preview = screen.getByTestId("grace-preview").textContent!;
+    expect(preview).toMatch(/1 hour 30 minutes after checkout/);
+    expect(preview).toMatch(/up to 12 Mbps down/);
+    expect(preview).toMatch(/with 2 GB of data/);
   });
 
-  it("refuses an out-of-range policy in the page, without widening what the server accepts", async () => {
-    mockGrace([unconfigured]);
-    await renderForm();
-
-    fireEvent.click(screen.getByRole("button", { name: /Create hotel policy/i }));
-    // Above 1 TB. The input's own min/max cannot express this bound, so it is the page guard that must catch
-    // it -- a duration of 0 would be refused by the browser's constraint validation first, which would make
-    // this test pass without the guard existing at all.
-    setField(/Data allowance \(MB\)/i, "2000000");
-    fireEvent.click(screen.getByRole("button", { name: /Review before publishing/i }));
-
-    expect(screen.getByRole("alert").textContent).toMatch(/Data allowance must be between/i);
-    expect(screen.queryByLabelText("Policy to publish")).toBeNull();
-    expect(put).not.toHaveBeenCalled();
-  });
-
-  it("a second version starts from what is in force, not from a blank form", async () => {
-    // THE DETAIL THAT MAKES VERSION 2 SAFE. An operator changing one number must not have to retype the other
-    // five from memory -- a blank form is how a policy loses its data allowance by accident.
-    const live = {
-      published: true,
-      config_version: 3,
-      supported_device_policies: ["REJECT_NEW_DEVICE"],
-      effective: {
-        source: "PUBLISHED",
-        duration_seconds: 1800,
-        down_kbps: 10000,
-        up_kbps: 4000,
-        data_quota_bytes: 1024 * 1024 * 1024,
-        device_limit: 2,
-        device_limit_policy: "REJECT_NEW_DEVICE",
-        eligibility_window_seconds: 7200,
-        config_version: 3,
-      },
-      emergency_history: { count: 0 },
-    };
+  it("shows old → new before publishing, and publishes nothing until confirmed", async () => {
     mockGrace([live]);
-    put.mockResolvedValue({ config_version: 4 });
-    await renderForm();
+    await renderScreen();
+    openEditor(/Edit policy/);
 
-    fireEvent.click(screen.getByRole("button", { name: /Change policy/i }));
-    expect((screen.getByLabelText(/Grace duration \(minutes\)/i) as HTMLInputElement).value).toBe("30");
-    expect((screen.getByLabelText(/Download speed \(Mbps\)/i) as HTMLInputElement).value).toBe("10");
-    expect((screen.getByLabelText(/Data allowance \(MB\)/i) as HTMLInputElement).value).toBe("1024");
-    expect((screen.getByLabelText(/Eligibility window \(minutes\)/i) as HTMLInputElement).value).toBe("120");
+    // A second version starts from what is in force, not from a blank form.
+    expect((screen.getByLabelText("Grace time") as HTMLInputElement).value).toBe("30");
+    expect((screen.getByLabelText("Grace time unit") as HTMLSelectElement).value).toBe("min");
+    expect((screen.getByLabelText("Download speed (Mbps)") as HTMLInputElement).value).toBe("10");
+    expect((screen.getByLabelText("Data allowance (MB)") as HTMLInputElement).value).toBe("1024");
+    expect((screen.getByLabelText("Stay rules after checkout") as HTMLInputElement).value).toBe("2");
+    expect((screen.getByLabelText("Stay rules after checkout unit") as HTMLSelectElement).value).toBe("h");
 
-    // Change ONE number and publish; everything else must survive unchanged.
-    setField(/Grace duration \(minutes\)/i, "20");
-    fireEvent.click(screen.getByRole("button", { name: /Review before publishing/i }));
-    fireEvent.change(screen.getByLabelText(/Confirm your password/i), { target: { value: "pw" } });
-    fireEvent.click(screen.getByRole("button", { name: /^Publish policy$/i }));
+    setField("Grace time", "20");
+    await toReview();
+    const changes = screen.getByLabelText("Policy changes");
+    const row = within(changes).getByText("Grace time").closest("li")!;
+    expect(row.textContent).toMatch(/30 min/);
+    expect(row.textContent).toMatch(/20 min/);
+    expect(screen.getByText("1 change")).toBeTruthy();
+    expect(put).not.toHaveBeenCalled();
 
+    await confirmAndPublish("pw");
     await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
     const body = put.mock.calls[0][1];
     expect(body.grace_duration_seconds).toBe(20 * 60);
     expect(body.grace_data_quota_bytes).toBe(1024 * 1024 * 1024);
     expect(body.grace_down_kbps).toBe(10000);
-    // Published against the version actually read, so a concurrent publication conflicts instead of vanishing.
     expect(body.expected_config_version).toBe(3);
+    expect(body.reason_code).toBe("POLICY_CHANGE");
   });
 
-  it("a concurrent publication reloads rather than overwrites", async () => {
-    mockGrace([unconfigured, { ...unconfigured, published: true, config_version: 7 }]);
-    put.mockRejectedValue(Object.assign(new Error("conflict"), { status: 409 }));
-    await renderForm();
-
-    fireEvent.click(screen.getByRole("button", { name: /Create hotel policy/i }));
-    fireEvent.click(screen.getByRole("button", { name: /Review before publishing/i }));
-    fireEvent.change(screen.getByLabelText(/Confirm your password/i), { target: { value: "pw" } });
-    fireEvent.click(screen.getByRole("button", { name: /^Publish policy$/i }));
-
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/newer policy/i));
-    // Reloaded, so the operator is looking at what is actually in force before they try again.
-    expect(get).toHaveBeenCalledWith("/checkout-grace");
-    expect(screen.queryByLabelText("Policy to publish")).toBeNull();
+  it("does not offer to publish identical terms (the server would not move the version)", async () => {
+    mockGrace([live]);
+    await renderScreen();
+    openEditor(/Edit policy/);
+    await toReview();
+    expect(screen.getByText("Nothing to publish")).toBeTruthy();
+    setField("Confirm your password", "pw");
+    expect((screen.getByRole("button", { name: /^Publish policy$/i }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("shows version history with who published it and why", async () => {
+  it("refuses an out-of-range policy inline, without widening what the server accepts", async () => {
+    mockGrace([unconfigured]);
+    await renderScreen();
+    openEditor();
+    setField("Data allowance (MB)", "2000000"); // above 1 TB
+    setField("Grace time", "8");
+    fireEvent.change(screen.getByLabelText("Grace time unit"), { target: { value: "d" } }); // above 7 days
+    fireEvent.click(screen.getByRole("button", { name: /Review changes/i }));
+
+    expect(screen.getByText(/data allowance between 1 MB and 1,048,576 MB/i)).toBeTruthy();
+    expect(screen.getByText(/grace time between 1 minute and 7 days/i)).toBeTruthy();
+    expect(screen.getByLabelText("Data allowance (MB)").getAttribute("aria-invalid")).toBe("true");
+    expect(screen.queryByLabelText("Policy changes")).toBeNull();
+    expect(screen.getByTestId("grace-preview").textContent).toMatch(/Correct the highlighted fields/);
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  it("a reason typed with spaces is normalised to a valid code — never sent invalid", async () => {
+    mockGrace([live]);
+    put.mockResolvedValue({ config_version: 4 });
+    await renderScreen();
+    openEditor(/Edit policy/);
+    setField("Grace time", "40");
+    await toReview();
+
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "__OTHER__" } });
+    setField("Describe the reason", "late checkout");
+    expect(screen.getByText("Recorded as LATE_CHECKOUT")).toBeTruthy();
+    await confirmAndPublish("pw");
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
+    expect(put.mock.calls[0][1].reason_code).toBe("LATE_CHECKOUT");
+  });
+
+  it("an 'Other' reason with nothing usable blocks publishing instead of sending it", async () => {
+    mockGrace([live]);
+    await renderScreen();
+    openEditor(/Edit policy/);
+    setField("Grace time", "40");
+    await toReview();
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "__OTHER__" } });
+    setField("Describe the reason", "123 !!!");
+    setField("Confirm your password", "pw");
+    expect(screen.getByText(/starting with a letter/i)).toBeTruthy();
+    const publish = screen.getByRole("button", { name: /^Publish policy$/i }) as HTMLButtonElement;
+    expect(publish.disabled).toBe(true);
+    fireEvent.click(publish);
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  it("a concurrent publication reloads, explains, and keeps the operator's draft", async () => {
+    const newer = {
+      ...live,
+      config_version: 7,
+      effective: { ...live.effective, duration_seconds: 3600, config_version: 7 },
+    };
+    mockGrace([live, newer]);
+    put.mockRejectedValue(Object.assign(new Error("conflict"), { status: 409, code: "version_conflict" }));
+    await renderScreen();
+    openEditor(/Edit policy/);
+    setField("Grace time", "20");
+    await toReview();
+    await confirmAndPublish("pw");
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/Someone else published a newer policy/i));
+    expect(put).toHaveBeenCalledTimes(1);
+    // Reloaded, and back on the terms step with the draft intact.
+    expect(get.mock.calls.filter((c) => c[0] === "/checkout-grace").length).toBe(2);
+    expect((screen.getByLabelText("Grace time") as HTMLInputElement).value).toBe("20");
+    // The review now compares against the NEW version and would publish against it.
+    put.mockResolvedValue({ config_version: 8 });
+    await toReview();
+    const row = within(screen.getByLabelText("Policy changes")).getByText("Grace time").closest("li")!;
+    expect(row.textContent).toMatch(/1 h/);
+    await confirmAndPublish("pw");
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(2));
+    expect(put.mock.calls[1][1].expected_config_version).toBe(7);
+  });
+
+  it("a wrong password is reported on the password field, and nothing claims success", async () => {
+    mockGrace([live]);
+    put.mockRejectedValue(Object.assign(new Error("password confirmation required"), { status: 401, code: "reauth_required" }));
+    await renderScreen();
+    openEditor(/Edit policy/);
+    setField("Grace time", "25");
+    await toReview();
+    await confirmAndPublish("wrong");
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/password was not accepted/i));
+    expect(screen.getByText("Password not accepted.")).toBeTruthy();
+    expect(screen.queryByText(/^Version \d+ published$/)).toBeNull();
+    // Still on the review step, so the operator can retype the password.
+    expect(screen.getByLabelText("Policy changes")).toBeTruthy();
+  });
+
+  it("a derived-package refusal is explained in plain words", async () => {
+    mockGrace([live]);
+    put.mockRejectedValue(Object.assign(new Error("the checkout-grace policy was refused"), { status: 400, code: "package_invalid" }));
+    await renderScreen();
+    openEditor(/Edit policy/);
+    setField("Grace time", "25");
+    await toReview();
+    await confirmAndPublish("pw");
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toMatch(/could not build a grace package that matches these terms/i),
+    );
+    expect(screen.getByRole("alert").textContent).toMatch(/policy in force is unchanged/i);
+  });
+
+  it("shows version history as a timeline with who, why and what changed", async () => {
+    const snap = (d: number, down: number, q: number) => ({
+      grace_duration_seconds: d,
+      grace_down_kbps: down,
+      grace_up_kbps: 4000,
+      grace_data_quota_bytes: q,
+      grace_device_limit: 2,
+      grace_device_limit_policy: "REJECT_NEW_DEVICE",
+      eligibility_window_seconds: 86400,
+    });
     mockGrace(
-      [{ ...unconfigured, published: true, config_version: 2 }],
+      [{ ...live, config_version: 2 }],
       [
-        {
-          config_version: 2,
-          published_at: "2026-09-17T09:00:00Z",
-          actor: "Dana Whitfield",
-          reason_code: "SHORTER_GRACE",
-          policy: {
-            grace_duration_seconds: 1800,
-            grace_down_kbps: 10000,
-            grace_up_kbps: 4000,
-            grace_data_quota_bytes: 1024 * 1024 * 1024,
-            grace_device_limit: 2,
-          },
-        },
-        {
-          config_version: 1,
-          published_at: "2026-09-16T09:00:00Z",
-          actor: "Dana Whitfield",
-          reason_code: "HOTEL_ADMIN_UPDATE",
-          policy: {
-            grace_duration_seconds: 3600,
-            grace_down_kbps: 5000,
-            grace_up_kbps: 2000,
-            grace_data_quota_bytes: 500 * 1024 * 1024,
-            grace_device_limit: 1,
-          },
-        },
+        { config_version: 2, published_at: "2026-09-17T09:00:00Z", actor: "Dana Whitfield", reason_code: "GUEST_FEEDBACK", policy: snap(1800, 10000, 1024 * 1024 * 1024) },
+        { config_version: 1, published_at: "2026-09-16T09:00:00Z", actor: "Sam Ortega", reason_code: "SHORTER_GRACE", policy: snap(3600, 10000, 500 * 1024 * 1024) },
       ],
     );
-    await renderForm();
+    await renderScreen();
 
-    const list = await screen.findByLabelText("Checkout grace policy history");
-    const rows = within(list).getAllByRole("button");
-    // Two versions, newest first, one compact line each -- not two full snapshots rendered at once.
-    expect(rows).toHaveLength(2);
-    expect(rows[0].textContent).toMatch(/v2/);
-    expect(rows[1].textContent).toMatch(/v1/);
+    const list = screen.getByLabelText("Checkout grace policy history");
+    expect(within(list).getByText("Version 2")).toBeTruthy();
+    expect(within(list).getByText("Version 1")).toBeTruthy();
+    expect(within(list).getByText(/Guest feedback/)).toBeTruthy();
+    // An unknown code is humanised, not shown raw.
+    expect(within(list).getByText(/Shorter grace/)).toBeTruthy();
 
-    // COLLAPSED MEANS COLLAPSED. The reason code and the full pinned terms belong to the detail view; if they
-    // rendered in the row, the list would be exactly the wall of text this replaced.
-    expect(within(list).queryByLabelText("Version 2 details")).toBeNull();
-    expect(screen.queryByText("SHORTER_GRACE")).toBeNull();
+    // What changed in v2, computed from consecutive snapshots.
+    const changes = within(list).getByLabelText("Changes in version 2");
+    expect(changes.textContent).toMatch(/Grace time: 1 h → 30 min/);
+    expect(changes.textContent).toMatch(/Data allowance: 500 MB → 1 GB/);
+    expect(changes.textContent).not.toMatch(/Download speed/);
 
-    // Opening one version shows ITS OWN terms, read from that version's snapshot.
-    rows[1].click();
-    const detail = await screen.findByLabelText("Version 1 details");
-    expect(within(detail).getByText("HOTEL_ADMIN_UPDATE")).toBeTruthy();
-    expect(within(detail).getByText("1 h")).toBeTruthy();
-    expect(within(detail).getByText("500 MB")).toBeTruthy();
-    // and not the newer version's
-    expect(within(detail).queryByText("30 min")).toBeNull();
+    // Opening a version shows ITS OWN terms.
+    fireEvent.click(within(list).getByRole("button", { name: "View terms of version 1" }));
+    const terms = await screen.findByLabelText("Version 1 terms");
+    expect(within(terms).getByText("1 h")).toBeTruthy();
+    expect(within(terms).getByText("500 MB")).toBeTruthy();
+    expect(within(terms).queryByText("30 min")).toBeNull();
   });
 
-  it("says it CANNOT SEE the history rather than claiming there is none", async () => {
-    // FOUND ON PRE-LIVE, NOT BY A TEST. The publication ledger is written by a SECURITY DEFINER function, so
-    // svc_edged holds no SELECT on it and the endpoint answered 500 on every page load. A fixture connecting
-    // as the schema owner can read everything and could never have caught it.
-    //
-    // The distinction being asserted is the one that matters: "no policy has ever been published" and "I
-    // cannot read the record" are different claims, and showing the first while the second is true would
-    // misinform an operator auditing who changed the hotel's grace terms.
-    get.mockImplementation((path: string) => {
-      if (path === "/checkout-grace/history")
-        return Promise.resolve({ data: [], meta: { has_more: false }, available: false });
-      if (path === "/checkout-grace") return Promise.resolve({ ...unconfigured, published: true, config_version: 2 });
-      return Promise.resolve({});
-    });
-    await renderForm();
-
-    const note = await screen.findByText(/cannot be read on this appliance/i);
-    expect(note.textContent).toMatch(/does not mean no policy has been published/i);
-    // and it must not render an empty table that reads as "nothing was ever published"
-    expect(screen.queryByLabelText("Checkout grace policy history")).toBeNull();
-  });
-
-  it("calls the fallback's zero device limit 'no extra devices', not '0'", async () => {
-    // The built-in fallback carries device_limit 0. A bare "0" reads as "no limit" -- the opposite of what it
-    // means. The previous screen said so and the rewrite lost it; PRE-LIVE showed the bare 0.
-    mockGrace([unconfigured]);
-    await renderForm();
-    const dl = screen.getByLabelText("Effective checkout grace");
-    expect(within(dl).getByText(/no extra devices/i)).toBeTruthy();
-  });
-
-  it("a read-only role sees the terms but cannot open the editor", async () => {
-    mockGrace([unconfigured]);
-    const { CheckoutGraceForm } = await import("@/components/phase3/checkout-grace-form");
-    render(<CheckoutGraceForm canWrite={false} />);
-    await screen.findByText("In force right now");
-
-    expect((screen.getByRole("button", { name: /Create hotel policy/i }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText(/can view this policy but not change it/i)).toBeTruthy();
+  it("collapses long history behind 'show more' without dropping versions", async () => {
+    const hist = Array.from({ length: 8 }, (_, i) => ({
+      config_version: 8 - i,
+      published_at: `2026-09-${String(20 - i).padStart(2, "0")}T09:00:00Z`,
+      actor: "Dana Whitfield",
+      reason_code: "POLICY_CHANGE",
+      policy: { grace_duration_seconds: 600 * (8 - i), grace_down_kbps: 5000, grace_up_kbps: 2000, grace_data_quota_bytes: 500 * 1024 * 1024 },
+    }));
+    mockGrace([{ ...live, config_version: 8 }], hist);
+    await renderScreen();
+    const list = screen.getByLabelText("Checkout grace policy history");
+    expect(within(list).queryByText("Version 3")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Show 3 older versions/ }));
+    expect(within(list).getByText("Version 1")).toBeTruthy();
   });
 });

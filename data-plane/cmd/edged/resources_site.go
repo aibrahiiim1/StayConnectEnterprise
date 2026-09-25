@@ -375,6 +375,10 @@ func (s *server) reportsRoutes() http.Handler {
 	// contract that scd's cloud telemetry shape mirrors, and widening it would change what gets reported
 	// upward as a side effect of changing a screen.
 	r.Get("/dashboard", s.reportsDashboard)
+	// The overview (range-selectable analytics + operational state) and the appliance's own resources. Both
+	// are additive; /dashboard is unchanged. See resources_overview.go and appliance_resources.go.
+	r.Get("/overview", s.reportsOverview)
+	r.Get("/appliance-resources", s.reportsApplianceResources)
 	r.Get("/summary", func(w http.ResponseWriter, req *http.Request) {
 		ctx, cancel := dbCtx(req)
 		defer cancel()

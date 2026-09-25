@@ -1,11 +1,15 @@
 package main
 
 const landingHTML = `<!doctype html>
-<html lang="en"><head>
+<html lang="en" data-template="{{.Template}}" data-density="{{.Density}}" data-panel="{{.Panel}}" data-hero="{{.HeroHeight}}" data-surface="{{.Surface}}"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Wi-Fi Access</title>
-<style>
+<style id="sc-base">
+  /* THE CASCADE ORDER, declared before anything else so nothing later can re-order it: the portal's own
+     styling, then the chosen template, then the hotel's custom CSS. See the guard sheet below for why. */
+  @layer sc-base, sc-template, hotel;
+  @layer sc-base {
   /* THE GUEST PORTAL, to the Product Owner's reference design.
      One design across desktop, tablet and phone -- the same card, hierarchy and controls, laid out for the
      space available. Every colour and radius is a custom property so Branding restyles it without touching
@@ -18,7 +22,7 @@ const landingHTML = `<!doctype html>
     --sc-card:       #ffffff;
     --sc-line:       #e3e8e8;
     --sc-radius:     20px;
-    --sc-bg: url("/assets/portal-background.jpg");
+    --sc-bg: none; /* no photo unless the hotel sets one; the old default named a file no appliance ships, so every guest page load requested it and got a 404 */
     font-family: "Inter", -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
   }
   * { box-sizing: border-box; }
@@ -185,9 +189,359 @@ const landingHTML = `<!doctype html>
     .panel.active { animation: fade .18s ease-out; }
     @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
   }
+  }
 </style>
+<style id="sc-templates">
+/* THE TEMPLATES -- six layouts over ONE page.
+   Every template arranges the same elements: the same forms, the same ids, the same script. What changes is
+   where the slots sit (.sc-hero, .sc-brandblock, .sc-signin, .sc-extras, .sc-foot) and how they look, so a
+   guest signs in identically whichever layout the hotel chose. Classic is the original page and is not
+   touched here at all: every rule below is scoped to a named template.
+   The hero (.sc-hero) is decoration. It repeats the hotel's name and welcome in large type for the layouts
+   that have a picture, and is aria-hidden: the sign-in card still carries the real, readable copies, which
+   those layouts hide visually rather than remove. */
+@layer sc-template {
+  :root { --sc-overlay: .35; --sc-hero: var(--sc-bg); }
+  .sc-hero { display: none; }
+  .sc-hero-logo { display: block; max-height: 64px; max-width: 260px; object-fit: contain; margin: 0 0 18px; }
+  .sc-hero-logo[hidden] { display: none; }
+  .sc-hero-name { font-weight: 650; line-height: 1.08; letter-spacing: -.01em; }
+  .sc-hero-welcome { margin: 14px 0 0; line-height: 1.45; max-width: 46ch; }
+  .sc-hero-welcome:empty { display: none; }
+  .brand .name, .sc-hero-name { font-family: var(--sc-heading-font, inherit); }
+  .sc-visually-hidden, [data-template="split"] .sc-brandblock, [data-template="immersive"] .sc-brandblock,
+  [data-template="editorial"] .sc-brandblock, [data-template="headerbar"] .sc-brandblock .brand {
+    position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden;
+    clip-path: inset(50%); white-space: nowrap; border: 0; padding: 0;
+  }
+
+  /* DENSITY, for every template. */
+  [data-density="compact"] .field { margin-bottom: 12px; }
+  [data-density="compact"] input[type=text], [data-density="compact"] input[type=password],
+  [data-density="compact"] input[type=email], [data-density="compact"] input[type=tel] { padding: 10px 12px; }
+  [data-density="compact"] button.primary { padding: 11px 28px; }
+  [data-density="spacious"] .field { margin-bottom: 30px; }
+  [data-density="spacious"] input[type=text], [data-density="spacious"] input[type=password],
+  [data-density="spacious"] input[type=email], [data-density="spacious"] input[type=tel] { padding: 18px 18px; font-size: 1.06rem; }
+  [data-density="spacious"] button.primary { padding: 17px 44px; }
+
+  /* A photographic panel: the hero image under a darkening overlay, over the brand colours when there is no
+     image at all -- so an appliance with nothing uploaded still gets a deliberate panel, not a grey box. */
+  [data-template="split"] .sc-hero, [data-template="immersive"] .sc-hero, [data-template="editorial"] .sc-hero {
+    color: #fff;
+    background:
+      linear-gradient(rgb(0 0 0 / var(--sc-overlay)), rgb(0 0 0 / var(--sc-overlay))),
+      var(--sc-hero) center/cover no-repeat,
+      linear-gradient(150deg, var(--sc-brand), var(--sc-brand-dark));
+  }
+
+  /* ---- 2. SPLIT ------------------------------------------------------------------------------------- */
+  [data-template="split"] body { background: var(--sc-card); }
+  [data-template="split"] .page {
+    grid-template-columns: minmax(0, 1.15fr) minmax(360px, 1fr);
+    align-items: stretch; padding: 0; min-height: 100vh; min-height: 100dvh;
+  }
+  [data-template="split"] .sc-hero {
+    display: flex; align-items: flex-end; grid-column: 1; grid-row: 1;
+    position: sticky; top: 0; height: 100vh; height: 100dvh;
+    padding: clamp(28px, 5vw, 72px);
+  }
+  [data-template="split"] .sc-hero-name { font-size: clamp(2rem, 3.6vw, 3.4rem); }
+  [data-template="split"] .sc-hero-welcome { font-size: clamp(1rem, 1.3vw, 1.2rem); opacity: .94; }
+  [data-template="split"] .card {
+    grid-column: 2; grid-row: 1; flex-direction: column; justify-content: center;
+    margin: 0; max-width: none; border-radius: 0; box-shadow: none;
+    min-height: 100vh; min-height: 100dvh;
+    padding: clamp(72px, 9vh, 96px) clamp(24px, 4.5vw, 64px) clamp(64px, 8vh, 88px);
+  }
+  [data-template="split"][data-panel="start"] .sc-hero { grid-column: 2; }
+  [data-template="split"][data-panel="start"] .card { grid-column: 1; }
+  [data-template="split"] .sc-signin, [data-template="split"] .sc-extras, [data-template="split"] .sc-foot {
+    width: 100%; max-width: 560px; margin-inline: auto;
+  }
+  [data-template="split"] .tabs { grid-template-columns: 1fr 1fr; }
+
+  /* ---- 3. IMMERSIVE --------------------------------------------------------------------------------- */
+  [data-template="immersive"] body { background: #0d1416; }
+  [data-template="immersive"] .sc-hero {
+    display: block; position: fixed; inset: 0; z-index: 0;
+    background:
+      linear-gradient(180deg, rgb(0 0 0 / calc(var(--sc-overlay) * .5)) 0%, rgb(0 0 0 / var(--sc-overlay)) 70%),
+      var(--sc-hero) center/cover no-repeat,
+      linear-gradient(150deg, var(--sc-brand-dark), #0d1416);
+  }
+  /* The display type and the glass panel share the screen, never the same corner: the headline sits at the
+     bottom of the side the panel is NOT on (panel at the end by default, so the words read first), and a
+     centred panel moves the headline to the top. */
+  [data-template="immersive"] .sc-hero-inner {
+    position: absolute; inset-inline-start: clamp(24px, 6vw, 96px); bottom: clamp(40px, 10vh, 120px);
+    max-width: min(18ch, 44vw);
+  }
+  [data-template="immersive"][data-panel="start"] .sc-hero-inner {
+    inset-inline-start: auto; inset-inline-end: clamp(24px, 6vw, 96px); text-align: end;
+  }
+  [data-template="immersive"][data-panel="start"] .sc-hero-welcome { margin-inline-start: auto; }
+  [data-template="immersive"][data-panel="center"] .sc-hero-inner {
+    bottom: auto; top: clamp(64px, 11vh, 120px); inset-inline: 0; margin-inline: auto; max-width: min(24ch, 90vw);
+    text-align: center;
+  }
+  [data-template="immersive"][data-panel="center"] .sc-hero-welcome { margin-inline: auto; }
+  [data-template="immersive"][data-panel="center"] .sc-hero-inner { max-width: min(46rem, 90vw); }
+  [data-template="immersive"][data-panel="center"] .sc-hero-name { font-size: clamp(2.2rem, 4.4vw, 3.8rem); }
+  [data-template="immersive"] .sc-hero-name {
+    font-size: clamp(2.6rem, 6.4vw, 5.6rem); font-weight: 700; letter-spacing: -.025em; line-height: .98;
+    text-shadow: 0 2px 24px rgb(0 0 0 / .25);
+  }
+  [data-template="immersive"] .sc-hero-welcome { font-size: clamp(1.05rem, 1.6vw, 1.4rem); max-width: 34ch; opacity: .93; }
+  [data-template="immersive"] .page {
+    position: relative; z-index: 1; align-items: flex-end; justify-content: flex-end;
+    padding: clamp(72px, 9vh, 96px) clamp(16px, 6vw, 96px) clamp(16px, 5vh, 56px);
+  }
+  [data-template="immersive"][data-panel="start"] .page { align-items: flex-start; }
+  [data-template="immersive"][data-panel="center"] .page { align-items: center; padding-top: clamp(220px, 34vh, 360px); }
+  [data-template="immersive"] .card {
+    margin-block: auto 0; max-width: 540px;
+    background: rgb(255 255 255 / .74);
+    -webkit-backdrop-filter: blur(20px) saturate(1.5); backdrop-filter: blur(20px) saturate(1.5);
+    border: 1px solid rgb(255 255 255 / .55);
+    box-shadow: 0 30px 80px rgb(0 0 0 / .35);
+  }
+  [data-template="immersive"][data-surface="solid"] .card {
+    background: var(--sc-card); -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
+  [data-template="immersive"] .tabs { grid-template-columns: 1fr 1fr; }
+  [data-template="immersive"] input[type=text], [data-template="immersive"] input[type=password],
+  [data-template="immersive"] input[type=email], [data-template="immersive"] input[type=tel] { background: rgb(255 255 255 / .9); }
+  [data-template="immersive"] .field { max-width: none; }
+
+  /* ---- 4. HEADER BAR -------------------------------------------------------------------------------- */
+  [data-template="headerbar"] body { background: #f2f4f5; }
+  [data-template="headerbar"] .sc-hero {
+    display: flex; align-items: center; position: fixed; top: 0; inset-inline: 0; z-index: 4;
+    height: 64px; padding-inline: clamp(16px, 4vw, 40px); padding-inline-end: 190px;
+    background: var(--sc-brand); color: #fff; box-shadow: 0 1px 0 rgb(0 0 0 / .08), 0 6px 18px rgb(0 0 0 / .08);
+  }
+  [data-template="headerbar"] .sc-hero-inner { display: flex; align-items: center; gap: 14px; min-width: 0; }
+  [data-template="headerbar"] .sc-hero-logo { max-height: 38px; max-width: 160px; margin: 0; }
+  [data-template="headerbar"] .sc-hero-name {
+    font-size: 1.12rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  [data-template="headerbar"] .sc-hero-welcome { display: none; }
+  [data-template="headerbar"] .langbar { top: 12px; z-index: 6; }
+  [data-template="headerbar"] .lang { padding: 7px 14px; box-shadow: none; }
+  [data-template="headerbar"] .page { padding: calc(64px + clamp(20px, 4vh, 44px)) clamp(12px, 4vw, 40px) clamp(20px, 4vh, 40px); }
+  [data-template="headerbar"] .card {
+    max-width: 1120px; margin-block: 0 auto;
+    grid-template-columns: minmax(0, 1.7fr) minmax(240px, 1fr);
+    grid-template-areas: "brand brand" "signin side" "foot foot";
+    column-gap: clamp(24px, 4vw, 56px);
+    border-radius: calc(var(--sc-radius) * .6);
+    box-shadow: 0 1px 3px rgb(0 0 0 / .08), 0 10px 30px rgb(0 0 0 / .06);
+    padding-bottom: clamp(20px, 3vw, 32px);
+  }
+  [data-template="headerbar"] .card:has(.sc-extras[data-empty]) { grid-template-columns: minmax(0, 1fr); grid-template-areas: "brand" "signin" "foot"; }
+  [data-template="headerbar"] .sc-brandblock { grid-area: brand; }
+  [data-template="headerbar"] .welcome { margin: 0 0 4px; font-size: clamp(1.1rem, 1.5vw, 1.35rem); color: var(--sc-ink); font-weight: 600; }
+  [data-template="headerbar"] .sc-signin { grid-area: signin; min-width: 0; }
+  [data-template="headerbar"] .sc-extras {
+    grid-area: side; align-self: start; margin-top: clamp(20px, 3vw, 34px);
+    border-inline-start: 1px solid var(--sc-line); padding-inline-start: clamp(18px, 2.5vw, 32px);
+  }
+  [data-template="headerbar"] .sc-extras[data-empty] { display: none; }
+  [data-template="headerbar"] .sc-extras .help { margin-top: 0; }
+  [data-template="headerbar"] .sc-foot {
+    grid-area: foot; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
+    margin-top: 26px; padding-top: 16px; border-top: 1px solid var(--sc-line);
+  }
+  [data-template="headerbar"] .sc-foot .terms { margin: 0; }
+  [data-template="headerbar"] .info-btn { position: static; }
+  [data-template="headerbar"] .info-panel { flex-basis: 100%; margin-top: 0; }
+
+  /* ---- 5. RESORT (editorial) ------------------------------------------------------------------------ */
+  [data-template="editorial"] body { background: #f6f2ec; }
+  [data-template="editorial"] .page { padding: 0 0 clamp(28px, 6vh, 64px); }
+  [data-template="editorial"] .sc-hero {
+    display: flex; align-items: center; justify-content: center; text-align: center;
+    align-self: stretch; min-height: 48vh;
+    padding: clamp(72px, 11vh, 120px) clamp(20px, 6vw, 80px) calc(clamp(56px, 8vh, 96px) + 80px);
+  }
+  [data-template="editorial"][data-hero="short"] .sc-hero { min-height: 34vh; }
+  [data-template="editorial"][data-hero="tall"] .sc-hero { min-height: 66vh; }
+  [data-template="editorial"] .sc-hero-inner { max-width: 60rem; display: flex; flex-direction: column; align-items: center; }
+  [data-template="editorial"] .sc-hero-name {
+    font-size: clamp(2.2rem, 5.4vw, 4.4rem); font-weight: 600;
+    font-family: var(--sc-heading-font, Georgia, "Times New Roman", serif);
+  }
+  [data-template="editorial"] .sc-hero-welcome { font-size: clamp(1.05rem, 1.8vw, 1.35rem); margin-inline: auto; opacity: .95; }
+  [data-template="editorial"] .card {
+    margin-block: -96px 0; max-width: 880px; width: calc(100% - 2 * clamp(12px, 4vw, 48px));
+    background: transparent; box-shadow: none; padding: 0;
+  }
+  [data-template="editorial"] .sc-signin {
+    background: var(--sc-card); border-radius: var(--sc-radius); box-shadow: 0 24px 60px rgb(0 0 0 / .16);
+    padding: clamp(22px, 3vw, 44px) clamp(20px, 3.5vw, 52px) clamp(26px, 3vw, 44px);
+  }
+  [data-template="editorial"] .sc-extras { padding: 0 4px; }
+  [data-template="editorial"] .help { text-align: center; margin-inline: auto; }
+  [data-template="editorial"] #custom-html {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; padding: 8px;
+  }
+  [data-template="editorial"] #custom-html:empty { display: none; }
+  [data-template="editorial"] #custom-html > * {
+    margin: 0; background: var(--sc-card); border-radius: calc(var(--sc-radius) * .7);
+    padding: 18px 20px; box-shadow: 0 6px 20px rgb(0 0 0 / .07);
+  }
+  [data-template="editorial"] .sc-foot {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 14px; margin-top: 18px;
+  }
+  [data-template="editorial"] .sc-foot .terms { margin: 0; }
+  [data-template="editorial"] .info-btn { position: static; }
+  [data-template="editorial"] .info-panel { flex-basis: 100%; margin-top: 0; background: var(--sc-card); }
+
+  /* ---- 6. KIOSK -------------------------------------------------------------------------------------- */
+  [data-template="kiosk"] { font-size: 112.5%; }
+  [data-template="kiosk"] body { background: #edf1f1; }
+  [data-template="kiosk"] .card { max-width: 780px; }
+  [data-template="kiosk"] .brand { justify-content: center; }
+  [data-template="kiosk"] .brand img { max-height: 76px; }
+  [data-template="kiosk"] .brand .name { font-size: clamp(1.4rem, 2.4vw, 1.9rem); }
+  [data-template="kiosk"] .welcome { text-align: center; margin-inline: auto; font-size: 1.15rem; }
+  [data-template="kiosk"] .tab { min-height: 76px; font-size: 1.3rem; }
+  [data-template="kiosk"] .field { max-width: none; }
+  [data-template="kiosk"] label { font-size: 1.15rem; }
+  [data-template="kiosk"] input[type=text], [data-template="kiosk"] input[type=password],
+  [data-template="kiosk"] input[type=email], [data-template="kiosk"] input[type=tel] {
+    min-height: 64px; font-size: 1.3rem; border-width: 2px;
+  }
+  [data-template="kiosk"] button.primary { width: 100%; min-height: 64px; font-size: 1.25rem; }
+  [data-template="kiosk"] .pill { font-size: 1.1rem; padding: 16px 26px; }
+  [data-template="kiosk"] .lang { font-size: 1.1rem; padding: 12px 20px; }
+  [data-template="kiosk"] .info-btn { width: 44px; height: 44px; font-size: 1.1rem; }
+
+  /* ---- shared by every non-classic template ---------------------------------------------------------- */
+  [data-template]:not([data-template="classic"]) .card { position: relative; }
+
+  /* TABLET AND PHONE. Two-column layouts become one column; the photograph becomes a banner above the card. */
+  @media (max-width: 860px) {
+    [data-template="split"] .page { grid-template-columns: minmax(0, 1fr); }
+    [data-template="split"] .sc-hero, [data-template="split"][data-panel="start"] .sc-hero {
+      grid-column: 1; grid-row: 1; position: relative; height: auto; min-height: 34vh;
+      padding: 72px 20px 44px;
+    }
+    [data-template="split"] .card, [data-template="split"][data-panel="start"] .card {
+      grid-column: 1; grid-row: 2; min-height: 0; margin-top: -22px;
+      border-radius: var(--sc-radius) var(--sc-radius) 0 0; padding: 26px 18px 64px;
+    }
+    [data-template="headerbar"] .card { grid-template-columns: minmax(0, 1fr); grid-template-areas: "brand" "signin" "side" "foot"; }
+    [data-template="headerbar"] .sc-extras {
+      border-inline-start: 0; padding-inline-start: 0; border-top: 1px solid var(--sc-line); padding-top: 18px;
+    }
+  }
+  @media (max-width: 680px) {
+    /* The base layout puts the language selector in the flow on a phone. The photographic and bar layouts
+       keep it over their own header instead, where it does not become a row of the page grid. */
+    [data-template="split"] .langbar, [data-template="immersive"] .langbar, [data-template="editorial"] .langbar {
+      position: absolute; top: 12px; right: auto; left: auto; inset-inline-end: 12px; width: auto; padding: 0; z-index: 5;
+    }
+    [data-template="headerbar"] .langbar { position: fixed; top: 12px; right: auto; left: auto; inset-inline-end: 12px; width: auto; padding: 0; }
+    [data-template="headerbar"] .sc-hero { padding-inline-end: 150px; }
+    [data-template="headerbar"] .sc-hero-logo { max-height: 30px; max-width: 96px; }
+    [data-template="headerbar"] .page { padding: 80px 12px 20px; }
+    [data-template="immersive"] .page, [data-template="immersive"][data-panel] .page {
+      padding: 42vh 12px 16px; align-items: stretch;
+    }
+    [data-template="immersive"] .sc-hero-inner, [data-template="immersive"][data-panel] .sc-hero-inner {
+      top: 72px; bottom: auto; inset-inline: 20px; margin: 0; max-width: none; text-align: start;
+    }
+    [data-template="immersive"][data-panel] .sc-hero-welcome { margin-inline: 0; }
+    [data-template="immersive"] .sc-hero-name { font-size: clamp(2.2rem, 11vw, 3rem); }
+    [data-template="immersive"] .card { max-width: none; }
+    [data-template="editorial"] .sc-hero { min-height: 40vh; padding: 76px 18px 120px; }
+    [data-template="editorial"] .card { width: calc(100% - 24px); margin-top: -84px; }
+    [data-template="editorial"] .sc-signin { padding: 20px 16px 26px; }
+    [data-template="kiosk"] { font-size: 106%; }
+  }
+}
+</style>
+<style id="sc-guard">
+/* THE GUARD -- why the hotel's stylesheet can restyle every control and hide none of them.
+   The cascade has three tiers here, weakest first:
+     1. @layer sc-base, sc-template   the portal's own look, and the template's
+     2. @layer hotel                  the hotel's custom CSS: beats (1) whatever the specificity
+     3. THIS SHEET, UNLAYERED         a normal declaration outside every layer beats every normal
+                                      declaration inside one, whatever the specificity
+   and above all of them the inline style="" the sign-in script sets to show and hide its own forms, which
+   is why nothing below uses !important: an important declaration here would beat the script too, and the
+   voucher/personal-account switch would stop working.
+   The one way a layered rule CAN beat an unlayered one is !important -- for important declarations the layer
+   order is reversed. So the portal removes !important from the hotel's stylesheet before serving it (see
+   internal/portaldesign), and the tier above is what is left.
+   What is guarded is what a guest needs to sign in: the path from the page down to the fields, the fields,
+   their labels and buttons, the group tabs, and the messages the server or the sign-in script shows. What is
+   guarded against is the ways a stylesheet hides a thing -- display, visibility, opacity, pointer-events,
+   clipping, transforms, filters and zero heights -- not every visual trick an authenticated administrator
+   could write; that is what the password step-up on the stylesheet itself is for. Values here match the
+   portal's own, so on an unstyled page this sheet changes nothing. */
+html, body { display: block; visibility: visible; opacity: 1; }
+.page { display: flex; }
+[data-template="split"] .page { display: grid; }
+main.card { display: block; }
+[data-template="split"] main.card { display: flex; }
+[data-template="headerbar"] main.card { display: grid; }
+.sc-signin, .panels, .panel.active, .panels form, .panels .field { display: block; }
+.panel:not(.active) { display: none; }
+#tabs { display: grid; }
+#tabs .tab, .pill { display: inline-flex; }
+.page, main.card, .sc-signin, .panels, .panel.active, .panels form, .panels .field, .panels label,
+.panels input:not([type=hidden]), .panels button, #tabs, #tabs .tab, .pill, .langbar, #lang,
+#server-error, .notice.show, .panels .err {
+  visibility: visible; pointer-events: auto; filter: none; clip-path: none; content-visibility: visible;
+  transform: none; translate: none; scale: none; rotate: none;
+}
+.page, main.card, .sc-signin, .panels, .panel.active, .panels form, .panels .field, .panels label,
+.panels input:not([type=hidden]), #tabs, #tabs .tab, #server-error, .notice.show, .panels .err,
+.panels button:not(:disabled) { opacity: 1; }
+.sc-signin, .panels, .panels form, .panels .field, .panels input:not([type=hidden]), .panels button {
+  height: auto; max-height: none; overflow: visible;
+}
+.page, main.card, .sc-signin, .panels, .panels form, .panels .field { position: relative; inset: auto; }
+.panels input:not([type=hidden]):not([type=checkbox]), .panels button { position: static; }
+#server-error, .notice.show, .panels .err { display: block; position: static; }
+/* Anything a stylesheet draws with ::before/::after can be looked at but never clicked, so a decorative
+   overlay can never sit between a guest and the Login button. */
+*::before, *::after { pointer-events: none; }
+/* The hotel's own markup stays in its own box: paint containment clips it to the container, and makes the
+   container the reference for position:fixed inside it -- so a fragment cannot lift itself over the forms. */
+#custom-html { position: relative; inset: auto; z-index: 0; contain: layout paint; transform: none; translate: none; }
+</style>
+<script nonce="{{.Nonce}}">
+  // CASCADE LAYERS, AND THE BROWSERS THAT PREDATE THEM. A browser without cascade layers (iOS before 15.4,
+  // for one) drops an entire layered block as an unknown rule -- which here would be the portal's whole
+  // stylesheet. On those browsers the layer wrappers are removed before anything paints, and the page falls
+  // back to plain source order: base, template, guard, with the hotel's sheet inserted before the guard.
+  (function () {
+    if (window.CSSLayerBlockRule) return;
+    ['sc-base', 'sc-templates'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      var css = el.textContent.replace(/@layer[^;{]*;/g, '').replace(/@layer\s+[\w-]+\s*\{/, '');
+      var end = css.lastIndexOf('}');
+      el.textContent = end >= 0 ? css.slice(0, end) : css;
+    });
+  })();
+</script>
 </head><body>
   <div class="page">
+  <!-- THE HERO: decoration for the photographic and bar templates, hidden in Classic and Kiosk. It repeats the
+       hotel's name and welcome in display type and is aria-hidden -- the card below keeps the real, readable
+       copies, which those templates hide visually rather than remove. -->
+  <div class="sc-hero" aria-hidden="true">
+    <div class="sc-hero-inner">
+      <img class="sc-hero-logo" alt="" hidden>
+      <div class="sc-hero-name"></div>
+      <p class="sc-hero-welcome"></p>
+    </div>
+  </div>
   <div class="langbar">
     <label class="lang" for="lang">
       <span id="lang-flag" aria-hidden="true">🌐</span>
@@ -196,6 +550,7 @@ const landingHTML = `<!doctype html>
   </div>
 
   <main class="card">
+    <div class="sc-brandblock">
     <!-- BRANDING. Filled from /api/branding when the hotel has published a design; the defaults below are
          what an unbranded appliance shows, which must still look deliberate rather than broken. -->
     <div class="brand">
@@ -208,6 +563,9 @@ const landingHTML = `<!doctype html>
          an appliance that has set none of them looks deliberate rather than gappy. -->
     <p class="welcome" id="brand-welcome" hidden></p>
     <hr class="rule">
+    </div>
+
+    <div class="sc-signin">
 
     <!-- WHY THE INTERNET STOPPED. Shown only when this device's most recent access ended because it ran out
          of data or time; the sign-in below is unchanged and the guest carries straight on into it. -->
@@ -355,13 +713,19 @@ const landingHTML = `<!doctype html>
 
       <div class="alt" id="alt-methods" style="display:none"></div>
     </div>
+    </div>
 
     <!-- The hotel's own footer: a help line, an optional terms link, and the Advanced fragment. The fragment
-         is inserted as MARKUP, which is safe here only because edged refuses a design containing script, an
-         inline handler, a frame, a form or @import at the point it is saved -- see validateAdvanced. A
-         portal that sanitised on render instead would teach an operator their template "worked". -->
+         is inserted as MARKUP. It is safe to do so for three independent reasons: edged refuses a design whose
+         fragment is not already clean (internal/portaldesign's allowlist, not a denylist); /api/branding
+         rebuilds it through the same allowlist before a guest receives it; and this page's Content-Security-
+         Policy runs only scripts carrying its per-response nonce, so an inline handler that somehow survived
+         would still not execute. -->
+    <div class="sc-extras">
     <p class="help" id="brand-help" hidden></p>
     <div id="custom-html"></div>
+    </div>
+    <div class="sc-foot">
     <p class="terms" id="brand-terms-wrap" hidden>
       <a id="brand-terms" target="_blank" rel="noopener noreferrer"
          data-i18n="terms.link" data-i18n-en="Terms of use">Terms of use</a>
@@ -377,10 +741,11 @@ const landingHTML = `<!doctype html>
       </dl>
       <p class="small" style="margin-top:10px" data-i18n="info.help" data-i18n-en="Reception may ask for these if you need help connecting.">Reception may ask for these if you need help connecting.</p>
     </div>
+    </div>
   </main>
   </div>
 
-  <script>
+  <script nonce="{{.Nonce}}">
     // THE REFERENCE DESIGN PRESENTS TWO DOORS, NOT SIX.
     //
     // With PMS, voucher, accounts, email, SMS, social and post-stay all enabled the old row carried seven
@@ -626,11 +991,35 @@ const landingHTML = `<!doctype html>
       applyLanguage(e.target.value);
     });
 
+    // THE TEMPLATE. The server already rendered the published template's attributes on <html>, so a guest's
+    // first paint is the right layout; this re-applies them from the design, which is what makes the admin
+    // preview follow an operator's unsaved choice. Every value is a closed vocabulary (edged refuses anything
+    // else and /api/branding drops it), and each is written as an attribute or a custom property -- never as
+    // markup or a stylesheet.
+    const TEMPLATES = ['classic', 'split', 'immersive', 'headerbar', 'editorial', 'kiosk'];
+    function applyTemplate(d) {
+      const el = document.documentElement;
+      const o = (d && d.template_options && typeof d.template_options === 'object') ? d.template_options : {};
+      el.dataset.template = TEMPLATES.indexOf(d && d.template_id) >= 0 ? d.template_id : 'classic';
+      el.dataset.density = ['compact', 'comfortable', 'spacious'].indexOf(o.density) >= 0 ? o.density : '';
+      el.dataset.panel = ['start', 'center', 'end'].indexOf(o.panel_position) >= 0 ? o.panel_position : '';
+      el.dataset.hero = ['short', 'medium', 'tall'].indexOf(o.hero_height) >= 0 ? o.hero_height : '';
+      el.dataset.surface = ['solid', 'glass'].indexOf(o.surface) >= 0 ? o.surface : '';
+      const overlay = Number(o.overlay);
+      if (o.overlay !== undefined && o.overlay !== null && overlay >= 0 && overlay <= 90) {
+        el.style.setProperty('--sc-overlay', String(overlay / 100));
+      }
+      if (o.heading_font) el.style.setProperty('--sc-heading-font', o.heading_font);
+      const hero = (d && (d.hero_image_url || d.background_url)) || '';
+      if (hero) el.style.setProperty('--sc-hero', 'url("' + encodeURI(hero) + '")');
+    }
+
     // BRANDING. Applied before anything else paints so the guest never sees the default teal flash to the
     // hotel's colour. Every value is optional and every default is a deliberate, finished-looking fallback.
     fetch('/api/branding').then(r => r.ok ? r.json() : {}).then(b => {
       const d = (b && b.design) || b || {};
       const root = document.documentElement.style;
+      applyTemplate(d);
       if (d.brand_color)      root.setProperty('--sc-brand', d.brand_color);
       if (d.brand_color_dark) root.setProperty('--sc-brand-dark', d.brand_color_dark);
       if (d.text_color)       root.setProperty('--sc-ink', d.text_color);
@@ -639,6 +1028,7 @@ const landingHTML = `<!doctype html>
       if (d.background_url)   root.setProperty('--sc-bg', 'url("' + encodeURI(d.background_url) + '")');
       if (d.hotel_name) {
         document.getElementById('brand-name').textContent = d.hotel_name;
+        document.querySelector('.sc-hero-name').textContent = d.hotel_name;
         document.title = d.hotel_name + ' — Wi-Fi';
       }
       if (d.logo_url) {
@@ -650,11 +1040,16 @@ const landingHTML = `<!doctype html>
         img.onload = function () { img.style.display = ''; };
         img.alt = d.hotel_name || 'Hotel';
         img.src = d.logo_url;
+        const heroLogo = document.querySelector('.sc-hero-logo');
+        heroLogo.onerror = function () { heroLogo.hidden = true; };
+        heroLogo.onload = function () { heroLogo.hidden = false; };
+        heroLogo.src = d.logo_url;
       }
       // The hotel's own words. Each is shown only when it has something to say.
       if (d.welcome_text) {
         const el = document.getElementById('brand-welcome');
         el.textContent = d.welcome_text; el.hidden = false;
+        document.querySelector('.sc-hero-welcome').textContent = d.welcome_text;
       }
       if (d.help_text) {
         const el = document.getElementById('brand-help');
@@ -665,15 +1060,30 @@ const landingHTML = `<!doctype html>
         document.getElementById('brand-terms-wrap').hidden = false;
       }
       if (d.custom_css) {
+        // THE HOTEL'S STYLESHEET GOES IN ITS OWN LAYER, above the portal's styling and below the guard sheet
+        // that keeps the sign-in controls usable. The server has already removed !important (which would let
+        // a layered rule outrank the guard); it is removed again here so the admin preview, which is handed
+        // the operator's unsaved text, shows exactly what a guest would get.
         const st = document.createElement('style');
-        st.textContent = d.custom_css;
-        document.head.appendChild(st);
+        st.id = 'sc-hotel';
+        const css = String(d.custom_css).replace(/!\s*important/gi, '');
+        if (window.CSSLayerBlockRule) {
+          st.textContent = '@layer hotel {\n' + css + '\n}';
+          document.head.appendChild(st);
+        } else {
+          // No cascade layers: source order is all there is, so the hotel's sheet goes BEFORE the guard.
+          st.textContent = css;
+          document.head.insertBefore(st, document.getElementById('sc-guard'));
+        }
       }
       if (d.custom_html) {
-        // innerHTML, deliberately: the fragment IS markup, and the executable spellings were refused when the
-        // design was saved rather than stripped here.
+        // innerHTML, deliberately: the fragment IS markup. What arrives here has been through the allowlist
+        // twice (on save in edged, on serve in /api/branding) and the page's CSP refuses any script without
+        // this response's nonce -- see the note beside #custom-html.
         document.getElementById('custom-html').innerHTML = d.custom_html;
       }
+      // A layout with a help column hides the column when the hotel has nothing to put in it.
+      document.querySelector('.sc-extras').toggleAttribute('data-empty', !d.help_text && !d.custom_html);
       I18N = (d.translations && typeof d.translations === 'object') ? d.translations : {};
       // ONLY THE CONFIGURED LANGUAGES ARE OFFERED. A hotel that has chosen which languages its guests see gets
       // exactly that list; one that has never been near the screen gets the six the portal ships words for.
@@ -1329,7 +1739,7 @@ const successHTML = `<!doctype html>
     <div id="cx-quote" hidden></div>
     <div id="cx-note"></div>
   </div>
-  <script>
+  <script nonce="{{.Nonce}}">
   (function(){
     var list = document.getElementById('cx-list');
     var quoteBox = document.getElementById('cx-quote');
@@ -1418,7 +1828,7 @@ const successHTML = `<!doctype html>
     <div class="tl-note">This counts down only while you are connected.</div>
     <div class="tl-note" id="tl-expiry" hidden></div>
   </div>
-  <script>
+  <script nonce="{{.Nonce}}">
   (function(){
     var box = document.getElementById('timeleft');
     var main = document.getElementById('tl-remaining');
@@ -1473,7 +1883,7 @@ const successHTML = `<!doctype html>
     <div id="dv-list"></div>
     <div id="dv-note"></div>
   </div>
-  <script>
+  <script nonce="{{.Nonce}}">
   (function(){
     var panel = document.getElementById('devices');
     var list  = document.getElementById('dv-list');

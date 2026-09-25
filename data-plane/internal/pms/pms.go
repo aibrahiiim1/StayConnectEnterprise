@@ -13,8 +13,11 @@
 // provider does the matching. This keeps tenant-policy decisions out of the
 // portal.
 //
-// Phase 4.5 ships Stub + ProtelFIAS. Opera/Fidelio (also FIAS-family),
-// Mews and Apaleo (REST) plug in by implementing the same Provider iface.
+// RETIRED PATH. This Provider interface and its scd loader (internal/pmsloader) are kept for rollback and
+// history only; scd no longer runs PMS providers. The live PMS runtime is pmsd (internal/pmsd), whose
+// supported connectors are listed in one place, the provider registry (internal/pmsprovider): Protel FIAS
+// over a socket, and Mews, Apaleo and OPERA Cloud as polled REST connectors (internal/pmsrest). New
+// connectors belong there, not here. The FIAS framing helpers in this package remain in use by pmsd.
 package pms
 
 import (

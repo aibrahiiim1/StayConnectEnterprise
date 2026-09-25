@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0088, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0091, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -18,6 +18,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 CREATE EXTENSION IF NOT EXISTS timescaledb WITH SCHEMA public;
 
 -- Roles created by the migrations rather than by Gate-P. Idempotent, so a rebuild is safe.
+DO $do$ BEGIN CREATE ROLE iam_v2_rollback NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $do$;
 DO $do$ BEGIN CREATE ROLE sc_commerce_runtime NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $do$;
 DO $do$ BEGIN CREATE ROLE sc_financial_operator NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $do$;
 DO $do$ BEGIN CREATE ROLE sc_financial_readonly NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $do$;
@@ -1474,6 +1475,107 @@ BEGIN
     FROM iam_v2.sessions ss WHERE ss.id=p_session AND e.id=ss.entitlement_id;
   RETURN 'APPLIED';
 END; $$;
+
+
+--
+-- Name: internet_package_delete_unused(uuid, uuid, uuid, uuid, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.internet_package_delete_unused(p_tenant uuid, p_site uuid, p_package uuid, p_operator uuid, p_reason text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_blockers text;
+  v_n integer;
+BEGIN
+  IF p_operator IS NULL THEN
+    RAISE EXCEPTION 'CATALOGUE_DELETE_NEEDS_AN_OPERATOR' USING ERRCODE = 'check_violation';
+  END IF;
+  IF length(btrim(coalesce(p_reason, ''))) < 4 THEN
+    RAISE EXCEPTION 'CATALOGUE_DELETE_NEEDS_A_REASON' USING ERRCODE = 'check_violation';
+  END IF;
+
+  -- Lock first, then decide: a concurrent publish of a new revision waits for us or we wait for it.
+  PERFORM 1 FROM iam_v2.internet_packages
+    WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_package FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'PACKAGE_NOT_FOUND: no package % for tenant %/site %', p_package, p_tenant, p_site
+      USING ERRCODE = 'no_data_found';
+  END IF;
+
+  SELECT string_agg(b.reason || '=' || b.n, ',' ORDER BY b.reason) INTO v_blockers
+    FROM iam_v2.internet_package_deletion_blockers(p_tenant, p_site, p_package) b;
+  IF v_blockers IS NOT NULL THEN
+    RAISE EXCEPTION 'PACKAGE_IN_USE: %', v_blockers USING ERRCODE = 'restrict_violation';
+  END IF;
+
+  PERFORM set_config('iam_v2.catalogue_purge', 'unused', true);
+  -- The package points at its current revision and the revisions point at the package; unhook the first so
+  -- the revisions can go, then the package. No cascade: eligibility rules and grant tiers cascade from THEIR
+  -- revision by the schema's own definition, and everything else is NO ACTION and will abort this if present.
+  UPDATE iam_v2.internet_packages SET current_revision_id = NULL
+   WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_package;
+  DELETE FROM iam_v2.internet_package_revisions
+   WHERE tenant_id = p_tenant AND site_id = p_site AND package_id = p_package;
+  DELETE FROM iam_v2.internet_packages
+   WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_package;
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  PERFORM set_config('iam_v2.catalogue_purge', '', true);
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION 'PACKAGE_NOT_DELETED: package % was not removed', p_package USING ERRCODE = 'check_violation';
+  END IF;
+END $$;
+
+
+--
+-- Name: internet_package_deletion_blockers(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.internet_package_deletion_blockers(p_tenant uuid, p_site uuid, p_package uuid) RETURNS TABLE(reason text, n bigint)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_pkg iam_v2.internet_packages%ROWTYPE;
+  v_revs uuid[];
+BEGIN
+  SELECT * INTO v_pkg FROM iam_v2.internet_packages
+   WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_package;
+  IF NOT FOUND THEN
+    reason := 'NOT_FOUND'; n := 1; RETURN NEXT; RETURN;
+  END IF;
+  IF v_pkg.is_system OR v_pkg.code IN ('__sys_emergency_grace_pkg__') THEN
+    reason := 'SYSTEM_PACKAGE'; n := 1; RETURN NEXT;
+  END IF;
+
+  SELECT coalesce(array_agg(r.id), '{}') INTO v_revs FROM iam_v2.internet_package_revisions r
+   WHERE r.tenant_id = p_tenant AND r.site_id = p_site AND r.package_id = p_package;
+
+  RETURN QUERY
+  SELECT x.reason, x.n FROM (
+    SELECT 'ENTITLEMENTS' AS reason, (SELECT count(*) FROM iam_v2.entitlements e
+      WHERE e.tenant_id = p_tenant AND e.site_id = p_site AND e.package_revision_id = ANY (v_revs)) AS n
+    UNION ALL SELECT 'PURCHASES', (SELECT count(*) FROM iam_v2.purchases p
+      WHERE p.tenant_id = p_tenant AND p.site_id = p_site AND p.package_revision_id = ANY (v_revs))
+    UNION ALL SELECT 'OFFER_QUOTES', (SELECT count(*) FROM iam_v2.offer_quotes q
+      WHERE q.tenant_id = p_tenant AND q.site_id = p_site AND q.package_revision_id = ANY (v_revs))
+    UNION ALL SELECT 'PORTAL_OFFERS', (SELECT count(*) FROM iam_v2.auth_context_offers o
+      WHERE o.tenant_id = p_tenant AND o.site_id = p_site AND o.package_revision_id = ANY (v_revs))
+    UNION ALL SELECT 'VOUCHERS', (SELECT count(*) FROM iam_v2.vouchers v
+      WHERE v.tenant_id = p_tenant AND v.site_id = p_site AND v.package_revision_id = ANY (v_revs))
+    UNION ALL SELECT 'VOUCHER_BATCHES', (SELECT count(*) FROM iam_v2.voucher_batches b
+      WHERE b.tenant_id = p_tenant AND b.site_id = p_site AND b.package_revision_id = ANY (v_revs))
+    UNION ALL SELECT 'SETTLEMENT_MAPPINGS', (SELECT count(*) FROM iam_v2.package_settlement_mappings m
+      WHERE m.tenant_id = p_tenant AND m.site_id = p_site AND m.package_revision_id = ANY (v_revs))
+    UNION ALL SELECT 'CHECKOUT_GRACE_CONFIG', (SELECT count(*) FROM iam_v2.site_checkout_grace_config g
+      WHERE g.tenant_id = p_tenant AND g.site_id = p_site AND g.grace_package_revision_id = ANY (v_revs))
+    UNION ALL SELECT 'CHECKOUT_GRACE_HISTORY', (SELECT count(*) FROM iam_v2.checkout_grace_policy_publications h
+      WHERE h.tenant_id = p_tenant AND h.site_id = p_site AND h.grace_package_revision_id = ANY (v_revs))
+    UNION ALL SELECT 'GUEST_ACCOUNTS', (SELECT count(*) FROM iam_v2.guest_access_accounts a
+      WHERE a.tenant_id = p_tenant AND a.site_id = p_site AND a.assigned_package_id = p_package)
+  ) x WHERE x.n > 0;
+END $$;
 
 
 --
@@ -7169,6 +7271,89 @@ $_$;
 
 
 --
+-- Name: service_plan_delete_unused(uuid, uuid, uuid, uuid, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.service_plan_delete_unused(p_tenant uuid, p_site uuid, p_plan uuid, p_operator uuid, p_reason text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_blockers text;
+  v_n integer;
+BEGIN
+  IF p_operator IS NULL THEN
+    RAISE EXCEPTION 'CATALOGUE_DELETE_NEEDS_AN_OPERATOR' USING ERRCODE = 'check_violation';
+  END IF;
+  IF length(btrim(coalesce(p_reason, ''))) < 4 THEN
+    RAISE EXCEPTION 'CATALOGUE_DELETE_NEEDS_A_REASON' USING ERRCODE = 'check_violation';
+  END IF;
+
+  PERFORM 1 FROM iam_v2.service_plans
+    WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_plan FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'PLAN_NOT_FOUND: no plan % for tenant %/site %', p_plan, p_tenant, p_site
+      USING ERRCODE = 'no_data_found';
+  END IF;
+
+  SELECT string_agg(b.reason || '=' || b.n, ',' ORDER BY b.reason) INTO v_blockers
+    FROM iam_v2.service_plan_deletion_blockers(p_tenant, p_site, p_plan) b;
+  IF v_blockers IS NOT NULL THEN
+    RAISE EXCEPTION 'PLAN_IN_USE: %', v_blockers USING ERRCODE = 'restrict_violation';
+  END IF;
+
+  PERFORM set_config('iam_v2.catalogue_purge', 'unused', true);
+  UPDATE iam_v2.service_plans SET current_revision_id = NULL
+   WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_plan;
+  DELETE FROM iam_v2.service_plan_revisions
+   WHERE tenant_id = p_tenant AND site_id = p_site AND service_plan_id = p_plan;
+  DELETE FROM iam_v2.service_plans
+   WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_plan;
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  PERFORM set_config('iam_v2.catalogue_purge', '', true);
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION 'PLAN_NOT_DELETED: plan % was not removed', p_plan USING ERRCODE = 'check_violation';
+  END IF;
+END $$;
+
+
+--
+-- Name: service_plan_deletion_blockers(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.service_plan_deletion_blockers(p_tenant uuid, p_site uuid, p_plan uuid) RETURNS TABLE(reason text, n bigint)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_plan iam_v2.service_plans%ROWTYPE;
+  v_revs uuid[];
+BEGIN
+  SELECT * INTO v_plan FROM iam_v2.service_plans
+   WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_plan;
+  IF NOT FOUND THEN
+    reason := 'NOT_FOUND'; n := 1; RETURN NEXT; RETURN;
+  END IF;
+  IF v_plan.code IN ('__sys_emergency_grace_plan__') THEN
+    reason := 'SYSTEM_PLAN'; n := 1; RETURN NEXT;
+  END IF;
+
+  SELECT coalesce(array_agg(r.id), '{}') INTO v_revs FROM iam_v2.service_plan_revisions r
+   WHERE r.tenant_id = p_tenant AND r.site_id = p_site AND r.service_plan_id = p_plan;
+
+  RETURN QUERY
+  SELECT x.reason, x.n FROM (
+    -- EVERY package revision, current or superseded: a superseded revision is the history of a package that
+    -- may have been sold, and it cannot be allowed to point at a plan that no longer exists.
+    SELECT 'PACKAGE_REVISIONS' AS reason, (SELECT count(*) FROM iam_v2.internet_package_revisions pr
+      WHERE pr.tenant_id = p_tenant AND pr.site_id = p_site AND pr.service_plan_revision_id = ANY (v_revs)) AS n
+    UNION ALL SELECT 'ENTITLEMENTS', (SELECT count(*) FROM iam_v2.entitlements e
+      WHERE e.tenant_id = p_tenant AND e.site_id = p_site AND e.service_plan_revision_id = ANY (v_revs))
+  ) x WHERE x.n > 0;
+END $$;
+
+
+--
 -- Name: supersede_entitlement_transition(uuid, text, timestamp with time zone, text); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -7377,6 +7562,26 @@ BEGIN
   PERFORM iam_v2.p3_rederive_entitlement_times(p_ent);
   RETURN v_new;
 END $_$;
+
+
+--
+-- Name: trg_catalogue_revision_immutable(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.trg_catalogue_revision_immutable() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE v_owner name;
+BEGIN
+  IF TG_OP = 'DELETE' AND current_setting('iam_v2.catalogue_purge', true) = 'unused' THEN
+    SELECT pg_get_userbyid(c.relowner) INTO v_owner FROM pg_class c WHERE c.oid = TG_RELID;
+    IF current_user = v_owner THEN
+      RETURN OLD;
+    END IF;
+  END IF;
+  -- Word for word what trg_reject_update_delete() says, so nothing that matches on it changes meaning.
+  RAISE EXCEPTION '% is immutable (no UPDATE/DELETE) on %', TG_TABLE_NAME, TG_OP;
+END $$;
 
 
 --
@@ -14168,14 +14373,14 @@ CREATE TRIGGER guest_signin_protection_changes_append_only BEFORE DELETE OR UPDA
 -- Name: internet_package_revisions imm_pkg_rev; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER imm_pkg_rev BEFORE DELETE OR UPDATE ON iam_v2.internet_package_revisions FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_reject_update_delete();
+CREATE TRIGGER imm_pkg_rev BEFORE DELETE OR UPDATE ON iam_v2.internet_package_revisions FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_catalogue_revision_immutable();
 
 
 --
 -- Name: service_plan_revisions imm_plan_rev; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER imm_plan_rev BEFORE DELETE OR UPDATE ON iam_v2.service_plan_revisions FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_reject_update_delete();
+CREATE TRIGGER imm_plan_rev BEFORE DELETE OR UPDATE ON iam_v2.service_plan_revisions FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_catalogue_revision_immutable();
 
 
 --
@@ -16287,6 +16492,22 @@ GRANT ALL ON FUNCTION iam_v2.ingest_absolute_counters(p_tenant uuid, p_site uuid
 
 
 --
+-- Name: FUNCTION internet_package_delete_unused(p_tenant uuid, p_site uuid, p_package uuid, p_operator uuid, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.internet_package_delete_unused(p_tenant uuid, p_site uuid, p_package uuid, p_operator uuid, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.internet_package_delete_unused(p_tenant uuid, p_site uuid, p_package uuid, p_operator uuid, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION internet_package_deletion_blockers(p_tenant uuid, p_site uuid, p_package uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.internet_package_deletion_blockers(p_tenant uuid, p_site uuid, p_package uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.internet_package_deletion_blockers(p_tenant uuid, p_site uuid, p_package uuid) TO svc_edged;
+
+
+--
 -- Name: FUNCTION issue_or_return_pms_context(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_stay uuid, p_device uuid, p_guest_network uuid, p_request uuid, p_ttl_seconds integer); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -17091,6 +17312,22 @@ REVOKE ALL ON FUNCTION iam_v2.selectable_grace_packages(p_tenant uuid, p_site uu
 
 
 --
+-- Name: FUNCTION service_plan_delete_unused(p_tenant uuid, p_site uuid, p_plan uuid, p_operator uuid, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.service_plan_delete_unused(p_tenant uuid, p_site uuid, p_plan uuid, p_operator uuid, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.service_plan_delete_unused(p_tenant uuid, p_site uuid, p_plan uuid, p_operator uuid, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION service_plan_deletion_blockers(p_tenant uuid, p_site uuid, p_plan uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.service_plan_deletion_blockers(p_tenant uuid, p_site uuid, p_plan uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.service_plan_deletion_blockers(p_tenant uuid, p_site uuid, p_plan uuid) TO svc_edged;
+
+
+--
 -- Name: FUNCTION supersede_entitlement_transition(p_target uuid, p_to text, p_at timestamp with time zone, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -17129,6 +17366,13 @@ GRANT ALL ON FUNCTION iam_v2.sync_outbox_recover_exhausted(p_operator text, p_re
 REVOKE ALL ON FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at timestamp with time zone, p_reason text) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at timestamp with time zone, p_reason text) TO svc_acctd;
 GRANT ALL ON FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at timestamp with time zone, p_reason text) TO svc_pmsd;
+
+
+--
+-- Name: FUNCTION trg_catalogue_revision_immutable(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.trg_catalogue_revision_immutable() FROM PUBLIC;
 
 
 --
@@ -18087,9 +18331,23 @@ GRANT SELECT,INSERT,DELETE ON TABLE public.operator_roles TO svc_edged;
 -- Name: TABLE operators; Type: ACL; Schema: public; Owner: -
 --
 
+GRANT SELECT,REFERENCES ON TABLE public.operators TO iam_v2_owner;
 GRANT SELECT,DELETE ON TABLE public.operators TO svc_scd;
 GRANT SELECT,INSERT,UPDATE ON TABLE public.operators TO svc_edged;
-GRANT SELECT ON TABLE public.operators TO iam_v2_owner;
+
+
+--
+-- Name: COLUMN operators.tenant_id; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT UPDATE(tenant_id) ON TABLE public.operators TO svc_scd;
+
+
+--
+-- Name: COLUMN operators.updated_at; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT UPDATE(updated_at) ON TABLE public.operators TO svc_scd;
 
 
 --
@@ -18112,6 +18370,13 @@ GRANT SELECT,INSERT,DELETE ON TABLE public.pms_attempts TO svc_scd;
 
 GRANT SELECT,DELETE,UPDATE ON TABLE public.pms_providers TO svc_scd;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.pms_providers TO svc_edged;
+
+
+--
+-- Name: TABLE schema_migrations; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,DELETE ON TABLE public.schema_migrations TO iam_v2_rollback;
 
 
 --

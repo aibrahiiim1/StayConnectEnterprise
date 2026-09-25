@@ -1,11 +1,11 @@
 "use client";
 
-// Route shell — see the alerts page for why the interactive form is a component.
+// Route shell — the screen itself lives in components/checkout-grace so it can be tested without the router.
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
-import { CheckoutGraceForm } from "@/components/phase3/checkout-grace-form";
+import { CheckoutGraceScreen } from "@/components/checkout-grace/checkout-grace-screen";
 
 export default function CheckoutGracePage() {
   const [roles, setRoles] = useState<string[] | null>(null);
@@ -15,5 +15,5 @@ export default function CheckoutGracePage() {
       .then((m) => setRoles(m.roles ?? []))
       .catch(() => setRoles([]));
   }, []);
-  return <CheckoutGraceForm canWrite={roles === null ? false : canWrite("checkout-grace", roles)} />;
+  return <CheckoutGraceScreen canWrite={roles === null ? false : canWrite("checkout-grace", roles)} />;
 }

@@ -50,7 +50,7 @@ export const api = {
   post:  <T>(path: string, body?: any)    => request<T>("POST", path, body),
   put:   <T>(path: string, body?: any)    => request<T>("PUT", path, body),
   patch: <T>(path: string, body?: any)    => request<T>("PATCH", path, body),
-  del:   <T>(path: string)                => request<T>("DELETE", path),
+  del:   <T>(path: string, body?: any)    => request<T>("DELETE", path, body),
   // upload sends a file as multipart/form-data.
   //
   // IT EXISTS BECAUSE THE ONE CALL THAT DID NOT USE THIS CLIENT WAS BROKEN. Portal asset upload hand-wrote

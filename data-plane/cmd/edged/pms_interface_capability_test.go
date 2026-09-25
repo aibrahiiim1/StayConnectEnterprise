@@ -17,14 +17,22 @@ import (
 	"testing"
 )
 
+// The authoring allowlist is EXACTLY the set pmsd runs: both derive from the provider registry. When this
+// test was written that set was {protel-fias}; pmsd now runs polled REST adapters for Mews, Apaleo and OPERA
+// Cloud (internal/pmsd/adapter_rest.go), so they are offered -- and nothing pmsd cannot run is.
 func TestPMSAllowedKinds_OnlyTheConnectorPMSDCanRun(t *testing.T) {
-	if len(pmsAllowedKinds) != 1 || !pmsAllowedKinds["protel-fias"] {
-		t.Fatalf("the canonical set must be exactly {protel-fias} until a verified pmsd adapter exists for "+
-			"another connector, got %v", pmsAllowedKinds)
+	want := map[string]bool{"protel-fias": true, "mews": true, "apaleo": true, "opera-cloud": true}
+	if len(pmsAllowedKinds) != len(want) {
+		t.Fatalf("the canonical set must be exactly the registry's runnable kinds %v, got %v", want, pmsAllowedKinds)
+	}
+	for k := range want {
+		if !pmsAllowedKinds[k] {
+			t.Fatalf("%q missing from the authoring allowlist", k)
+		}
 	}
 	// Named individually so that re-adding any one of them fails loudly rather than slipping in with a map
-	// literal edit. These are the legacy scd kinds; their implementations still exist and are untouched.
-	for _, unsupported := range []string{"opera-fias", "fidelio-fias", "mews", "apaleo", "stub"} {
+	// literal edit. These are legacy scd kinds with no pmsd adapter; their old implementations are untouched.
+	for _, unsupported := range []string{"opera-fias", "fidelio-fias", "stub"} {
 		if pmsAllowedKinds[unsupported] {
 			t.Fatalf("%q is offered as a canonical PMS Interface but pmsd does not support it: the revision "+
 				"would be authored and published, then refused by the connector", unsupported)

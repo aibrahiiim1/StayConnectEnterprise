@@ -23,11 +23,12 @@ package main
 //  3. NO GUEST IS NAMED. This is an aggregate surface. The per-guest screens are separately role-gated and
 //     that is where an operator legitimately looks at one person.
 //
-// A note on what is NOT here: there is no hourly byte series. Per-interval traffic lives in
-// iam_v2.accounting_records, which svc_edged holds no privilege on, and the alternative — attributing a
-// session's whole-day total to the hour it happened to start in — would put a guest's 6 GB evening on the
-// 08:00 column. The hourly chart is sign-ins, which is a real per-hour count, and the byte totals are reported
-// for the day as the day's totals.
+// A note on what is NOT here: there is no hourly byte series in THIS snapshot. Per-interval traffic lives in
+// iam_v2.accounting_records, which svc_edged has been able to read since migration 0082 (the Usage screen reads
+// it too). The time series built from it is served by /reports/overview (resources_overview.go), which reads the
+// samples with the bounded, index-led query that table needs. What must never be done instead is attributing a
+// session's whole-day total to the hour it happened to start in — that would put a guest's 6 GB evening on the
+// 08:00 column. The hourly chart here is sign-ins, a real per-hour count, and the byte totals are the day's.
 
 import (
 	"context"
@@ -493,17 +494,15 @@ func (s *server) dashNetworks(ctx context.Context) []dashNetwork {
 		       -- actively serving 101 addresses from. During a guest pilot that is worse than silence: it sends
 		       -- somebody to repair a working DHCP configuration.
 		       --
-		       -- The guard exists because the arithmetic below subtracts the FOURTH OCTET, which is only
-		       -- meaningful inside one /24. So it now asks exactly that question.
-		       COALESCE((SELECT sum(
-		                    (split_part(host(p.end_ip),'.',4)::bigint
-		                   - split_part(host(p.start_ip),'.',4)::bigint) + 1
-		                 )
+		       -- AND THE FIX FOR THAT STILL ONLY COUNTED /24 RANGES. The arithmetic subtracted the FOURTH OCTET,
+		       -- so it needed a guard that both ends share a /24 -- and that guard excluded (scored as zero)
+		       -- every pool crossing an octet boundary, e.g. 10.20.0.10-10.20.3.250 on a /22. inet minus inet is
+		       -- the integer distance between two addresses in Postgres, for any IPv4 range, so the size is
+		       -- simply that distance plus one. No octet arithmetic, no /24 guard.
+		       COALESCE((SELECT sum((p.end_ip - p.start_ip) + 1)
 		                  FROM public.dhcp_pools p
 		                 WHERE p.guest_network_id = gn.id
 		                   AND family(p.start_ip) = 4 AND family(p.end_ip) = 4
-		                   AND network(set_masklen(p.start_ip::cidr, 24))
-		                     = network(set_masklen(p.end_ip::cidr, 24))
 		                   AND p.end_ip >= p.start_ip), 0)::bigint,
 		       COALESCE((SELECT count(DISTINCT se.mac) FROM iam_v2.sessions se
 		                  WHERE se.tenant_id = gn.tenant_id AND se.site_id = gn.site_id

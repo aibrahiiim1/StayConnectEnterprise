@@ -12,8 +12,13 @@ import { cn } from "@/lib/utils";
 // Signatures are unchanged: Table/THead/TR/TH/TD are drop-in.
 
 export function Table({ className, ...p }: React.HTMLAttributes<HTMLTableElement>) {
+  // `relative` is load-bearing. Without it an absolutely positioned descendant (the `sr-only` label on an
+  // icon-only header, a tooltip anchor) takes its containing block from somewhere OUTSIDE this scroller, so it
+  // is laid out at the table's full width and stretches the whole DOCUMENT sideways on a phone — measured at
+  // 390px as a 759px page on Internet packages. Positioning the scroller makes it the containing block, so
+  // those elements scroll with the table instead of widening the page.
   return (
-    <div className="w-full overflow-x-auto">
+    <div className="relative w-full overflow-x-auto">
       <table className={cn("w-full border-collapse text-sm", className)} {...p} />
     </div>
   );

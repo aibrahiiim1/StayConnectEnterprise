@@ -83,6 +83,15 @@ export default function UsageExplorerPage() {
     finally { setBusy(false); }
   }
 
+  // DEEP LINK: /usage?stay=<id> opens that stay directly. Internet packages → Guest activity links here, so
+  // "see what this stay used" lands on the stay rather than on an empty search. Read from the location once,
+  // on mount, rather than through useSearchParams, which would need a Suspense boundary for the static build.
+  useEffect(() => {
+    const id = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("stay");
+    if (id) void openStay(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function lookUpDevice(mac: string) {
     setBusy(true); setErr(null); setStay(null);
     try { setDevice(await api.get<DeviceDetail>(`/usage/devices/${encodeURIComponent(mac)}`)); setTab("devices"); }

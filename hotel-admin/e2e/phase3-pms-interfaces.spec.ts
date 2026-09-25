@@ -59,6 +59,7 @@ async function installBackend(
     resolutions?: any[];
     publishStatus?: number;
     secretStatus?: number;
+    providers?: any[];
   },
 ) {
   const json = (status: number, body: unknown) => ({
@@ -78,6 +79,17 @@ async function installBackend(
     if (method !== "GET") opts.mutations.push({ method, path, body });
 
     if (path === "/auth/whoami") return route.fulfill(json(200, { email: "admin@test.local", roles: ["site_admin"] }));
+    if (path === "/pms-providers") {
+      return opts.providers
+        ? route.fulfill(json(200, { providers: opts.providers }))
+        : route.fulfill(json(404, { error: "not_found", message: "page not found" }));
+    }
+    if (path === "/pms-interfaces" && method === "POST") {
+      return route.fulfill(json(201, { id: "new1", connector_kind: body?.connector_kind, display_label: body?.display_label, lifecycle_state: "AUTH_DISABLED" }));
+    }
+    if (path.endsWith("/revisions") && method === "POST") {
+      return route.fulfill(json(201, { revision_id: "rv-new", revision_no: 1, published: false }));
+    }
     if (path === "/auth/logout") return route.fulfill(json(200, {}));
 
     if (path.endsWith("/publish")) {
@@ -121,95 +133,86 @@ async function installBackend(
   });
 }
 
-test("the interface page shows what is running, how it is doing, and how far behind it is", async ({ page }) => {
+// Opens the connection's side sheet from its card, then (optionally) one of its tabs.
+async function openSheet(page: Page, tab?: string) {
+  await page.getByRole("button", { name: "Manage" }).click();
+  if (tab) await page.getByRole("tab", { name: tab }).click();
+}
+
+test("the connections page shows what is running, how it is doing, and how far behind it is", async ({ page }) => {
   const mutations: Mutations = [];
   await installBackend(page, { mutations });
   await page.goto("/pms-interfaces");
 
-  await expect(page.getByRole("heading", { name: "PMS connection" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "PMS connections" })).toBeVisible();
   await expect(page.getByText("Main PMS")).toBeVisible();
-  await page.getByRole("button", { name: "Manage" }).click();
+  await openSheet(page);
 
-  // three dimensions, stated separately because they fail separately — and in the words an operator reads,
-  // not the internal axis names. The raw codes remain available as tooltips for support.
-  // Scoped to the status card: the list row now carries live state too, so these words legitimately appear
-  // more than once on the page. What is asserted is unchanged -- the three dimensions are stated SEPARATELY,
-  // in operator words, rather than collapsed into one "degraded".
-  const status = page.locator("dl").filter({ hasText: "Live updates" }).first();
-  await expect(status.getByText("Connected")).toBeVisible();
-  await expect(status.getByText("Receiving updates")).toBeVisible();
-  await expect(status.getByText("Up to date")).toBeVisible();
-  await expect(page.getByText("Guests in house").first()).toBeVisible();
-  await expect(page.getByText("12", { exact: true }).first()).toBeVisible();
+  // The dimensions are stated SEPARATELY, in operator words, rather than collapsed into one "degraded".
+  const sheet = page.getByRole("dialog");
+  await expect(sheet.getByText("The checks room sign-in depends on")).toBeVisible();
+  await expect(sheet.getByText("Connected", { exact: true }).first()).toBeVisible();
+  await expect(sheet.getByText("Receiving updates", { exact: true }).first()).toBeVisible();
+  await expect(sheet.getByText("Up to date", { exact: true })).toBeVisible();
+  await expect(sheet.getByText("Guests in house").first()).toBeVisible();
+  await expect(sheet.getByText("12", { exact: true }).first()).toBeVisible();
   // the backlog's AGE, which is what distinguishes a busy morning from a stuck processor
-  await expect(page.getByText(/^Oldest /).first()).toBeVisible();
+  await expect(sheet.getByText(/^Oldest waiting message arrived/)).toBeVisible();
 });
 
 test("the published revision is the one the interface points at, not the newest", async ({ page }) => {
   const mutations: Mutations = [];
   await installBackend(page, { mutations });
   await page.goto("/pms-interfaces");
-  await page.getByRole("button", { name: "Manage" }).click();
+  await openSheet(page, "Configuration");
 
-  // THE MAIN VIEW IS WHAT IS IN FORCE. Version 1 is in use even though version 2 is newer, and the newer
-  // one is not shown here at all -- previous versions live behind History.
-  await expect(page.getByText("Current configuration")).toBeVisible();
-  await expect(page.getByText("Version 1", { exact: true })).toBeVisible();
-  await expect(page.getByText("In use", { exact: true })).toBeVisible();
-  await expect(page.getByText("Version 2", { exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /^History/ })).toBeVisible();
+  // THE LIVE SECTION IS WHAT IS IN FORCE. Version 1 is in use even though version 2 is newer; version 2 is a
+  // draft that can be put live, never labelled as in use.
+  const sheet = page.getByRole("dialog");
+  await expect(sheet.getByRole("heading", { name: "Live configuration" })).toBeVisible();
+  await expect(sheet.getByText("Version 1", { exact: true })).toBeVisible();
+  await expect(sheet.getByText("In use", { exact: true })).toHaveCount(1);
+  await expect(sheet.getByRole("button", { name: "Put version 2 live" })).toBeVisible();
 });
 
 test("publishing sends the revision the operator believed was live", async ({ page }) => {
   const mutations: Mutations = [];
   await installBackend(page, { mutations });
   await page.goto("/pms-interfaces");
-  await page.getByRole("button", { name: "Manage" }).click();
+  await openSheet(page, "History");
 
-  // Rolling back is putting a previous version back, so it is reached through History.
-  await page.getByRole("button", { name: /^History/ }).click();
-  await page.getByRole("button", { name: /Put this version back in use/ }).first().click();
-  await page.getByLabel("Reason").fill("CONFIG_UPDATE");
-  await page.getByLabel("Confirm your password").fill("operator-pw");
-  await page.getByRole("dialog").getByRole("button", { name: "Put live" }).click();
+  await page.getByRole("button", { name: "Put version 2 live" }).click();
+  const confirm = page.getByRole("dialog", { name: /Put version 2 live/ });
+  await confirm.getByLabel("Reason").selectOption("ENDPOINT_CHANGE");
+  await confirm.getByLabel("Confirm your password").fill("operator-pw");
+  await confirm.getByRole("button", { name: "Put live" }).click();
 
   await expect.poll(() => mutations.length).toBeGreaterThan(0);
   const m = mutations.find((x) => x.path.endsWith("/publish"))!;
-  expect(m.body.revision_id).toBe("r2");
-  expect(m.body.expected_revision_id).toBe("r1");
-  expect(m.body.reason_code).toBe("CONFIG_UPDATE");
-  expect(m.body.password).toBe("operator-pw");
+  expect(m.body).toEqual({
+    revision_id: "r2", expected_revision_id: "r1", reason_code: "ENDPOINT_CHANGE", password: "operator-pw",
+  });
 });
 
 test("a concurrent publication is shown as a refusal, not as success", async ({ page }) => {
   const mutations: Mutations = [];
   await installBackend(page, { mutations, publishStatus: 409 });
   await page.goto("/pms-interfaces");
-  await page.getByRole("button", { name: "Manage" }).click();
+  await openSheet(page, "History");
 
-  // Rolling back is putting a previous version back, so it is reached through History.
-  await page.getByRole("button", { name: /^History/ }).click();
-  await page.getByRole("button", { name: /Put this version back in use/ }).first().click();
-  await page.getByLabel("Reason").fill("CONFIG_UPDATE");
-  await page.getByLabel("Confirm your password").fill("operator-pw");
-  await page.getByRole("dialog").getByRole("button", { name: "Put live" }).click();
+  await page.getByRole("button", { name: "Put version 2 live" }).click();
+  const confirm = page.getByRole("dialog", { name: /Put version 2 live/ });
+  await confirm.getByLabel("Confirm your password").fill("operator-pw");
+  await confirm.getByRole("button", { name: "Put live" }).click();
 
   await expect(page.getByRole("alert").filter({ hasText: /published a different revision/ })).toBeVisible();
   // the form stays open so the operator can reload and decide, rather than closing as if it had worked
-  await expect(page.getByRole("dialog").getByRole("button", { name: "Put live" })).toBeVisible();
+  await expect(confirm.getByRole("button", { name: "Put live" })).toBeVisible();
 });
 
-// THE SUPPORTED CONNECTOR HAS NO CREDENTIAL, so no credential surface may be presented.
-//
-// This replaces two tests that asserted the Credential card behaved SECURELY — masked field, value never
-// echoed, never fetched, refusal surfaced without a false success. Those were the right assertions while a
-// credential could exist. The Protel FIAS link carries no transport authentication (credential_mode=NONE),
-// so the card's "never set" badge described a missing secret that is not supposed to exist and read as a
-// fault on a correctly configured interface.
-//
-// The security property is NOT weakened — it is strengthened to "nothing is rendered and nothing is
-// requested". The card and its endpoint remain in the tree for a connector that genuinely authenticates,
-// and this test would fail the moment either reappeared on the Protel surface.
+// THE SUPPORTED CONNECTOR HAS NO CREDENTIAL, so no credential surface may be presented. The Protel FIAS link
+// carries no transport authentication; a Credentials tab exists only for a provider that signs in with a key,
+// and nothing on this page ever asks the server for a credential.
 test("no credential surface is presented, and no credential is ever fetched", async ({ page }) => {
   const mutations: Mutations = [];
   const gets: string[] = [];
@@ -219,17 +222,42 @@ test("no credential surface is presented, and no credential is ever fetched", as
   });
 
   await page.goto("/pms-interfaces");
-  await page.getByRole("button", { name: "Manage" }).click();
+  await openSheet(page);
 
-  await expect(page.getByRole("heading", { name: "Credential" })).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: /credential/i })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /replace credential/i })).toHaveCount(0);
-  await expect(page.getByLabel("New credential")).toHaveCount(0);
-  // the misleading warning specifically: an interface needing no secret is not "never set"
   expect((await page.content()).toLowerCase()).not.toContain("never set");
-  // and no request anywhere on this page asks the server for a credential
   for (const g of gets) expect(g).not.toMatch(/secret/);
-  // no mutation was issued either — the page cannot rotate what it does not offer
   expect(mutations.filter((m) => m.path.includes("/secret"))).toHaveLength(0);
+});
+
+test("adding a Protel connection sends exactly the create and draft requests, and nothing else", async ({ page }) => {
+  const mutations: Mutations = [];
+  await installBackend(page, { mutations });
+  await page.goto("/pms-interfaces");
+
+  await page.getByRole("button", { name: /add connection/i }).click();
+  const wizard = page.getByRole("dialog", { name: /Add a PMS connection/ });
+  // Without a provider catalogue only Protel is offered, and it is already chosen.
+  await expect(wizard.getByText(/Only Protel is offered/)).toBeVisible();
+  await wizard.getByRole("button", { name: "Next" }).click();
+  await wizard.getByLabel(/^Name/).fill("Front office");
+  await wizard.getByLabel(/PMS address and port/).fill("10.0.0.5:5010");
+  await wizard.getByRole("button", { name: "Next" }).click();
+  await wizard.getByRole("button", { name: "Create connection" }).click();
+  await expect(page.getByRole("button", { name: "Publish and activate" })).toBeVisible();
+
+  expect(mutations.map((m) => `${m.method} ${m.path}`)).toEqual([
+    "POST /pms-interfaces",
+    "POST /pms-interfaces/new1/revisions",
+  ]);
+  expect(mutations[0].body).toEqual({ connector_kind: "protel-fias", display_label: "Front office" });
+  expect(mutations[1].body).toEqual({
+    endpoint: "10.0.0.5:5010", source_timezone: "Africa/Cairo",
+    dial_timeout_ms: 5000, read_timeout_ms: 15000, write_timeout_ms: 15000,
+    heartbeat_interval_ms: 30000, heartbeat_timeout_ms: 90000, feed_freshness_ms: 120000, complete_sync_ms: 600000,
+    read_only: true,
+  });
 });
 
 test("routing names the guest networks that are mapped to nothing", async ({ page }) => {
@@ -293,7 +321,7 @@ test("resolution evidence summarises outcomes and names no guest", async ({ page
   }
 });
 
-test("the new phase-3 pages are accessible: one heading, named controls, labelled fields", async ({ page }) => {
+test("the PMS pages are accessible: one heading, named controls, labelled fields", async ({ page }) => {
   const mutations: Mutations = [];
   await installBackend(page, {
     mutations,
@@ -320,11 +348,11 @@ test("the new phase-3 pages are accessible: one heading, named controls, labelle
 
   // the forms specifically: every input is reachable by its label, which is what a screen reader announces
   await page.goto("/pms-interfaces");
-  await page.getByRole("button", { name: "Manage" }).click();
-  await page.getByRole("button", { name: /^History/ }).click();
-  await page.getByRole("button", { name: /Put this version back in use/ }).first().click();
-  await expect(page.getByLabel("Reason")).toBeVisible();
-  await expect(page.getByLabel("Confirm your password")).toBeVisible();
+  await openSheet(page, "History");
+  await page.getByRole("button", { name: "Put version 2 live" }).click();
+  const confirm = page.getByRole("dialog", { name: /Put version 2 live/ });
+  await expect(confirm.getByLabel("Reason")).toBeVisible();
+  await expect(confirm.getByLabel("Confirm your password")).toBeVisible();
 
   // Errors are ANNOUNCED, not merely coloured. Refusing the publication and then finding the message in a
   // live region is the check that matters — a red paragraph with no role is invisible to a screen reader,
@@ -333,12 +361,23 @@ test("the new phase-3 pages are accessible: one heading, named controls, labelle
   const mutations2: Mutations = [];
   await installBackend(page, { mutations: mutations2, publishStatus: 409 });
   await page.goto("/pms-interfaces");
-  await page.getByRole("button", { name: "Manage" }).click();
-  // Rolling back is putting a previous version back, so it is reached through History.
-  await page.getByRole("button", { name: /^History/ }).click();
-  await page.getByRole("button", { name: /Put this version back in use/ }).first().click();
-  await page.getByLabel("Reason").fill("CONFIG_UPDATE");
-  await page.getByLabel("Confirm your password").fill("pw");
-  await page.getByRole("dialog").getByRole("button", { name: "Put live" }).click();
+  await openSheet(page, "History");
+  await page.getByRole("button", { name: "Put version 2 live" }).click();
+  const refused = page.getByRole("dialog", { name: /Put version 2 live/ });
+  await refused.getByLabel("Confirm your password").fill("pw");
+  await refused.getByRole("button", { name: "Put live" }).click();
   await expect(page.getByRole("alert").filter({ hasText: /published a different revision/ })).toBeVisible();
+});
+
+test("the connections page and its sheet fit a 390px phone without sideways scrolling", async ({ page }) => {
+  const mutations: Mutations = [];
+  await page.setViewportSize({ width: 390, height: 844 });
+  await installBackend(page, { mutations });
+  await page.goto("/pms-interfaces");
+  await expect(page.getByText("Main PMS")).toBeVisible();
+  const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(await overflow()).toBeLessThanOrEqual(0);
+  await openSheet(page, "Configuration");
+  await expect(page.getByRole("heading", { name: "Live configuration" })).toBeVisible();
+  expect(await overflow()).toBeLessThanOrEqual(0);
 });

@@ -33,13 +33,21 @@ ALTER TABLE public.guest_networks
   -- matching the shape a real appliance has, which is the stated purpose of the block above.
   ADD COLUMN IF NOT EXISTS dhcp_mode text NOT NULL DEFAULT 'local',
   ADD COLUMN IF NOT EXISTS captive_portal_enabled boolean NOT NULL DEFAULT true,
-  ADD COLUMN IF NOT EXISTS internet_access_enabled boolean NOT NULL DEFAULT true;
+  ADD COLUMN IF NOT EXISTS internet_access_enabled boolean NOT NULL DEFAULT true,
+  -- The dashboard's network card reads how each network resolves names (resources_overview.go). 0002's
+  -- defaults and CHECK, for the same reason as the three above.
+  ADD COLUMN IF NOT EXISTS dns_mode text NOT NULL DEFAULT 'appliance',
+  ADD COLUMN IF NOT EXISTS dns_servers jsonb NOT NULL DEFAULT '[]'::jsonb;
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'guest_networks_dhcp_mode_check') THEN
     ALTER TABLE public.guest_networks
       ADD CONSTRAINT guest_networks_dhcp_mode_check
       CHECK (dhcp_mode IN ('local','external','relay','disabled'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'guest_networks_dns_mode_check') THEN
+    ALTER TABLE public.guest_networks
+      ADD CONSTRAINT guest_networks_dns_mode_check CHECK (dns_mode IN ('appliance','custom'));
   END IF;
 END $$;
 -- seed one tenant/site/guest_network for tests (deterministic uuids)

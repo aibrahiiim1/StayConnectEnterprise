@@ -41,6 +41,7 @@ export function PageHeader({
   description,
   eyebrow,
   actions,
+  icon,
   className,
   children,
 }: {
@@ -48,12 +49,23 @@ export function PageHeader({
   description?: React.ReactNode;
   eyebrow?: React.ReactNode;
   actions?: React.ReactNode;
+  /** A section icon in a tinted tile, left of the title. Optional; existing headers are unchanged. */
+  icon?: React.ReactNode;
   className?: string;
   children?: React.ReactNode;
 }) {
   return (
     <header className={cn("space-y-3", className)}>
       <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+        <div className="flex min-w-0 items-start gap-3.5">
+        {icon && (
+          <span
+            className="mt-0.5 hidden size-10 shrink-0 items-center justify-center rounded-lg border border-primary/15 bg-primary-subtle text-primary-subtle-foreground sm:inline-flex [&_svg]:size-5"
+            aria-hidden
+          >
+            {icon}
+          </span>
+        )}
         <div className="min-w-0 space-y-1">
           {eyebrow && (
             <div className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground">
@@ -64,6 +76,7 @@ export function PageHeader({
           {description && (
             <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">{description}</p>
           )}
+        </div>
         </div>
         {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
       </div>

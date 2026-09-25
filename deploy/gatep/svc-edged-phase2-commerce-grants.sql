@@ -143,3 +143,17 @@ END $$;
 -- Provisioning creates the hidden system package row (D32). INSERT only: the revisions it publishes are
 -- append-only and it never deletes.
 GRANT INSERT ON iam_v2.internet_packages TO svc_edged;
+
+-- Deleting a package or plan that was never used (migration 0091). EXECUTE on the two answer functions and
+-- the two kernels, and NOTHING on the tables: svc_edged holds no DELETE anywhere in the catalogue, and the
+-- revision tables admit a DELETE only from inside those kernels. Guarded, because a bootstrap that runs
+-- before 0091 exists must not fail on a function it cannot yet see.
+DO $$
+BEGIN
+  IF to_regprocedure('iam_v2.internet_package_delete_unused(uuid, uuid, uuid, uuid, text)') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION iam_v2.internet_package_deletion_blockers(uuid, uuid, uuid) TO svc_edged;
+    GRANT EXECUTE ON FUNCTION iam_v2.service_plan_deletion_blockers(uuid, uuid, uuid) TO svc_edged;
+    GRANT EXECUTE ON FUNCTION iam_v2.internet_package_delete_unused(uuid, uuid, uuid, uuid, text) TO svc_edged;
+    GRANT EXECUTE ON FUNCTION iam_v2.service_plan_delete_unused(uuid, uuid, uuid, uuid, text) TO svc_edged;
+  END IF;
+END $$;

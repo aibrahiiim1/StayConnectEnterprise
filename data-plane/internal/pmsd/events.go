@@ -54,7 +54,16 @@ const (
 	maxCursorLen       = 4096
 	maxExtIdentityLen  = 128
 	maxEvidenceHexLen  = 64 // sha256 hex
+	maxSharers         = 32
 )
+
+// EventSharer is one occupant of a Stay, in the exact JSON shape stayengine.Sharer reads from the payload.
+type EventSharer struct {
+	ExternalGuestID string `json:"external_guest_id"`
+	FirstName       string `json:"first_name"`
+	LastName        string `json:"last_name"`
+	IsPrimary       bool   `json:"is_primary"`
+}
 
 // hasControlBytes rejects STX/ETX and other control characters in a typed string field (they belong only
 // inside the raw frame, which never reaches a typed Event).
@@ -118,6 +127,18 @@ func (e Event) Validate() error {
 	}
 	if e.NormalizedAt.IsZero() {
 		return ErrEventInvalid
+	}
+	// Occupants are bounded exactly like the primary guest's fields. Only connectors that report occupants
+	// set this; an empty list (every FIAS event) is not inspected.
+	if len(e.Sharers) > maxSharers {
+		return ErrEventInvalid
+	}
+	for _, sh := range e.Sharers {
+		for _, v := range []string{sh.ExternalGuestID, sh.FirstName, sh.LastName} {
+			if len(v) > maxGuestLen || hasControlBytes(v) {
+				return ErrEventInvalid
+			}
+		}
 	}
 	if e.RecordType.IsDomain() {
 		// a guest Stay mutation must carry: a 64-hex keyed-HMAC source-event fingerprint (== external
@@ -269,11 +290,14 @@ func eventPayloadJSON(ev Event) []byte {
 		ArrivalRaw  string `json:"arrival_raw,omitempty"`
 		Departure   string `json:"departure_raw,omitempty"`
 		Candidate   string `json:"stay_resolution_candidate,omitempty"`
+		// omitempty: absent unless a connector reported occupants, so FIAS payloads are unchanged.
+		Sharers []EventSharer `json:"sharers,omitempty"`
 	}{
 		Reservation: ev.ReservationRef, Room: ev.RoomNumber,
 		LastName: ev.GuestLastName, FirstName: ev.GuestFirstName,
 		Folio: ev.FolioRef, ArrivalRaw: ev.ArrivalRaw, Departure: ev.DepartureRaw,
 		Candidate: ev.StayResolutionCandidate,
+		Sharers:   ev.Sharers,
 	}
 	b, err := json.Marshal(p)
 	if err != nil {

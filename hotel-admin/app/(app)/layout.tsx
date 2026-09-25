@@ -12,6 +12,7 @@ import { api, Whoami } from "@/lib/api";
 import { useSidebarCollapsed } from "@/lib/sidebar-state";
 import { useCapabilities, surfaceAvailable } from "@/lib/capabilities";
 import { SurfaceNotEnabled } from "@/components/surface-not-enabled";
+import { ToastProvider } from "@/components/ui/toast";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -132,6 +133,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     // `h-screen` + `overflow-hidden` bounds the container to the viewport. The sidebar becomes a real
     // independently-scrolling column whose position survives navigation (the layout is not remounted between
     // routes), and the page content scrolls in its own pane.
+    <ToastProvider>
     <div className="flex h-screen overflow-hidden">
       {/* Below `lg` the column becomes a drawer instead of disappearing. A 64px-wide icon rail was the other
           option and is worse here: these labels ("Duplicate sources", "Checkout grace") are not guessable
@@ -225,5 +227,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </DialogPrimitive.Root>
     </div>
+    </ToastProvider>
   );
 }
