@@ -97,3 +97,22 @@
     background-clip: content-box;
   }
 }
+
+@layer components {
+  /* THE SELECT CHEVRON IS A COMPONENT CLASS, NOT FOUR ARBITRARY UTILITIES. As utilities it went through
+     tailwind-merge, which read the arbitrary background image as conflicting with the fill and dropped the
+     control's background colour -- every select rendered on the browser's grey. Logical: the chevron sits at
+     the inline END, so it moves to the left in right-to-left text. */
+  .select-chevron {
+    background-color: hsl(var(--card));
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235a6270' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-size: 16px;
+    background-position: right 0.625rem center;
+  }
+  [dir="rtl"] .select-chevron { background-position: left 0.625rem center; }
+  .dark .select-chevron {
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a3a9b3' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  }
+  .select-chevron:disabled { background-color: hsl(var(--surface)); }
+}

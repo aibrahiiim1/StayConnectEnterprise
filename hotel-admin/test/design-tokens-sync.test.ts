@@ -19,7 +19,8 @@ describe("Velonet design tokens", () => {
     const css = readFileSync(join(ROOT, "app/globals.css"), "utf8");
     expect(css).toMatch(/@import "\.\/tokens\.css";/);
     expect(css).toMatch(/@fontsource-variable\/inter/);
-    expect(css).not.toMatch(/fonts\.googleapis|https?:\/\//);
+    // No remote stylesheet, font or image. (An SVG namespace inside a data: URI is not a fetch.)
+    expect(css).not.toMatch(/fonts\.googleapis|@import\s+(url\()?["']?https?:|url\(\s*["']?https?:/);
   });
 
   it("every text token pair used on a card clears 4.5:1 in both themes", () => {

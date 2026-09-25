@@ -35,12 +35,9 @@ export const Select = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttrib
         ref={ref}
         className={cn(
           CONTROL,
-          "h-10 cursor-pointer appearance-none bg-no-repeat py-0 ps-3 pe-9 text-sm",
-          // The chevron is an inline data-URI so it needs no asset and no extra element, and `currentColor`
-          // cannot be used in a background image — hence the two theme-matched strokes below.
-          "bg-[length:16px] bg-[right_0.625rem_center] rtl:bg-[left_0.625rem_center]",
-          "bg-[url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")]",
-          "dark:bg-[url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")]",
+          // The chevron and the fill live in the .select-chevron component class (globals.css): as arbitrary
+          // utilities they collided inside tailwind-merge and cost the control its background colour.
+          "h-10 cursor-pointer appearance-none py-0 ps-3 pe-9 text-sm select-chevron",
           className,
         )}
         {...p}

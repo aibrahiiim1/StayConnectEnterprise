@@ -59,7 +59,7 @@ export function VelonetLockup({
           <div className={cn("truncate text-[0.9375rem] font-bold tracking-[-0.01em]", inverse ? "text-white" : "text-foreground")}>
             Velonet
           </div>
-          <div className={cn("truncate text-nano uppercase tracking-[0.14em]", inverse ? "text-sidebar-muted" : "text-muted-foreground")}>
+          <div className={cn("truncate text-nano uppercase tracking-[0.12em]", inverse ? "text-sidebar-muted" : "text-muted-foreground")}>
             {product}
           </div>
         </div>
