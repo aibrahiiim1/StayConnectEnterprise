@@ -1,11 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { ArrowRight } from "lucide-react";
 import { api, withStepUp, ApiError } from "@/lib/api";
-import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
-import { AlertTriangle, X } from "lucide-react";
+import { ConfirmDialog } from "@/components/ui/dialog";
 
 export type Blocker = {
   type: string;
@@ -16,11 +15,13 @@ export type Blocker = {
 };
 
 /**
- * DeleteDialog is the shared, safe permanent-delete flow for owned resources
- * (Customer, Site, Appliance). It NEVER cascades: the server rejects a delete
- * while dependencies exist and returns the blocking list, which this dialog
- * renders with links to the relevant records. A successful delete requires a
- * typed confirmation, a reason, and a password step-up (handled by withStepUp).
+ * DeleteDialog — the one permanent-delete flow for owned resources (Customer, Site, Appliance).
+ *
+ * The contract is unchanged: DELETE {deleteUrl} with { confirm, reason }, wrapped in withStepUp so the server can
+ * ask for the password again. It NEVER cascades — while dependencies exist the server answers 409 with the
+ * blocking list, which is rendered with a link to each. What changed is the presentation, now on the shared
+ * ConfirmDialog: it says it cannot be undone, previews what is affected, lists blockers, and requires the typed
+ * name/code/serial plus a reason before the button enables.
  */
 export function DeleteDialog({
   open, onClose, onDeleted,
@@ -36,20 +37,20 @@ export function DeleteDialog({
   deleteUrl: string;             // DELETE endpoint
   extraImpact?: React.ReactNode; // optional impact preview block
 }) {
-  const [confirm, setConfirm] = useState("");
-  const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [blockers, setBlockers] = useState<Blocker[] | null>(null);
 
-  if (!open) return null;
+  useEffect(() => {
+    if (!open) { setErr(null); setBlockers(null); setBusy(false); }
+  }, [open]);
 
   const linkFor = (b: Blocker) => `/${b.resource}`;
 
-  async function submit() {
+  async function submit({ reason }: { reason: string }) {
     setBusy(true); setErr(null); setBlockers(null);
     try {
-      await withStepUp(() => api.del(deleteUrl, { confirm, reason }));
+      await withStepUp(() => api.del(deleteUrl, { confirm: expected, reason }));
       onDeleted();
       onClose();
     } catch (e: any) {
@@ -67,54 +68,45 @@ export function DeleteDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-lg border border-border bg-panel shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-border px-5 py-3">
-          <div className="flex items-center gap-2 text-err"><AlertTriangle size={16} /> <span className="font-semibold">{title}</span></div>
-          <button onClick={onClose} className="text-muted hover:text-text"><X size={16} /></button>
-        </div>
-        <div className="space-y-4 p-5">
-          <p className="text-sm text-muted">
-            This permanently deletes the {what.toLowerCase()}. It cannot be undone. Deletion is blocked while any
-            owned records still exist — you&apos;ll see exactly what to remove first.
-          </p>
-
-          {extraImpact}
-
-          {blockers && blockers.length > 0 && (
-            <div className="rounded-md border border-err/40 bg-err/5 p-3">
-              <div className="mb-2 text-sm font-medium text-err">{what} cannot be deleted because it still contains:</div>
-              <ul className="space-y-1 text-sm">
-                {blockers.map((b) => (
-                  <li key={b.type} className="flex items-center justify-between">
-                    <span>{b.count} {b.label}</span>
-                    <Link href={linkFor(b)} className="text-brand hover:underline">View {b.label} →</Link>
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-2 text-xs text-muted">Delete or archive these first, in order (Appliances → Site → Customer).</div>
-            </div>
-          )}
-
-          <div>
-            <Label>{confirmHint}: <span className="font-mono text-text">{expected}</span></Label>
-            <Input value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder={expected} autoFocus />
-          </div>
-          <div>
-            <Label>Reason (recorded in the audit log)</Label>
-            <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. decommissioned test tenant" />
-          </div>
-
-          {err && <div className="text-sm text-err">{err}</div>}
-
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={onClose}>Cancel</Button>
-            <Button variant="danger" disabled={busy || confirm !== expected || !reason.trim()} onClick={submit}>
-              {busy ? "Deleting…" : `Delete ${what}`}
-            </Button>
+    <ConfirmDialog
+      open={open}
+      onOpenChange={(v) => { if (!v) onClose(); }}
+      title={title}
+      description={`This permanently deletes the ${what.toLowerCase()}.`}
+      confirmLabel={`Delete ${what.toLowerCase()}`}
+      confirmVariant="danger"
+      busy={busy}
+      error={err}
+      consequences={[
+        "It cannot be undone.",
+        "Deletion is blocked while any owned records still exist — you will see exactly what to remove first.",
+      ]}
+      confirmText={expected}
+      confirmTextLabel={confirmHint}
+      requireReason
+      reasonLabel="Reason (recorded in the audit log)"
+      reasonPlaceholder="e.g. decommissioned test customer"
+      onConfirm={submit}
+    >
+      {extraImpact}
+      {blockers && blockers.length > 0 && (
+        <div className="rounded-md border border-destructive/30 bg-destructive-subtle p-3.5 text-sm text-destructive-subtle-foreground">
+          <div className="mb-2 font-semibold">{what} cannot be deleted because it still contains:</div>
+          <ul className="space-y-1.5">
+            {blockers.map((b) => (
+              <li key={b.type} className="flex items-center justify-between gap-3">
+                <span>{b.count} {b.label}</span>
+                <Link href={linkFor(b)} className="inline-flex items-center gap-1 font-medium underline-offset-2 hover:underline">
+                  View {b.label} <ArrowRight className="size-3.5 rtl:-scale-x-100" aria-hidden />
+                </Link>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2 text-xs opacity-80">
+            Delete or archive these first, in order (Appliances → Site → Customer).
           </div>
         </div>
-      </div>
-    </div>
+      )}
+    </ConfirmDialog>
   );
 }

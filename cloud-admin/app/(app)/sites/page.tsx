@@ -1,29 +1,41 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { Archive, ArchiveRestore, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
 import { api, ApiError, ListResp, Site } from "@/lib/api";
 import { useCustomer } from "@/lib/customer-context";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Field, Input, Select } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorBanner, Callout } from "@/components/ui/error-banner";
+import { DialogForm } from "@/components/ui/dialog";
+import { PageHeader, PageShell, Toolbar } from "@/components/ui/page";
+import { FilterChips, SearchInput } from "@/components/ui/data";
+import { SkeletonRows } from "@/components/ui/misc";
+import { useToast } from "@/components/ui/toast";
 import { DeleteDialog } from "@/components/delete-dialog";
-import { Plus, X, Archive, ArchiveRestore, Building2 } from "lucide-react";
+import { CustomerScope } from "@/components/customer-scope";
 import { formatRelative } from "@/lib/utils";
 
+type StatusFilter = "all" | "active" | "archived";
+
 export default function SitesPage() {
-  // Sites are customer-owned. The owning customer comes from the Global Customer
-  // Context (top-left selector). "All Customers" ("") lists every customer's sites
-  // (super-admin fan-out) but a Site can only be CREATED under one explicit customer.
+  // Sites are customer-owned. The owning customer comes from the Customer context. "All customers" ("") lists
+  // every customer's sites (super-admin fan-out); a Site is still CREATED under one explicit customer, chosen in
+  // the New site dialog.
   const { selectedTenantId, selectedTenantName, ready, tenants } = useCustomer();
   const allCustomers = selectedTenantId === "";
   const nameFor = (tid?: string) => tenants.find((t) => t.id === tid)?.name ?? tid ?? "—";
+  const toast = useToast();
 
   const [rows, setRows] = useState<Site[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [showNew, setShowNew] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState<StatusFilter>("all");
 
   async function load() {
     if (!ready) return;
@@ -35,33 +47,22 @@ export default function SitesPage() {
       setErr(e?.message ?? "Failed to load");
     }
   }
-  // Reload whenever the selected customer changes; clear stale rows first so one
-  // customer's data never flashes under another's.
+  // Reload whenever the selected customer changes; clear stale rows first so one customer's data never flashes
+  // under another's.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { setShowNew(false); load(); }, [ready, selectedTenantId]);
 
-  const [delSite, setDelSite] = useState<Site | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
-
-  async function onArchive(s: Site) {
-    setErr(null); setMsg(null);
-    try { await api.post(`/v1/sites/${s.id}/archive?tenant_id=${s.tenant_id}`); setMsg(`${s.name} archived.`); load(); }
-    catch (e: any) { setErr(e?.message ?? "Archive failed"); }
-  }
-  async function onRestore(s: Site) {
-    setErr(null); setMsg(null);
-    try { await api.post(`/v1/sites/${s.id}/restore?tenant_id=${s.tenant_id}`); setMsg(`${s.name} restored.`); load(); }
-    catch (e: any) { setErr(e?.message ?? "Restore failed"); }
-  }
+  // ---- create ----
+  const [showNew, setShowNew] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [createErr, setCreateErr] = useState<string | null>(null);
 
   async function onCreate(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setBusy(true); setErr(null);
+    setBusy(true); setCreateErr(null);
     const form = new FormData(e.currentTarget);
-    const el = e.currentTarget;
-    // The owning customer: the one selected in the form (shown when the global
-    // context is "All Customers"), otherwise the globally-selected customer.
+    // The owning customer: the one selected in the form, otherwise the globally-selected customer.
     const owner = (form.get("tenant_id") as string) || selectedTenantId;
-    if (!owner) { setErr("Choose the owning customer for this site."); setBusy(false); return; }
+    if (!owner) { setCreateErr("Choose the owning customer for this site."); setBusy(false); return; }
     try {
       await api.post(`/v1/sites?tenant_id=${owner}`, {
         code: form.get("code"),
@@ -70,155 +71,259 @@ export default function SitesPage() {
         country: form.get("country") || undefined,
       });
       setShowNew(false);
-      el.reset();
+      toast.success("Site created", String(form.get("name") ?? ""));
       load();
     } catch (e: any) {
       if (e instanceof ApiError && e.body?.error === "limit_exceeded") {
-        setErr(`License limit reached: ${e.body.limit_key} (${e.body.current}/${e.body.limit})`);
+        setCreateErr(`License limit reached: ${e.body.limit_key} (${e.body.current}/${e.body.limit})`);
       } else {
-        setErr(e?.message ?? "Create failed");
+        setCreateErr(e?.message ?? "Create failed");
       }
     } finally {
       setBusy(false);
     }
   }
 
-  async function onEdit(s: Site) {
-    const name = window.prompt("Site name:", s.name);
-    if (name === null) return;
-    const timezone = window.prompt("Timezone:", s.timezone || "UTC");
-    if (timezone === null) return;
-    const country = window.prompt("Country (2-letter, blank for none):", s.country || "");
-    if (country === null) return;
-    setErr(null);
+  // ---- edit ----
+  const [editSite, setEditSite] = useState<Site | null>(null);
+  const [editBusy, setEditBusy] = useState(false);
+  const [editErr, setEditErr] = useState<string | null>(null);
+
+  async function onEdit(e: React.FormEvent<HTMLFormElement>) {
+    const s = editSite;
+    if (!s) return;
+    const form = new FormData(e.currentTarget);
+    const name = String(form.get("name") ?? "");
+    const timezone = String(form.get("timezone") ?? "");
+    const country = String(form.get("country") ?? "");
+    setEditBusy(true); setEditErr(null);
     try {
       await api.patch(`/v1/sites/${s.id}?tenant_id=${s.tenant_id}`, {
         name: name.trim() || s.name,
         timezone: timezone.trim() || "UTC",
         country: country.trim() || undefined,
       });
+      setEditSite(null);
+      toast.success("Site updated", name.trim() || s.name);
       load();
     } catch (e: any) {
-      setErr(e?.message ?? "Update failed");
+      setEditErr(e?.message ?? "Update failed");
+    } finally {
+      setEditBusy(false);
     }
   }
 
+  // ---- archive / restore / delete ----
+  const [rowBusy, setRowBusy] = useState<string | null>(null);
+  const [delSite, setDelSite] = useState<Site | null>(null);
+
+  async function onArchive(s: Site) {
+    setErr(null); setRowBusy(s.id);
+    try { await api.post(`/v1/sites/${s.id}/archive?tenant_id=${s.tenant_id}`); toast.success(`${s.name} archived`); load(); }
+    catch (e: any) { toast.error("Archive failed", e?.message); }
+    finally { setRowBusy(null); }
+  }
+  async function onRestore(s: Site) {
+    setErr(null); setRowBusy(s.id);
+    try { await api.post(`/v1/sites/${s.id}/restore?tenant_id=${s.tenant_id}`); toast.success(`${s.name} restored`); load(); }
+    catch (e: any) { toast.error("Restore failed", e?.message); }
+    finally { setRowBusy(null); }
+  }
+
+  const counts = useMemo(() => {
+    const all = rows ?? [];
+    const archived = all.filter((s) => (s.status ?? "active") === "archived").length;
+    return { all: all.length, archived, active: all.length - archived };
+  }, [rows]);
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return (rows ?? []).filter((s) => {
+      const st = (s.status ?? "active") === "archived" ? "archived" : "active";
+      if (status !== "all" && st !== status) return false;
+      if (!q) return true;
+      return [s.code, s.name, s.timezone, s.country ?? "", allCustomers ? nameFor(s.tenant_id) : ""]
+        .join(" ").toLowerCase().includes(q);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, query, status, allCustomers, tenants]);
+
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="flex items-baseline justify-between mb-4">
-        <div>
-          <div className="text-xs text-muted uppercase tracking-wider">Infrastructure</div>
-          <h1 className="text-2xl font-semibold">Sites</h1>
-          <div className="mt-1 flex items-center gap-1.5 text-sm text-muted">
-            <Building2 size={13} /> {allCustomers ? "All Customers" : <>Customer: <span className="text-text font-medium">{selectedTenantName}</span></>}
-          </div>
-        </div>
-        <Button onClick={() => setShowNew((s) => !s)}>
-          {showNew ? <><X size={14} /> Cancel</> : <><Plus size={14} /> New site</>}
-        </Button>
-      </div>
+    <PageShell>
+      <PageHeader
+        eyebrow="Infrastructure"
+        title="Sites"
+        icon={<MapPin />}
+        description="A site is one physical property — one hotel or resort. It belongs to exactly one customer and holds one or more appliances. Buildings, floors, SSIDs and guest networks are configured on the appliance; they are not sites."
+        actions={
+          <Button onClick={() => { setCreateErr(null); setShowNew(true); }}>
+            <Plus /> New site
+          </Button>
+        }
+      >
+        <CustomerScope />
+      </PageHeader>
 
-      <p className="text-sm text-muted mb-4">
-        A <strong>Site</strong> is one physical property (a single hotel/resort). It belongs to exactly one Customer
-        and can contain one or more Appliances. Buildings, floors, wings, SSIDs and guest VLANs are configured on the
-        appliance — they are not Sites.
-      </p>
-
-      {err && <div className="text-err text-sm mb-4">{err}</div>}
-      {msg && <div className="text-ok text-sm mb-4">{msg}</div>}
-
-      {showNew && (
-        <Card className="mb-6">
-          <CardHeader><CardTitle>New site</CardTitle></CardHeader>
-          <CardBody>
-            {tenants.length === 0 ? (
-              <div className="text-sm text-warn">
-                No customers exist yet. Create a customer on the <a href="/tenants" className="underline">Customers</a> page first.
-              </div>
-            ) : (
-              <form onSubmit={onCreate} className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                <div className="sm:col-span-4">
-                  <Label>Owning customer</Label>
-                  <div className="relative">
-                    <Building2 size={13} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted" />
-                    <select
-                      name="tenant_id" required defaultValue={allCustomers ? "" : selectedTenantId}
-                      className="h-9 w-full rounded-md bg-panel2 border border-border pl-7 pr-3 text-sm"
-                    >
-                      {allCustomers && <option value="" disabled>— select a customer —</option>}
-                      {tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                    </select>
-                  </div>
-                  <div className="mt-1 text-xs text-muted">The site will belong to this customer. A site always has exactly one owning customer.</div>
-                </div>
-                <div><Label>Code</Label><Input name="code" required placeholder="hurghada" /></div>
-                <div><Label>Name</Label><Input name="name" required placeholder="Coral Sea Resort Hurghada" /></div>
-                <div><Label>Timezone</Label><Input name="timezone" placeholder="UTC" /></div>
-                <div><Label>Country</Label><Input name="country" placeholder="EG" /></div>
-                <div className="sm:col-span-4 flex justify-end">
-                  <Button type="submit" disabled={busy}>{busy ? "Creating…" : "Create site"}</Button>
-                </div>
-              </form>
-            )}
-          </CardBody>
-        </Card>
-      )}
+      <ErrorBanner err={err} />
 
       <Card>
-        <CardBody className="p-0">
-          {rows === null ? (
-            <EmptyState title="Loading…" />
-          ) : rows.length === 0 ? (
-            <EmptyState title="No sites yet" hint={allCustomers ? "No sites for any customer yet." : `Create one under ${selectedTenantName} to start managing appliances.`} />
-          ) : (
-            <Table>
-              <THead>
-                <TR>
-                  {allCustomers && <TH>Customer</TH>}
-                  <TH>Code</TH><TH>Name</TH><TH>Status</TH><TH>Timezone</TH><TH>Country</TH>
-                  <TH>Created</TH><TH></TH>
-                </TR>
-              </THead>
-              <tbody>
-                {rows.map((s) => {
-                  const archived = (s.status ?? "active") === "archived";
-                  return (
+        <Toolbar className="border-b border-border px-4 py-3">
+          <SearchInput value={query} onChange={setQuery} placeholder="Search code, name, timezone" label="Search sites" />
+          <FilterChips
+            label="Status"
+            value={status}
+            onChange={setStatus}
+            options={[
+              { value: "all", label: "All", count: counts.all },
+              { value: "active", label: "Active", count: counts.active, tone: "ok" },
+              { value: "archived", label: "Archived", count: counts.archived },
+            ]}
+          />
+        </Toolbar>
+        {rows === null ? (
+          <SkeletonRows rows={4} cols={allCustomers ? 7 : 6} />
+        ) : rows.length === 0 ? (
+          <EmptyState
+            icon={<MapPin />}
+            title="No sites yet"
+            hint={allCustomers ? "No customer has a site yet." : `Create one under ${selectedTenantName} to start managing appliances.`}
+            action={<Button onClick={() => setShowNew(true)}><Plus /> New site</Button>}
+          />
+        ) : visible.length === 0 ? (
+          <EmptyState
+            title="No sites match"
+            hint="Nothing matches the search or status filter."
+            action={<Button variant="secondary" onClick={() => { setQuery(""); setStatus("all"); }}>Clear filters</Button>}
+          />
+        ) : (
+          <Table>
+            <THead>
+              <TR>
+                {allCustomers && <TH>Customer</TH>}
+                <TH>Code</TH><TH>Name</TH><TH>Status</TH>
+                <TH className="hidden md:table-cell">Timezone</TH>
+                <TH className="hidden md:table-cell">Country</TH>
+                <TH className="hidden lg:table-cell">Created</TH>
+                <TH><span className="sr-only">Actions</span></TH>
+              </TR>
+            </THead>
+            <tbody>
+              {visible.map((s) => {
+                const archived = (s.status ?? "active") === "archived";
+                return (
                   <TR key={s.id}>
-                    {allCustomers && <TD className="text-muted">{nameFor(s.tenant_id)}</TD>}
-                    <TD className="font-mono">{s.code}</TD>
-                    <TD>{s.name}</TD>
-                    <TD className="text-muted">{s.status ?? "active"}</TD>
-                    <TD className="text-muted">{s.timezone}</TD>
-                    <TD className="text-muted">{s.country || "—"}</TD>
-                    <TD className="text-muted">{formatRelative(s.created_at)}</TD>
-                    <TD className="text-right">
-                      <div className="flex gap-1 justify-end">
-                        <Button size="sm" variant="ghost" onClick={() => onEdit(s)}>Edit</Button>
-                        {archived
-                          ? <Button size="sm" variant="secondary" onClick={() => onRestore(s)}><ArchiveRestore size={13} /> Restore</Button>
-                          : <Button size="sm" variant="secondary" onClick={() => onArchive(s)}><Archive size={13} /> Archive</Button>}
-                        <Button size="sm" variant="danger" onClick={() => setDelSite(s)}>Delete</Button>
+                    {allCustomers && <TD className="text-muted-foreground">{nameFor(s.tenant_id)}</TD>}
+                    <TD className="font-mono text-xs">{s.code}</TD>
+                    <TD className="font-medium">{s.name}</TD>
+                    <TD>{archived ? <Badge>Archived</Badge> : <Badge tone="ok" dot>Active</Badge>}</TD>
+                    <TD className="hidden text-muted-foreground md:table-cell">{s.timezone}</TD>
+                    <TD className="hidden text-muted-foreground md:table-cell">{s.country || "—"}</TD>
+                    <TD className="hidden text-muted-foreground lg:table-cell">{formatRelative(s.created_at)}</TD>
+                    <TD>
+                      <div className="flex justify-end gap-1">
+                        <Button size="sm" variant="ghost" onClick={() => { setEditErr(null); setEditSite(s); }} aria-label={`Edit ${s.name}`}>
+                          <Pencil /> <span className="hidden sm:inline">Edit</span>
+                        </Button>
+                        {archived ? (
+                          <Button size="sm" variant="ghost" disabled={rowBusy === s.id} onClick={() => onRestore(s)}>
+                            <ArchiveRestore /> <span className="hidden sm:inline">Restore</span>
+                          </Button>
+                        ) : (
+                          <Button size="sm" variant="ghost" disabled={rowBusy === s.id} onClick={() => onArchive(s)}>
+                            <Archive /> <span className="hidden sm:inline">Archive</span>
+                          </Button>
+                        )}
+                        <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setDelSite(s)} aria-label={`Delete ${s.name}`}>
+                          <Trash2 /> <span className="hidden sm:inline">Delete</span>
+                        </Button>
                       </div>
                     </TD>
                   </TR>
-                  );
-                })}
-              </tbody>
-            </Table>
-          )}
-        </CardBody>
+                );
+              })}
+            </tbody>
+          </Table>
+        )}
       </Card>
+
+      <DialogForm
+        open={showNew}
+        onOpenChange={setShowNew}
+        title="New site"
+        description="One physical property. It will belong to the customer you choose."
+        submitLabel="Create site"
+        busyLabel="Creating…"
+        busy={busy}
+        error={createErr}
+        disabled={tenants.length === 0}
+        onSubmit={onCreate}
+      >
+        {tenants.length === 0 ? (
+          <Callout tone="warning">
+            No customers exist yet. Create a customer on the <Link href="/tenants" className="underline">Customers</Link> page first.
+          </Callout>
+        ) : (
+          <>
+            <Field label="Owning customer" required hint="A site always has exactly one owning customer.">
+              <Select name="tenant_id" required defaultValue={allCustomers ? "" : selectedTenantId}>
+                {allCustomers && <option value="" disabled>Select a customer…</option>}
+                {tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </Select>
+            </Field>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Code" required hint="Short and unique, e.g. hurghada.">
+                <Input name="code" required placeholder="hurghada" />
+              </Field>
+              <Field label="Name" required>
+                <Input name="name" required placeholder="Coral Sea Resort Hurghada" />
+              </Field>
+              <Field label="Timezone" hint="Defaults to UTC.">
+                <Input name="timezone" placeholder="UTC" />
+              </Field>
+              <Field label="Country" hint="Two-letter code, optional.">
+                <Input name="country" placeholder="EG" />
+              </Field>
+            </div>
+          </>
+        )}
+      </DialogForm>
+
+      <DialogForm
+        open={!!editSite}
+        onOpenChange={(v) => { if (!v) setEditSite(null); }}
+        title={`Edit ${editSite?.name ?? "site"}`}
+        description={editSite ? <>Code <span className="font-mono">{editSite.code}</span> cannot be changed.</> : undefined}
+        submitLabel="Save changes"
+        busyLabel="Saving…"
+        busy={editBusy}
+        error={editErr}
+        onSubmit={onEdit}
+      >
+        {editSite && (
+          <div key={editSite.id} className="grid gap-4 sm:grid-cols-2">
+            <Field label="Name" className="sm:col-span-2">
+              <Input name="name" defaultValue={editSite.name} />
+            </Field>
+            <Field label="Timezone" hint="Empty means UTC.">
+              <Input name="timezone" defaultValue={editSite.timezone || "UTC"} />
+            </Field>
+            <Field label="Country" hint="Two-letter code; empty for none.">
+              <Input name="country" defaultValue={editSite.country || ""} />
+            </Field>
+          </div>
+        )}
+      </DialogForm>
 
       <DeleteDialog
         open={!!delSite}
         onClose={() => setDelSite(null)}
-        onDeleted={() => { setMsg("Site permanently deleted."); load(); }}
+        onDeleted={() => { toast.success("Site permanently deleted"); load(); }}
         title={`Delete site "${delSite?.name ?? ""}"`}
         what="Site"
         expected={delSite?.code ?? ""}
         confirmHint="Type the site code"
         deleteUrl={`/v1/sites/${delSite?.id}?tenant_id=${delSite?.tenant_id ?? ""}`}
       />
-    </div>
+    </PageShell>
   );
 }
