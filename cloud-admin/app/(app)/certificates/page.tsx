@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { PageHeader, PageShell, StatCard, Toolbar } from "@/components/ui/page";
+import { RoleRestricted } from "@/components/role-restricted";
+import { usePermissions } from "@/lib/permissions";
 import { SearchInput } from "@/components/ui/data";
 import { MonoId, SkeletonRows, Switch } from "@/components/ui/misc";
 import { statusWord } from "@/lib/license-state";
@@ -45,6 +47,9 @@ const tone = (s: string, expired: boolean) =>
  * revocation reason and last rotation. Private keys and certificate PEM are never returned by the API or shown.
  */
 export default function CertificatesPage() {
+  // Reading needs "certificates.read" (lib/permissions.ts); the server refuses this page's list to other roles.
+  const { can } = usePermissions();
+  const canRead = can["certificates.read"];
   const [rows, setRows] = useState<Cert[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showSuperseded, setShowSuperseded] = useState(false);
@@ -85,6 +90,10 @@ export default function CertificatesPage() {
         description="Appliance client certificates issued by Central's internal certificate authority. Read-only and metadata only — no private keys or certificate material are ever shown."
       />
 
+      {!canRead ? (
+        <RoleRestricted what="Certificates are the vendor's appliance identity inventory." />
+      ) : (
+      <>
       <ErrorBanner err={err} />
 
       <section aria-label="Certificate counts" className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -145,6 +154,8 @@ export default function CertificatesPage() {
           </Table>
         )}
       </Card>
+      </>
+      )}
     </PageShell>
   );
 }

@@ -12,6 +12,7 @@ import {
 import { VelonetLockup } from "@/components/brand";
 import { CustomerSelector } from "@/components/customer-selector";
 import { Tooltip } from "@/components/ui/tooltip";
+import { PAGE_READ, usePermissions } from "@/lib/permissions";
 
 export type NavItem = { href: string; label: string; icon: React.ComponentType<{ className?: string }> };
 export type NavSection = { title: string; items: NavItem[] };
@@ -80,6 +81,19 @@ export function Nav({
 }) {
   const path = usePathname() ?? "";
   const activeHref = useMemo(() => activeNavHref(path), [path]);
+  // A menu item is shown only when the server lets this role read that page (lib/permissions.ts PAGE_READ).
+  const { can } = usePermissions();
+  const sections = useMemo(
+    () =>
+      NAV_SECTIONS.map((sec) => ({
+        ...sec,
+        items: sec.items.filter((it) => {
+          const need = PAGE_READ[it.href];
+          return !need || can[need];
+        }),
+      })).filter((sec) => sec.items.length > 0),
+    [can],
+  );
 
   return (
     <aside
@@ -122,7 +136,7 @@ export function Nav({
       </div>
 
       <nav id="sidebar-nav" className="nav-scroll flex-1 overflow-y-auto px-2 py-2.5" aria-label="Main">
-        {NAV_SECTIONS.map((sec) => (
+        {sections.map((sec) => (
           <div key={sec.title} className="mb-3 last:mb-0">
             {collapsed ? (
               <div className="mx-2 mb-1.5 mt-1 border-t border-sidebar-border/70 first:mt-0 first:border-t-0" aria-hidden />

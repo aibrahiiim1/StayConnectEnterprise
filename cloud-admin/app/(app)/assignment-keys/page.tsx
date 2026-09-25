@@ -9,6 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { PageHeader, PageShell, StatCard } from "@/components/ui/page";
+import { RoleRestricted } from "@/components/role-restricted";
+import { usePermissions } from "@/lib/permissions";
 import { MonoId, SkeletonRows } from "@/components/ui/misc";
 import { statusWord } from "@/lib/license-state";
 import { formatDate } from "@/lib/utils";
@@ -43,6 +45,9 @@ const stateWord = (s: string) => (s === "verify_only" ? "Verify-only" : statusWo
  * fingerprint only — the private signing key lives solely in the API's signer and is never persisted or shown.
  */
 export default function AssignmentKeysPage() {
+  // Reading needs "assignmentKeys.read" (lib/permissions.ts); the server refuses this page's list to other roles.
+  const { can } = usePermissions();
+  const canRead = can["assignmentKeys.read"];
   const [rows, setRows] = useState<Key[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -73,6 +78,10 @@ export default function AssignmentKeysPage() {
         description="Keys that sign the documents binding an appliance to its customer and site. Active keys sign and verify; verify-only keys still verify existing assignments but sign nothing; revoked keys are no longer trusted. Read-only — no private key material is shown."
       />
 
+      {!canRead ? (
+        <RoleRestricted what="Assignment keys are the vendor's signing keys." />
+      ) : (
+      <>
       <ErrorBanner err={err} />
 
       <section aria-label="Key counts" className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -120,6 +129,8 @@ export default function AssignmentKeysPage() {
           </Table>
         )}
       </Card>
+      </>
+      )}
     </PageShell>
   );
 }

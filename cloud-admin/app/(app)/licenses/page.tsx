@@ -16,7 +16,10 @@ import { PageHeader, PageShell, StatCard, Toolbar } from "@/components/ui/page";
 import { FilterChips, SearchInput } from "@/components/ui/data";
 import { Meter, SkeletonRows } from "@/components/ui/misc";
 import { useToast } from "@/components/ui/toast";
-import { CustomerScope } from "@/components/customer-scope";
+import { AllCustomersNotice, CustomerScope } from "@/components/customer-scope";
+import { RoleRestricted } from "@/components/role-restricted";
+import { ReadOnlyNotice } from "@/components/ui/patterns";
+import { usePermissions } from "@/lib/permissions";
 import { formatDate, formatRelative, errMsg } from "@/lib/utils";
 import { graceEndOf, licenseState } from "@/lib/license-state";
 
@@ -31,6 +34,15 @@ type StateFilter = "all" | "active" | "grace" | "expired" | "suspended" | "revok
 export default function LicensesPage() {
   const { selectedTenantId: tenantID, ready } = useCustomer();
   const allCustomers = tenantID === "";
+  // Issue/renew/suspend/resume/revoke sit behind auth.RequireRole("platform_admin") (api/licenses.go Routes) and
+  // the offline package behind platform.certificates.issue (api/offline_api.go); every role with a customer can
+  // READ the list (lib/permissions.ts). A reader who can change nothing gets the read-only notice.
+  //
+  // Issuing in All customers mode stays disabled even though POST /cloud/v1/licenses carries tenant_id in its
+  // body: the form's Site and Appliance lists come from the selected customer, so the context is the customer.
+  const { can } = usePermissions();
+  const canChange = can["licenses.change"];
+  const canPackage = can["licenses.offlinePackage"];
   const toast = useToast();
   const [rows, setRows] = useState<License[] | null>(null);
   const [sites, setSites] = useState<Site[]>([]);
@@ -120,6 +132,7 @@ export default function LicensesPage() {
   const [revokeL, setRevokeL] = useState<License | null>(null);
   const [suspendL, setSuspendL] = useState<License | null>(null);
   const [renewL, setRenewL] = useState<License | null>(null);
+  const [resumeL, setResumeL] = useState<License | null>(null);
   const [rowBusy, setRowBusy] = useState<string | null>(null);
 
   async function onRevoke() {
@@ -136,11 +149,12 @@ export default function LicensesPage() {
     catch (e) { setActErr(errMsg(e)); }
     finally { setActBusy(false); }
   }
-  async function onResume(l: License) {
-    setRowBusy(l.id);
-    try { await withStepUp(() => api.post(`/cloud/v1/licenses/${l.id}/resume`)); toast.success("License resumed"); load(); }
-    catch (e) { toast.error("Resume failed", errMsg(e)); }
-    finally { setRowBusy(null); }
+  async function onResume() {
+    const l = resumeL; if (!l) return;
+    setActBusy(true); setActErr(null);
+    try { await withStepUp(() => api.post(`/cloud/v1/licenses/${l.id}/resume`)); setResumeL(null); toast.success("License resumed"); load(); }
+    catch (e) { setActErr(errMsg(e)); }
+    finally { setActBusy(false); }
   }
   async function onRenew(e: React.FormEvent<HTMLFormElement>) {
     const l = renewL; if (!l) return;
@@ -206,7 +220,7 @@ export default function LicensesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, query, stateFilter, sites, appliances, tenantList]);
 
-  const canIssue = !allCustomers && sites.length > 0;
+  const canIssue = canChange && !allCustomers && sites.length > 0;
 
   return (
     <PageShell width="wide">
@@ -216,18 +230,25 @@ export default function LicensesPage() {
         icon={<BadgeCheck />}
         description="Each appliance's signed license: max concurrent online guests, validity window and grace period. Renewing issues a new signed version."
         actions={
-          <Button onClick={() => { setIssueErr(null); setShowNew(true); }} disabled={!canIssue}>
-            <Plus /> Issue license
-          </Button>
+          canChange && can["licenses.read"] ? (
+            <Button onClick={() => { setIssueErr(null); setShowNew(true); }} disabled={!canIssue}>
+              <Plus /> Issue license
+            </Button>
+          ) : undefined
         }
       >
         <CustomerScope />
       </PageHeader>
 
-      {allCustomers && (
-        <Callout tone="info">Viewing licenses across all customers. Select a customer in the sidebar to issue a new license.</Callout>
+      {!can["licenses.read"] ? (
+        <RoleRestricted what="Licenses are listed per customer, and your sign-in has none." />
+      ) : (
+      <>
+      {!canChange && !canPackage && <ReadOnlyNotice />}
+      {allCustomers && canChange && (
+        <AllCustomersNotice>Viewing licenses across all customers. Select a customer in the sidebar to issue a new license.</AllCustomersNotice>
       )}
-      {!allCustomers && rows !== null && sites.length === 0 && (
+      {canChange && !allCustomers && rows !== null && sites.length === 0 && (
         <Callout tone="warning" title="No site yet">Create a site first — a license needs a site and an appliance.</Callout>
       )}
       <ErrorBanner err={err} />
@@ -264,7 +285,7 @@ export default function LicensesPage() {
           <EmptyState
             icon={<BadgeCheck />}
             title="No licenses yet"
-            hint="Activating an appliance under Onboarding issues its license. You can also issue one here."
+            hint={canChange ? "Activating an appliance under Onboarding issues its license. You can also issue one here." : "Licenses are issued when an appliance is activated."}
             action={canIssue ? <Button onClick={() => setShowNew(true)}><Plus /> Issue license</Button> : undefined}
           />
         ) : visible.length === 0 ? (
@@ -310,29 +331,29 @@ export default function LicensesPage() {
                     <TD className="hidden text-xs text-muted-foreground lg:table-cell">{u.at ? formatRelative(u.at) : "—"}</TD>
                     <TD>
                       <div className="flex justify-end gap-1">
-                        {(l.status === "active" || l.status === "suspended") && (
+                        {canChange && (l.status === "active" || l.status === "suspended") && (
                           <Button size="sm" variant="ghost" onClick={() => { setActErr(null); setRenewL(l); }}>
                             <RefreshCw /> Renew
                           </Button>
                         )}
-                        {(l.appliance_ids?.length ?? 0) > 0 && (
+                        {canPackage && (l.appliance_ids?.length ?? 0) > 0 && (
                           <Button size="sm" variant="ghost" disabled={rowBusy === l.id} onClick={() => onDownloadOffline(l)}
                             title="Signed, appliance-bound, single use. Upload in Hotel Admin under Appliance & licence.">
                             <Download /> <span className="hidden 2xl:inline">Download for offline</span>
                             <span className="sr-only 2xl:hidden">Download for offline</span>
                           </Button>
                         )}
-                        {l.status === "active" && (
+                        {canChange && l.status === "active" && (
                           <Button size="sm" variant="ghost" onClick={() => { setActErr(null); setSuspendL(l); }}>
                             <PauseCircle /> Suspend
                           </Button>
                         )}
-                        {l.status === "suspended" && (
-                          <Button size="sm" variant="ghost" disabled={rowBusy === l.id} onClick={() => onResume(l)}>
+                        {canChange && l.status === "suspended" && (
+                          <Button size="sm" variant="ghost" onClick={() => { setActErr(null); setResumeL(l); }}>
                             <PlayCircle /> Resume
                           </Button>
                         )}
-                        {l.status !== "revoked" && l.status !== "superseded" && (
+                        {canChange && l.status !== "revoked" && l.status !== "superseded" && (
                           <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => { setActErr(null); setRevokeL(l); }}>
                             <Ban /> Revoke
                           </Button>
@@ -346,6 +367,8 @@ export default function LicensesPage() {
           </Table>
         )}
       </Card>
+      </>
+      )}
 
       <DialogForm
         open={showNew}
@@ -432,6 +455,17 @@ export default function LicensesPage() {
       />
 
       <ConfirmDialog
+        open={!!resumeL}
+        onOpenChange={(v) => { if (!v) setResumeL(null); }}
+        title="Resume this license?"
+        description="The license is back in force until its valid-until date and the appliance accepts new guest sign-ins again. You may be asked to confirm your password."
+        confirmLabel="Resume license"
+        busy={actBusy}
+        error={actErr}
+        onConfirm={onResume}
+      />
+
+      <ConfirmDialog
         open={!!revokeL}
         onOpenChange={(v) => { if (!v) setRevokeL(null); }}
         title="Revoke this license?"
@@ -443,7 +477,8 @@ export default function LicensesPage() {
         consequences={[
           "The appliance will refuse new guest sign-ins.",
           "Existing guest sessions are not dropped.",
-          "This cannot be undone; issue a new license to restore service.",
+          "Issue a new license to restore service.",
+          "It cannot be undone.",
         ]}
         onConfirm={onRevoke}
       />

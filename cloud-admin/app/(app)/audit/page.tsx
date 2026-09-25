@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { PageHeader, PageShell } from "@/components/ui/page";
+import { RoleRestricted } from "@/components/role-restricted";
+import { usePermissions } from "@/lib/permissions";
 import { MonoId, SkeletonRows } from "@/components/ui/misc";
 import { CustomerScope, SelectCustomerCard } from "@/components/customer-scope";
 import { formatDate } from "@/lib/utils";
@@ -36,6 +38,9 @@ function tone(action: string) {
 }
 
 export default function AuditPage() {
+  // Reading needs "audit.read" (lib/permissions.ts); the server refuses this page's list to other roles.
+  const { can } = usePermissions();
+  const canRead = can["audit.read"];
   // The audit log is per-customer. It requires a concrete customer in the Customer context; "All customers"
   // shows a prompt.
   const { selectedTenantId: tenantID, ready } = useCustomer();
@@ -69,6 +74,10 @@ export default function AuditPage() {
         <CustomerScope />
       </PageHeader>
 
+      {!canRead ? (
+        <RoleRestricted what="The audit log is kept per customer, and your sign-in has none." />
+      ) : (
+      <>
       <ErrorBanner err={err} />
 
       {allCustomers ? (
@@ -148,6 +157,8 @@ export default function AuditPage() {
             </Table>
           )}
         </Card>
+      )}
+      </>
       )}
     </PageShell>
   );

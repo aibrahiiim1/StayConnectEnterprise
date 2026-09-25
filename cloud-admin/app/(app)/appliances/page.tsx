@@ -22,6 +22,9 @@ import { MonoId, Skeleton, SkeletonRows } from "@/components/ui/misc";
 import { LiveStatus, OneTimeReveal, refreshingClass } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { CustomerScope } from "@/components/customer-scope";
+import { DeleteDialog } from "@/components/delete-dialog";
+import { RoleRestricted } from "@/components/role-restricted";
+import { usePermissions } from "@/lib/permissions";
 import { statusWord } from "@/lib/license-state";
 import { cn, formatRelative, errMsg } from "@/lib/utils";
 
@@ -50,6 +53,13 @@ export default function AppliancesPage() {
   // Appliances are owned via Site → Customer. The Customer context scopes the list; "All customers" ("") fans
   // out. Manual create / token mint require a concrete customer (and a Site under it).
   const { selectedTenantId, selectedTenantName, ready, tenants } = useCustomer();
+  // Roles (lib/permissions.ts): the /v1/appliances routes apply only the tenant-scope check, so manual create,
+  // Config and Delete stay for every role that can list. Enrollment tokens are catalog-gated
+  // (platform.enrollment_tokens.create / .revoke, api/enrollment.go TokenRoutes) and are hidden otherwise.
+  const { can } = usePermissions();
+  const canWrite = can["appliances.write"];
+  const canMint = can["enrollmentTokens.create"];
+  const canRevokeToken = can["enrollmentTokens.revoke"];
   const allCustomers = selectedTenantId === "";
   const custName = (tid?: string) => tenants.find((t) => t.id === tid)?.name ?? tid ?? "—";
   const toast = useToast();
@@ -179,19 +189,9 @@ export default function AppliancesPage() {
   }
 
   // ---- delete ----
+  // DELETE /v1/appliances/{id} takes no body and no password step-up (api/appliances.go deleteAppliance), so the
+  // shared DeleteDialog runs without a reason field and without withStepUp — same request as before.
   const [delApp, setDelApp] = useState<Appliance | null>(null);
-
-  async function onDelete() {
-    const a = delApp; if (!a) return;
-    setActBusy(true); setActErr(null);
-    try {
-      await api.del(`/v1/appliances/${a.id}?tenant_id=${a.tenant_id ?? selectedTenantId}`);
-      setDelApp(null);
-      toast.success("Appliance deleted", a.serial);
-      load(true);
-    } catch (e: any) { setActErr(e?.message ?? "Delete failed"); }
-    finally { setActBusy(false); }
-  }
 
   const siteName = (sid: string) => sites.find((s) => s.id === sid)?.name ?? sid.slice(0, 8);
   const canCreate = !allCustomers && sites.length > 0;
@@ -220,14 +220,20 @@ export default function AppliancesPage() {
         icon={<Server />}
         description="Every appliance, where it is and whether it is online. Appliances normally arrive by themselves under Onboarding; the tools here are for recovery."
         actions={
-          <>
-            <Button variant="secondary" onClick={() => { setFormErr(null); setShowMint(true); }} disabled={!canCreate}>
-              <Key /> Enrollment token
-            </Button>
-            <Button onClick={() => { setFormErr(null); setShowNew(true); }} disabled={!canCreate}>
-              <Plus /> New appliance
-            </Button>
-          </>
+          can["appliances.read"] ? (
+            <>
+              {canMint && (
+                <Button variant="secondary" onClick={() => { setFormErr(null); setShowMint(true); }} disabled={!canCreate}>
+                  <Key /> Enrollment token
+                </Button>
+              )}
+              {canWrite && (
+                <Button onClick={() => { setFormErr(null); setShowNew(true); }} disabled={!canCreate}>
+                  <Plus /> New appliance
+                </Button>
+              )}
+            </>
+          ) : undefined
         }
       >
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -236,6 +242,10 @@ export default function AppliancesPage() {
         </div>
       </PageHeader>
 
+      {!can["appliances.read"] ? (
+        <RoleRestricted what="Appliances belong to a customer, and your sign-in has none." />
+      ) : (
+      <>
       <Callout tone="info" title="Most appliances install zero-touch">
         A factory-clean appliance with internet registers itself and appears under{" "}
         <Link href="/onboarding" className="font-medium underline underline-offset-2">Onboarding</Link> as Pending
@@ -243,7 +253,7 @@ export default function AppliancesPage() {
         tokens are only a recovery lever: an appliance that cannot register itself, or one being deliberately
         re-attached.
       </Callout>
-      {allCustomers && (
+      {allCustomers && (canWrite || canMint) && (
         <Callout tone="neutral">
           Select a customer in the sidebar to add or enroll an appliance — an appliance is created under a site that
           belongs to one customer.
@@ -308,10 +318,12 @@ export default function AppliancesPage() {
                   <TD>
                     <div className="flex justify-end gap-1">
                       <Button size="sm" variant="ghost" onClick={() => onShowEffective(a)}><Eye /> Config</Button>
-                      <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive"
-                        onClick={() => { setActErr(null); setDelApp(a); }} aria-label={`Delete appliance ${a.serial}`}>
-                        <Trash2 /> <span className="hidden sm:inline">Delete</span>
-                      </Button>
+                      {canWrite && (
+                        <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive"
+                          onClick={() => setDelApp(a)} aria-label={`Delete appliance ${a.serial}`}>
+                          <Trash2 /> <span className="hidden sm:inline">Delete</span>
+                        </Button>
+                      )}
                     </div>
                   </TD>
                 </TR>
@@ -352,7 +364,7 @@ export default function AppliancesPage() {
                     <TD className="hidden text-xs text-muted-foreground sm:table-cell">{formatRelative(t.expires_at)}</TD>
                     <TD className="hidden text-xs text-muted-foreground md:table-cell">{formatRelative(t.created_at)}</TD>
                     <TD className="text-end">
-                      {!consumed && (
+                      {!consumed && canRevokeToken && (
                         <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive"
                           onClick={() => { setActErr(null); setRevokeTok(t); }}>
                           <Trash2 /> Revoke
@@ -365,6 +377,8 @@ export default function AppliancesPage() {
             </tbody>
           </Table>
         </Card>
+      )}
+      </>
       )}
 
       <DialogForm
@@ -452,22 +466,22 @@ export default function AppliancesPage() {
         onConfirm={onRevokeToken}
       />
 
-      <ConfirmDialog
+      <DeleteDialog
         open={!!delApp}
-        onOpenChange={(v) => { if (!v) setDelApp(null); }}
-        title={`Delete appliance ${delApp?.serial ?? ""}?`}
-        description={delApp ? <>{delApp.name} · {delApp.site_id ? siteName(delApp.site_id) : "unassigned"}</> : undefined}
-        confirmLabel="Delete appliance"
-        confirmVariant="danger"
-        busy={actBusy}
-        error={actErr}
+        onClose={() => setDelApp(null)}
+        onDeleted={() => { toast.success("Appliance deleted", delApp?.serial); load(true); }}
+        title={`Delete appliance ${delApp?.serial ?? ""}`}
+        what="Appliance"
+        expected={delApp?.serial ?? ""}
+        confirmHint="Type the appliance serial"
+        deleteUrl={`/v1/appliances/${delApp?.id}?tenant_id=${delApp?.tenant_id ?? selectedTenantId}`}
+        takesReason={false}
+        stepUp={false}
         consequences={[
           "The appliance record is removed from this customer.",
+          "Any license bound to this appliance is revoked.",
           "It cannot be undone.",
         ]}
-        confirmText={delApp?.serial}
-        confirmTextLabel="Type the appliance serial"
-        onConfirm={onDelete}
       />
 
       <DetailDialog
