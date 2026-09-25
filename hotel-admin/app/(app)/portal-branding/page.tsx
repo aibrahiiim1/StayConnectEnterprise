@@ -34,6 +34,8 @@ import { MetricStrip } from "@/components/ui/data";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { Skeleton } from "@/components/ui/misc";
+import { ReadOnlyNotice } from "@/components/ui/patterns";
+import { buttonVariants } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { canWrite } from "@/lib/roles";
 import { cn, errMsg } from "@/lib/utils";
@@ -84,7 +86,7 @@ export default function PortalSettingsPage() {
   const [saved, setSaved] = useState<Design | null>(null);
   const [d, setD] = useState<Design>({});
   const [revisions, setRevisions] = useState<RevisionSummary[]>([]);
-  const [roles, setRoles] = useState<string[]>([]);
+  const [roles, setRoles] = useState<string[] | null>(null);
   const [section, setSection] = useState<Section>("template");
   const [wordingLang, setWordingLang] = useState<string | undefined>(undefined);
   const [loadErr, setLoadErr] = useState<unknown>(null);
@@ -97,7 +99,7 @@ export default function PortalSettingsPage() {
   const [validation, setValidation] = useState<ValidateResp | null>(null);
   const [checking, setChecking] = useState(false);
 
-  const writable = canWrite("portal-branding", roles);
+  const writable = roles !== null && canWrite("portal-branding", roles);
   const set = useCallback(<K extends keyof Design>(k: K, v: Design[K]) => setD((p) => ({ ...p, [k]: v })), []);
   const setOpt = <K extends keyof TemplateOptions>(k: K, v: TemplateOptions[K]) =>
     setD((p) => ({ ...p, template_options: { ...(p.template_options ?? {}), [k]: v } }));
@@ -120,7 +122,7 @@ export default function PortalSettingsPage() {
 
   useEffect(() => {
     load();
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => {});
+    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
   }, [load]);
 
   const dirty = useMemo(() => saved !== null && JSON.stringify(d) !== JSON.stringify(saved), [d, saved]);
@@ -279,17 +281,25 @@ export default function PortalSettingsPage() {
         title="Portal settings"
         description="Design the Wi-Fi sign-in page: choose a layout, brand it, and check it in the live preview. Guests see your changes as soon as you save."
         actions={
-          <>
-            {dirty
-              ? <Badge tone="warn" dot>Unsaved changes</Badge>
-              : <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Check className="h-3.5 w-3.5" aria-hidden /> All changes saved</span>}
-            <Button variant="secondary" disabled={!dirty || busy} onClick={discard}>Discard</Button>
-            <Button disabled={!dirty || busy || !writable || blocking.length > 0} onClick={() => save()}>
-              {busy ? "Saving…" : "Save changes"}
-            </Button>
-          </>
+          writable ? (
+            <>
+              <span aria-live="polite">
+                {dirty
+                  ? <Badge tone="warn" dot>Unsaved changes</Badge>
+                  : <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Check className="size-3.5" aria-hidden /> All changes saved</span>}
+              </span>
+              <Button variant="secondary" disabled={!dirty || busy} onClick={discard}>Discard</Button>
+              <Button disabled={!dirty || busy || blocking.length > 0} onClick={() => save()}>
+                {busy ? "Saving…" : "Save changes"}
+              </Button>
+            </>
+          ) : undefined
         }
       />
+
+      {roles !== null && !writable && (
+        <ReadOnlyNotice>Your role can see the portal design but not change it.</ReadOnlyNotice>
+      )}
 
       <MetricStrip
         items={[
@@ -326,26 +336,42 @@ export default function PortalSettingsPage() {
       <div className="grid gap-6 lg:grid-cols-[210px_minmax(0,1fr)] xl:grid-cols-[210px_minmax(0,1fr)_minmax(0,1.05fr)]">
         {/* ---- the rail --------------------------------------------------------------------------------- */}
         <div role="tablist" aria-label="Portal settings sections" aria-orientation="vertical"
+          onKeyDown={(e) => {
+            const i = SECTIONS.findIndex((x) => x.id === section);
+            const step = e.key === "ArrowDown" || e.key === "ArrowRight" ? 1 : e.key === "ArrowUp" || e.key === "ArrowLeft" ? -1 : 0;
+            if (!step) return;
+            e.preventDefault();
+            const next = SECTIONS[(i + step + SECTIONS.length) % SECTIONS.length];
+            setSection(next.id);
+            document.getElementById(`portal-tab-${next.id}`)?.focus();
+          }}
           className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1 lg:mx-0 lg:flex-col lg:self-start lg:overflow-visible lg:px-0 xl:sticky xl:top-6">
           {SECTIONS.map((s) => (
             <button
               key={s.id}
+              id={`portal-tab-${s.id}`}
               role="tab"
               type="button"
+              tabIndex={section === s.id ? 0 : -1}
               aria-selected={section === s.id}
               aria-controls="portal-section"
               onClick={() => setSection(s.id)}
               className={cn(
-                "inline-flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors",
+                "inline-flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-start text-sm transition-colors",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
                 section === s.id
                   ? "bg-primary-subtle font-medium text-primary-subtle-foreground"
                   : "text-muted-foreground hover:bg-surface hover:text-foreground",
               )}
             >
-              <s.icon className="h-4 w-4 shrink-0" aria-hidden />
+              <s.icon className="size-4 shrink-0" aria-hidden />
               <span className="whitespace-nowrap">{s.label}</span>
-              {sectionHasIssue(s.id) && <AlertTriangle className="ml-auto h-3.5 w-3.5 text-destructive" aria-label="has problems" />}
+              {sectionHasIssue(s.id) && (
+                <span className="ms-auto inline-flex items-center text-destructive">
+                  <AlertTriangle className="size-3.5" aria-hidden />
+                  <span className="sr-only">has problems</span>
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -451,19 +477,21 @@ export default function PortalSettingsPage() {
                     and this page collects room numbers and voucher codes.
                   </p>
                   {unused.length > 0 && (
-                    <div className="border-t pt-4">
-                      <h3 className="text-sm font-medium">Previously uploaded</h3>
+                    <div className="border-t border-border pt-4">
+                      <h3 className="text-label">Previously uploaded</h3>
                       <p className="mb-2 text-xs text-muted-foreground">Not used by the current settings.</p>
                       <ul className="flex flex-wrap gap-3">
                         {unused.map((a) => (
-                          <li key={a.name} className="flex items-center gap-2 rounded border p-2">
+                          <li key={a.name} className="flex items-center gap-2 rounded-md border border-border p-2">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img src={assetSrc(a.url)} alt="" className="h-10 w-16 rounded object-contain" />
                             <span className="text-xs text-muted-foreground">{Math.round(a.size_bytes / 1024)} KB</span>
-                            <Button size="sm" variant="secondary" disabled={!writable}
-                              onClick={() => removeUnusedAsset(a.name)} aria-label={`Delete ${a.name}`}>
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
+                            {writable && (
+                              <Button size="icon-sm" variant="ghost"
+                                onClick={() => removeUnusedAsset(a.name)} aria-label={`Delete ${a.name}`}>
+                                <Trash2 />
+                              </Button>
+                            )}
                           </li>
                         ))}
                       </ul>
@@ -588,7 +616,7 @@ function OptionRow({ label, hint, children }: { label: string; hint?: string; ch
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div className="min-w-0">
-        <div className="text-sm font-medium">{label}</div>
+        <div className="text-label">{label}</div>
         {hint && <div className="text-xs text-muted-foreground">{hint}</div>}
       </div>
       {children}
@@ -601,8 +629,11 @@ function ContrastNote({ label, ratio }: { label: string; ratio: number | null })
   if (ratio === null) return null;
   const ok = ratio >= 4.5;
   return (
-    <p className={cn("flex items-center gap-1.5 text-xs", ok ? "text-muted-foreground" : "text-warning-subtle-foreground")}>
-      {ok ? <Check className="h-3.5 w-3.5 text-success" aria-hidden /> : <AlertTriangle className="h-3.5 w-3.5" aria-hidden />}
+    <p className={cn(
+      "flex items-start gap-1.5 text-xs",
+      ok ? "text-muted-foreground" : "rounded-md border border-warning/30 bg-warning-subtle px-3 py-2 text-warning-subtle-foreground",
+    )}>
+      {ok ? <Check className="mt-px size-3.5 shrink-0 text-success" aria-hidden /> : <AlertTriangle className="mt-px size-3.5 shrink-0" aria-hidden />}
       {label}: {ratio.toFixed(1)}:1{ok ? "" : " — below the 4.5:1 many guests need to read it comfortably. Choose a darker colour."}
     </p>
   );
@@ -620,7 +651,8 @@ function ColorField({ label, help, value, fallback, disabled, error, onChange }:
       <Label htmlFor={id}>{label}</Label>
       <span className="flex items-center gap-2">
         <input id={id} type="color" value={/^#[0-9a-fA-F]{6}$/.test(value ?? "") ? value : fallback} disabled={disabled}
-          aria-describedby={id + "-help"} onChange={(e) => onChange(e.target.value)} className="h-9 w-12 shrink-0 rounded border" />
+          aria-describedby={id + "-help"} onChange={(e) => onChange(e.target.value)}
+          className="h-10 w-12 shrink-0 cursor-pointer rounded-md border border-input bg-card p-1 disabled:cursor-not-allowed disabled:opacity-50" />
         <Input value={value ?? ""} placeholder={fallback} disabled={disabled} aria-invalid={error ? true : undefined}
           aria-label={label + " as a hex value"} onChange={(e) => onChange(e.target.value)} />
       </span>
@@ -639,32 +671,40 @@ function ImageField({ label, help, src, busy, writable, wide, error, onPick, onC
 }) {
   return (
     <div>
-      <span className="block text-sm font-medium">{label}</span>
+      <span className="block text-label">{label}</span>
       <span className="mb-2 block text-xs text-muted-foreground">{help}</span>
       <div className="flex flex-wrap items-center gap-3">
-        <div className={`flex items-center justify-center overflow-hidden rounded-lg border bg-surface ${wide ? "h-24 w-44" : "h-20 w-32"}`}>
+        <div className={cn("flex items-center justify-center overflow-hidden rounded-lg border border-border bg-surface", wide ? "h-24 w-44" : "h-20 w-32")}>
           {src
             // eslint-disable-next-line @next/next/no-img-element
             ? <img src={src} alt={`${label} currently set`} className="h-full w-full object-contain" />
             : <span className="px-2 text-center text-2xs text-muted-foreground">Nothing set — the portal uses its own default</span>}
         </div>
-        <div className="flex flex-col gap-2">
-          <label className={`inline-flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm ${!writable ? "opacity-50" : ""}`}>
-            <Upload className="h-4 w-4" aria-hidden />
-            {busy ? "Uploading…" : src ? `Replace ${label.toLowerCase()}` : `Upload ${label.toLowerCase()}`}
-            <input type="file" className="hidden" disabled={!writable || busy}
-              accept="image/png,image/jpeg,image/webp,image/gif"
-              aria-label={`Upload ${label.toLowerCase()}`}
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(f); e.target.value = ""; }} />
-          </label>
-          {src && (
-            <Button size="sm" variant="secondary" disabled={!writable} onClick={onClear}>
-              Remove {label.toLowerCase()}
-            </Button>
-          )}
-        </div>
+        {writable && (
+          <div className="flex flex-col gap-2">
+            {/* The file input stays in the tab order (visually hidden, not display:none), so the upload is
+                reachable by keyboard; the label is what looks like the button. */}
+            <label className={cn(
+              buttonVariants({ variant: "secondary", size: "sm" }),
+              "cursor-pointer has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2",
+              busy && "pointer-events-none opacity-50",
+            )}>
+              <Upload aria-hidden />
+              {busy ? "Uploading…" : src ? `Replace ${label.toLowerCase()}` : `Upload ${label.toLowerCase()}`}
+              <input type="file" className="sr-only" disabled={busy}
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                aria-label={`Upload ${label.toLowerCase()}`}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(f); e.target.value = ""; }} />
+            </label>
+            {src && (
+              <Button size="sm" variant="ghost" onClick={onClear}>
+                Remove {label.toLowerCase()}
+              </Button>
+            )}
+          </div>
+        )}
       </div>
-      {error && <p className="mt-1.5 text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="mt-1.5 text-xs text-destructive">{error}</p>}
     </div>
   );
 }

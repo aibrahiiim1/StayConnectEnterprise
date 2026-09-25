@@ -1,6 +1,6 @@
 "use client";
 
-// Phase 4 (DARK) — Financial recovery.
+// Phase 4 (DARK) — Recovery.
 //
 // This screen exists for the worst day: the database has been restored, and nobody yet knows which of the
 // payments and postings that were in flight actually completed out in the world.
@@ -11,9 +11,12 @@
 // anything.
 //
 // Each decision takes a password and a written account of how it was established, for the same reason a
-// Manual Review decision does: this is an assertion about real money and it should carry a name.
+// Manual review decision does: this is an assertion about real money and it should carry a name.
+//
+// A role that may not decide sees the same state and items, and no form, password field or button at all.
 
 import { useCallback, useEffect, useState } from "react";
+import { CircleCheck, LifeBuoy, ShieldAlert } from "lucide-react";
 import {
   api,
   RECOVERY_RESOLUTIONS,
@@ -24,11 +27,17 @@ import {
   ZeroAttemptRow,
   surfaceUnavailableMessage,
 } from "@/lib/api";
-import { Card, CardBody } from "@/components/ui/card";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
+import { Card, CardBody, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { Field, Input, Select, Textarea } from "@/components/ui/input";
+import { PageHeader, PageShell } from "@/components/ui/page";
+import { MonoId, Skeleton } from "@/components/ui/misc";
+import { ReadOnlyNotice } from "@/components/ui/patterns";
+import { formatDate } from "@/lib/utils";
+import { humanize, money } from "./format";
 
 const RESOLUTION_TEXT: Record<RecoveryResolution, string> = {
   CONFIRMED_COMPLETED: "It already completed — confirmed against the provider or the folio",
@@ -42,11 +51,6 @@ const KIND_TEXT: Record<RecoveryHold["work_kind"], string> = {
   PAYMENT_TRANSACTION: "Payment",
   SETTLEMENT: "Settlement",
 };
-
-function money(minor: number | null, currency: string, exponent = 2): string {
-  if (minor === null) return "—";
-  return `${(minor / Math.pow(10, exponent)).toFixed(exponent)} ${currency}`;
-}
 
 export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
   const [status, setStatus] = useState<RecoveryStatus | null>(null);
@@ -95,6 +99,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
     }
     setBusy(hold.hold_id);
     setErr(null);
+    setNote(null);
     try {
       await api.post(`/financial-ops/recovery/holds/${hold.hold_id}/resolve`, {
         resolution,
@@ -113,6 +118,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
   async function release() {
     setBusy("release");
     setErr(null);
+    setNote(null);
     try {
       await api.post("/financial-ops/recovery/release", {
         note: evidence["__release"] ?? "",
@@ -134,6 +140,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
   async function authorizeZeroAttempt(row: ZeroAttemptRow) {
     setBusy(row.posting_id);
     setErr(null);
+    setNote(null);
     try {
       await api.post(`/financial-ops/recovery/zero-attempt/${row.posting_id}/authorize`, {
         reason: zaReason[row.posting_id] ?? "",
@@ -155,256 +162,240 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
     }
   }
 
-  // The error is rendered BEFORE the loading guard. When the load fails the state variable is never set,
-  // so a guard placed first returns "Loading…" forever and the alert further down is unreachable -- the
-  // screen tells the operator it is still working when it has already given up.
-  if (err) return <p role="alert" className="text-sm text-destructive">{err}</p>;
-  if (!status) return <p role="status">Loading recovery state…</p>;
+  const header = (
+    <PageHeader
+      icon={<LifeBuoy />}
+      eyebrow="Charges"
+      title="Recovery"
+      description="After a database restore, reconcile the money that was in flight before charging resumes. Nothing here re-sends anything."
+    />
+  );
+
+  if (!status) {
+    return (
+      <PageShell>
+        {header}
+        <ErrorBanner err={err} className="mb-0" />
+        {!err && (
+          <div className="space-y-4" aria-busy="true">
+            <span className="sr-only">Loading recovery state</span>
+            <Skeleton className="h-28 w-full" />
+            <Skeleton className="h-40 w-full" />
+          </div>
+        )}
+      </PageShell>
+    );
+  }
 
   if (!status.Active) {
     return (
-      <Card>
-        <CardBody>
-          <div className="flex items-center gap-3">
-            <Badge tone="ok">NOT IN RECOVERY</Badge>
-            <p className="text-sm text-muted-foreground">
-              Financial execution is running normally. Epoch {status.Epoch}.
-            </p>
-          </div>
-        </CardBody>
-      </Card>
+      <PageShell>
+        {header}
+        <ErrorBanner err={err} className="mb-0" />
+        {note && <Callout tone="success">{note}</Callout>}
+        <Card>
+          <CardBody className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center">
+            <CircleCheck className="size-6 shrink-0 text-success" aria-hidden />
+            <div className="min-w-0 space-y-1">
+              <Badge tone="ok" dot>Not in recovery</Badge>
+              <p className="text-sm text-muted-foreground">
+                Financial execution is running normally. Epoch {status.Epoch}.
+              </p>
+            </div>
+          </CardBody>
+        </Card>
+      </PageShell>
     );
   }
 
   const open = holds ?? [];
+  const zq = zero?.queue ?? [];
 
   return (
-    <div className="space-y-4">
-      {err ? <p role="alert" className="text-sm text-destructive">{err}</p> : null}
-      {note ? <p role="status" className="text-sm text-success-subtle-foreground">{note}</p> : null}
+    <PageShell>
+      {header}
 
-      <Card>
-        <CardBody>
-          <div className="flex items-start gap-3">
-            <Badge tone="err">FINANCIAL RECOVERY</Badge>
-            <div className="text-sm text-foreground">
-              <p>
-                Money movement is held for this site. Nothing has been replayed and nothing will be: after a
-                restore, a correct retry is how a guest gets charged twice.
-              </p>
-              <p className="mt-2">
-                Epoch {status.Epoch} · {status.Reason.replace(/_/g, " ").toLowerCase()} ·{" "}
-                <strong>{status.HeldOpen}</strong> of {status.HeldTotal} items still to reconcile.
-              </p>
-              <p className="mt-2 text-muted-foreground">Guest internet access is unaffected and continues to work.</p>
-            </div>
+      {!canAct && <ReadOnlyNotice>Your role can see the recovery state but not record decisions or release it.</ReadOnlyNotice>}
+      <ErrorBanner err={err} className="mb-0" />
+      {note && <Callout tone="success">{note}</Callout>}
+
+      {/* The recovery banner. Deliberately not an alert region: it is the page's standing state, not news. */}
+      <section className="overflow-hidden rounded-lg border border-destructive/40 bg-card shadow-card">
+        <div className="flex flex-col gap-3 bg-destructive-subtle px-5 py-4 sm:flex-row sm:items-start">
+          <ShieldAlert className="size-6 shrink-0 text-destructive-subtle-foreground" aria-hidden />
+          <div className="min-w-0 space-y-2 text-sm text-foreground">
+            <Badge tone="err" dot>Financial recovery</Badge>
+            <p>
+              Money movement is held for this site. Nothing has been replayed and nothing will be: after a
+              restore, a correct retry is how a guest gets charged twice.
+            </p>
+            <p className="tabular">
+              Epoch {status.Epoch} · {status.Reason.replace(/_/g, " ").toLowerCase()} ·{" "}
+              <strong>{status.HeldOpen}</strong> of {status.HeldTotal} items still to reconcile.
+            </p>
+            <p className="text-muted-foreground">Guest internet access is unaffected and continues to work.</p>
           </div>
-        </CardBody>
-      </Card>
+        </div>
+      </section>
 
-      <Card>
-        <CardBody>
-          <label className="block text-sm font-medium" htmlFor="recovery-password">
-            Your password
-          </label>
-          <input
-            id="recovery-password"
-            type="password"
-            autoComplete="current-password"
-            className="mt-1 w-full max-w-sm rounded-md border border-border px-3 py-2"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            aria-describedby="recovery-password-help"
-          />
-          <p id="recovery-password-help" className="mt-1 text-xs text-muted-foreground">
-            Every reconciliation decision is an audited statement about real money, so each one is confirmed
-            with your password.
-          </p>
-        </CardBody>
-      </Card>
-
-      {(zero?.queue.length ?? 0) > 0 ? (
+      {canAct && (
         <Card>
           <CardBody>
-            <h3 className="mb-1 text-sm font-medium text-muted-foreground">
-              Never transmitted ({zero!.queue.length})
-            </h3>
-            <p className="mb-3 max-w-3xl text-sm text-foreground">
+            <Field
+              label="Your password"
+              htmlFor="recovery-password"
+              hint="Every reconciliation decision is an audited statement about real money, so each one is confirmed with your password."
+            >
+              <Input
+                id="recovery-password"
+                type="password"
+                autoComplete="current-password"
+                className="max-w-sm"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </Field>
+          </CardBody>
+        </Card>
+      )}
+
+      {zq.length > 0 ? (
+        <Card>
+          <CardHeader className="block space-y-1">
+            <CardTitle>Never transmitted ({zq.length})</CardTitle>
+            <CardDescription className="max-w-3xl">
               These charges were held before anything was sent to the PMS, so there is no attempt to review
               and they do not appear on the Manual Review screen. {zero!.note}
-            </p>
-            <Table>
-              <THead>
-                <TR>
-                  <TH>Posting</TH>
-                  <TH>Amount</TH>
-                  <TH>What was established</TH>
-                  <TH>Authorize one attempt</TH>
-                  <TH> </TH>
-                </TR>
-              </THead>
-              <tbody>
-                {zero!.queue.map((z) => (
-                  <TR key={z.posting_id}>
-                    <TD>
-                      <code className="text-xs">{z.posting_id.slice(0, 8)}</code>
-                    </TD>
-                    <TD>{money(z.amount_minor, z.currency, z.currency_exponent)}</TD>
-                    <TD>
-                      {z.retry_authorized_attempt_no !== null ? (
-                        <Badge tone="ok">ATTEMPT {z.retry_authorized_attempt_no} AUTHORIZED</Badge>
-                      ) : z.hold_resolution ? (
-                        <Badge tone={z.eligible_for_retry_authorization ? "warn" : "default"}>
-                          {z.hold_resolution.replace(/_/g, " ")}
-                        </Badge>
-                      ) : (
-                        <Badge tone="default">NOT YET RECONCILED</Badge>
-                      )}
-                    </TD>
-                    <TD>
-                      {z.eligible_for_retry_authorization ? (
-                        <div className="space-y-2">
-                          <div>
-                            <label className="sr-only" htmlFor={`za-reason-${z.posting_id}`}>
-                              Why this charge must still go out
-                            </label>
-                            <textarea
-                              id={`za-reason-${z.posting_id}`}
-                              rows={2}
-                              className="w-72 rounded-md border border-border px-2 py-1"
-                              placeholder="Why this charge must still go out"
-                              value={zaReason[z.posting_id] ?? ""}
-                              onChange={(e) =>
-                                setZaReason({ ...zaReason, [z.posting_id]: e.target.value })
-                              }
-                            />
-                          </div>
-                          <div className="flex gap-2">
-                            <div>
-                              <label className="sr-only" htmlFor={`za-source-${z.posting_id}`}>
-                                Evidence source for this posting
-                              </label>
-                              <select
-                                id={`za-source-${z.posting_id}`}
-                                className="rounded-md border border-border px-2 py-1"
-                                value={zaSource[z.posting_id] ?? ""}
-                                onChange={(e) =>
-                                  setZaSource({ ...zaSource, [z.posting_id]: e.target.value })
-                                }
-                              >
-                                <option value="">Choose…</option>
-                                {(zero!.evidence_contract?.source_types ?? []).map((t) => (
-                                  <option key={t} value={t}>
-                                    {t}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                            <div>
-                              <label className="sr-only" htmlFor={`za-ref-${z.posting_id}`}>
-                                Reference to that evidence
-                              </label>
-                              <input
-                                id={`za-ref-${z.posting_id}`}
-                                className="w-40 rounded-md border border-border px-2 py-1"
-                                placeholder="e.g. folio 4471"
-                                value={zaRef[z.posting_id] ?? ""}
-                                onChange={(e) => setZaRef({ ...zaRef, [z.posting_id]: e.target.value })}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      ) : (
-                        <p className="max-w-xs text-xs text-muted-foreground">
-                          {z.retry_authorized_attempt_no !== null
-                            ? "An attempt has already been authorized for this posting. Exactly one is allowed."
-                            : "Reconcile this item above as “It never completed” first — the authorization rests on that finding."}
-                        </p>
-                      )}
-                    </TD>
-                    <TD>
-                      {z.eligible_for_retry_authorization ? (
-                        <Button
-                          disabled={!canAct || busy === z.posting_id}
-                          onClick={() => void authorizeZeroAttempt(z)}
+            </CardDescription>
+          </CardHeader>
+          <ul className="divide-y divide-border">
+            {zq.map((z) => (
+              <li key={z.posting_id} className="space-y-3 px-5 py-4">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                  <span className="text-emphasis tabular">{money(z.amount_minor, z.currency, z.currency_exponent)}</span>
+                  <MonoId value={z.posting_id} title="Posting reference" />
+                  {z.retry_authorized_attempt_no !== null ? (
+                    <Badge tone="ok" dot>Attempt {z.retry_authorized_attempt_no} authorized</Badge>
+                  ) : z.hold_resolution ? (
+                    <Badge tone={z.eligible_for_retry_authorization ? "warn" : "default"}>
+                      {humanize(z.hold_resolution)}
+                    </Badge>
+                  ) : (
+                    <Badge tone="default">Not yet reconciled</Badge>
+                  )}
+                </div>
+                {z.eligible_for_retry_authorization ? (
+                  canAct ? (
+                    <div className="grid gap-3 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+                      <Field label="Why this charge must still go out" htmlFor={`za-reason-${z.posting_id}`}>
+                        <Textarea
+                          id={`za-reason-${z.posting_id}`}
+                          rows={2}
+                          className="min-h-10"
+                          value={zaReason[z.posting_id] ?? ""}
+                          onChange={(e) => setZaReason({ ...zaReason, [z.posting_id]: e.target.value })}
+                        />
+                      </Field>
+                      <Field label="Evidence source for this posting" htmlFor={`za-source-${z.posting_id}`}>
+                        <Select
+                          id={`za-source-${z.posting_id}`}
+                          value={zaSource[z.posting_id] ?? ""}
+                          onChange={(e) => setZaSource({ ...zaSource, [z.posting_id]: e.target.value })}
                         >
-                          {busy === z.posting_id ? "Authorizing…" : "Authorize one attempt"}
-                        </Button>
-                      ) : null}
-                    </TD>
-                  </TR>
-                ))}
-              </tbody>
-            </Table>
-            <p className="mt-3 text-xs text-muted-foreground">
-              {zero!.eligibility} Authorizing sends nothing now, and it can be done once per posting.
-            </p>
-          </CardBody>
+                          <option value="">Choose…</option>
+                          {(zero!.evidence_contract?.source_types ?? []).map((t) => (
+                            <option key={t} value={t}>
+                              {t}
+                            </option>
+                          ))}
+                        </Select>
+                      </Field>
+                      <Field label="Reference to that evidence" htmlFor={`za-ref-${z.posting_id}`}>
+                        <Input
+                          id={`za-ref-${z.posting_id}`}
+                          placeholder="e.g. folio 4471"
+                          value={zaRef[z.posting_id] ?? ""}
+                          onChange={(e) => setZaRef({ ...zaRef, [z.posting_id]: e.target.value })}
+                        />
+                      </Field>
+                      <Button
+                        className="h-10"
+                        disabled={busy === z.posting_id}
+                        onClick={() => void authorizeZeroAttempt(z)}
+                      >
+                        {busy === z.posting_id ? "Authorizing…" : "Authorize one attempt"}
+                      </Button>
+                    </div>
+                  ) : null
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    {z.retry_authorized_attempt_no !== null
+                      ? "An attempt has already been authorized for this posting. Exactly one is allowed."
+                      : "Reconcile this item above as “It never completed” first — the authorization rests on that finding."}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+          <CardFooter className="text-xs text-muted-foreground">
+            {zero!.eligibility} Authorizing sends nothing now, and it can be done once per posting.
+          </CardFooter>
         </Card>
       ) : null}
 
       {open.length === 0 ? (
         <Card>
-          <CardBody>
+          <CardBody className="space-y-4">
             <EmptyState
+              className="py-6"
+              icon={<CircleCheck />}
               title="Everything has been reconciled"
               hint="No held items remain. Releasing recovery resumes money movement for this site."
             />
-            <div>
-              <label className="mt-3 block text-sm font-medium" htmlFor="release-note">
-                Why is it safe to resume?
-              </label>
-              <textarea
-                id="release-note"
-                className="mt-1 w-full rounded-md border border-border px-3 py-2"
-                rows={3}
-                value={evidence["__release"] ?? ""}
-                onChange={(e) => setEvidence({ ...evidence, __release: e.target.value })}
-              />
-              <Button
-                className="mt-3"
-                disabled={!canAct || busy === "release"}
-                onClick={() => void release()}
-              >
-                {busy === "release" ? "Releasing…" : "Release financial recovery"}
-              </Button>
-            </div>
+            {canAct && (
+              <div className="space-y-3 border-t border-border pt-4">
+                <Field label="Why is it safe to resume?" htmlFor="release-note" hint="Recorded in the audit log with your name.">
+                  <Textarea
+                    id="release-note"
+                    rows={3}
+                    value={evidence["__release"] ?? ""}
+                    onChange={(e) => setEvidence({ ...evidence, __release: e.target.value })}
+                  />
+                </Field>
+                <Button disabled={busy === "release"} onClick={() => void release()}>
+                  {busy === "release" ? "Releasing…" : "Release financial recovery"}
+                </Button>
+              </div>
+            )}
           </CardBody>
         </Card>
       ) : (
         <Card>
-          <CardBody>
-            <h3 className="mb-3 text-sm font-medium text-muted-foreground">Held work ({open.length})</h3>
-            <Table>
-              <THead>
-                <TR>
-                  <TH>What</TH>
-                  <TH>State when held</TH>
-                  <TH>Amount</TH>
-                  <TH>What did you establish?</TH>
-                  <TH>How did you establish it?</TH>
-                  <TH> </TH>
-                </TR>
-              </THead>
-              <tbody>
-                {open.map((h) => (
-                  <TR key={h.hold_id}>
-                    <TD>{KIND_TEXT[h.work_kind]}</TD>
-                    <TD>
-                      <Badge tone="warn">{h.held_status}</Badge>
-                    </TD>
-                    <TD>{money(h.amount_minor, h.currency)}</TD>
-                    <TD>
-                      <label className="sr-only" htmlFor={`res-${h.hold_id}`}>
-                        Conclusion for this {KIND_TEXT[h.work_kind].toLowerCase()}
-                      </label>
-                      <select
+          <CardHeader className="block space-y-1">
+            <CardTitle>Held work ({open.length})</CardTitle>
+            <CardDescription>
+              For each item, record what you established and how. Recording a decision never re-sends anything.
+            </CardDescription>
+          </CardHeader>
+          <ul className="divide-y divide-border">
+            {open.map((h) => (
+              <li key={h.hold_id} className="space-y-3 px-5 py-4">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                  <span className="text-emphasis">{KIND_TEXT[h.work_kind]}</span>
+                  <span className="tabular">{money(h.amount_minor, h.currency)}</span>
+                  <Badge tone="warn">State when held: {humanize(h.held_status)}</Badge>
+                  <span className="text-xs text-muted-foreground">Held {formatDate(h.held_at)}</span>
+                </div>
+                {canAct && (
+                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+                    <Field
+                      label={`Conclusion for this ${KIND_TEXT[h.work_kind].toLowerCase()}`}
+                      htmlFor={`res-${h.hold_id}`}
+                    >
+                      <Select
                         id={`res-${h.hold_id}`}
-                        className="rounded-md border border-border px-2 py-1"
                         value={choice[h.hold_id] ?? ""}
-                        onChange={(e) =>
-                          setChoice({ ...choice, [h.hold_id]: e.target.value as RecoveryResolution })
-                        }
+                        onChange={(e) => setChoice({ ...choice, [h.hold_id]: e.target.value as RecoveryResolution })}
                       >
                         <option value="">Choose…</option>
                         {RECOVERY_RESOLUTIONS.map((r) => (
@@ -412,36 +403,29 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
                             {RESOLUTION_TEXT[r]}
                           </option>
                         ))}
-                      </select>
-                    </TD>
-                    <TD>
-                      <label className="sr-only" htmlFor={`note-${h.hold_id}`}>
-                        Evidence for this decision
-                      </label>
-                      <input
+                      </Select>
+                    </Field>
+                    <Field label="Evidence for this decision" htmlFor={`note-${h.hold_id}`}>
+                      <Input
                         id={`note-${h.hold_id}`}
-                        className="w-64 rounded-md border border-border px-2 py-1"
                         placeholder="e.g. provider dashboard shows no charge"
                         value={evidence[h.hold_id] ?? ""}
                         onChange={(e) => setEvidence({ ...evidence, [h.hold_id]: e.target.value })}
                       />
-                    </TD>
-                    <TD>
-                      <Button disabled={!canAct || busy === h.hold_id} onClick={() => void resolve(h)}>
-                        {busy === h.hold_id ? "Recording…" : "Record"}
-                      </Button>
-                    </TD>
-                  </TR>
-                ))}
-              </tbody>
-            </Table>
-            <p className="mt-3 text-xs text-muted-foreground">
-              Recording a decision never re-sends anything. Recovery can only be released once every item
-              above has been reconciled.
-            </p>
-          </CardBody>
+                    </Field>
+                    <Button className="h-10" disabled={busy === h.hold_id} onClick={() => void resolve(h)}>
+                      {busy === h.hold_id ? "Recording…" : "Record"}
+                    </Button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+          <CardFooter className="text-xs text-muted-foreground">
+            Recovery can only be released once every item above has been reconciled.
+          </CardFooter>
         </Card>
       )}
-    </div>
+    </PageShell>
   );
 }

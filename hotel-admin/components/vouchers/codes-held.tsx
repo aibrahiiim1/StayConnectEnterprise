@@ -86,7 +86,7 @@ export function CodesHeld({
       <details className="rounded-md border border-border p-3">
         <summary className="cursor-pointer text-sm font-medium">Card layout</summary>
         <div className="mt-3 grid gap-4 sm:grid-cols-2">
-          <Field label="Heading printed on each card" htmlFor={headingId}>
+          <Field label="Heading printed on each card" htmlFor={headingId} hint={`${heading.length}/60 characters. Printed at the top of every card.`}>
             <Input id={headingId} value={heading} maxLength={60} onChange={(e) => setHeading(e.target.value)} />
           </Field>
           <VoucherCardFace

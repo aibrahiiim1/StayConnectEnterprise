@@ -33,6 +33,7 @@ export default function VouchersPage() {
       canEditFormat={roles === null ? false : canWrite("voucher-code-settings", r)}
       // Only for the hotel name printed on voucher cards; the card prints without it.
       canReadBranding={roles === null ? false : canRead("portal-branding", r)}
+      readOnly={roles !== null && !canWrite("vouchers", r) && !canWrite("voucher-codes", r)}
     />
   );
 }

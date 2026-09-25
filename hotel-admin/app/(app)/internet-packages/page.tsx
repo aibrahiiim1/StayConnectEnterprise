@@ -9,9 +9,11 @@
 //
 // See packages-tab.tsx and activity-tab.tsx for the reasoning each view carries.
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Package, Plus } from "lucide-react";
-import { ApiError } from "@/lib/api";
+import { api, ApiError, Whoami } from "@/lib/api";
+import { canWrite } from "@/lib/roles";
+import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { Card, CardBody } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -37,6 +39,13 @@ export default function InternetPackagesPage() {
   const [err, setErr] = useState<string | null>(null);
   const [addRequest, setAddRequest] = useState(0);
   const { disabled, guard } = useDisabled();
+  // Fails closed while it loads: the Add / Edit / Disable / Delete controls appear only for a role the server
+  // will accept them from. edged enforces the real gate either way.
+  const [roles, setRoles] = useState<string[] | null>(null);
+  useEffect(() => {
+    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
+  }, []);
+  const writable = roles !== null && canWrite("commercial-packages", roles);
 
   return (
     <PageShell width="wide">
@@ -45,12 +54,15 @@ export default function InternetPackagesPage() {
         eyebrow="Internet offering"
         title="Internet packages"
         description="What guests are offered on the portal, and what those packages are doing for guests right now."
-        actions={!disabled && (
+        actions={!disabled && writable && (
           <Button onClick={() => { setTab("packages"); setAddRequest((n) => n + 1); }}>
             <Plus /> Add package
           </Button>
         )}
       />
+      {!disabled && roles !== null && !writable && (
+        <ReadOnlyNotice>Your role can see the internet packages but not change them.</ReadOnlyNotice>
+      )}
       {disabled ? (
         <Card><CardBody>
           <EmptyState
@@ -67,7 +79,7 @@ export default function InternetPackagesPage() {
           </TabsList>
           <ErrorBanner err={err} className="mt-4" />
           <TabsContent value="packages" className="mt-4">
-            <PackagesTab guard={guard} setErr={setErr} addRequest={addRequest} onAddHandled={() => setAddRequest(0)} />
+            <PackagesTab guard={guard} setErr={setErr} addRequest={addRequest} onAddHandled={() => setAddRequest(0)} writable={writable} />
           </TabsContent>
           <TabsContent value="activity" className="mt-4">
             <ActivityTab guard={guard} setErr={setErr} />

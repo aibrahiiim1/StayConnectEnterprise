@@ -69,6 +69,8 @@ const FREEE_CURRENT = {
 
 function mockLoad(packages = PACKAGES, plans: unknown[] = PLANS) {
   g.mockImplementation((path: string) => {
+    // A role that may change plans: the write controls are offered only to one.
+    if (path === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
     if (path === "/commercial-packages/plans") return Promise.resolve(list(plans));
     if (path === "/commercial-packages") return Promise.resolve(list(packages));
     if (path === "/commercial-packages/pkg-freee/current") return Promise.resolve(FREEE_CURRENT);
@@ -320,6 +322,7 @@ describe("ServicePlansPage — add, record and delete", () => {
 
   it("the plan record lists the packages using it and its saved versions", async () => {
     g.mockImplementation((path: string) => {
+      if (path === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
       if (path === "/commercial-packages/plans") return Promise.resolve(list(PLANS));
       if (path === "/commercial-packages") return Promise.resolve(list(PACKAGES));
       if (path === "/commercial-packages/plans/plan-free/revisions") return Promise.resolve(list([
@@ -339,6 +342,7 @@ describe("ServicePlansPage — add, record and delete", () => {
 
   it("Delete… of a used plan shows what is attached and why, offers no delete, and sends nothing", async () => {
     g.mockImplementation((path: string) => {
+      if (path === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
       if (path === "/commercial-packages/plans") return Promise.resolve(list(PLANS));
       if (path === "/commercial-packages") return Promise.resolve(list(PACKAGES));
       if (path === "/commercial-packages/plans/plan-free/deletability") return Promise.resolve({
@@ -363,6 +367,7 @@ describe("ServicePlansPage — add, record and delete", () => {
     const d = (api as unknown as { del: ReturnType<typeof vi.fn> }).del;
     d.mockResolvedValue({ deleted: true });
     g.mockImplementation((path: string) => {
+      if (path === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
       if (path === "/commercial-packages/plans") return Promise.resolve(list(PLANS));
       if (path === "/commercial-packages") return Promise.resolve(list(PACKAGES));
       if (path === "/commercial-packages/plans/plan-free/deletability") return Promise.resolve({ deletable: true, reasons: [] });
