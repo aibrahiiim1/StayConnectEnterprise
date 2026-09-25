@@ -9,24 +9,15 @@ import { join } from "node:path";
 // SERVER-SIDE trust boundary (portald injecting the pins, browser unable to substitute Tenant/Site/
 // Auth-Context/Device/Guest-Network) is additionally proven by the Go portald bridge tests.
 
-const templatesGo = join(__dirname, "../../data-plane/cmd/portald/templates.go");
-
+// The success page as portald renders it, commerce ON and OFF. data-plane/cmd/portald renders both with the
+// real handler into e2e/fixtures (TestE2EPortalFixtures fails when they are stale), so these tests exercise
+// the exact page a guest receives -- the Go template is assembled from shared pieces and can no longer be cut
+// out of the source with a regular expression. The nonce is the inert placeholder "e2e-nonce".
 function renderSuccess(commerceEnabled: boolean): string {
-  const src = readFileSync(templatesGo, "utf8");
-  const start = src.indexOf("const successHTML = `") + "const successHTML = `".length;
-  const end = src.indexOf("`", start);
-  let html = src.slice(start, end);
-  html = html.replace(/\{\{\.SessionID\}\}/g, "sess-1");
-  // The per-response CSP nonce. Served here without the header, so any placeholder is inert.
-  html = html.replace(/\{\{\.Nonce\}\}/g, "e2e-nonce");
-  // pick the {{else}} branch of the DurationSeconds conditional
-  html = html.replace(/\{\{if \.DurationSeconds\}\}[\s\S]*?\{\{else\}\}([\s\S]*?)\{\{end\}\}/, "$1");
-  if (commerceEnabled) {
-    html = html.replace("{{if .CommerceEnabled}}", "").replace("{{end}}", "");
-  } else {
-    html = html.replace(/\{\{if \.CommerceEnabled\}\}[\s\S]*?\{\{end\}\}/, "");
-  }
-  return html;
+  return readFileSync(
+    join(__dirname, "fixtures", commerceEnabled ? "portal-success-commerce.html" : "portal-success.html"),
+    "utf8",
+  );
 }
 
 type Bodies = { path: string; body: Record<string, unknown> }[];

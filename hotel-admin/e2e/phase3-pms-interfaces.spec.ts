@@ -292,7 +292,7 @@ test("source conflicts name both interfaces by their labels", async ({ page }) =
 
   await expect(page.getByText("Main PMS")).toBeVisible();
   await expect(page.getByText("Spa PMS")).toBeVisible();
-  await expect(page.getByText("high")).toBeVisible();
+  await expect(page.getByText("high", { exact: true })).toBeVisible();
 });
 
 test("resolution evidence summarises outcomes and names no guest", async ({ page }) => {

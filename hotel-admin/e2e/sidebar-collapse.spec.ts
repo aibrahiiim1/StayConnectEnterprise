@@ -109,14 +109,14 @@ test("the choice survives navigation, a reload, and a later session", async ({ p
 test("the width is applied before paint, so a collapsed operator sees no jump", async ({ page }) => {
   await page.goto("/dashboard");
   await collapseBtn(page).click();
-  await expect(desktopAside(page)).toHaveCSS("width", "56px");   // --sidebar-width-rail, settled
+  await expect(desktopAside(page)).toHaveCSS("width", "60px");   // --sidebar-width-rail (3.75rem), settled
   const railWidth = await desktopAside(page).evaluate((el) => el.getBoundingClientRect().width);
 
   // A fresh load with the preference already stored. If the width were React state the server HTML would be
   // the expanded column and this attribute would be absent on the first frame.
   await page.goto("/sessions");
   expect(await page.evaluate(() => document.documentElement.getAttribute("data-sidebar"))).toBe("collapsed");
-  await expect(desktopAside(page)).toHaveCSS("width", "56px");
+  await expect(desktopAside(page)).toHaveCSS("width", "60px");
   expect(await desktopAside(page).evaluate((el) => el.getBoundingClientRect().width)).toBeCloseTo(railWidth, 0);
 });
 
@@ -125,7 +125,7 @@ test("the main content reclaims the width, with one gutter and no horizontal scr
   const wide = await page.locator("main > div").evaluate((el) => el.getBoundingClientRect().width);
 
   await collapseBtn(page).click();
-  await expect(desktopAside(page)).toHaveCSS("width", "56px");
+  await expect(desktopAside(page)).toHaveCSS("width", "60px");
   const wider = await page.locator("main > div").evaluate((el) => el.getBoundingClientRect().width);
   expect(wider).toBeGreaterThan(wide);
 
@@ -191,7 +191,7 @@ test("an operator who asked for reduced motion gets none", async ({ page }) => {
   // And it still WORKS -- removing the animation must not remove the behaviour.
   await collapseBtn(page).click();
   await expect(expandBtn(page)).toBeVisible();
-  await expect(desktopAside(page)).toHaveCSS("width", "56px");
+  await expect(desktopAside(page)).toHaveCSS("width", "60px");
 });
 
 test("motion is restrained by default, not absent", async ({ page }) => {

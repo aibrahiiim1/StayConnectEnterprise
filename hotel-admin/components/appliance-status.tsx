@@ -37,7 +37,7 @@ export function ApplianceStatus({ className }: { className?: string }) {
   }, []);
 
   if (!health && !failed) {
-    return <span className={cn("hidden h-6 w-24 animate-pulse rounded-md bg-surface sm:block", className)} />;
+    return <span className={cn("h-8 w-8 animate-pulse rounded-full bg-surface sm:w-24", className)} />;
   }
 
   // THE WORST FACT WINS. A pill that says "ok" because the top-level status field says so, while the database
@@ -101,15 +101,17 @@ export function ApplianceStatus({ className }: { className?: string }) {
         href="/health"
         aria-label={`Appliance health: ${word}. Open Diagnostics.`}
         className={cn(
-          "hidden items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 text-xs font-medium",
-          "transition-colors hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:inline-flex",
+          // Visible at every width: on a phone the word collapses and the dot stays, so health is never one
+          // navigation away. The accessible name above carries the word either way.
+          "inline-flex h-8 min-w-8 items-center justify-center gap-1.5 rounded-full border border-border bg-card px-2.5 text-xs font-semibold",
+          "transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           tone === "err" && "border-destructive/30 text-destructive-subtle-foreground",
           tone === "warn" && "border-warning/30 text-warning-subtle-foreground",
           className,
         )}
       >
         <StatusDot tone={tone} />
-        <span>{word}</span>
+        <span className="hidden sm:inline">{word}</span>
       </Link>
     </Tooltip>
   );

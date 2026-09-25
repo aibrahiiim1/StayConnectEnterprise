@@ -149,7 +149,7 @@ export function ActiveRestrictions({
               <TR>
                 <TH>Device</TH>
                 <TH className="hidden md:table-cell">Guest network</TH>
-                <TH className="hidden sm:table-cell">Last room typed</TH>
+                <TH className="hidden sm:table-cell">Last room typed (unverified)</TH>
                 <TH className="hidden lg:table-cell">Why</TH>
                 <TH className="hidden lg:table-cell">Started</TH>
                 <TH>Time left</TH>

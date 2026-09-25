@@ -31,7 +31,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { DialogForm } from "@/components/ui/dialog";
 import { MetricStrip } from "@/components/ui/data";
-import { MonoId, SkeletonRows } from "@/components/ui/misc";
+import { SkeletonRows } from "@/components/ui/misc";
 import { ConsequenceList, ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 
@@ -299,7 +299,13 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
               {signals.map((s) => (
                 <TR key={`${s.outcome_code}-${s.guest_network_id}`}>
                   <TD><Badge tone="warn">{outcomeWords(s.outcome_code)}</Badge></TD>
-                  <TD><MonoId value={s.guest_network_id} title="Guest network" /></TD>
+                  {/* Plain text, not the copyable chip: this section is evidence with nothing to act on, and even a
+                      copy button would be a control inside it. The full id is in the tooltip. */}
+                  <TD>
+                    <span className="font-mono text-caption text-muted-foreground" title={`Guest network ${s.guest_network_id}`}>
+                      {s.guest_network_id.length > 12 ? `${s.guest_network_id.slice(0, 8)}…` : s.guest_network_id}
+                    </span>
+                  </TD>
                   <TD className="text-end tabular">{s.occurrences.toLocaleString()}</TD>
                   <TD className="whitespace-nowrap text-sm text-muted-foreground">{formatDate(s.resolved_at)}</TD>
                 </TR>
