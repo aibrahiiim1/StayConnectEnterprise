@@ -18,7 +18,7 @@
   "new_decision_created": false,
   "history_note": "T0030 through T0042 are PRESERVED unchanged. This transition records the FIRST live-DARK deployment of the Phase-4 software to the development Hotel Appliance. It does not accept or close Phase 4; that decision belongs to the Product Owner.",
   "appliance": {
-    "host": "172.21.60.23",
+    "host": "the retired development reference appliance",
     "hostname": "radius",
     "machine_id": "9b1e4e3578164bd094b11d96fc08ed8a",
     "product_uuid": "f65c4d56-d9c7-2cf4-68cd-756dd9d32744",
@@ -90,7 +90,7 @@
     "services": ["scd", "edged", "netd", "portald", "acctd", "hotel-admin", "caddy", "kea-dhcp4-server", "unbound", "postgres"],
     "self_reported": "public.appliance_service_health reports state=healthy and health_ok=true for all ten.",
     "phase_0_to_3": "Legacy IAM (1 operator, 37 guests, 23 sessions) unchanged; captive portal 200; Hotel Admin 200; unbound answering; Kea active; license Active; assignment, identity and the pinned registry anchor unchanged.",
-    "topology": "UNCHANGED. ens160 172.21.60.23/24, ens192, ens192.90, br-lan 10.10.0.1/24, br-g90 10.20.0.1/22 and the same six nft tables, identical before deployment, after deployment, across the reboot and after the rollback."
+    "topology": "UNCHANGED. ens160 the retired development reference appliance's address, ens192, ens192.90, br-lan 10.10.0.1/24, br-g90 10.20.0.1/22 and the same six nft tables, identical before deployment, after deployment, across the reboot and after the rollback."
   },
   "reboot_persistence": {
     "performed": "2026-08-13, authorized controlled reboot; the appliance returned in ~30s",

@@ -26,7 +26,7 @@
   "new_state_note": "The sweep is executed. Guest Accounts renders and its full IAM-v2 lifecycle was exercised against the real API. Navigation shows exactly one active item on all 38 screens and the sidebar keeps its position across navigation. Seven screens that answered HTTP 500 now answer, a Stays listing that referenced a non-existent column is corrected and covered by a test, the Licence screen is wired to the paths edged actually serves, and four Phase-4 screens state that the capability is not enabled here instead of claiming to be loading forever. PMS interfaces gained the create and revision-authoring surface they never had, exposing the endpoint host:port and every other value the implemented connector reads. Kea can persist its own configuration, so guest-VLAN DHCP survives a restart and a full reboot.",
   "phase_affected_note": "post-roadmap (D33/T0072 hardening sweep)",
   "boundaries_observed": [
-    "Confined to DEVELOPMENT appliance 172.21.60.23. Production untouched.",
+    "Confined to DEVELOPMENT appliance (now retired). Production untouched.",
     "No capability was enabled. edged still carries no Phase-4 configuration, and the financial screens report that rather than being switched on.",
     "No PMS event, network topology, guest traffic or protocol evidence is fabricated. The VLAN-90 interface has received zero packets and that is reported as an external switch/trunk matter, not repaired or claimed.",
     "No device DHCP test is claimed: no real client was placed on the guest VLAN.",

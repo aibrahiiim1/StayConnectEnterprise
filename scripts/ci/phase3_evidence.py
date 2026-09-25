@@ -280,7 +280,7 @@ def main() -> int:
     increment9_historical = {
         "executed_on": "2026-08-10",
         "executed_against_head": "83449200a8aca7018fac5b38a96b3a1aafc66ba2",
-        "appliance": "172.21.60.23",
+        "appliance": "the retired development reference appliance",
         "item_1_read_only_pms": "PASS",
         "item_2_live_dark_deployment": "BLOCKED/PARTIAL - migration 0010 applied cleanly and the nft foundation installed surgically with byte-identical legacy parity, but it did not survive the next netd start",
         "item_3_reboot": "FAIL for the required post-reboot persistence - phase3_auth_ipv4 absent, table structurally identical to the pre-install baseline",

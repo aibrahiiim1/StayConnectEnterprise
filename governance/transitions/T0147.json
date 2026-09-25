@@ -32,7 +32,7 @@
     "financial": "No posting, payment, reversal, settlement or financial egress.",
     "guest_state": "No guest, stay, entitlement or session row altered on the appliance. Zero open guest sessions throughout.",
     "schema": "No migration.",
-    "retired_host": "172.21.60.23 neither contacted nor modified.",
+    "retired_host": "the retired development reference appliance neither contacted nor modified.",
     "gates": "No test or gate weakened. Four tests added, one misleading test removed."
   },
 

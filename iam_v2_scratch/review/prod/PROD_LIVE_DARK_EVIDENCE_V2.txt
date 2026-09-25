@@ -2,7 +2,7 @@
 # Supersedes PROD_LIVE_DARK_EVIDENCE.txt (which had shell-escaped-quote corruption). Authoritative.
 captured_utc=2026-07-16T16:59:23Z
 method=server-side READ-ONLY psql -f prod_verify.sql (no DDL/DML); PSQL_EXIT=0 (no SQL errors)
-appliance=radius(172.21.60.23) container=stayconnect-pg image=timescale/timescaledb:2.16.1-pg16
+appliance=radius(the retired development reference appliance) container=stayconnect-pg image=timescale/timescaledb:2.16.1-pg16
 --------------------------------------------------------------------------
 current_database=stayconnect_site
 server_addr=local-unix-socket

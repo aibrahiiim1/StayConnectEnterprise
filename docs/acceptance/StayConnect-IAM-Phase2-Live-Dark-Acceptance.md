@@ -9,7 +9,7 @@
 - **Accepted baseline:** base `master@4e3c3ee27a8caa2d0656b57b419e8ed5e0d87b68`; substantive reconciliation HEAD `45323ad5cb8f70e64e1dcd727ac92b52cc878c37`; final pre-acceptance PR HEAD `a8c3b3caac6baf8ac41fa581fca5350c97219bb8`; Governance CI `29649900358` SUCCESS.
 - Branch: `phase/2-commercial-packages` (merged, deleted); PR #4 (merged/closed, merge commit `fe6a0d1`).
 - Maturity offered for acceptance: **verified DARK** (implementation + automated UI tests + live-dark deployment + **two** reboots, each with post-reboot re-verification).
-- Appliance: `radius` / `172.21.60.23`.
+- Appliance: `radius` / the retired development reference appliance.
 
 ## Final acceptance-gate additions
 - **45 automated UI tests, all green:** 36 Vitest + React Testing Library (component/unit) + 9 Playwright E2E (3 Hotel Admin against the real Next app with edged mocked; 6 Guest Portal driving the real portald success-page template).

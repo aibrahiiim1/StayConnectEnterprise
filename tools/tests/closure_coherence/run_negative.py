@@ -133,7 +133,7 @@ st["authorized_activities"] = [{
     "name": "post-roadmap DEVELOPMENT appliance IAM-v2 operational trial",
     "authorization": "D29/T0066",
     "status": "AUTHORIZED_IN_PROGRESS",
-    "scope": "DEVELOPMENT appliance 172.21.60.23 only.",
+    "scope": "DEVELOPMENT appliance (now retired) only.",
 }]
 check("an in-progress activity against a RETIRED target is refused", st, "caught", "RETIRED")
 

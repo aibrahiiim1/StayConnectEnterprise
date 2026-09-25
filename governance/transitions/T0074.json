@@ -25,7 +25,7 @@
   "accepted_at_head": "fff268d0af174c0d201af6e3258145ea64195bcd",
   "accepted_activity": "T0073",
   "previous_state_note": "The hardening and Hotel-Admin usability sweep was execution-complete and awaiting one Product-Owner review. No acceptance existed.",
-  "new_state_note": "T0073 is ACCEPTED AND CLOSED at the verified head fff268d. The governed merge of PR #16 is authorized and performed from that exact head. The Production IAM-v2 cutover and legacy IAM retirement are AUTHORIZED, and their preflight is complete, but they are ENVIRONMENT-BLOCKED: no Production appliance exists to cut over. Central's authoritative appliance registry contains exactly one appliance (serial SC-BEN1-JS4A-0D9C, hostname radius, last_public_ip 172.21.60.23), which governance designates the DEVELOPMENT appliance, and the Production record still reads 'none -- Production has not been contacted'. The cutover is deliberately NOT simulated on the development appliance, because doing so would neither be a Production cutover nor leave the development baseline intact.",
+  "new_state_note": "T0073 is ACCEPTED AND CLOSED at the verified head fff268d. The governed merge of PR #16 is authorized and performed from that exact head. The Production IAM-v2 cutover and legacy IAM retirement are AUTHORIZED, and their preflight is complete, but they are ENVIRONMENT-BLOCKED: no Production appliance exists to cut over. Central's authoritative appliance registry contains exactly one appliance (serial SC-BEN1-JS4A-0D9C, hostname radius, last_public_ip the retired development reference appliance), which governance designates the DEVELOPMENT appliance, and the Production record still reads 'none -- Production has not been contacted'. The cutover is deliberately NOT simulated on the development appliance, because doing so would neither be a Production cutover nor leave the development baseline intact.",
   "phase_affected_note": "post-roadmap (D33/T0072 trial acceptance, D33/T0073 sweep, now D34/T0074)",
   "items_explicitly_not_promoted": [
     "The Production IAM-v2 cutover is NOT performed and is NOT claimed. Production remains PRE-LIVE and uncontacted.",
@@ -41,5 +41,5 @@
     "No external financial effect: no PMS posting, no provider charge, per-property financial gates untouched.",
     "Historical governance and acceptance evidence are retained, not deleted."
   ],
-  "next": "One Product-Owner determination of the Production target: either designate the Production appliance (host, enrollment identity and access) so the authorized cutover can execute against it, or confirm that 172.21.60.23 is to be treated as the Production system, at which point the authorized cutover and staged legacy retirement proceed there."
+  "next": "One Product-Owner determination of the Production target: either designate the Production appliance (host, enrollment identity and access) so the authorized cutover can execute against it, or confirm that the retired development reference appliance is to be treated as the Production system, at which point the authorized cutover and staged legacy retirement proceed there."
 }

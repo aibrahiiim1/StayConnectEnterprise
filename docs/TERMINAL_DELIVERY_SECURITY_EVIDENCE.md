@@ -1,7 +1,7 @@
 # Terminal Assignment Delivery — Final Security Closure Evidence
 
 Date: 2026-07-12 · Central `150.0.0.252` (edge control plane) · Appliance
-`93f0bb1b-…-a84ba8` (`APP-DEV-0001`, radius `172.21.60.23`) · tenant Harborview
+`93f0bb1b-…-a84ba8` (`APP-DEV-0001`, radius the retired development reference appliance) · tenant Harborview
 (`e30aa9ef`) / site (`e3c9ecd8`).
 
 Scope: the six terminal-delivery requirements. The previously-accepted

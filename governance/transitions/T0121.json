@@ -44,7 +44,7 @@
   "environment_of_record": {
     "central": "150.0.0.252, associated with sc-central.echofusion.com. Verified this mission: ctrlapi subscribed to telemetry.>, hb.*, appliances.*.commands.results and appliances.*.updates.status on the mutually-authenticated NATS listener on 4223; nats-authz live on $SYS.REQ.USER.AUTH.",
     "pre_live_appliance": "172.21.60.25. PRE-LIVE remains PRE-LIVE; Go-Live is not authorized.",
-    "development_reference_appliance": "172.21.60.23 is RETIRED as an operational target. It is removed from current operational instructions and must not be contacted. Its historical accepted evidence is preserved unchanged — a retired target is not a falsified record.",
+    "development_reference_appliance": "the retired development reference appliance is RETIRED as an operational target. It is removed from current operational instructions and must not be contacted. Its historical accepted evidence is preserved unchanged — a retired target is not a falsified record.",
     "pms": "Protel FIAS was reconnected by the Product Owner. Transport CONNECTED and a complete roster synchronization published 589 records (591 in-house) at 2026-09-12T15:51:29Z."
   },
   "mission_scoped_authorizations": {

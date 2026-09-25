@@ -17,7 +17,7 @@ Phase 4 DARK, because the contract requires exactly that interface to stay fail-
 | R2 | Governance validators green | GH-MANDATORY-CI | project-state PASS, parity 16/16, negative 26/26, artifact-staleness 10/10, zero-stale PASS, transition-times PASS | **PASS** |
 | R3 | Deployment == source of truth | A3 | 4/4 artefacts md5-identical after correcting two comment-only drifts (Edge unit, Central Caddyfile) | **PASS** |
 | R4 | Both hosts healthy | A4 | Edge 7 services running / 0 failed; Central 4 services + 4 containers / 0 failed | **PASS** |
-| R5 | Browser surfaces reachable | A4 | `https://172.21.60.23/login` 200, `https://150.0.0.252/login` 200, static assets 200, backend 401 boundaries | **PASS** |
+| R5 | Browser surfaces reachable | A4 | `the retired development reference appliance's address/login` 200, `https://150.0.0.252/login` 200, static assets 200, backend 401 boundaries | **PASS** |
 | R6 | Licence valid | A4 | `Active`, `c03b5aa5…` v2, valid to **2027-08-08T23:59:59Z**, `cloud_stale=false`, `clock_rollback=false` | **PASS** |
 | R7 | Migration baseline known | A5 | ledger = 7 applied, latest `0010_phase3_stay_resolution`; repo has 10 `.up.sql` (0001–0010) | **PASS** |
 | R8 | iam_v2 DARK | A5 | **63 tables / 0 rows**; `svc_*` grants on `iam_v2` = **0** | **PASS** |

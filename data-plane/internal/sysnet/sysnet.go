@@ -15,7 +15,7 @@ import (
 type WANConfig struct {
 	Interface string   `json:"interface"`  // ens160
 	Mode      string   `json:"mode"`       // static | dhcp
-	IP        string   `json:"ip"`         // 172.21.60.23
+	IP        string   `json:"ip"`         // e.g. 192.0.2.23
 	PrefixLen int      `json:"prefix_len"` // 24
 	Gateway   string   `json:"gateway"`    // 172.21.60.1
 	DNS       []string `json:"dns"`        // resolvers

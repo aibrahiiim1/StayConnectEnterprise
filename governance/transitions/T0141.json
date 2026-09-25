@@ -13,7 +13,7 @@
   },
 
   "deployed": {
-    "target": "172.21.60.25 (PRE-LIVE). 172.21.60.23 neither contacted nor modified.",
+    "target": "172.21.60.25 (PRE-LIVE). the retired development reference appliance neither contacted nor modified.",
     "source_commit": "cb7c37f2a40b6c7c059f0d3474815f274d09986a, built by scripts/build-appliance-binaries.sh with the pinned toolchain and -tags stayconnect_production. APPLIANCE_BUILD = PASS: every binary reports that revision, clean, tagged.",
     "digests": {
       "scd": "cbcddcebda61c0fc8607b6033ead8bb368edbb8379b4c58ebc093b4a3027df2b",

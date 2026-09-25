@@ -14,7 +14,7 @@ Sanitization: no DB credentials/DSNs, no guest data, no key bytes or key-derived
 --------------------------------------------------------------------------------
   hostname               : radius
   machine-id (sha256)    : c572f3aaa512726f39187c374019b7bab6ea1ca16b37945f6378fab86100619a
-  management IP          : 172.21.60.23/24  (ens160)
+  management IP          : the retired development reference appliance's address  (ens160)
   OS / kernel            : Ubuntu 22.04.5 LTS / 5.15.0-185-generic
   timezone               : Etc/UTC (localtime UTC+0000)  -> all timestamps below are true UTC
   PostgreSQL             : PostgreSQL 16.3 (x86_64-pc-linux-musl)

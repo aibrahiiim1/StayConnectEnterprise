@@ -36,7 +36,7 @@ deliberately breaks a step and fails if the gate still reports success.
 
 ## 2. T0043 live evidence (WS-L)
 
-Appliance `radius` / `172.21.60.23` · machine-id `9b1e4e3578164bd094b11d96fc08ed8a` · site
+Appliance `radius` / the retired development reference appliance · machine-id `9b1e4e3578164bd094b11d96fc08ed8a` · site
 `7acf26a7-5ad2-4c65-aef7-651107484636` · serial `APP-DEV-0001` · **development** appliance.
 
 ### Deployed artefacts
@@ -116,7 +116,7 @@ All ten services active and self-reporting `healthy` before deployment, after de
 and after the rollback rehearsal: `scd`, `edged`, `netd`, `portald`, `acctd`, `hotel-admin`, `caddy`,
 `kea-dhcp4-server`, `unbound`, `postgres`. Legacy IAM 1 operator / 37 guests / 23 sessions; captive portal
 200; Hotel Admin 200; unbound answering; Kea active; license `Active`; assignment, identity and the pinned
-registry anchor unchanged. Topology unchanged: `ens160 172.21.60.23/24`, `ens192`, `ens192.90`,
+registry anchor unchanged. Topology unchanged: `ens160 the retired development reference appliance's address`, `ens192`, `ens192.90`,
 `br-lan 10.10.0.1/24`, `br-g90 10.20.0.1/22`, same six nft tables.
 
 ### Reboot persistence

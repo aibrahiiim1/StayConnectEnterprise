@@ -29,7 +29,7 @@
   },
 
   "deployment": {
-    "target": "172.21.60.25 (PRE-LIVE). 172.21.60.23 was neither contacted nor modified.",
+    "target": "172.21.60.25 (PRE-LIVE). the retired development reference appliance was neither contacted nor modified.",
     "built_in": "The designated workstation build environment, golang:1.25.12 and node:20 containers. Nothing was built on the appliance or on Central.",
     "edged": "sha256 7509f6af5d0eada4530ce6a0b004fb0c03c0d10954b0613a9c00561294fb281e",
     "pmsd": "sha256 ff4dadcb3d80d053aefe7c1887da1d1df7af8b8341588269845176981d5cb47f",

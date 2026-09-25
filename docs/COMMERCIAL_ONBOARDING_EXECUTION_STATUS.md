@@ -4,7 +4,7 @@ _Continuously updated. Do not treat chat as the state store._
 
 ## Servers / access
 - Central: `root@150.0.0.252` (ctrlapi:8080, cloud-admin:3000, mTLS:9443, NATS live :4222, NATS mTLS parallel :4223, authz svc). ufw active.
-- Appliance: `root@172.21.60.23` (scd/edged/netd/portald/kea/hotel-admin). Guest plane must stay up.
+- Appliance: `root@the retired development reference appliance` (scd/edged/netd/portald/kea/hotel-admin). Guest plane must stay up.
 - DB: `docker exec sc-central-pg psql -U stayconnect -d stayconnect`.
 
 ## Deployment versions / rollback points

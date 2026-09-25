@@ -6,7 +6,7 @@
   "record_type": "PRE_LIVE_DEPLOYMENT_AND_HISTORY_PROVENANCE_JOIN_CORRECTED",
 
   "deployment_performed": {
-    "target": "172.21.60.25 (PRE-LIVE). The retired 172.21.60.23 was not contacted.",
+    "target": "172.21.60.25 (PRE-LIVE). The retired development reference appliance was not contacted.",
     "source_commit": "e0d7df745b0c624c2b27f9d4c4df3c7b666a4559 -- the master merge of PR #130, with all four required gates green on the merge commit itself.",
     "built_in": "The designated workstation build environment. Nothing was built on the appliance or on Central.",
     "artifacts": {
@@ -45,7 +45,7 @@
     "pms_configuration": "No change to configuration, endpoint, credentials, routing or financial settings.",
     "manual_resync": "No Full Resync was issued.",
     "financial": "No posting, payment, reversal, settlement or financial egress.",
-    "retired_host": "172.21.60.23 was neither contacted nor modified.",
+    "retired_host": "the retired development reference appliance was neither contacted nor modified.",
     "gates": "No test or gate was weakened. A test was added."
   },
 

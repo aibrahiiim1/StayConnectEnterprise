@@ -348,7 +348,7 @@ def cmd_validate(deep=True, manifest_equality=True):
         dev = st.get("development_reference_appliance", {}) or {}
         if dev.get("cutover_performed") is not False or dev.get("modified_by_zero_legacy_work") is not False:
             fail("development_reference_appliance must record cutover_performed=false and "
-                 "modified_by_zero_legacy_work=false: 172.21.60.23 was not changed by this work")
+                 "modified_by_zero_legacy_work=false: the retired development reference appliance was not changed by this work")
 
     # D: after T0010, no current-state field may present the stale authoritative HEAD or "Production unchanged/untouched".
     if str(st.get("latest_transition_id", "")) >= "T0010":
@@ -1327,7 +1327,7 @@ def check_closure_coherence(st):
     #   (a) an activity tied to the mission that has just closed, still marked in progress; and
     #   (b) an activity whose target is an appliance this same state records as RETIRED -- which is what the
     #       real contradiction was: the DEVELOPMENT trial sat AUTHORIZED_IN_PROGRESS from D29/T0066 against
-    #       172.21.60.23 while prohibited_actions forbade contacting it. An authorisation whose target may
+    #       the retired development reference appliance while prohibited_actions forbade contacting it. An authorisation whose target may
     #       not be touched is not in progress.
     #
     # The retired addresses are READ FROM THE RECORD rather than hardcoded, so this stays true when the

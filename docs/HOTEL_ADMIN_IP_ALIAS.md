@@ -6,7 +6,7 @@ management IP, both fronted by Caddy, from one app instance:
 | URL | |
 |-----|--|
 | `https://hotel.stayconnect.local` | canonical |
-| `https://172.21.60.23` | management-IP alias |
+| `the retired development reference appliance's address` | management-IP alias |
 
 Both terminate on the same Caddy vhost → the same Next.js instance on `127.0.0.1:3100`
 → edged on `127.0.0.1:8090`. There is **no** second application or database, and
@@ -20,7 +20,7 @@ preserved, nothing new to distribute):
 
 ```
 Issuer : Caddy Local Authority - ECC Intermediate
-SAN    : DNS:hotel.stayconnect.local, IP Address:172.21.60.23
+SAN    : DNS:hotel.stayconnect.local, IP Address:the retired development reference appliance
 Validity: 2 years
 ```
 
@@ -48,7 +48,7 @@ Reachability is controlled by nftables (`deploy/nftables/stayconnect.nft`), not 
 Caddy bind:
 
 - `:443` is accepted **only** on the management interface `ens160` to the management
-  IP (`iifname "ens160" ip daddr 172.21.60.23 tcp dport 443 accept`).
+  IP (`iifname "ens160" ip daddr the retired development reference appliance tcp dport 443 accept`).
 - Guest `:443` arriving on `br-lan` is DNAT'd to the **captive portal**
   (`10.10.0.1:8343`) — it never reaches Caddy.
 - Guest→management ranges (`172.16/12`, `192.168/16`) are dropped.

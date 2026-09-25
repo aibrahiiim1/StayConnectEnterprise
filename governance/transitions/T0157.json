@@ -38,7 +38,7 @@
     "no_privilege_widening": "scd writes root-owned files because it already runs as root and is already the privileged helper. edged was not given new privileges.",
     "no_destructive_action": "Nothing deletes an artefact, a revision or an image the portal is using.",
     "no_pms_or_financial": "No PMS configuration change, no PMS write, no financial traffic.",
-    "retired_host": "172.21.60.23 neither contacted nor modified."
+    "retired_host": "the retired development reference appliance neither contacted nor modified."
   },
   "previous_state": {
     "phase": "7",

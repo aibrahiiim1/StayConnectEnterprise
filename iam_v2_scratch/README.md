@@ -13,7 +13,7 @@ deployment. See the FINAL contract and `docs/architecture/StayConnect-IAM-Phase1
   PostgreSQL 16.14. Credentials are a throwaway passed only to the one-off `docker run` command — **not**
   committed here.
 - **Hard safety guard** (`lib.sh`): every DB call is refused if the target matches a known live
-  identifier (`172.21.60.23`, `150.0.0.*`, `120.0.0.*`, `stayconnect_site`, `stayconnect-pg`,
+  identifier (the retired development reference appliance, `150.0.0.*`, `120.0.0.*`, `stayconnect_site`, `stayconnect-pg`,
   `/opt/stayconnect`, `appliance`, …), if the container is published on a non-loopback address, or if
   `current_database()` is not the scratch DB.
 

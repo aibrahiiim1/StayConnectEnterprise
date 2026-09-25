@@ -20,7 +20,7 @@ CENTRAL CONTROL PLANE — 150.0.0.252 (Ubuntu 22.04)
   vendor license signing key                          ufw: 22, 443, 4222(appliance-only)
         ▲  outbound TLS (HTTPS + NATS-TLS), appliance-initiated only
         │
-HOTEL APPLIANCE — 172.21.60.23  (edge-only; Cloud API/Admin removed)
+HOTEL APPLIANCE — the retired development reference appliance  (edge-only; Cloud API/Admin removed)
   scd portald acctd edged netd hotel-admin kea unbound nftables tc  +  site DB (stayconnect_site)
 ```
 
@@ -112,6 +112,6 @@ The migrated cloud DB carries historical guest rows from the co-located era
 
 - Cloud Admin + Cloud API: `https://150.0.0.252/` (admin UI) and `https://150.0.0.252/v1|/cloud` (API).
 - NATS: `tls://150.0.0.252:4222`.
-- Hotel Admin (appliance, mgmt only): `https://172.21.60.23/`.
+- Hotel Admin (appliance, mgmt only): `the retired development reference appliance's address/`.
 - Central config: `/opt/stayconnect/central/` (compose, secrets 600, tls),
   `/etc/stayconnect/ctrlapi.env`, systemd `stayconnect-{ctrlapi,cloud-admin,caddy}`.
