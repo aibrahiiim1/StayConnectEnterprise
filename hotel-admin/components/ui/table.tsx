@@ -28,7 +28,7 @@ export function THead({ className, ...p }: React.HTMLAttributes<HTMLTableSection
   return (
     <thead
       className={cn(
-        "bg-surface/70 text-left text-2xs font-semibold uppercase tracking-wider text-muted-foreground",
+        "bg-surface text-left text-micro uppercase tracking-[0.06em] text-muted-foreground",
         "[&_th]:border-b [&_th]:border-border",
         className,
       )}
@@ -48,7 +48,7 @@ export function TR({ className, ...p }: React.HTMLAttributes<HTMLTableRowElement
         "border-b border-border last:border-0 transition-colors",
         // Only body rows highlight. `tbody &` keeps the header row out of it without every call site having to
         // pass a different component.
-        "[tbody_&]:hover:bg-surface/60",
+        "[tbody_&]:hover:bg-accent/60",
         className,
       )}
       {...p}
@@ -57,7 +57,7 @@ export function TR({ className, ...p }: React.HTMLAttributes<HTMLTableRowElement
 }
 
 export function TH({ className, ...p }: React.ThHTMLAttributes<HTMLTableCellElement>) {
-  return <th className={cn("whitespace-nowrap px-4 py-2.5 font-semibold", className)} {...p} />;
+  return <th className={cn("whitespace-nowrap px-4 py-2.5", className)} {...p} />;
 }
 
 export function TD({ className, ...p }: React.TdHTMLAttributes<HTMLTableCellElement>) {

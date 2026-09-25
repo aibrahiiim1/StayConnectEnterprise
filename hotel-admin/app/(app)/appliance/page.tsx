@@ -42,7 +42,7 @@ export default function ApplianceAndLicensePage() {
           <ServerCog className="h-5 w-5" /> Appliance &amp; licence
         </h1>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          Whether this appliance is connected to StayConnect and set up, and what its licence allows.
+          Whether this appliance is connected to Velonet and set up, and what its licence allows.
         </p>
       </header>
 

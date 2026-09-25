@@ -5,7 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { SIDEBAR_INIT_SCRIPT } from "@/lib/sidebar-state";
 
 export const metadata: Metadata = {
-  title: "StayConnect Hotel Admin",
+  title: "Velonet Hotel Admin",
   description: "On-appliance hotel management",
 };
 

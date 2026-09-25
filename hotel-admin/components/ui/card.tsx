@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 export function Card({ className, ...p }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn("rounded-lg border border-border bg-card text-card-foreground shadow-xs", className)}
+      className={cn("rounded-lg border border-border bg-card text-card-foreground shadow-card", className)}
       {...p}
     />
   );
@@ -19,7 +19,7 @@ export function CardHeader({ className, ...p }: React.HTMLAttributes<HTMLDivElem
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-3.5",
+        "flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4",
         className,
       )}
       {...p}
@@ -28,7 +28,7 @@ export function CardHeader({ className, ...p }: React.HTMLAttributes<HTMLDivElem
 }
 
 export function CardTitle({ className, ...p }: React.HTMLAttributes<HTMLHeadingElement>) {
-  return <h2 className={cn("text-sm font-semibold tracking-tight", className)} {...p} />;
+  return <h2 className={cn("text-emphasis tracking-tight", className)} {...p} />;
 }
 
 export function CardDescription({ className, ...p }: React.HTMLAttributes<HTMLParagraphElement>) {
@@ -63,7 +63,7 @@ export function Section({
     <div className={cn("space-y-3", className)}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
-          <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
+          <h3 className="text-emphasis tracking-tight">{title}</h3>
           {description && <p className="max-w-3xl text-sm text-muted-foreground">{description}</p>}
         </div>
         {actions && <div className="flex items-center gap-2">{actions}</div>}

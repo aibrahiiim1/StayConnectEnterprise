@@ -218,7 +218,7 @@ export default function SignInMethodsPage() {
               {pmsReadiness.state === "down" ? (
                 <p className="text-xs text-warning-subtle-foreground mt-1">
                   {capitalise(pmsReadiness.reason)}. Guests cannot sign in with their room number until the
-                  property management system is connected to StayConnect again; they can still use any other
+                  property management system is connected to Velonet again; they can still use any other
                   method switched on below. Nothing here needs changing — this setting is kept as it is and
                   starts working again on its own once the connection returns.
                 </p>
@@ -256,7 +256,7 @@ export default function SignInMethodsPage() {
 
           <div className="flex items-start justify-between gap-4">
             <p className="text-sm text-muted max-w-xl">
-              The guest enters their room number and one detail from their booking. StayConnect checks it
+              The guest enters their room number and one detail from their booking. Velonet checks it
               against the property management system for the network they are on — the guest never chooses a
               system, and no booking details are shown back to them.
             </p>

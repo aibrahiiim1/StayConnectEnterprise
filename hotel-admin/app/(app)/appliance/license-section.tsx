@@ -170,22 +170,22 @@ export function LicenseSection() {
         <div className="rounded-md border border-warning/30 bg-warning-subtle p-3 text-sm text-warning-subtle-foreground">
           <b>Hardware Binding Mismatch.</b> This license is bound to a different WAN network adapter than the one now present
           {st?.hardware_mismatch ? <> ({st.hardware_mismatch})</> : null}. The hotel keeps running on a time-limited grace.
-          If the WAN NIC was genuinely replaced, ask StayConnect to authorize a <b>Rebind</b> — a new license will be issued.
+          If the WAN NIC was genuinely replaced, ask Velonet to authorize a <b>Rebind</b> — a new license will be issued.
         </div>
       )}
 
-      {/* ---- Activate: the two values the operator sends to StayConnect ---- */}
+      {/* ---- Activate: the two values the operator sends to Velonet ---- */}
       <Card>
         <CardHeader><CardTitle className="flex items-center gap-2"><Cpu className="h-4 w-4" /> Appliance identity</CardTitle></CardHeader>
         <CardBody className="space-y-4">
           {!activated && (
             <p className="text-sm text-muted-foreground">
-              To activate this appliance, send these two values to StayConnect:
+              To activate this appliance, send these two values to Velonet:
               your <b>Serial Number</b> and <b>WAN MAC Address</b>.
             </p>
           )}
           <div className="grid gap-4 sm:grid-cols-2">
-            <CopyField label="StayConnect Serial Number" value={hw?.serial || st?.serial} big />
+            <CopyField label="Velonet Serial Number" value={hw?.serial || st?.serial} big />
             <CopyField label="WAN MAC Address" value={hw?.wan_mac} big />
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -267,7 +267,7 @@ export function LicenseSection() {
         <CardHeader><CardTitle className="flex items-center gap-2"><Upload className="h-4 w-4" /> Offline activation</CardTitle></CardHeader>
         <CardBody className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            No connection to Central? Get a signed license file from StayConnect (generated for this Serial + WAN MAC) and upload it here.
+            No connection to Central? Get a signed license file from Velonet (generated for this Serial + WAN MAC) and upload it here.
             The appliance verifies it is bound to this exact hardware before accepting.
           </p>
           <input ref={fileRef} type="file" accept=".license,.json,application/json" onChange={onUpload} disabled={!writable || uploading} className="hidden" id="lic-file" />
@@ -349,7 +349,7 @@ export function LicenseSection() {
                     Technical details — feature entitlements
                   </summary>
                   <p className="mt-2 text-xs text-muted">
-                    A standard StayConnect license includes <strong>all product features</strong>. The commercial
+                    A standard Velonet license includes <strong>all product features</strong>. The commercial
                     controls are the concurrent-guest capacity, validity window and grace period above — you do
                     not configure features. This table is shown for support/diagnostics; per-feature entitlements
                     exist in the signed-license format for future editions.

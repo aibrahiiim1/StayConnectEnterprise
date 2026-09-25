@@ -182,7 +182,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             visible by navigating to the dashboard or Diagnostics — so an operator on any other screen had no
             way to know the PMS had dropped or the database was unreachable.
           */}
-          <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-background/85 px-4 backdrop-blur sm:px-6">
+          <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card/90 px-4 backdrop-blur sm:px-6">
             <DialogPrimitive.Trigger
               className="-ml-1 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 lg:hidden"
               aria-label="Open navigation"

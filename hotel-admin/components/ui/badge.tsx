@@ -9,8 +9,8 @@ import { cn } from "@/lib/utils";
 type Tone = "default" | "ok" | "warn" | "err" | "info" | "neutral" | "accent";
 
 const TONES: Record<Tone, string> = {
-  default: "border-border bg-surface text-muted-foreground",
-  neutral: "border-border bg-surface text-foreground",
+  default: "border-transparent bg-accent text-muted-foreground",
+  neutral: "border-transparent bg-accent text-foreground",
   ok: "border-success/25 bg-success-subtle text-success-subtle-foreground",
   warn: "border-warning/30 bg-warning-subtle text-warning-subtle-foreground",
   err: "border-destructive/25 bg-destructive-subtle text-destructive-subtle-foreground",
@@ -34,7 +34,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium leading-5 whitespace-nowrap",
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[0.6875rem] font-bold leading-4 tracking-[0.01em] whitespace-nowrap",
         TONES[tone] ?? TONES.default,
         className,
       )}

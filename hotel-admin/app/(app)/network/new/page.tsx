@@ -223,7 +223,7 @@ export default function NewGuestNetworkPage() {
               <div>
                 <Label>SSID label</Label>
                 <Input value={ssidLabel} onChange={(e) => setSsidLabel(e.target.value)} placeholder="Broadcast SSID name (for reference)" />
-                <div className="text-xs text-muted mt-1">StayConnect does not broadcast WiFi — this label maps the SSID your controller broadcasts to this gateway.</div>
+                <div className="text-xs text-muted mt-1">Velonet does not broadcast WiFi — this label maps the SSID your controller broadcasts to this gateway.</div>
               </div>
             </>
           )}
@@ -369,7 +369,7 @@ export default function NewGuestNetworkPage() {
                 <div className="font-medium">Wireless controller action required</div>
                 <div className="text-xs mt-1">
                   Map the &lsquo;{ssidLabel || name}&rsquo; SSID to VLAN {vlanTagged ? vlanId : "(untagged)"} on your wireless controller.
-                  StayConnect manages the gateway, DHCP and captive portal.
+                  Velonet manages the gateway, DHCP and captive portal.
                 </div>
               </div>
             </div>

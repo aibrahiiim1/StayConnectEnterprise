@@ -169,7 +169,7 @@
         "surface": "operators"
       },
       {
-        "label": "Dashboard",
+        "label": "Overview",
         "route": "/dashboard",
         "surface": "reports"
       },

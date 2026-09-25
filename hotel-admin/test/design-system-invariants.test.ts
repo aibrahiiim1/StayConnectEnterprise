@@ -118,11 +118,12 @@ describe("colour only ever comes from a theme token", () => {
   it("the dark chart series are stepped independently, not reused from light", () => {
     // A dark palette that is literally the light one fails its own lightness band. If these ever become equal it
     // means somebody "simplified" the duplication away and silently broke dark-mode chart legibility.
-    const css = read(join(ROOT, "app/globals.css"));
+    // The token values moved to the canonical design-system/tokens.css, copied here as app/tokens.css.
+    const css = read(join(ROOT, "app/tokens.css"));
     const grab = (block: string) =>
       [...block.matchAll(/--chart-(\d):\s*([^;]+);/g)].map((m) => `${m[1]}:${m[2].trim()}`).join("|");
-    const light = grab(css.slice(css.indexOf(":root {"), css.indexOf(".dark {")));
-    const dark = grab(css.slice(css.indexOf(".dark {")));
+    const light = grab(css.slice(css.indexOf(":root {"), css.indexOf("[data-product")));
+    const dark = grab(css.slice(css.indexOf(".dark {"), css.indexOf(".dark[data-product")));
     expect(light).not.toBe("");
     expect(dark).not.toBe("");
     expect(dark).not.toBe(light);

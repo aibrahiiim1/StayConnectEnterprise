@@ -119,7 +119,7 @@ export function GuestDeviceSelfServiceView({ canAct }: { canAct: boolean }) {
           </div>
           <p className="mt-2 text-xs text-muted">
             Your setting, stored on this appliance. It applies as soon as it is saved and keeps working if
-            the connection to StayConnect Central is unavailable.
+            the connection to Velonet Central is unavailable.
           </p>
         </div>
         <div className="rounded border border-border bg-panel p-4">

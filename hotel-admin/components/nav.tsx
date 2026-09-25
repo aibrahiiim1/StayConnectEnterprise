@@ -11,7 +11,10 @@ import {
   Wallet, BadgeCheck, Paintbrush, Archive, Network, Wifi, History, Router, Cloud,
   ServerCog, Lock, Activity, Package, Gauge, Smartphone, LogIn, Search, X,
   PanelLeftClose, PanelLeftOpen, ClipboardCheck, Ticket,
+  DoorOpen, BedDouble, Plug, Route, Inbox, ShieldCheck, UserX, Layers, ArrowLeftRight, HeartPulse, Receipt,
+  LifeBuoy, Globe, AtSign, MessageSquare, Stethoscope, Bell, Hourglass, CalendarClock, ChartColumn,
 } from "lucide-react";
+import { VelonetLockup } from "@/components/brand";
 import { Tooltip } from "@/components/ui/tooltip";
 
 // THERE IS NO BUILD-TIME GATE IN THIS FILE, AND THAT IS THE POINT.
@@ -70,7 +73,7 @@ const SECTIONS: Section[] = [
   {
     title: "Overview",
     items: [
-      { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, resource: "reports", keywords: "home tonight summary stats" },
+      { href: "/dashboard", label: "Overview", icon: LayoutDashboard, resource: "reports", keywords: "home tonight summary stats" },
     ],
   },
   {
@@ -81,7 +84,7 @@ const SECTIONS: Section[] = [
     items: [
       { href: "/internet-packages", label: "Internet packages", icon: Package, resource: "commercial-packages", keywords: "offer tariff price free paid" },
       { href: "/service-plans",     label: "Service plans",     icon: Gauge,   resource: "commercial-packages", keywords: "speed bandwidth quota devices mbps" },
-      { href: "/checkout-grace",    label: "Checkout grace",    icon: Shield,  resource: "checkout-grace", keywords: "after checkout late departure" },
+      { href: "/checkout-grace",    label: "Checkout grace",    icon: DoorOpen,  resource: "checkout-grace", keywords: "after checkout late departure" },
       // Vouchers sit with the offer rather than with the guest: a voucher IS an internet package, printed.
       { href: "/vouchers",          label: "Vouchers",          icon: Ticket,  resource: "vouchers", keywords: "code card print batch redeem scratch prepaid" },
     ],
@@ -89,13 +92,13 @@ const SECTIONS: Section[] = [
   {
     title: "Guests",
     items: [
-      { href: "/stays",          label: "Stays",           icon: Hotel,    resource: "pms-stays", keywords: "rooms reservations in house occupancy guest list" },
+      { href: "/stays",          label: "Stays",           icon: BedDouble,    resource: "pms-stays", keywords: "rooms reservations in house occupancy guest list" },
       { href: "/guest-accounts", label: "Guest accounts",  icon: KeyRound, resource: "guest-accounts", keywords: "username password login credentials voucher" },
       { href: "/sessions",       label: "Active sessions", icon: Monitor,  resource: "sessions", keywords: "online now devices connected who is on wifi disconnect" },
-      { href: "/usage",          label: "Usage explorer",  icon: Activity, resource: "usage", keywords: "data used quota dispute how much room device mac gigabytes consumption investigate" },
+      { href: "/usage",          label: "Usage explorer",  icon: ChartColumn, resource: "usage", keywords: "data used quota dispute how much room device mac gigabytes consumption investigate" },
       { href: "/guest-device-self-service", label: "Guest devices", icon: Smartphone, resource: "guest-device-self-service", keywords: "phone laptop remove device" },
-      { href: "/online-time",    label: "Online-time budgets", icon: Activity, resource: "sessions", capability: "sessions.aggregate-time", keywords: "time remaining allowance hours" },
-      { href: "/post-stay",      label: "Post-stay access", icon: KeyRound, resource: "post-stay-profiles", keywords: "after departure loyalty" },
+      { href: "/online-time",    label: "Online-time budgets", icon: Hourglass, resource: "sessions", capability: "sessions.aggregate-time", keywords: "time remaining allowance hours" },
+      { href: "/post-stay",      label: "Post-stay access", icon: CalendarClock, resource: "post-stay-profiles", keywords: "after departure loyalty" },
     ],
   },
   {
@@ -110,11 +113,11 @@ const SECTIONS: Section[] = [
     // stays are the symptom.
     title: "Property management system",
     items: [
-      { href: "/pms-interfaces",       label: "PMS connection",       icon: Hotel,  resource: "pms-interfaces", keywords: "protel fias connect sync resync opera status" },
-      { href: "/pms-routing",          label: "Network routing",      icon: Router, resource: "pms-routing", keywords: "which pms per network vlan mapping" },
-      { href: "/stay-events",          label: "PMS activity",         icon: Send,   resource: "pms-events", keywords: "feed messages check in out log" },
-      { href: "/pms-resolutions",      label: "Guest sign-in checks", icon: Send,   resource: "pms-resolutions", keywords: "room verification failures evidence" },
-    { href: "/guest-signin-attempts", label: "Guest sign-in attempts", icon: KeyRound, resource: "guest-signin-attempts", keywords: "attempt failed reason room typed credential mismatch why cannot connect" },
+      { href: "/pms-interfaces",       label: "PMS connection",       icon: Plug,  resource: "pms-interfaces", keywords: "protel fias connect sync resync opera status" },
+      { href: "/pms-routing",          label: "Network routing",      icon: Route, resource: "pms-routing", keywords: "which pms per network vlan mapping" },
+      { href: "/stay-events",          label: "PMS activity",         icon: Inbox,   resource: "pms-events", keywords: "feed messages check in out log" },
+      { href: "/pms-resolutions",      label: "Guest sign-in checks", icon: ShieldCheck,   resource: "pms-resolutions", keywords: "room verification failures evidence" },
+    { href: "/guest-signin-attempts", label: "Guest sign-in attempts", icon: UserX, resource: "guest-signin-attempts", keywords: "attempt failed reason room typed credential mismatch why cannot connect" },
       // RECONCILIATION IS NOT DAY-TO-DAY WORK, so it is not day-to-day navigation.
       //
       // Both reconciliation screens are diagnostics. Neither has an action on it, both describe machinery
@@ -122,17 +125,17 @@ const SECTIONS: Section[] = [
       // working. They stay routable and are reached from PMS connection under Advanced diagnostics, where
       // somebody troubleshooting will look for them -- and the PMS connection page now says plainly when
       // there is something in them worth looking at.
-      { href: "/pms-source-conflicts", label: "Duplicate sources",    icon: Shield, resource: "pms-source-conflicts", keywords: "conflict two interfaces same room" },
-      { href: "/stay-transfers",       label: "Cross-PMS transfer",   icon: Send,   resource: "stay-transfers", keywords: "move stay between systems" },
+      { href: "/pms-source-conflicts", label: "Duplicate sources",    icon: Layers, resource: "pms-source-conflicts", keywords: "conflict two interfaces same room" },
+      { href: "/stay-transfers",       label: "Cross-PMS transfer",   icon: ArrowLeftRight,   resource: "stay-transfers", keywords: "move stay between systems" },
     ],
   },
   {
     title: "Charges",
     items: [
-      { href: "/financial-health",      label: "Charge health", icon: Wallet, resource: "financial-review", keywords: "posting queue outbox money" },
-      { href: "/financial-review",      label: "Manual review", icon: Shield, resource: "financial-review", keywords: "failed posting decide" },
-      { href: "/financial-settlements", label: "Settlements",   icon: Wallet, resource: "financial-review", keywords: "payment room charge card" },
-      { href: "/financial-recovery",    label: "Recovery",      icon: Shield, resource: "financial-review", keywords: "held restore epoch" },
+      { href: "/financial-health",      label: "Charge health", icon: HeartPulse, resource: "financial-review", keywords: "posting queue outbox money" },
+      { href: "/financial-review",      label: "Manual review", icon: ClipboardCheck, resource: "financial-review", keywords: "failed posting decide" },
+      { href: "/financial-settlements", label: "Settlements",   icon: Receipt, resource: "financial-review", keywords: "payment room charge card" },
+      { href: "/financial-recovery",    label: "Recovery",      icon: LifeBuoy, resource: "financial-review", keywords: "held restore epoch" },
     ],
   },
   {
@@ -142,9 +145,9 @@ const SECTIONS: Section[] = [
       // operator sets up on the portal, and it was previously not settable anywhere in the product.
       { href: "/sign-in-methods",  label: "Sign-in methods", icon: LogIn,    resource: "auth-methods", keywords: "room number voucher otp sms email social" },
       { href: "/portal-branding",  label: "Portal settings", icon: Paintbrush, resource: "portal-branding", keywords: "branding logo background colours terms languages translations" },
-      { href: "/walled-garden",    label: "Allowed sites", icon: Shield,     resource: "walled-garden", keywords: "whitelist domains before login" },
-      { href: "/social-providers", label: "Social login",  icon: KeyRound,   resource: "social-providers", keywords: "google apple facebook microsoft oauth" },
-      { href: "/notifications",    label: "Email & SMS",   icon: Send,       resource: "notification-providers", keywords: "sendgrid twilio ses otp delivery" },
+      { href: "/walled-garden",    label: "Allowed sites", icon: Globe,     resource: "walled-garden", keywords: "whitelist domains before login" },
+      { href: "/social-providers", label: "Social login",  icon: AtSign,   resource: "social-providers", keywords: "google apple facebook microsoft oauth" },
+      { href: "/notifications",    label: "Email & SMS",   icon: MessageSquare,       resource: "notification-providers", keywords: "sendgrid twilio ses otp delivery" },
     ],
   },
   {
@@ -181,8 +184,8 @@ const SECTIONS: Section[] = [
     // run it, then the people who may.
     items: [
       // Watching it.
-      { href: "/health",             label: "Diagnostics", icon: Activity,   resource: "diagnostics", keywords: "services health checks scd netd kea" },
-      { href: "/operational-alerts", label: "Alerts",      icon: Shield,     resource: "operational-alerts", keywords: "warnings acknowledge" },
+      { href: "/health",             label: "Diagnostics", icon: Stethoscope,   resource: "diagnostics", keywords: "services health checks scd netd kea" },
+      { href: "/operational-alerts", label: "Alerts",      icon: Bell,     resource: "operational-alerts", keywords: "warnings acknowledge" },
       { href: "/audit",              label: "Activity",    icon: ScrollText, resource: "audit", keywords: "audit log who did what history trail security changes" },
       // Running it.
       { href: "/appliance",          label: "Appliance & licence", icon: ServerCog, resource: "license", keywords: "enrol claim serial activate setup cloud connection central licence capacity expiry plan offline renewal first-time" },
@@ -315,21 +318,13 @@ export function Nav({
     >
       <div
         className={cn(
-          "flex items-center gap-2.5 border-b border-sidebar-border py-3.5",
+          "flex min-h-[var(--topbar-height)] items-center gap-2.5 border-b border-sidebar-border py-2.5",
           collapsed ? "flex-col gap-2 px-2" : "px-4",
         )}
       >
         {/* The mark is drawn rather than loaded: one fewer asset to ship to an appliance, and it inherits the
             brand token so it is never out of step with the rest of the product. */}
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
-          <Wifi className="size-4" />
-        </span>
-        {!collapsed && (
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold leading-tight text-white">StayConnect</div>
-            <div className="truncate text-2xs uppercase tracking-widest text-sidebar-muted">Hotel Admin</div>
-          </div>
-        )}
+        <VelonetLockup product="Hotel Admin" collapsed={collapsed} inverse className={collapsed ? undefined : "flex-1"} />
         {onToggleCollapsed && (
           // ONE control, and its accessible name states what activating it will DO, which is what a screen
           // reader user needs — not what the current state is. aria-expanded carries the state.
@@ -343,7 +338,7 @@ export function Nav({
               className={cn(
                 "flex size-8 shrink-0 items-center justify-center rounded-md text-sidebar-muted",
                 "transition-colors hover:bg-sidebar-accent/60 hover:text-white",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
               )}
             >
               {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
@@ -364,7 +359,7 @@ export function Nav({
               className={cn(
                 "flex size-10 w-full items-center justify-center rounded-md text-sidebar-muted",
                 "transition-colors hover:bg-sidebar-accent/60 hover:text-white",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
               )}
             >
               <Search className="size-4" />
@@ -381,9 +376,9 @@ export function Nav({
               placeholder="Find a screen…"
               aria-label="Filter navigation"
               className={cn(
-                "h-8 w-full rounded-md border border-sidebar-border bg-sidebar-accent/60 pl-8 pr-7 text-sm",
+                "h-9 w-full rounded-md border border-sidebar-border bg-sidebar-accent/70 pl-8 pr-7 text-[0.8125rem]",
                 "text-sidebar-foreground placeholder:text-sidebar-muted",
-                "focus:border-primary/60 focus:outline-none focus:ring-2 focus:ring-primary/25",
+                "focus:border-sidebar-active focus:outline-none focus:ring-2 focus:ring-sidebar-active/30",
               )}
             />
             {query && (
@@ -419,7 +414,7 @@ export function Nav({
                 // still comes from each item's own label.
                 <div className="mx-2 mb-1.5 mt-1 border-t border-sidebar-border/70 first:mt-0 first:border-t-0" aria-hidden />
               ) : (
-                <div className="px-2.5 pb-1 pt-1.5 text-2xs font-semibold uppercase tracking-widest text-sidebar-muted">
+                <div className="px-2.5 pb-1.5 pt-2 text-nano uppercase tracking-[0.12em] text-sidebar-muted">
                   {sec.title}
                 </div>
               )}
@@ -438,11 +433,11 @@ export function Nav({
                       // getByRole("link", { name }) and aria-current continue to work unchanged — the
                       // collapse is a visual change, not a semantic one.
                       className={cn(
-                        "group relative flex items-center rounded-md text-sm transition-colors",
-                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
-                        collapsed ? "h-10 justify-center px-0" : "gap-2.5 px-2.5 py-1.5",
+                        "group relative flex items-center rounded-md text-[0.8125rem] transition-colors duration-press",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
+                        collapsed ? "h-10 justify-center px-0" : "min-h-9 gap-2.5 px-2.5 py-1.5",
                         active
-                          ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                          ? "bg-sidebar-accent font-semibold text-sidebar-accent-foreground"
                           : "text-sidebar-foreground/85 hover:bg-sidebar-accent/60 hover:text-white",
                       )}
                     >
@@ -452,8 +447,8 @@ export function Nav({
                           no label to read. */}
                       <span
                         className={cn(
-                          "absolute left-0 top-1/2 -translate-y-1/2 rounded-r-full bg-primary transition-opacity",
-                          collapsed ? "h-6 w-[3px]" : "h-4 w-0.5",
+                          "absolute left-0 top-1/2 -translate-y-1/2 rounded-r-full bg-sidebar-active transition-opacity",
+                          collapsed ? "h-6 w-[3px]" : "h-5 w-[3px]",
                           active ? "opacity-100" : "opacity-0",
                         )}
                         aria-hidden
@@ -461,7 +456,7 @@ export function Nav({
                       <Icon
                         className={cn(
                           "size-4 shrink-0 transition-colors",
-                          active ? "text-primary" : "text-sidebar-muted group-hover:text-sidebar-foreground",
+                          active ? "text-sidebar-active" : "text-sidebar-muted group-hover:text-sidebar-foreground",
                         )}
                       />
                       <span className={cn(collapsed ? "sr-only" : "truncate")}>{it.label}</span>
@@ -507,7 +502,7 @@ export function Nav({
               className={cn(
                 "mx-auto flex size-8 items-center justify-center rounded-full bg-sidebar-accent",
                 "text-2xs font-semibold uppercase text-white",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
               )}
             >
               {(email ?? "?").slice(0, 2)}
@@ -543,7 +538,7 @@ export function Nav({
               className={cn(
                 "mt-1 flex w-full items-center rounded-md text-sm text-sidebar-foreground/85",
                 "transition-colors hover:bg-sidebar-accent/60 hover:text-white",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
                 collapsed ? "h-10 justify-center px-0" : "gap-2.5 px-2.5 py-1.5",
               )}
             >

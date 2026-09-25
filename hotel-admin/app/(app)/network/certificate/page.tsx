@@ -111,7 +111,7 @@ export default function CertificatePage() {
       <p className="text-sm text-muted mb-4">
         The dual-SAN certificate for <code>hotel.stayconnect.local</code> and the management IP. Renewal is
         automatic (checked daily; renews at 45 days, on IP change, or SAN drift). It is issued from the local
-        StayConnect CA — never the vendor appliance PKI.
+        appliance certificate authority — never the vendor appliance PKI.
       </p>
 
       {err && <div className="text-err text-sm mb-3">{err}</div>}

@@ -85,7 +85,7 @@ export function describeOutbox(o?: OutboxFigures | null): Explained {
     return {
       headline: "Licensing only",
       summary:
-        "This appliance uses the StayConnect cloud for its licence only. Operational reporting is " +
+        "This appliance uses the Velonet cloud for its licence only. Operational reporting is " +
         "intentionally switched off, so nothing is being sent and nothing needs reconnecting. Guest " +
         "internet, sign-in, the PMS connection, sessions and accounting all run locally on this appliance " +
         "and are unaffected.",
@@ -96,7 +96,7 @@ export function describeOutbox(o?: OutboxFigures | null): Explained {
     return {
       headline: "Not in use",
       summary:
-        "This appliance is not reporting to the StayConnect cloud, so nothing is queued. Guest internet, " +
+        "This appliance is not reporting to the Velonet cloud, so nothing is queued. Guest internet, " +
         "sign-in and the PMS connection do not depend on it.",
       tone: "default",
     };
@@ -119,21 +119,21 @@ export function describeOutbox(o?: OutboxFigures | null): Explained {
   const explain: Record<string, { line: string; tone: Tone; headline?: string }> = {
     TRANSPORT_UNAVAILABLE: {
       line:
-        "The appliance currently has no connection to the StayConnect cloud, so nothing can be sent. " +
+        "The appliance currently has no connection to the Velonet cloud, so nothing can be sent. " +
         "Records are kept safely and go out when the connection returns.",
       tone: "warn",
       headline: "No connection to the cloud",
     },
     RECEIVER_UNAVAILABLE: {
       line:
-        "The appliance can reach the StayConnect cloud, but nothing there is listening for this " +
+        "The appliance can reach the Velonet cloud, but nothing there is listening for this " +
         "appliance's reports. This is a cloud-side problem — the hotel network is not the cause.",
       tone: "err",
       headline: "The cloud is not listening",
     },
     RECEIVER_REJECTED: {
       line:
-        "The StayConnect cloud answered and refused the records. Retrying will not change that; it needs " +
+        "The Velonet cloud answered and refused the records. Retrying will not change that; it needs " +
         "someone to look at how this appliance is registered.",
       tone: "err",
       headline: "The cloud refused the records",
@@ -155,11 +155,11 @@ export function describeOutbox(o?: OutboxFigures | null): Explained {
 
   const parts: string[] = [];
   if (pending === 0 && dead === 0) {
-    parts.push("Everything this appliance has reported to the StayConnect cloud has been delivered.");
+    parts.push("Everything this appliance has reported to the Velonet cloud has been delivered.");
   } else {
     if (pending > 0) {
       parts.push(
-        `${num(pending)} ${pending === 1 ? "record is" : "records are"} waiting to be sent to the StayConnect cloud.`,
+        `${num(pending)} ${pending === 1 ? "record is" : "records are"} waiting to be sent to the Velonet cloud.`,
       );
     }
     if (dead > 0) {
@@ -266,7 +266,7 @@ export function describeLicense(state: string | null | undefined, installed: boo
       return {
         headline: state === "Suspended" ? "Suspended" : "Restricted",
         summary:
-          "The licence is no longer in good standing, so some capabilities are withheld. Contact StayConnect.",
+          "The licence is no longer in good standing, so some capabilities are withheld. Contact Velonet.",
         tone: "warn",
       };
     case "Expired":

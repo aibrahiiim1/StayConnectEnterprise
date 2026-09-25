@@ -154,7 +154,7 @@ export function configRows(
           ms(cfg.read_timeout_ms) && `read ${ms(cfg.read_timeout_ms)}`,
           ms(cfg.write_timeout_ms) && `write ${ms(cfg.write_timeout_ms)}`].filter(Boolean).join(", ") || "—",
       },
-      { label: "Direction", value: auth.read_only === false ? "Read and write" : "Read-only — StayConnect never writes to the PMS" },
+      { label: "Direction", value: auth.read_only === false ? "Read and write" : "Read-only — Velonet never writes to the PMS" },
       { label: "Credential", value: auth.credential_mode === "NONE" || auth.credential_mode === undefined ? "None needed for this link" : "Required" },
     ];
     if (cfg.resync_supported != null) {

@@ -56,7 +56,7 @@ export default function InternetPackagesPage() {
           <EmptyState
             icon={<Package />}
             title="The internet offering is not switched on for this appliance"
-            hint="Internet packages become available once this capability is enabled for the site. Contact your StayConnect administrator."
+            hint="Internet packages become available once this capability is enabled for the site. Contact your Velonet administrator."
           />
         </CardBody></Card>
       ) : (

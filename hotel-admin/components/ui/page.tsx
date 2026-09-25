@@ -60,7 +60,7 @@ export function PageHeader({
         <div className="flex min-w-0 items-start gap-3.5">
         {icon && (
           <span
-            className="mt-0.5 hidden size-10 shrink-0 items-center justify-center rounded-lg border border-primary/15 bg-primary-subtle text-primary-subtle-foreground sm:inline-flex [&_svg]:size-5"
+            className="mt-1 hidden size-11 shrink-0 items-center justify-center rounded-lg bg-primary-subtle text-primary-subtle-foreground sm:inline-flex [&_svg]:size-5"
             aria-hidden
           >
             {icon}
@@ -68,11 +68,11 @@ export function PageHeader({
         )}
         <div className="min-w-0 space-y-1">
           {eyebrow && (
-            <div className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground">
+            <div className="text-micro uppercase tracking-[0.08em] text-muted-foreground">
               {eyebrow}
             </div>
           )}
-          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{title}</h1>
+          <h1 className="text-subtitle sm:text-title">{title}</h1>
           {description && (
             <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">{description}</p>
           )}
@@ -142,7 +142,7 @@ export function StatCard({
         )}
       </div>
       <div className="mt-2 flex items-end gap-2">
-        <div className="text-2xl font-semibold leading-none tabular tracking-tight">{value}</div>
+        <div className="text-metric leading-none tabular">{value}</div>
         {trend && (
           <span
             className={cn(
@@ -164,8 +164,9 @@ export function StatCard({
   );
 
   const shell = cn(
-    "block rounded-lg border border-border bg-card p-4 text-card-foreground shadow-xs",
-    href && "transition-colors hover:border-border-strong hover:bg-surface/40",
+    "block rounded-lg border border-border bg-card p-4 text-card-foreground shadow-card",
+    href &&
+      "transition-[box-shadow,border-color] duration-base ease-velonet hover:border-border-strong hover:shadow-card-hover focus-visible:shadow-card-hover",
     className,
   );
 

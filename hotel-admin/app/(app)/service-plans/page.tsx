@@ -311,7 +311,7 @@ export default function ServicePlansPage() {
           <EmptyState
             icon={<Gauge />}
             title="The internet offering is not switched on for this appliance"
-            hint="Service plans and internet packages become available once this capability is enabled for the site. Contact your StayConnect administrator." />
+            hint="Service plans and internet packages become available once this capability is enabled for the site. Contact your Velonet administrator." />
         </CardBody></Card>
       ) : (
         <Card>

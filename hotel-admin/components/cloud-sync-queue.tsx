@@ -168,7 +168,7 @@ export function CloudSyncQueueCard({
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <CloudUpload size={16} /> Reporting to the StayConnect cloud
+          <CloudUpload size={16} /> Reporting to the Velonet cloud
         </CardTitle>
       </CardHeader>
       <CardBody className="space-y-3">
@@ -191,7 +191,7 @@ export function CloudSyncQueueCard({
         />
         {licensingOnly && (
           <p className="text-xs text-muted-foreground">
-            This appliance contacts the StayConnect cloud for its licence, its own identity and the
+            This appliance contacts the Velonet cloud for its licence, its own identity and the
             certificate that authenticates them — and for nothing else. Operational reporting is switched off
             by decision, not by a fault. The figures below are the records this appliance produced while
             reporting was enabled; they are kept, not sent.

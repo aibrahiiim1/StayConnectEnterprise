@@ -21,7 +21,7 @@ import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "./button";
 import { ErrorBanner } from "./error-banner";
-import { Field, Input } from "./input";
+import { Field, Input, Select } from "./input";
 
 export const Dialog = DialogPrimitive.Root;
 export const DialogTrigger = DialogPrimitive.Trigger;
@@ -44,7 +44,7 @@ export function DialogContent({
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay
         className={cn(
-          "fixed inset-0 z-50 bg-foreground/45 backdrop-blur-[2px]",
+          "fixed inset-0 z-50 bg-[hsl(225_12%_7%/0.55)] backdrop-blur-[2px]",
           "data-[state=open]:animate-in data-[state=closed]:animate-out",
           "data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0",
         )}
@@ -58,7 +58,7 @@ export function DialogContent({
       <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:items-center sm:p-6">
         <DialogPrimitive.Content
           className={cn(
-            "relative my-auto flex w-full flex-col rounded-lg border border-border bg-card text-card-foreground shadow-lg",
+            "relative my-auto flex w-full flex-col rounded-xl border border-border bg-card text-card-foreground shadow-overlay",
             "max-h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-3rem)]",
             "data-[state=open]:animate-in data-[state=closed]:animate-out",
             "data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0",
@@ -95,7 +95,7 @@ export function DialogTitle({
   className,
   ...p
 }: React.ComponentPropsWithoutRef<typeof DialogPrimitive.Title>) {
-  return <DialogPrimitive.Title className={cn("text-base font-semibold tracking-tight", className)} {...p} />;
+  return <DialogPrimitive.Title className={cn("text-headline", className)} {...p} />;
 }
 
 export function DialogDescription({
@@ -226,6 +226,10 @@ export function ConfirmDialog({
   reasonPlaceholder,
   requirePassword = false,
   passwordLabel = "Confirm your password",
+  reasonMaxLength = 500,
+  reasonOptions,
+  confirmText,
+  consequences,
   onConfirm,
   children,
 }: {
@@ -242,6 +246,15 @@ export function ConfirmDialog({
   reasonPlaceholder?: string;
   requirePassword?: boolean;
   passwordLabel?: string;
+  /** The audit log's limit for a typed reason. */
+  reasonMaxLength?: number;
+  /** When the reason is a choice rather than free text. */
+  reasonOptions?: { value: string; label: string }[];
+  /** TYPED CONFIRMATION for the heaviest actions: the operator must type exactly this (a name, a serial,
+   *  a word such as REVOKE) before the button enables. Compared exactly, case included. */
+  confirmText?: string;
+  /** What the action will do, shown as a danger list above the fields. */
+  consequences?: React.ReactNode[];
   onConfirm: (args: { reason: string; password: string }) => void | Promise<void>;
   children?: React.ReactNode;
 }) {
@@ -252,6 +265,8 @@ export function ConfirmDialog({
   // and to `getByLabelText` — a control asking for a password with no accessible name.
   const reasonId = React.useId();
   const passwordId = React.useId();
+  const typedId = React.useId();
+  const [typed, setTyped] = React.useState("");
 
   // Clearing on close rather than on open: a password must not survive in component state after the dialog
   // that collected it has gone.
@@ -259,10 +274,14 @@ export function ConfirmDialog({
     if (!open) {
       setReason("");
       setPassword("");
+      setTyped("");
     }
   }, [open]);
 
-  const ready = (!requireReason || reason.trim() !== "") && (!requirePassword || password !== "");
+  const ready =
+    (!requireReason || reason.trim() !== "") &&
+    (!requirePassword || password !== "") &&
+    (!confirmText || typed === confirmText);
 
   return (
     <DialogForm
@@ -278,15 +297,50 @@ export function ConfirmDialog({
       disabled={!ready}
       onSubmit={() => onConfirm({ reason: reason.trim(), password })}
     >
+      {consequences && consequences.length > 0 && (
+        <div className="rounded-md border border-destructive/30 bg-destructive-subtle px-3.5 py-3 text-sm text-destructive-subtle-foreground">
+          <ul className="list-disc space-y-1 ps-5">
+            {consequences.map((c, i) => (
+              <li key={i}>{c}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       {children}
       {requireReason && (
-        <Field label={reasonLabel} htmlFor={reasonId} required>
+        <Field label={reasonLabel} htmlFor={reasonId} required
+          hint={reasonOptions ? "Recorded in the activity log." : `Recorded in the activity log. ${reason.length}/${reasonMaxLength}`}
+        >
+          {reasonOptions ? (
+            <Select id={reasonId} value={reason} onChange={(e) => setReason(e.target.value)} required>
+              <option value="">Choose a reason…</option>
+              {reasonOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+          ) : (
+            <Input
+              id={reasonId}
+              value={reason}
+              maxLength={reasonMaxLength}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder={reasonPlaceholder}
+              required
+            />
+          )}
+        </Field>
+      )}
+      {confirmText && (
+        <Field label={<>Type <span className="font-mono font-bold">{confirmText}</span> to confirm</>} htmlFor={typedId} required>
           <Input
-            id={reasonId}
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder={reasonPlaceholder}
-            required
+            id={typedId}
+            value={typed}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(e) => setTyped(e.target.value)}
+            className="font-mono"
           />
         </Field>
       )}
