@@ -104,7 +104,7 @@ jobs:
           echo "This attempt exists so the required context '${{ github.job }}' is REPORTED for this commit,"
           echo "and it fails so the pull request cannot become mergeable on a check that validated nothing."
           echo
-          echo "The full four-gate validation runs once a night at 03:10 Africa/Cairo, when the nightly"
+          echo "The full four-gate validation runs once a night at 06:00 Africa/Cairo, when the nightly"
           echo "orchestrator re-runs THIS run for the exact delivery head. That re-run arrives as attempt 2+"
           echo "and executes everything below."
           echo

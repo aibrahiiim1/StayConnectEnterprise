@@ -2,7 +2,7 @@
 """THE NIGHTLY AUTHORITATIVE DELIVERY DECISION, as pure functions.
 
 WHAT THIS IS FOR. Normal development is no longer interrupted by the four full gates on every push: the gates
-no longer run on `pull_request` at all. Instead, once a night at 03:10 Africa/Cairo, the exact current HEAD of
+no longer run on `pull_request` at all. Instead, once a night at 06:00 Africa/Cairo, the exact current HEAD of
 the single active delivery candidate is validated by ONE FRESH run of all four authoritative gates, and only
 an all-green result on that exact HEAD is merged.
 
@@ -27,7 +27,7 @@ required context to integration_id 15368 and evaluates it for the pull request. 
 
 WHAT WORKS IS A pull_request RUN, RE-RUN. The daytime push produces attempt 1, which fails in seconds as a
 deliberate sentinel: the context exists so the rule can be evaluated, and is non-passing so nothing can merge
-on a check that validated nothing. At 03:10 Africa/Cairo the orchestrator RE-RUNS that same run for the exact
+on a check that validated nothing. At 06:00 Africa/Cairo the orchestrator RE-RUNS that same run for the exact
 head. A re-run keeps `event=pull_request` and the same head SHA, so its checks count, and it arrives as
 attempt 2 or higher, where the gates execute in full.
 
@@ -48,9 +48,9 @@ except ImportError:                       # pragma: no cover
 UTC = _dt.timezone.utc
 
 DELIVERY_TZ = "Africa/Cairo"
-TARGET_LOCAL_HOUR = 3
-TARGET_LOCAL_MINUTE = 10
-# How far from 03:10 local a SCHEDULED run may start before it is treated as evidence that the declared
+TARGET_LOCAL_HOUR = 6
+TARGET_LOCAL_MINUTE = 0
+# How far from 06:00 local a SCHEDULED run may start before it is treated as evidence that the declared
 # timezone was not honoured. A late scheduler drifts by minutes; a UTC-interpreted cron drifts by 120 minutes
 # in winter and 180 in summer, so 105 separates the two without refusing a merely delayed run.
 MAX_DRIFT_MINUTES = 105
@@ -86,19 +86,19 @@ class Decision:
 # ---------------------------------------------------------------------------------------------------------
 def schedule_sanity(now_utc, event="schedule", tz_name=DELIVERY_TZ, hour=TARGET_LOCAL_HOUR,
                     minute=TARGET_LOCAL_MINUTE, max_drift_minutes=MAX_DRIFT_MINUTES):
-    """Did this run actually start near 03:10 Africa/Cairo?
+    """Did this run actually start near 06:00 Africa/Cairo?
 
     THE SCHEDULE ITSELF IS NO LONGER THIS FUNCTION'S JOB. GitHub Actions takes an IANA `timezone:` beside
-    `cron:`, so the workflow states `10 3 * * *` in Africa/Cairo once and the platform resolves the offset
+    `cron:`, so the workflow states `0 6 * * *` in Africa/Cairo once and the platform resolves the offset
     across Egypt's DST transitions. What this function does now is much narrower, and it is the reason it still
     exists at all: IT CHECKS THAT THE PLATFORM DID WHAT THE WORKFLOW ASKED.
 
     If `timezone:` were ignored -- removed in an edit, unsupported on some runner, mistyped -- the cron would
-    fire at 03:10 UTC, which is 05:10 or 06:10 in Cairo. Nothing else in this system would notice: the gates
+    fire at 06:00 UTC, which is 08:00 or 09:00 in Cairo. Nothing else in this system would notice: the gates
     would run, the merge would happen, and a nightly process would silently be running in the morning for as
     long as nobody looked. A misconfiguration that still produces green merges is the kind that lasts.
 
-    So the drift from 03:10 local is measured and a large one refuses. 105 minutes is chosen deliberately: a
+    So the drift from 06:00 local is measured and a large one refuses. 105 minutes is chosen deliberately: a
     scheduled GitHub run can start late by minutes and occasionally more, while an ignored timezone shows up as
     a drift of at least 120 minutes (winter) or 180 (summer). The threshold separates the two cases without
     refusing a merely delayed run.
@@ -320,7 +320,7 @@ def merge_precondition(gates, expected_sha, pr_now, unresolved_threads):
                                     and waits instead of quietly rebasing.
       unresolved review threads     `required_review_thread_resolution` is true. An unresolved automated
                                     review thread blocks the merge, and saying so plainly is more useful at
-                                    03:10 than a 405 from the merge endpoint.
+                                    06:00 than a 405 from the merge endpoint.
     """
     if not getattr(gates, "proceed", False):
         return Decision(False, "GATES_NOT_GREEN", gates.reason, getattr(gates, "detail", {}))

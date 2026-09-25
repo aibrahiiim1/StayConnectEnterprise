@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """WHAT DID LAST NIGHT'S AUTHORITATIVE VALIDATION DECIDE? -- the first thing an agent session asks.
 
-Under the nightly delivery model nothing tells an agent that a gate failed at 03:10. The push that caused it
+Under the nightly delivery model nothing tells an agent that a gate failed at 06:00. The push that caused it
 succeeded, the working day ended, and the evidence sits in a workflow run nobody opened. So this is the
 session-start check: it prints the latest nightly outcome, and whether it is an UNRESOLVED failure that must
 be repaired before new work begins.

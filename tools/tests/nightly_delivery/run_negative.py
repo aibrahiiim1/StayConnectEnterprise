@@ -68,24 +68,24 @@ def pr(number=200, head=SHA_A, draft=False, base="master", labels=None, state="o
 
 # =========================================================================================================
 print("== 8. SCHEDULING AND TIMEZONE CORRECTNESS (one timezone-aware cron; verified, not computed) ==")
-# The workflow now declares a single `- cron: '10 3 * * *'` with `timezone: "Africa/Cairo"`, so the PLATFORM
+# The workflow now declares a single `- cron: '0 6 * * *'` with `timezone: "Africa/Cairo"`, so the PLATFORM
 # resolves Egypt's DST -- UTC+2 in winter, UTC+3 from late April to late October. What is asserted here is the
-# narrow thing that remains this repository's problem: that a run which did NOT start near 03:10 local is
-# refused, because an ignored `timezone:` would fire at 03:10 UTC and merge quietly at the wrong hour forever.
-WINTER = dt.datetime(2027, 1, 15, tzinfo=UTC)      # Cairo is UTC+2 -> 03:10 local == 01:10Z
-SUMMER = dt.datetime(2027, 7, 15, tzinfo=UTC)      # Cairo is UTC+3 -> 03:10 local == 00:10Z
+# narrow thing that remains this repository's problem: that a run which did NOT start near 06:00 local is
+# refused, because an ignored `timezone:` would fire at 06:00 UTC and merge quietly at the wrong hour forever.
+WINTER = dt.datetime(2027, 1, 15, tzinfo=UTC)      # Cairo is UTC+2 -> 06:00 local == 04:00Z
+SUMMER = dt.datetime(2027, 7, 15, tzinfo=UTC)      # Cairo is UTC+3 -> 06:00 local == 03:00Z
 
-expect("winter: a run at 01:10Z is 03:10 Cairo and proceeds",
-       nd.schedule_sanity(WINTER.replace(hour=1, minute=10)), True, "ON_SCHEDULE")
-expect("summer: a run at 00:10Z is 03:10 Cairo and proceeds",
-       nd.schedule_sanity(SUMMER.replace(hour=0, minute=10)), True, "ON_SCHEDULE")
+expect("winter: a run at 04:00Z is 06:00 Cairo and proceeds",
+       nd.schedule_sanity(WINTER.replace(hour=4, minute=0)), True, "ON_SCHEDULE")
+expect("summer: a run at 03:00Z is 06:00 Cairo and proceeds",
+       nd.schedule_sanity(SUMMER.replace(hour=3, minute=0)), True, "ON_SCHEDULE")
 
 # THE CASE THE CHECK EXISTS FOR: `timezone:` ignored, so the cron is read as UTC.
-w_ignored = nd.schedule_sanity(WINTER.replace(hour=3, minute=10))
-s_ignored = nd.schedule_sanity(SUMMER.replace(hour=3, minute=10))
-expect("winter: an IGNORED timezone fires at 03:10Z = 05:10 Cairo and is refused",
+w_ignored = nd.schedule_sanity(WINTER.replace(hour=6, minute=0))
+s_ignored = nd.schedule_sanity(SUMMER.replace(hour=6, minute=0))
+expect("winter: an IGNORED timezone fires at 06:00Z = 08:00 Cairo and is refused",
        w_ignored, False, "SCHEDULE_DRIFT")
-expect("summer: an IGNORED timezone fires at 03:10Z = 06:10 Cairo and is refused",
+expect("summer: an IGNORED timezone fires at 06:00Z = 09:00 Cairo and is refused",
        s_ignored, False, "SCHEDULE_DRIFT")
 if abs(w_ignored.detail["drift_minutes"] - 120.0) > 0.01:
     fails.append("winter drift measured %s, expected +120" % w_ignored.detail["drift_minutes"])
@@ -96,9 +96,9 @@ else:
     print("  ok   the ignored-timezone drift really is +120 winter / +180 summer (measured, not assumed)")
 
 # The offsets themselves are measured from the tz database rather than written down anywhere.
-if abs(nd.schedule_sanity(WINTER.replace(hour=1, minute=10)).detail["utc_offset_hours"] - 2.0) > 0.01:
+if abs(nd.schedule_sanity(WINTER.replace(hour=4, minute=0)).detail["utc_offset_hours"] - 2.0) > 0.01:
     fails.append("winter offset is not +2")
-elif abs(nd.schedule_sanity(SUMMER.replace(hour=0, minute=10)).detail["utc_offset_hours"] - 3.0) > 0.01:
+elif abs(nd.schedule_sanity(SUMMER.replace(hour=3, minute=0)).detail["utc_offset_hours"] - 3.0) > 0.01:
     fails.append("summer offset is not +3")
 else:
     oks += 1
@@ -106,11 +106,11 @@ else:
 
 # A late scheduler must not be mistaken for a misconfiguration, and the threshold must sit between the two.
 expect("a 40-minute-late scheduled start is tolerated",
-       nd.schedule_sanity(WINTER.replace(hour=1, minute=50)), True, "ON_SCHEDULE")
+       nd.schedule_sanity(WINTER.replace(hour=4, minute=40)), True, "ON_SCHEDULE")
 expect("a 100-minute-late start is still tolerated (a late scheduler, not a wrong timezone)",
-       nd.schedule_sanity(WINTER.replace(hour=2, minute=50)), True, "ON_SCHEDULE")
+       nd.schedule_sanity(WINTER.replace(hour=5, minute=40)), True, "ON_SCHEDULE")
 expect("a 120-minute drift is refused -- that is exactly the winter UTC misreading",
-       nd.schedule_sanity(WINTER.replace(hour=3, minute=10)), False, "SCHEDULE_DRIFT")
+       nd.schedule_sanity(WINTER.replace(hour=6, minute=0)), False, "SCHEDULE_DRIFT")
 expect("the middle of the working day is refused for a SCHEDULED run",
        nd.schedule_sanity(WINTER.replace(hour=12, minute=0)), False, "SCHEDULE_DRIFT")
 
@@ -119,25 +119,25 @@ expect("a workflow_dispatch at midday is exempt, because that is what manual mea
        nd.schedule_sanity(WINTER.replace(hour=12, minute=0), event="workflow_dispatch"), True,
        "NOT_SCHEDULED")
 expect("a workflow_dispatch on time is also fine",
-       nd.schedule_sanity(WINTER.replace(hour=1, minute=10), event="workflow_dispatch"), True,
+       nd.schedule_sanity(WINTER.replace(hour=4, minute=0), event="workflow_dispatch"), True,
        "NOT_SCHEDULED")
 
 # Every night of a leap year, in both offsets, a correctly-scheduled run proceeds and a UTC-read one does not.
 good = bad_ = 0
 for day in range(366):
     d = dt.datetime(2027, 1, 1, tzinfo=UTC) + dt.timedelta(days=day)
-    local_target = d.astimezone(nd.ZoneInfo(nd.DELIVERY_TZ)).replace(hour=3, minute=10, second=0,
+    local_target = d.astimezone(nd.ZoneInfo(nd.DELIVERY_TZ)).replace(hour=6, minute=0, second=0,
                                                                      microsecond=0)
     if nd.schedule_sanity(local_target.astimezone(UTC)).proceed:
         good += 1
-    if not nd.schedule_sanity(d.replace(hour=3, minute=10)).proceed:
+    if not nd.schedule_sanity(d.replace(hour=6, minute=0)).proceed:
         bad_ += 1
 if good != 366 or bad_ != 366:
     fails.append("across 366 nights: %d/366 correct starts accepted, %d/366 UTC-read starts refused"
                  % (good, bad_))
 else:
     oks += 1
-    print("  ok   366/366 nights: a correct 03:10-Cairo start proceeds and a UTC-read start is refused")
+    print("  ok   366/366 nights: a correct 06:00-Cairo start proceeds and a UTC-read start is refused")
 
 # =========================================================================================================
 print()

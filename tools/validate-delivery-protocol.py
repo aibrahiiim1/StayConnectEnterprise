@@ -272,7 +272,7 @@ def check_concurrency(name, text):
 
 
 def check_orchestrator():
-    """The nightly orchestrator must exist, be scheduled for 03:10 Africa/Cairo, and prove its own rules."""
+    """The nightly orchestrator must exist, be scheduled for 06:00 Africa/Cairo, and prove its own rules."""
     raw = read(ORCHESTRATOR)
     if raw is None:
         fail("%s is missing; nothing would validate a delivery candidate or merge it" % ORCHESTRATOR)
@@ -282,18 +282,18 @@ def check_orchestrator():
     # explaining the DST window. The mutation was detected only after this line changed.
     text = noncomment(raw)
     crons = re.findall(r"(?m)^\s*-\s*cron:\s*'([^']+)'", text)
-    if crons != ["10 3 * * *"]:
-        fail("%s declares crons %r; it must declare exactly one, '10 3 * * *'. More than one firing means a "
+    if crons != ["0 6 * * *"]:
+        fail("%s declares crons %r; it must declare exactly one, '0 6 * * *'. More than one firing means a "
              "deliberate no-op run every night and a session-start check that has to tell a no-op from a real "
              "verdict; none means nothing ever validates a candidate" % (ORCHESTRATOR, crons))
     else:
-        ok("%s declares exactly one schedule: 03:10" % ORCHESTRATOR)
-    # THE TIMEZONE IS THE WHOLE SCHEDULE. Without it the same cron means 03:10 UTC -- 05:10 or 06:10 in Cairo
+        ok("%s declares exactly one schedule: 06:00" % ORCHESTRATOR)
+    # THE TIMEZONE IS THE WHOLE SCHEDULE. Without it the same cron means 06:00 UTC -- 08:00 or 09:00 in Cairo
     # -- and the nightly merge would run at the wrong hour while still going green, which is the kind of
     # misconfiguration that lasts for months.
     if not re.search(r"(?m)^\s*timezone:\s*[\"\']?%s[\"\']?\s*$" % re.escape(DELIVERY_TZ), text):
         fail("%s does not declare `timezone: %s` beside its cron. Without it the cron is interpreted as UTC "
-             "and the nightly validation would run at 05:10 or 06:10 Cairo time instead of 03:10"
+             "and the nightly validation would run at 08:00 or 09:00 Cairo time instead of 06:00"
              % (ORCHESTRATOR, DELIVERY_TZ))
     else:
         ok("%s states its schedule in %s, so the platform owns the DST arithmetic" % (ORCHESTRATOR, DELIVERY_TZ))
