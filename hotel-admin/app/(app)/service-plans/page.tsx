@@ -320,7 +320,7 @@ export default function ServicePlansPage() {
           <EmptyState
             icon={<Gauge />}
             title="The internet offering is not switched on for this appliance"
-            hint="Service plans and internet packages become available once this capability is enabled for the site. Contact your Velonet administrator." />
+            hint="Service plans and internet packages become available once this capability is enabled for the site. Contact your Semantics administrator." />
         </CardBody></Card>
       ) : (
         <Card>

@@ -21,7 +21,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       defaultTheme="system"
       enableSystem
       disableTransitionOnChange
-      storageKey="velonet-central-theme"
+      storageKey="onegate-central-theme"
     >
       {children}
     </NextThemeProvider>

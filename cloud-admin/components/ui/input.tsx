@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 
 const CONTROL = cn(
   "w-full rounded-md border border-input bg-card text-foreground",
-  "transition-[border-color,box-shadow] duration-base ease-velonet",
+  "transition-[border-color,box-shadow] duration-base ease-onegate",
   "placeholder:text-muted-foreground/80",
   "focus:outline-none focus-visible:outline-none focus:border-foreground focus:ring-2 focus:ring-ring/20",
   "disabled:cursor-not-allowed disabled:bg-surface disabled:text-muted-foreground",

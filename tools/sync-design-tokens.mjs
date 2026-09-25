@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copies the canonical Velonet design tokens into each admin console.
+// Copies the canonical OneGate design tokens into each admin console.
 //
 //   node tools/sync-design-tokens.mjs          write the copies
 //   node tools/sync-design-tokens.mjs --check  exit 1 if any copy differs (used by the consoles' unit tests)

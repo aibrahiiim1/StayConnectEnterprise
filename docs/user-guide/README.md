@@ -1,11 +1,11 @@
-# Velonet — User Guide
+# OneGate — User Guide
 
-This guide explains how to use Velonet's two operator consoles for each operator role:
-**Velonet Central** (the vendor's console in the cloud, used for licensing) and **Velonet Hotel Admin** (the
+This guide explains how to use OneGate's two operator consoles for each operator role:
+**OneGate Central** (the vendor's console in the cloud, used for licensing) and **OneGate Hotel Admin** (the
 console on the appliance at each hotel). Start with the section that matches your role; the role pages are
 task-oriented ("how do I…") rather than a feature reference.
 
-> **New to Velonet?** Read the
+> **New to OneGate?** Read the
 > [Complete Operations Manual](../STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md) first —
 > it takes a hotel from an unpacked appliance to live, licensed guest Wi-Fi. The full
 > documentation index is at [docs/README.md](../README.md).
@@ -16,7 +16,7 @@ task-oriented ("how do I…") rather than a feature reference.
 > for licensing only; the hotel's networks, sign-in methods, packages and guests are run from Hotel Admin.
 >
 > **Design:** both consoles and the guest portal share the
-> [Velonet design system](../../design-system/README.md).
+> [OneGate design system](../../design-system/README.md).
 
 ## Complete references & configuration manuals
 
@@ -25,9 +25,9 @@ If you want a **page-by-page reference** (what every screen shows and does) or a
 
 | Document | What it covers |
 |---|---|
-| [control-panel-reference.md](control-panel-reference.md) | Every **Velonet Central** page — Dashboard, Sites, Onboarding, Appliances, Customers, Licenses, Operators, Security alerts, Certificates, Assignment keys, Backup health, Audit log |
+| [control-panel-reference.md](control-panel-reference.md) | Every **OneGate Central** page — Dashboard, Sites, Onboarding, Appliances, Customers, Licenses, Operators, Security alerts, Certificates, Assignment keys, Backup health, Audit log |
 | [control-panel-config-manual.md](control-panel-config-manual.md) | How to create a **Customer → Site → Appliance → License** and run day-2 operations in Central |
-| [hotel-admin-reference.md](hotel-admin-reference.md) | Every **Velonet Hotel Admin** page, group by group — Overview; Internet offering; Guests; Property management system; Charges; Guest portal; Networking; System |
+| [hotel-admin-reference.md](hotel-admin-reference.md) | Every **OneGate Hotel Admin** page, group by group — Overview; Internet offering; Guests; Property management system; Charges; Guest portal; Networking; System |
 | [hotel-admin-config-manual.md](hotel-admin-config-manual.md) | How to **activate and fully configure** an appliance from Hotel Admin — networking, guest networks, sign-in methods, packages, vouchers, PMS, portal, operators |
 | [guest-portal.md](guest-portal.md) | What **guests** see on the Wi-Fi sign-in page, and which Hotel Admin settings control it |
 
@@ -35,17 +35,17 @@ The role-based guides below are shorter, task-oriented walkthroughs for each rol
 
 ## Who should read what
 
-**Velonet Central** (vendor staff and hotel-group admins):
+**OneGate Central** (vendor staff and hotel-group admins):
 
 | Role | Read this | In one sentence |
 |---|---|---|
-| **Platform admin** | [platform-admin.md](platform-admin.md) | You run Velonet Central for all customers: you create customers, activate appliances and issue licenses. |
+| **Platform admin** | [platform-admin.md](platform-admin.md) | You run OneGate Central for all customers: you create customers, activate appliances and issue licenses. |
 | **Customer admin** (tenant admin) | [tenant-admin.md](tenant-admin.md) | You look after one hotel group's sites, appliances and Central operators, and read its licenses. |
 | **Customer operator** (tenant operator) | [tenant-operator.md](tenant-operator.md) | You do day-to-day Central work for one hotel group, and usually run its hotels' Hotel Admin too. |
 | **Viewer** | [viewer-and-billing.md](viewer-and-billing.md#viewer) | You can look at everything for your customer but not change anything. |
 | **Billing** | [viewer-and-billing.md](viewer-and-billing.md#billing) | You can view your customer's licenses and usage. Nothing else. |
 
-**Velonet Hotel Admin** (hotel staff) has seven roles of its own — Site admin, Hotel IT manager, Front office
+**OneGate Hotel Admin** (hotel staff) has seven roles of its own — Site admin, Hotel IT manager, Front office
 operator, Guest relations operator, Voucher operator, Payments operator and Site viewer. Which pages each can
 use is listed in [hotel-admin-reference.md](hotel-admin-reference.md#who-can-use-which-page).
 
@@ -54,9 +54,9 @@ If a guest can't get online and you're trying to help them, jump straight to
 
 ## Accessing the consoles
 
-- **Velonet Central**: the Central address your platform admin gave you. Sign in with your Central
+- **OneGate Central**: the Central address your platform admin gave you. Sign in with your Central
   operator account (or your organisation's single sign-on). A Central account does not open any appliance.
-- **Velonet Hotel Admin**: `https://` + the appliance's management address on the hotel network. Sign in
+- **OneGate Hotel Admin**: `https://` + the appliance's management address on the hotel network. Sign in
   with the account created for you on that appliance; it works only at that property.
 - **Session**: both consoles re-check your session every 30 seconds. Click **Sign out** at the bottom of the
   sidebar when done.
@@ -67,7 +67,7 @@ and no action buttons.
 
 ## What each menu item does
 
-**Velonet Central** — four groups:
+**OneGate Central** — four groups:
 
 | Group | Pages |
 |---|---|
@@ -76,7 +76,7 @@ and no action buttons.
 | **Commercial** | Customers (hotel groups) · Licenses (issue, renew, suspend, revoke) |
 | **Administration** | Operators · Security alerts · Certificates · Assignment keys · Backup health · Audit log |
 
-**Velonet Hotel Admin** — eight groups:
+**OneGate Hotel Admin** — eight groups:
 
 | Group | Pages |
 |---|---|
@@ -115,7 +115,7 @@ template, brand, wording, languages and custom CSS/HTML. Details: [guest-portal.
 
 - **Customer** — The hotel group or company that owns sites (e.g., "Coral Sea Resorts").
 - **Site** — One physical property (one hotel or resort). Buildings, floors and SSIDs are not sites.
-- **Appliance** — The Velonet gateway at a site. Hands out addresses, shows the sign-in page, enforces speed
+- **Appliance** — The OneGate gateway at a site. Hands out addresses, shows the sign-in page, enforces speed
   and time limits and talks to the PMS. It does not broadcast Wi-Fi; the hotel's access points do.
 - **Activate / Pending activation** — A new appliance registers itself and waits as *Pending activation*
   until an operator activates it in Central.

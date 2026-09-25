@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { cn } from "@/lib/utils";
 
-describe("cn keeps the Velonet type roles", () => {
+describe("cn keeps the OneGate type roles", () => {
   it("a type role and a text colour coexist", () => {
     expect(cn("text-caption", "text-muted-foreground")).toBe("text-caption text-muted-foreground");
     expect(cn("text-nano uppercase", "text-sidebar-muted")).toBe("text-nano uppercase text-sidebar-muted");

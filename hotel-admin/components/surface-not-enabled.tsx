@@ -29,7 +29,7 @@ export function SurfaceNotEnabled({ label }: { label: string }) {
               <h1 className="text-lg font-semibold tracking-tight">{label}</h1>
               <p className="text-sm font-medium">Not enabled on this appliance</p>
               <p className="text-sm text-muted-foreground">
-                This is a configuration of the appliance, not a fault. The feature exists in Velonet but
+                This is a configuration of the appliance, not a fault. The feature exists in OneGate but
                 is not switched on for this property, so there is nothing here to show or to fix.
               </p>
               <p className="text-sm text-muted-foreground">
@@ -37,7 +37,7 @@ export function SurfaceNotEnabled({ label }: { label: string }) {
                 them depends on this screen.
               </p>
               <p className="text-sm text-muted-foreground">
-                If this property should have it, ask Velonet support to enable it; it is a deployment
+                If this property should have it, ask Semantics support to enable it; it is a deployment
                 decision rather than something an operator can turn on.
               </p>
             </div>

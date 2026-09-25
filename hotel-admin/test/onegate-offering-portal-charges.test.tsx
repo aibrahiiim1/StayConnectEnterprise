@@ -1,4 +1,4 @@
-// VELONET REDESIGN — Internet offering, Guest portal and Charges.
+// ONEGATE REDESIGN — Internet offering, Guest portal and Charges.
 //
 // Two rules from the redesign handoff, asserted where they were broken:
 //

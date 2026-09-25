@@ -14,7 +14,7 @@ import {
   DoorOpen, BedDouble, Plug, Route, Inbox, ShieldCheck, UserX, Layers, ArrowLeftRight, HeartPulse, Receipt,
   LifeBuoy, Globe, AtSign, MessageSquare, Stethoscope, Bell, Hourglass, CalendarClock, ChartColumn,
 } from "lucide-react";
-import { VelonetLockup } from "@/components/brand";
+import { OneGateLockup } from "@/components/brand";
 import { Tooltip } from "@/components/ui/tooltip";
 
 // THERE IS NO BUILD-TIME GATE IN THIS FILE, AND THAT IS THE POINT.
@@ -324,7 +324,7 @@ export function Nav({
       >
         {/* The mark is drawn rather than loaded: one fewer asset to ship to an appliance, and it inherits the
             brand token so it is never out of step with the rest of the product. */}
-        <VelonetLockup product="Hotel Admin" collapsed={collapsed} inverse className={collapsed ? undefined : "flex-1"} />
+        <OneGateLockup product="Hotel Admin" collapsed={collapsed} inverse className={collapsed ? undefined : "flex-1"} />
         {onToggleCollapsed && (
           // ONE control, and its accessible name states what activating it will DO, which is what a screen
           // reader user needs — not what the current state is. aria-expanded carries the state.

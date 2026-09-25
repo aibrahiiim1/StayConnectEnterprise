@@ -1,6 +1,6 @@
 # Platform Admin — User Guide
 
-You run Velonet Central for the vendor. You are not a hotel; your customers are hotel groups. Your job is to create customers and sites, activate their appliances, issue and manage each appliance's signed license, and step in when a customer admin has a problem they can't solve themselves. Central is used for licensing only: a hotel's networks, sign-in methods, packages and guests are run by the hotel's own staff in **Velonet Hotel Admin** on the appliance.
+You run OneGate Central for the vendor. You are not a hotel; your customers are hotel groups. Your job is to create customers and sites, activate their appliances, issue and manage each appliance's signed license, and step in when a customer admin has a problem they can't solve themselves. Central is used for licensing only: a hotel's networks, sign-in methods, packages and guests are run by the hotel's own staff in **OneGate Hotel Admin** on the appliance.
 
 ## What only you can do
 
@@ -11,7 +11,7 @@ You run Velonet Central for the vendor. You are not a hotel; your customers are 
 
 ## Your daily navigation
 
-Because you're platform-scoped, the sidebar has a **Customer context** selector under the Velonet mark. Pick a customer and Dashboard, Sites, Appliances, Licenses, Operators and Audit log scope to that customer. With **All customers** selected, Sites, Appliances and Licenses list every customer (with a Customer column), while Operators and Audit log ask you to select a customer first. Security alerts, Certificates, Assignment keys and Backup health are always fleet-wide.
+Because you're platform-scoped, the sidebar has a **Customer context** selector under the OneGate mark. Pick a customer and Dashboard, Sites, Appliances, Licenses, Operators and Audit log scope to that customer. With **All customers** selected, Sites, Appliances and Licenses list every customer (with a Customer column), while Operators and Audit log ask you to select a customer first. Security alerts, Certificates, Assignment keys and Backup health are always fleet-wide.
 
 ## Common tasks
 

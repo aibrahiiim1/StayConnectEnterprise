@@ -1,29 +1,29 @@
-# Velonet Central — Page-by-Page Reference
+# OneGate Central — Page-by-Page Reference
 
-**Velonet Central** (also called the Control Panel or Cloud Admin) is the vendor's console in the cloud. It
+**OneGate Central** (also called the Control Panel or Cloud Admin) is the vendor's console in the cloud. It
 registers and licenses every appliance: which customer owns it, which site it is at, how many guests it may
 serve at once, and until when. **Central is used for licensing only.** It never configures a hotel's guest
-networks, sign-in methods, packages or guests — those are run from **Velonet Hotel Admin** on each appliance
+networks, sign-in methods, packages or guests — those are run from **OneGate Hotel Admin** on each appliance
 (see [hotel-admin-reference.md](hotel-admin-reference.md)).
 
 This document describes every page in the menu: what it is for, what it shows, what an operator can do, and
 which actions ask for a reason, password confirmation, typed confirmation or a one-time reveal. For
 step-by-step instructions see [control-panel-config-manual.md](control-panel-config-manual.md). The visual
-language is defined in the [Velonet design system](../../design-system/README.md).
+language is defined in the [OneGate design system](../../design-system/README.md).
 
 ---
 
 ## Things that apply to every page
 
-- **Sign-in.** The login page is titled *Velonet Central*: email and password, and a collapsed **single
+- **Sign-in.** The login page is titled *OneGate Central*: email and password, and a collapsed **single
   sign-on** option that asks for an **Organisation slug** and then lists that organisation's providers. A
   Central login opens nothing on an appliance, and a Hotel Admin login does not work here. The session is
   re-checked every 30 seconds; if it has ended you are returned to the login page.
 - **The sidebar.** Four groups: **Overview · Infrastructure · Commercial · Administration**. The button
-  beside the Velonet mark collapses it to an icon rail (tooltips show each name) and expands it again; the
+  beside the OneGate mark collapses it to an icon rail (tooltips show each name) and expands it again; the
   choice is remembered in that browser. On a narrow window the menu is a drawer behind the ☰ button. Your
   email and **Sign out** are at the bottom. Central has no "Find a screen…" filter; its menu is short.
-- **Customer context.** Under the Velonet mark, a platform admin chooses **All customers** or one customer.
+- **Customer context.** Under the OneGate mark, a platform admin chooses **All customers** or one customer.
   The choice is remembered across pages and refreshes. **Dashboard, Sites, Appliances, Licenses, Operators
   and Audit log** follow it; each page repeats which customer it is showing under its title.
   - In **All customers** mode, Sites, Appliances and Licenses list every customer's rows (with a Customer
@@ -219,7 +219,7 @@ Who did what for the selected customer in the last 7 days. Entries are never edi
 ## Retired pages
 
 `/commercial` and `/subscription` are not in the menu and are labelled *retired*. They belong to a pricing
-model that is no longer part of Velonet; the signed appliance license is the only entitlement. Do not use
+model that is no longer part of OneGate; the signed appliance license is the only entitlement. Do not use
 them.
 
 ---

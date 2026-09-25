@@ -34,7 +34,7 @@ export default function ApplianceAndLicensePage() {
         icon={<ServerCog />}
         eyebrow="System"
         title="Appliance & licence"
-        description="Whether this appliance is activated and connected to Velonet Central, and what its licence allows."
+        description="Whether this appliance is activated and connected to OneGate Central, and what its licence allows."
       />
 
       <Tabs value={section} onValueChange={(v) => setSection(v as Section)}>

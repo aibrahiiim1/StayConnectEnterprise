@@ -9,7 +9,7 @@ import {
   ShieldAlert, FileBadge, KeyRound, HardDrive,
   PanelLeftClose, PanelLeftOpen,
 } from "lucide-react";
-import { VelonetLockup } from "@/components/brand";
+import { OneGateLockup } from "@/components/brand";
 import { CustomerSelector } from "@/components/customer-selector";
 import { Tooltip } from "@/components/ui/tooltip";
 import { PAGE_READ, usePermissions } from "@/lib/permissions";
@@ -109,7 +109,7 @@ export function Nav({
           collapsed ? "flex-col gap-2 px-2" : "px-4",
         )}
       >
-        <VelonetLockup product="Central" collapsed={collapsed} inverse className={collapsed ? undefined : "flex-1"} />
+        <OneGateLockup product="Central" collapsed={collapsed} inverse className={collapsed ? undefined : "flex-1"} />
         {onToggleCollapsed && (
           <Tooltip content={collapsed ? "Expand sidebar" : "Collapse sidebar"} side="right">
             <button

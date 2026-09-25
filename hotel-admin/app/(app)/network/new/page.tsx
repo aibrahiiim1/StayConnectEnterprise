@@ -270,7 +270,7 @@ export default function NewGuestNetworkPage() {
               </Field>
               <Field
                 label="SSID label"
-                hint="For reference only. Velonet does not broadcast Wi-Fi — this label records which SSID your wireless controller maps to this network."
+                hint="For reference only. OneGate does not broadcast Wi-Fi — this label records which SSID your wireless controller maps to this network."
               >
                 <Input value={ssidLabel} onChange={(e) => setSsidLabel(e.target.value)} placeholder="Hotel Guest" />
               </Field>
@@ -442,7 +442,7 @@ export default function NewGuestNetworkPage() {
               />
               <Callout tone="warning" title="Wireless controller action required" icon={<Radio className="size-4" />}>
                 Map the &lsquo;{ssidLabel || name}&rsquo; SSID to VLAN {vlanTagged ? vlanId : "(untagged)"} on your wireless
-                controller. Velonet manages the gateway, DHCP and captive portal; it does not broadcast Wi-Fi.
+                controller. OneGate manages the gateway, DHCP and captive portal; it does not broadcast Wi-Fi.
               </Callout>
             </div>
           )}

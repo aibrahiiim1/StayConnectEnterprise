@@ -1,6 +1,6 @@
 /* GENERATED from design-system/tokens.css by tools/sync-design-tokens.mjs. Do not edit here. */
 /*
-  VELONET DESIGN TOKENS — the single source of truth for colour, radius, elevation and motion.
+  ONEGATE DESIGN TOKENS — the single source of truth for colour, radius, elevation and motion.
 
   This file is canonical. `node tools/sync-design-tokens.mjs` copies it into each admin console
   (hotel-admin/app/tokens.css, cloud-admin/app/tokens.css); a unit test in each console fails if a copy
@@ -12,7 +12,7 @@
   A theme is a set of token values and nothing else: no component names a colour.
 
   PALETTE ORIGIN (light theme hex, for reference):
-    brand        #1773bd  hover #125c97  press #0f4b7b  tint #e8f1f8  tint text #0f4b7b   (Velonet blue)
+    brand        #1773bd  hover #125c97  press #0f4b7b  tint #e8f1f8  tint text #0f4b7b   (brand blue)
     ink          #14161a  slate #5a6270                                                   (text)
     canvas       #f1f2f4  surface #ffffff  recessed #f6f7f9                               (layers)
     hairline     #dcdfe4  (dividers, no meaning)   edge #7f8795 (control borders, >= 3:1)
@@ -118,7 +118,7 @@
   --topbar-height: 3.5rem;
 }
 
-/* The console that renders a product accent other than Velonet blue sets data-product on <html>. Central
+/* The console that renders a product accent other than brand blue sets data-product on <html>. Central
    is teal so an operator can never mistake the vendor console for a hotel's appliance. Only the accent
    moves; every other token is shared, which is what keeps the two consoles one family. */
 [data-product="central"] {

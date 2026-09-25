@@ -178,7 +178,7 @@ export function GuestDeviceSelfServiceView({ canAct, rolesKnown = true }: { canA
           icon={on ? <CheckCircle2 /> : <CircleSlash />}
         >
           Your setting, stored on this appliance. It applies as soon as it is saved and keeps working if the
-          connection to Velonet Central is unavailable.
+          connection to OneGate Central is unavailable.
         </StateTile>
         <StateTile
           label="Available in this release"

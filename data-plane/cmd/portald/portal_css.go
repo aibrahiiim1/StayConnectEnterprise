@@ -3,7 +3,7 @@ package main
 // THE PORTAL'S LOOK, AS ONE TOKEN SET.
 //
 // Every guest page -- sign-in, package choice, "You're online", the failure page -- is drawn from these two
-// sheets. The first is the default look: the Velonet palette, radius scale and type roles as CSS custom
+// sheets. The first is the default look: the OneGate palette, radius scale and type roles as CSS custom
 // properties (design-system/README.md, "Guest portal"), which the hotel's Portal settings override one
 // property at a time. The second arranges the SAME elements into the six layouts. A layout never introduces a
 // colour or a radius of its own; it reads the tokens, which is why each one stays coherent under any brand

@@ -1,6 +1,6 @@
 # Viewer & Billing — User Guide
 
-These are the two read-mostly roles in **Velonet Central**. Keep this short because there's not much to do. (On an appliance, the equivalent read-only role in **Velonet Hotel Admin** is **Site viewer** — see [hotel-admin-reference.md](hotel-admin-reference.md#who-can-use-which-page).)
+These are the two read-mostly roles in **OneGate Central**. Keep this short because there's not much to do. (On an appliance, the equivalent read-only role in **OneGate Hotel Admin** is **Site viewer** — see [hotel-admin-reference.md](hotel-admin-reference.md#who-can-use-which-page).)
 
 ---
 
@@ -50,7 +50,7 @@ A legacy role: it is no longer granted to new operators. If you already hold it,
 ### Who typically gets this role
 
 - Finance / accounts-payable contact at the customer.
-- An operations person whose only Velonet concern is cost.
+- An operations person whose only OneGate concern is cost.
 
 ### What you can do
 
@@ -59,10 +59,10 @@ A legacy role: it is no longer granted to new operators. If you already hold it,
 
 ### Changing what you are licensed for
 
-There is nothing to change in Central yourself: the signed appliance license is issued and renewed by the Velonet platform admin.
+There is nothing to change in Central yourself: the signed appliance license is issued and renewed by the OneGate platform admin.
 
 1. Open **Licenses** and note the appliance, its limit and its valid-until date.
-2. Contact your Velonet account contact with what you need (more concurrent guests, a longer term).
+2. Contact your Semantics account contact with what you need (more concurrent guests, a longer term).
 3. When the platform admin renews it, a new license version appears on the row and the previous one becomes *Superseded*.
 
 ### What you cannot do
@@ -73,4 +73,4 @@ There is nothing to change in Central yourself: the signed appliance license is 
 
 ### Getting invoices
 
-Invoices are not produced by Velonet Central. Ask your Velonet account contact or your organisation's finance team.
+Invoices are not produced by OneGate Central. Ask your OneGate account contact or your organisation's finance team.

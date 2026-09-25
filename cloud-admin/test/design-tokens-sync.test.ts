@@ -13,7 +13,7 @@ const HEADER =
   "/* GENERATED from design-system/tokens.css by tools/sync-design-tokens.mjs. Do not edit here. */\n";
 
 const copyPath = join(consoleRoot, "app", "tokens.css");
-const sourcePath = process.env.VELONET_DESIGN_TOKENS ?? join(repoRoot, "design-system", "tokens.css");
+const sourcePath = process.env.ONEGATE_DESIGN_TOKENS ?? join(repoRoot, "design-system", "tokens.css");
 const toolPath = join(repoRoot, "tools", "sync-design-tokens.mjs");
 
 describe("design tokens", () => {
@@ -27,7 +27,7 @@ describe("design tokens", () => {
   it("the root layout selects the Central accent and the page title", () => {
     const layout = readFileSync(join(consoleRoot, "app", "layout.tsx"), "utf8");
     expect(layout).toContain('data-product="central"');
-    expect(layout).toContain('title: "Velonet Central"');
+    expect(layout).toContain('title: "OneGate Central"');
     const globals = readFileSync(join(consoleRoot, "app", "globals.css"), "utf8");
     expect(globals).toContain('@import "@fontsource-variable/inter/index.css";');
     expect(globals).toContain('@import "./tokens.css";');

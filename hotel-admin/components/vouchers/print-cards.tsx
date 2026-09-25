@@ -120,7 +120,7 @@ export function VoucherCardFace({
       </div>
 
       <div className="vp-quiet absolute bottom-1.5 end-4 text-[0.5rem] tracking-[0.08em] text-muted-foreground">
-        Velonet
+        OneGate
       </div>
     </div>
   );

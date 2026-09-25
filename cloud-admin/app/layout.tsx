@@ -5,8 +5,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { SIDEBAR_INIT_SCRIPT } from "@/lib/sidebar-state";
 
 export const metadata: Metadata = {
-  title: "Velonet Central",
-  description: "Velonet vendor console: customers, sites, appliance activation and licenses",
+  title: "OneGate Central",
+  description: "OneGate vendor console: customers, sites, appliance activation and licenses",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -8,7 +8,7 @@
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ShieldCheck } from "lucide-react";
-import { VelonetLockup, VelonetMark } from "@/components/brand";
+import { OneGateLockup, OneGateMark } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import { Input, Field } from "@/components/ui/input";
 import { ErrorBanner } from "@/components/ui/error-banner";
@@ -56,25 +56,25 @@ function LoginInner() {
       {/* THE INVERSE PANEL. Desktop only: it carries the product identity and the one fact an operator needs
           before typing a password here -- that this login belongs to this building. Phones get the form. */}
       <aside className="relative hidden flex-col justify-between overflow-hidden bg-sidebar p-10 text-sidebar-foreground lg:flex">
-        <VelonetLockup product="Hotel Admin" inverse />
+        <OneGateLockup product="Hotel Admin" inverse />
         <div className="relative z-10 max-w-md space-y-4">
           <div className="text-micro uppercase tracking-[0.14em] text-sidebar-active">On-appliance console</div>
           <p className="text-[1.75rem] font-bold leading-tight tracking-[-0.02em] text-white">
             Guest Wi-Fi for this property: who is online, how they got there, and whether everything is healthy.
           </p>
           <p className="text-sm leading-relaxed text-sidebar-muted">
-            Runs on the appliance in the hotel and keeps working when the internet link or Velonet Central is
+            Runs on the appliance in the hotel and keeps working when the internet link or OneGate Central is
             unreachable.
           </p>
         </div>
-        <div className="text-caption text-sidebar-muted">Velonet · Hotel Admin</div>
-        <VelonetMark className="pointer-events-none absolute -right-24 -bottom-16 size-[26rem] text-white/[0.035]" />
+        <div className="text-caption text-sidebar-muted">OneGate · Hotel Admin</div>
+        <OneGateMark className="pointer-events-none absolute -right-24 -bottom-16 size-[26rem] opacity-[0.07]" />
       </aside>
 
       <div className="flex min-h-screen flex-col">
         <div className="flex items-center justify-between p-4 sm:p-6">
           <div className="lg:invisible">
-            <VelonetLockup product="Hotel Admin" />
+            <OneGateLockup product="Hotel Admin" />
           </div>
           <ThemeToggle />
         </div>
@@ -82,7 +82,7 @@ function LoginInner() {
         <main className="flex flex-1 items-center justify-center px-4 pb-16 sm:px-6">
           <div className="w-full max-w-[25rem]">
             <div className="mb-7 space-y-1.5">
-              <h1 className="text-title">Velonet Hotel Admin</h1>
+              <h1 className="text-title">OneGate Hotel Admin</h1>
               <p className="text-sm text-muted-foreground">Sign in with your account for this property.</p>
             </div>
 
@@ -117,7 +117,7 @@ function LoginInner() {
             <div className="mt-6 flex gap-2.5 rounded-lg border border-border bg-card px-3.5 py-3 text-caption leading-relaxed text-muted-foreground">
               <ShieldCheck className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
               <p>
-                This account is managed on this appliance. It is not a Velonet cloud account and does not work at
+                This account is managed on this appliance. It is not a OneGate cloud account and does not work at
                 any other property.
               </p>
             </div>

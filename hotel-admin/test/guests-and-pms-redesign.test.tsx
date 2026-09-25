@@ -1,4 +1,4 @@
-// THE GUESTS AND PMS SCREENS, AFTER THE VELONET REDESIGN.
+// THE GUESTS AND PMS SCREENS, AFTER THE ONEGATE REDESIGN.
 //
 // The presentation of these screens changed completely; their behaviour was not allowed to. So what is asserted
 // here is the behaviour the redesign had to carry over — and the three things it had to add:

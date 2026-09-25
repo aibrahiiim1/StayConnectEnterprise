@@ -1,29 +1,29 @@
-# Velonet Hotel Admin — Page-by-Page Reference
+# OneGate Hotel Admin — Page-by-Page Reference
 
-**Velonet Hotel Admin** is the console that runs on the appliance in the hotel. Hotel staff use it for
+**OneGate Hotel Admin** is the console that runs on the appliance in the hotel. Hotel staff use it for
 everything day to day: guest networks, sign-in methods, vouchers, internet packages, the PMS, sessions and
-reports. It is reached over HTTPS on the hotel's management network and keeps working when Velonet Central
-cannot be reached. Operator accounts are local to the appliance: they are not Velonet cloud accounts and do
+reports. It is reached over HTTPS on the hotel's management network and keeps working when OneGate Central
+cannot be reached. Operator accounts are local to the appliance: they are not OneGate cloud accounts and do
 not work at any other property.
 
 This document describes every page in the menu, in menu order: what it is for, what it shows, what an
 operator can do, which roles can change it, and which actions ask for a reason, password confirmation, typed
 confirmation, a one-time reveal, or the apply → confirm → automatic rollback flow. For step-by-step setup see
 [hotel-admin-config-manual.md](hotel-admin-config-manual.md). The visual language (colours, components,
-states) is defined once in the [Velonet design system](../../design-system/README.md).
+states) is defined once in the [OneGate design system](../../design-system/README.md).
 
 ---
 
 ## Things that apply to every page
 
-- **Sign-in.** The login page is titled *Velonet Hotel Admin*: **Email or username**, **Password**,
+- **Sign-in.** The login page is titled *OneGate Hotel Admin*: **Email or username**, **Password**,
   **Sign in**. There is no single sign-on, no multi-factor step and no "forgot password"; an operator with
   the Site admin role changes passwords under **System → Operators**. The session is re-checked every
   30 seconds; if it has ended you are returned to the login page.
 - **The sidebar and "Find a screen…".** The menu has eight groups: **Overview · Internet offering ·
   Guests · Property management system · Charges · Guest portal · Networking · System**. At the top is a
   **Find a screen…** filter (press `/` from anywhere outside a text field) that matches page names, group
-  names and everyday words ("wifi speed", "room sign in"). The button beside the Velonet mark collapses the
+  names and everyday words ("wifi speed", "room sign in"). The button beside the OneGate mark collapses the
   sidebar to an icon rail and expands it again; collapsed, every icon shows its name as a tooltip, and the
   choice is remembered in that browser. On a phone or narrow window the menu is a full, labelled drawer
   behind the ☰ button. Your email, your role names and **Sign out** are at the bottom of the sidebar.
@@ -41,7 +41,7 @@ states) is defined once in the [Velonet design system](../../design-system/READM
   Post-stay access, Online-time budgets or Guest devices). A switched-off feature is left out of the menu;
   if you open it by address, the page says **"Not enabled on this appliance"**, explains that this is a
   configuration and not a fault, and states that guest internet, sign-in, the PMS connection, sessions and
-  accounting are unaffected. Turning a feature on is a deployment decision for Velonet support, not an
+  accounting are unaffected. Turning a feature on is a deployment decision for Semantics support, not an
   operator setting.
 - **Blocks you may not see.** Where part of a page is not available to your role or not reported by the
   appliance, it shows a dashed **"Not available"** panel with the reason instead of an empty result.
@@ -631,11 +631,11 @@ edited or removed.
   viewer.
 
 ### Appliance & licence — `/appliance`
-Whether this appliance is activated and connected to Velonet Central, and what its license allows. Two tabs.
+Whether this appliance is activated and connected to OneGate Central, and what its license allows. Two tabs.
 
 - **Appliance setup:**
   - Not yet activated: **Activate this appliance** with two paths. **Online** (recommended) needs nothing
-    typed — it shows the serial and whether Velonet Central is reachable, and the appliance appears in
+    typed — it shows the serial and whether OneGate Central is reachable, and the appliance appears in
     Central under *Onboarding* as *Pending activation*. **Offline** — **Download activation request**, carry
     it to Central (*Onboarding → Offline activation*), then upload the returned **Activation package file**.
   - During activation, a three-phase progress: **Connect → Verify → Ready**.

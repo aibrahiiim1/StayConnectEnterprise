@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { HelpTip } from "@/components/help";
 
 // THE PAGE MEASURE AND RHYTHM.
 //
@@ -42,11 +43,17 @@ export function PageHeader({
   eyebrow,
   actions,
   icon,
+  help,
+  helpTitle,
   className,
   children,
 }: {
   title: React.ReactNode;
   description?: React.ReactNode;
+  /** Tips for this screen, opened from a lightbulb beside the title. Keep warnings on the page, not in here. */
+  help?: React.ReactNode;
+  /** The tips drawer title; defaults to the page title when that is a string. */
+  helpTitle?: string;
   eyebrow?: React.ReactNode;
   actions?: React.ReactNode;
   /** A section icon in a tinted tile, left of the title. Optional; existing headers are unchanged. */
@@ -72,7 +79,12 @@ export function PageHeader({
               {eyebrow}
             </div>
           )}
-          <h1 className="text-subtitle sm:text-title">{title}</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-subtitle sm:text-title">{title}</h1>
+            {help && (
+              <HelpTip title={helpTitle ?? (typeof title === "string" ? title : "This page")}>{help}</HelpTip>
+            )}
+          </div>
           {description && (
             <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">{description}</p>
           )}
@@ -166,7 +178,7 @@ export function StatCard({
   const shell = cn(
     "block rounded-lg border border-border bg-card p-4 text-card-foreground shadow-card",
     href &&
-      "transition-[box-shadow,border-color] duration-base ease-velonet hover:border-border-strong hover:shadow-card-hover focus-visible:shadow-card-hover",
+      "transition-[box-shadow,border-color] duration-base ease-onegate hover:border-border-strong hover:shadow-card-hover focus-visible:shadow-card-hover",
     className,
   );
 

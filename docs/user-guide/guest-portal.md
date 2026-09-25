@@ -1,11 +1,11 @@
-# Velonet Guest portal — What Guests See
+# OneGate Guest portal — What Guests See
 
 The **guest portal** is the page that opens on a guest's phone, tablet or laptop when it joins the hotel's
 guest Wi-Fi. It is served by the appliance itself, before the guest has internet, so it carries no external
 fonts, scripts or tracking and works inside the small "sign in to network" browser that phones open
-automatically. Guests have no Velonet account; they only ever see this page.
+automatically. Guests have no OneGate account; they only ever see this page.
 
-Everything here is configured in **Velonet Hotel Admin** under the **Guest portal** menu group — see
+Everything here is configured in **OneGate Hotel Admin** under the **Guest portal** menu group — see
 [hotel-admin-reference.md](hotel-admin-reference.md#guest-portal).
 
 ---

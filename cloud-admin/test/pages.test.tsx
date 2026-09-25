@@ -111,11 +111,11 @@ describe("Licenses page", () => {
 });
 
 describe("Login page", () => {
-  it("is Velonet Central with email, password and a collapsed single sign-on", async () => {
+  it("is OneGate Central with email, password and a collapsed single sign-on", async () => {
     const user = userEvent.setup();
     mockFetch([{ match: /\/api\/v1\/auth\/sso\/providers\?tenant=acme/, body: { data: [{ name: "okta", display_name: "Okta", kind: "oidc" }] } }]);
     render(<LoginPage />);
-    expect(screen.getByRole("heading", { level: 1, name: "Velonet Central" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "OneGate Central" })).toBeInTheDocument();
     expect(screen.getByLabelText("Email")).toBeInTheDocument();
     expect(screen.getByLabelText("Password")).toHaveAttribute("type", "password");
     expect(screen.queryByLabelText("Organisation slug")).not.toBeInTheDocument();

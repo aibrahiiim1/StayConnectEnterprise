@@ -250,7 +250,7 @@ export default function SignInMethodsPage() {
           </CardHeader>
           <CardBody className="space-y-4">
             <p className="max-w-2xl text-sm text-muted-foreground">
-              The guest enters their room number and one detail from their booking. Velonet checks it
+              The guest enters their room number and one detail from their booking. OneGate checks it
               against the property management system for the network they are on — the guest never chooses a
               system, and no booking details are shown back to them.
             </p>
@@ -274,7 +274,7 @@ export default function SignInMethodsPage() {
                 {pmsReadiness.state === "down" ? (
                   <p>
                     {capitalise(pmsReadiness.reason)}. Guests cannot sign in with their room number until the
-                    property management system is connected to Velonet again; they can still use any other
+                    property management system is connected to OneGate again; they can still use any other
                     method switched on here. Nothing here needs changing — this setting is kept as it is and
                     starts working again on its own once the connection returns.
                   </p>

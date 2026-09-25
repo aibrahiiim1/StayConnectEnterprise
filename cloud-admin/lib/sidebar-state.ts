@@ -22,7 +22,7 @@ import { useCallback, useEffect, useState } from "react";
  * the labels are readable. Nothing about this preference is per-site or per-role, so it is a plain
  * device-local setting and belongs in localStorage.
  */
-export const SIDEBAR_STORAGE_KEY = "velonet-central-sidebar";
+export const SIDEBAR_STORAGE_KEY = "onegate-central-sidebar";
 
 /** The attribute value that means collapsed. Its ABSENCE means expanded, so the default needs no write. */
 const COLLAPSED = "collapsed";

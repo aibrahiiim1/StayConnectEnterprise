@@ -10,7 +10,7 @@ Work through this top-down. Stop at the first match.
 
 Ask them to **forget the network** and rejoin. In **Hotel Admin → Networking → DHCP & leases → Active leases**, look for their device's MAC address right after they rejoin (IT roles; the guest can read their MAC from **Device information** at the bottom of the sign-in page).
 
-- If their MAC never appears → they're not associated. Wi-Fi radio / SSID issue on the hotel's access points, not a Velonet problem.
+- If their MAC never appears → they're not associated. Wi-Fi radio / SSID issue on the hotel's access points, not a OneGate problem.
 - If it appears but the sign-in page never loads → check the appliance's health pill in the Hotel Admin top bar and **System → Diagnostics**.
 
 ### 2. Do they see the sign-in page?
@@ -82,7 +82,7 @@ If you need to read the full code on a card (e.g. a smudged card), open it and u
    - Check the uplink cable is plugged in.
    - Check the uplink itself works (plug a laptop into the WAN port and try to browse).
 3. If physical looks fine but the appliance still isn't heard from, reboot it (pull power for 10 seconds, plug back in). Wait 2 minutes.
-4. Still offline after 10 minutes → escalate to Velonet support with the appliance serial and last-seen time.
+4. Still offline after 10 minutes → escalate to Semantics support with the appliance serial and last-seen time.
 
 An appliance that cannot reach Central keeps serving guests — Central is used for licensing only. On site, **Hotel Admin → System → Appliance & licence** shows whether Central is reachable.
 
@@ -111,7 +111,7 @@ For a **Hotel Admin** account (on the appliance):
 
 For a **Central** account: **Central → Operators** → **Disable**, and check the **Audit log**.
 
-If they were a platform admin, contact Velonet operations directly — you can't disable them yourself.
+If they were a platform admin, contact Semantics operations directly — you can't disable them yourself.
 
 ## Useful places to look
 
