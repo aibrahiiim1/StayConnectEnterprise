@@ -1,0 +1,54 @@
+{
+  "transition_id": "T0194",
+  "seq": 194,
+  "timestamp": "2026-09-26T02:19:56+03:00",
+  "timestamp_derivation": "The committer date of the CONTENT commit of this redaction (6a519b71), so the receipt cannot post-date the commit that introduces it.",
+  "record_type": "RETIRED_ADDRESS_CURRENT_TREE_REDACTION",
+  "authorisation": "Product-Owner mission of 2026-09-26: remove the retired development appliance's literal address from the current repository tree and every generated and exported project material, preserving historical meaning and evidence, with a forward receipt, through the protected PR path. It did NOT authorise rewriting Git history, changing a historical fact or outcome, changing runtime or product behaviour, deploying anything or contacting any appliance or environment.",
+  "what_this_is": "A redaction of the CURRENT TREE, not a correction of history. Every record that named the retired development reference appliance by its literal address now names it by role -- 'the retired development reference appliance', or the role noun it already had followed by '(now retired)'. What each record says happened, where, when and with what result is unchanged. The original wording remains in Git history, which was not rewritten.",
+  "does_not_invalidate_history": "No historical evidence is invalidated. The receipts, acceptance records, evidence, reports and plans that were edited kept their facts, dates, verdicts and outcomes; only the literal address was replaced. Earlier receipts are amended in the current tree for this one purpose, by this receipt's authority, and Git history shows exactly what each said before.",
+  "scope": {
+    "occurrences_replaced": "228 occurrences in 141 tracked text files, plus the three export ZIP packs, which are regenerated from the redacted sources.",
+    "categories": [
+      "governance: project-state.json, decision-register.json and 53 transition receipts",
+      "CLAUDE.md, CONTINUATION.md and the scratch README",
+      "authoritative docs, architecture, acceptance, evidence, reports, spikes, handoff and contract documents",
+      "tools and validators: validate-standing-records.py, its negative test, project-state.py, the mutation and closure-coherence fixtures",
+      "scripts: the three PHASE7 guard scripts, the phase-3 CI evidence builder, the phase-3 dev bootstrap, a network-test comment, a certificate-script comment",
+      "data-plane: Go test fixtures, a sysnet comment and a migration comment",
+      "control-plane: one configuration comment",
+      "the governance workflow: one comment",
+      "exports: the generated text surfaces and all three ZIP packs"
+    ]
+  },
+  "behaviour_preserved": {
+    "retired_host_refusal": "Unchanged. current_state_facts.retired_hosts is keyed by name (development-reference-appliance) and carries address_octets; validate-standing-records.py rebuilds the dotted address from them and still refuses a retired address used as a default target (STANDING_RECORDS_NEGATIVE = PASS). The three PHASE7 guard scripts assemble the same address from its octets and still refuse it.",
+    "tests": "Go test fixtures for sysnet, netcfg and netd use the RFC 5737 documentation range instead; go test for those three packages passes and gofmt is clean.",
+    "dev_bootstrap": "scripts/phase3-bootstrap.sh no longer lists the retired appliance's origin among the local development CORS origins; it is a local development script and that host is out of bounds.",
+    "migration_0048": "A comment-only change. Migration checksums are enforced only when a migration is applied; 0048 is long applied, and fresh installs start from the production baseline.",
+    "runtime": "No runtime or product behaviour changed; nothing was built or deployed."
+  },
+  "terminology": "the retired development reference appliance; in a sentence that already carries the role noun, '<role noun> (now retired)'; CLAUDE.md section 0D records the rule that the literal is not reintroduced.",
+  "deployment_provenance": "NONE. Nothing was deployed and no appliance or environment was contacted.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. THIS transition records a PRE-LIVE deployment of already-merged front-end presentation under the standing PRE-LIVE deployment decision; it changed no phase, applied no migration, changed no configuration, networking, PMS or licensing state, performed no cutover and enabled no capability. PRE-LIVE remains PRE-LIVE."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. THIS transition is a current-tree redaction: it changed no phase, no historical fact or outcome, no runtime behaviour, applied no migration, deployed nothing and contacted no appliance or environment. PRE-LIVE remains PRE-LIVE."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Phase 7 remains ACCEPTED_AND_CLOSED under D41, Guest activation remains DEFERRED by D41, Go-Live remains unauthorised.",
+  "base": "cd8a1cf7e76ccc8b1ab97f27cb25395d6fc59306",
+  "base_note": "Master after the merge of PR #187.",
+  "head": "6a519b71",
+  "head_note": "The CONTENT commit of this redaction.",
+  "previous_delivery": "T0193",
+  "go_live": "NOT authorised. Guest activation remains DEFERRED by D41."
+}

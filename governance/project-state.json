@@ -1210,7 +1210,7 @@
     "nightly_authoritative_validation": "The four authoritative gates no longer run on pull_request. One COMPLETE FRESH run of all four (governance, phase3-full-software-gate, phase4-financial-core-gate, phase5-post-stay-transfer-gate) is dispatched at 03:10 Africa/Cairo against the EXACT head of the single active delivery candidate, and an all-green result on that exact head is merged automatically through the protected path.\n\nTHE SCHEDULE IS ONE LINE: `- cron: '10 3 * * *'` with `timezone: \"Africa/Cairo\"`. GitHub Actions accepts an IANA timezone beside cron, so Egypt's DST -- UTC+2 in winter, UTC+3 from late April to late October -- is the platform's arithmetic and no offset is written down anywhere. What this repository still checks is that the platform HONOURED it: if the timezone were dropped or mistyped the same cron would mean 03:10 UTC, which is 05:10 or 06:10 in Cairo, and nothing else would notice because the gates would still run and the merge would still happen. Drift beyond 105 minutes refuses -- a late scheduler drifts by minutes, a UTC misreading by 120 (winter) or 180 (summer) -- and a manual workflow_dispatch is exempt because manual means any hour.\n\nNothing was removed, shortened or made unable to fail. The nightly run DECLINES evidence reuse outright, so no daytime, pull-request, master or previous-night verdict can substitute for it, and a commit pushed during the run makes the pass stale -- the next night judges the new head. Zero candidates is a quiet no-op; two or more is a hard refusal. Fail-closed behaviour is proven by 71 assertions in tools/tests/nightly_delivery/run_negative.py, which the governance gate runs and the orchestrator re-runs before deciding anything.",
     "session_start_check": "EVERY agent session runs `python tools/nightly-status.py` FIRST. Exit 1 / UNRESOLVED_FAILURE means the latest nightly authoritative validation failed and has not been superseded: diagnose and repair that on the same delivery branch before starting new work. UNKNOWN (exit 2) is not the same as clear. Nothing else notifies anyone -- the push that caused the failure succeeded and the evidence sits in a workflow run nobody has opened."
   },
-  "latest_transition_id": "T0193",
+  "latest_transition_id": "T0194",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1705,17 +1705,17 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "VELONET_DEPLOYED_TO_PRE_LIVE",
-    "decision": "Product-Owner mission of 2026-09-26 to deploy the merged Velonet delivery from master to PRE-LIVE under the standing PRE-LIVE deployment decision; no Go-Live, no Guest activation, no migration, no Central deployment.",
-    "decision_note": "Deployment record for the Velonet front-end redesign (T0188-T0192): portald and the Hotel Admin bundle from master 38d2ab79 on PRE-LIVE 172.21.60.25. Governance only in the repository: no product, architecture, trust, permission or topology decision was taken inside it.",
-    "manifest": "docs/manifests/VelonetPreLive-change-manifest.md",
-    "base": "38d2ab7995661e1838fa2803c669b1d64411d0e5",
-    "base_note": "Master after the merge of PR #186 -- the deployed source (T0193).",
-    "head": "86c3dfdf",
-    "head_note": "The record commit of this lineage (86c3dfdf): T0193 and the corrected current_state_facts. The deployed source is master 38d2ab79.",
-    "transition": "T0193",
-    "previous_delivery": "T0192",
-    "note": "T0193. The Velonet front-end redesign runs on PRE-LIVE: portald and the Hotel Admin bundle were built from master 38d2ab79 and deployed on 2026-09-26, verified live. Central's console (cloud-admin) was not deployed; it is a separate target outside this authorisation."
+    "kind": "RETIRED_ADDRESS_CURRENT_TREE_REDACTION",
+    "decision": "Product-Owner mission of 2026-09-26: remove the retired development appliance's literal address from the current tree and all generated material, preserving historical meaning; no history rewrite, no behaviour change, no deployment.",
+    "decision_note": "Current-tree redaction recorded by T0194. Governance, documentation, tooling and test fixtures only: no product, architecture, trust, permission or topology decision was taken inside it.",
+    "manifest": "docs/manifests/RetiredAddressRedaction-change-manifest.md",
+    "base": "cd8a1cf7e76ccc8b1ab97f27cb25395d6fc59306",
+    "base_note": "Master after the merge of PR #187 (T0193).",
+    "head": "6a519b71",
+    "head_note": "The CONTENT commit of this redaction (T0194).",
+    "transition": "T0194",
+    "previous_delivery": "T0193",
+    "note": "T0194. The retired development reference appliance's literal address is no longer written anywhere in the current tree or its exports; records name it by role, meaning and outcomes preserved, and Git history unchanged."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
