@@ -94,6 +94,9 @@ type Result struct {
 	Stay          string
 	Interface     string
 	ActivatedAt   time.Time
+	// Joined: the Stay already held an ACTIVE entitlement and this device took one of its device slots; no
+	// quote, purchase or new entitlement was written.
+	Joined bool
 }
 
 // Grant executes the whole chain in ONE transaction.
@@ -174,7 +177,27 @@ func (s *Store) GrantTx(ctx context.Context, tx pgx.Tx, tenant, site string, r R
 		return res, err
 	}
 	if live > 0 {
-		return res, ErrAlreadyEntitled
+		// ANOTHER DEVICE OF A STAY THAT ALREADY HAS ACCESS JOINS IT. One live entitlement per Stay is the rule;
+		// per-entitlement device slots are how a family's second phone gets online (contract 6.3). This sign-in
+		// is already consumed above, so it admits this one device once; authorize_entitlement_device enforces
+		// the plan's device limit under the entitlement lock and raises MAX_DEVICES_REACHED beyond it. A live
+		// entitlement that is not ACTIVE (pending or suspended) still refuses, as before.
+		var eid string
+		err := tx.QueryRow(ctx, `SELECT id::text FROM iam_v2.entitlements
+			WHERE stay_id=$1 AND status='ACTIVE' AND (window_ends_at IS NULL OR window_ends_at > now())
+			FOR UPDATE`, res.Stay).Scan(&eid)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return res, ErrAlreadyEntitled
+		}
+		if err != nil {
+			return res, err
+		}
+		res.EntitlementID, res.Joined = eid, true
+		if err := tx.QueryRow(ctx, `SELECT iam_v2.authorize_entitlement_device($1,$2,now())::text`,
+			eid, r.Presenter.Device).Scan(&res.DeviceAuthID); err != nil {
+			return res, err
+		}
+		return res, nil
 	}
 
 	// (4) durable QUOTE pinned to the consumed context + revision, with a server-built grant snapshot.

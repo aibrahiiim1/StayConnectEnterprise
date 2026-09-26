@@ -52,10 +52,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
@@ -63,6 +65,30 @@ import (
 // to the portal. It is deliberately NOT a session: authentication establishes
 // identity and device, and the commerce flow is what grants access. These are
 // exactly the three trusted identifiers /v1/commerce/* requires.
+// liveEntitlementForContext returns the ACTIVE, in-window entitlement held by the subject of this auth context
+// (voucher, account or guest principal), or "". A read failure answers "" -- the guest is offered packages as
+// before, and a purchase for a subject that does hold a live grant still supersedes it correctly.
+func (s *server) liveEntitlementForContext(ctx context.Context, authContextID string) string {
+	if s.db == nil || authContextID == "" {
+		return ""
+	}
+	var id string
+	err := s.db.QueryRow(ctx, `
+	    SELECT e.id::text
+	      FROM iam_v2.auth_contexts ac
+	      JOIN iam_v2.entitlements e
+	        ON e.tenant_id = ac.tenant_id AND e.site_id = ac.site_id
+	       AND (e.voucher_id = ac.voucher_id OR e.guest_account_id = ac.guest_account_id
+	            OR e.guest_principal_id = ac.guest_principal_id)
+	     WHERE ac.id = $1 AND ac.tenant_id = $2 AND ac.site_id = $3
+	       AND e.status = 'ACTIVE' AND (e.window_ends_at IS NULL OR e.window_ends_at > now())
+	     LIMIT 1`, authContextID, s.tenID, s.siteID).Scan(&id)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("iamv2: live entitlement lookup failed", "err", err)
+	}
+	return id
+}
+
 type iamv2GuestResult struct {
 	AuthContextID  string `json:"auth_context_id"`
 	DeviceID       string `json:"device_id"`
@@ -72,6 +98,12 @@ type iamv2GuestResult struct {
 	// a test or an operator reading a response can tell which authority served
 	// the request without having to infer it from a flag.
 	Authority string `json:"authority"`
+	// LiveEntitlementID is set when the subject that just signed in already holds an ACTIVE entitlement. The
+	// portal then joins this device to it -- within its device limit -- instead of offering a purchase:
+	// contract B3, "account attaches to its live entitlement (never fresh quota per login)", and section 6.3's
+	// per-entitlement device slots. Before this, every sign-in bought again and the new grant superseded the
+	// old one, knocking the guest's other devices offline.
+	LiveEntitlementID string `json:"live_entitlement_id,omitempty"`
 }
 
 // iamv2MethodEnabled reports whether IAM-v2 is the configured authority for a
@@ -142,11 +174,12 @@ func (s *server) authorizeViaIAMv2(w http.ResponseWriter, r *http.Request,
 			s.met.AuthContextsCreated.WithLabelValues(string(method)).Inc()
 		}
 		writeJSON(w, http.StatusOK, iamv2GuestResult{
-			AuthContextID:  res.AuthContextID,
-			DeviceID:       res.DeviceID,
-			GuestNetworkID: nc.NetworkID,
-			Method:         string(method),
-			Authority:      "iam_v2",
+			AuthContextID:     res.AuthContextID,
+			DeviceID:          res.DeviceID,
+			GuestNetworkID:    nc.NetworkID,
+			Method:            string(method),
+			Authority:         "iam_v2",
+			LiveEntitlementID: s.liveEntitlementForContext(r.Context(), res.AuthContextID),
 		})
 		return true
 

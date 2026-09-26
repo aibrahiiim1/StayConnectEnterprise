@@ -39,6 +39,8 @@ type iamv2AuthReply struct {
 	GuestNetworkID string `json:"guest_network_id"`
 	Authority      string `json:"authority"`
 	Method         string `json:"method"`
+	// LiveEntitlementID: the subject already holds ACTIVE access, so this device joins it rather than buying.
+	LiveEntitlementID string `json:"live_entitlement_id,omitempty"`
 }
 
 // commerceSessionTTL bounds how long the server-held pins stay usable. It is deliberately short: the pins
@@ -82,12 +84,37 @@ func (h *handler) tryIAMv2Auth(w http.ResponseWriter, r *http.Request, payload [
 		h.landing(w, r, "Something went wrong. Please try again.")
 		return true
 	}
-	h.commerceSessions.put(token, commerceSession{
+	sess := commerceSession{
 		authContextID:  reply.AuthContextID,
 		deviceID:       reply.DeviceID,
 		guestNetworkID: reply.GuestNetworkID,
 		expiry:         time.Now().Add(commerceSessionTTL),
-	})
+	}
+	// ALREADY ENTITLED: JOIN, DON'T BUY. A guest whose voucher or account already holds ACTIVE access -- a
+	// second phone, or the same one reconnecting -- takes a device slot on that access. Offering a purchase
+	// instead would supersede it and knock their other devices offline (contract B3 and 6.3). Success still
+	// means enforced, exactly as after a purchase.
+	if reply.LiveEntitlementID != "" {
+		sid, failure := h.activateEnforced(r, sess, reply.LiveEntitlementID)
+		switch failure {
+		case "":
+			http.Redirect(w, r, "/success?s="+url.QueryEscape(sid), http.StatusSeeOther)
+		case activateDeviceLimit:
+			if reply.Method == "ACCOUNT" {
+				h.landing(w, r, "This account has reached its device limit. Disconnect another device and try again.")
+			} else {
+				h.landing(w, r, "This voucher has reached its device limit. Disconnect another device and try again.")
+			}
+		case activateNoDevice:
+			h.landing(w, r, "Your device isn't on the guest network.")
+		case activateNotEnforced:
+			h.landing(w, r, "We could not bring your device online. Please try again in a moment.")
+		default:
+			h.landing(w, r, "We could not connect your device.")
+		}
+		return true
+	}
+	h.commerceSessions.put(token, sess)
 	http.SetCookie(w, &http.Cookie{
 		Name:  commerceCookie,
 		Value: token,
@@ -257,7 +284,9 @@ func (h *handler) activateEnforced(r *http.Request, sess commerceSession, entitl
 	}
 	raw, _ := json.Marshal(map[string]any{
 		"entitlement_id": entitlementID, "device_id": sess.deviceID,
-		"ip": ip.String(), "mac": mac.String()})
+		"ip": ip.String(), "mac": mac.String(),
+		// This device's own sign-in: what admits a device other than the purchaser to the entitlement.
+		"auth_context_id": sess.authContextID})
 	resp, err := h.scdDo(r.Context(), http.MethodPost, "/v1/sessions/activate", raw)
 	if err != nil {
 		return "", activateFailed

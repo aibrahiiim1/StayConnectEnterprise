@@ -249,6 +249,8 @@ func (h *handler) authVoucher(w http.ResponseWriter, r *http.Request) {
 				msg = "This voucher has reached its device limit. Disconnect another device and try again."
 			case "LICENSE_CAPACITY_REACHED":
 				msg = "The guest network is at capacity. Please try again shortly."
+			case "METHOD_DISABLED":
+				msg = "This sign-in method is not available. Please ask reception."
 			default:
 				msg = "Voucher " + e.Error + "."
 			}
@@ -318,6 +320,8 @@ func (h *handler) authCredentials(w http.ResponseWriter, r *http.Request) {
 			msg = "This account has reached its device limit. Disconnect another device and try again."
 		case "TOO_MANY_ATTEMPTS":
 			msg = "Too many attempts. Please wait a minute and try again."
+		case "METHOD_DISABLED":
+			msg = "This sign-in method is not available. Please ask reception."
 		}
 		h.landing(w, r, msg)
 		return
