@@ -1,4 +1,0 @@
-commit c396de3270f28de460cdf277343287399190f45b
-Date:   Sat Sep 26 15:23:13 2026 +0300
-
-    Zero-Stale: recognise the D42 next action

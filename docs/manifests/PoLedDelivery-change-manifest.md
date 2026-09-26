@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `e3a90e0acaeaa63cf07234c4a3e8d4618f6ff6b7`
-- **HEAD commit:** `214d95fb`
-- **Provenance (generation HEAD = inventory_head):** `c396de3270f28de460cdf277343287399190f45b`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `35084fd0`
+- **Provenance (generation HEAD = inventory_head):** `1b76405f1e153fdb797ae56b416bdbf0a3e5c447`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/po-led-delivery-model`
 - **Remote branch:** `origin/master`
 - **Changed files:** 58
@@ -17,7 +17,7 @@
 | `.github/workflows/phase3-software.yml` | MODIFIED | `M` | configuration | CI | rollback RESTORES prior content | Delivery model D42: Product Owner merge authorization; comprehensive gates become FULL CHECK only |
 | `.github/workflows/phase4-financial-core.yml` | MODIFIED | `M` | configuration | CI | rollback RESTORES prior content | Delivery model D42: Product Owner merge authorization; comprehensive gates become FULL CHECK only |
 | `.github/workflows/phase5-post-stay-transfer.yml` | MODIFIED | `M` | configuration | CI | rollback RESTORES prior content | Delivery model D42: Product Owner merge authorization; comprehensive gates become FULL CHECK only |
-| `.github/workflows/po-merge-authorization.yml` | CREATED | `A` | configuration | CI | rollback REMOVES it | Delivery model D42: Product Owner merge authorization; comprehensive gates become FULL CHECK only |
+| `.github/workflows/po-merge-authorization.yml` | CREATED | `A` | configuration | CI | rollback REMOVES it | po-merge-authorization: create the tools directory before the bootstrap copy |
 | `.github/workflows/project-governance.yml` | MODIFIED | `M` | configuration | CI | rollback RESTORES prior content | Delivery model D42: Product Owner merge authorization; comprehensive gates become FULL CHECK only |
 | `CLAUDE.md` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Delivery model D42: Product Owner merge authorization; comprehensive gates become FULL CHECK only |
 | `docs/FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery model D42: Product Owner merge authorization; comprehensive gates become FULL CHECK only |
@@ -32,13 +32,13 @@
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase-evidence/GIT_STAT_1b76405f.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_a7a21e62.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Packs and manifest at the delivery head, in that order |
-| `exports/chatgpt/phase-evidence/GIT_STAT_c396de32.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
 | `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
-| `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
 | `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
 | `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
 | `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
@@ -55,8 +55,8 @@
 | `governance/branch-protection.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery model D42: Product Owner merge authorization; comprehensive gates become FULL CHECK only |
 | `governance/ci-reuse-policy.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery model D42: Product Owner merge authorization; comprehensive gates become FULL CHECK only |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: D42 and T0196 record the Product-Owner-led delivery model |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: D42 and T0196 record the Product-Owner-led delivery model |
-| `governance/transitions/T0196.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: D42 and T0196 record the Product-Owner-led delivery model |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: the content head is 35084fd0 |
+| `governance/transitions/T0196.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: the content head is 35084fd0 |
 | `scripts/ci/nightly-orchestrate.py` | DELETED | `D` | other | OTHER | rollback RESTORES it | Delivery model D42: Product Owner merge authorization; comprehensive gates become FULL CHECK only |
 | `tools/full-check.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Delivery model D42: Product Owner merge authorization; comprehensive gates become FULL CHECK only |
 | `tools/nightly-status.py` | DELETED | `D` | tests/tooling | TOOLING | rollback RESTORES it | Delivery model D42: Product Owner merge authorization; comprehensive gates become FULL CHECK only |
@@ -78,7 +78,7 @@
  .github/workflows/phase3-software.yml              |  86 +---
  .github/workflows/phase4-financial-core.yml        |  95 +---
  .github/workflows/phase5-post-stay-transfer.yml    |  96 +---
- .github/workflows/po-merge-authorization.yml       |  51 +++
+ .github/workflows/po-merge-authorization.yml       |  52 +++
  .github/workflows/project-governance.yml           |  99 +---
  CLAUDE.md                                          | 120 +++--
  docs/FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md  |  57 +--
@@ -89,12 +89,12 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   6 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   6 +-
  docs/context/StayConnect-IAM-Handoff.md            |   6 +-
- docs/manifests/PoLedDelivery-change-manifest.md    | 161 +++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343170 -> 343229 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 149846 -> 151120 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44026 -> 44008 bytes
+ docs/manifests/PoLedDelivery-change-manifest.md    | 163 +++++++
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343170 -> 343228 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 149846 -> 151114 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44026 -> 44009 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_1b76405f.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_a7a21e62.txt   |   4 -
- .../chatgpt/phase-evidence/GIT_STAT_c396de32.txt   |   4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |  10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   8 +-
  .../governance/decision-register.json              |  19 +-
@@ -131,7 +131,7 @@
  tools/validate-branch-protection.py                |   2 +-
  tools/validate-delivery-protocol.py                | 320 +++++--------
  tools/validate-project-state.sh                    |   2 +-
- 58 files changed, 1180 insertions(+), 2410 deletions(-)
+ 58 files changed, 1183 insertions(+), 2410 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -140,11 +140,10 @@ M  docs/manifests/PoLedDelivery-change-manifest.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_53cfb3e8.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_c396de32.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_1b76405f.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_c396de32.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/tools/validate-project-state.sh
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
 M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
@@ -153,6 +152,9 @@ M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 1b76405f Governance: the content head is 35084fd0
+HISTORICAL: 35084fd0 po-merge-authorization: create the tools directory before the bootstrap copy
+HISTORICAL: b435db88 Packs and manifest at the delivery head, in that order
 HISTORICAL: c396de32 Zero-Stale: recognise the D42 next action
 HISTORICAL: 41fb5413 Packs and manifest at the delivery head, in that order
 HISTORICAL: 53cfb3e8 Change manifest for the D42 migration
