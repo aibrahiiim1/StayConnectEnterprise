@@ -326,7 +326,7 @@ describe("zero-attempt recovery", () => {
       screen.getByLabelText(/evidence source for this posting/i),
       "PMS_FOLIO_INSPECTION",
     );
-    await userEvent.type(screen.getByLabelText(/reference to that evidence/i), "folio 4471");
+    await userEvent.type(screen.getByLabelText(/reference to that evidence/i), "folio 1001");
     await userEvent.click(screen.getByRole("button", { name: /authorize one attempt/i }));
 
     await waitFor(() => expect(sent).not.toBeNull());
@@ -335,7 +335,7 @@ describe("zero-attempt recovery", () => {
     );
     expect(sent).toEqual({
       reason: "checked the folio; nothing was posted",
-      evidence: { source_type: "PMS_FOLIO_INSPECTION", reference: "folio 4471" },
+      evidence: { source_type: "PMS_FOLIO_INSPECTION", reference: "folio 1001" },
       password: "hunter2",
     });
     for (const forbidden of ["actor", "operator_id", "amount_minor", "attempt_no"]) {

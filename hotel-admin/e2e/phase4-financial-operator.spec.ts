@@ -246,7 +246,7 @@ test.describe("Phase 4 financial operator surface", () => {
     await page.getByLabel(/why this charge must still go out/i)
       .fill("checked the folio directly; this charge was never posted");
     await page.getByLabel(/evidence source for this posting/i).selectOption("PMS_FOLIO_INSPECTION");
-    await page.getByLabel(/reference to that evidence/i).fill("folio 4471");
+    await page.getByLabel(/reference to that evidence/i).fill("folio 1001");
     await page.getByRole("button", { name: /authorize one attempt/i }).click();
 
     await expect(page.getByText(/nothing has been sent/i)).toBeVisible();
@@ -259,7 +259,7 @@ test.describe("Phase 4 financial operator surface", () => {
     );
     expect(sent[0].body).toEqual({
       reason: "checked the folio directly; this charge was never posted",
-      evidence: { source_type: "PMS_FOLIO_INSPECTION", reference: "folio 4471" },
+      evidence: { source_type: "PMS_FOLIO_INSPECTION", reference: "folio 1001" },
       password: "hunter2",
     });
     // the audit author comes from the session, and no amount travels with an authorization

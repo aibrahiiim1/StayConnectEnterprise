@@ -445,7 +445,7 @@ export default function AppliancesPage() {
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Serial" required><Input name="serial" required placeholder="APP-HQ-0001" /></Field>
           <Field label="Name" required><Input name="name" required placeholder="hq-gateway" /></Field>
-          <Field label="Model" className="sm:col-span-2"><Input name="model" placeholder="Protectli VP2410" /></Field>
+          <Field label="Model" className="sm:col-span-2"><Input name="model" placeholder="Appliance model" /></Field>
         </div>
       </DialogForm>
 
