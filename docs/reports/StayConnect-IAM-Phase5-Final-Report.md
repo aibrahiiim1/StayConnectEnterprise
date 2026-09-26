@@ -45,7 +45,7 @@
 - **Candidate complete:** transition **T0051** (2026-08-14). **Acceptance-evidence fix-forward:** transition **T0052** (2026-08-14).
 - **Accepted and closed:** decision **D22**, closure transition **T0053** (2026-08-14).
 - **Branch:** `phase/5-poststay-transfer`; **PR #13 — MERGED to master on 2026-08-14 UTC under the separate Product-Owner merge decision D23** (transition **T0054**), merge commit `4f27b4d0ea4de57f9bbf6a062d9bb9d294ec6e6a`. The merge introduced no content: master's tree is byte-identical to the accepted head's tree.
-- **Appliance:** `radius` / `172.21.60.23` — the **development** appliance. Production was never migrated or contacted.
+- **Appliance:** `radius` / the retired development reference appliance — the **development** appliance. Production was never migrated or contacted.
 
 ---
 

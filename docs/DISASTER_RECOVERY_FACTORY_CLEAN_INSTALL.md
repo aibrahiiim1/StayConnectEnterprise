@@ -5,7 +5,7 @@
 existing machine. This is the procedure behind the **Fresh Production Appliance Deployment** strategy
 (D35/T0075) and it is also the disaster-recovery path for a lost appliance.
 
-> The DEVELOPMENT appliance `172.21.60.23` is **reference evidence only**. It is never an installation source.
+> The DEVELOPMENT appliance (now retired) is **reference evidence only**. It is never an installation source.
 > Its database contains development tenants, operators, plans, vouchers and PMS probes; copying any of it
 > would carry those identities into a production system.
 
@@ -195,7 +195,7 @@ schema iam_v2 is owned by iam_v2_owner
 
 **One consequence, recorded rather than acted on:** the development appliance carries this same drift — 107
 functions and 6 tables in `iam_v2` owned by `stayconnect` — because the same migrations ran the same way there.
-A factory-clean build is now *more* correct than the appliance on this point. 172.21.60.23 was **not** modified;
+A factory-clean build is now *more* correct than the appliance on this point. the retired development reference appliance was **not** modified;
 it is reference evidence, not an installation source.
 
 ### G. The superseded guest-auth authority was configuration-selectable  ·  **CLOSED, then superseded by §4H**

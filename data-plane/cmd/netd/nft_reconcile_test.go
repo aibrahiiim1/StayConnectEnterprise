@@ -238,7 +238,7 @@ func testIntent() []netcfg.GuestNetwork {
 }
 
 func testTopo() netcfg.Topology {
-	return netcfg.Topology{WANInterface: "ens160", MgmtInterface: "ens160", MgmtAddr: "172.21.60.23"}
+	return netcfg.Topology{WANInterface: "ens160", MgmtInterface: "ens160", MgmtAddr: "192.0.2.23"}
 }
 
 func newTestApplier(t *testing.T, k *fakeKernel) *applier {

@@ -65,12 +65,12 @@
   "scope_allowed": "Phase-4 implementation DARK: migration 0011, posting engine, P# allocator, fail-closed gates, per-interface outbox lanes, PS/PA state machine, UNKNOWN handling, Manual Review, payment and settlement execution, restore/FINANCIAL_RECOVERY_MODE, observability, operator UI, the full test matrix, and controlled LIVE-DARK deployment with all flags OFF and no financial egress.",
   "scope_prohibited": "No real PMS PS transaction, no real guest folio debit, no real PA acceptance test caused by StayConnect, no PMS financial onboarding for Hotel ID 2, no real payment-provider CHARGE or REFUND, no real paid guest access, no programmatic reversal, no IAM-v2 cutover, no production authentication routed to iam_v2, no Phase-3 or Phase-4 guest-facing flag enablement, no data migration from legacy IAM, no legacy IAM deletion, no WAN/LAN/VLAN/DHCP or topology change, no certificate trust-anchor redesign, no Phase 5/6/7 work.",
   "live_actions_performed_this_round": [
-    "Installed the repository Edge systemd unit on 172.21.60.23 (comment-only delta; systemctl daemon-reload; no Caddy restart required; hotel-admin verified HTTP 200 afterwards).",
+    "Installed the repository Edge systemd unit on the retired development reference appliance (comment-only delta; systemctl daemon-reload; no Caddy restart required; hotel-admin verified HTTP 200 afterwards).",
     "Installed the repository Central Caddyfile on 150.0.0.252 (comment-only delta; caddy validate then systemctl restart, because Central has no reload contract by design; central /login verified HTTP 200 afterwards).",
     "Read-only inspection of both hosts, the site database and the licence state. No financial action, no PMS traffic, no migration, no reboot."
   ],
   "rollback": {
-    "edge_unit": "/root/stayconnect-caddy.service.pre-parity-<timestamp> on 172.21.60.23",
+    "edge_unit": "/root/stayconnect-caddy.service.pre-parity-<timestamp> on the retired development reference appliance",
     "central_caddyfile": "/root/Caddyfile.central.pre-parity-<timestamp> on 150.0.0.252",
     "repository": "git revert of this branch's merge commit"
   },

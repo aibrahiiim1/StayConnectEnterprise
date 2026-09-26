@@ -63,7 +63,7 @@
     "phase3": "run 31825068831 dispatched on the branch"
   },
   "live_dark_deployment": {
-    "host": "radius (172.21.60.23) DEVELOPMENT appliance",
+    "host": "radius (the retired development reference appliance) DEVELOPMENT appliance",
     "database": "stayconnect_site",
     "production_contacted": false,
     "backup": "/opt/stayconnect/backups/phase5-iam-20260814T174052Z/site.dump 6260737 bytes sha256 cf1bda432c82c7007976d3f51972c225aea862be370264764a3a80163255c07a",

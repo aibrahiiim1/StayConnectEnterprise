@@ -18,7 +18,7 @@ that deferral asks for.
 
 ## PRE-LIVE 172.21.60.25, as read on 2026-09-22
 
-The only appliance. Onboarded, enrolled, claimed, licensed, under a pinned signed assignment. `172.21.60.23`
+The only appliance. Onboarded, enrolled, claimed, licensed, under a pinned signed assignment. the retired development reference appliance
 is RETIRED and must not be contacted.
 
 * Schema head `0083`. All eight StayConnect units active; `kea-dhcp4-server` enabled; containers

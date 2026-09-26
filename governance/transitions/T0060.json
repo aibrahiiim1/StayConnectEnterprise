@@ -32,7 +32,7 @@
       "the Phase-6 guest surface has the privileges it needs to resolve a device and only those (migration 0047), with the refusals asserted alongside the grants"
     ],
     "controlled_validation": {
-      "where": "the authorized DEVELOPMENT appliance 172.21.60.23 (radius). Production was not contacted.",
+      "where": "the authorized DEVELOPMENT appliance (now retired) (radius). Production was not contacted.",
       "result": "42 proofs, 0 failures, followed by verified restoration and a second reboot",
       "capability_state_afterwards": "every Phase-6 flag OFF and coherent across scd/acctd/edged, the guest routes absent from the running scd, the operator screens compiled out of the deployed Hotel Admin bundle, and no appliance left with the per-appliance setting enabled",
       "what_it_created": "one zero-price ADMIN_GRANT entitlement and two devices at reserved addresses. No paid access, and no real guest, PMS, provider or financial traffic.",

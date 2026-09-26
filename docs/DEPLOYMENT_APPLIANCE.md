@@ -18,7 +18,7 @@
 
 | Interface | Example | Role |
 |---|---|---|
-| **WAN = management** (`ens160`) | `172.21.60.23/24`, default route | uplink/masquerade **and** management: Hotel Admin (`https://<WAN-IP>`), SSH, outbound sync (NATS + license HTTPS), PMS reachability when the PMS is on the WAN-side hotel network, monitoring |
+| **WAN = management** (`ens160`) | `the retired development reference appliance's address`, default route | uplink/masquerade **and** management: Hotel Admin (`https://<WAN-IP>`), SSH, outbound sync (NATS + license HTTPS), PMS reachability when the PMS is on the WAN-side hotel network, monitoring |
 | **LAN = guest** (`ens192`, over `br-lan` / per-VLAN bridges) | `10.20.0.1/24` (and per-VLAN gateways) | guest gateway: DHCP/DNS/captive portal/shaping + 802.1Q guest VLAN trunk; option 114 → `http://10.20.0.1:8380/` (**keep the RFC 8910 stanza in the repo Kea config — it was VM-only drift once already**) |
 
 Guest traffic masquerades out the **WAN** interface, never onto the guest LAN. ESXi installs:

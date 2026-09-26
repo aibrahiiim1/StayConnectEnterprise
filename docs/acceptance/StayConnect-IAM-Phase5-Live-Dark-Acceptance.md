@@ -7,7 +7,7 @@
 - **Acceptance candidate complete** recorded by transition **T0051**; **acceptance-evidence fix-forward** recorded by transition **T0052**.
 - **Product-Owner ACCEPTED and CLOSED** by decision **D22**, closure transition **T0053** (`transition_accepted: true`) at verified **LIVE-DARK / NO-FINANCIAL-TRAFFIC** maturity.
 - Branch: `phase/5-poststay-transfer`; **PR #13 — MERGED to master on 2026-08-14 UTC under the separate Product-Owner merge decision D23** (transition **T0054**), merge commit `4f27b4d0ea4de57f9bbf6a062d9bb9d294ec6e6a`. The merge introduced no content: master's tree is byte-identical to the accepted head's tree.
-- Appliance: `radius` / `172.21.60.23` — the **development** appliance. Production was never contacted.
+- Appliance: `radius` / the retired development reference appliance — the **development** appliance. Production was never contacted.
 - Dates are **UTC**, matching the transition ledger. The Product-Owner decision was taken on 2026-08-15 *local* time (UTC+03:00), which is 2026-08-14 in UTC.
 
 ---

@@ -7,10 +7,10 @@ reach is five markdown/json files in DOC_SURFACES and seven in STATIC_SURFACES, 
 JSON only. A sweep of the tree against the standing records found 44 current-state contradictions outside
 that reach, and the two most dangerous were SHELL SCRIPTS -- which no validator read at all:
 
-    deploy/scripts/phase7-appliance-m4.sh   APPL="${PHASE7_APPLIANCE:-172.21.60.23}"
-    deploy/scripts/phase7-final-reboot.sh   APPL="${PHASE7_APPLIANCE:-172.21.60.23}"
+    deploy/scripts/phase7-appliance-m4.sh   APPL="${PHASE7_APPLIANCE:-<retired development appliance>}"
+    deploy/scripts/phase7-final-reboot.sh   APPL="${PHASE7_APPLIANCE:-<retired development appliance>}"
 
-172.21.60.23 is RETIRED and must not be contacted. The second issues a real reboot. Neither was a sentence
+The retired development reference appliance is RETIRED and must not be contacted. The second issues a real reboot. Neither was a sentence
 anybody would have caught by reading prose, and the largest cluster -- seventeen surfaces describing Central
 telemetry that migration 0045 dropped -- survived because the removal delivery touched no architecture doc.
 
@@ -222,7 +222,13 @@ def check_retired_hosts(facts, files):
             "against anything. Record it there.")
         return
     hits = 0
-    for addr in retired:
+    # An entry is keyed by NAME and carries its address as octets, so the literal address of a retired host is
+    # not written in the tree (T0194). An entry keyed by the address itself is still accepted.
+    def address_of(key, entry):
+        octets = (entry or {}).get("address_octets")
+        return ".".join(str(int(o)) for o in octets) if octets else key
+    for key in retired:
+        addr = address_of(key, retired[key])
         # The form that actually causes harm: a retired address as a DEFAULT, so a run with no environment
         # variable goes there. Matches ${VAR:-addr}, ${VAR:=addr} and a bare `VAR=addr` assignment.
         default_form = re.compile(
@@ -239,7 +245,7 @@ def check_retired_hosts(facts, files):
                 hits += 1
                 bad("retired-host-default",
                     "%s is RETIRED (%s) and is used here as a DEFAULT target, so a run that does not set "
-                    "the variable contacts it" % (addr, retired[addr].get("status", "RETIRED")),
+                    "the variable contacts it" % (key, retired[key].get("status", "RETIRED")),
                     "%s:%d  %s" % (path, line_no, line.strip()))
     if not hits:
         ok("no retired host is used as a default target (%s)" % ", ".join(sorted(retired)))

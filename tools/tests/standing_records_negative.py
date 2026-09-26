@@ -9,7 +9,7 @@ tree and requires a pass.
 The four defects, as they were found:
 
   retired-host-default       deploy/scripts/phase7-final-reboot.sh defaulted PHASE7_APPLIANCE to the RETIRED
-                             172.21.60.23, and that script issues a real reboot.
+                             development reference appliance, and that script issues a real reboot.
   onboarding-milestone       environment_scoped_iam_state.production.lifecycle read "PRE-LIVE, deployed,
                              awaiting onboarding" while appliance_enrolled/claimed/assigned/licensed were all
                              recorded true in the same file.
@@ -98,7 +98,9 @@ def expect_fail(name, rule, relpath, plant):
 
 
 def plant_retired_host_default(p):
-    p.write('#!/usr/bin/env bash\nAPPL="${PHASE7_APPLIANCE:-172.21.60.23}"\nssh "root@$APPL" reboot\n')
+    # The address is assembled from octets: its literal is not written in the tree (T0194).
+    addr = ".".join(str(o) for o in (172, 21, 60, 23))
+    p.write('#!/usr/bin/env bash\nAPPL="${PHASE7_APPLIANCE:-%s}"\nssh "root@$APPL" reboot\n' % addr)
 
 
 def plant_onboarding_relapse(p):

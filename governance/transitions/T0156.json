@@ -28,7 +28,7 @@
     "no_privilege_widening": "edged was NOT added to the docker group. The dump moved to the existing root helper instead.",
     "no_audit_deletion": "No authoritative history hidden, archived or deleted.",
     "no_pms_or_financial": "No PMS configuration change, no PMS write, no financial traffic.",
-    "retired_host": "172.21.60.23 neither contacted nor modified."
+    "retired_host": "the retired development reference appliance neither contacted nor modified."
   },
   "previous_state": {
     "phase": "7",

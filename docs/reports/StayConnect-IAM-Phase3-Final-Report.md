@@ -483,7 +483,7 @@ appears.
 
 ## 6b. Live Increment 9 — what was actually executed, and what it found
 
-Executed 2026-08-10 against appliance `172.21.60.23` (`radius`), identity proven before any action: appliance
+Executed 2026-08-10 against appliance (the retired development reference appliance) (`radius`), identity proven before any action: appliance
 `ef78219b-0d47-4465-9f77-3d0c702c815c`, serial `SC-BEN1-JS4A-0D9C`, signed assignment to tenant Coral Sea
 Resorts / site Coral Sea Holiday Resort, licence `active` with `wan_mac` matching the live `ens160` MAC.
 

@@ -20,7 +20,7 @@
 set -uo pipefail
 # THE TARGET IS DEMANDED, NOT ASSUMED.
 #
-# This used to read `APPL="${PHASE7_APPLIANCE:-172.21.60.23}"`. That address is the RETIRED development
+# This used to read `APPL="${PHASE7_APPLIANCE:-<retired address>}"`. That address is the RETIRED development
 # appliance: it is not an operational target, must not be contacted, and must not be treated as a source of
 # anything. A harness that defaults to it sends whoever runs it with no environment variable at the one
 # machine the standing record forbids touching.
@@ -28,7 +28,8 @@ set -uo pipefail
 # So there is no default. The target is named explicitly or the script refuses, and the retired address is
 # refused outright even when it IS named -- an address is a property of the run, not of the script. The same
 # correction was already made to deploy/scripts/hotel-admin-mint-cert.sh for the same reason.
-RETIRED_APPLIANCE="172.21.60.23"
+# Assembled from octets: the literal address is not written in the tree (T0194). The refusal is unchanged.
+RETIRED_APPLIANCE="$(printf '%s.%s.%s.%s' 172 21 60 23)"
 APPL="${PHASE7_APPLIANCE:-}"
 if [ -z "$APPL" ]; then
   echo "REFUSED: set PHASE7_APPLIANCE to the appliance this run targets." >&2

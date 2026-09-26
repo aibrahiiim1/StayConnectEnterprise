@@ -47,7 +47,7 @@
   "what_was_not_done": {
     "product_behaviour": "Unchanged. No handler, route, flow or wording was touched in this delivery.",
     "commerce": "Still dark. Nothing here enables it.",
-    "retired_appliance": "172.21.60.23 was not contacted.",
+    "retired_appliance": "the retired development reference appliance was not contacted.",
     "other_boundaries": "No networking, PMS, financial, schema, security-boundary or Go-Live change. The three services restarted are the same three this mission had already deployed, now carrying correct provenance."
   },
   "open_product_owner_decision": "Carried forward unchanged from T0170 and T0171, and not a blocker to this closure: the appliance offers two guest sign-in methods, voucher and PMS room, and voucher cannot put a guest online while Phase-2 commerce is dark. It now refuses honestly. The options are to leave it visible, to authorise enabling the portal commerce surface, or to authorise showing only the working method. All three are product decisions.",

@@ -44,10 +44,10 @@
     },
     "four_harnesses_aimed_at_the_retired_appliance": {
       "severity": "HIGH -- one of them reboots it",
-      "what": "deploy/scripts/phase7-appliance-m4.sh, deploy/scripts/phase7-final-reboot.sh and iam_v2_scratch/phase7_ledger_material_effect.sh defaulted PHASE7_APPLIANCE to 172.21.60.23, which is RETIRED and must not be contacted; the second issues a real reboot. scripts/phase19-network-test.sh went further and ASSERTED that address as the management IP, plus br-lan at 10.10.0.1/24 and three hardcoded owner uuids.",
+      "what": "deploy/scripts/phase7-appliance-m4.sh, deploy/scripts/phase7-final-reboot.sh and iam_v2_scratch/phase7_ledger_material_effect.sh defaulted PHASE7_APPLIANCE to the retired development reference appliance, which is RETIRED and must not be contacted; the second issues a real reboot. scripts/phase19-network-test.sh went further and ASSERTED that address as the management IP, plus br-lan at 10.10.0.1/24 and three hardcoded owner uuids.",
       "consequence_of_the_fourth": "phase19-network-test.sh is the only end-to-end proof of a real tagged guest VLAN, and it could only ever run on the retired machine. On PRE-LIVE it would report MANAGEMENT LOST while management was intact, and 'legacy network disturbed' about a bridge that does not exist there.",
       "fix": "The three defaults are removed -- the target is named or the script refuses, and the retired address is refused even when named, the correction deploy/scripts/hotel-admin-mint-cert.sh already made. phase19-network-test.sh now derives the owner from the appliance's own guest_networks rows and refuses rather than inventing one, and RECORDS the management and legacy addresses before the deliberately-bad apply and compares them afterwards, which is portable and a stronger assertion than matching a literal.",
-      "historical_evidence": "Not rewritten. What 172.21.60.23 proved stands exactly as recorded; these are the harnesses, not the records."
+      "historical_evidence": "Not rewritten. What the retired development reference appliance proved stands exactly as recorded; these are the harnesses, not the records."
     },
     "the_records_contradicted_themselves": {
       "severity": "Governance",
@@ -89,7 +89,7 @@
   },
   "new_facts_recorded": {
     "master_head_at_delivery_base": "Nothing recorded a master head at all, so every 'master is at <sha>' sentence was unenforceable by construction -- the parity validator reads such a field, found nothing, and dropped master from its acceptable-head set. CONTINUATION.md then announced PR #120 as the head for nine days and 52 merges through four green gates. Recorded as the BASE rather than 'current master', because a tracked file cannot hold the sha of the commit that contains it.",
-    "retired_hosts": "The ban on 172.21.60.23 existed only in prose, so there was nothing to diff against -- and three harnesses still defaulted to it.",
+    "retired_hosts": "The ban on the retired development reference appliance existed only in prose, so there was nothing to diff against -- and three harnesses still defaulted to it.",
     "central_scope": "LICENSING_ONLY. The decision lived only in prose, and the removal delivery updated no architecture document."
   },
   "what_stops_it_coming_back": {
@@ -100,7 +100,7 @@
     "wired": "preflight stage 1 and the governance gate, classified tree-pure in governance/ci-reuse-policy.json."
   },
   "what_this_does_not_claim": "NOT functional completeness. The gap inventory is wider than what is closed here: multi-VLAN tagged guest networking is not yet proven on the current architecture, the voucher admin surface does not exist at all (issuance has no caller -- no admin route, no UI, no CLI), voucher reveal/export remains unimplemented, and the live recovery, rollback, reboot and Central-outage drills have not been run. Those are named in the delivery report rather than implied to be done. It also does not close the forty remaining Gate-P grant gaps, the absent nightly-backup scheduler, or the absent guarded down-migration runner -- all three are recorded above as outstanding rather than implied done.",
-  "what_this_does_not_authorize": "No change to PRE-LIVE. Nothing here is deployed, no service is restarted, no migration is applied to any appliance, and the only appliance access performed was read-only. It enables no commerce surface, changes no guest sign-in behaviour, and authorises no PMS, financial, networking, schema, security-boundary or Go-Live action. It does not contact 172.21.60.23. D41 remains in force: real Guest activation and Guest pilot use stay DEFERRED.",
+  "what_this_does_not_authorize": "No change to PRE-LIVE. Nothing here is deployed, no service is restarted, no migration is applied to any appliance, and the only appliance access performed was read-only. It enables no commerce surface, changes no guest sign-in behaviour, and authorises no PMS, financial, networking, schema, security-boundary or Go-Live action. It does not contact the retired development reference appliance. D41 remains in force: real Guest activation and Guest pilot use stay DEFERRED.",
   "financial_traffic": "ZERO, re-verified live on all five counters at 2026-09-22T11:26:28Z: pms_postings 0, posting_attempts 0, posting_outbox 0, payment_transactions 0, settlements 0. No financial traffic was generated by this delivery; the appliance access was SELECT count(*) and a read of netd's shaping epochs.",
   "previous_state": {
     "phase": "7",

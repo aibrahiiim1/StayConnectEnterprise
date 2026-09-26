@@ -1,6 +1,6 @@
 # StayConnect IAM Phase 2 — Live-Dark Deployment Evidence
 
-**Immutable record. DARK Phase 2 (all `STAYCONNECT_PHASE2_*` + `NEXT_PUBLIC_PHASE2_ADMIN` OFF). No cutover, no paid access, no PMS settlement. Appliance `radius` / `172.21.60.23`.**
+**Immutable record. DARK Phase 2 (all `STAYCONNECT_PHASE2_*` + `NEXT_PUBLIC_PHASE2_ADMIN` OFF). No cutover, no paid access, no PMS settlement. Appliance `radius` / the retired development reference appliance.**
 
 Deployed source: branch `phase/2-commercial-packages`, PR #4. Pinned artifacts built `-trimpath`, `CGO_ENABLED=0 GOOS=linux GOARCH=amd64` from the committed Phase-2 Go source (functionally HEAD `b89a744`).
 
@@ -26,7 +26,7 @@ Rollback: prior binaries kept as `/opt/stayconnect/bin/{scd,edged,portald}.bak-p
 (The Go binaries `1e25f9ef`/`30ed45f1`/`bf400654` were **not** changed by the final gate; the initial and current deployments share the same Go binaries.)
 
 ## Pre-deployment
-- Host identity: `radius` / `172.21.60.23` reverified.
+- Host identity: `radius` / the retired development reference appliance reverified.
 - Fresh backup: `/opt/stayconnect/backups/pre-phase2-20260718-082640.dump` (`sha256 3af4237b573d59da908f333fe8a41cde2cafc5e6fadf9ed8990b1c67441a6843`).
 - IAM-v2 baseline before migration: **49 tables / 0 rows**; migration `0009` not present; commerce tables present.
 - `public` columns SHA-256 (pre): `833c3d6740af4ac79731bb038616559b999109df2f0bef37e95173ffe3a26bfb`.

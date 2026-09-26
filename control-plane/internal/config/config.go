@@ -27,7 +27,7 @@ func Load() (Config, error) {
 		Env:          env("CTRLAPI_ENV", "dev"),
 		CookieSecure: env("CTRLAPI_COOKIE_SECURE", "false") == "true",
 	}
-	// LOOPBACK ONLY BY DEFAULT. This used to also allow http://172.21.60.23:3000 — one particular
+	// LOOPBACK ONLY BY DEFAULT. This used to also allow the retired development reference appliance's address — one particular
 	// appliance's address, from one particular lab, compiled into the product. A real deployment sets
 	// CTRLAPI_ALLOW_ORIGINS to its own admin origin; a default naming somebody's old machine is either
 	// dead weight or, if that address is ever reused, a browser origin nobody authorised.

@@ -134,7 +134,7 @@ units, zero price, `NOT_REQUIRED`, ISO-4217, no payment/posting/refund/FX). Plus
 migration-lifecycle/API/portal/admin/RBAC/audit/flags-OFF-zero-SQL/reboot-config/redaction/rollback.
 Disposable DB; destroy all disposable infra after the gate. Governance CI is NOT a substitute.
 
-## 7. Live-dark deployment (appliance 172.21.60.23)
+## 7. Live-dark deployment (appliance (the retired development reference appliance))
 
 Reverify host → fresh backup + fingerprints + iam_v2 row counts → apply 0009 via the migration executor
 → **as-built: zero new runtime iam_v2 privileges were required for the DARK build** (nil repo while

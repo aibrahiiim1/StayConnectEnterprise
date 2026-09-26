@@ -44,7 +44,7 @@ echo "   owner: tenant=$TEN site=$SITE appliance=${APP:-(null)}"
 
 # THE MANAGEMENT ADDRESS IS OBSERVED, NOT ASSERTED AGAINST A LITERAL.
 #
-# 19.8 used to check `ip -br addr show ens160 | grep -q "172.21.60.23"`. That is the retired appliance's
+# 19.8 used to check `ip -br addr show ens160 | grep -q "the retired development reference appliance"`. That is the retired appliance's
 # address, so on any other appliance the check reported MANAGEMENT LOST while management was perfectly
 # intact -- a false alarm on the one assertion an operator would act on immediately. What the test actually
 # wants to know is whether the address CHANGED across a failed apply, so it records it first and compares.

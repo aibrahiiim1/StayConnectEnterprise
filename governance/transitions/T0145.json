@@ -11,7 +11,7 @@
     "preflight": "PASS on all seven default stages."
   },
   "deployed": {
-    "target": "172.21.60.25 (PRE-LIVE). 172.21.60.23 neither contacted nor modified.",
+    "target": "172.21.60.25 (PRE-LIVE). the retired development reference appliance neither contacted nor modified.",
     "source_commit": "37652b65ffba80b8ec4fb4c75adb9aa175ac5be1, built by scripts/build-appliance-binaries.sh. APPLIANCE_BUILD = PASS: every binary names that revision, clean, tags=stayconnect_production.",
     "hotel_admin_ui": "BUILD_ID 912jAgEwD9g2s53fmbX7h, bundle sha256 9bfad14255ddc4e0cce0c74ce2cbcf816534dfa884cf6512334232abf01d8cdb; the served manifest reads source_commit 37652b65ffba (clean).",
     "provenance": "DEPLOYED_SHA updated and DEPLOYED_BINARIES.txt rewritten, then re-verified in place with sha256sum -c: all six OK.",

@@ -241,7 +241,7 @@ re-runs the Phase-4 financial core.
 
 ### Controlled LIVE-DARK deployment — development appliance only
 
-Host `radius` (172.21.60.23), database `stayconnect_site`. **Production was never contacted.**
+Host `radius` (the retired development reference appliance), database `stayconnect_site`. **Production was never contacted.**
 
 | Area | Evidence |
 |---|---|

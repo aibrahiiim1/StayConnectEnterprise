@@ -143,7 +143,7 @@ still called the raw writer, so in the running product a grace save recorded no 
 version, appended no audit row, and pinned a package the operator had chosen rather than one derived to satisfy
 `iam_v2.grace_package_mismatch_reason`. The guarantees existed in tests and not in the product.
 
-Verified on the DEVELOPMENT appliance (172.21.60.23, DB `stayconnect_site`) against the running `edged`:
+Verified on the DEVELOPMENT appliance (the retired development reference appliance, DB `stayconnect_site`) against the running `edged`:
 
 | Case | Result |
 |---|---|
@@ -242,7 +242,7 @@ merged" is still caught, and an inverted case now pins both directions (72 negat
 
 ## D33/T0072 — post-acceptance DEVELOPMENT hardening and Hotel-Admin usability sweep
 
-Carried out on 172.21.60.23 as a real operator would, in a real browser, after the trial was accepted and
+Carried out on the retired development reference appliance as a real operator would, in a real browser, after the trial was accepted and
 closed. Everything below was found by opening screens and using them, not by reading code.
 
 ### Guest Accounts crashed, and the reason was worse than the crash

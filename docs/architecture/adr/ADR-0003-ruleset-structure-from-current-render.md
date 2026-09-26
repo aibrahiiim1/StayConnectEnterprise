@@ -11,7 +11,7 @@ static `/etc/nftables.conf` — does not leave the appliance forwarding by an ol
 by replaying the file it had generated at the time of the last network apply:
 `<bundle>/stayconnect.nft`, taken from the active row of `network_config_revisions`.
 
-Live Increment 9 deployed the Phase-3 software to appliance `172.21.60.23` and installed the Phase-3 packet
+Live Increment 9 deployed the Phase-3 software to appliance (the retired development reference appliance) and installed the Phase-3 packet
 authorization foundation into the running ruleset. The install was correct and surgical: legacy `auth_ipv4` was
 byte-identical afterwards, chain and DNAT counts were unchanged, nothing was flushed.
 

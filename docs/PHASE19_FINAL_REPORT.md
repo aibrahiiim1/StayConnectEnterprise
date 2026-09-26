@@ -2,7 +2,7 @@
 
 Guest VLANs, guest-facing networks, and DHCP management for the StayConnect
 edge appliance. Implemented on top of the existing cloud/edge architecture
-without undoing the Cloud/Edge split. Verified on the pilot (`172.21.60.23`)
+without undoing the Cloud/Edge split. Verified on the pilot (the retired development reference appliance)
 with an isolated test VLAN.
 
 ## 1. Previous networking limitation

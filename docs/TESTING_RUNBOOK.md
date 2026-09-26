@@ -6,7 +6,7 @@ a workstation that can SSH to both hosts.
 ```bash
 # Set once per shell
 C=root@150.0.0.252     # Central control plane
-A=root@172.21.60.23    # Appliance edge (radius)
+A=root@the retired development reference appliance    # Appliance edge (radius)
 ```
 
 Host / service map:
@@ -14,7 +14,7 @@ Host / service map:
 | Plane | Host | Key services | Ingress |
 |---|---|---|---|
 | Central control plane | `150.0.0.252` | `stayconnect-ctrlapi` (:8080), `stayconnect-nats-authz`, `cloud-admin` (:3000), Postgres `sc-central-pg`, NATS mTLS `sc-central-nats-mtls` (:4223), legacy `sc-central-nats` (:4222, loopback‑only) | `admin.stayconnect.local` → :3000 · `api.stayconnect.local` → :8080 |
-| Appliance edge | `172.21.60.23` | `stayconnect-scd`, `edged` (:8090), `netd`, `portald` (:8380), `caddy` (:80/:443), `hotel-admin` (:3100), `acctd`, site Postgres `stayconnect-pg` | `portal.stayconnect.local` (guest) · `hotel.stayconnect.local` (Hotel Admin) |
+| Appliance edge | the retired development reference appliance | `stayconnect-scd`, `edged` (:8090), `netd`, `portald` (:8380), `caddy` (:80/:443), `hotel-admin` (:3100), `acctd`, site Postgres `stayconnect-pg` | `portal.stayconnect.local` (guest) · `hotel.stayconnect.local` (Hotel Admin) |
 
 > **UI note:** the admin UIs redirect unauthenticated requests, so a protected
 > route returns **307 → /login**, and **/login returns 200**. A `500` on a

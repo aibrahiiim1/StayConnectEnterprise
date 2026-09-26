@@ -50,7 +50,7 @@
     "No PMS traffic.",
     "No payment-provider or financial traffic.",
     "No Go-Live.",
-    "172.21.60.23 was NOT contacted and NOT modified; nothing was copied from it.",
+    "the retired development reference appliance was NOT contacted and NOT modified; nothing was copied from it.",
     "No identity was seeded or copied: enrollment, claim and signed assignment remain outstanding.",
     "Central Control Plane remains a separate server; the two-NIC model, local-first edge operation, least-privilege service roles, IAM-v2 ownership and SECURITY DEFINER boundaries are preserved."
   ],

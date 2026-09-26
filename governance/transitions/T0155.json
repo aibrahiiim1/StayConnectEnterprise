@@ -60,7 +60,7 @@
     "no_destructive_restore": "No live restore was performed or offered. Verification runs against a throwaway database.",
     "no_audit_deletion": "No authoritative history was hidden, archived or deleted -- not the grace publication ledger, not network revisions, not branding revisions.",
     "no_pms_or_financial": "No PMS configuration change, no PMS write, no financial traffic.",
-    "retired_host": "172.21.60.23 neither contacted nor modified."
+    "retired_host": "the retired development reference appliance neither contacted nor modified."
   },
   "previous_state": {
     "phase": "7",

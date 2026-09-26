@@ -7,7 +7,7 @@ closure — T0010 itself was never "already accepted". This acceptance is at DAR
 cutover, no Phase 2, no iam_v2 production access, and every dark feature remains OFF.** Legacy
 public-schema IAM remains the sole production authority (iam_v2 49 tables / 0 rows).
 
-**Appliance:** `radius` / `172.21.60.23`, site DB `stayconnect_site` (docker `stayconnect-pg`,
+**Appliance:** `radius` / the retired development reference appliance, site DB `stayconnect_site` (docker `stayconnect-pg`,
 timescaledb 2.16.1-pg16). **Executed:** 2026-07-17 → 2026-07-18. **Branch/PR:** `phase/1b-dark-auth` / PR #2.
 
 ## 1. Scope delivered

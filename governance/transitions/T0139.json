@@ -73,7 +73,7 @@
     "no_configuration_change": "No PMS configuration, endpoint, credentials, routing or financial settings were touched. No env file was modified.",
     "financial": "No posting, payment, reversal, settlement or financial egress.",
     "guest_data": "No guest or stay state altered.",
-    "retired_host": "172.21.60.23 neither contacted nor modified.",
+    "retired_host": "the retired development reference appliance neither contacted nor modified.",
     "gates": "No test or gate weakened. A self-verifying build check was added."
   },
 

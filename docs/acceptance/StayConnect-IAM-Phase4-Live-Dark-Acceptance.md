@@ -7,7 +7,7 @@
 - **Live WS-L deployment** recorded by transition **T0043** (controlled live-DARK deployment, reboot, recovery and rollback drill).
 - **Product-Owner ACCEPTED and CLOSED** by decision **D19**, closure transition **T0044** (`transition_accepted: true`) at verified **LIVE-DARK / NO-FINANCIAL-TRAFFIC** maturity.
 - Branch: `phase/4-financial-execution`; **PR #12 — MERGED to master on 2026-08-14 under the separate Product-Owner merge decision **D20** (transition **T0048**), merge commit `210154b5ba72178bae715e7c8e4a1398ca629257`**.
-- Appliance: `radius` / `172.21.60.23`, site `7acf26a7-5ad2-4c65-aef7-651107484636`, serial `APP-DEV-0001` — the **development** appliance.
+- Appliance: `radius` / the retired development reference appliance, site `7acf26a7-5ad2-4c65-aef7-651107484636`, serial `APP-DEV-0001` — the **development** appliance.
 
 ---
 

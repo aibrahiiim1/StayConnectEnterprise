@@ -117,7 +117,7 @@ Key facts:
 
 | Role | Interface | Address |
 |---|---|---|
-| WAN (uplink / management) | `ens160` | `172.21.60.23/24` (pilot; gw `172.21.60.1`, DNS 1.1.1.1/8.8.8.8) |
+| WAN (uplink / management) | `ens160` | `the retired development reference appliance's address` (pilot; gw `172.21.60.1`, DNS 1.1.1.1/8.8.8.8) |
 | LAN bridge (guests) | `br-lan` | `10.10.0.1/24` |
 | LAN physical | `ens192` | no IP — enslaved to `br-lan` |
 | HA gateway VIP (VRRP) | `br-lan` | `10.10.0.1` shared |
@@ -304,7 +304,7 @@ Go module `github.com/stayconnect/enterprise/control-plane` (Go 1.25, version `0
 - `ctrlapi serve` — the HTTP server on `CTRLAPI_ADDR` (default **:8080**).
 - `ctrlapi seed-admin --email --password [--name]` — idempotently creates a `platform_admin` operator (argon2id hash, password ≥ 10 chars).
 
-**Env vars:** `CTRLAPI_ADDR` (:8080), `CTRLAPI_DB_URL`, `CTRLAPI_REDIS_URL` (redis://127.0.0.1:6379/0), `CTRLAPI_NATS_URL` (presence toggles NATS transport; unset → local Unix transport to scd), `CTRLAPI_LOG_LEVEL`, `CTRLAPI_ENV`, `CTRLAPI_COOKIE_SECURE`, `CTRLAPI_ALLOW_ORIGINS` (CORS allowlist, defaults include `http://172.21.60.23:3000`), `CTRLAPI_SCD_SOCKET`.
+**Env vars:** `CTRLAPI_ADDR` (:8080), `CTRLAPI_DB_URL`, `CTRLAPI_REDIS_URL` (redis://127.0.0.1:6379/0), `CTRLAPI_NATS_URL` (presence toggles NATS transport; unset → local Unix transport to scd), `CTRLAPI_LOG_LEVEL`, `CTRLAPI_ENV`, `CTRLAPI_COOKIE_SECURE`, `CTRLAPI_ALLOW_ORIGINS` (CORS allowlist, defaults include `the retired development reference appliance's address`), `CTRLAPI_SCD_SOCKET`.
 
 **Startup:** slog JSON → config → pgx pool (max 10 conns) → Redis ping → transport selection (NATS or Unix) → metrics → heartbeat consumer (NATS only) → hourly bootstrap-token expiry sweeper → OIDC registry (stub provider only) → chi router → graceful shutdown on SIGINT/SIGTERM.
 
@@ -639,8 +639,8 @@ Admin console glossary: **Tenant** (customer account) → **Site** (property) �
 
 ## 18. Live pilot VM & dev workflow
 
-- **VM:** `172.21.60.23` (hostname `radius`), SSH as root with ed25519 key auth (`ssh root@172.21.60.23`). Runs everything: ctrlapi, scd/portald/acctd, web-admin, Caddy, docker-compose infra + observability.
-- **Code on VM:** `/opt/stayconnect/` — **neither the VM nor the Windows workspace is a git repo.** Sync with `scp 'd:\WebProjects\StayConnectEnterprise\<path>' root@172.21.60.23:/opt/stayconnect/<path>`, then rerun the relevant phase test.
+- **VM:** the retired development reference appliance (hostname `radius`), SSH as root with ed25519 key auth (`ssh root@the retired development reference appliance`). Runs everything: ctrlapi, scd/portald/acctd, web-admin, Caddy, docker-compose infra + observability.
+- **Code on VM:** `/opt/stayconnect/` — **neither the VM nor the Windows workspace is a git repo.** Sync with `scp 'd:\WebProjects\StayConnectEnterprise\<path>' root@the retired development reference appliance:/opt/stayconnect/<path>`, then rerun the relevant phase test.
 - Beware the *other* radius host `172.21.96.200` — a separate legacy deployment; the real one is `.60.23`.
 - Pilot conveniences: `SCD_PMS_STUB_SEED=true` in `/etc/stayconnect/scd.env` (seeded rooms 101/102/103 + future/past guests for stay-window tests), stub notification/social providers, dev admin `admin@stayconnect.local`.
 - Hypervisor: VMware ESXi — remember the LAN portgroup security settings (§3).

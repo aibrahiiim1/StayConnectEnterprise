@@ -11,7 +11,7 @@
 #
 # Env overrides: HA_DNS, HA_IP, CADDY_CA_DIR, HA_DIR
 #
-# HA_IP has NO baked-in default. It used to default to 172.21.60.23 -- the DEVELOPMENT reference appliance --
+# HA_IP has NO baked-in default. It used to default to the address of the DEVELOPMENT reference appliance (now retired) --
 # which meant running this on any other machine minted a certificate for someone else's address, and the IP
 # SAN silently did not match the host it was serving. An address is a property of the machine, not of the
 # script, so it is derived from this host's own default route and otherwise demanded explicitly. Nothing is

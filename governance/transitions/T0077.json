@@ -68,7 +68,7 @@
     "authority_lock": "the production-profile config loader refuses every hostile configuration -- explicit disable, master off -- and forces the locked methods on when unset"
   },
   "boundaries_observed": [
-    "Repository-only work. 172.21.60.23 NOT modified; the only appliance data used was the read-only reference catalog already captured, used for comparison.",
+    "Repository-only work. the retired development reference appliance NOT modified; the only appliance data used was the read-only reference catalog already captured, used for comparison.",
     "No deployment to any server. No Production appliance exists or was contacted.",
     "No real PMS, payment-provider or financial traffic.",
     "No historical migration, scratch file or governance evidence deleted; iam_v2_scratch retained as provenance.",

@@ -65,7 +65,7 @@
     "build_and_test": "go build, go vet and go test pass on the development build AND the production build (-tags stayconnect_production); Hotel-Admin Next build clean"
   },
   "boundaries_observed": [
-    "Repository-only. 172.21.60.23 NOT modified and NOT contacted.",
+    "Repository-only. the retired development reference appliance NOT modified and NOT contacted.",
     "No deployment. No Production appliance provisioned or contacted.",
     "No PMS, payment-provider or financial traffic.",
     "Git history, migrations 0001-0048, accepted evidence and governance records preserved; 0049 removes the superseded domain at the end of the chain rather than rewriting how it was built.",
