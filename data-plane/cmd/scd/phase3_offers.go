@@ -118,7 +118,15 @@ func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID string, 
 		   AND (ipr.visible_until IS NULL OR ipr.visible_until > now())
 		   AND ipr.price_minor = 0
 		   AND ipr.settlement_methods = ARRAY['NOT_REQUIRED']::text[]
-		 ORDER BY ip.code`, p.srv.tenID, p.srv.siteID)
+		   -- A STAY TAKES EACH PACKAGE REVISION ONCE (purchase_once_per_stay, contract). One it already holds
+		   -- was still offered, and choosing it failed on that index -- after the guest's details were right,
+		   -- as "we are unable to verify your stay". Same predicate as the index, so the offer set and the
+		   -- grant can never disagree.
+		   AND NOT EXISTS (SELECT 1 FROM iam_v2.purchases pu
+		                    WHERE pu.stay_id = $3::uuid AND pu.package_revision_id = ipr.id
+		                      AND pu.trigger = 'GUEST_SELECTION'
+		                      AND pu.state IN ('PENDING','AWAITING_SETTLEMENT','MANUAL_REVIEW','GRANTED'))
+		 ORDER BY ip.code`, p.srv.tenID, p.srv.siteID, stayID)
 	if err != nil {
 		return nil, err
 	}

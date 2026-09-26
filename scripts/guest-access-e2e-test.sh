@@ -219,7 +219,8 @@ logout ga2
 echo "== 8. PMS room sign-in: one in-house stay from the live mirror (not printed) =="
 methods '{"guest_account":{"enabled":false}}'
 STAY=$($PSQL "SELECT s.id FROM iam_v2.stays s WHERE s.status='IN_HOUSE' AND s.external_reservation_id IS NOT NULL
-  AND NOT EXISTS (SELECT 1 FROM iam_v2.entitlements e WHERE e.stay_id=s.id AND e.status IN ('PENDING','ACTIVE','SUSPENDED'))
+  AND NOT EXISTS (SELECT 1 FROM iam_v2.entitlements e WHERE e.stay_id=s.id)
+  AND NOT EXISTS (SELECT 1 FROM iam_v2.purchases pu WHERE pu.stay_id=s.id)
   AND (SELECT count(*) FROM iam_v2.stays o WHERE o.status='IN_HOUSE' AND o.normalized_room_number=s.normalized_room_number)=1
   ORDER BY s.occupancy_evidence_at DESC NULLS LAST LIMIT 1")
 ROOM=$($PSQL "SELECT normalized_room_number FROM iam_v2.stays WHERE id='$STAY'"); RES=$($PSQL "SELECT external_reservation_id FROM iam_v2.stays WHERE id='$STAY'")
@@ -251,6 +252,24 @@ if [ -n "$STAY" ]; then
   [ "$($PSQL "SELECT count(*) FROM iam_v2.entitlements WHERE stay_id='$STAY'")" = 1 ] && ok "still one entitlement for the stay" || bad "stay has several entitlements"
   logout ga2; logout ga4
   c=$(online ga2); [ "$c" != 204 ] && ok "room device captive again after disconnect" || bad "room device online after disconnect"
+  # A stay takes each package revision once. Once its access has ended, signing in again must not offer the
+  # package it already took (choosing it used to fail as "unable to verify your stay").
+  USED=$($PSQL "SELECT package_revision_id FROM iam_v2.entitlements WHERE id='$PMS_ENT'")
+  $PSQL "SELECT iam_v2.apply_entitlement_transition('$PMS_ENT','TERMINATED',now(),'ADMIN')" >/dev/null; sleep 2
+  j=$(pms ga2 "$RES")
+  if printf '%s' "$j" | grep -q '"needs_choice":true'; then
+    printf '%s' "$j" | grep -q "$USED" && bad "the package the stay already took is offered again" || ok "after the stay's access ended, only packages it has not taken are offered"
+    j=$(pmschoose ga2 "$j")
+  fi
+  S3=$(printf '%s' "$j" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("session_id",""))' 2>/dev/null)
+  if [ -n "$S3" ]; then
+    PMS_ENT=$(ent_of_session "$S3")
+    [ "$($PSQL "SELECT package_revision_id FROM iam_v2.entitlements WHERE id='$PMS_ENT'")" != "$USED" ] && [ "$(online ga2)" = 204 ] \
+      && ok "the stay was granted a package it had not taken, and is online (204)" || bad "re-grant reused the taken package or is offline"
+    logout ga2
+  else
+    [ "$($PSQL "SELECT count(*) FROM iam_v2.purchases WHERE stay_id='$STAY'")" = 1 ] && ok "no package left for the stay: refused without a second purchase" || bad "re-sign-in: $(printf '%s' "$j" | head -c 160)"
+  fi
 else
   bad "no in-house stay suitable for the positive room test"
 fi

@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -223,6 +224,11 @@ func (s *Store) GrantTx(ctx context.Context, tx pgx.Tx, tenant, site string, r R
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'GUEST_SELECTION',0,'GRANTED')
 		RETURNING id::text`,
 		tenant, site, r.PackageRevID, res.QuoteID, r.AuthContextID, res.Interface, res.Stay, consumed.Revision).Scan(&res.PurchaseID); err != nil {
+		// The stay already took this package revision (purchase_once_per_stay). The offer set excludes it, so
+		// this is a race or a stale offer: refuse it as not grantable rather than surface a raw index error.
+		if strings.Contains(err.Error(), "purchase_once_per_stay") {
+			return res, ErrPackageNotGrantable
+		}
 		return res, err
 	}
 
