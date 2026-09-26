@@ -1,0 +1,51 @@
+# PRODUCT OWNER MERGE AUTHORIZATION -- the one required status context on master (D42).
+#
+# NO PRODUCT OWNER ACCEPTANCE = NO MERGE. This passes only while the pull request carries the label
+# `po-merge-approved` on the exact head being judged; a later push revokes it. The ruleset
+# `master-protected-delivery` requires this context, pinned to the GitHub Actions app, so a pull request is
+# refused by GitHub until the approval is recorded. Logic and its limits: tools/po_merge_authorization.py.
+#
+# It runs in seconds and validates nothing else. The comprehensive four-gate validation is explicit opt-in
+# only ("FULL CHECK THE WHOLE CODE"); see docs/PO_LED_DELIVERY_MODEL.md.
+name: Product Owner Merge Authorization
+
+on:
+  pull_request:
+    branches: [ master ]
+    types: [ opened, reopened, synchronize, ready_for_review, converted_to_draft, labeled, unlabeled ]
+
+# One verdict per pull request at a time, never cancelled: the latest event's run is the one that counts,
+# and a cancelled run would only ever leave the context non-passing.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: write     # reading labels, and removing the approval label when a push revokes it
+  issues: write            # the label endpoints live under issues
+
+jobs:
+  po-merge-authorization:
+    name: po-merge-authorization
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the authorization logic from the base branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          sparse-checkout: tools/po_merge_authorization.py
+          sparse-checkout-cone-mode: false
+      - name: Product Owner merge authorization
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          f=tools/po_merge_authorization.py
+          # The migration pull request that introduces this check has no copy on its base yet; it then uses
+          # its own. Every later pull request is judged by master's copy, so a branch cannot weaken the check
+          # that judges it.
+          if [ ! -f "$f" ]; then
+            git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.head.sha }}"
+            git show "${{ github.event.pull_request.head.sha }}:$f" > "$f"
+          fi
+          python3 "$f"

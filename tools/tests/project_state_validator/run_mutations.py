@@ -454,9 +454,11 @@ MUTATIONS = [
  #
  # Worth keeping the history visible: for the span of T0183 this case was pointed at a trigger that could not
  # earn the context at all, so it was proving the reachability of something unreachable.
- ("M20 CI no longer runs on pull requests, so its required context can never report",
+ # D42 (T0196) retargets it a third time: the governance gate is FULL CHECK only, so the defect is losing the
+ # trigger FULL CHECK THE WHOLE CODE dispatches.
+ ("M20 the governance gate can no longer be dispatched, so FULL CHECK cannot run it",
   ".github/workflows/project-governance.yml",
-   ("replace", [("  pull_request:\n    branches: [ master ]", "  pull_request_disabled:\n    branches: [ master ]")])),
+   ("replace", [("  workflow_dispatch:\n", "  workflow_dispatch_disabled:\n")])),
  ("M21 CI job ignores failures", ".github/workflows/project-governance.yml",
    ("append", "\n    continue-on-error: true\n")),
  ("M22 agent-only-operations decision removed", "governance/decision-register.json",
@@ -623,66 +625,40 @@ MUTATIONS = [
  # Each of these is a condition the repository was ACTUALLY IN before this rule existed, and each cost
  # measurable delivery time. They are mutations rather than prose precisely because prose is what allowed the
  # first two to persist unnoticed across all four gate workflows.
- # THE M61 FAMILY HAS TRACKED THREE DELIVERY MODELS, AND THE CHURN IS ITSELF THE LESSON.
- #
- # Under daytime-full-gates, M61 was "a gate can be satisfied by workflow_dispatch again". Under the T0183
- # nightly-dispatch model that became the REQUIRED state, so the case went [MISS]. Under T0184 -- where a
- # dispatched run's checks were measured NOT to satisfy the ruleset -- it is a defect once more, and for a
- # sharper reason than before: a dispatch trigger on a gate is an invitation back into a dead end that costs a
- # night per attempt to rediscover.
- #
- # An obsolete mutation is worse than no mutation. It fails the suite for the wrong reason and invites someone
- # to "fix" the validator until the case passes, which is how a protection gets removed by a green test.
- #
- # What these five defend is the Option E mechanism: a CHEAP NON-PASSING context by day, a FULL gate on the
- # nightly re-run, and nothing in between that could let a merge happen on a check that validated nothing.
- ("M61 a gate accepts workflow_dispatch again, reopening the dead end T0184 measured",
+ # THE M61 FAMILY HAS TRACKED FOUR DELIVERY MODELS, AND THE CHURN IS ITSELF THE LESSON: daytime full gates,
+ # the T0183 nightly dispatch, the T0184 sentinel + nightly re-run, and now D42 (T0196). Under D42 the
+ # comprehensive gates are FULL CHECK only and the one required context is the Product Owner merge
+ # authorization. What these defend: no normal change runs the full matrix automatically, nothing runs on a
+ # clock, FULL CHECK stays reachable and executes fresh, and no merge happens without a recorded approval.
+ ("M61 a gate runs on pull_request again, so every normal change pays for the full matrix",
   ".github/workflows/phase3-software.yml",
-   ("replace", [("  pull_request:\n    branches: [ master ]",
-                 "  workflow_dispatch:\n  pull_request:\n    branches: [ master ]")])),
- ("M61b a gate stops forbidding evidence reuse during the nightly validation",
+   ("replace", [("  workflow_dispatch:\n", "  workflow_dispatch:\n  pull_request:\n    branches: [ master ]\n")])),
+ ("M61b a gate stops executing fresh, so FULL CHECK could be satisfied by earlier evidence",
   ".github/workflows/phase4-financial-core.yml",
-   ("replace", [("          NIGHTLY_VALIDATION: ${{ github.event_name == 'pull_request' "
-                 "&& github.run_attempt != 1 }}",
-                 "          NIGHTLY_VALIDATION_DISABLED: 'false'")])),
- # M61c WAS "loses the cron that covers half the year", which was the dual-cron design. With one
- # timezone-aware entry the equivalent defect is losing the TIMEZONE: the same cron then means 06:00 UTC,
- # which is 05:10 or 06:10 in Cairo, and the nightly merge runs at the wrong hour while still going green.
- ("M61c the nightly orchestrator loses the timezone that makes its cron mean 06:00 Cairo",
-  ".github/workflows/nightly-authoritative-validation.yml",
-   ("replace", [('      timezone: "Africa/Cairo"', "      # timezone removed")])),
- ("M61d the nightly orchestrator stops proving its own fail-closed rules before merging",
-  ".github/workflows/nightly-authoritative-validation.yml",
-   ("replace", [("        run: python tools/tests/nightly_delivery/run_negative.py",
-                 "        run: true  # proofs skipped")])),
+   ("replace", [("          NIGHTLY_VALIDATION: 'true'", "          NIGHTLY_VALIDATION: 'false'")])),
+ ("M61c a gate is put back on a clock, so validation runs unattended again",
+  ".github/workflows/phase5-post-stay-transfer.yml",
+   ("replace", [("  workflow_dispatch:\n", "  workflow_dispatch:\n  schedule:\n    - cron: '0 6 * * *'\n")])),
+ ("M61d the merge-authorization workflow stops running its decision",
+  ".github/workflows/po-merge-authorization.yml",
+   ("replace", [('          python3 "$f"\n', "          true\n")])),
  ("M61e the register declares a delivery model nobody enforces",
   "governance/project-state.json",
    ("json_set", [(["current_state_facts", "delivery_model"], "SOMETHING_ELSE")])),
- # THE SINGLE WORST DEFECT THIS MODEL CAN HAVE, so it gets its own case. M61f used to be "a gate starts
- # running on pull_request again"; under Option E pull_request is REQUIRED, and the equivalent damage is the
- # sentinel that PASSES. A passing daytime context makes all four required checks green within a minute of a
- # push, on attempts that validated nothing -- so the ruleset is satisfied and master becomes mergeable
- # BEFORE any authoritative validation has run. Every other protection in this delivery is downstream of the
- # sentinel failing.
- ("M61f the daytime sentinel passes, so master becomes mergeable on checks that validated nothing",
-  ".github/workflows/phase5-post-stay-transfer.yml",
-   ("replace", [('reports what the last authoritative night decided."\n          exit 1',
-                 'reports what the last authoritative night decided."\n          exit 0')])),
- # AND THE OTHER WAY THE SENTINEL CAN STOP WORKING: not by passing, but by never standing aside. Restricted to
- # the wrong attempt it fires on the nightly re-run too, so the gates never execute at all and the nightly
- # validation can only ever refuse. That fails safe -- nothing merges -- but it means the delivery path is
- # silently dead, which nobody discovers until a release is wanted.
- ("M61g the sentinel is not confined to attempt 1, so the nightly re-run never executes the gate",
-  ".github/workflows/project-governance.yml",
-   ("replace", [("        if: github.event_name == 'pull_request' && github.run_attempt == 1",
-                 "        if: github.event_name == 'pull_request'")])),
- ("M62 a superseded run is never cancelled (concurrency block removed)",
+ # THE SINGLE WORST DEFECT THIS MODEL CAN HAVE: an approval that survives a push. What the Product Owner
+ # tested would no longer be what merges.
+ ("M61f approval is no longer revoked by a new push",
+  ".github/workflows/po-merge-authorization.yml",
+   ("replace", [("types: [ opened, reopened, synchronize, ", "types: [ opened, reopened, ")])),
+ ("M61g the merge-authorization workflow is deleted, so nothing blocks an unapproved merge",
+  ".github/workflows/po-merge-authorization.yml",
+   ("remove", None)),
+ ("M62 a FULL CHECK can race another (concurrency block removed)",
   ".github/workflows/phase4-financial-core.yml",
    ("replace", [("concurrency:\n  group:", "removed_concurrency:\n  group:")])),
- ("M63 cancel-in-progress made unconditional, so a master run becomes cancellable",
+ ("M63 cancel-in-progress made true, so a running FULL CHECK can be cancelled",
   ".github/workflows/phase5-post-stay-transfer.yml",
-   ("replace", [("cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
-                 "cancel-in-progress: true")])),
+   ("replace", [("  cancel-in-progress: false\n", "  cancel-in-progress: true\n")])),
  ("M64 the preflight hollowed out into a stub that still exits 0",
   "tools/preflight.sh",
    ("replace", [("python tools/check-fixture-parity.py || rc=1",
