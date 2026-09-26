@@ -23,6 +23,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 REPO = "aibrahiiim1/StayConnectEnterprise"
@@ -65,7 +66,7 @@ def main():
     a = ap.parse_args()
     tok = token()
     try:
-        head = call("GET", "repos/%s/commits/%s" % (REPO, a.ref), tok)["sha"]
+        head = call("GET", "repos/%s/commits/%s" % (REPO, urllib.parse.quote(a.ref, safe="")), tok)["sha"]
         since = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
         for wf in GATES:
             call("POST", "repos/%s/actions/workflows/%s/dispatches" % (REPO, wf), tok, {"ref": a.ref})
@@ -80,8 +81,9 @@ def main():
     while time.time() < deadline:
         for wf in GATES:
             try:
-                rs = call("GET", "repos/%s/actions/workflows/%s/runs?event=workflow_dispatch&branch=%s"
-                          "&created=%%3E%%3D%s&per_page=5" % (REPO, wf, a.ref, since), tok)["workflow_runs"]
+                q = urllib.parse.urlencode({"event": "workflow_dispatch", "branch": a.ref,
+                                            "created": ">=" + since, "per_page": 5})
+                rs = call("GET", "repos/%s/actions/workflows/%s/runs?%s" % (REPO, wf, q), tok)["workflow_runs"]
             except (urllib.error.URLError, KeyError, ValueError):
                 continue
             rs = [r for r in rs if r["head_sha"] == head]
