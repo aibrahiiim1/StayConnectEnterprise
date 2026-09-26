@@ -21,6 +21,7 @@ package main
 // is reached only after a session exists and is enforced.
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -254,6 +255,9 @@ func (h *handler) renderPackages(w http.ResponseWriter, r *http.Request, pkgs []
 
 var packagesTmpl = template.Must(template.New("packages").Parse(compactMarkup(packagesHTML)))
 
+// activateClientTimeout covers scd's enforcement wait (8 s) with margin for the grant transaction around it.
+const activateClientTimeout = 12 * time.Second
+
 // Why an activation did not put the device online. "" means it did, and was enforced.
 const (
 	activateNoDevice    = "NO_DEVICE"
@@ -287,7 +291,18 @@ func (h *handler) activateEnforced(r *http.Request, sess commerceSession, entitl
 		"ip": ip.String(), "mac": mac.String(),
 		// This device's own sign-in: what admits a device other than the purchaser to the entitlement.
 		"auth_context_id": sess.authContextID})
-	resp, err := h.scdDo(r.Context(), http.MethodPost, "/v1/sessions/activate", raw)
+	// THE WAIT MUST FIT INSIDE THE CALL. scd holds this request open until netd has enforced the session, for
+	// up to iamv2EnforcementWaitMax (8 s). portald's shared scd client times out at 5 s, so a slow enforcement
+	// used to surface here as a failure AFTER the grant had committed -- the guest told "could not connect"
+	// while their access existed. Activation alone gets a client whose timeout covers scd's whole wait.
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, "http://unix/v1/sessions/activate", bytes.NewReader(raw))
+	if err != nil {
+		return "", activateFailed
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := *h.scd
+	client.Timeout = activateClientTimeout
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", activateFailed
 	}
