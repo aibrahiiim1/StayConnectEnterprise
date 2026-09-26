@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Menu } from "lucide-react";
@@ -13,6 +13,8 @@ import { useSidebarCollapsed } from "@/lib/sidebar-state";
 import { useCapabilities, surfaceAvailable } from "@/lib/capabilities";
 import { SurfaceNotEnabled } from "@/components/surface-not-enabled";
 import { ToastProvider } from "@/components/ui/toast";
+import { usePoll } from "@/lib/use-poll";
+import { WhoamiProvider } from "@/lib/whoami-context";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -50,34 +52,37 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // immediately. Nothing waits on a failure either -- the loader resolves to an empty set, which fails open.
   const capsKnown = caps !== null;
 
+  // Session cookie is stale/invalid (expired, or edged restarted and dropped
+  // its in-memory sessions). Explicitly clear the cookie so the middleware
+  // won't bounce /login back to /dashboard (a redirect loop), then show the
+  // login form.
+  const bounce = useCallback(async () => {
+    try { await api.post("/auth/logout"); } catch {}
+    router.replace("/login");
+  }, [router]);
+
   useEffect(() => {
     let cancelled = false;
-    const bounce = async () => {
-      // Session cookie is stale/invalid (expired, or edged restarted and dropped
-      // its in-memory sessions). Explicitly clear the cookie so the middleware
-      // won't bounce /login back to /dashboard (a redirect loop), then show the
-      // login form.
-      try { await api.post("/auth/logout"); } catch {}
-      if (!cancelled) router.replace("/login");
-    };
     (async () => {
       try {
         const m = await api.get<Whoami>("/auth/whoami");
         if (!cancelled) setMe(m);
       } catch {
-        await bounce();
+        if (!cancelled) await bounce();
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
-    // Re-validate periodically so a session that expires while the operator is
-    // watching a long-lived page (onboarding, sessions, dashboard) recovers to
-    // /login instead of every poll erroring on 401.
-    const iv = setInterval(() => {
-      api.get<Whoami>("/auth/whoami").catch(() => bounce());
-    }, 30000);
-    return () => { cancelled = true; clearInterval(iv); };
-  }, [router]);
+    return () => { cancelled = true; };
+  }, [bounce]);
+
+  // Re-validate periodically so a session that expires while the operator is
+  // watching a long-lived page (onboarding, sessions, dashboard) recovers to
+  // /login instead of every poll erroring on 401. Paused in a hidden tab, and
+  // checked at once when the tab comes back.
+  usePoll(() => {
+    api.get<Whoami>("/auth/whoami").catch(() => bounce());
+  }, 30_000, { enabled: me !== null });
 
   // With the CONTENT as the scrolling element, the window no longer scrolls, so Next's scroll-to-top on
   // navigation has nothing to reset. Reset the content pane explicitly instead -- otherwise an operator who
@@ -133,6 +138,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     // `h-screen` + `overflow-hidden` bounds the container to the viewport. The sidebar becomes a real
     // independently-scrolling column whose position survives navigation (the layout is not remounted between
     // routes), and the page content scrolls in its own pane.
+    <WhoamiProvider value={me}>
     <ToastProvider>
     <div className="flex h-screen overflow-hidden">
       {/* Below `lg` the column becomes a drawer instead of disappearing. A 64px-wide icon rail was the other
@@ -150,9 +156,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       <DialogPrimitive.Root open={drawer} onOpenChange={setDrawer}>
         <DialogPrimitive.Portal>
-          <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-foreground/45 backdrop-blur-[2px] lg:hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0" />
+          <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-scrim/45 backdrop-blur-[2px] lg:hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 motion-reduce:animate-none" />
           <DialogPrimitive.Content
-            className="fixed inset-y-0 left-0 z-50 h-full w-64 outline-none lg:hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left"
+            className="fixed inset-y-0 left-0 z-50 h-full w-64 outline-none lg:hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left motion-reduce:animate-none"
             aria-label="Navigation"
             /*
               OPENING A MENU IS NOT ASKING TO TYPE.
@@ -182,9 +188,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             visible by navigating to the dashboard or Diagnostics — so an operator on any other screen had no
             way to know the PMS had dropped or the database was unreachable.
           */}
-          <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card/90 px-4 backdrop-blur sm:px-6">
+          {/* Solid, not translucent: the content scrolls in its own pane below, so nothing ever passes under
+              this bar for a blur to show. */}
+          <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card px-4 sm:px-6">
             <DialogPrimitive.Trigger
-              className="-ml-1 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 lg:hidden"
+              className="-ml-1.5 inline-flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 pointer-coarse:size-11 lg:hidden"
               aria-label="Open navigation"
             >
               <Menu className="size-5" />
@@ -228,5 +236,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </DialogPrimitive.Root>
     </div>
     </ToastProvider>
+    </WhoamiProvider>
   );
 }

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   api, ApiError, GuestAccount, GuestAccountCreateResp,
-  GuestAccountPasswordResp, ListResp, Whoami,
+  GuestAccountPasswordResp, ListResp,
 } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
 import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
@@ -25,6 +25,7 @@ import { OneTimeReveal, ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { Plus, KeyRound, Eye, EyeOff, Pencil, Power, Users } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
+import { useOperatorRoles } from "@/lib/whoami-context";
 
 function weakPassword(pw: string): boolean {
   return pw.length > 0 && pw.length < 8;
@@ -66,10 +67,7 @@ export default function GuestAccountsPage() {
   // write on guest-accounts (site_viewer, payments_operator); offering those roles an Add button, a switch and
   // five row actions that all answer 403 was the "buttons shown to roles that cannot use them" the redesign
   // handoff lists against this screen. Fails closed while the roles load.
-  const [roles, setRoles] = useState<string[] | null>(null);
-  useEffect(() => {
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
-  }, []);
+  const roles = useOperatorRoles();
   const mayWrite = roles === null ? false : canWrite("guest-accounts", roles);
 
   // THERE IS NO AUTHORITY DIMENSION ANY MORE.

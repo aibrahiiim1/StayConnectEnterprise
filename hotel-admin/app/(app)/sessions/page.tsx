@@ -14,9 +14,11 @@
 // more rows than anyone scrolls), summary tiles, a per-row detail panel, and a disconnect confirmation that
 // names who is about to be cut off.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { api, ListResp, Session, Whoami } from "@/lib/api";
+import { api, ListResp, Session } from "@/lib/api";
+import { usePoll } from "@/lib/use-poll";
+import { useOperatorRoles } from "@/lib/whoami-context";
 import { canWrite } from "@/lib/roles";
 import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
@@ -31,7 +33,7 @@ import { Segmented } from "@/components/ui/tabs";
 import { ConfirmDialog, DetailDialog } from "@/components/ui/dialog";
 import { Explain } from "@/components/ui/tooltip";
 import { DList, Meter, MonoId, Metric, SkeletonRows } from "@/components/ui/misc";
-import { SearchInput } from "@/components/ui/data";
+import { Pagination, SearchInput } from "@/components/ui/data";
 import { LiveStatus, ReadOnlyNotice, refreshingClass } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
@@ -42,6 +44,8 @@ import {
 import { Users, Monitor, ArrowDownUp, Hotel, KeyRound, Ticket, UserCircle, Power } from "lucide-react";
 
 type Tab = "active" | "recent";
+
+const PAGE = 50;
 
 const KIND_ICON = {
   room: Hotel,
@@ -77,10 +81,7 @@ export default function SessionsPage() {
   // DISCONNECT IS OFFERED ONLY TO A ROLE THAT CAN USE IT. site_viewer, payments_operator and voucher_operator
   // read this list; edged refuses them the disconnect. A button that 403s on click was the redesign handoff's
   // complaint about this screen. Fails closed while the roles load.
-  const [roles, setRoles] = useState<string[] | null>(null);
-  useEffect(() => {
-    api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
-  }, []);
+  const roles = useOperatorRoles();
   const mayDisconnect = roles === null ? false : canWrite("sessions", roles);
 
   const load = useCallback(async () => {
@@ -89,7 +90,7 @@ export default function SessionsPage() {
     setRefreshing(true);
     try {
       const r = await api.get<ListResp<Session>>(`/sessions?${q.toString()}`);
-      setRows(r.data ?? []);
+      setRows((prev) => keepUnchanged(prev, r.data ?? []));
       setErr(null);
       setUpdatedAt(Date.now());
     } catch (e) {
@@ -105,11 +106,8 @@ export default function SessionsPage() {
   // The list is cleared on a tab CHANGE only, not on every poll. Blanking it each time the 10-second poll fired
   // made the table flash and lose the row the operator was reading.
   useEffect(() => { setRows(null); void load(); }, [load]);
-  useEffect(() => {
-    if (tab !== "active") return;
-    const id = setInterval(() => void load(), 10_000);
-    return () => clearInterval(id);
-  }, [tab, load]);
+  // Paused while the tab is hidden; an operator switching back gets a fresh list at once.
+  usePoll(() => void load(), 10_000, { enabled: tab === "active" });
 
   async function onDisconnect(s: Session) {
     setBusy(true); setActionErr(null);
@@ -141,6 +139,22 @@ export default function SessionsPage() {
       ].some((v) => typeof v === "string" && v.toLowerCase().includes(q));
     });
   }, [rows, query, kind]);
+
+  // A PAGE AT A TIME. edged returns up to 200 sessions and this list re-renders on every 10-second poll; drawing
+  // all of them each time made a busy evening's list slow to scroll. The filter still searches every row loaded,
+  // and a new search or filter starts again at the first page.
+  const [offset, setOffset] = useState(0);
+  useEffect(() => { setOffset(0); }, [tab, query, kind]);
+  // A poll can shrink the list under the page being read (guests leave); stay on the last page that exists.
+  const pageOffset = filtered && offset >= filtered.length && filtered.length > 0
+    ? Math.floor((filtered.length - 1) / PAGE) * PAGE
+    : offset;
+  const pageRows = useMemo(
+    () => (filtered ? filtered.slice(pageOffset, pageOffset + PAGE) : null),
+    [filtered, pageOffset],
+  );
+  const openDetail = useCallback((s: Session) => { setDetail(s); setActionErr(null); }, []);
+  const askDisconnect = useCallback((s: Session) => { setConfirm(s); setActionErr(null); }, []);
 
   // Summary figures come from the rows on screen, which is the honest thing for them to describe: they are a
   // summary OF THIS LIST, and the dashboard is where the site-wide numbers live.
@@ -313,97 +327,22 @@ export default function SessionsPage() {
                 </TR>
               </THead>
               <TBody>
-                {filtered.map((s) => {
-                  const id = identifySession(s);
-                  const Icon = KIND_ICON[(s.subject_kind ?? "") as keyof typeof KIND_ICON] ?? Monitor;
-                  const st = stateWords(s.state);
-                  return (
-                    <TR key={s.id}>
-                      <TD>
-                        <button
-                          type="button"
-                          onClick={() => { setDetail(s); setActionErr(null); }}
-                          className="group flex items-start gap-2.5 text-start"
-                        >
-                          <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-surface text-muted-foreground">
-                            <Icon className="size-3.5" />
-                          </span>
-                          <span className="min-w-0">
-                            <span
-                              className={
-                                id.anonymous
-                                  ? "block font-mono text-xs text-muted-foreground group-hover:text-foreground"
-                                  : "block font-medium group-hover:text-primary"
-                              }
-                            >
-                              {id.title}
-                            </span>
-                            {id.subtitle && (
-                              <span className="block truncate text-xs text-muted-foreground">{id.subtitle}</span>
-                            )}
-                            {id.anonymous && (
-                              <span className="block text-2xs text-muted-foreground">
-                                No guest record on this session
-                              </span>
-                            )}
-                          </span>
-                        </button>
-                      </TD>
-                      <TD className="hidden text-muted-foreground md:table-cell">
-                        <div className="text-xs">{methodLabel(s.credential_method)}</div>
-                        <div className="text-2xs">{formatRelative(s.started_at)}</div>
-                      </TD>
-                      <TD className="hidden lg:table-cell">
-                        {s.package_name || s.package_code ? (
-                          <>
-                            <div className="text-sm">{s.package_name || s.package_code}</div>
-                            <div className="text-2xs text-muted-foreground">
-                              {speedPair(s.down_kbps, s.up_kbps) ?? s.service_plan_code ?? ""}
-                            </div>
-                          </>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
-                        )}
-                      </TD>
-                      <TD className="hidden min-w-40 xl:table-cell">
-                        <AllowanceCell s={s} />
-                      </TD>
-                      <TD className="hidden lg:table-cell">
-                        <div className="text-xs">{s.guest_network_name ?? "—"}</div>
-                        <div className="font-mono text-2xs text-muted-foreground">{s.ip}</div>
-                      </TD>
-                      <TD className="hidden text-end sm:table-cell">
-                        <div className="tabular">{formatBytes(s.bytes_down)}</div>
-                        <div className="text-2xs tabular text-muted-foreground">
-                          {formatBytes(s.bytes_up)} up
-                        </div>
-                      </TD>
-                      <TD className="text-end">
-                        <Badge tone={st.tone} dot>{st.label}</Badge>
-                        {s.end_reason && (
-                          <div className="mt-0.5 text-2xs text-muted-foreground">
-                            {endReasonWords(s.end_reason)}
-                          </div>
-                        )}
-                      </TD>
-                      {mayDisconnect && (
-                        <TD className="text-end">
-                          {s.state === "active" && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => { setConfirm(s); setActionErr(null); }}
-                            >
-                              <Power /> Disconnect
-                            </Button>
-                          )}
-                        </TD>
-                      )}
-                    </TR>
-                  );
-                })}
+                {(pageRows ?? []).map((s) => (
+                  <SessionRow key={s.id} s={s} mayDisconnect={mayDisconnect} onOpen={openDetail} onDisconnect={askDisconnect} />
+                ))}
               </TBody>
             </Table>
+          )}
+          {filtered && filtered.length > PAGE && (
+            <div className="border-t border-border px-4 py-3">
+              <Pagination
+                offset={pageOffset}
+                limit={PAGE}
+                shown={pageRows?.length ?? 0}
+                total={filtered.length}
+                onChange={setOffset}
+              />
+            </div>
           )}
         </CardBody>
       </Card>
@@ -478,6 +417,115 @@ export default function SessionsPage() {
  * A plan with no data quota is unmetered on that axis; rendering an empty meter for it would imply a limit the
  * guest does not have, which is exactly the kind of invented fact that gets repeated to a guest at the desk.
  */
+// One row of the list. MEMOISED, and `keepUnchanged` below keeps an unchanged session the same object across
+// polls, so a 10-second refresh re-renders only the rows whose figures actually moved.
+const SessionRow = memo(function SessionRow({
+  s, mayDisconnect, onOpen, onDisconnect,
+}: {
+  s: Session;
+  mayDisconnect: boolean;
+  onOpen: (s: Session) => void;
+  onDisconnect: (s: Session) => void;
+}) {
+  const id = identifySession(s);
+  const Icon = KIND_ICON[(s.subject_kind ?? "") as keyof typeof KIND_ICON] ?? Monitor;
+  const st = stateWords(s.state);
+  return (
+    <TR>
+      <TD>
+        <button
+          type="button"
+          onClick={() => onOpen(s)}
+          className="group flex items-start gap-2.5 text-start"
+        >
+          <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-surface text-muted-foreground">
+            <Icon className="size-3.5" />
+          </span>
+          <span className="min-w-0">
+            <span
+              className={
+                id.anonymous
+                  ? "block font-mono text-xs text-muted-foreground group-hover:text-foreground"
+                  : "block font-medium group-hover:text-primary"
+              }
+            >
+              {id.title}
+            </span>
+            {id.subtitle && (
+              <span className="block truncate text-xs text-muted-foreground">{id.subtitle}</span>
+            )}
+            {id.anonymous && (
+              <span className="block text-2xs text-muted-foreground">
+                No guest record on this session
+              </span>
+            )}
+          </span>
+        </button>
+      </TD>
+      <TD className="hidden text-muted-foreground md:table-cell">
+        <div className="text-xs">{methodLabel(s.credential_method)}</div>
+        <div className="text-2xs">{formatRelative(s.started_at)}</div>
+      </TD>
+      <TD className="hidden lg:table-cell">
+        {s.package_name || s.package_code ? (
+          <>
+            <div className="text-sm">{s.package_name || s.package_code}</div>
+            <div className="text-2xs text-muted-foreground">
+              {speedPair(s.down_kbps, s.up_kbps) ?? s.service_plan_code ?? ""}
+            </div>
+          </>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        )}
+      </TD>
+      <TD className="hidden min-w-40 xl:table-cell">
+        <AllowanceCell s={s} />
+      </TD>
+      <TD className="hidden lg:table-cell">
+        <div className="text-xs">{s.guest_network_name ?? "—"}</div>
+        <div className="font-mono text-2xs text-muted-foreground">{s.ip}</div>
+      </TD>
+      <TD className="hidden text-end sm:table-cell">
+        <div className="tabular">{formatBytes(s.bytes_down)}</div>
+        <div className="text-2xs tabular text-muted-foreground">
+          {formatBytes(s.bytes_up)} up
+        </div>
+      </TD>
+      <TD className="text-end">
+        <Badge tone={st.tone} dot>{st.label}</Badge>
+        {s.end_reason && (
+          <div className="mt-0.5 text-2xs text-muted-foreground">
+            {endReasonWords(s.end_reason)}
+          </div>
+        )}
+      </TD>
+      {mayDisconnect && (
+        <TD className="text-end">
+          {s.state === "active" && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => onDisconnect(s)}
+            >
+              <Power /> Disconnect
+            </Button>
+          )}
+        </TD>
+      )}
+    </TR>
+  );
+});
+
+/** Reuse the previous object for every session whose content has not changed, so memoised rows can skip. */
+function keepUnchanged(prev: Session[] | null, next: Session[]): Session[] {
+  if (!prev || prev.length === 0) return next;
+  const before = new Map(prev.map((p) => [p.id, p]));
+  return next.map((n) => {
+    const p = before.get(n.id);
+    return p && JSON.stringify(p) === JSON.stringify(n) ? p : n;
+  });
+}
+
 function AllowanceCell({ s }: { s: Session }) {
   const hasData = typeof s.data_quota_bytes === "number" && s.data_quota_bytes > 0;
   const hasTime = typeof s.time_quota_seconds === "number" && s.time_quota_seconds > 0;
@@ -550,7 +598,7 @@ function SessionDetail({ s }: { s: Session }) {
           {
             label: "Internet package",
             value: s.package_name || s.package_code ? (
-              <Link href="/internet-packages" className="text-primary hover:underline">
+              <Link href="/internet-packages" className="text-primary underline underline-offset-2 hover:decoration-2">
                 {s.package_name || s.package_code}
               </Link>
             ) : "—",
@@ -573,7 +621,7 @@ function SessionDetail({ s }: { s: Session }) {
                 {
                   label: "Stay",
                   value: s.stay_id ? (
-                    <Link href="/stays" className="text-primary hover:underline">Open in Stays</Link>
+                    <Link href="/stays" className="text-primary underline underline-offset-2 hover:decoration-2">Open in Stays</Link>
                   ) : "—",
                 },
               ]
