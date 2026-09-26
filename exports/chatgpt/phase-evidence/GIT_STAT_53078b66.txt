@@ -1,4 +1,0 @@
-commit 53078b66702c493fa59dc1a5fb05787d3393e6d2
-Date:   Sat Sep 26 05:14:57 2026 +0300
-
-    Governance: the delivery head is the selftest fixture fix; the deployed source is unchanged
