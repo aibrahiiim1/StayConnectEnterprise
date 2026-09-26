@@ -45,12 +45,14 @@ client() {
   sleep 1; ip netns exec $n timeout 25 dhclient -1 -lf /tmp/$n.lease -pf /tmp/$n.pid ${n}c >/dev/null 2>&1
   CIP=$(ip netns exec $n ip -4 -br addr show ${n}c | awk '{print $3}' | cut -d/ -f1)
   # The DNS server the lease handed out, as a real device would use it (ip netns exec mounts this file).
-  local dns; dns=$(grep -o 'domain-name-servers [0-9.]*' /tmp/$n.lease | tail -1 | awk '{print $2}')
+  local dns; dns=$(grep -o 'domain-name-servers [0-9.]*' /tmp/$n.lease 2>/dev/null | tail -1 | awk '{print $2}')
   mkdir -p /etc/netns/$n; echo "nameserver ${dns:-$GW}" > /etc/netns/$n/resolv.conf
   ip netns exec $n ping -c1 -W2 "$GW" >/dev/null 2>&1   # the portal refuses a device with no ARP entry
 }
 online(){ ip netns exec $1 curl -s -o /dev/null -w '%{http_code}' -m 8 "$PROBE"; }
-inset(){ nft list set inet stayconnect phase3_auth_ipv4 2>/dev/null | grep -qE "\"?$GB\"? \. $1([^0-9]|\$)"; }
+# inset <ip>: the device is in netd's enforcement set. The listing is captured BEFORE it is searched: under
+# pipefail, `nft list ... | grep -q` fails on a match whenever grep exits first and nft takes the SIGPIPE.
+inset(){ local s; s=$(nft list set inet stayconnect phase3_auth_ipv4 2>/dev/null); grep -qE "\"?$GB\"? \. $1([^0-9]|\$)" <<<"$s"; }
 # signin <ns> <path> <form...>: POST a sign-in form; prints the Location header.
 signin(){ local n=$1 p=$2; shift 2; rm -f /tmp/$n.jar
   ip netns exec $n curl -s -o /tmp/$n.html -D - -c /tmp/$n.jar -b /tmp/$n.jar "$@" "$PORTAL$p" | tr -d '\r' | awk 'tolower($1)=="location:"{print $2}'; }
@@ -82,6 +84,11 @@ issue; RCODE=$CODE; RVID=$VID
 curl -sk $R -b $CK -o /dev/null -H 'Content-Type: application/json' -d '{"password":"admin","reason":"e2e: revoked-credential check"}' "$B/vouchers/$RVID/revoke"
 loc=$(signin ga1 /auth/voucher --data-urlencode "code=$RCODE")
 [ -z "$loc" ] && ok "a revoked voucher is refused (state $($PSQL "SELECT state FROM iam_v2.vouchers WHERE id='$RVID'"))" || bad "revoked voucher redirected to $loc"
+
+echo "== 2b. PMS room sign-in refuses a stay that does not exist (no guest data is used) =="
+pj=$(ip netns exec ga1 curl -s -H 'Content-Type: application/json' -d '{"room":"00000","verification":"e2e-no-such-guest"}' "$PORTAL/auth/pms/phase3")
+printf '%s' "$pj" | grep -q '/success' && bad "PMS sign-in succeeded for a non-existent stay" || ok "PMS sign-in refused for a non-existent room ($(printf '%s' "$pj" | head -c 90))"
+c=$(online ga1); [ "$c" != 204 ] && ok "device still captive after the refused PMS attempt" || bad "device online after a refused PMS attempt"
 
 echo "== 3. voucher sign-in -> packages -> acquisition -> activation -> enforcement =="
 issue
@@ -129,7 +136,8 @@ QID=$(printf '%s' "$q" | python3 -c 'import sys,json;print(json.load(sys.stdin).
 c=$(ip netns exec ga3 curl -s -b /tmp/ga3.jar -H 'Content-Type: application/json' -d "{\"quote_id\":\"$QID\"}" "$PORTAL/api/commerce/confirm")
 ENF=$(printf '%s' "$c" | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d.get("enforced"),d.get("session_id",""))' 2>/dev/null)
 case "$ENF" in True\ ?*) ok "panel confirm answered only after enforcement (session ${ENF#True })";; *) bad "panel confirm: $(printf '%s' "$c" | head -c 200)";; esac
-inset "$CIP3" && ok "panel device enforced in nft" || bad "panel device not enforced"
+inset "$CIP3" && ok "panel device enforced in nft" || bad "panel device $CIP3 not in set: $(nft list set inet stayconnect phase3_auth_ipv4 | tr -s ' 
+	' ' ' | cut -c1-400)"
 c=$(online ga3); [ "$c" = 204 ] && ok "REAL INTERNET for the panel device (204)" || bad "panel device probe $c"
 ip netns exec ga3 curl -s -o /dev/null -X POST "$PORTAL/logout"; sleep 5
 c=$(online ga3); [ "$c" != 204 ] && ok "panel device blocked after disconnect" || bad "panel device still online"
