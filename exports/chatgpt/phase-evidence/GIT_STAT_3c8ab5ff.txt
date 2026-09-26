@@ -1,4 +1,0 @@
-commit 3c8ab5ffdde1d72fd5fffe5237ecf67e6551b15b
-Date:   Sat Sep 26 10:21:14 2026 +0300
-
-    Governance: the delivery head is the structural receipt rule; the deployed consoles are unchanged

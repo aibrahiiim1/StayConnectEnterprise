@@ -1,0 +1,4 @@
+commit 67c605eb0e0df650b1431fc2095e59f467e5232e
+Date:   Sat Sep 26 13:34:10 2026 +0300
+
+    Governance: T0196 records the narrowed scope and the out-of-scope actions as they happened
