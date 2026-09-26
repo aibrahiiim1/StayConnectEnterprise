@@ -532,8 +532,17 @@ ledger_add 0098_selftest_fails
 # separate `docker exec psql` in this fixture -- had not finished, so the DELETE landed BEFORE the gap
 # check and the case reported "gap check SKIPPED: empty" instead of exercising the guard. The window has
 # to outlast the pre-lock phase, not merely overlap it.
-docker exec -d "$C" psql -U postgres -d "$DB" -c \
-  "SELECT pg_advisory_lock($LKEY7M); SELECT pg_sleep(25); DELETE FROM public.schema_migrations WHERE version='0096_selftest_predecessor'; SELECT pg_advisory_unlock($LKEY7M);" >/dev/null 2>&1
+#
+# ONE -c PER STATEMENT, so each commits before the next. As a single -c string the four statements ran as ONE
+# implicit transaction: pg_advisory_unlock takes effect at once, but the DELETE only commits when the whole string
+# finishes, so a runner woken by the unlock could still see the predecessor, pass its under-lock check and commit
+# -- and the row vanished a moment later (CI: rc=0 ledger=1, with the lock verifiably held). Separate -c
+# arguments run as separate transactions in the same session, so the DELETE is committed BEFORE the unlock.
+docker exec -d "$C" psql -U postgres -d "$DB" \
+  -c "SELECT pg_advisory_lock($LKEY7M)" \
+  -c "SELECT pg_sleep(25)" \
+  -c "DELETE FROM public.schema_migrations WHERE version='0096_selftest_predecessor'" \
+  -c "SELECT pg_advisory_unlock($LKEY7M)" >/dev/null 2>&1
 # WAIT UNTIL THE LOCK IS ACTUALLY HELD, NOT FOR A FIXED SECOND. `docker exec -d` returns before its psql has
 # connected, and on a loaded CI runner that took longer than the one second this used to sleep: the runner then
 # took the ledger lock FIRST, committed before the holder could delete the predecessor, and the case reported
