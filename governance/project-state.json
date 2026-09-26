@@ -1774,8 +1774,8 @@
     "manifest": "docs/manifests/OneGateClosure-change-manifest.md",
     "base": "e3a90e0acaeaa63cf07234c4a3e8d4618f6ff6b7",
     "base_note": "Master after the merge of PR #189 (T0195).",
-    "head": "92407b6a",
-    "head_note": "The CONTENT commit of this correction and the source of both redeployed consoles (T0196).",
+    "head": "8ebf0b92",
+    "head_note": "The last CONTENT commit of this correction (8ebf0b92): the receipt previous_state rule made structural after review. Both redeployed consoles were built from 92407b6a (T0196); no runtime file differs between 92407b6a and 8ebf0b92 -- the difference is tooling only.",
     "transition": "T0196",
     "previous_delivery": "T0195",
     "note": "T0196. T0189-T0195's copied previous_state sentences are corrected forward; the PRE-LIVE portal shows 'Semantics'; no placeholder points at real data; both consoles redeployed from 92407b6a. The first real 06:00 Africa/Cairo scheduled run is recorded by the receipt that follows."
