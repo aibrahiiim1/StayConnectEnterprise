@@ -1,4 +1,0 @@
-commit 8a45ad685089b52f49c6b4a8fd1a63a97ac5e93c
-Date:   Sat Sep 26 02:21:46 2026 +0300
-
-    Governance: T0194 records the current-tree redaction of the retired appliance's address

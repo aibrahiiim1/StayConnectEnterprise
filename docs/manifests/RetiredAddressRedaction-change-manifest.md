@@ -2,7 +2,7 @@
 
 - **Base commit:** `cd8a1cf7e76ccc8b1ab97f27cb25395d6fc59306`
 - **HEAD commit:** `6a519b71`
-- **Provenance (generation HEAD = inventory_head):** `8a45ad685089b52f49c6b4a8fd1a63a97ac5e93c`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `b85c48d297fc0f10fa4a3d5445875f90aabfc72d`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/retired-address-redaction`
 - **Remote branch:** `origin/delivery/retired-address-redaction`
 - **Changed files:** 153
@@ -56,48 +56,48 @@
 | `docs/evidence/Phase4-Final-Live-Acceptance-Record.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Redact the retired development appliance's literal address from the current tree |
 | `docs/evidence/StayConnect-IAM-Phase2-Live-Dark-Evidence.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Redact the retired development appliance's literal address from the current tree |
 | `docs/evidence/StayConnect-IAM-Phase5-Evidence.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Redact the retired development appliance's literal address from the current tree |
-| `docs/manifests/RetiredAddressRedaction-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: T0194 records the current-tree redaction of the retired appliance's address |
+| `docs/manifests/RetiredAddressRedaction-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Packs and manifest at the delivery head, in that order |
 | `docs/reports/StayConnect-IAM-Phase2-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Redact the retired development appliance's literal address from the current tree |
 | `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Redact the retired development appliance's literal address from the current tree |
 | `docs/reports/StayConnect-IAM-Phase4-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Redact the retired development appliance's literal address from the current tree |
 | `docs/reports/StayConnect-IAM-Phase5-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Redact the retired development appliance's literal address from the current tree |
 | `docs/spikes/Protel-FIAS-Phase0-Spike.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Redact the retired development appliance's literal address from the current tree |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/GIT_STAT_8a45ad68.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/GIT_STAT_9946c2a7.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase1B-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Final-Report.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Live-Dark-Evidence.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/governance/transitions/T0013.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/review/prod/PROD_LIVE_DARK_EVIDENCE_V2.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase-evidence/GIT_STAT_9946c2a7.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase-evidence/GIT_STAT_b85c48d2.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase1B-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Final-Report.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Live-Dark-Evidence.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase-evidence/governance/transitions/T0013.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase-evidence/review/prod/PROD_LIVE_DARK_EVIDENCE_V2.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0194 records the current-tree redaction of the retired appliance's address |
-| `exports/chatgpt/stayconnectenterprise/DEPLOYMENT_APPLIANCE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
+| `exports/chatgpt/stayconnectenterprise/DEPLOYMENT_APPLIANCE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0194 records the current-tree redaction of the retired appliance's address |
-| `exports/chatgpt/stayconnectenterprise/Phase2-Privilege-Matrix.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/Protel-FIAS-Phase0-Spike.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/SYSTEM_OVERVIEW.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Final-Report.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Live-Dark-Evidence.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
+| `exports/chatgpt/stayconnectenterprise/Phase2-Privilege-Matrix.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/stayconnectenterprise/Protel-FIAS-Phase0-Spike.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/stayconnectenterprise/SYSTEM_OVERVIEW.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Final-Report.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Live-Dark-Evidence.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Redact the retired development appliance's literal address from the current tree |
 | `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0194 records the current-tree redaction of the retired appliance's address |
 | `governance/transitions/T0010.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Redact the retired development appliance's literal address from the current tree |
@@ -160,7 +160,7 @@
 | `scripts/ci/phase3_evidence.py` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Redact the retired development appliance's literal address from the current tree |
 | `scripts/phase19-network-test.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Redact the retired development appliance's literal address from the current tree |
 | `scripts/phase3-bootstrap.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Redact the retired development appliance's literal address from the current tree |
-| `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Redact the retired development appliance's literal address from the current tree |
+| `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Closure coherence reads retired hosts from the registry, not from prose |
 | `tools/tests/closure_coherence/run_negative.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Redact the retired development appliance's literal address from the current tree |
 | `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Redact the retired development appliance's literal address from the current tree |
 | `tools/tests/standing_records_negative.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Redact the retired development appliance's literal address from the current tree |
@@ -212,17 +212,17 @@
  .../Phase4-Final-Live-Acceptance-Record.md         |   4 +-
  .../StayConnect-IAM-Phase2-Live-Dark-Evidence.md   |   4 +-
  docs/evidence/StayConnect-IAM-Phase5-Evidence.md   |   2 +-
- .../RetiredAddressRedaction-change-manifest.md     | 370 +++++++++++++++++++++
+ .../RetiredAddressRedaction-change-manifest.md     | 350 +++++++++++++++++++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |   2 +-
  .../reports/StayConnect-IAM-Phase3-Final-Report.md |   2 +-
  .../reports/StayConnect-IAM-Phase4-Final-Report.md |   2 +-
  .../reports/StayConnect-IAM-Phase5-Final-Report.md |   2 +-
  docs/spikes/Protel-FIAS-Phase0-Spike.md            |   8 +-
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343106 -> 343257 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 149469 -> 149556 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44033 -> 44041 bytes
- .../chatgpt/phase-evidence/GIT_STAT_8a45ad68.txt   |   4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343106 -> 343255 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 149469 -> 149836 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44033 -> 44039 bytes
  .../chatgpt/phase-evidence/GIT_STAT_9946c2a7.txt   |   4 -
+ .../chatgpt/phase-evidence/GIT_STAT_b85c48d2.txt   |   4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |  22 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
  ...StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md |   2 +-
@@ -233,7 +233,7 @@
  .../governance/decision-register.json              |  10 +-
  .../governance/transitions/T0013.json              |   2 +-
  .../review/prod/PROD_LIVE_DARK_EVIDENCE_V2.txt     |   2 +-
- .../chatgpt/phase-evidence/tools/project-state.py  |   4 +-
+ .../chatgpt/phase-evidence/tools/project-state.py  |  14 +-
  exports/chatgpt/phase1b-planning/MANIFEST.md       |   2 +-
  .../chatgpt/phase1b-planning/PACK_SHA256SUMS.txt   |   6 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
@@ -255,7 +255,7 @@
  .../StayConnect-IAM-Phase2-Live-Dark-Evidence.md   |   4 +-
  .../StayConnect-IAM-Phase2-Plan.md                 |   2 +-
  governance/decision-register.json                  |  10 +-
- governance/project-state.json                      |  79 +++--
+ governance/project-state.json                      |  79 ++---
  governance/transitions/T0010.json                  |   2 +-
  governance/transitions/T0013.json                  |   2 +-
  governance/transitions/T0020.json                  |   2 +-
@@ -309,14 +309,14 @@
  governance/transitions/T0179.json                  |   2 +-
  governance/transitions/T0180.json                  |   4 +-
  governance/transitions/T0181.json                  |   2 +-
- governance/transitions/T0194.json                  |  54 +++
+ governance/transitions/T0194.json                  |  54 ++++
  iam_v2_scratch/README.md                           |   2 +-
  iam_v2_scratch/phase7_ledger_material_effect.sh    |   5 +-
  .../review/prod/PROD_LIVE_DARK_EVIDENCE_V2.txt     |   2 +-
  scripts/ci/phase3_evidence.py                      |   2 +-
  scripts/phase19-network-test.sh                    |   2 +-
  scripts/phase3-bootstrap.sh                        |   2 +-
- tools/project-state.py                             |   4 +-
+ tools/project-state.py                             |  14 +-
  tools/tests/closure_coherence/run_negative.py      |   2 +-
  .../tests/project_state_validator/run_mutations.py |   2 +-
  tools/tests/standing_records_negative.py           |   6 +-
@@ -330,41 +330,21 @@ M  docs/manifests/RetiredAddressRedaction-change-manifest.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_8a45ad68.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_9946c2a7.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_8a45ad68.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_b85c48d2.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md
-M  exports/chatgpt/phase-evidence/StayConnect-IAM-Phase1B-Live-Dark-Acceptance.md
-M  exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Final-Report.md
-M  exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md
-M  exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Live-Dark-Evidence.md
-M  exports/chatgpt/phase-evidence/governance/decision-register.json
-M  exports/chatgpt/phase-evidence/governance/transitions/T0013.json
-M  exports/chatgpt/phase-evidence/review/prod/PROD_LIVE_DARK_EVIDENCE_V2.txt
 M  exports/chatgpt/phase-evidence/tools/project-state.py
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
 M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md
-M  exports/chatgpt/stayconnectenterprise/DEPLOYMENT_APPLIANCE.md
 M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
-M  exports/chatgpt/stayconnectenterprise/Phase2-Privilege-Matrix.md
-M  exports/chatgpt/stayconnectenterprise/Protel-FIAS-Phase0-Spike.md
-M  exports/chatgpt/stayconnectenterprise/SYSTEM_OVERVIEW.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Final-Report.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Live-Dark-Evidence.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Plan.md
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: b85c48d2 Closure coherence reads retired hosts from the registry, not from prose
+HISTORICAL: de4cff75 Packs and manifest at the delivery head, in that order
 HISTORICAL: 8a45ad68 Governance: T0194 records the current-tree redaction of the retired appliance's address
 HISTORICAL: 6a519b71 Redact the retired development appliance's literal address from the current tree
 ```
