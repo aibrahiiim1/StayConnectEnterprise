@@ -179,6 +179,8 @@ type guestBrand struct {
 	// replaced by html/template's placeholder.
 	Logo                                          template.URL
 	Template, Density, Panel, HeroHeight, Surface string
+	// HeroLogo and CardLogo say which of the page's two logo slots the layout shows (heroTemplates).
+	HeroLogo, CardLogo bool
 	// Style is the design as custom properties on <html>, the same properties the sign-in page's script
 	// sets. It is built only from validated values; see cssURL for the one value that is not a token.
 	Style template.CSS
@@ -196,31 +198,45 @@ func brandFor(d map[string]any) guestBrand {
 	}
 	set("--sc-brand", str("brand_color"))
 	set("--sc-brand-dark", str("brand_color_dark"))
-	set("--sc-ink", str("text_color"))
 	set("--sc-radius", str("corner_radius"))
 	set("font-family", str("font_family"))
-	if v := str("brand_color"); v != "" && lightColour(v) {
-		set("--sc-on-brand", "#14161a")
-	}
 	if v := str("background_url"); v != "" {
 		set("--sc-bg", cssURL(v))
 	}
+	// --sc-hero defaults to var(--sc-bg) in the stylesheet, so a background photograph is not written twice.
 	if v := str("hero_image_url"); v != "" {
 		set("--sc-hero", cssURL(v))
-	} else if v := str("background_url"); v != "" {
-		set("--sc-hero", cssURL(v))
 	}
+	photo := str("hero_image_url") != "" || str("background_url") != ""
+	overlay := defaultOverlay
 	if o, ok := d["template_options"].(map[string]any); ok {
 		pick := func(k string) string { s, _ := o[k].(string); return s }
 		b.Density, b.Panel, b.HeroHeight, b.Surface = pick("density"), pick("panel_position"), pick("hero_height"), pick("surface")
 		if n, ok := number(o["overlay"]); ok && n >= 0 && n <= 90 {
-			set("--sc-overlay", fmt.Sprintf("%.2f", n/100))
+			overlay = n / 100
+			// White words over a photograph always get some darkening under them.
+			if photo && overlay < minPhotoOverlay {
+				overlay = minPhotoOverlay
+			}
+			set("--sc-overlay", fmt.Sprintf("%.2f", overlay))
 		}
 		set("--sc-heading-font", pick("heading_font"))
 	}
+	// The text colours the hotel's colours need (portal_colour.go), including --sc-ink, which is the hotel's
+	// text colour only when it reads on the card.
+	for _, kv := range derivedColours(str("brand_color"), str("brand_color_dark"), str("text_color"), overlay, photo) {
+		set(kv[0], kv[1])
+	}
+	b.HeroLogo = b.Logo != "" && heroTemplates[b.Template]
+	b.CardLogo = b.Logo != "" && !heroTemplates[b.Template]
 	b.Style = template.CSS(strings.Join(style, ";"))
 	return b
 }
+
+// heroTemplates are the layouts that show the hotel's logo in the hero rather than in the card: the photographic
+// three put it over the photograph and the header bar puts it in the bar, and each of them hides the card's
+// copy. The page draws the logo only where its layout shows it, so an inline logo is not sent twice.
+var heroTemplates = map[string]bool{"split": true, "immersive": true, "editorial": true, "headerbar": true}
 
 // cssURL writes an image address as a CSS url(). The address was checked by ForGuests (an appliance path,
 // an https URL or an inline image); the characters that could end the string or the function are
@@ -228,32 +244,6 @@ func brandFor(d map[string]any) guestBrand {
 func cssURL(u string) string {
 	r := strings.NewReplacer(`"`, "%22", `'`, "%27", `(`, "%28", `)`, "%29", `\`, "%5C", "\n", "", "\r", "", " ", "%20")
 	return `url("` + r.Replace(u) + `")`
-}
-
-// lightColour reports whether white text on this colour would be hard to read, so a hotel that picks a pale
-// brand colour gets dark button text instead of an unreadable button. Hex only; rgb() stays white.
-func lightColour(c string) bool {
-	c = strings.TrimPrefix(c, "#")
-	if len(c) == 3 || len(c) == 4 {
-		c = string([]byte{c[0], c[0], c[1], c[1], c[2], c[2]})
-	}
-	if len(c) < 6 {
-		return false
-	}
-	var r, g, b int
-	if _, err := fmt.Sscanf(c[:6], "%02x%02x%02x", &r, &g, &b); err != nil {
-		return false
-	}
-	lin := func(v int) float64 {
-		f := float64(v) / 255
-		if f <= 0.03928 {
-			return f / 12.92
-		}
-		return math.Pow((f+0.055)/1.055, 2.4)
-	}
-	l := 0.2126*lin(r) + 0.7152*lin(g) + 0.0722*lin(b)
-	// White on this colour below 3:1 -- the threshold for large, bold button text.
-	return (1.05)/(l+0.05) < 3
 }
 
 func number(v any) (float64, bool) {
@@ -326,6 +316,14 @@ func buildGuestPage(r *http.Request, d map[string]any, nonce string, jsPrefixes 
 		Lang: lang.Code, Dir: dir, Nonce: nonce, T: words, JS: jsData(subset(words, jsPrefixes...)),
 		Languages: offeredLanguages(d), Brand: brandFor(d), HotelSheet: hotelSheet(d),
 	}
+}
+
+// capRunes keeps at most n characters: a value given back to a field is no longer than the field accepts.
+func capRunes(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n])
+	}
+	return s
 }
 
 // fill replaces {name} placeholders.
@@ -443,11 +441,18 @@ func localise(words map[string]string, msg string) localMessage {
 type landingView struct {
 	guestPage
 	Error, ErrorKey, ErrorEn string
-	ClientIP, ClientMAC      string
-	BrandName                string // the hotel's name, or the neutral fallback in the guest's language
-	Help                     string
-	HasExtras                bool
-	Terms                    template.URL // checked by ForGuests (CheckLinkURL)
+	// ErrorForm is the plain-HTML form the refusal answers ("voucher" or "account", from the route that
+	// rendered this page), so its fields can point at the message and the right form is the one showing.
+	// ErrorInvalid is set when the refusal is about what was typed rather than about the network.
+	ErrorForm    string
+	ErrorInvalid bool
+	// What the guest typed, given back so a typo can be corrected rather than retyped. Never the password.
+	VoucherValue, UsernameValue string
+	ClientIP, ClientMAC         string
+	BrandName                   string // the hotel's name, or the neutral fallback in the guest's language
+	Help                        string
+	HasExtras                   bool
+	Terms                       template.URL // checked by ForGuests (CheckLinkURL)
 	// The shipped wording for the script, from languages.go -- the words the sign-in page can show, in every
 	// language, so a guest switching language needs no round trip. The after-sign-in pages' words are
 	// rendered by those pages and are not repeated here.
@@ -511,6 +516,21 @@ func newLandingView(r *http.Request, d map[string]any, nonce, errMsg, ip, mac st
 	}
 	if v.BrandName == "" {
 		v.BrandName = p.T["brand.fallback"]
+	}
+	if errMsg != "" && r != nil && r.Method == http.MethodPost {
+		// Read-only: the handler has already parsed the form and chosen the message.
+		switch r.URL.Path {
+		case "/auth/voucher":
+			v.ErrorForm = "voucher"
+			v.VoucherValue = capRunes(strings.TrimSpace(r.PostFormValue("code")), 32)
+		case "/auth/credentials":
+			v.ErrorForm = "account"
+			v.UsernameValue = capRunes(strings.TrimSpace(r.PostFormValue("username")), 64)
+		}
+		switch msg.Key {
+		case "err.voucher.empty", "err.voucher.invalid", "err.account.empty", "err.account.invalid":
+			v.ErrorInvalid = true
+		}
 	}
 	v.Help, _ = d["help_text"].(string)
 	html, _ := d["custom_html"].(string)

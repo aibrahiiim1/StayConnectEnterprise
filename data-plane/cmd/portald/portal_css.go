@@ -18,6 +18,8 @@ package main
 //   corner radius -> --sc-radius (cards; controls are 0.6 of it)            typeface -> font-family on <html>
 //   background photo -> --sc-bg         hero photo -> --sc-hero             photo darkening -> --sc-overlay
 //   heading typeface -> --sc-heading-font
+// Derived by the server from those colours so the words on them stay readable (portal_colour.go):
+//   --sc-on-brand, --sc-on-brand-dark (button labels), --sc-link, --sc-on-hero and --sc-hero-shade.
 // Layout options arrive as attributes on <html>: data-template, data-density, data-panel, data-hero,
 // data-surface.
 
@@ -26,6 +28,10 @@ const portalBaseCSS = `
     --sc-brand: #1773bd;
     --sc-brand-dark: #125c97;
     --sc-on-brand: #ffffff;
+    /* The label on the darker shade (a button under a finger), and the link colour. The server writes both
+       when the hotel's colours need something else to stay readable (portal_colour.go). */
+    --sc-on-brand-dark: #ffffff;
+    --sc-link: var(--sc-brand-dark);
     --sc-ink: #14161a;
     --sc-muted: #5a6270;
     --sc-canvas: #f1f2f4;
@@ -51,14 +57,14 @@ const portalBaseCSS = `
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
   }
-  /* Arabic: faces drawn for the script first, a little more leading, and no tracking -- letter-spacing breaks
-     the joins between Arabic letters. A hotel typeface, set on <html>, still wins. */
-  html[lang|="ar"] {
+  /* Arabic script (Arabic, Persian, Urdu): faces drawn for the script first, a little more leading, and no
+     tracking -- letter-spacing breaks the joins between the letters (the template sheet resets it for every
+     right-to-left page). A hotel typeface, set on <html>, still wins. */
+  html[lang|="ar"], html[lang|="fa"], html[lang|="ur"] {
     --sc-font: "Segoe UI", "SF Arabic", "Geeza Pro", "Noto Naskh Arabic", "Noto Sans Arabic", Tahoma,
       -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif;
     line-height: 1.6;
   }
-  html[lang|="ar"] * { letter-spacing: 0; }
   [data-density="compact"] { --sc-ctl: 44px; --sc-gap: 12px; --sc-pad: 22px; }
   [data-density="spacious"] { --sc-ctl: 56px; --sc-gap: 22px; --sc-pad: 36px; }
 
@@ -79,7 +85,7 @@ const portalBaseCSS = `
   }
   @media (min-width: 640px) { body { background-size: cover, 100% 38vh; } }
   img { border: 0; }
-  a { color: var(--sc-brand-dark); }
+  a { color: var(--sc-link); }
   h1, h2, h3, p { margin: 0; }
   [hidden] { display: none; }
   .sc-vh {
@@ -92,6 +98,7 @@ const portalBaseCSS = `
   .page {
     position: relative;
     min-height: 100vh;
+    min-height: 100dvh;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -108,7 +115,7 @@ const portalBaseCSS = `
     height: 44px; margin: 0; padding: 0 34px 0 38px;
     border: 1px solid rgba(20, 22, 26, 0.12); border-radius: 999px;
     background: rgba(255, 255, 255, 0.95); color: var(--sc-ink);
-    font: inherit; font-size: 0.875rem; font-weight: 600; cursor: pointer;
+    font: inherit; font-size: 1rem; /* 16px: iOS does not zoom a control this size */ font-weight: 600; cursor: pointer;
     box-shadow: 0 1px 2px rgba(18, 22, 28, 0.08), 0 4px 14px rgba(18, 22, 28, 0.10);
   }
   [dir="rtl"] .lang select { padding: 0 38px 0 34px; }
@@ -225,7 +232,7 @@ const portalBaseCSS = `
     font: inherit; font-size: 1rem; /* 16px: iOS does not zoom a field this size */
     box-shadow: inset 0 1px 2px rgba(18, 22, 28, 0.04);
   }
-  input::placeholder { color: #80868f; opacity: 1; }
+  input::placeholder { color: #6b717b; opacity: 1; } /* 4.9:1 on the white field */
   input[type=text]:hover, input[type=password]:hover, input[type=email]:hover, input[type=tel]:hover { border-color: var(--sc-muted); }
   #voucher { text-transform: uppercase; letter-spacing: 0.08em; }
   #voucher::placeholder { text-transform: none; letter-spacing: 0; }
@@ -246,23 +253,23 @@ const portalBaseCSS = `
     text-decoration: none; cursor: pointer;
     box-shadow: 0 1px 2px rgba(18, 22, 28, 0.10);
   }
-  button.primary:hover, .btn:hover { background: var(--sc-brand-dark); }
+  button.primary:hover, .btn:hover { background: var(--sc-brand-dark); color: var(--sc-on-brand-dark); }
   button.primary:active, .btn:active { box-shadow: inset 0 1px 2px rgba(18, 22, 28, 0.25); }
   button.primary:disabled { opacity: 0.55; cursor: default; }
   .btn--outline {
     border: 1px solid var(--sc-edge); background: var(--sc-card); color: var(--sc-ink);
     box-shadow: 0 1px 2px rgba(18, 22, 28, 0.06);
   }
-  .btn--outline:hover { background: var(--sc-recess); }
+  .btn--outline:hover { background: var(--sc-recess); color: var(--sc-ink); }
   .btn--danger { border: 1px solid #e3a49c; background: var(--sc-card); color: #b42318; }
-  .btn--danger:hover { background: #fdeceb; }
+  .btn--danger:hover { background: #fdeceb; color: #b42318; }
   .btn--solid-danger { background: #b42318; color: #fff; }
-  .btn--solid-danger:hover { background: #8f1c13; }
+  .btn--solid-danger:hover { background: #8f1c13; color: #fff; }
   .btn--sm { width: auto; min-height: 44px; padding: 0 14px; font-size: 0.875rem; }
   button.link {
     display: inline-flex; align-items: center;
     min-height: 44px; margin: 6px 0 0; padding: 0 2px;
-    border: 0; background: none; color: var(--sc-brand-dark);
+    border: 0; background: none; color: var(--sc-link);
     font: inherit; font-size: 0.9375rem; font-weight: 600; cursor: pointer;
     text-decoration: underline; text-underline-offset: 3px;
   }
@@ -289,7 +296,7 @@ const portalBaseCSS = `
 
   /* ---- "Or sign in with" ----------------------------------------------------------------------------- */
   .alt { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--sc-line); }
-  .alt h3 {
+  .alt h2 {
     margin: 0 0 10px; color: var(--sc-muted);
     font-size: 0.75rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
   }
@@ -388,7 +395,9 @@ const portalBaseCSS = `
   }
   .help-btn svg { width: 22px; height: 22px; }
   .help-btn:hover, .sc-help[open] > .help-btn, .help-btn[aria-expanded="true"] { background: var(--sc-fill); color: var(--sc-ink); }
-  .help-btn:focus-visible, .help-close:focus-visible { outline: 2px solid var(--sc-brand); outline-offset: 2px; }
+  /* The same ink ring with a white halo as every other control: a hotel's brand colour is not checked against
+     the surface the lightbulb sits on. */
+  .help-btn:focus-visible, .help-close:focus-visible { outline: 2px solid var(--sc-ink); outline-offset: 2px; box-shadow: 0 0 0 2px #fff; }
   .sc-help[open]:not([data-modal]) { flex: 1 1 100%; }
   .help-card {
     margin: 4px 0 12px; padding: 18px 18px 16px;
@@ -400,10 +409,10 @@ const portalBaseCSS = `
   .help-title { flex: 1 1 auto; margin: 0; font-size: 1.125rem; font-weight: 700; line-height: 1.3; }
   .help-close {
     display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center;
-    width: 40px; height: 40px; margin: -6px -8px -6px 8px; padding: 0;
+    width: 44px; height: 44px; margin: -8px -10px -8px 8px; padding: 0;
     border: 0; border-radius: 999px; background: transparent; color: var(--sc-muted); cursor: pointer;
   }
-  [dir="rtl"] .help-close { margin: -6px 8px -6px -8px; }
+  [dir="rtl"] .help-close { margin: -8px 8px -8px -10px; }
   .help-close svg { width: 20px; height: 20px; }
   .help-close:hover { background: var(--sc-fill); color: var(--sc-ink); }
   .help-sheet:not(.is-modal) .help-close { display: none; }
@@ -559,7 +568,6 @@ const portalBaseCSS = `
 
   /* PHONE. The same card and hierarchy, given nearly the whole width. */
   @media (max-width: 680px) {
-    .lang select { font-size: 0.8125rem; }
     .brand img { max-height: 48px; }
   }
   @media (prefers-reduced-motion: no-preference) {
@@ -606,7 +614,13 @@ const portalTemplateCSS = `
     background-repeat: no-repeat;
   }
   [data-template="split"] .sc-hero-name, [data-template="immersive"] .sc-hero-name,
-  [data-template="editorial"] .sc-hero-name { text-shadow: 0 1px 18px rgba(0, 0, 0, 0.22); }
+  [data-template="editorial"] .sc-hero-name, [data-template="split"] .sc-hero-welcome,
+  [data-template="immersive"] .sc-hero-welcome, [data-template="editorial"] .sc-hero-welcome {
+    text-shadow: 0 1px 2px var(--sc-hero-shade, rgba(0, 0, 0, 0.35)), 0 1px 18px var(--sc-hero-shade, rgba(0, 0, 0, 0.35));
+  }
+  /* With no photograph the words sit on the brand gradient, and a pale brand colour gets the dark ink there
+     (--sc-on-hero, from portal_colour.go). The immersive gradient ends in near-black and keeps white. */
+  [data-template="split"] .sc-hero, [data-template="editorial"] .sc-hero { color: var(--sc-on-hero, #fff); }
   /* A logo over a photograph sits on a light plate, so a dark logo stays legible on any picture. */
   [data-template="split"] .sc-hero-logo, [data-template="immersive"] .sc-hero-logo,
   [data-template="editorial"] .sc-hero-logo {
@@ -647,7 +661,8 @@ const portalTemplateCSS = `
   }
   [data-template="immersive"] .card {
     max-width: 440px; margin: 0;
-    background: rgba(255, 255, 255, 0.82);
+    /* Opaque enough that the secondary text keeps 4.5:1 over the darkest photograph. */
+    background: rgba(255, 255, 255, 0.92);
     -webkit-backdrop-filter: blur(18px) saturate(1.4); backdrop-filter: blur(18px) saturate(1.4);
     border: 1px solid rgba(255, 255, 255, 0.6);
     box-shadow: 0 24px 64px rgba(0, 0, 0, 0.32);
@@ -815,6 +830,11 @@ const portalTemplateCSS = `
     [data-template="editorial"] #custom-html:empty { display: none; }
     [data-template="editorial"] #custom-html > * { margin: 0; }
   }
+
+  /* No tracking on a right-to-left page: letter-spacing pulls joined scripts (Arabic, Persian, Urdu) apart.
+     In this layer and specific enough to outrank every heading's own tracking; fields keep theirs, since a
+     voucher code or a one-time code is Latin and digits. */
+  html[dir="rtl"][dir] *:not(input) { letter-spacing: 0; }
 `
 
 // portalGuardCSS -- why the hotel's stylesheet can restyle every control and hide none of them.
