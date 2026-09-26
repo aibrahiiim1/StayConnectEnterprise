@@ -171,7 +171,7 @@ def main():
             fail("the live ruleset requires contexts this project does not record: %s. An unrecorded "
                  "requirement is as much a drift as a missing one." % sorted(extra))
         if not missing and not extra:
-            ok("all %d mandatory gates are required: %s" % (len(want), sorted(want)))
+            ok("all %d recorded required contexts are required: %s" % (len(want), sorted(want)))
         bad_app = sorted(c for c, iid in live.items() if c in want and iid != e["integration_id"])
         if bad_app:
             fail("these contexts are not pinned to the GitHub Actions app (%s): %s -- a check of the same "

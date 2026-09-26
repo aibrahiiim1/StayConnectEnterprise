@@ -10,11 +10,6 @@
     "phase3-software.yml": {
       "steps": [
         {
-          "name": "Daytime sentinel (attempt 1 establishes the required context and fails on purpose)",
-          "reuse": "always",
-          "why": "it is not a validation step at all: it exists so attempt 1 of a pull_request run REPORTS the required context cheaply and FAILS, which is what keeps master unmergeable until the nightly authoritative re-run has actually executed. Its verdict is a property of the RUN (the event and the attempt number), never of the tree, and it is the first step in the job -- before the reuse machinery exists. A reuse guard here would be incoherent in both directions: on a hit it would skip the step whose failure is the protection, and it can have no hit to consult because the lookup has not run yet."
-        },
-        {
           "name": "Check out the PR HEAD",
           "reuse": "always",
           "why": "infrastructure: the checkout every other step runs in."
@@ -209,11 +204,6 @@
     "phase4-financial-core.yml": {
       "steps": [
         {
-          "name": "Daytime sentinel (attempt 1 establishes the required context and fails on purpose)",
-          "reuse": "always",
-          "why": "it is not a validation step at all: it exists so attempt 1 of a pull_request run REPORTS the required context cheaply and FAILS, which is what keeps master unmergeable until the nightly authoritative re-run has actually executed. Its verdict is a property of the RUN (the event and the attempt number), never of the tree, and it is the first step in the job -- before the reuse machinery exists. A reuse guard here would be incoherent in both directions: on a hit it would skip the step whose failure is the protection, and it can have no hit to consult because the lookup has not run yet."
-        },
-        {
           "name": "Check out the PR HEAD",
           "reuse": "always",
           "why": "infrastructure: the checkout every other step runs in."
@@ -360,11 +350,6 @@
     "phase5-post-stay-transfer.yml": {
       "steps": [
         {
-          "name": "Daytime sentinel (attempt 1 establishes the required context and fails on purpose)",
-          "reuse": "always",
-          "why": "it is not a validation step at all: it exists so attempt 1 of a pull_request run REPORTS the required context cheaply and FAILS, which is what keeps master unmergeable until the nightly authoritative re-run has actually executed. Its verdict is a property of the RUN (the event and the attempt number), never of the tree, and it is the first step in the job -- before the reuse machinery exists. A reuse guard here would be incoherent in both directions: on a hit it would skip the step whose failure is the protection, and it can have no hit to consult because the lookup has not run yet."
-        },
-        {
           "name": "Check out the HEAD under test",
           "reuse": "always",
           "why": "infrastructure: the checkout every other step runs in."
@@ -458,11 +443,6 @@
     "project-governance.yml": {
       "steps": [
         {
-          "name": "Daytime sentinel (attempt 1 establishes the required context and fails on purpose)",
-          "reuse": "always",
-          "why": "it is not a validation step at all: it exists so attempt 1 of a pull_request run REPORTS the required context cheaply and FAILS, which is what keeps master unmergeable until the nightly authoritative re-run has actually executed. Its verdict is a property of the RUN (the event and the attempt number), never of the tree, and it is the first step in the job -- before the reuse machinery exists. A reuse guard here would be incoherent in both directions: on a hit it would skip the step whose failure is the protection, and it can have no hit to consult because the lookup has not run yet."
-        },
-        {
           "name": "Check out full history",
           "reuse": "always",
           "why": "infrastructure: the checkout every other step runs in, and the object graph the history checks read."
@@ -518,9 +498,9 @@
           "why": "it builds in-process variations of the tracked governance/project-state.json and runs the tracked rule against them, asserting both that each contradiction is refused AND that legitimate future authorised work is allowed. One case gutters scripts/clean-install-reconstruction.sh to prove the ledger guard checks the assertion rather than its heading, then restores it byte-exact and verifies that it did. Every input is the tree; an identical tree gives an identical verdict. No clock, no network, no database, no artifact."
         },
         {
-          "name": "Nightly delivery decision — fail-closed proofs",
+          "name": "Product Owner merge authorization — fail-closed proofs",
           "reuse": "tree-pure",
-          "why": "it drives the tracked decision module through constructed in-memory states -- candidate lists, gate-run lists, pull-request snapshots and fixed UTC instants -- and asserts each verdict. The schedule cases are computed from the tz database against pinned datetimes, not against the wall clock, so the verdict does not move with the time of day. Every input is the tree; an identical tree gives an identical verdict. No clock dependence, no network, no database, no artifact."
+          "why": "it drives the tracked decision function in tools/po_merge_authorization.py through constructed in-memory pull-request states -- action, draft flag, labels, event head and live head -- and asserts each verdict. No clock, no network, no database, no artifact; an identical tree gives an identical verdict."
         },
         {
           "name": "Migration grant durability — a migration grant must also be named in Gate-P",
@@ -610,27 +590,17 @@
         }
       ]
     },
-    "nightly-authoritative-validation.yml": {
+    "po-merge-authorization.yml": {
       "steps": [
         {
-          "name": "Check out master (the judge, not the candidate)",
+          "name": "Check out the authorization logic from the base branch",
           "reuse": "always",
-          "why": "it fetches the decision module and its proofs from the DEFAULT BRANCH. The candidate is the thing under judgement, so the judge must never be supplied by it. Nothing here is skippable: there is no evidence-reuse step in this workflow at all."
+          "why": "infrastructure: the base branch's copy of the decision logic, so a branch cannot weaken the check that judges it."
         },
         {
-          "name": "Set up Python",
+          "name": "Product Owner merge authorization",
           "reuse": "always",
-          "why": "the toolchain the decision module runs on. This workflow has no reuse lookup, so no step in it is ever skipped."
-        },
-        {
-          "name": "Fail-closed proofs for tonight's decision rules",
-          "reuse": "always",
-          "why": "the rules that can refuse a merge are proven on the night they are used, before anything is dispatched or merged. Skipping this would mean deciding a merge with unproven rules, which is the one thing this workflow must never do."
-        },
-        {
-          "name": "Validate, and merge if all four gates freshly pass the exact head",
-          "reuse": "always",
-          "why": "it reads the live pull-request list, dispatches the four gates, waits for their verdicts and performs the protected merge. Every input is live GitHub state and wall-clock time, so it is inherently unreusable and must run in full every night."
+          "why": "the Product Owner merge authorization (D42) is a verdict about the pull request's labels and head at this moment, never about the tree; it runs in seconds, has no reuse step, and must be decided afresh on every event."
         }
       ]
     }

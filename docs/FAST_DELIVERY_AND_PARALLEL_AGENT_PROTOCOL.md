@@ -98,32 +98,22 @@ passing check.
 
 ## 3. CI hygiene
 
-- **`workflow_dispatch` NEVER satisfies a required check — and the reason is stronger than the one first
-  written down.** This rule was briefly retracted on 2026-09-24, when the nightly model dispatched the gates
-  at the delivery ref, and then reinstated the same day by measurement: on PR #181 four dispatched runs put
-  four green check runs under exactly the required context names, from the pinned Actions app, on the
-  pull-request head — and the ruleset answered `HTTP 405 … 4 of 4 required status checks are expected`, with
-  `statusCheckRollup` null. **It is not merely discouraged; it cannot work.** See
-  [`NIGHTLY_AUTHORITATIVE_DELIVERY.md`](NIGHTLY_AUTHORITATIVE_DELIVERY.md) §4.
-- **The gates run on `pull_request`, and attempt 1 is a sentinel that fails on purpose.** It costs seconds,
-  gives the pull request a required context that exists and does not pass, and skips every heavy step. Do not
-  treat a red attempt 1 as a finding, and do not wait for it.
-- **After a genuine correction, do not re-run jobs by hand.** Push the fix; the nightly re-run of the current
-  head is the authoritative attempt.
-- **To repair a failed night:** fix the cause on the same delivery branch and push. Do not re-run the gates by
-  hand; the next nightly run judges the resulting head. `python tools/nightly-status.py` is the session-start
-  check that tells you a repair is owed.
-- **Superseded runs are cancelled automatically.** Every gate now declares:
+**Superseded in part by D42 (2026-09-26, T0196) — see [`PO_LED_DELIVERY_MODEL.md`](PO_LED_DELIVERY_MODEL.md).**
+The four comprehensive gates no longer run on `pull_request` or on push, and there is no nightly run. They are
+`workflow_dispatch` only and run solely for "FULL CHECK THE WHOLE CODE" (`tools/full-check.py`). The one
+required status context is `po-merge-authorization`. The historical rules this section used to state — the
+attempt-1 sentinel, the nightly re-run, `tools/nightly-status.py` — are retired; the measurement behind them
+still stands: **a `workflow_dispatch` run's checks never satisfy a ruleset-required status check** (PR #181,
+`HTTP 405 … 4 of 4 required status checks are expected`). That is why the merge requirement is a
+`pull_request` check and the comprehensive gates are not required checks at all.
+
+- **Concurrency.** Each gate declares one FULL CHECK per workflow and ref, never cancelled mid-flight:
 
   ```yaml
   concurrency:
-    group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: false
   ```
-
-  Cancellation is restricted to `pull_request` **on purpose**. A push to master must never be cancelled:
-  master's green record is what the protection rule reads, and cancelling it would leave the default branch
-  with a check that is neither passing nor failing.
 - **Prepare read-only delivery material while the gates run** — the report, the summary, the review notes.
   **Never merge or deploy before the required exact head is ALL_GREEN.**
 - **Record, for every rerun:** queue time, execution time, failure category, and the reason.
@@ -188,16 +178,13 @@ Parallelism is for reducing elapsed time, never for sharing a working tree.
 Prose is what allowed a missing `concurrency:` key to persist unnoticed across four workflows, so every
 statement above that *can* be checked from the tree *is*:
 
-- **`tools/validate-delivery-protocol.py`** — every gate workflow runs on `pull_request`, does **not**
-  declare `workflow_dispatch`, carries the daytime sentinel **as its first step** restricted to
-  `pull_request` attempt 1 and ending in `exit 1`, forbids evidence reuse on the authoritative re-run attempt,
-  and runs on no push but master; the orchestrator exists with one Africa/Cairo cron and proves its own
-  fail-closed rules; the runner **re-runs** each gate's `pull_request` run and dispatches nothing; and each
-  gate carries a `concurrency:` block keyed on workflow and the commit under test whose
-  `cancel-in-progress` is restricted to pull requests and is never unconditionally true; this document, the
-  preflight and the PR template all exist; this document is registered in the artifact registry; and the
-  preflight still implements each of the four late-failure checks (checked by marker, so it cannot be
-  hollowed into a stub that exits 0).
+- **`tools/validate-delivery-protocol.py`** — under D42: every comprehensive gate is `workflow_dispatch`
+  only (no `pull_request`, `push`, `schedule` or `workflow_run`), carries no sentinel, executes fresh, and has
+  a never-cancelled concurrency block keyed on workflow and ref; no workflow anywhere declares a schedule or
+  performs a merge, and the nightly orchestrator is gone; `po-merge-authorization.yml` runs on the pull-request
+  events that grant and revoke approval and actually runs `tools/po_merge_authorization.py`; the decision's
+  negative tests and `tools/full-check.py` exist; this document, the preflight and the PR template exist; this
+  document is registered; and the preflight still implements each late-failure check.
 - **`tools/check-fixture-parity.py`** — the disposable-Postgres fixture carries every column its queries
   actually select, and every table joined into a fixture-backed statement.
 - **`tools/preflight.sh`** — the aggregate a developer runs.
@@ -209,7 +196,7 @@ statement above that *can* be checked from the tree *is*:
 
 ## 8. What this rule does not relax
 
-Every required check stays required and keeps its name. `master-protected-delivery` keeps `enforcement:
-active`, an **empty bypass-actor list**, merge-commit-only delivery, and all four contexts pinned to the
-GitHub Actions app. Authorization boundaries (§12 of the delivery rule) are untouched. A skipped or
+`master-protected-delivery` keeps `enforcement: active`, an **empty bypass-actor list**, merge-commit-only
+delivery, no force push and no deletion. Under D42 its one required context is `po-merge-authorization`,
+pinned to the GitHub Actions app; the four comprehensive gates are FULL CHECK only. Authorization boundaries (§12 of the delivery rule) are untouched. A skipped or
 non-failing gate is not evidence, and speed is never a reason to accept one.

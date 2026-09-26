@@ -159,10 +159,11 @@ def rule(t):
     return [r for r in State.rules if r["type"] == t][0]
 
 
-# 1. A GATE QUIETLY DROPPED. The whole point of the mission: four gates required, not one.
+# 1. THE REQUIRED CONTEXT QUIETLY DROPPED. Under D42 that is the Product Owner merge authorization, and
+#    without it a pull request could merge with no approval at all.
 def drop_context(_):
     rule("required_status_checks")["parameters"]["required_status_checks"] = [
-        {"context": c, "integration_id": IID} for c in CONTEXTS if c != "phase4-financial-core-gate"]
+        {"context": c, "integration_id": IID} for c in CONTEXTS if c != "po-merge-authorization"]
 
 
 case("a required gate removed from the ruleset is refused", drop_context, "MISSING")
@@ -219,7 +220,7 @@ case("enforcement downgraded to evaluate-only is refused", evaluate_only, "enfor
 # 8. A CONTEXT NO LONGER PINNED to the GitHub Actions app: another app could satisfy it by name.
 def unpin(_):
     rule("required_status_checks")["parameters"]["required_status_checks"] = [
-        {"context": c, "integration_id": (99999 if c == "governance" else IID)} for c in CONTEXTS]
+        {"context": c, "integration_id": (99999 if c == "po-merge-authorization" else IID)} for c in CONTEXTS]
 
 
 case("a required context not pinned to the Actions app is refused", unpin, "not pinned")
@@ -269,10 +270,10 @@ case("an unreachable API fails closed rather than passing", api_dead, "could not
 
 # 14. A JOB RENAMED. The required context is the job NAME; rename it and the context never reports.
 def rename_job(d):
-    p = os.path.join(d, ".github", "workflows", "phase5-post-stay-transfer.yml")
+    p = os.path.join(d, ".github", "workflows", "po-merge-authorization.yml")
     t = io.open(p, encoding="utf-8").read()
-    old = "    name: phase5-post-stay-transfer-gate\n"
-    assert old in t, "the phase5 job name is not where this fixture expects it"
+    old = "    name: po-merge-authorization\n"
+    assert old in t, "the merge-authorization job name is not where this fixture expects it"
     io.open(p, "w", encoding="utf-8", newline="\n").write(t.replace(old, "    name: renamed-gate\n", 1))
 
 

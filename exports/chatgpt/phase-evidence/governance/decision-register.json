@@ -301,7 +301,8 @@
       "authoritative_document": "docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md",
       "affected": [
         ".github/workflows/project-governance.yml"
-      ]
+      ],
+      "amended_by": "D42 (2026-09-26): the Project Governance check is no longer a required status check and no longer runs on pull_request; it runs by workflow_dispatch for FULL CHECK THE WHOLE CODE. The title above is the decision as taken on 2026-07-17 and is kept as written."
     },
     {
       "id": "GH-AGENT-ONLY-OPERATIONS",
@@ -681,6 +682,22 @@
       "supersedes": null,
       "does_not_authorize": "Any change to PRE-LIVE. It enables no commerce surface, changes no guest sign-in behaviour, deploys nothing, restarts no service, and authorises no PMS, financial, networking, schema, security-boundary or Go-Live action. It does not contact the retired development reference appliance. It is not an acceptance of functional completeness and does not define what completeness consists of -- it states that guest activation waits for it. It does not reopen or re-decide anything accepted at T0169 through T0173.",
       "implementation": "Records only. governance/project-state.json records the deferral in current_state_facts, resolves the guest entry in open_product_owner_decisions against this decision, and removes the open-action wording that presented guest activation as awaiting its own authorisation. The generated current-state blocks and export packs are re-rendered from it. Receipt T0174."
+    },
+    {
+      "id": "D42",
+      "title": "PRODUCT-OWNER-LED DELIVERY MODEL (2026-09-26). Normal work is scoped, implemented, focus-reviewed, target-tested, built if needed, deployed to PRE-LIVE when authorized, smoke-checked and returned for Product Owner testing. NO PRODUCT OWNER ACCEPTANCE = NO MERGE: the merge waits for an explicit Product Owner instruction, or a mission that authorized the merge in advance, and GitHub enforces it through the single required status context po-merge-authorization (label po-merge-approved on the exact head; any later push revokes it). The comprehensive validation -- full review, full suites, governance synchronization and the four gates -- runs only when the Product Owner says 'FULL CHECK THE WHOLE CODE'. Nothing runs on a schedule and nothing merges unattended.",
+      "decided_on": "2026-09-26",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-09-26",
+      "authorization_evidence": "Product-Owner governance decision of 2026-09-26, 'PRODUCT OWNER GOVERNANCE DECISION -- NEW DELIVERY MODEL', which authorized updating delivery governance, workflows, validators, ruleset configuration, authoritative documentation and supporting tooling, and using the existing protected delivery mechanism once to migrate.",
+      "supersedes": [
+        "The Nightly Authoritative Delivery model of 2026-09-24 (recorded T0182-T0195; docs/NIGHTLY_AUTHORITATIVE_DELIVERY.md): the daytime sentinel, the 06:00 Africa/Cairo orchestrator and its unattended merge.",
+        "GH-MANDATORY-CI, in part: the Project Governance check is no longer required on every pull request; it is the FULL CHECK governance gate."
+      ],
+      "does_not_authorize": "Go-Live; any new PRE-LIVE, Central or other runtime deployment as part of the migration; product functionality changes; destructive or historical data mutation; a database migration; PMS configuration, posting or traffic; financial or payment-provider activity; networking or topology change; Root-CA or trust change; the merge of PR #190; changing the required approval count from 0.",
+      "implementation": "Ruleset master-protected-delivery requires only po-merge-authorization (GitHub Actions app 15368), keeping PR-only, no force push, no deletion, merge commits only, conversation resolution, strict, 0 approvals and no bypass actors. .github/workflows/po-merge-authorization.yml + tools/po_merge_authorization.py decide it. The four gate workflows are workflow_dispatch only and run by tools/full-check.py. The nightly orchestrator and its tooling are removed; it was first disabled in GitHub. Authoritative text: docs/PO_LED_DELIVERY_MODEL.md and CLAUDE.md section 0F. Recorded by T0196."
     }
   ]
 }

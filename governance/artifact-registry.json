@@ -59,13 +59,25 @@
       "id": "fast-delivery-protocol",
       "path": "docs/FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md",
       "status": "AUTHORITATIVE",
-      "note": "Permanent Fast Delivery and Parallel-Agent protocol: the measured bottlenecks of the PRs #108/#109 delivery, the local preflight that closes them, the CI hygiene rules (no workflow_dispatch on a required check; superseded pull-request runs cancelled while master runs never are), dependency-aware deployment order, the guest-data rule for delivery evidence, and the one-Delivery-Owner-per-branch parallel-agent contract. Machine-enforced by tools/validate-delivery-protocol.py."
+      "note": "Permanent Fast Delivery and Parallel-Agent protocol: the measured bottlenecks of the PRs #108/#109 delivery, the local preflight that closes them, CI hygiene (a workflow_dispatch run can never satisfy a ruleset-required check; under D42 the comprehensive gates are FULL CHECK only and never cancelled mid-flight), dependency-aware deployment order, the guest-data rule for delivery evidence, and the one-Delivery-Owner-per-branch parallel-agent contract. Machine-enforced by tools/validate-delivery-protocol.py."
     },
     {
       "id": "nightly-authoritative-delivery",
       "path": "docs/NIGHTLY_AUTHORITATIVE_DELIVERY.md",
+      "status": "SUPERSEDED",
+      "note": "SUPERSEDED by D42 (2026-09-26, T0196); kept unedited as the record of the NIGHTLY AUTHORITATIVE DELIVERY model (T0182-T0195): a failing daytime sentinel on every pull_request and a 06:00 Africa/Cairo orchestrator that re-ran the four gates and merged unattended. Current model: docs/PO_LED_DELIVERY_MODEL.md."
+    },
+    {
+      "id": "po-led-delivery-model",
+      "path": "docs/PO_LED_DELIVERY_MODEL.md",
       "status": "AUTHORITATIVE",
-      "note": "Product-Owner-approved NIGHTLY AUTHORITATIVE DELIVERY model (2026-09-24) and the STANDING PRE-LIVE DEPLOYMENT DECISION. The four authoritative gates no longer run on pull_request, so daytime development is uninterrupted; one complete fresh run of all four is dispatched at 06:00 Africa/Cairo against the exact head of the single active delivery candidate and merged automatically only if all four pass that exact head; and every completed change may be deployed to PRE-LIVE 172.21.60.25 without waiting for that run. Supersedes the CI-hygiene rules in the Fast Delivery protocol that forbade workflow_dispatch on a required check and told an operator to re-run failed jobs."
+      "note": "Product-Owner-led delivery model (D42, 2026-09-26, T0196): normal work is scoped, implemented, target-tested, deployed to PRE-LIVE when authorized and returned for Product Owner testing; the merge waits for explicit Product Owner approval, enforced by the single required context po-merge-authorization (label po-merge-approved, revoked by any later push); the four comprehensive gates run only on 'FULL CHECK THE WHOLE CODE' (tools/full-check.py); nothing runs on a schedule and no workflow merges."
+    },
+    {
+      "id": "po-merge-authorization-workflow",
+      "path": ".github/workflows/po-merge-authorization.yml",
+      "status": "AUTHORITATIVE",
+      "note": "The one required status context on master (D42): passes only while the pull request carries po-merge-approved on the exact head; decision in tools/po_merge_authorization.py, fail-closed proofs in tools/tests/po_merge_authorization/run_negative.py."
     },
     {
       "id": "project-state",
@@ -113,7 +125,7 @@
       "id": "governance-ci-workflow",
       "path": ".github/workflows/project-governance.yml",
       "status": "AUTHORITATIVE",
-      "note": "Repository-side enforcement layer (GH-MANDATORY-CI): 'Project Governance' check runs validate/check-generated/mutation-suite/keyword-validator + clean-tree assertion on pull_request->master, push->master, and workflow_dispatch; read-only permissions; no deploy/DB/migrations."
+      "note": "The Project Governance FULL CHECK gate (GH-MANDATORY-CI): validate/check-generated/mutation-suite/keyword-validator + clean-tree assertion; workflow_dispatch only under D42 (run by tools/full-check.py on 'FULL CHECK THE WHOLE CODE'); read-only permissions; no deploy/DB/migrations."
     },
     {
       "id": "gitattributes-lf-policy",

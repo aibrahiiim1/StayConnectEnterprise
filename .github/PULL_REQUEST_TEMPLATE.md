@@ -1,19 +1,15 @@
 <!--
-READ THIS FIRST — it is three lines and it saves a full CI cycle.
+DELIVERY MODEL: D42 (docs/PO_LED_DELIVERY_MODEL.md).
 
-The `governance` gate reads THIS BODY, live, as step 15 of ~21. If the Status block below is wrong or
-missing, the gate fails after roughly twenty minutes of work that had already passed. That happened twice
-during the PRs #108/#109 delivery, and the second time cost a complete 1,291-second re-run of a gate that had
-nothing wrong with it.
+NO PRODUCT OWNER ACCEPTANCE = NO MERGE. The only required check is `po-merge-authorization`. It passes only
+while this PR carries the label `po-merge-approved` on its current head, applied after the Product Owner's
+explicit approval ("Approved", "Merge it", ...) or when the mission authorized the merge in advance. Any
+later push removes the label.
 
-Fill in the Status block from the canonical state, not from memory:
-
-    python tools/project-state.py validate      # prints the current phase, status, decision and receipt
-    bash tools/preflight.sh --stage 2           # validates THIS body against them, before the gates run
-
-`tools/validate-pr-metadata.sh` requires two things of the Status block:
-  1. it must state the recorded status of the current phase, verbatim (e.g. ACCEPTED_AND_CLOSED);
-  2. if a decision and a receipt granted that status, it must cite BOTH (e.g. D40 and T0120).
+The comprehensive gates run only for "FULL CHECK THE WHOLE CODE" (python tools/full-check.py --ref <branch>).
+When they do, the `governance` gate reads THIS BODY live via tools/validate-pr-metadata.sh, which requires the
+Status block to state the current phase status verbatim and to cite the decision and receipt that granted it.
+Fill it from the canonical state:  python tools/project-state.py validate
 -->
 
 ## Status
@@ -28,6 +24,11 @@ extend or re-evaluate it.
 - `inventory_head`: `\<sha\>`
 - Latest accepted Product-Owner decision on record: **\<D..\>** — latest receipt: **\<T....\>**
 
+## Product Owner acceptance
+
+<!-- READY FOR PRODUCT OWNER TESTING / approved on <date> ("<instruction>") / merge authorized in the mission.
+     PRE-LIVE: deployed commit <sha> / not applicable; smoke result. -->
+
 ## What this changes
 
 <!-- What a reviewer needs to know, and why it is being done. Prefer the reason over the enumeration; the
@@ -39,15 +40,15 @@ extend or re-evaluate it.
 
 ## Verification
 
-<!-- Fill from a real run. `bash tools/preflight.sh` prints a table you can paste. An unrun check is not a
-     passing check; say "not run" rather than leaving a row implying otherwise. -->
+<!-- Fill from real runs. An unrun check is not a passing check; say "not run" rather than leaving a row
+     implying otherwise. -->
 
 | Check | Result |
 |---|---|
-| `bash tools/preflight.sh` | |
-| `python tools/project-state.py validate` | |
-| `bash tools/validate-project-state.sh` (ZERO_STALE) | |
-| working tree clean | |
+| targeted tests for the changed components | |
+| build of anything deployed | |
+| PRE-LIVE smoke / health (if deployed) | |
+| FULL CHECK (only if requested) | not requested |
 
 ## Scope held
 

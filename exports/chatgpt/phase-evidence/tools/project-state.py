@@ -438,7 +438,7 @@ def cmd_validate(deep=True, manifest_equality=True):
         if got != want: fail(f"delivery_governance.{key} must be '{want}' (got: {got!r})")
         elif not os.path.isfile(os.path.join(ROOT, want)): fail(f"delivery_governance {key} file missing on disk: {want}")
 
-    # mandatory GitHub Actions governance CI must exist, run on PRs to master, run every required
+    # mandatory GitHub Actions governance CI must exist, be dispatchable for FULL CHECK, run every required
     # command, and not be weakened (GH-MANDATORY-CI). Text checks only (stdlib; no YAML dependency).
     wf = os.path.join(ROOT, ".github/workflows/project-governance.yml")
     if not os.path.isfile(wf):
@@ -453,12 +453,20 @@ def cmd_validate(deep=True, manifest_equality=True):
         # a dispatched run's check runs do NOT satisfy a ruleset-required status check. See
         # tools/nightly_delivery.py for the verbatim refusal GitHub returned with all four green.
         #
-        # So `pull_request:` is required again -- and the cost is removed by the sentinel attempt instead of
-        # by changing the event. Which EVENT earns the context is asserted in ONE place,
-        # validate-delivery-protocol.py; this check owns only the substance below.
-        if "pull_request:" not in w:
-            fail("governance CI must run on pull_request; only a pull_request run's checks satisfy a "
-                 "ruleset-required status check, as PR #181 measured")
+        # So `pull_request:` was required again -- and the cost was removed by the sentinel attempt.
+        #
+        # D42 (T0196) RETIRED THAT MODEL. The comprehensive gates are no longer required status checks: they
+        # run only when the Product Owner asks for "FULL CHECK THE WHOLE CODE", by workflow_dispatch, and the
+        # only required context is po-merge-authorization. The dispatch finding above still stands -- it is
+        # exactly why the merge requirement is a pull_request check and the gates are not. Which EVENTS each
+        # workflow may and may not carry is asserted in ONE place, validate-delivery-protocol.py; this check
+        # owns only the substance below.
+        if not re.search(r"(?m)^\s{2}workflow_dispatch:\s*$", w):
+            fail("governance CI must be dispatchable (workflow_dispatch): it is the FULL CHECK THE WHOLE CODE "
+                 "governance gate (D42)")
+        if not os.path.isfile(os.path.join(ROOT, ".github/workflows/po-merge-authorization.yml")):
+            fail("the Product Owner merge-authorization workflow is missing: nothing would stop a merge "
+                 "before Product Owner acceptance (D42)")
         if "master" not in w: fail("governance CI must target the master branch")
         for cmd in ["tools/project-state.py validate", "tools/project-state.py check-generated",
                     "tools/tests/project_state_validator/run_mutations.py", "tools/validate-project-state.sh"]:

@@ -24,7 +24,7 @@ Do: implement the requested outcome, fix routine defects directly related to it,
 
 **Do not turn a small change into a release process.**
 
-Related changes may accumulate locally across several requests. Perform documentation sync, full required CI, PR and merge **once for the finished batch** — and only when the Product Owner says something like *"close this milestone"*, *"release this"*, *"merge this"*, *"deploy this"*, or equivalent. Governance closure does not follow every intermediate edit.
+Related changes may accumulate locally across several requests. The merge to master happens **only after Product Owner acceptance** (§0F, D42); documentation sync happens once for the finished batch, and the comprehensive validation runs only on **"FULL CHECK THE WHOLE CODE"**. Governance closure does not follow every intermediate edit.
 
 ### CONTROLLED — only for what actually touches these
 
@@ -109,25 +109,20 @@ Two lifecycles now coexist, chosen by what the Product Owner actually authorized
 It is machine-enforced by `tools/validate-delivery-protocol.py` inside the `governance` gate. What follows is
 the short form; where the two differ, that file wins.
 
-**Before pushing, run `bash tools/preflight.sh`.** It refuses locally what the gates refuse remotely, cheapest
-check first. This is not ceremony: it is measured. Across PRs #108/#109 the gates burned 11 461 s over 34
-attempts, 16 of them failed, and GitHub queue time was **zero** — every second lost was rework. Thirteen of
-those sixteen failures were knowable on a workstation in seconds to minutes: a fixture behind its migrations
-(8), a manifest not regenerated (3), a PR body missing its governance metadata (2), a Windows-pruned lockfile
-(1).
+**Normal work does not run the preflight, the governance suites or the four gates** (D42). They belong to
+**FULL CHECK THE WHOLE CODE**, which runs `python tools/full-check.py --ref <branch>` (the four gates,
+dispatched) plus `bash tools/preflight.sh` and the full local suites. The measurement behind the preflight
+still stands for when a FULL CHECK is requested: across PRs #108/#109, 13 of 16 gate failures were knowable on
+a workstation in minutes.
 
 **CI hygiene.**
 
-* **The four gates DO run on `pull_request`, and attempt 1 is a deliberate sentinel.** It fails in seconds
-  so the required context exists and cannot pass; nobody waits for it, and a red daytime check is not a
-  finding about the change. The full gates execute only on the nightly re-run of that same run. Never use
-  `workflow_dispatch` to satisfy or repair a required check — measured on PR #181, a dispatched run's checks
-  do not satisfy a ruleset-required status check at all, even green, on the head, from the pinned app.
-* **Do not re-run gates by hand to repair a night.** Fix the cause and push; the next nightly run judges the
-  new head. `python tools/nightly-status.py` says whether a repair is owed.
-* Superseded pull-request runs now cancel automatically; master runs never do.
-* Prepare read-only delivery material while gates run. **Never merge or deploy before the required exact head
-  is ALL_GREEN.**
+* **Master requires exactly one check: `po-merge-authorization`.** It passes only while the PR carries the
+  label `po-merge-approved` on its current head; any later push removes the label. Apply it only after the
+  Product Owner's explicit merge instruction, or when the mission authorized the merge in advance.
+* **The four comprehensive gates are `workflow_dispatch` only**, for FULL CHECK. No pull request, push or
+  schedule runs them, and nothing merges automatically. A `workflow_dispatch` run can never satisfy a
+  ruleset-required check (measured on PR #181), which is why the gates are not required checks at all.
 
 **Deployment order follows dependencies.** Deploy a backward-compatible API before the UI that depends on it,
 or use a verified atomic staged switch. Never expose a temporary 404. (Deploying the Hotel Admin bundle
@@ -241,17 +236,48 @@ Stopping a producer is not a retention policy, and no historical record was dele
 
 ---
 
-## 0F. NIGHTLY AUTHORITATIVE DELIVERY, AND THE STANDING PRE-LIVE DEPLOYMENT DECISION
+## 0F. PRODUCT-OWNER-LED DELIVERY (D42), AND THE STANDING PRE-LIVE DEPLOYMENT DECISION
 
-**Standing Product-Owner decision, 2026-09-24. It supersedes every earlier rule in this file or in `docs/`
-that requires the four full CI gates to pass before work continues, or that requires deployment approval to be
-requested again. The full form is [`docs/NIGHTLY_AUTHORITATIVE_DELIVERY.md`](docs/NIGHTLY_AUTHORITATIVE_DELIVERY.md);
-where the two differ, that file wins.**
+**Product-Owner governance decision D42, 2026-09-26 (T0196). It supersedes the Nightly Authoritative Delivery
+model of 2026-09-24 (T0182–T0195) wherever they conflict. The full form is
+[`docs/PO_LED_DELIVERY_MODEL.md`](docs/PO_LED_DELIVERY_MODEL.md); where the two differ, that file wins.**
+
+### Normal delivery
+
+```
+REQUEST → SCOPE → IMPLEMENT → FOCUSED SELF-REVIEW → TARGETED TESTS → FIX RELATED ISSUES → BUILD IF NEEDED
+→ DEPLOY TO PRE-LIVE WHEN AUTHORIZED → SMOKE / HEALTH CHECK → STOP: READY FOR PRODUCT OWNER TESTING
+→ PRODUCT OWNER ACCEPTANCE → PROTECTED MERGE TO MASTER → DONE
+```
+
+Unrelated findings are FOLLOW-UP, not scope. Review is focused on what the mission touched. Tests are targeted.
+After the PRE-LIVE smoke check, **stop** and report `READY FOR PRODUCT OWNER TESTING`; corrections continue on
+the same branch and PR with no new governance cycle.
+
+### NO PRODUCT OWNER ACCEPTANCE = NO MERGE
+
+Merge only after an explicit instruction — *Approved*, *Merge it*, *Approved, merge* — or a mission that said
+"implement and merge" in advance. Implementation completion and PRE-LIVE deployment never authorize a merge.
+GitHub enforces it: the ruleset's one required context is `po-merge-authorization`, which passes only while the
+PR carries `po-merge-approved` on its current head (tools/po_merge_authorization.py). Direct push, force push,
+deletion and bypass stay prohibited; merge commits only; required approvals 0.
+
+### FULL CHECK THE WHOLE CODE — opt-in only
+
+Only when the Product Owner says exactly that: full review, full suites and browser suites, complete governance
+and stale-state validation, packs/manifests/evidence, the four gates via `python tools/full-check.py --ref
+<branch>`, provenance, live verification where deployment is authorized, and a comprehensive report. It does
+not authorize a merge, Go-Live, destructive DB changes, PMS/financial traffic, networking changes or an
+unnamed environment.
+
+**Nothing runs unattended.** There is no schedule and no workflow merges. The nightly orchestrator and
+`tools/nightly-status.py` were removed by T0196; there is no session-start nightly check any more.
 
 ### The standing PRE-LIVE deployment authorization
 
 > **Until explicitly revoked or changed by the Product Owner, every completed application/code change may be
-> deployed promptly to the PRE-LIVE appliance at `172.21.60.25` without waiting for the nightly CI run.**
+> deployed promptly to the PRE-LIVE appliance at `172.21.60.25` for Product Owner testing, before it is
+> merged.**
 
 **This is continuing. Do not ask for it again.** Asking again is a defect in reading this section. It covers the
 directly required parts of deploying: build and package, install, service restart, deployment verification,
@@ -263,49 +289,15 @@ migration/schema decision · networking or topology changes · PMS configuration
 financial or payment-provider activity · Guest activation or Guest Go-Live · Root-CA or trust changes ·
 Go-Live.
 
-**PRE-LIVE will often be AHEAD of master during the day, and that is intended.** Two rules keep it readable:
-always record the **exact deployed commit SHA**, read back from the installed artifact rather than the build
-host (`current_state_facts.deployed_runtime_services`) — that record has been wrong immediately after three
-consecutive deployments, so update it *as part of* deploying; and **never** treat deployed PRE-LIVE provenance
-as authoritative master state. Only master says a change passed the gates.
+**PRE-LIVE will often be AHEAD of master, and that is intended.** Always record the **exact deployed commit
+SHA**, read back from the installed artifact rather than the build host; and **never** treat deployed PRE-LIVE
+provenance as authoritative master state.
 
-### Daytime
+### Normal report format
 
-Work, commit, push, deploy to PRE-LIVE, verify, continue. **A push makes the four required checks go RED in
-seconds and starts no full-gate cycle: attempt 1 of each gate runs one step, a deliberate sentinel, and fails.**
-
-That red is not a finding about the change. It exists so the required context is reported (the rule can be
-evaluated) and cannot pass (nothing merges on a check that validated nothing). **Do not wait for it, do not
-try to make it green, and do not re-run it by hand.** `bash tools/preflight.sh` is the only fast signal
-between pushes, which makes it more valuable rather than less.
-
-### Nightly
-
-At **06:00 Africa/Cairo** — one `cron: '0 6 * * *'` with `timezone: "Africa/Cairo"`, so the platform owns the
-DST arithmetic — the orchestrator **re-runs** each gate's existing `pull_request` run for the exact head of the
-single active delivery candidate. A re-run keeps the event and the head SHA, so its checks satisfy the ruleset,
-and arrives as attempt 2+, where the full gate executes. It merges automatically only if all four pass **that
-exact head**. A commit pushed during the run makes the pass stale; the next night judges the new head. Zero
-candidates is a quiet no-op; two or more is a hard refusal. Mark a PR **draft** or label it **`nightly-hold`**
-to keep it open overnight without merging.
-
-**`workflow_dispatch` cannot satisfy a required check. This is measured, not policy.** On PR #181 four
-dispatched runs produced four green check runs under exactly the required context names, from the pinned
-Actions app, on the pull-request head — and the ruleset answered `HTTP 405 … 4 of 4 required status checks are
-expected`. Only a `pull_request` run's checks count, which is why the nightly path is a re-run and not a
-dispatch. Do not reintroduce a dispatch trigger on a gate.
-
-### THE FIRST THING EVERY SESSION DOES
-
-```
-python tools/nightly-status.py
-```
-
-`UNRESOLVED_FAILURE` (exit 1) means the latest nightly validation failed and the head it failed on is **still**
-the delivery head: **diagnose and repair that first**, on the same delivery branch, before starting new work.
-`SUPERSEDED_FAILURE` (exit 0) means a later commit already moved past it. `UNKNOWN` (exit 2) is not the same as
-clear. Nothing else notifies you — the push that caused the failure succeeded, and the
-evidence sits in a workflow run nobody has opened.
+`STATUS: READY FOR PRODUCT OWNER TESTING / MERGED / BLOCKED` · Changed · Targeted verification · PRE-LIVE
+(deployed commit / not applicable, smoke result) · Product Owner action (Test now / Approve merge / Decision
+required) · Blocker (NONE / exact blocker). No chronological diaries unless asked.
 
 ---
 

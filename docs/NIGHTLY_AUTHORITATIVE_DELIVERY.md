@@ -1,6 +1,13 @@
 # Nightly Authoritative Delivery, and the Standing PRE-LIVE Deployment Decision
 
-**Product-Owner decision, 2026-09-24. Authoritative. Where an earlier delivery or deployment rule in this
+> **SUPERSEDED — HISTORICAL.** Retired by Product-Owner decision **D42** (2026-09-26, T0196). The current
+> model is [`PO_LED_DELIVERY_MODEL.md`](PO_LED_DELIVERY_MODEL.md): no schedule, no unattended merge, the four
+> gates run only on "FULL CHECK THE WHOLE CODE", and master requires only `po-merge-authorization`. The
+> orchestrator, `tools/nightly_delivery.py` and `tools/nightly-status.py` no longer exist. Everything below
+> describes the model as it was from T0182 to T0195 and is kept unedited as a record. The standing PRE-LIVE
+> deployment authorization (§1 of the old text) continues under D42.
+
+**Product-Owner decision, 2026-09-24. Authoritative until D42. Where an earlier delivery or deployment rule in this
 repository contradicts this document, this document is current and the earlier wording is historical.**
 
 ---
