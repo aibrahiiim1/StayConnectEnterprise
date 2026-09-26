@@ -42,8 +42,8 @@
   "state_note": "No phase, activity or acceptance state changes. Phase 7 remains ACCEPTED_AND_CLOSED; Guest activation remains DEFERRED by D41; Go-Live remains unauthorised.",
   "base": "e3a90e0acaeaa63cf07234c4a3e8d4618f6ff6b7",
   "base_note": "Master after the merge of PR #189 (e3a90e0a).",
-  "head": "35084fd0",
-  "head_note": "The last CONTENT commit of this migration (35084fd0): the model change is 214d95fb; 35084fd0 makes the authorization workflow's bootstrap copy create its directory, found when the check first ran on PR #191.",
+  "head": "160b966c",
+  "head_note": "The last CONTENT commit of this migration (160b966c). The model change is 214d95fb; 35084fd0 makes the authorization workflow's bootstrap copy create its directory (found when the check first ran on PR #191, and raised by review); 160b966c URL-encodes the ref in tools/full-check.py (raised by review).",
   "previous_delivery": "T0195",
   "go_live": "NOT authorised. Guest activation remains DEFERRED by D41.",
   "verification_live": {
