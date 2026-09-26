@@ -631,8 +631,11 @@ function AccountForm({ account, onSubmit, busy, withPassword, onCancel }: {
         An account carries no plan, so there is nothing to choose here and nothing to wait for. This block
         used to be a five-way branch -- authority unknown, plans loading, plans failed, plans empty, plans
         present -- every arm of which existed to describe a superseded prerequisite. It says the one thing
-        that is now true instead.
+        that is now true instead. One line, visible while the form is filled: it answers "where do I pick the plan?".
       */}
+      <p className="text-caption text-muted-foreground">
+        What this guest can take is decided by the eligibility rules on each internet package.
+      </p>
       <div className="flex justify-end gap-2 border-t border-border pt-4">
         {onCancel && <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>}
         <Button type="submit" disabled={busy}>

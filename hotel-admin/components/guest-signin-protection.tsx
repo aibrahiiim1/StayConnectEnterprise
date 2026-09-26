@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ShieldAlert } from "lucide-react";
 import { api, GuestSignInProtection } from "@/lib/api";
-import { Card, CardBody, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardBody, CardFooter, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
@@ -124,6 +124,10 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
             </HelpTip>
             {policy.is_default && <Badge tone="default">Using the standard settings</Badge>}
           </CardTitle>
+          {/* Visible on purpose: "standard settings" must never read as "protection is off". */}
+          <CardDescription className="max-w-2xl">
+            It is always on — these settings decide how strict it is, not whether it runs.
+          </CardDescription>
         </div>
       </CardHeader>
       <CardBody className="space-y-5">
