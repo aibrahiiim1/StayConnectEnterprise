@@ -1,4 +1,0 @@
-commit 53cfb3e8e2d51153a6ae24674f885355f755a48f
-Date:   Sat Sep 26 15:08:08 2026 +0300
-
-    Change manifest for the D42 migration
