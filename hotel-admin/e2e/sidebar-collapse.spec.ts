@@ -78,7 +78,12 @@ test("every icon-only item exposes its label on hover AND on keyboard focus", as
   await expect(page.getByRole("tooltip")).toContainText("Guest sign-in checks");
 
   // Keyboard focus, not just hover. A rail whose labels are mouse-only is not navigable.
+  // The pointer leaves the rail first and the hover tooltip is gone before focusing: a keyboard user is not also
+  // hovering, and with the pointer still resting on the link Radix's reopen-on-focus raced the dismissal (a CI
+  // flake, the same code green on the previous run). What is proven is unchanged -- focus alone shows the label.
   await page.keyboard.press("Escape");
+  await page.mouse.move(900, 400);
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
   await link.focus();
   await expect(page.getByRole("tooltip")).toContainText("Guest sign-in checks");
 });
