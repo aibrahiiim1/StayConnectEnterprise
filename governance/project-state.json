@@ -1723,8 +1723,8 @@
     "manifest": "docs/manifests/OneGate-change-manifest.md",
     "base": "50c1458893778c63b868c0c85a4aaa65f77d0c46",
     "base_note": "Master after the merge of PR #188 (T0194).",
-    "head": "334f9d91",
-    "head_note": "The CONTENT commit of this delivery and the source deployed to PRE-LIVE and Central (T0195).",
+    "head": "75468ab1",
+    "head_note": "The last CONTENT commit of this delivery (75468ab1): the selftest 7m lock holder commits its DELETE before it unlocks -- a test-fixture fix. The source deployed to PRE-LIVE and Central is 334f9d91 (T0195); no runtime file differs between 334f9d91 and 75468ab1.",
     "transition": "T0195",
     "previous_delivery": "T0194",
     "note": "T0195. OneGate branding and lightbulb help across Guest Portal, Hotel Admin and Central; nightly validation at 06:00 Africa/Cairo; deployed to PRE-LIVE (edged, portald, Hotel Admin) and Central (cloud-admin) from 334f9d91 and verified live."
