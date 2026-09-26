@@ -393,13 +393,30 @@ def cmd_validate(deep=True, manifest_equality=True):
         # therefore carries "THIS transition ... deployed nothing and contacted no appliance". A copied claim is still a
         # claim (T0185). Those seven are preserved as written and corrected forward by T0196; from T0196 on, a
         # previous_state must not speak in the first person of the receipt that carries it.
-        for t in trans:
-            if t.get("seq", -1) < 196:
+        #
+        # STRUCTURAL, NOT A WORD LIST (review on PR #190): a word list only catches the phrasing it names, and T0196's
+        # own new_state begins "This correction ...", which a wholesale copy into T0197 would carry straight past it.
+        # So the rule is about the RELATIONSHIP: previous_state must NAME the previous receipt by id, and must not be a
+        # verbatim copy of the previous receipt's new_state. The phrasing check stays as a second line.
+        ordered = sorted(trans, key=lambda x: x.get("seq", -1))
+        for i, t in enumerate(ordered):
+            if t.get("seq", -1) < 196 or i == 0:
                 continue
-            ps_text = " ".join(str(v) for v in (t.get("previous_state") or {}).values())
-            if re.search(r"\bTHIS\s+(transition|delivery|increment|receipt|mission)\b", ps_text, re.I):
-                fail(f"{t.get('transition_id')}: previous_state describes the receipt itself ('THIS transition ...'); "
-                     f"it must describe the state BEFORE this receipt -- name the previous receipt instead")
+            before = ordered[i - 1]
+            ps = t.get("previous_state") or {}
+            ps_text = " ".join(str(v) for v in ps.values())
+            prev_id = str(before.get("transition_id") or "")
+            if prev_id and prev_id not in ps_text:
+                fail(f"{t.get('transition_id')}: previous_state does not name the previous receipt {prev_id}; it must "
+                     f"describe the state BEFORE this receipt, and say which receipt produced it")
+            copied = str((before.get("new_state") or {}).get("unchanged_on_purpose") or "")
+            if copied and str(ps.get("unchanged_on_purpose") or "") == copied:
+                fail(f"{t.get('transition_id')}: previous_state.unchanged_on_purpose is a verbatim copy of "
+                     f"{prev_id}'s new_state, which speaks as {prev_id} itself; restate it as the previous receipt's")
+            if re.search(r"\bTHIS\s+(transition|delivery|increment|receipt|mission|correction|change|redaction|record)\b",
+                         ps_text, re.I):
+                fail(f"{t.get('transition_id')}: previous_state describes the receipt itself ('THIS ...'); it must "
+                     f"describe the state BEFORE this receipt -- name the previous receipt instead")
 
     # Phase 1A cannot appear pending/current/not-started; must be closed/accepted
     p1a = st["phases"].get("1A", {}).get("status")

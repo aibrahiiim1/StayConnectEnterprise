@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `e3a90e0acaeaa63cf07234c4a3e8d4618f6ff6b7`
-- **HEAD commit:** `92407b6a`
-- **Provenance (generation HEAD = inventory_head):** `b07171602740814fc0c23124d6cf130f6a2e70cc`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `8ebf0b92`
+- **Provenance (generation HEAD = inventory_head):** `3c8ab5ffdde1d72fd5fffe5237ecf67e6551b15b`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/onegate-closure`
 - **Remote branch:** `origin/delivery/onegate-closure`
 - **Changed files:** 35
@@ -17,27 +17,27 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0196 corrects T0189-T0195 forward and records the closure corrections |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0196 corrects T0189-T0195 forward and records the closure corrections |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0196 corrects T0189-T0195 forward and records the closure corrections |
-| `docs/manifests/OneGateClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: T0196 corrects T0189-T0195 forward and records the closure corrections |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/GIT_STAT_a7a21e62.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/GIT_STAT_b0717160.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
+| `docs/manifests/OneGateClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase-evidence/GIT_STAT_3c8ab5ff.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/GIT_STAT_a7a21e62.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0196 corrects T0189-T0195 forward and records the closure corrections |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0196 corrects T0189-T0195 forward and records the closure corrections |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0196 corrects T0189-T0195 forward and records the closure corrections |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: the delivery head is the structural receipt rule; the deployed consoles are unchanged |
 | `governance/transitions/T0196.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0196 corrects T0189-T0195 forward and records the closure corrections |
 | `hotel-admin/app/(app)/notifications/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | No placeholder points at real data; a receipt's previous_state names the state before it |
 | `hotel-admin/app/(app)/operators/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | No placeholder points at real data; a receipt's previous_state names the state before it |
@@ -46,7 +46,7 @@
 | `hotel-admin/components/phase4/financial-recovery-view.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | No placeholder points at real data; a receipt's previous_state names the state before it |
 | `hotel-admin/e2e/phase4-financial-operator.spec.ts` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | No placeholder points at real data; a receipt's previous_state names the state before it |
 | `hotel-admin/test/phase4-financial-pages.test.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | No placeholder points at real data; a receipt's previous_state names the state before it |
-| `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | No placeholder points at real data; a receipt's previous_state names the state before it |
+| `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Receipts: previous_state must name the previous receipt, not copy its new_state |
 
 ## Total diff statistics (`git diff --stat`)
 ```text
@@ -55,15 +55,15 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   2 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   2 +-
  docs/context/StayConnect-IAM-Handoff.md            |   2 +-
- docs/manifests/OneGateClosure-change-manifest.md   | 117 +++++++++++++++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343170 -> 343174 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 149846 -> 150256 bytes
+ docs/manifests/OneGateClosure-change-manifest.md   | 115 +++++++++++++++++++++
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343170 -> 343170 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 149846 -> 150653 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44026 -> 44031 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_3c8ab5ff.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_a7a21e62.txt   |   4 -
- .../chatgpt/phase-evidence/GIT_STAT_b0717160.txt   |   4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   6 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
- .../chatgpt/phase-evidence/tools/project-state.py  |  14 +++
+ .../chatgpt/phase-evidence/tools/project-state.py  |  31 ++++++
  exports/chatgpt/phase1b-planning/MANIFEST.md       |   2 +-
  .../chatgpt/phase1b-planning/PACK_SHA256SUMS.txt   |   6 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
@@ -84,8 +84,8 @@
  .../components/phase4/financial-recovery-view.tsx  |   2 +-
  hotel-admin/e2e/phase4-financial-operator.spec.ts  |   4 +-
  hotel-admin/test/phase4-financial-pages.test.tsx   |   4 +-
- tools/project-state.py                             |  14 +++
- 35 files changed, 390 insertions(+), 94 deletions(-)
+ tools/project-state.py                             |  31 ++++++
+ 35 files changed, 422 insertions(+), 94 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -94,24 +94,22 @@ M  docs/manifests/OneGateClosure-change-manifest.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_a7a21e62.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_b0717160.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_3c8ab5ff.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_b0717160.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/tools/project-state.py
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
 M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md
 M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 3c8ab5ff Governance: the delivery head is the structural receipt rule; the deployed consoles are unchanged
+HISTORICAL: 8ebf0b92 Receipts: previous_state must name the previous receipt, not copy its new_state
+HISTORICAL: 86739276 Packs and manifest at the delivery head, in that order
 HISTORICAL: b0717160 Governance: T0196 corrects T0189-T0195 forward and records the closure corrections
 HISTORICAL: 92407b6a No placeholder points at real data; a receipt's previous_state names the state before it
 ```
