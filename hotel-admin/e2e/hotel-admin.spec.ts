@@ -167,8 +167,8 @@ test("internet packages: publish via the plan selector, then step-up deactivate"
   // Published through the plan SELECTOR, which is keyed by PLAN -- the operator never sees, types or
   // selects a revision id. The revision the save pins is resolved from the chosen plan.
   await page.getByRole("button", { name: /add package/i }).click();
-  await page.getByRole("dialog").getByLabel("code", { exact: true }).fill("FREEWIFI2");
-  await page.getByRole("dialog").getByLabel("service-plan", { exact: true }).selectOption("p1");
+  await page.getByRole("dialog").getByTestId("code").fill("FREEWIFI2");
+  await page.getByRole("dialog").getByTestId("service-plan").selectOption("p1");
   // The per-tier speed step lives under Advanced now and is not what this test is about: the package's
   // speed comes from the chosen plan, and the form starts with the one grant tier a package needs.
   await page.locator('form button[type="submit"]').click();

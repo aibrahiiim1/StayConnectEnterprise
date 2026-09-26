@@ -29,15 +29,15 @@ const plans: PlanOption[] = [
 function openForm() {
   return render(<PackageForm mode="add" plans={plans} onSave={() => {}} />);
 }
-const setMode = (m: string) => fireEvent.change(screen.getByLabelText("allocation-mode"), { target: { value: m } });
-const setPlan = (p: string) => fireEvent.change(screen.getByLabelText("service-plan"), { target: { value: p } });
+const setMode = (m: string) => fireEvent.change(screen.getByTestId("allocation-mode"), { target: { value: m } });
+const setPlan = (p: string) => fireEvent.change(screen.getByTestId("service-plan"), { target: { value: p } });
 const notice = () => screen.queryByTestId("allowance-notice");
 
 function perNight(gb: string, min = "", max = "") {
   setMode("PER_STAY_NIGHT");
-  fireEvent.change(screen.getByLabelText("gb-per-night"), { target: { value: gb } });
-  if (min !== "") fireEvent.change(screen.getByLabelText("min-gb"), { target: { value: min } });
-  if (max !== "") fireEvent.change(screen.getByLabelText("max-gb"), { target: { value: max } });
+  fireEvent.change(screen.getByTestId("gb-per-night"), { target: { value: gb } });
+  if (min !== "") fireEvent.change(screen.getByTestId("min-gb"), { target: { value: min } });
+  if (max !== "") fireEvent.change(screen.getByTestId("max-gb"), { target: { value: max } });
 }
 
 describe("the data-allowance precedence notice", () => {
@@ -138,12 +138,12 @@ describe("the data-allowance precedence notice", () => {
     perNight("1");
     expect(notice()!.textContent).toContain("1 GB per stay night");
 
-    fireEvent.change(screen.getByLabelText("gb-per-night"), { target: { value: "2" } });
+    fireEvent.change(screen.getByTestId("gb-per-night"), { target: { value: "2" } });
     expect(notice()!.textContent).toContain("2 GB per stay night");
     // 8 nights x 2 GB, no clamps configured.
     expect(screen.getByTestId("allowance-example").textContent).toContain("16 GB");
 
-    fireEvent.change(screen.getByLabelText("max-gb"), { target: { value: "10" } });
+    fireEvent.change(screen.getByTestId("max-gb"), { target: { value: "10" } });
     expect(notice()!.textContent).toContain("Maximum 10 GB");
     // ...and the example now shows the ceiling doing its work.
     expect(screen.getByTestId("allowance-example").textContent).toContain("10 GB");
