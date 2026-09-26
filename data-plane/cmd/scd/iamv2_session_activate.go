@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
 type activateReq struct {
@@ -132,6 +133,11 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 		if acquiringDevice != req.DeviceID {
 			if req.AuthContextID == "" {
 				return errDeviceNotOnEntitlement
+			}
+			// The auth_context family is written only inside its controlled operation (a database trigger
+			// refuses anything else), exactly as authctx does when it consumes a PMS context.
+			if err := writerguard.Open(ctx, tx, writerguard.CapAuthContext); err != nil {
+				return err
 			}
 			var joined string
 			err := tx.QueryRow(ctx, `
