@@ -37,9 +37,10 @@ export function SheetContent({
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay
         className={cn(
-          "fixed inset-0 z-50 bg-foreground/35 backdrop-blur-[1px]",
+          "fixed inset-0 z-50 bg-scrim/45 backdrop-blur-[1px]",
           "data-[state=open]:animate-in data-[state=closed]:animate-out",
           "data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0",
+          "motion-reduce:animate-none",
         )}
       />
       <DialogPrimitive.Content
@@ -48,6 +49,7 @@ export function SheetContent({
           "data-[state=open]:animate-in data-[state=closed]:animate-out",
           "data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right",
           "data-[state=open]:duration-200 data-[state=closed]:duration-150",
+          "motion-reduce:animate-none",
           WIDTHS[width],
           className,
         )}
@@ -56,7 +58,8 @@ export function SheetContent({
         {children}
         <DialogPrimitive.Close
           className={cn(
-            "absolute right-3.5 top-3.5 rounded-md p-1 text-muted-foreground",
+            "absolute right-3 top-3 inline-flex size-8 items-center justify-center rounded-md text-muted-foreground",
+            "pointer-coarse:size-11 pointer-coarse:right-1.5 pointer-coarse:top-1.5",
             "transition-colors hover:bg-surface hover:text-foreground",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
           )}

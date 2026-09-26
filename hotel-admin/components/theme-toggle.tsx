@@ -4,12 +4,14 @@ import * as React from "react";
 import { useTheme } from "next-themes";
 import { Monitor, Moon, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useRadioKeys } from "@/components/ui/data";
 
 const OPTIONS = [
   { value: "light", label: "Light", Icon: Sun },
   { value: "dark", label: "Dark", Icon: Moon },
   { value: "system", label: "System", Icon: Monitor },
 ] as const;
+const VALUES = OPTIONS.map((o) => o.value);
 
 /**
  * ThemeToggle — the control the operator asked for: dark is an option, not the only mode.
@@ -25,11 +27,14 @@ export function ThemeToggle({ className }: { className?: string }) {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = React.useState(false);
   React.useEffect(() => setMounted(true), []);
+  const current = mounted ? theme ?? "system" : "system";
+  const onKeyDown = useRadioKeys<string>(VALUES, current, setTheme);
 
   return (
     <div
       role="radiogroup"
       aria-label="Colour theme"
+      onKeyDown={onKeyDown}
       className={cn(
         "inline-flex items-center gap-0.5 rounded-md border border-border bg-surface p-0.5",
         className,
@@ -43,10 +48,12 @@ export function ThemeToggle({ className }: { className?: string }) {
             type="button"
             role="radio"
             aria-checked={active}
+            // Roving tabindex: one tab stop for the group, arrows between the three.
+            tabIndex={value === current ? 0 : -1}
             title={label}
             onClick={() => setTheme(value)}
             className={cn(
-              "inline-flex size-6 items-center justify-center rounded-[5px] transition-colors",
+              "inline-flex size-6 items-center justify-center rounded-[5px] transition-colors pointer-coarse:size-11",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
               active
                 ? "bg-card text-foreground shadow-xs"

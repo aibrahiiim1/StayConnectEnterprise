@@ -280,6 +280,11 @@ export function Nav({
     }
     searchRef.current?.focus();
   };
+  // Read through a ref by the "/" listener, so that listener is registered once rather than on every render.
+  const openFilterRef = useRef(openFilter);
+  useEffect(() => {
+    openFilterRef.current = openFilter;
+  });
 
   useEffect(() => {
     if (!collapsed && focusFilterAfterExpand.current) {
@@ -296,11 +301,11 @@ export function Nav({
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
       e.preventDefault();
-      openFilter();
+      openFilterRef.current();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  });
+  }, []);
 
   const roleLabel = roles
     .map((r) => ROLE_LABELS[r as SiteRole])
@@ -313,7 +318,11 @@ export function Nav({
       className={cn(
         "sidebar-motion flex h-full shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground",
         // The DRAWER is always a full 16rem overlay; only the desktop column follows the width token.
-        onToggleCollapsed ? "w-[var(--sidebar-width)] transition-[width] duration-200 ease-out" : "w-64",
+        // 160ms (the base motion token): long enough to read as a state change, short enough not to be waited
+        // for. Reduced motion drops the transition outright; the width still changes, instantly.
+        onToggleCollapsed
+          ? "w-[var(--sidebar-width)] transition-[width] duration-base ease-out motion-reduce:transition-none"
+          : "w-64",
       )}
     >
       <div
@@ -376,7 +385,7 @@ export function Nav({
               placeholder="Find a screen…"
               aria-label="Filter navigation"
               className={cn(
-                "h-9 w-full rounded-md border border-sidebar-border bg-sidebar-accent/70 pl-8 pr-7 text-[0.8125rem]",
+                "h-9 w-full rounded-md border border-sidebar-border bg-sidebar-accent/70 pl-8 pr-8 text-[0.8125rem] pointer-coarse:pr-11",
                 "text-sidebar-foreground placeholder:text-sidebar-muted",
                 "focus:border-sidebar-active focus:outline-none focus:ring-2 focus:ring-sidebar-active/30",
               )}
@@ -386,7 +395,11 @@ export function Nav({
                 type="button"
                 onClick={() => setQuery("")}
                 aria-label="Clear filter"
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-sidebar-muted hover:text-white"
+                className={cn(
+                  "absolute right-1 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded",
+                  "text-sidebar-muted hover:text-white pointer-coarse:right-0 pointer-coarse:size-11",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active/60",
+                )}
               >
                 <X className="size-3.5" />
               </button>

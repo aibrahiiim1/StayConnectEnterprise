@@ -71,7 +71,7 @@ export function ColumnChart({
         <div className="pointer-events-none absolute inset-0 flex flex-col justify-between" style={{ height }}>
           {[1, 0.5, 0].map((f) => (
             <div key={f} className="flex items-center gap-2">
-              <span className="w-12 shrink-0 text-right text-2xs tabular text-muted-foreground/70">
+              <span className="w-12 shrink-0 text-right text-2xs tabular text-muted-foreground">
                 {fmtAxis(Math.round(ceiling * f))}
               </span>
               <span className="h-px flex-1 bg-border" />
@@ -79,7 +79,9 @@ export function ColumnChart({
           ))}
         </div>
 
-        <div className="flex items-end gap-[2px] pl-14" style={{ height }} role="img"
+        {/* A GROUP, not an image: role="img" makes every descendant presentational, which hid the very columns
+            that carry each band's values from the screen reader while leaving them in the tab order. */}
+        <div className="flex items-end gap-[2px] pl-14" style={{ height }} role="group"
           aria-label={`${series.map((s) => s.name).join(" and ")} by ${data.length === 24 ? "hour" : "period"}`}>
           {data.map((d, i) => {
             const total = totals[i];
@@ -148,7 +150,7 @@ export function ColumnChart({
         {data.map((d, i) => (
           <span
             key={i}
-            className="max-w-6 flex-1 truncate text-center text-2xs tabular text-muted-foreground/70"
+            className="max-w-6 flex-1 truncate text-center text-2xs tabular text-muted-foreground"
           >
             {i % tickEvery === 0 ? d.label : ""}
           </span>
@@ -383,12 +385,19 @@ export function AreaChart({
     return Array.from({ length: k }, (_, j) => Math.round((j * (n - 1)) / (k - 1)));
   }, [n, tickCount]);
 
-  const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
+  // POINTER events, so a finger scrubs the read-out as a mouse does. `touch-pan-y` on the svg hands vertical
+  // drags to the page scroll and keeps horizontal ones for the chart.
+  const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
     if (n === 0) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const rel = ((e.clientX - rect.left) / rect.width) * w;
     const i = Math.round(((rel - pad) / (w - pad * 2)) * (n - 1));
     setHover(Math.max(0, Math.min(n - 1, i)));
+  };
+  // A lifted finger always "leaves"; clearing then would hide the value the tap asked for. Touch keeps the last
+  // read-out until the next touch moves it.
+  const onLeave = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (e.pointerType !== "touch") setHover(null);
   };
 
   return (
@@ -397,7 +406,7 @@ export function AreaChart({
       <div className="flex gap-2">
         <div className="flex w-12 shrink-0 flex-col justify-between text-right" style={{ height }}>
           {[1, 0.5, 0].map((f) => (
-            <span key={f} className="text-2xs leading-none tabular text-muted-foreground/70">
+            <span key={f} className="text-2xs leading-none tabular text-muted-foreground">
               {fmtAxis(ceiling * f)}
             </span>
           ))}
@@ -408,9 +417,10 @@ export function AreaChart({
             height={height}
             viewBox={`0 0 ${w} ${height}`}
             preserveAspectRatio="none"
-            className="block overflow-visible"
-            onMouseMove={onMove}
-            onMouseLeave={() => setHover(null)}
+            className="block touch-pan-y overflow-visible"
+            onPointerDown={onMove}
+            onPointerMove={onMove}
+            onPointerLeave={onLeave}
             role="img"
             aria-label={`${series.map((s) => s.name).join(" and ")} over time`}
           >
@@ -478,7 +488,7 @@ export function AreaChart({
             {ticks.map((i) => (
               <span
                 key={i}
-                className="absolute -translate-x-1/2 whitespace-nowrap text-2xs tabular text-muted-foreground/70"
+                className="absolute -translate-x-1/2 whitespace-nowrap text-2xs tabular text-muted-foreground"
                 style={{ left: `${(x(i) / w) * 100}%` }}
               >
                 {data[i]?.label}
@@ -488,7 +498,47 @@ export function AreaChart({
         </div>
       </div>
       {allZero && <p className="mt-2 text-center text-xs text-muted-foreground">{emptyLabel}</p>}
+      {!allZero && (
+        <ChartDataTable
+          caption={`${series.map((s) => s.name).join(" and ")} over time`}
+          series={series.map((s) => s.name)}
+          data={data}
+          formatValue={formatValue}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * The values behind a chart, for a screen reader. The line itself is a picture and its read-out follows a
+ * pointer, so without this the numbers are reachable only by someone who can see and aim.
+ */
+function ChartDataTable({
+  caption, series, data, formatValue,
+}: { caption: string; series: string[]; data: Point[]; formatValue: (n: number) => string }) {
+  return (
+    <table className="sr-only">
+      <caption>{caption}</caption>
+      <thead>
+        <tr>
+          <th scope="col">Period</th>
+          {series.map((s) => (
+            <th key={s} scope="col">{s}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {data.map((d, i) => (
+          <tr key={i}>
+            <th scope="row">{d.label}</th>
+            {series.map((s, si) => (
+              <td key={s}>{formatValue(d.values[si] ?? 0)}</td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -599,7 +649,7 @@ export function Heatmap({
           <tr>
             <td />
             {columns.map((c, ci) => (
-              <td key={c} className="text-center text-2xs tabular text-muted-foreground/70">
+              <td key={c} className="text-center text-2xs tabular text-muted-foreground">
                 {ci % 3 === 0 ? c : ""}
               </td>
             ))}
