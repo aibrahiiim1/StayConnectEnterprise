@@ -4,7 +4,7 @@
   "timestamp": "2026-09-26T08:58:24+03:00",
   "timestamp_derivation": "Written after the PRE-LIVE portal setting was saved and both consoles were redeployed and verified, and before the commit that introduces this receipt.",
   "record_type": "ONEGATE_CLOSURE_CORRECTIONS",
-  "authorisation": "Continuation of the Product-Owner OneGate/nightly mission (2026-09-26): correct the stale T0194 wording carried into T0195 without rewriting history; change the PRE-LIVE portal hotel name; remove placeholders that point at real data or a real hotel; the Central site name need not change. No Go-Live, PMS, financial or networking change.",
+  "authorisation": "Continuation of the Product-Owner OneGate/nightly mission (2026-09-26), narrowed by the Product Owner the same day to its governance and nightly closure: correct the stale previous_state wording carried from T0194 into T0195 (and the same defect in T0189-T0194) without rewriting history, prevent recurrence, and record the first real 06:00 Africa/Cairo scheduled run. No Go-Live, PMS, financial or networking change; no further deployment or runtime change.",
   "receipt_corrections": {
     "summary": "T0189 through T0195 each built previous_state by copying the previous receipt's new_state, so each one's previous_state.unchanged_on_purpose says 'THIS transition ...' about what the PREVIOUS transition did. The most visible case: T0195, which deployed to PRE-LIVE and Central, carries 'THIS transition is a current-tree redaction ... deployed nothing and contacted no appliance or environment' -- T0194's sentence. The seven receipts are preserved unchanged; this receipt and current_state_facts.receipt_content_corrections state the correct reading. No verified fact changes: every record_type, new_state, provenance, deployment and verification in those receipts stands.",
     "corrections": [
@@ -60,22 +60,9 @@
     ],
     "prevention": "tools/project-state.py validate now refuses, from T0196 on, a previous_state that speaks as 'THIS transition/delivery/increment/receipt/mission'. This receipt's own previous_state names T0195 instead."
   },
-  "pre_live_portal_hotel_name": {
-    "change": "PRE-LIVE portal hotel_name 'Hotel Name' -> 'Semantics', saved through Hotel Admin's audited POST /portal-branding/settings (no custom CSS/HTML touched, so no step-up). Guests are served 'Semantics -- Wi-Fi'.",
-    "unchanged": "Logo and background (both neutral colour gradients, no hotel imagery), welcome and help lines, languages and the Arabic wording override. The previous design is kept on the appliance at /root/portal-design-before-semantics.json for rollback.",
-    "not_changed_by_decision": "The site name Central assigned (shown in the Hotel Admin eyebrow) stays, by Product-Owner decision: changing it is not required."
-  },
-  "placeholders": "UI placeholders that pointed at real data now use neutral or reserved examples: ops@ and noreply@example.com instead of the real hotel.com domain, portal.example.com for the social callback, 'Appliance model' instead of a real vendor's model, 'e.g. folio number' instead of a folio-shaped number, 'e.g. Europe/London' instead of the site's own timezone. Test inputs follow. Presentation only.",
-  "deployment": {
-    "source": "92407b6a8134ce195852b1d3b972748666038e94 (clean clone)",
-    "hotel_admin_pre_live": "bundle sha256 8846c18d4ef6405b15060696097f718689581c2961c158fc60808cad7dd586a9, release 20260926-055844, source_commit 92407b6a clean, BUILD_ID fR1HnruWINzrib6c1m3tN; installer smoke 30/30; previous release 20260926-003848 kept. Only stayconnect-hotel-admin restarted.",
-    "central_console": "bundle sha256 0c5fedc4851b48fdbc6029feb5499dd0489ab8e81e69140967384403fdcc9d9d, release /opt/stayconnect/releases/cloud-admin/20260926-055907, source_commit 92407b6a clean, BUILD_ID 6bLPqucYlBs9PvHQwSjSP; cloud-admin-current.previous -> 20260926-003937. Only stayconnect-cloud-admin restarted; ctrlapi unchanged at 0582eb78.",
-    "verified": "Old placeholder strings in 0 files of either installed bundle; the new ones present. Console /login 200 directly and through Caddy on Central; Hotel Admin installer smoke 30/30.",
-    "not_redeployed": "edged, portald and every other service: unchanged at T0195's provenance."
-  },
   "nightly_schedule_evidence": "Pending: the first real 06:00 Africa/Cairo scheduled run after the change is observed and recorded by the receipt that follows this one. No workflow_dispatch run stands in for it.",
-  "repository_verification": "Hotel Admin tsc, vitest 534, the phase-4 financial-operator e2e spec 10/10; Central tsc, vitest 116, next build; project-state validate PASS with the new rule.",
-  "deployment_provenance": "PRE-LIVE Hotel Admin and Central console at 92407b6a; PRE-LIVE edged and portald remain at 334f9d91. Go-Live not performed.",
+  "repository_verification": "project-state validate PASS with the structural previous_state rule, proven against a planted T0197 that copies T0196's new_state (refused by all three checks); the real ledger passes.",
+  "deployment_provenance": "No deployment belongs to this correction. What runs: PRE-LIVE edged and portald at 334f9d91 (T0195); PRE-LIVE Hotel Admin and the Central console at 92407b6a (see out_of_scope_actions). Go-Live not performed.",
   "previous_state": {
     "phase": "7",
     "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
@@ -88,13 +75,19 @@
     "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
     "phase_status": "ACCEPTED_AND_CLOSED",
     "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
-    "unchanged_on_purpose": "Still Phase 7, accepted and closed. This correction changes presentation text and one portal presentation setting, redeploys the two consoles, and corrects receipts forward; it changed no phase, applied no migration, changed no permission, authentication, PMS, financial, network or licensing behaviour, and enabled no capability. PRE-LIVE remains PRE-LIVE."
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. This correction changes governance records and one validator rule; it changed no phase, applied no migration, changed no permission, authentication, PMS, financial, network or licensing behaviour, and enabled no capability. PRE-LIVE remains PRE-LIVE."
   },
   "state_note": "No phase, activity or acceptance state changes. Phase 7 remains ACCEPTED_AND_CLOSED under D41, Guest activation remains DEFERRED by D41, Go-Live remains unauthorised.",
   "base": "e3a90e0acaeaa63cf07234c4a3e8d4618f6ff6b7",
   "base_note": "Master after the merge of PR #189 (T0195).",
-  "head": "92407b6a",
-  "head_note": "The CONTENT commit of this correction and the source of both redeployed consoles.",
+  "head": "c1158124",
+  "head_note": "The last CONTENT commit of this correction: the placeholder files restored to master, leaving the structural previous_state rule (8ebf0b92) as the only non-governance change.",
   "previous_delivery": "T0195",
-  "go_live": "NOT authorised. Guest activation remains DEFERRED by D41."
+  "go_live": "NOT authorised. Guest activation remains DEFERRED by D41.",
+  "out_of_scope_actions": {
+    "_note": "Performed during this session on the Product Owner's instruction of 2026-09-26, and afterwards placed OUTSIDE this mission's scope by the Product Owner. Recorded here so they are not hidden; none of them is undone, and nothing was changed to compensate for them.",
+    "pre_live_portal_hotel_name": "PRE-LIVE portal hotel_name changed from 'Hotel Name' to 'Semantics' through Hotel Admin's audited POST /portal-branding/settings; guests are served 'Semantics -- Wi-Fi'. Logo and background (neutral gradients), welcome and help lines and languages unchanged. The previous design is kept on the appliance at /root/portal-design-before-semantics.json.",
+    "console_redeploys": "Hotel Admin on PRE-LIVE (release 20260926-055844, bundle sha256 8846c18d4ef6405b15060696097f718689581c2961c158fc60808cad7dd586a9, BUILD_ID fR1HnruWINzrib6c1m3tN, smoke 30/30; previous release 20260926-003848) and the Central console (release 20260926-055907, bundle sha256 0c5fedc4851b48fdbc6029feb5499dd0489ab8e81e69140967384403fdcc9d9d, BUILD_ID 6bLPqucYlBs9PvHQwSjSP; previous 20260926-003937) were redeployed from 92407b6a, whose only runtime change was six UI placeholders (neutral example addresses and names instead of real-looking ones).",
+    "repository_divergence": "Those placeholder edits were then RESTORED to master's content in this pull request (c1158124), at Product-Owner direction. The two running consoles therefore differ from master in exactly six placeholder strings and nothing else. This divergence is recorded, not corrected: no compensating redeploy is made without Product-Owner authorisation."
+  }
 }
