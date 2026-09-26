@@ -182,5 +182,32 @@ func (h *handler) commerceConfirm(w http.ResponseWriter, r *http.Request) {
 		commerceUnavailable(w)
 		return
 	}
-	relay(w, resp)
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	var granted struct {
+		PurchaseID    string `json:"purchase_id"`
+		EntitlementID string `json:"entitlement_id"`
+	}
+	_ = json.Unmarshal(raw, &granted)
+	if resp.StatusCode != http.StatusOK || granted.EntitlementID == "" {
+		// A refusal is relayed as scd gave it: the panel shows no success without an entitlement.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(resp.StatusCode)
+		_, _ = w.Write(raw)
+		return
+	}
+	// A GRANT IS NOT A CONNECTION. The panel says "Package active" when this answers with an entitlement, so
+	// the entitlement is only returned once the device is actually online -- activated and enforced -- exactly
+	// as /packages/acquire requires before its success page.
+	sid, failure := h.activateEnforced(r, sess, granted.EntitlementID)
+	if failure != "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": failure})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"purchase_id": granted.PurchaseID, "entitlement_id": granted.EntitlementID,
+		"session_id": sid, "enforced": true})
 }

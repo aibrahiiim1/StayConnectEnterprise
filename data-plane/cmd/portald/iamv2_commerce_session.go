@@ -187,33 +187,23 @@ func (h *handler) acquirePackage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The entitlement is durable; the guest is still offline until it is activated into a session.
-	ip := clientIP(r)
-	mac, macOK := h.arpCache(ip)
-	if ip == nil || !macOK {
+	eid, _ := confirm["entitlement_id"].(string)
+	sid, failure := h.activateEnforced(r, sess, eid)
+	switch failure {
+	case "":
+	case activateNoDevice:
 		h.landing(w, r, "Your device isn't on the guest network.")
 		return
-	}
-	act, ok := post("/v1/sessions/activate", map[string]any{
-		"entitlement_id": confirm["entitlement_id"], "device_id": sess.deviceID,
-		"ip": ip.String(), "mac": mac.String()})
-	if !ok {
-		msg := "We could not connect your device."
-		if act != nil && act["error"] == "MAX_DEVICES_REACHED" {
-			msg = "This account has reached its device limit. Disconnect another device and try again."
-		}
-		h.landing(w, r, msg)
+	case activateDeviceLimit:
+		h.landing(w, r, "This account has reached its device limit. Disconnect another device and try again.")
 		return
-	}
-	// SUCCESS MEANS ENFORCED, NOT MERELY GRANTED.
-	//
-	// scd waits for netd to promote the session and reports the state it actually observed. A session that is
-	// still PENDING_ENFORCEMENT is a guest whose packets are still being dropped, and showing them a success
-	// page would be the same false claim the auth redirect used to make, moved one step later in the flow.
-	if enforced, _ := act["enforced"].(bool); !enforced {
+	case activateNotEnforced:
 		h.landing(w, r, "We could not bring your device online. Please try again in a moment.")
 		return
+	default:
+		h.landing(w, r, "We could not connect your device.")
+		return
 	}
-	sid, _ := act["session_id"].(string)
 	http.Redirect(w, r, "/success?s="+url.QueryEscape(sid), http.StatusSeeOther)
 }
 
@@ -236,3 +226,55 @@ func (h *handler) renderPackages(w http.ResponseWriter, r *http.Request, pkgs []
 }
 
 var packagesTmpl = template.Must(template.New("packages").Parse(compactMarkup(packagesHTML)))
+
+// Why an activation did not put the device online. "" means it did, and was enforced.
+const (
+	activateNoDevice    = "NO_DEVICE"
+	activateDeviceLimit = "MAX_DEVICES_REACHED"
+	activateNotEnforced = "NOT_ENFORCED"
+	activateFailed      = "ACTIVATE_FAILED"
+)
+
+// activateEnforced turns a granted entitlement into a session for THIS device and reports success only when
+// netd has enforced it.
+//
+// SUCCESS MEANS ENFORCED, NOT MERELY GRANTED. scd waits for netd to promote the session and reports the state
+// it actually observed. A session still PENDING_ENFORCEMENT is a guest whose packets are still being dropped,
+// so it is a failure here. Both ways a guest acquires a package -- the /packages form and the success-page
+// panel's /api/commerce/confirm -- go through this, so neither can tell a guest they are online when they
+// are not.
+func (h *handler) activateEnforced(r *http.Request, sess commerceSession, entitlementID string) (string, string) {
+	if entitlementID == "" {
+		return "", activateFailed
+	}
+	ip := clientIP(r)
+	if ip == nil {
+		return "", activateNoDevice
+	}
+	mac, ok := h.arpCache(ip)
+	if !ok {
+		return "", activateNoDevice
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"entitlement_id": entitlementID, "device_id": sess.deviceID,
+		"ip": ip.String(), "mac": mac.String()})
+	resp, err := h.scdDo(r.Context(), http.MethodPost, "/v1/sessions/activate", raw)
+	if err != nil {
+		return "", activateFailed
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	var act map[string]any
+	_ = json.Unmarshal(b, &act)
+	if resp.StatusCode != http.StatusOK {
+		if act != nil && act["error"] == "MAX_DEVICES_REACHED" {
+			return "", activateDeviceLimit
+		}
+		return "", activateFailed
+	}
+	if enforced, _ := act["enforced"].(bool); !enforced {
+		return "", activateNotEnforced
+	}
+	sid, _ := act["session_id"].(string)
+	return sid, ""
+}
