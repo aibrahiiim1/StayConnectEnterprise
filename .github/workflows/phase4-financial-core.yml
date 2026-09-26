@@ -17,47 +17,23 @@ name: Phase 4 Financial Core CI
 # is a disposable container it creates and destroys itself, and every transport in the tests is an
 # in-process stub.
 
-# The phase branch is in the trigger list deliberately. workflow_dispatch cannot reach a workflow that does
-# not yet exist on the default branch, and the Phase-4 delivery rule is one branch and ONE eventual PR -- so
-# without this, the only way to obtain authoritative CI for the work in progress would be to open a PR early
-# or to merge, and neither is authorized. A push trigger uses the workflow file from the pushed branch, so
-# the branch gates itself on the exact HEAD under test.
 on:
-  # THE REQUIRED CONTEXT MUST COME FROM A pull_request RUN. Nothing else counts.
+  # FULL CHECK ONLY (Product-Owner decision D42, docs/PO_LED_DELIVERY_MODEL.md).
   #
-  # PROVEN, NOT ASSUMED. The previous design had the nightly orchestrator dispatch these gates with
-  # workflow_dispatch at the delivery ref. Every visible signal said it worked: the four check runs landed on
-  # the pull-request HEAD SHA, they came from app 15368 (the pinned integration), and GitHub reported them as
-  # associated with the pull request. It still did not satisfy the ruleset. GitHub's own merge enforcement
-  # answered:
+  # This comprehensive gate no longer runs on pull_request or on push to master, and nothing schedules it.
+  # It runs only when the Product Owner asks for "FULL CHECK THE WHOLE CODE", dispatched at the ref under
+  # test (tools/full-check.py dispatches all four gates and waits for their verdicts). It is not a required
+  # status check: master requires only po-merge-authorization.
   #
-  #     HTTP 405  Repository rule violations found
-  #     4 of 4 required status checks are expected.
-  #
-  # -- with all four green, and GraphQL statusCheckRollup null for that commit. A dispatched run's checks do
-  # not count toward a ruleset-required status check. Attaching to the head, coming from the right app, and
-  # being associated with the PR are each necessary and none is sufficient.
-  #
-  # So the trigger is pull_request again, and the COST is removed a different way: see the sentinel step below.
-  pull_request:
-    branches: [ master ]
-  push:
-    branches: [ master ]
+  # History, kept on purpose: under the nightly model (T0182..T0195) this gate ran a failing
+  # sentinel on attempt 1 of every pull_request and executed in full only when a 06:00 Africa/Cairo
+  # orchestrator re-ran it. That model is retired; its records remain in governance/transitions/.
+  workflow_dispatch:
 
-# ---------------------------------------------------------------------------------------------------------
-# ONE RUN PER REF, AND A SUPERSEDED RUN IS CANCELLED INSTEAD OF BEING LEFT TO FINISH.
-#
-# Without this key -- and until now there was no `concurrency:` key in ANY of the four gate workflows -- every
-# push to a PR branch started a run that nothing ever stopped. The runs for the abandoned commits kept a
-# runner busy, kept writing evidence, and kept reporting a check whose name is REQUIRED, so an obsolete run
-# could still be "in progress" for an old commit while the branch had already moved on.
-#
-# cancel-in-progress is deliberately TRUE ONLY FOR pull_request. A push to master must never be cancelled:
-# master's green record is the thing the protection rule reads, and cancelling it would leave the default
-# branch with a check that is neither passing nor failing.
+# One FULL CHECK per ref at a time, never cancelled mid-flight.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -69,43 +45,6 @@ jobs:
     env:
       EVID: ${{ github.workspace }}/.phase4-evidence
     steps:
-      # ---------------------------------------------------------------------------------------------------
-      # THE DAYTIME SENTINEL. This is what stops a push costing 29-31 minutes.
-      #
-      # Attempt 1 of a pull_request run does almost nothing and FAILS, in seconds. That gives the pull request
-      # a required context that EXISTS (so GitHub can evaluate the rule) and is NON-PASSING (so master cannot
-      # become mergeable before the nightly authoritative validation has actually run). Because this is the
-      # FIRST step, its failure skips every heavy step beneath it -- no Go build, no PostgreSQL, no browser, no
-      # mutation matrix.
-      #
-      # The nightly orchestrator then RE-RUNS this same run for the same head. A re-run keeps event=pull_request
-      # and the same head SHA -- so its checks do count -- and arrives as attempt 2 or higher, where this step
-      # steps aside and the full gate executes.
-      #
-      # An agent does NOT wait for attempt 1. It is expected to be red, it says so, and it is not evidence
-      # about the change.
-      #
-      # A push to master is never a sentinel: master's own runs must be real.
-      - name: Daytime sentinel (attempt 1 establishes the required context and fails on purpose)
-        if: github.event_name == 'pull_request' && github.run_attempt == 1
-        run: |
-          echo "SENTINEL ATTEMPT -- this is not a validation result."
-          echo
-          echo "  workflow  : ${{ github.workflow }}"
-          echo "  head      : ${{ github.event.pull_request.head.sha }}"
-          echo "  attempt   : ${{ github.run_attempt }}"
-          echo
-          echo "This attempt exists so the required context '${{ github.job }}' is REPORTED for this commit,"
-          echo "and it fails so the pull request cannot become mergeable on a check that validated nothing."
-          echo
-          echo "The full four-gate validation runs once a night at 06:00 Africa/Cairo, when the nightly"
-          echo "orchestrator re-runs THIS run for the exact delivery head. That re-run arrives as attempt 2+"
-          echo "and executes everything below."
-          echo
-          echo "Nobody should wait on this attempt. Push, deploy to PRE-LIVE under the standing decision, and"
-          echo "carry on: python tools/nightly-status.py reports what the last authoritative night decided."
-          exit 1
-
       - name: Check out the PR HEAD
         uses: actions/checkout@v4
         with:
@@ -163,8 +102,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           EVIDENCE_ENV_FINGERPRINT: ${{ steps.env.outputs.fingerprint }}
-          NIGHTLY_VALIDATION: ${{ github.event_name == 'pull_request' && github.run_attempt != 1 }}
-          NIGHTLY_CORRELATION_ID: attempt-${{ github.run_attempt }}
+          NIGHTLY_VALIDATION: 'true'   # a FULL CHECK always executes fresh; the name is historical
+          NIGHTLY_CORRELATION_ID: full-check-${{ github.run_id }}-${{ github.run_attempt }}
         run: bash scripts/ci/evidence-reuse.sh phase4-financial-core.yml
       - name: Initialise evidence staging
         if: steps.reuse.outputs.hit != 'true'
@@ -352,7 +291,7 @@ jobs:
       # named as Phase evidence, produced by a run that validated nothing. A junk artifact under an
       # authoritative name is worse than no artifact.
       - name: Assemble the Phase-4 financial-core evidence artifact
-        if: always() && !(github.event_name == 'pull_request' && github.run_attempt == 1) && steps.reuse.outputs.hit != 'true'
+        if: always() && steps.reuse.outputs.hit != 'true'
         run: python3 scripts/ci/phase4_evidence.py
 
       # See the Phase-3 workflow for why a reused verdict still publishes an artifact under its own commit.
@@ -369,7 +308,7 @@ jobs:
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Upload the Phase-4 financial-core evidence artifact
-        if: always() && !(github.event_name == 'pull_request' && github.run_attempt == 1)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: phase4-financial-core-evidence-${{ steps.head.outputs.sha }}

@@ -1,0 +1,4 @@
+commit dddd87ec507dbead5b81cbbc85937c91ae0119cb
+Date:   Sat Sep 26 15:31:32 2026 +0300
+
+    Governance: the content head is 160b966c

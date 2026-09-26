@@ -1,0 +1,55 @@
+{
+  "transition_id": "T0196",
+  "seq": 196,
+  "timestamp": "2026-09-26T15:07:10+03:00",
+  "timestamp_derivation": "Written after the content commit 214d95fb and before the commit that introduces this receipt.",
+  "record_type": "PO_LED_DELIVERY_MODEL_MIGRATION",
+  "authorisation": "Product-Owner governance decision of 2026-09-26 (D42): replace the automatic nightly delivery model with a Product-Owner-led model; update governance, workflows, validators, ruleset, docs and tooling; use the existing protected mechanism once to migrate; no product change, no runtime deployment, no Go-Live, no automatic merge of PR #190.",
+  "decision": "D42",
+  "immediate_safety_actions": {
+    "pr_190_hold": "2026-09-26 ~11:55Z: PR #190 labelled nightly-hold, which the orchestrator's candidate selection skips (tools/nightly_delivery.py select_candidate, as it stood on master).",
+    "orchestrator_disabled": "2026-09-26 ~11:55Z: workflow nightly-authoritative-validation.yml (id 365801023) disabled via the Actions API; state read back as disabled_manually. No scheduled run could fire from then on."
+  },
+  "repository_changes": {
+    "merge_authorization": ".github/workflows/po-merge-authorization.yml (job po-merge-authorization) runs tools/po_merge_authorization.py on opened/reopened/synchronize/ready_for_review/converted_to_draft/labeled/unlabeled; passes only with the po-merge-approved label on the exact, non-draft head; a push after approval removes the label. Proofs: tools/tests/po_merge_authorization/run_negative.py (10 cases).",
+    "full_check_gates": "The four gate workflows are workflow_dispatch only; the daytime sentinel is removed; a FULL CHECK always executes fresh; concurrency is per workflow and ref and never cancels. tools/full-check.py dispatches all four and reports each verdict for the exact head.",
+    "removed": ".github/workflows/nightly-authoritative-validation.yml, scripts/ci/nightly-orchestrate.py, tools/nightly_delivery.py, tools/nightly-status.py, tools/tests/nightly_delivery/.",
+    "validators": "validate-delivery-protocol.py (D42 shape, no schedule, no merging workflow), validate-branch-protection.py and branch-protection.json (one required context; gates under full_check_gates; residual risks), project-state.py GH-MANDATORY-CI (governance gate must be dispatchable; authorization workflow must exist), ci-reuse-policy.json, mutation cases M20 and M61-M63 retargeted, branch-protection negative cases retargeted.",
+    "docs": "docs/PO_LED_DELIVERY_MODEL.md (new, authoritative); CLAUDE.md sections 0, 0B, 0F; FAST_DELIVERY protocol; GITHUB_EXECUTION rule; NIGHTLY_AUTHORITATIVE_DELIVERY.md marked SUPERSEDED and otherwise unedited; PR template; artifact registry."
+  },
+  "ruleset_change": {
+    "ruleset": "master-protected-delivery (id 22779180), updated 2026-09-26 ~12:25Z through the rulesets API.",
+    "before": "required_status_checks: governance, phase3-full-software-gate, phase4-financial-core-gate, phase5-post-stay-transfer-gate (each app 15368); strict true.",
+    "after": "required_status_checks: po-merge-authorization (app 15368) only; strict true.",
+    "unchanged": "enforcement active; bypass_actors empty; deletion; non_fast_forward; pull_request with 0 required approvals, dismiss stale reviews, conversation resolution, merge method 'merge' only. tools/validate-branch-protection.py against the live API: BRANCH_PROTECTION = PASS."
+  },
+  "pr_190": "Left OPEN and UNMERGED, labelled nightly-hold, its history untouched. Under D42 it can merge only with Product Owner approval. Its own receipt is also numbered T0196, so if it is ever approved it must first be brought up to date with master and renumbered forward.",
+  "out_of_scope_actions_previously_recorded": "The PRE-LIVE portal hotel name 'Semantics' and the Hotel Admin / Central console redeploys from 92407b6a (six placeholder strings ahead of master) were performed earlier on 2026-09-26 and are recorded in PR #190. This migration changes nothing on any runtime to compensate.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0195: Phase 7 accepted and closed, deliveries validated by the nightly authoritative model (06:00 Africa/Cairo, unattended merge), OneGate branding deployed to PRE-LIVE and Central."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. Only the delivery process changed: no phase, migration, permission, authentication, PMS, financial, network or licensing behaviour changed, nothing was deployed, and no product or runtime file changed. PRE-LIVE remains PRE-LIVE."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Phase 7 remains ACCEPTED_AND_CLOSED; Guest activation remains DEFERRED by D41; Go-Live remains unauthorised.",
+  "base": "e3a90e0acaeaa63cf07234c4a3e8d4618f6ff6b7",
+  "base_note": "Master after the merge of PR #189 (e3a90e0a).",
+  "head": "160b966c",
+  "head_note": "The last CONTENT commit of this migration (160b966c). The model change is 214d95fb; 35084fd0 makes the authorization workflow's bootstrap copy create its directory (found when the check first ran on PR #191, and raised by review); 160b966c URL-encodes the ref in tools/full-check.py (raised by review).",
+  "previous_delivery": "T0195",
+  "go_live": "NOT authorised. Guest activation remains DEFERRED by D41.",
+  "verification_live": {
+    "normal_pr_runs_no_full_check": "PR #191 pushes produced exactly one workflow run each, Product Owner Merge Authorization; no gate workflow ran.",
+    "unapproved_merge_refused": "PUT /pulls/191/merge with no approval: HTTP 405 'Required status check \"po-merge-authorization\" is failing'. PUT /pulls/190/merge: HTTP 405 'Required status check \"po-merge-authorization\" is expected'.",
+    "approval_enables_merge": "Label po-merge-approved applied to PR #191 at 12:29:53Z: the check passed for head 387e4372 and printed the approval record (actor, time); mergeable_state clean.",
+    "push_revokes_approval": "Proven by the push that introduces this very record: see the pull request and the final report."
+  }
+}
