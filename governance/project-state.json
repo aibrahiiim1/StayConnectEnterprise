@@ -1724,8 +1724,8 @@
     "manifest": "docs/manifests/PoLedDelivery-change-manifest.md",
     "base": "e3a90e0acaeaa63cf07234c4a3e8d4618f6ff6b7",
     "base_note": "Master after the merge of PR #189.",
-    "head": "214d95fb",
-    "head_note": "The CONTENT commit of this migration (214d95fb): workflows, validators, tests, the protection record and the authoritative docs.",
+    "head": "35084fd0",
+    "head_note": "The last CONTENT commit of this migration (35084fd0): the model change is 214d95fb; 35084fd0 makes the authorization workflow's bootstrap copy create its directory, found when the check first ran on PR #191.",
     "transition": "T0196",
     "previous_delivery": "T0195",
     "note": "T0196 / D42. Merge authorization enforced by the one required context po-merge-authorization; the four comprehensive gates FULL CHECK only; the nightly orchestrator disabled then removed; PR #190 held and left unmerged."
