@@ -1,4 +1,0 @@
-commit c3d1575c79b4949015a88b1da6ce72cec8262c41
-Date:   Sat Sep 26 15:28:53 2026 +0300
-
-    T0196: record the live ruleset change and its verification

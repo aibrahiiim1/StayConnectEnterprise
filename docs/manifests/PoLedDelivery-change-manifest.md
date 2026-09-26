@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `e3a90e0acaeaa63cf07234c4a3e8d4618f6ff6b7`
-- **HEAD commit:** `35084fd0`
-- **Provenance (generation HEAD = inventory_head):** `c3d1575c79b4949015a88b1da6ce72cec8262c41`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `160b966c`
+- **Provenance (generation HEAD = inventory_head):** `dddd87ec507dbead5b81cbbc85937c91ae0119cb`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/po-led-delivery-model`
 - **Remote branch:** `origin/master`
 - **Changed files:** 58
@@ -33,7 +33,7 @@
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
 | `exports/chatgpt/phase-evidence/GIT_STAT_a7a21e62.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Packs and manifest at the delivery head, in that order |
-| `exports/chatgpt/phase-evidence/GIT_STAT_c3d1575c.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/GIT_STAT_dddd87ec.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Packs and manifest at the delivery head, in that order |
@@ -55,10 +55,10 @@
 | `governance/branch-protection.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery model D42: Product Owner merge authorization; comprehensive gates become FULL CHECK only |
 | `governance/ci-reuse-policy.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery model D42: Product Owner merge authorization; comprehensive gates become FULL CHECK only |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: D42 and T0196 record the Product-Owner-led delivery model |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: the content head is 35084fd0 |
-| `governance/transitions/T0196.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | T0196: record the live ruleset change and its verification |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: the content head is 160b966c |
+| `governance/transitions/T0196.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: the content head is 160b966c |
 | `scripts/ci/nightly-orchestrate.py` | DELETED | `D` | other | OTHER | rollback RESTORES it | Delivery model D42: Product Owner merge authorization; comprehensive gates become FULL CHECK only |
-| `tools/full-check.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Delivery model D42: Product Owner merge authorization; comprehensive gates become FULL CHECK only |
+| `tools/full-check.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | full-check: URL-encode the ref in the commit and run-list queries |
 | `tools/nightly-status.py` | DELETED | `D` | tests/tooling | TOOLING | rollback RESTORES it | Delivery model D42: Product Owner merge authorization; comprehensive gates become FULL CHECK only |
 | `tools/nightly_delivery.py` | DELETED | `D` | tests/tooling | TOOLING | rollback RESTORES it | Delivery model D42: Product Owner merge authorization; comprehensive gates become FULL CHECK only |
 | `tools/po_merge_authorization.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Delivery model D42: Product Owner merge authorization; comprehensive gates become FULL CHECK only |
@@ -89,12 +89,12 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   6 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   6 +-
  docs/context/StayConnect-IAM-Handoff.md            |   6 +-
- docs/manifests/PoLedDelivery-change-manifest.md    | 165 +++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343170 -> 343230 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 149846 -> 151125 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44026 -> 44009 bytes
+ docs/manifests/PoLedDelivery-change-manifest.md    | 168 +++++++
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 343170 -> 343229 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 149846 -> 151115 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44026 -> 44006 bytes
  .../chatgpt/phase-evidence/GIT_STAT_a7a21e62.txt   |   4 -
- .../chatgpt/phase-evidence/GIT_STAT_c3d1575c.txt   |   4 +
+ .../chatgpt/phase-evidence/GIT_STAT_dddd87ec.txt   |   4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |  10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   8 +-
  .../governance/decision-register.json              |  19 +-
@@ -119,7 +119,7 @@
  governance/project-state.json                      |  51 +--
  governance/transitions/T0196.json                  |  55 +++
  scripts/ci/nightly-orchestrate.py                  | 321 -------------
- tools/full-check.py                                | 107 +++++
+ tools/full-check.py                                | 109 +++++
  tools/nightly-status.py                            | 217 ---------
  tools/nightly_delivery.py                          | 497 ---------------------
  tools/po_merge_authorization.py                    | 106 +++++
@@ -131,7 +131,7 @@
  tools/validate-branch-protection.py                |   2 +-
  tools/validate-delivery-protocol.py                | 320 +++++--------
  tools/validate-project-state.sh                    |   2 +-
- 58 files changed, 1196 insertions(+), 2410 deletions(-)
+ 58 files changed, 1201 insertions(+), 2410 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -140,8 +140,8 @@ M  docs/manifests/PoLedDelivery-change-manifest.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_1b76405f.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_c3d1575c.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_c3d1575c.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_dddd87ec.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -152,6 +152,9 @@ M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: dddd87ec Governance: the content head is 160b966c
+HISTORICAL: 160b966c full-check: URL-encode the ref in the commit and run-list queries
+HISTORICAL: 88f558af Packs and manifest at the delivery head, in that order
 HISTORICAL: c3d1575c T0196: record the live ruleset change and its verification
 HISTORICAL: 387e4372 Packs and manifest at the delivery head, in that order
 HISTORICAL: 1b76405f Governance: the content head is 35084fd0
