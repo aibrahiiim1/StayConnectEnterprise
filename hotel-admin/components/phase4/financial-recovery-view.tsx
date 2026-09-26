@@ -335,7 +335,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
                       <Field label="Reference to that evidence" htmlFor={`za-ref-${z.posting_id}`}>
                         <Input
                           id={`za-ref-${z.posting_id}`}
-                          placeholder="e.g. folio number"
+                          placeholder="e.g. folio 4471"
                           value={zaRef[z.posting_id] ?? ""}
                           onChange={(e) => setZaRef({ ...zaRef, [z.posting_id]: e.target.value })}
                         />

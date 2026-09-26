@@ -270,7 +270,7 @@ export default function SocialProvidersPage() {
               value={f.redirect_uri}
               onChange={(e) => set("redirect_uri", e.target.value)}
               required
-              placeholder="https://portal.example.com/callback"
+              placeholder="https://portal.hotel.local/callback"
             />
           </Field>
           <Field label="Scopes" hint="Space separated.">

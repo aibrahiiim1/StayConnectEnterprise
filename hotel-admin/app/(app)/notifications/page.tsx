@@ -316,7 +316,7 @@ export default function NotificationsPage() {
                   type="email"
                   value={f.from_address}
                   onChange={(e) => set("from_address", e.target.value)}
-                  placeholder="noreply@example.com"
+                  placeholder="noreply@hotel.com"
                 />
               </Field>
               <Field label="From name">

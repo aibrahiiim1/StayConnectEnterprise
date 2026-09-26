@@ -240,7 +240,7 @@ export function AddConnectionWizard({
                     </Field>
                     <Field label="PMS time zone" required hint="Time zone name, for example Europe/Berlin. Arrivals and departures are read in it."
                       error={showErrors ? tzError : undefined}>
-                      <Input value={timezone} placeholder="e.g. Europe/London" spellCheck={false}
+                      <Input value={timezone} placeholder="Africa/Cairo" spellCheck={false}
                         onChange={(e) => setTimezone(e.target.value)} />
                     </Field>
                   </div>
