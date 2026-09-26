@@ -387,6 +387,20 @@ def cmd_validate(deep=True, manifest_equality=True):
                 fail(f"{t['transition_id']}: phase {ph} regressed {prev} -> {nstat}")
             seen[ph] = nstat
 
+        # A RECEIPT'S previous_state DESCRIBES THE STATE BEFORE IT, NOT THE RECEIPT ITSELF. T0189-T0195 each copied the
+        # previous receipt's new_state wholesale into previous_state, so each one's previous_state says "THIS
+        # transition ..." about what the PREVIOUS transition did -- T0195, which deployed to PRE-LIVE and Central,
+        # therefore carries "THIS transition ... deployed nothing and contacted no appliance". A copied claim is still a
+        # claim (T0185). Those seven are preserved as written and corrected forward by T0196; from T0196 on, a
+        # previous_state must not speak in the first person of the receipt that carries it.
+        for t in trans:
+            if t.get("seq", -1) < 196:
+                continue
+            ps_text = " ".join(str(v) for v in (t.get("previous_state") or {}).values())
+            if re.search(r"\bTHIS\s+(transition|delivery|increment|receipt|mission)\b", ps_text, re.I):
+                fail(f"{t.get('transition_id')}: previous_state describes the receipt itself ('THIS transition ...'); "
+                     f"it must describe the state BEFORE this receipt -- name the previous receipt instead")
+
     # Phase 1A cannot appear pending/current/not-started; must be closed/accepted
     p1a = st["phases"].get("1A", {}).get("status")
     if p1a not in CLOSED: fail(f"Phase 1A status {p1a} is not ACCEPTED_AND_CLOSED/FINAL_CLOSED (must not be pending/current/not-started)")
