@@ -45,6 +45,7 @@ jobs:
           # its own. Every later pull request is judged by master's copy, so a branch cannot weaken the check
           # that judges it.
           if [ ! -f "$f" ]; then
+            mkdir -p "$(dirname "$f")"
             git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.head.sha }}"
             git show "${{ github.event.pull_request.head.sha }}:$f" > "$f"
           fi
