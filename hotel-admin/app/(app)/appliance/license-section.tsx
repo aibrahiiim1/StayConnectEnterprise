@@ -1,6 +1,6 @@
 "use client";
 
-// LICENCE — what this appliance is allowed to do, and the two values Velonet needs to issue a licence for it.
+// LICENCE — what this appliance is allowed to do, and the two values Semantics needs to issue a licence for it.
 //
 // The one licence rule an operator must never be misled about is at the top, in words: when a licence stops
 // being in good standing NEW guest sign-ins are refused and existing guest sessions are NOT dropped. Central
@@ -61,7 +61,7 @@ function licenseWord(state?: string): string {
   return state === "GracePeriod" ? "Grace period" : state;
 }
 
-/** A large, copyable identifier — the two values an operator reads out to Velonet. */
+/** A large, copyable identifier — the two values an operator reads out to Semantics. */
 function Identifier({ label, value, big }: { label: string; value?: string; big?: boolean }) {
   return (
     <div className="min-w-0 space-y-1.5">
@@ -198,7 +198,7 @@ export function LicenseSection() {
         <Callout tone="danger" title="A blocked attempt to switch off licence enforcement">
           This production appliance refused to run in an unlicensed mode ({st.permissive_blocked}). Guest
           internet still requires a real signed licence. Remove the misconfiguration and investigate — the attempt
-          was recorded in Activity and reported to Velonet Central.
+          was recorded in Activity and reported to OneGate Central.
         </Callout>
       )}
 
@@ -226,12 +226,12 @@ export function LicenseSection() {
         <Callout tone="warning" title="Hardware mismatch">
           This licence is bound to a different WAN network adapter than the one now present
           {st?.hardware_mismatch ? <> ({st.hardware_mismatch})</> : null}. The hotel keeps running on a
-          time-limited grace. If the WAN adapter was genuinely replaced, ask Velonet to authorise a{" "}
+          time-limited grace. If the WAN adapter was genuinely replaced, ask Semantics to authorise a{" "}
           <strong>rebind</strong> — a new licence will be issued.
         </Callout>
       )}
 
-      {/* ---- IDENTITY: the two values the operator sends to Velonet ---- */}
+      {/* ---- IDENTITY: the two values the operator sends to Semantics ---- */}
       <Card>
         <CardHeader>
           <div className="space-y-0.5">
@@ -239,7 +239,7 @@ export function LicenseSection() {
             <CardDescription>
               {activated
                 ? "The licence is bound to these values."
-                : "To activate this appliance, send these two values to Velonet."}
+                : "To activate this appliance, send these two values to Semantics."}
             </CardDescription>
           </div>
         </CardHeader>
@@ -314,9 +314,7 @@ export function LicenseSection() {
           <div className="space-y-0.5">
             <CardTitle className="flex items-center gap-2"><Upload className="size-4" aria-hidden /> Upload licence file</CardTitle>
             <CardDescription>
-              For renewals, or when this appliance has no connection to Velonet Central. Velonet generates the file
-              for this serial and WAN MAC; the appliance checks it is bound to this exact hardware before accepting it,
-              and refuses an older licence than the one installed.
+              For renewals, or when this appliance has no connection to OneGate Central.
             </CardDescription>
           </div>
         </CardHeader>
@@ -356,9 +354,7 @@ export function LicenseSection() {
           <div className="space-y-0.5">
             <CardTitle className="flex items-center gap-2"><Cloud className="size-4" aria-hidden /> Connection to Central</CardTitle>
             <CardDescription>
-              Velonet Central issues and renews this appliance&apos;s licence and certificate. Guests are authorised
-              by this appliance from its own data, so a Central outage does not interrupt service — it only delays
-              licence renewal.
+              OneGate Central issues and renews this appliance&apos;s licence and certificate.
             </CardDescription>
           </div>
         </CardHeader>
@@ -421,9 +417,7 @@ export function LicenseSection() {
               <div className="space-y-2">
                 <div className="text-label">Feature entitlements</div>
                 <p className="text-caption text-muted-foreground">
-                  A standard Velonet licence includes every product feature. What a licence limits is the number of
-                  concurrent online guests, the validity window and the grace period shown above. This table is shown
-                  for support; per-feature entitlements exist in the signed licence format for future editions.
+                  Shown for support. A standard OneGate licence includes every product feature.
                 </p>
                 <div className="overflow-hidden rounded-md border border-border">
                   <Table>

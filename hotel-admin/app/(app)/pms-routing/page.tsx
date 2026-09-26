@@ -34,6 +34,7 @@ import { Button } from "@/components/ui/button";
 import { Select, Field } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { HelpList, HelpSection } from "@/components/help";
 import { DialogForm, ConfirmDialog } from "@/components/ui/dialog";
 import { Explain } from "@/components/ui/tooltip";
 import { SkeletonRows } from "@/components/ui/misc";
@@ -124,21 +125,46 @@ export default function PMSRoutingPage() {
       <PageHeader
         eyebrow="Property management system"
         title="Network routing"
-        description="When a guest signs in with their room number, the appliance has to know which property management system to check that room against. It decides from the Wi-Fi network the device is connected to — and that is what this page sets."
+        description="Which PMS connection each guest network's room sign-ins are checked against."
+        help={
+          <>
+            <HelpSection title="What this page sets">
+              <p>
+                When a guest signs in with their room number, the appliance has to know which property management
+                system to check that room against. It decides from the Wi-Fi network the device is connected to —
+                and that is what this page sets.
+              </p>
+              <p>
+                Every row is one of this property&rsquo;s guest networks. The property itself is fixed when the
+                appliance is activated and cannot be chosen here — this page only decides which PMS connection each
+                network&rsquo;s room sign-ins are checked against.
+              </p>
+            </HelpSection>
+            <HelpSection title="Why this matters">
+              <p>
+                Getting this wrong does not produce an error anywhere. The guest is checked against a different
+                property&rsquo;s guest list, no matching room is found, and they simply cannot get online — while
+                the PMS connection, the networks and the packages all report healthy. If room sign-in fails on one
+                Wi-Fi network but works on another, this is the first page to check.
+              </p>
+              <p>
+                Vouchers and username-and-password accounts never involve the PMS, so a network with no mapping
+                still works for those — it just cannot offer room sign-in.
+              </p>
+            </HelpSection>
+            <HelpSection title="Scope">
+              <HelpList
+                items={[
+                  <><strong>This one PMS</strong> checks the room against the single named connection — the normal choice for a property with one PMS.</>,
+                  <><strong>Every active PMS</strong> tries all of them, which only makes sense where one appliance serves several properties.</>,
+                ]}
+              />
+            </HelpSection>
+          </>
+        }
       />
 
       <ErrorBanner err={err} />
-
-      <Callout tone="info" title="Why this matters">
-        Getting this wrong does not produce an error anywhere. The guest is checked against a different
-        property&rsquo;s guest list, no matching room is found, and they simply cannot get online — while the PMS
-        connection, the networks and the packages all report healthy. If room sign-in fails on one Wi-Fi network
-        but works on another, this is the first page to check.
-        <div className="mt-2 text-xs">
-          Vouchers and username-and-password accounts never involve the PMS, so a network with no mapping still
-          works for those — it just cannot offer room sign-in.
-        </div>
-      </Callout>
 
       {nothingPublishable && interfaces.length > 0 && (
         <Callout tone="warning" title="No PMS connection is ready to be used">
@@ -161,11 +187,6 @@ export default function PMSRoutingPage() {
             WHAT THIS PAGE IS AND IS NOT. Said here because "Site" appeared in the table for years and an
             operator who wondered what a Site was had nowhere to find out.
           */}
-          <p className="mb-3 text-xs text-muted-foreground">
-            Every row is one of this property&rsquo;s guest networks. The property itself is fixed when the
-            appliance is activated and cannot be chosen here — this page only decides which PMS connection
-            each network&rsquo;s room sign-ins are checked against.
-          </p>
           {routes === null ? (
             <SkeletonRows rows={3} cols={4} />
           ) : routes.length === 0 ? (

@@ -17,7 +17,7 @@ import OperatorsPage from "@/app/(app)/operators/page";
 import LicensesPage from "@/app/(app)/licenses/page";
 import LoginPage from "@/app/login/page";
 
-const TENANTS = { data: [{ id: "t-acme", slug: "acme", name: "Acme Hotels" }] };
+const TENANTS = { data: [{ id: "t-semantics", slug: "semantics", name: "Semantics" }] };
 
 function withContext(ui: React.ReactNode) {
   return (
@@ -37,11 +37,11 @@ describe("Sites page", () => {
       {
         match: "/api/v1/sites?tenant_id=&status=all",
         body: { data: [
-          { id: "s1", tenant_id: "t-acme", code: "coral", name: "Coral Sea", timezone: "Africa/Cairo", country: "EG", status: "active", created_at: "2026-01-01T00:00:00Z", updated_at: "" },
-          { id: "s2", tenant_id: "t-acme", code: "old", name: "Old Resort", timezone: "UTC", status: "archived", created_at: "2026-01-01T00:00:00Z", updated_at: "" },
+          { id: "s1", tenant_id: "t-semantics", code: "demo", name: "Semantics Demo", timezone: "Africa/Cairo", country: "EG", status: "active", created_at: "2026-01-01T00:00:00Z", updated_at: "" },
+          { id: "s2", tenant_id: "t-semantics", code: "old", name: "Old Resort", timezone: "UTC", status: "archived", created_at: "2026-01-01T00:00:00Z", updated_at: "" },
         ], meta: { has_more: false } },
       },
-      { method: "PATCH", match: /\/api\/v1\/sites\/s1\?tenant_id=t-acme/, body: {} },
+      { method: "PATCH", match: /\/api\/v1\/sites\/s1\?tenant_id=t-semantics/, body: {} },
     ]);
     render(withContext(<SitesPage />));
 
@@ -49,19 +49,39 @@ describe("Sites page", () => {
     expect(screen.getByText("Infrastructure")).toBeInTheDocument();
     const table = await screen.findByRole("table");
     expect(within(table).getByRole("columnheader", { name: "Customer" })).toBeInTheDocument();
-    expect(within(table).getAllByText("Acme Hotels").length).toBe(2);
+    expect(within(table).getAllByText("Semantics").length).toBe(2);
     expect(within(table).getByText("Active")).toBeInTheDocument();
     expect(within(table).getByText("Archived")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Edit Coral Sea" }));
+    await user.click(screen.getByRole("button", { name: "Edit Semantics Demo" }));
     const name = await screen.findByLabelText("Name");
     await user.clear(name);
-    await user.type(name, "Coral Sea Resort");
+    await user.type(name, "Semantics Demo Hotel");
     await user.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(calls.some((c) => c.method === "PATCH")).toBe(true));
     const patch = calls.find((c) => c.method === "PATCH")!;
-    expect(patch.url).toBe("/api/v1/sites/s1?tenant_id=t-acme");
-    expect(patch.body).toEqual({ name: "Coral Sea Resort", timezone: "Africa/Cairo", country: "EG" });
+    expect(patch.url).toBe("/api/v1/sites/s1?tenant_id=t-semantics");
+    expect(patch.body).toEqual({ name: "Semantics Demo Hotel", timezone: "Africa/Cairo", country: "EG" });
+  });
+});
+
+describe("Page tips", () => {
+  it("each page has exactly one lightbulb, and it opens that page's tips", async () => {
+    const user = userEvent.setup();
+    mockFetch([
+      { match: "/api/v1/tenants", body: TENANTS },
+      { match: "/api/v1/sites?tenant_id=&status=all", body: { data: [], meta: { has_more: false } } },
+    ]);
+    render(withContext(<SitesPage />));
+    const bulbs = screen.getAllByRole("button", { name: /^Tips: / });
+    expect(bulbs).toHaveLength(1);
+    expect(bulbs[0]).toHaveAccessibleName("Tips: Sites");
+    // The explanation is not on the page until the lightbulb is opened.
+    expect(screen.queryByText("What a site is")).not.toBeInTheDocument();
+    await user.click(bulbs[0]);
+    const drawer = await screen.findByRole("dialog");
+    expect(within(drawer).getByText("What a site is")).toBeInTheDocument();
+    expect(within(drawer).getByText(/Buildings, floors, SSIDs and guest networks/)).toBeInTheDocument();
   });
 });
 
@@ -80,7 +100,7 @@ describe("Licenses page", () => {
     const day = 86400000;
     const now = Date.now();
     const lic = (id: string, over: Record<string, unknown>) => ({
-      id, tenant_id: "t-acme", site_id: "s1", commercial_plan_code: "", status: "active",
+      id, tenant_id: "t-semantics", site_id: "s1", commercial_plan_code: "", status: "active",
       issued_at: new Date(now - 10 * day).toISOString(), valid_until: new Date(now + 100 * day).toISOString(),
       offline_grace_days: 0, appliance_ids: ["a1"], key_id: "k", created_at: "", grace_period_days: 30,
       license_version: 1, max_concurrent_online_guests: 500, ...over,
@@ -96,7 +116,7 @@ describe("Licenses page", () => {
         lic("l6", { status: "superseded" }),
         lic("l7", { appliance_ids: [] }),
       ], meta: { has_more: false } } },
-      { match: /\/api\/v1\/sites\?/, body: { data: [{ id: "s1", code: "coral", name: "Coral Sea" }], meta: { has_more: false } } },
+      { match: /\/api\/v1\/sites\?/, body: { data: [{ id: "s1", code: "demo", name: "Semantics Demo" }], meta: { has_more: false } } },
       { match: /\/api\/v1\/appliances\?/, body: { data: [{ id: "a1", site_id: "s1", serial: "SN-1", name: "gw" }], meta: { has_more: false } } },
       { match: /\/api\/cloud\/v1\/fleet\?/, body: { data: [], meta: { has_more: false } } },
     ]);
@@ -111,17 +131,18 @@ describe("Licenses page", () => {
 });
 
 describe("Login page", () => {
-  it("is Velonet Central with email, password and a collapsed single sign-on", async () => {
+  it("is OneGate Central with email, password and a collapsed single sign-on", async () => {
     const user = userEvent.setup();
-    mockFetch([{ match: /\/api\/v1\/auth\/sso\/providers\?tenant=acme/, body: { data: [{ name: "okta", display_name: "Okta", kind: "oidc" }] } }]);
+    mockFetch([{ match: /\/api\/v1\/auth\/sso\/providers\?tenant=semantics/, body: { data: [{ name: "okta", display_name: "Okta", kind: "oidc" }] } }]);
     render(<LoginPage />);
-    expect(screen.getByRole("heading", { level: 1, name: "Velonet Central" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "OneGate Central" })).toBeInTheDocument();
+    expect(screen.getAllByText("OneGate by Semantics").length).toBeGreaterThan(0);
     expect(screen.getByLabelText("Email")).toBeInTheDocument();
     expect(screen.getByLabelText("Password")).toHaveAttribute("type", "password");
     expect(screen.queryByLabelText("Organisation slug")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Use single sign-on instead/ }));
-    await user.type(screen.getByLabelText("Organisation slug"), "acme");
+    await user.type(screen.getByLabelText("Organisation slug"), "semantics");
     const link = await screen.findByRole("link", { name: "Sign in with Okta" });
-    expect(link.getAttribute("href")).toContain("/api/v1/auth/sso/start?tenant=acme&provider=okta");
+    expect(link.getAttribute("href")).toContain("/api/v1/auth/sso/start?tenant=semantics&provider=okta");
   });
 });

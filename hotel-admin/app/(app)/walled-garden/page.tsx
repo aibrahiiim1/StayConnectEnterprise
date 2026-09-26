@@ -12,6 +12,7 @@
 import { useEffect, useState } from "react";
 import { api, ListResp, Whoami, WalledGardenRule } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
+import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -114,7 +115,33 @@ export default function WalledGardenPage() {
         icon={<Globe />}
         eyebrow="Guest portal"
         title="Allowed sites"
-        description="Addresses a guest's device may reach before it has signed in. Keep it to what the sign-in page itself needs — a captive-portal check, a payment provider, an identity provider — because everything listed here is reachable without any authentication at all."
+        description="Addresses reachable before sign-in, without any authentication — keep the list to what the sign-in page needs."
+        help={
+          <>
+            <HelpSection title="What an allowed site is">
+              <p>
+                An address a guest&apos;s device may reach before it has signed in. Everything listed here is
+                reachable without any authentication at all, so keep it to what the sign-in page itself needs.
+              </p>
+              <HelpList
+                items={[
+                  <>a captive-portal check, so the device notices the sign-in page;</>,
+                  <>a payment provider, so a paid package&apos;s payment page loads;</>,
+                  <>an identity provider, for social login.</>,
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="Writing a rule">
+              <HelpList
+                items={[
+                  <>A <strong>domain</strong> covers its subdomains; an <strong>address range</strong> uses CIDR notation, for example 10.0.0.0/24.</>,
+                  <>Leave <strong>Ports</strong> empty to allow every port.</>,
+                  <>Say <strong>why it is needed</strong>, so the next operator does not have to guess before removing it.</>,
+                ]}
+              />
+            </HelpSection>
+          </>
+        }
         actions={writable && <Button onClick={openNew}><Plus /> Add rule</Button>}
       />
 

@@ -1,4 +1,0 @@
-commit b85c48d297fc0f10fa4a3d5445875f90aabfc72d
-Date:   Sat Sep 26 03:19:22 2026 +0300
-
-    Closure coherence reads retired hosts from the registry, not from prose

@@ -253,7 +253,7 @@ export function AddConnectionWizard({
                   {provider.kind === PROTEL_KIND && (
                     <Callout tone="neutral" title="Fixed for this connection">
                       <ul className="list-disc space-y-0.5 pl-4 text-xs">
-                        <li>Read-only — Velonet never writes to the PMS.</li>
+                        <li>Read-only — OneGate never writes to the PMS.</li>
                         <li>No credential required — the link needs none.</li>
                         <li>
                           Charging a room through the PMS stays off until the property&rsquo;s folio behaviour has

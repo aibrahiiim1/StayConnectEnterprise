@@ -349,6 +349,98 @@
   }
   .info-panel p { margin: 10px 0 0; }
 
+   
+  .sc-help { display: inline-block; margin: 0 0 0 auto; }
+  [dir="rtl"] .sc-help { margin: 0 auto 0 0; }
+  .sc-help + .info-btn { margin: 0 -8px 0 0; }
+  [dir="rtl"] .sc-help + .info-btn { margin: 0 0 0 -8px; }
+  .sc-foot--page .sc-help { margin: 0 -8px 0 auto; }
+  [dir="rtl"] .sc-foot--page .sc-help { margin: 0 auto 0 -8px; }
+  .sc-help > summary { list-style: none; }
+  .sc-help > summary::-webkit-details-marker { display: none; }
+  .sc-help > summary::marker { content: ""; }
+  .help-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 44px; height: 44px; padding: 0; border-radius: 999px;
+    background: transparent; color: var(--sc-muted); cursor: pointer;
+  }
+  .help-btn svg { width: 22px; height: 22px; }
+  .help-btn:hover, .sc-help[open] > .help-btn, .help-btn[aria-expanded="true"] { background: var(--sc-fill); color: var(--sc-ink); }
+  .help-btn:focus-visible, .help-close:focus-visible { outline: 2px solid var(--sc-brand); outline-offset: 2px; }
+  .sc-help[open]:not([data-modal]) { flex: 1 1 100%; }
+  .help-card {
+    margin: 4px 0 12px; padding: 18px 18px 16px;
+    border: 1px solid var(--sc-line); border-radius: var(--sc-radius);
+    background: var(--sc-card); color: var(--sc-ink); font-size: 0.9375rem; line-height: 1.5; text-align: left;
+  }
+  [dir="rtl"] .help-card { text-align: right; }
+  .help-head { display: flex; align-items: center; }
+  .help-title { flex: 1 1 auto; margin: 0; font-size: 1.125rem; font-weight: 700; line-height: 1.3; }
+  .help-close {
+    display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center;
+    width: 40px; height: 40px; margin: -6px -8px -6px 8px; padding: 0;
+    border: 0; border-radius: 999px; background: transparent; color: var(--sc-muted); cursor: pointer;
+  }
+  [dir="rtl"] .help-close { margin: -6px 8px -6px -8px; }
+  .help-close svg { width: 20px; height: 20px; }
+  .help-close:hover { background: var(--sc-fill); color: var(--sc-ink); }
+  .help-sheet:not(.is-modal) .help-close { display: none; }
+  .help-tips { list-style: none; margin: 12px 0 0; padding: 0; }
+  .help-tips li { padding: 10px 0; border-top: 1px solid var(--sc-line); }
+  .help-tips li:first-child { border-top: 0; padding-top: 2px; }
+  .help-tips li[hidden] { display: none; }
+  .help-tips strong { display: block; font-size: 0.875rem; font-weight: 650; }
+  .help-tips span { display: block; margin-top: 2px; color: var(--sc-muted); font-size: 0.875rem; }
+  .help-fail { margin: 12px 0 0; padding: 12px 14px; border-radius: var(--sc-r-ctl); background: var(--sc-recess); font-size: 0.875rem; }
+  .help-device { margin: 12px 0 0; color: var(--sc-muted); font-size: 0.875rem; }
+  .help-device strong { display: block; color: var(--sc-ink); }
+  .help-device dl { display: grid; grid-template-columns: auto 1fr; grid-gap: 4px 16px; gap: 4px 16px; margin: 8px 0 0; }
+  .help-device dt, .help-device dd { margin: 0; }
+  .help-device dd {
+    color: var(--sc-ink); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.8125rem; overflow-wrap: anywhere;
+  }
+  .help-device p { margin: 8px 0 0; }
+  .help-hotel { margin: 12px 0 0; color: var(--sc-muted); font-size: 0.875rem; white-space: pre-line; }
+  .help-hotel[hidden] { display: none; }
+  .help-sheet.is-modal {
+    position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 50;
+    display: flex; align-items: flex-end; justify-content: center;
+    padding: 12px; background: rgba(12, 16, 20, 0.5);
+  }
+  .help-sheet.is-modal .help-card {
+    width: 100%; max-width: 460px; max-height: 86vh; overflow: auto; margin: 0;
+    box-shadow: var(--sc-shadow-float);
+    -webkit-animation: sc-help-in 0.18s ease-out; animation: sc-help-in 0.18s ease-out;
+  }
+  @media (min-width: 560px) { .help-sheet.is-modal { align-items: center; } }
+  @-webkit-keyframes sc-help-in { from { opacity: 0; -webkit-transform: translateY(12px); } to { opacity: 1; -webkit-transform: none; } }
+  @keyframes sc-help-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .help-sheet.is-modal .help-card { -webkit-animation: none; animation: none; } }
+  .help-sheet.is-modal[hidden] { display: none; }
+  .sc-help-open body { overflow: hidden; }
+
+   
+  .sc-by {
+    flex: 1 1 100%; margin: 8px 0 2px; text-align: center;
+    color: var(--sc-muted); font-size: 0.75rem; line-height: 1.6;
+  }
+  .og-mark {
+    display: inline-block; padding: 0 7px; border-radius: 999px;
+    background: #ffffff; box-shadow: 0 0 0 1px rgba(10, 10, 10, 0.08);
+    font-size: 0.8125rem; letter-spacing: 0; white-space: nowrap; unicode-bidi: isolate;
+  }
+  .og-one, .og-gate { font-weight: 700; }
+  .og-one { color: #149c4a; }
+  .og-gate { color: #0a0a0a; }
+  @supports ((-webkit-background-clip: text) or (background-clip: text)) {
+    .og-one {
+      background-image: linear-gradient(95deg, #0b7a3b, #149c4a 38%, #3cc05a 70%, #8fdc5f);
+      -webkit-background-clip: text; background-clip: text;
+      -webkit-text-fill-color: transparent; color: transparent;
+    }
+  }
+
   .empty-state { padding: 8px 0 4px; text-align: center; }
   .empty-state svg { width: 40px; height: 40px; margin: 0 auto 10px; color: var(--sc-muted); display: block; }
   .empty-state p { color: var(--sc-ink); font-size: 0.9375rem; }
@@ -952,6 +1044,14 @@ main.card { display: block; }
   })();
   </script>
 </div>
+<div class="sc-foot sc-foot--page">
+<details class="sc-help" id="sc-help"><summary class="help-btn" data-i18n-aria="help.button" aria-label="Help and tips" title="Help and tips"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9.5 18h5M10.5 21h3"/><path d="M12 3a6 6 0 0 0-3.7 10.7c.8.7 1.2 1.4 1.2 2.3v.5h5V16c0-.9.4-1.6 1.2-2.3A6 6 0 0 0 12 3z"/></svg></summary><div class="help-sheet" id="sc-help-sheet"><div class="help-card">
+<div class="help-head"><h2 class="help-title" id="sc-help-title" data-i18n="help.title" data-i18n-en="Help with signing in">Help with signing in</h2><button type="button" class="help-close" data-help-close data-i18n-aria="help.close" aria-label="Close" title="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+<p class="help-fail" data-i18n="help.fail" data-i18n-en="Something not working? Please contact reception — they are happy to help.">Something not working? Please contact reception — they are happy to help.</p>
+<p class="help-hotel" id="help-hotel" dir="auto" hidden></p>
+</div></div></details>
+<p class="sc-by"><span data-i18n="brand.by" data-i18n-en="Wi-Fi by">Wi-Fi by</span> <bdi class="og-mark" dir="ltr" lang="en"><b class="og-one">One</b><b class="og-gate">Gate</b></bdi></p>
+</div>
 </main>
 </div>
 <script nonce="e2e-nonce">
@@ -976,4 +1076,64 @@ main.card { display: block; }
   });
 })();
 </script>
+<script nonce="e2e-nonce">
+(function () {
+  var d = document.getElementById('sc-help');
+  var sheet = document.getElementById('sc-help-sheet');
+  if (!d || !sheet) return;
+  var sum = d.querySelector('summary');
+  
+  
+  d.open = false;
+  d.setAttribute('data-modal', '');
+  sheet.hidden = true;
+  sheet.className += ' is-modal';
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-modal', 'true');
+  sheet.setAttribute('aria-labelledby', 'sc-help-title');
+  document.body.appendChild(sheet);
+  sum.setAttribute('aria-haspopup', 'dialog');
+  sum.setAttribute('aria-expanded', 'false');
+  function focusables() {
+    var all = sheet.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])');
+    var out = [];
+    for (var i = 0; i < all.length; i++) { if (all[i].offsetWidth || all[i].offsetHeight) out.push(all[i]); }
+    return out;
+  }
+  function show() {
+    sheet.hidden = false;
+    sum.setAttribute('aria-expanded', 'true');
+    document.documentElement.className += ' sc-help-open';
+    var c = sheet.querySelector('[data-help-close]');
+    if (c) c.focus();
+  }
+  function hide() {
+    sheet.hidden = true;
+    sum.setAttribute('aria-expanded', 'false');
+    document.documentElement.className = document.documentElement.className.replace(/(^|\s)sc-help-open(?=\s|$)/g, '');
+    sum.focus();
+  }
+  sum.addEventListener('click', function (e) { e.preventDefault(); if (sheet.hidden) show(); else hide(); });
+  sheet.addEventListener('click', function (e) {
+    
+    var el = e.target;
+    if (el === sheet) { hide(); return; }
+    while (el && el !== sheet) {
+      if (el.hasAttribute && el.hasAttribute('data-help-close')) { e.preventDefault(); hide(); return; }
+      el = el.parentNode;
+    }
+  });
+  document.addEventListener('keydown', function (e) {
+    if (sheet.hidden) return;
+    if (e.key === 'Escape' || e.key === 'Esc') { e.preventDefault(); hide(); return; }
+    if (e.key !== 'Tab') return;
+    var f = focusables();
+    if (!f.length) { e.preventDefault(); return; }
+    var first = f[0], last = f[f.length - 1], at = document.activeElement;
+    if (e.shiftKey && (at === first || !sheet.contains(at))) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && (at === last || !sheet.contains(at))) { e.preventDefault(); first.focus(); }
+  });
+})();
+</script>
+
 </body></html>

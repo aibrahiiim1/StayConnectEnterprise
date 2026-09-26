@@ -1,6 +1,6 @@
 # Customer Admin (Tenant Admin) — User Guide
 
-You look after Velonet for your organisation (a hotel, a chain, a group of properties) in **Velonet Central**. In Central you manage your customer's sites, appliances and Central operators, and you can read your licenses. The hotels' day-to-day setup — guest networks, sign-in methods, packages, vouchers, the PMS — is done in **Velonet Hotel Admin** on each appliance, with an operator account created on that appliance.
+You look after OneGate for your organisation (a hotel, a chain, a group of properties) in **OneGate Central**. In Central you manage your customer's sites, appliances and Central operators, and you can read your licenses. The hotels' day-to-day setup — guest networks, sign-in methods, packages, vouchers, the PMS — is done in **OneGate Hotel Admin** on each appliance, with an operator account created on that appliance.
 
 You can only see your own customer. You **cannot** see or change any other customer. Central's server decides exactly which actions your role may perform; if an action is not allowed, Central says so when you try it.
 
@@ -31,7 +31,7 @@ A site is one physical property. If you have three hotels, you have three sites.
 
 **Central → Infrastructure → Appliances** and **Onboarding**
 
-An appliance is the Velonet gateway (physical or virtual) at a site. New appliances register themselves and are activated on **Onboarding** — usually by the platform admin, who also sets the license terms.
+An appliance is the OneGate gateway (physical or virtual) at a site. New appliances register themselves and are activated on **Onboarding** — usually by the platform admin, who also sets the license terms.
 
 **What the appliance status column means:**
 
@@ -69,7 +69,7 @@ A sender (SendGrid, Amazon SES or Twilio) delivers one-time codes. Then switch *
 
 **Hotel Admin → Guest portal → Social login**
 
-1. Create an OAuth app with Google / Apple / Facebook / Microsoft (outside Velonet — follow their docs).
+1. Create an OAuth app with Google / Apple / Facebook / Microsoft (outside OneGate — follow their docs).
 2. Enter the client ID and secret in Social login.
 3. Tick the provider under **Sign-in methods**.
 
@@ -154,6 +154,6 @@ Also useful as a "is Wi-Fi working?" smoke test — if the count is zero and gue
 ## Escalation
 
 - **Guest can't connect** → [common-tasks.md](common-tasks.md#a-guest-cant-log-in)
-- **Appliance offline >30 min** → check the site's internet uplink, then contact Velonet support
+- **Appliance offline >30 min** → check the site's internet uplink, then contact Semantics support
 - **PMS connection broken** → use **Test the connection** on the PMS connection page first; if it's a PMS-side issue, contact your PMS vendor
-- **License question** (more guests, renewal) → your platform admin contact at Velonet
+- **License question** (more guests, renewal) → your platform admin contact at OneGate

@@ -29,12 +29,12 @@ import OnboardingPage from "@/app/(app)/onboarding/page";
 import SecurityPage from "@/app/(app)/security/page";
 
 // ------------------------------------------------------------------------------------------------------------
-// The signed-in operators. Tenant users are pinned to t-acme (whoami default_tenant_id).
+// The signed-in operators. Tenant users are pinned to t-semantics (whoami default_tenant_id).
 // ------------------------------------------------------------------------------------------------------------
 
 const tenantUser = (role: string) => ({
-  operator_id: `op-${role}`, email: `${role}@acme.test`, is_super_admin: false,
-  default_tenant_id: "t-acme", roles: [role], expires_at: "2099-01-01T00:00:00Z",
+  operator_id: `op-${role}`, email: `${role}@semantics.test`, is_super_admin: false,
+  default_tenant_id: "t-semantics", roles: [role], expires_at: "2099-01-01T00:00:00Z",
 });
 
 const ROLES: Record<string, Whoami> = {
@@ -50,7 +50,7 @@ const ROLES: Record<string, Whoami> = {
   } as Whoami,
 };
 const TENANT_ROLES = ["tenant_admin", "tenant_operator", "viewer", "billing"] as const;
-const TENANTS = { data: [{ id: "t-acme", slug: "acme", name: "Acme Hotels" }] };
+const TENANTS = { data: [{ id: "t-semantics", slug: "semantics", name: "Semantics" }] };
 const empty = { data: [], meta: { has_more: false } };
 
 function renderAs(role: string, ui: React.ReactNode) {
@@ -173,17 +173,17 @@ describe("Navigation per role", () => {
   });
 });
 
-const SITE = { id: "s1", tenant_id: "t-acme", code: "coral", name: "Coral Sea", timezone: "UTC", status: "active", created_at: "2026-01-01T00:00:00Z", updated_at: "" };
+const SITE = { id: "s1", tenant_id: "t-semantics", code: "demo", name: "Semantics Demo", timezone: "UTC", status: "active", created_at: "2026-01-01T00:00:00Z", updated_at: "" };
 
 describe("Sites per role", () => {
   it.each(TENANT_ROLES)("%s: New site, Edit, Archive and Delete (the server refuses no role here)", async (role) => {
-    mockFetch([{ match: "/api/v1/sites?tenant_id=t-acme&status=all", body: { data: [SITE], meta: { has_more: false } } }]);
+    mockFetch([{ match: "/api/v1/sites?tenant_id=t-semantics&status=all", body: { data: [SITE], meta: { has_more: false } } }]);
     renderAs(role, <SitesPage />);
     await screen.findByRole("table");
     expect(screen.getByRole("button", { name: /New site/ })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Edit Coral Sea" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit Semantics Demo" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Archive/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Delete Coral Sea" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete Semantics Demo" })).toBeInTheDocument();
     expect(screen.queryByText("Your role can view this but not change it.")).not.toBeInTheDocument();
   });
 
@@ -199,23 +199,23 @@ describe("Sites per role", () => {
   });
 
   it("platform admin with a customer: creates under the selected customer", async () => {
-    window.localStorage.setItem("sc.customerContext", "t-acme");
+    window.localStorage.setItem("sc.customerContext", "t-semantics");
     const user = userEvent.setup();
     const { calls } = mockFetch([
       { match: "/api/v1/tenants", body: TENANTS },
-      { match: "/api/v1/sites?tenant_id=t-acme&status=all", body: empty },
-      { method: "POST", match: "/api/v1/sites?tenant_id=t-acme", body: SITE },
+      { match: "/api/v1/sites?tenant_id=t-semantics&status=all", body: empty },
+      { method: "POST", match: "/api/v1/sites?tenant_id=t-semantics", body: SITE },
     ]);
     renderAs("platform_admin", <SitesPage />);
     const btn = await screen.findByRole("button", { name: /New site/ });
     await waitFor(() => expect(btn).toBeEnabled());
     await user.click(btn);
-    expect(screen.getByLabelText("Owning customer")).toHaveValue("Acme Hotels");
-    await user.type(screen.getByLabelText(/^Code/), "coral");
-    await user.type(screen.getByLabelText(/^Name/), "Coral Sea");
+    expect(screen.getByLabelText("Owning customer")).toHaveValue("Semantics");
+    await user.type(screen.getByLabelText(/^Code/), "demo");
+    await user.type(screen.getByLabelText(/^Name/), "Semantics Demo");
     await user.click(screen.getByRole("button", { name: "Create site" }));
     await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
-    expect(calls.find((c) => c.method === "POST")!.url).toBe("/api/v1/sites?tenant_id=t-acme");
+    expect(calls.find((c) => c.method === "POST")!.url).toBe("/api/v1/sites?tenant_id=t-semantics");
   });
 
   it("platform_support (no customer): restricted, no controls", () => {
@@ -227,7 +227,7 @@ describe("Sites per role", () => {
 });
 
 const LIC = {
-  id: "l1", tenant_id: "t-acme", site_id: "s1", commercial_plan_code: "", status: "active",
+  id: "l1", tenant_id: "t-semantics", site_id: "s1", commercial_plan_code: "", status: "active",
   issued_at: "2026-01-01T00:00:00Z", valid_until: "2099-01-01T00:00:00Z", offline_grace_days: 0,
   appliance_ids: ["a1"], key_id: "k", created_at: "", grace_period_days: 30, license_version: 1,
   max_concurrent_online_guests: 500,
@@ -241,7 +241,7 @@ const licenseRoutes = (tid: string) => [
 
 describe("Licenses per role", () => {
   it.each(TENANT_ROLES)("%s: reads, changes nothing, sees the read-only notice", async (role) => {
-    mockFetch(licenseRoutes("t-acme"));
+    mockFetch(licenseRoutes("t-semantics"));
     renderAs(role, <LicensesPage />);
     await screen.findByRole("table");
     expect(screen.getByText("Your role can view this but not change it.")).toBeInTheDocument();
@@ -251,9 +251,9 @@ describe("Licenses per role", () => {
   });
 
   it("platform admin: issue, renew, suspend, resume (confirmed), revoke, download", async () => {
-    window.localStorage.setItem("sc.customerContext", "t-acme");
+    window.localStorage.setItem("sc.customerContext", "t-semantics");
     const user = userEvent.setup();
-    mockFetch(licenseRoutes("t-acme"));
+    mockFetch(licenseRoutes("t-semantics"));
     renderAs("platform_admin", <LicensesPage />);
     await screen.findByRole("table");
     await waitFor(() => expect(screen.getByRole("button", { name: /Issue license/ })).toBeEnabled());
@@ -268,11 +268,11 @@ describe("Licenses per role", () => {
   });
 });
 
-const OPS = { data: [{ id: "op-x", email: "desk@acme.test", status: "active", roles: [{ id: "r1", role: "viewer" }], created_at: "", updated_at: "" }], meta: { has_more: false } };
+const OPS = { data: [{ id: "op-x", email: "desk@semantics.test", status: "active", roles: [{ id: "r1", role: "viewer" }], created_at: "", updated_at: "" }], meta: { has_more: false } };
 
 describe("Operators per role", () => {
   it("tenant_admin: full management of its own customer", async () => {
-    mockFetch([{ match: "/api/v1/operators?tenant_id=t-acme", body: OPS }]);
+    mockFetch([{ match: "/api/v1/operators?tenant_id=t-semantics", body: OPS }]);
     renderAs("tenant_admin", <OperatorsPage />);
     await screen.findByRole("table");
     expect(screen.getByRole("button", { name: /New operator/ })).toBeEnabled();
@@ -282,7 +282,7 @@ describe("Operators per role", () => {
   });
 
   it.each(["tenant_operator", "viewer", "billing"])("%s: the server refuses even the list — restricted, no controls", async (role) => {
-    mockFetch([{ match: "/api/v1/operators?tenant_id=t-acme", status: 403, body: { error: "forbidden", message: "operators management requires tenant_admin / platform_admin" } }]);
+    mockFetch([{ match: "/api/v1/operators?tenant_id=t-semantics", status: 403, body: { error: "forbidden", message: "operators management requires tenant_admin / platform_admin" } }]);
     renderAs(role, <OperatorsPage />);
     expect(await screen.findByText("Not available to your role")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /New operator/ })).not.toBeInTheDocument();
@@ -294,7 +294,7 @@ describe("Operators per role", () => {
 const onboardingRoutes = [
   { match: "/api/cloud/v1/appliances-admin/pending", body: { data: [{ id: "p1", serial: "SN-NEW", wan_mac: "aa:bb" }] } },
   { match: "/api/v1/tenants", body: TENANTS },
-  { match: "/api/v1/appliances?tenant_id=t-acme", body: { data: [{ id: "a1", serial: "SN-1", lifecycle_state: "activated" }] } },
+  { match: "/api/v1/appliances?tenant_id=t-semantics", body: { data: [{ id: "a1", serial: "SN-1", lifecycle_state: "activated" }] } },
 ];
 
 describe("Onboarding per role", () => {
@@ -367,7 +367,7 @@ describe("Appliance delete — same dialog, each endpoint's contract", () => {
     const user = userEvent.setup();
     const { calls } = mockFetch([{ method: "DELETE", match: /\/api\/v1\/appliances\/a1/, status: 204, body: {} }]);
     render(
-      <DeleteDialog {...base} deleteUrl="/v1/appliances/a1?tenant_id=t-acme" takesReason={false} stepUp={false}
+      <DeleteDialog {...base} deleteUrl="/v1/appliances/a1?tenant_id=t-semantics" takesReason={false} stepUp={false}
         consequences={["The appliance record is removed from this customer.", "It cannot be undone."]} />,
     );
     expect(screen.getByText("It cannot be undone.")).toBeInTheDocument();
@@ -377,7 +377,7 @@ describe("Appliance delete — same dialog, each endpoint's contract", () => {
     await user.type(screen.getByLabelText(/Type the appliance serial/), "SN-1");
     await user.click(btn);
     await waitFor(() => expect(calls.length).toBe(1));
-    expect(calls[0]).toEqual({ method: "DELETE", url: "/api/v1/appliances/a1?tenant_id=t-acme", body: undefined });
+    expect(calls[0]).toEqual({ method: "DELETE", url: "/api/v1/appliances/a1?tenant_id=t-semantics", body: undefined });
   });
 
   it("Onboarding (DELETE /cloud/v1/appliances-admin/{id}): typed serial plus reason, sent as the body", async () => {

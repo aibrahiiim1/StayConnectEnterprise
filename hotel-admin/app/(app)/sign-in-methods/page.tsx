@@ -33,6 +33,7 @@ import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/compon
 import { Badge } from "@/components/ui/badge";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { PageHeader, PageShell } from "@/components/ui/page";
+import { HelpList, HelpSection } from "@/components/help";
 import { OptionCard } from "@/components/ui/data";
 import { Skeleton, Switch } from "@/components/ui/misc";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
@@ -178,7 +179,34 @@ export default function SignInMethodsPage() {
       icon={<LogIn />}
       eyebrow="Guest portal"
       title="Sign-in methods"
-      description="How guests prove who they are on the portal. Each switch applies immediately — the next guest to open the sign-in page sees it. Turning a method off does not disconnect guests already online."
+      description="Each switch applies immediately. Turning a method off does not disconnect guests already online."
+      help={
+        <>
+          <HelpSection title="What this page sets">
+            <p>
+              How guests prove who they are on the portal. Each switch applies immediately — the next guest to open
+              the sign-in page sees it. Turning a method off does not disconnect guests already online.
+            </p>
+          </HelpSection>
+          <HelpSection title="The methods">
+            <HelpList
+              items={[
+                <><strong>Voucher code</strong> — the guest types a code from a printed or emailed voucher. Vouchers are managed under Vouchers.</>,
+                <><strong>Guest account</strong> — a username and password issued to the guest, managed under Guest accounts.</>,
+                <><strong>Room sign-in</strong> — the guest enters their room number and one detail from their booking. OneGate checks it against the property management system for the network they are on; the guest never chooses a system, and no booking details are shown back to them. Which system a network uses is set in Network routing.</>,
+                <><strong>Email code</strong> and <strong>SMS code</strong> — the guest receives a one-time code. Each is available only once a sender exists and is switched on under Email &amp; SMS.</>,
+                <><strong>Social login</strong> — the guest signs in with an existing account such as Google. Each provider is offered individually, because each needs its own credentials; providers are set up under Social login.</>,
+              ]}
+            />
+          </HelpSection>
+          <HelpSection title="Guest sign-in protection">
+            <p>
+              After too many incorrect sign-in details from the same device, that device is asked to wait before it
+              can try again. The card at the bottom decides how strict that is; it is always on.
+            </p>
+          </HelpSection>
+        </>
+      }
     />
   );
 
@@ -250,9 +278,7 @@ export default function SignInMethodsPage() {
           </CardHeader>
           <CardBody className="space-y-4">
             <p className="max-w-2xl text-sm text-muted-foreground">
-              The guest enters their room number and one detail from their booking. Velonet checks it
-              against the property management system for the network they are on — the guest never chooses a
-              system, and no booking details are shown back to them.
+              The guest enters their room number and one detail from their booking.
             </p>
 
             {pms.enabled && (pmsReadiness.state === "down" || pmsReadiness.state === "partial") && (
@@ -274,7 +300,7 @@ export default function SignInMethodsPage() {
                 {pmsReadiness.state === "down" ? (
                   <p>
                     {capitalise(pmsReadiness.reason)}. Guests cannot sign in with their room number until the
-                    property management system is connected to Velonet again; they can still use any other
+                    property management system is connected to OneGate again; they can still use any other
                     method switched on here. Nothing here needs changing — this setting is kept as it is and
                     starts working again on its own once the connection returns.
                   </p>
@@ -380,8 +406,7 @@ export default function SignInMethodsPage() {
             <div className="min-w-0 space-y-1">
               <CardTitle className="flex items-center gap-2 [&_svg]:size-4"><Users aria-hidden /> Social login</CardTitle>
               <CardDescription>
-                The guest signs in with an existing account such as Google. Each provider is offered
-                individually, because each needs its own credentials.
+                The guest signs in with an existing account such as Google.
               </CardDescription>
             </div>
           </CardHeader>

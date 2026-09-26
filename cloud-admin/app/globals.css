@@ -6,7 +6,7 @@
 @tailwind utilities;
 
 /*
-  THE VELONET DESIGN SYSTEM, in this console.
+  THE ONEGATE DESIGN SYSTEM, in this console.
 
   The token VALUES live in design-system/tokens.css at the repository root and are copied here as
   app/tokens.css by tools/sync-design-tokens.mjs (a unit test fails if the copy drifts). This file only

@@ -30,6 +30,7 @@ import { Hint, Input, Label, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
+import { HelpList, HelpSection } from "@/components/help";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody, DialogFooter } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetBody, SheetFooter, SheetSection } from "@/components/ui/sheet";
@@ -246,7 +247,30 @@ export default function ServicePlansPage() {
         icon={<Gauge />}
         eyebrow="Internet offering"
         title="Service plans"
-        description="A service plan is the technical service a guest receives: how fast it is, how many devices it covers, and how much data and time it includes. Each internet package hands out one plan."
+        description="The speed, devices, data and time a package hands out."
+        help={
+          <>
+            <HelpSection title="What a service plan is">
+              <p>
+                A service plan is the technical service a guest receives: how fast it is, how many devices it
+                covers, and how much data and time it includes. Each internet package hands out one plan.
+              </p>
+              <p>A plan reaches guests only through the packages that hand it out.</p>
+            </HelpSection>
+            <HelpSection title="Saved versions">
+              <p>
+                Every saved change is kept permanently. A guest keeps the terms that applied when they connected.
+                When a plan changes, you choose which packages give the new settings to future guests.
+              </p>
+            </HelpSection>
+            <HelpSection title="How the speed is shared">
+              <HelpList items={[
+                <><strong>Per device</strong>: every device gets the full speed.</>,
+                <><strong>Shared</strong>: the whole allowance goes to whichever devices are actually using it, so one device alone still gets the full speed. It is not divided into fixed portions.</>,
+              ]} />
+            </HelpSection>
+          </>
+        }
         actions={writable && !unavailable && <Button onClick={() => startNew()}><Plus /> Add plan</Button>}
       />
 
@@ -320,7 +344,7 @@ export default function ServicePlansPage() {
           <EmptyState
             icon={<Gauge />}
             title="The internet offering is not switched on for this appliance"
-            hint="Service plans and internet packages become available once this capability is enabled for the site. Contact your Velonet administrator." />
+            hint="Service plans and internet packages become available once this capability is enabled for the site. Contact your Semantics administrator." />
         </CardBody></Card>
       ) : (
         <Card>
@@ -460,8 +484,7 @@ export default function ServicePlansPage() {
                       { label: "Longest single session", value: p.max_continuous_session_seconds ? formatDuration(p.max_continuous_session_seconds) : "No limit" },
                     ]} />
                   </SheetSection>
-                  <SheetSection title="Packages using it"
-                    description="A plan reaches guests only through the packages that hand it out.">
+                  <SheetSection title="Packages using it">
                     {using.length === 0 ? (
                       <p className="text-sm text-muted-foreground">No package uses this plan.</p>
                     ) : (
@@ -478,8 +501,7 @@ export default function ServicePlansPage() {
                       </ul>
                     )}
                   </SheetSection>
-                  <SheetSection title="Saved versions"
-                    description="Every saved change is kept permanently. A guest keeps the terms that applied when they connected.">
+                  <SheetSection title="Saved versions">
                     <ErrorBanner err={revsErr} />
                     {revs === null && !revsErr ? <SkeletonRows rows={2} cols={1} /> : (
                       <Timeline emptyLabel="No saved versions yet"
@@ -625,11 +647,7 @@ export default function ServicePlansPage() {
                   <option value="PER_DEVICE">Per device — every device gets the full speed</option>
                   <option value="SHARED">Shared — all the guest&rsquo;s devices share the speed</option>
                 </Select>
-                <Hint>
-                  Shared gives the whole allowance to whichever devices are actually using it, so one device alone
-                  still gets the full speed. It is not divided into fixed portions. Shared needs a download and
-                  upload speed to share.
-                </Hint>
+                <Hint>Shared needs a download and upload speed to share.</Hint>
               </div>
 
               <div className="sm:col-span-2">

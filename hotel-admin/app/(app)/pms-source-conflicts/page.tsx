@@ -22,7 +22,8 @@ import { Card } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { ErrorBanner } from "@/components/ui/error-banner";
+import { HelpSection } from "@/components/help";
 import { MonoId, SkeletonRows } from "@/components/ui/misc";
 
 const SEVERITY: Record<string, { tone: "err" | "warn" | "info"; label: string }> = {
@@ -83,7 +84,23 @@ export default function PMSSourceConflictsPage() {
         eyebrow="Property management system"
         title="Duplicate sources"
         icon={<Layers />}
-        description="Two PMS connections claiming the same rooms. Until one of them is given authority, guests in the contested rooms cannot be verified."
+        description="PMS connections claiming the same rooms; guests in contested rooms cannot be verified until one is given authority."
+        help={
+          <>
+            <HelpSection title="What a duplicate source is">
+              <p>
+                Two PMS connections claiming the same rooms. Until one of them is given authority, guests in the
+                contested rooms cannot be verified.
+              </p>
+            </HelpSection>
+            <HelpSection title="Nothing is changed from here">
+              <p>
+                This list is for information. Which connection is authoritative is set on{" "}
+                <Link href="/pms-interfaces" className="font-medium underline underline-offset-2">PMS connection</Link>.
+              </p>
+            </HelpSection>
+          </>
+        }
       />
 
       <ErrorBanner err={err} />
@@ -95,11 +112,6 @@ export default function PMSSourceConflictsPage() {
           <StatCard label="Not decided yet" value={counts.open.toLocaleString()} tone={counts.open > 0 ? "warn" : "default"} />
         </div>
       )}
-
-      <Callout tone="neutral">
-        This list is for information: nothing is changed from here. Which connection is authoritative is set on{" "}
-        <Link href="/pms-interfaces" className="font-medium underline underline-offset-2">PMS connection</Link>.
-      </Callout>
 
       <Card className="overflow-hidden">
         {rows === null ? (

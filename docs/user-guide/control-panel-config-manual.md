@@ -1,7 +1,7 @@
-# Velonet Central — Configuration Manual
+# OneGate Central — Configuration Manual
 
 Step-by-step instructions for setting up customers, sites, appliances and
-licenses in **Velonet Central** (also called the Control Panel or Cloud Admin).
+licenses in **OneGate Central** (also called the Control Panel or Cloud Admin).
 For a description of what each page shows, see
 [control-panel-reference.md](control-panel-reference.md).
 
@@ -48,7 +48,7 @@ they are **not** Sites. A hotel with two buildings on one uplink is still one Si
      customers** mode you must choose it here. A Site always has exactly one
      owner.
    - **Code** — short and unique, e.g. `hurghada` or `marina`.
-   - **Name** — the property name, e.g. `Coral Sea Resort Hurghada`.
+   - **Name** — the property name, e.g. `Semantics Demo Hotel`.
    - **Timezone** — optional, defaults to `UTC` (e.g. `Africa/Cairo`).
    - **Country** — optional two-letter code (e.g. `EG`).
 5. Click **Create site**.
@@ -186,4 +186,4 @@ still blocked, the dialog tells you exactly what remains.
 | Review who changed what | Audit log | filter by action |
 
 A hotel's own networks, guests, sessions and appliance health are not managed in
-Central; they are in **Velonet Hotel Admin** on the appliance.
+Central; they are in **OneGate Hotel Admin** on the appliance.

@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 const buttonVariants = cva(
   cn(
     "inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium",
-    "transition-[background-color,border-color,color,box-shadow] duration-press ease-velonet",
+    "transition-[background-color,border-color,color,box-shadow] duration-press ease-onegate",
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
     "disabled:pointer-events-none disabled:opacity-50",
     // Icons sent in as children should never be squashed by a flex parent.
@@ -20,7 +20,7 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        // THE VELONET BUTTON FAMILY. primary: the brand fill, the ONE main action a screen exists for.
+        // THE ONEGATE BUTTON FAMILY. primary: the brand fill, the ONE main action a screen exists for.
         // secondary: surface with an ink border, every other real action. quiet (ghost): transparent with a
         // slate label, for dismiss/cancel/tertiary. Hover lifts with a short shallow shadow; press sinks
         // with an inset one over 80ms. No bounce, no spring.

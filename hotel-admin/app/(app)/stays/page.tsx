@@ -27,6 +27,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, ListResp, Stay, StayDetail } from "@/lib/api";
 import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
+import { HelpSection } from "@/components/help";
 import { Card, CardBody } from "@/components/ui/card";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -128,7 +129,28 @@ export default function StaysPage() {
       <PageHeader
         eyebrow="Guests"
         title="Stays"
-        description="What the property management system reports about who is in the building, and which internet package each room has been given. Stays themselves are changed in the PMS, not here."
+        description="Who the PMS reports in the building, and the internet each room has."
+        help={
+          <>
+            <HelpSection title="Where stays come from">
+              <p>
+                This is what the property management system reports about who is in the building, and which
+                internet package each room has been given. Stays themselves are changed in the PMS, not here.
+              </p>
+            </HelpSection>
+            <HelpSection title="Internet packages on a stay">
+              <p>
+                A stay has a package once a guest from that room has signed in and been given one &mdash; a package
+                is granted at sign-in, not at check-in. A room with no package is not a fault: it usually means
+                nobody from it has connected yet.
+              </p>
+              <p>A stay&rsquo;s details show how many of the allowed devices are online right now.</p>
+            </HelpSection>
+            <HelpSection title="Search">
+              <p>Search runs in your browser over the most recent 200 stays for the selected status.</p>
+            </HelpSection>
+          </>
+        }
       />
 
       <ErrorBanner err={err} />
@@ -352,8 +374,7 @@ export default function StaysPage() {
                 </>
               ) : (
                 <p className="text-sm text-muted-foreground">
-                  No internet package has been given to this stay. That normally means nobody from the room has
-                  signed in yet — a package is granted at sign-in, not at check-in.
+                  No internet package has been given to this stay yet.
                 </p>
               )}
             </section>

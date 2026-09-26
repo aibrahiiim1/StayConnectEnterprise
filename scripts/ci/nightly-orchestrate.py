@@ -6,7 +6,7 @@ adversarially by tools/tests/nightly_delivery/run_negative.py; nothing here deci
 
 THE SEQUENCE, and what each step refuses:
 
-  1. schedule sanity   the run really started near 03:10 Africa/Cairo. The platform owns the timezone
+  1. schedule sanity   the run really started near 06:00 Africa/Cairo. The platform owns the timezone
                        (one `cron:` with `timezone: Africa/Cairo`); this verifies it honoured it.
   2. one candidate     exactly one open, non-draft, non-held pull request to master. Zero is a quiet no-op;
                        two is a hard refusal.

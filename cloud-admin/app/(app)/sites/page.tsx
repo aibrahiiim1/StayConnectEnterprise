@@ -22,6 +22,7 @@ import { AllCustomersNotice, CustomerScope } from "@/components/customer-scope";
 import { RoleRestricted } from "@/components/role-restricted";
 import { usePermissions } from "@/lib/permissions";
 import { formatRelative } from "@/lib/utils";
+import { HelpList, HelpSection } from "@/components/help";
 
 type StatusFilter = "all" | "active" | "archived";
 
@@ -168,7 +169,31 @@ export default function SitesPage() {
         eyebrow="Infrastructure"
         title="Sites"
         icon={<MapPin />}
-        description="A site is one physical property — one hotel or resort. It belongs to exactly one customer and holds one or more appliances. Buildings, floors, SSIDs and guest networks are configured on the appliance; they are not sites."
+        description="Each site is one physical property of a customer."
+        help={
+          <>
+            <HelpSection title="What a site is">
+              <p>
+                A site is one physical property: one hotel or resort. It belongs to exactly one customer and holds
+                one or more appliances.
+              </p>
+              <p>
+                Buildings, floors, SSIDs and guest networks are configured on the appliance, in Hotel Admin. They
+                are not sites.
+              </p>
+            </HelpSection>
+            <HelpSection title="Creating and changing sites">
+              <HelpList
+                items={[
+                  <>A new site is created under the customer selected in the sidebar. In <strong>All customers</strong> mode creation is disabled.</>,
+                  <>The site <strong>code</strong> is short and unique and cannot be changed later; the name, timezone and country can.</>,
+                  <><strong>Archive</strong> hides a site without deleting it; <strong>Restore</strong> brings it back.</>,
+                  <><strong>Delete</strong> is permanent and asks you to type the site code.</>,
+                ]}
+              />
+            </HelpSection>
+          </>
+        }
         actions={
           canRead && canWrite ? (
             <Button onClick={() => { setCreateErr(null); setShowNew(true); }} disabled={!canCreate}>
@@ -296,11 +321,11 @@ export default function SitesPage() {
               <Input value={selectedTenantName} readOnly disabled />
             </Field>
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Code" required hint="Short and unique, e.g. hurghada.">
-                <Input name="code" required placeholder="hurghada" />
+              <Field label="Code" required hint="Short and unique, e.g. demo-hotel.">
+                <Input name="code" required placeholder="demo-hotel" />
               </Field>
               <Field label="Name" required>
-                <Input name="name" required placeholder="Coral Sea Resort Hurghada" />
+                <Input name="name" required placeholder="Semantics Demo Hotel" />
               </Field>
               <Field label="Timezone" hint="Defaults to UTC.">
                 <Input name="timezone" placeholder="UTC" />

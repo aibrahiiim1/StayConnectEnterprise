@@ -64,8 +64,10 @@ describe("colour only ever comes from a theme token", () => {
   const LITERAL = /\b(?:text|bg|border|ring|from|to|via|fill|stroke)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}\b/g;
 
   it("no component uses a literal Tailwind palette colour", () => {
+    const EXEMPT = new Set<string>();
     const offenders: string[] = [];
     for (const f of SOURCES) {
+      if (EXEMPT.has(rel(f))) continue;
       for (const m of read(f).matchAll(LITERAL)) offenders.push(`${rel(f)} :: ${m[0]}`);
     }
     expect(offenders, `literal palette colours are not theme-aware:\n${offenders.join("\n")}`).toEqual([]);
@@ -81,10 +83,14 @@ describe("colour only ever comes from a theme token", () => {
     // admin's colours instead of the hotel's, which is the opposite of what the screen is for.
     //
     // Scoped to the single file rather than to a pattern, so a hex added anywhere else still fails.
-    const EXEMPT = "app/(app)/portal-branding/page.tsx";
+    //
+    // The OneGate wordmark (components/brand.tsx) is the second: its green gradient and its black "Gate" are the
+    // brand itself and stay the same on every surface -- on a dark surface the mark sits on a light tile rather
+    // than changing colour. Tokens would let a theme recolour the logo, which is exactly what must not happen.
+    const EXEMPT = new Set(["app/(app)/portal-branding/page.tsx", "components/brand.tsx"]);
     const offenders: string[] = [];
     for (const f of SOURCES) {
-      if (rel(f) === EXEMPT) continue;
+      if (EXEMPT.has(rel(f))) continue;
       for (const m of read(f).matchAll(/#[0-9a-fA-F]{6}\b/g)) offenders.push(`${rel(f)} :: ${m[0]}`);
     }
     expect(offenders, `hard-coded hex colours bypass the token system:\n${offenders.join("\n")}`).toEqual([]);

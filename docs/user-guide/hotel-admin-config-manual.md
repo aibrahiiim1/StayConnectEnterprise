@@ -1,6 +1,6 @@
-# Velonet Hotel Admin — Configuration Manual
+# OneGate Hotel Admin — Configuration Manual
 
-Step-by-step instructions for configuring an appliance from **Velonet Hotel
+Step-by-step instructions for configuring an appliance from **OneGate Hotel
 Admin**, the console on the appliance. For a description of what each page shows,
 see [hotel-admin-reference.md](hotel-admin-reference.md).
 
@@ -21,7 +21,7 @@ settings → Operators.
 ## 1. Connect the appliance to Central
 
 **The normal path is zero-touch — you type nothing on the appliance.** A
-factory-clean appliance with internet registers itself with Velonet Central and
+factory-clean appliance with internet registers itself with OneGate Central and
 appears on Central's **Onboarding** page as **Pending activation**, where a
 Central operator activates it. See the Central manual, "Onboard & activate an
 Appliance."
@@ -29,7 +29,7 @@ Appliance."
 Everything about this lives on **System → Appliance & licence** (`/appliance`),
 tab **Appliance setup**:
 
-- **Online** (recommended) shows the appliance's serial and whether Velonet
+- **Online** (recommended) shows the appliance's serial and whether OneGate
   Central is reachable. Once it is activated in Central, a three-phase progress
   runs — **Connect → Verify → Ready** — and ends with *"This appliance is
   connected"* and **Setup complete**.
@@ -56,7 +56,7 @@ itself and installs it; the **Licence** tab flips to **Active**.
 
 **Offline:**
 1. On **Appliance & licence → Licence**, copy the **Serial number** and **WAN MAC
-   address** (large, with copy buttons) and send them to your Velonet contact.
+   address** (large, with copy buttons) and send them to your Semantics contact.
 2. You receive a signed license file generated for that exact serial and WAN MAC
    (Central: *Licenses → Download for offline*).
 3. On the **Licence** tab → **Upload licence file**. The appliance checks that the
@@ -72,7 +72,7 @@ itself and installs it; the **Licence** tab flips to **Active**.
   stay up.
 - **Licensed capacity reached** — new guest logins are refused until someone goes
   offline.
-- **Hardware mismatch** — the WAN network card changed; ask Velonet to rebind the
+- **Hardware mismatch** — the WAN network card changed; ask Semantics to rebind the
   license.
 - **Connection to Central** — *Used for: Licensing only*.
 

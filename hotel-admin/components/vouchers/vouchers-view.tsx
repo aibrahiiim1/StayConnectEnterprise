@@ -32,6 +32,7 @@ import { Field, Select } from "@/components/ui/input";
 import { SkeletonRows } from "@/components/ui/misc";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { PageHeader, PageShell, StatCard, Toolbar } from "@/components/ui/page";
+import { HelpList, HelpSection } from "@/components/help";
 import { Table, TableWrap, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -228,7 +229,39 @@ export function VouchersView(props: {
         icon={<Ticket />}
         eyebrow="Internet offering"
         title="Vouchers"
-        description="Printed cards a guest redeems for internet access. Showing or exporting a code needs your password and is recorded."
+        description="Printed cards a guest redeems for internet access."
+        help={
+          <>
+            <HelpSection title="Four jobs">
+              <HelpList items={[
+                <><strong>Issue</strong> prints a batch. The codes appear once, in the issue dialog.</>,
+                <><strong>Show code</strong> recovers one code for a card already in circulation.</>,
+                <><strong>Export</strong> recovers a whole batch, with one record naming the size of the selection.</>,
+                <><strong>Cancel</strong> ends an unused card that has not expired. A used card cannot be cancelled: that guest already has access.</>,
+              ]} />
+            </HelpSection>
+            <HelpSection title="Showing and exporting codes">
+              <p>
+                A voucher code is encrypted, not hashed, so it can be read again. Showing or exporting a code needs
+                your password and a reason, and is recorded permanently with your name. The Access log lists every
+                reveal and export.
+              </p>
+            </HelpSection>
+            <HelpSection title="Card status">
+              <p>
+                Expiry is enforced when a guest signs in: a card past its valid-until is refused there, while its
+                record still says unused. The statuses here show what each card is right now.
+              </p>
+            </HelpSection>
+            <HelpSection title="Code format and keys">
+              <p>
+                The code format applies to the next batch you issue; cards already printed keep working. Every code
+                is indexed under a key, and each card stays tied to the key that made it. Retiring a key means new
+                batches use a fresh one.
+              </p>
+            </HelpSection>
+          </>
+        }
         actions={
           <>
             {canReadFormat && (

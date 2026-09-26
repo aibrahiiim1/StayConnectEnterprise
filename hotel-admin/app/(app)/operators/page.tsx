@@ -29,6 +29,7 @@ import { useToast } from "@/components/ui/toast";
 import { Plus, X, Users } from "lucide-react";
 import { canWrite, SITE_ROLES, ROLE_LABELS, SiteRole } from "@/lib/roles";
 import { formatRelative } from "@/lib/utils";
+import { HelpList, HelpSection } from "@/components/help";
 
 const MIN_PASSWORD = 10;
 
@@ -157,7 +158,36 @@ export default function OperatorsPage() {
         icon={<Users />}
         eyebrow="System"
         title="Operators"
-        description="Staff accounts for this appliance. They are local to this property — they are not cloud accounts and do not exist on any other site."
+        description="Staff accounts that can sign in to this appliance."
+        help={
+          <>
+            <HelpSection title="Local accounts">
+              <p>
+                Operators are local to this property. They are not cloud accounts and do not exist on any other site.
+              </p>
+            </HelpSection>
+            <HelpSection title="Roles">
+              <HelpList
+                items={[
+                  "A role decides what an operator can see and change. An operator can hold several.",
+                  "An operator with no role can sign in but cannot see anything.",
+                  "Adding or removing a role is confirmed first, because it changes what someone can do.",
+                  "You cannot remove your own Site admin role, or disable your own account.",
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="Passwords and disabling">
+              <HelpList
+                items={[
+                  `Passwords must be at least ${MIN_PASSWORD} characters and are typed twice when changed.`,
+                  "Changing a password does not end the operator's current sessions.",
+                  "A disabled operator can no longer sign in.",
+                ]}
+              />
+            </HelpSection>
+          </>
+        }
+
         actions={writable && <Button onClick={openNew}><Plus /> Add operator</Button>}
       />
 

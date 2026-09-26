@@ -7,13 +7,14 @@ import {
 } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
 import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
+import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody } from "@/components/ui/card";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input, Field } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { ErrorBanner } from "@/components/ui/error-banner";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody,
   ConfirmDialog,
@@ -250,7 +251,30 @@ export default function GuestAccountsPage() {
         eyebrow="Guests"
         title="Guest accounts"
         icon={<KeyRound />}
-        description="A username and password a guest can sign in with, instead of a room number or a voucher. What each guest may then take is decided by the eligibility rules on Internet packages, not by anything stored on the account."
+        description="Usernames and passwords guests can sign in with."
+        help={
+          <>
+            <HelpSection title="What a guest account is">
+              <p>
+                A username and password a guest can sign in with, instead of a room number or a voucher.
+              </p>
+            </HelpSection>
+            <HelpSection title="What a guest can take">
+              <p>
+                Decided by the eligibility rules on each internet package, not by anything stored on the account.
+                The licence capacity is appliance-wide.
+              </p>
+            </HelpSection>
+            <HelpSection title="Good to know">
+              <HelpList items={[
+                "Accounts can only be used while username-and-password sign-in is offered on the guest portal.",
+                "A password is shown once, when it is set. It cannot be looked up again; if it is lost, set a new one.",
+                "An account is locked out after too many failed sign-in attempts.",
+                "Disable an account to stop it being used for now; that can be reversed. Deleting cannot.",
+              ]} />
+            </HelpSection>
+          </>
+        }
         actions={
           // This button used to be disabled whenever there were no active guest access plans, which under
           // IAM-v2 meant permanently. It is no longer gated on anything but the operator's role.
@@ -607,13 +631,11 @@ function AccountForm({ account, onSubmit, busy, withPassword, onCancel }: {
         An account carries no plan, so there is nothing to choose here and nothing to wait for. This block
         used to be a five-way branch -- authority unknown, plans loading, plans failed, plans empty, plans
         present -- every arm of which existed to describe a superseded prerequisite. It says the one thing
-        that is now true instead.
+        that is now true instead. One line, visible while the form is filled: it answers "where do I pick the plan?".
       */}
-      <Callout tone="neutral" title="What this guest can take">
-        Decided by the eligibility rules on each internet package, not by anything stored on the account. The
-        licence capacity is appliance-wide.
-      </Callout>
-
+      <p className="text-caption text-muted-foreground">
+        What this guest can take is decided by the eligibility rules on each internet package.
+      </p>
       <div className="flex justify-end gap-2 border-t border-border pt-4">
         {onCancel && <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>}
         <Button type="submit" disabled={busy}>

@@ -34,6 +34,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner, Callout } from "@/components/ui/error-banner";
+import { HelpList, HelpSection } from "@/components/help";
 import { SkeletonRows, DList, MonoId } from "@/components/ui/misc";
 import { DetailDialog } from "@/components/ui/dialog";
 import { SearchInput } from "@/components/ui/data";
@@ -362,7 +363,36 @@ export default function GuestSignInAttemptsPage() {
         eyebrow="Property management system"
         title="Guest sign-in attempts"
         icon={<UserX />}
-        description="The desk's “why can't this guest get online?” tool: every Connect submission, why it succeeded or failed, and — for roles allowed to see guest credentials — what the guest entered beside what would have been accepted. Kept for 30 days."
+        description="Every Connect submission and why it succeeded or failed."
+        help={
+          <>
+            <HelpSection title="What this page is for">
+              <p>
+                The desk&rsquo;s &ldquo;why can&rsquo;t this guest get online?&rdquo; tool: every Connect
+                submission, why it succeeded or failed, and — for roles allowed to see guest credentials — what the
+                guest entered beside what would have been accepted. Attempts are kept for 30 days.
+              </p>
+            </HelpSection>
+            <HelpSection title="Reading the figures">
+              <HelpList
+                items={[
+                  <><strong>Details did not match</strong> — a wrong value, or a room the guest list does not hold.</>,
+                  <><strong>System-side failures</strong> — refused because the guest list was out of date, the network routing, or an internal fault. Nothing the guest typed could have helped, and the guest saw &ldquo;we are unable to verify your stay right now&rdquo;.</>,
+                  <><strong>Guest-list age</strong> — how old the appliance&rsquo;s copy of the guest list was when the attempt was checked.</>,
+                ]}
+              />
+            </HelpSection>
+            {maySeeRestrictions && (
+              <HelpSection title="Active restrictions">
+                <p>
+                  Devices currently being asked to wait after too many incorrect sign-in details. A device disappears
+                  from that list on its own when its wait ends. The room shown is the last room that device{" "}
+                  <strong>typed</strong> — it is not a statement about who is using it or where they are staying.
+                </p>
+              </HelpSection>
+            )}
+          </>
+        }
       />
 
       <ErrorBanner err={err} />

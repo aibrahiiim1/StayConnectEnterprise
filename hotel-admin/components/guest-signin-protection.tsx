@@ -16,10 +16,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { ShieldAlert } from "lucide-react";
 import { api, GuestSignInProtection } from "@/lib/api";
-import { Card, CardBody, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardBody, CardFooter, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { HelpSection, HelpTip } from "@/components/help";
 import { Skeleton } from "@/components/ui/misc";
 import { ReadOnlyNotice, SettingField } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
@@ -112,12 +113,20 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
         <div className="min-w-0 space-y-1">
           <CardTitle className="flex flex-wrap items-center gap-2">
             <ShieldAlert className="size-4 text-muted-foreground" aria-hidden /> Guest sign-in protection
+            <HelpTip title="Guest sign-in protection">
+              <HelpSection>
+                <p>
+                  After too many incorrect sign-in details from the <strong>same device</strong>, that device is
+                  asked to wait before it can try again. It protects guests from someone working through room
+                  numbers, and it is always on — these settings decide how strict it is, not whether it runs.
+                </p>
+              </HelpSection>
+            </HelpTip>
             {policy.is_default && <Badge tone="default">Using the standard settings</Badge>}
           </CardTitle>
+          {/* Visible on purpose: "standard settings" must never read as "protection is off". */}
           <CardDescription className="max-w-2xl">
-            After too many incorrect sign-in details from the <strong>same device</strong>, that device is asked
-            to wait before it can try again. It protects guests from someone working through room numbers, and it
-            is always on — these settings decide how strict it is, not whether it runs.
+            It is always on — these settings decide how strict it is, not whether it runs.
           </CardDescription>
         </div>
       </CardHeader>

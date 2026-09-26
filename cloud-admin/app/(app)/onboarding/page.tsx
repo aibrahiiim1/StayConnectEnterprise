@@ -25,6 +25,7 @@ import { RoleRestricted } from "@/components/role-restricted";
 import { usePermissions } from "@/lib/permissions";
 import { statusWord } from "@/lib/license-state";
 import { cn, formatRelative } from "@/lib/utils";
+import { HelpList, HelpSection } from "@/components/help";
 
 /**
  * Onboarding — connect an appliance. Pick a Pending appliance, choose Customer/Site + license terms, click
@@ -328,7 +329,55 @@ export default function OnboardingPage() {
         eyebrow="Infrastructure"
         title="Onboarding"
         icon={<PlugZap />}
-        description="Connect an appliance. A factory-clean appliance with internet appears here by itself: select it, choose its customer, site and license terms, and activate it once. Assignment, certificate and the signed license all happen for you."
+        description="Activate appliances that are waiting to be connected."
+        help={
+          <>
+            <HelpSection title="How activation works">
+              <p>
+                A factory-clean appliance with internet access registers itself and appears under{" "}
+                <strong>Pending activation</strong> within seconds. No token is needed.
+              </p>
+              <HelpList
+                items={[
+                  <>Select the pending appliance.</>,
+                  <>Choose its customer and site (existing, or create new ones here) and its license terms.</>,
+                  <>Confirm your password and click <strong>Activate</strong> once.</>,
+                  <>Central assigns it, issues its certificate and its signed hardware-bound license; the appliance then converges to Active on its own.</>,
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="License terms">
+              <HelpList
+                items={[
+                  <><strong>Max concurrent online guests</strong>: 0 means unlimited; the limit covers the whole appliance and all its guest networks.</>,
+                  <><strong>Valid until</strong>: empty means 365 days from now.</>,
+                  <><strong>Grace period</strong>: after expiry, guests are still served, with warnings, for this many days.</>,
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="Offline activation">
+              <p>
+                For an appliance with no route to Central: import the activation request it produced, activate it
+                here as usual, then download its <strong>Activation package</strong> from Registered appliances
+                and upload it in Hotel Admin under Appliance &amp; licence. The package is valid for 7 days and
+                single use.
+              </p>
+              <p>
+                The request file only registers the appliance. Customer, site and license terms are always chosen
+                here, by an operator.
+              </p>
+            </HelpSection>
+            <HelpSection title="Resets and recovery">
+              <HelpList
+                items={[
+                  <><strong>Deactivate</strong> revokes the license; activate the appliance again to restore it.</>,
+                  <><strong>Delete</strong> removes the appliance, its license, assignment and certificate. The appliance then reappears as Pending. Delete the site or customer from their own pages if you also want those gone.</>,
+                  <><strong>Advanced Support</strong> reveals elevated actions (reissue certificate, force reconcile, decommission). Each asks for a reason, which is audited.</>,
+                ]}
+              />
+            </HelpSection>
+          </>
+        }
       />
 
       {!canRead ? (
@@ -564,11 +613,7 @@ export default function OnboardingPage() {
             <CardHeader>
               <div className="space-y-0.5">
                 <CardTitle>Offline activation</CardTitle>
-                <CardDescription>
-                  For an appliance with no route to Central. Import the activation request it produced, activate it
-                  above as usual, then download its activation package from Registered appliances to carry back.
-                  The file only registers the appliance — customer, site and license terms are chosen here, by you.
-                </CardDescription>
+                <CardDescription>For an appliance with no route to Central.</CardDescription>
               </div>
             </CardHeader>
             <CardBody>
@@ -688,14 +733,7 @@ export default function OnboardingPage() {
                   ))}
                 </tbody>
               </Table>
-              {canManage && (
-              <CardFooter className="block text-caption text-muted-foreground">
-                <strong className="font-semibold text-foreground">Deactivate</strong> revokes the license (activate again to
-                restore). <strong className="font-semibold text-foreground">Delete</strong> removes the appliance, its license,
-                assignment and certificate — the appliance then reappears above as Pending. Delete the site or customer
-                from their own pages if you also want those gone.
-              </CardFooter>
-              )}
+
             </Card>
           )}
         </>

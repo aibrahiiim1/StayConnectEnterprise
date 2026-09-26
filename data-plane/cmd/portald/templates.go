@@ -22,7 +22,100 @@ const (
 	iconWifi     = svgOpen + ` stroke-width="2"><path d="M5 12.6a10.5 10.5 0 0 1 14 0M1.9 9.1a15 15 0 0 1 20.2 0M8.5 16.1a5.5 5.5 0 0 1 7 0"/><path d="M12 20h.01"/></svg>`
 	iconCheck    = svgOpen + ` stroke-width="2.4"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>`
 	iconAlert    = svgOpen + ` stroke-width="2.2"><path d="M12 7.5v6M12 17v.1"/></svg>`
+	iconBulb     = svgOpen + `><path d="M9.5 18h5M10.5 21h3"/><path d="M12 3a6 6 0 0 0-3.7 10.7c.8.7 1.2 1.4 1.2 2.3v.5h5V16c0-.9.4-1.6 1.2-2.3A6 6 0 0 0 12 3z"/></svg>`
+	iconClose    = svgOpen + ` stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>`
 )
+
+// ---- the help sheet and the product attribution, on every guest page ---------------------------------------
+
+// helpOpen opens the lightbulb and its sheet. It is a <details>: with no script the lightbulb is a native
+// disclosure that shows the tips in place, keyboard-operable with nothing added. guestHelpScript upgrades it
+// to a modal sheet (role="dialog", focus kept inside, Esc and the backdrop close it, focus returns to the
+// lightbulb). The tips explain; they never carry an error, a countdown or a notice -- those stay on the page.
+const helpOpen = `
+<details class="sc-help" id="sc-help"><summary class="help-btn" data-i18n-aria="help.button" aria-label="{{index .T "help.button"}}" title="{{index .T "help.button"}}">` + iconBulb + `</summary><div class="help-sheet" id="sc-help-sheet"><div class="help-card">
+<div class="help-head"><h2 class="help-title" id="sc-help-title" data-i18n="help.title" data-i18n-en="Help with signing in">{{index .T "help.title"}}</h2><button type="button" class="help-close" data-help-close data-i18n-aria="help.close" aria-label="{{index .T "help.close"}}" title="{{index .T "help.close"}}">` + iconClose + `</button></div>`
+
+// helpClose ends the sheet: what to do when something does not work, and the hotel's own help line.
+const helpClose = `
+<p class="help-fail" data-i18n="help.fail" data-i18n-en="Something not working? Please contact reception — they are happy to help.">{{index .T "help.fail"}}</p>
+<p class="help-hotel" id="help-hotel" dir="auto"{{if not .Brand.Help}} hidden{{end}}>{{.Brand.Help}}</p>
+</div></div></details>`
+
+// ogAttribution is the product's one line on a guest page: small, at the foot, after everything the hotel
+// says. "OneGate" is a name and is never translated; it sits on a light chip so the black half stays black on
+// any surface a hotel chooses, and it is isolated left-to-right so an Arabic page keeps it whole.
+const ogAttribution = `
+<p class="sc-by"><span data-i18n="brand.by" data-i18n-en="Wi-Fi by">{{index .T "brand.by"}}</span> <bdi class="og-mark" dir="ltr" lang="en"><b class="og-one">One</b><b class="og-gate">Gate</b></bdi></p>`
+
+// guestFoot is the foot of every page after sign-in: the lightbulb (general help and the hotel's line) and the
+// attribution.
+const guestFoot = `
+<div class="sc-foot sc-foot--page">` + helpOpen + helpClose + ogAttribution + `
+</div>`
+
+// guestHelpScript turns the <details> into a modal sheet. Presentation only: it opens and closes a panel that
+// is already on the page.
+const guestHelpScript = `
+<script nonce="{{.Nonce}}">
+(function () {
+  var d = document.getElementById('sc-help');
+  var sheet = document.getElementById('sc-help-sheet');
+  if (!d || !sheet) return;
+  var sum = d.querySelector('summary');
+  // The sheet moves to <body>: a card with a backdrop filter or a transform would otherwise trap a fixed
+  // overlay inside itself. Every id, and every data-i18n the language pass reaches, travels with it.
+  d.open = false;
+  d.setAttribute('data-modal', '');
+  sheet.hidden = true;
+  sheet.className += ' is-modal';
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-modal', 'true');
+  sheet.setAttribute('aria-labelledby', 'sc-help-title');
+  document.body.appendChild(sheet);
+  sum.setAttribute('aria-haspopup', 'dialog');
+  sum.setAttribute('aria-expanded', 'false');
+  function focusables() {
+    var all = sheet.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])');
+    var out = [];
+    for (var i = 0; i < all.length; i++) { if (all[i].offsetWidth || all[i].offsetHeight) out.push(all[i]); }
+    return out;
+  }
+  function show() {
+    sheet.hidden = false;
+    sum.setAttribute('aria-expanded', 'true');
+    document.documentElement.className += ' sc-help-open';
+    var c = sheet.querySelector('[data-help-close]');
+    if (c) c.focus();
+  }
+  function hide() {
+    sheet.hidden = true;
+    sum.setAttribute('aria-expanded', 'false');
+    document.documentElement.className = document.documentElement.className.replace(/(^|\s)sc-help-open(?=\s|$)/g, '');
+    sum.focus();
+  }
+  sum.addEventListener('click', function (e) { e.preventDefault(); if (sheet.hidden) show(); else hide(); });
+  sheet.addEventListener('click', function (e) {
+    // The backdrop, or the close button (or its icon), closes the sheet; a tap on the tips does not.
+    var el = e.target;
+    if (el === sheet) { hide(); return; }
+    while (el && el !== sheet) {
+      if (el.hasAttribute && el.hasAttribute('data-help-close')) { e.preventDefault(); hide(); return; }
+      el = el.parentNode;
+    }
+  });
+  document.addEventListener('keydown', function (e) {
+    if (sheet.hidden) return;
+    if (e.key === 'Escape' || e.key === 'Esc') { e.preventDefault(); hide(); return; }
+    if (e.key !== 'Tab') return;
+    var f = focusables();
+    if (!f.length) { e.preventDefault(); return; }
+    var first = f[0], last = f[f.length - 1], at = document.activeElement;
+    if (e.shiftKey && (at === first || !sheet.contains(at))) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && (at === last || !sheet.contains(at))) { e.preventDefault(); first.focus(); }
+  });
+})();
+</script>`
 
 // guestHead opens every page after sign-in: language, direction, the hotel's layout attributes and colours
 // on <html>, and the stylesheets in the SAME cascade as the sign-in page -- the portal's styling and the
@@ -101,7 +194,8 @@ const guestScripts = `
     location.reload();
   });
 })();
-</script>`
+</script>` + guestHelpScript + `
+`
 
 // ============================================================================================================
 // THE SIGN-IN PAGE
@@ -272,8 +366,6 @@ const landingHTML = `<!doctype html>
 
   <div class="panel" id="panel-social">
     <div id="social-providers"></div>
-    <p class="hint" data-i18n="social.note"
-       data-i18n-en="You'll be redirected to the provider, then back here.">{{index .T "social.note"}}</p>
   </div>
 
   <div class="panel" id="panel-sms">
@@ -316,6 +408,28 @@ const landingHTML = `<!doctype html>
         <a id="brand-terms"{{with .Terms}} href="{{.}}"{{end}} target="_blank" rel="noopener noreferrer"
            data-i18n="terms.link" data-i18n-en="Terms of use">{{index .T "terms.link"}}</a>
       </p>
+      <!-- HELP. The ways in this hotel offers, explained; the script hides the tips for methods that are off. -->
+      ` + helpOpen + `
+      <ul class="help-tips" id="help-tips">
+        <li data-help-method="pms"><strong data-i18n="method.pms" data-i18n-en="Room">{{index .T "method.pms"}}</strong><span data-i18n="help.pms" data-i18n-en="Enter your room number, then the detail asked for below it, exactly as it appears on your reservation.">{{index .T "help.pms"}}</span></li>
+        <li data-help-method="poststay"><strong data-i18n="method.poststay" data-i18n-en="Post-stay">{{index .T "method.poststay"}}</strong><span data-i18n="help.poststay" data-i18n-en="Already checked out? Enter the PIN you were given at checkout to reconnect.">{{index .T "help.poststay"}}</span></li>
+        <li data-help-method="voucher"><strong data-i18n="method.voucher" data-i18n-en="Voucher">{{index .T "method.voucher"}}</strong><span data-i18n="help.voucher" data-i18n-en="Type the code exactly as it is printed on your voucher, then tap Login.">{{index .T "help.voucher"}}</span></li>
+        <li data-help-method="account"><strong data-i18n="method.account" data-i18n-en="Personal account">{{index .T "method.account"}}</strong><span data-i18n="help.account" data-i18n-en="Enter the username and password you were given. If a voucher field is showing, switch on “Use Personal Account” first.">{{index .T "help.account"}}</span></li>
+        <li data-help-method="email"><strong data-i18n="method.email" data-i18n-en="Email">{{index .T "method.email"}}</strong><span data-i18n="help.email" data-i18n-en="Enter your email address and tap Send code, then type the 6-digit code from the email. Check your spam folder if it does not arrive.">{{index .T "help.email"}}</span></li>
+        <li data-help-method="sms"><strong data-i18n="method.sms" data-i18n-en="Phone">{{index .T "method.sms"}}</strong><span data-i18n="help.sms" data-i18n-en="Enter your phone number with the country code and tap Send code, then type the 6-digit code from the text message.">{{index .T "help.sms"}}</span></li>
+        <li data-help-method="social"><strong data-i18n="method.social" data-i18n-en="Social">{{index .T "method.social"}}</strong><span data-i18n="social.note" data-i18n-en="You will be redirected to the provider, then back here.">{{index .T "social.note"}}</span></li>
+      </ul>
+      <p class="help-fail" data-i18n="help.fail" data-i18n-en="Something not working? Please contact reception — they are happy to help.">{{index .T "help.fail"}}</p>
+      <div class="help-device">
+        <strong data-i18n="info.device" data-i18n-en="Your device">{{index .T "info.device"}}</strong>
+        <dl>
+          <dt><span data-i18n="info.ip" data-i18n-en="IP address">{{index .T "info.ip"}}</span></dt><dd dir="ltr">{{if .ClientIP}}{{.ClientIP}}{{else}}<span data-i18n="info.none" data-i18n-en="Not detected">{{index .T "info.none"}}</span>{{end}}</dd>
+          <dt><span data-i18n="info.mac" data-i18n-en="MAC address">{{index .T "info.mac"}}</span></dt><dd dir="ltr">{{if .ClientMAC}}{{.ClientMAC}}{{else}}<span data-i18n="info.none" data-i18n-en="Not detected">{{index .T "info.none"}}</span>{{end}}</dd>
+        </dl>
+        <p data-i18n="info.help" data-i18n-en="Reception may ask for these if you need help connecting.">{{index .T "info.help"}}</p>
+      </div>
+      <p class="help-hotel" id="help-hotel" dir="auto"{{if not .Brand.Help}} hidden{{end}}>{{.Brand.Help}}</p>
+      </div></div></details>
       <button class="info-btn" id="info-btn" type="button" aria-expanded="false" aria-controls="info-panel"
               data-i18n-aria="info.button" aria-label="{{index .T "info.button"}}" title="{{index .T "info.button"}}">` + iconInfo + `</button>
       <div class="info-panel" id="info-panel" hidden>
@@ -325,7 +439,7 @@ const landingHTML = `<!doctype html>
           <dt><span data-i18n="info.mac" data-i18n-en="MAC address">{{index .T "info.mac"}}</span></dt><dd dir="ltr">{{if .ClientMAC}}{{.ClientMAC}}{{else}}<span data-i18n="info.none" data-i18n-en="Not detected">{{index .T "info.none"}}</span>{{end}}</dd>
         </dl>
         <p data-i18n="info.help" data-i18n-en="Reception may ask for these if you need help connecting.">{{index .T "info.help"}}</p>
-      </div>
+      </div>` + ogAttribution + `
     </div>
   </main>
   </div>
@@ -651,6 +765,8 @@ const landingHTML = `<!doctype html>
       document.querySelector('.sc-hero-welcome').textContent = d.welcome_text || '';
       const help = document.getElementById('brand-help');
       help.textContent = d.help_text || ''; help.hidden = !d.help_text;
+      const helpSheet = document.getElementById('help-hotel');
+      helpSheet.textContent = d.help_text || ''; helpSheet.hidden = !d.help_text;
       const terms = document.getElementById('brand-terms');
       if (d.terms_url) { terms.href = d.terms_url; } else { terms.removeAttribute('href'); }
       document.getElementById('brand-terms-wrap').hidden = !d.terms_url;
@@ -831,6 +947,10 @@ const landingHTML = `<!doctype html>
         n.textContent = t('notice.nopackages');
         n.classList.add('show');
       }
+      // THE HELP SHEET explains only the ways in this hotel offers.
+      document.querySelectorAll('[data-help-method]').forEach(function (el) {
+        el.hidden = enabled.indexOf(el.dataset.helpMethod) < 0;
+      });
       if (enabled.length === 0) {
         // NO WAY IN AT ALL: said plainly, with nothing on the page that looks like it might work.
         const none = document.createElement('p');
@@ -1231,6 +1351,7 @@ const landingHTML = `<!doctype html>
       }
     });
   </script>
+` + guestHelpScript + `
 
 </body></html>`
 
@@ -1254,7 +1375,7 @@ const packagesHTML = guestHead + `
     <button class="choice" type="submit"><span class="c-text"><span class="c-name" dir="auto">{{.Name}}</span>{{if .Detail}}<span class="c-detail">{{.Detail}}</span>{{end}}</span>` + iconChevNext + `</button>
   </form>{{end}}
   </div>
-</div>
+</div>` + guestFoot + `
 </main>
 </div>` + guestScripts + `
 <script nonce="{{.Nonce}}">
@@ -1287,7 +1408,7 @@ const errorHTML = guestHead + `
   <h1 class="page-title">{{.Title}}</h1>
   <p class="page-lead" role="alert">{{.Message}}</p>
   <div class="actions"><a class="btn" href="{{.BackHref}}">{{.BackLabel}}</a></div>
-</div>
+</div>` + guestFoot + `
 </main>
 </div>` + guestScripts + `
 </body></html>`
@@ -1318,7 +1439,7 @@ const statusHTML = guestHead + `
     <a class="btn btn--outline" href="{{.BackHref}}">{{index .T "online.back"}}</a>
     <form method="POST" action="/logout"><button class="btn btn--outline" type="submit">{{index .T "online.disconnect"}}</button></form>
   </div>
-</div>
+</div>` + guestFoot + `
 </main>
 </div>` + guestScripts + `
 <script nonce="{{.Nonce}}">
@@ -1667,7 +1788,7 @@ const successHTML = guestHead + `
     load(true);
   })();
   </script>
-</div>
+</div>` + guestFoot + `
 </main>
 </div>` + guestScripts + `
 </body></html>`

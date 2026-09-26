@@ -21,6 +21,7 @@ import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { ArrowLeft, Network, Pencil, Plus, Save, Trash2, X, Pin } from "lucide-react";
 import { cn, errMsg } from "@/lib/utils";
+import { HelpList, HelpSection } from "@/components/help";
 import {
   AddReservationDialog, EditReservationDialog, RemoveReservationDialog, SwitchRow,
   DhcpModeBadge, networkTypeLabel, useNetworkAccess,
@@ -152,9 +153,33 @@ export default function EditGuestNetworkPage() {
             <span className="inline-flex flex-wrap items-center gap-1.5">
               <Badge tone={net.network_type === "vlan" ? "info" : "default"}>{networkTypeLabel(net)}</Badge>
               {enabled ? <Badge tone="ok" dot>Enabled</Badge> : <Badge tone="default">Disabled</Badge>}
-              <span>Saved changes are staged; they reach guests when you apply them from Guest networks.</span>
             </span>
           ) : "Loading the network…"
+        }
+        helpTitle="Guest network"
+        help={
+          <>
+            <HelpSection title="Saving is staging">
+              <p>
+                <strong>Save changes</strong> stages the new settings. Guests keep the previous settings until you
+                validate and apply the changes from <strong>Guest networks</strong>.
+              </p>
+            </HelpSection>
+            <HelpSection title="What cannot be edited">
+              <p>
+                The type, VLAN and parent interface are fixed when the network is created. To change them, delete the
+                network and create a new one.
+              </p>
+            </HelpSection>
+            <HelpSection title="DHCP reservations">
+              <HelpList
+                items={[
+                  "A reservation pins a device (by MAC address) to a fixed address inside this network.",
+                  "Reserved addresses must sit inside the network's subnet.",
+                ]}
+              />
+            </HelpSection>
+          </>
         }
         actions={writable && net && (
           <Button type="submit" form={FORM_ID} disabled={busy}>
@@ -189,10 +214,7 @@ export default function EditGuestNetworkPage() {
             <CardHeader>
               <div className="space-y-1">
                 <CardTitle>Status &amp; topology</CardTitle>
-                <CardDescription>
-                  Fixed when the network was created. To change the type, VLAN or parent interface, delete the network
-                  and create a new one.
-                </CardDescription>
+                <CardDescription>Fixed when the network was created.</CardDescription>
               </div>
             </CardHeader>
             <CardBody>

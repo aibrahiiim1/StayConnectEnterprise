@@ -391,8 +391,7 @@ export function PackagesTab({
                     ]} />
                   </SheetSection>
 
-                  <SheetSection title="Saved versions"
-                    description="Each saved change is kept permanently. A guest keeps the terms that applied when they connected.">
+                  <SheetSection title="Saved versions">
                     <ErrorBanner err={historyErr} />
                     {history === null && !historyErr ? <SkeletonRows rows={2} cols={1} /> : (
                       <Timeline

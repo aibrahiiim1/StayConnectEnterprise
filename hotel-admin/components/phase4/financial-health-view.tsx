@@ -19,6 +19,7 @@ import { Card, CardBody } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader, PageShell, StatCard } from "@/components/ui/page";
+import { HelpList, HelpSection } from "@/components/help";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { Skeleton } from "@/components/ui/misc";
 import { LiveStatus, refreshingClass } from "@/components/ui/patterns";
@@ -100,7 +101,39 @@ export function FinancialHealthView() {
         icon={<HeartPulse />}
         eyebrow="Charges"
         title="Charge health"
-        description="Whether money is moving — room charges posted to the PMS and online payments — and, if not, why."
+        description="Whether money is moving, and if not, why."
+        help={
+          <>
+            <HelpSection title="What this page answers">
+              <p>
+                Whether money is moving — room charges posted to the PMS and online payments — and, if not, why. The
+                status comes first; the reasons under it say what is holding things up. It is a diagnostic screen:
+                the only action is Refresh.
+              </p>
+            </HelpSection>
+            <HelpSection title="The sections">
+              <HelpList
+                items={[
+                  <><strong>PMS posting</strong> — internet charges posted to a guest&rsquo;s room bill in the property management system.</>,
+                  <><strong>Online payment</strong> — payments a guest makes on the portal, and how each one settled.</>,
+                  <><strong>Configuration</strong> — the payment account and provider egress. Provider and merchant account are resolved from site configuration, never chosen per transaction.</>,
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="Unknown outcomes">
+              <p>
+                A posting or payment that ended UNKNOWN is never retried automatically, because nobody knows yet
+                whether the money moved. It is decided on <strong>Manual review</strong>.
+              </p>
+            </HelpSection>
+            <HelpSection title="No guest detail here">
+              <p>
+                Nothing on this screen identifies a guest, a folio, a card or a provider transaction. The detail lives
+                behind Manual review, where every decision is audited.
+              </p>
+            </HelpSection>
+          </>
+        }
         actions={
           <>
             {health && <LiveStatus updatedAt={updatedAt} refreshing={loading} error={!!err} />}
@@ -204,7 +237,6 @@ export function FinancialHealthView() {
               icon={<Wallet />}
               value={health.payment_account_configured ? "Configured" : "Not configured"}
               tone={health.payment_account_configured ? "ok" : "warn"}
-              hint="Provider and merchant account are resolved from site configuration, never chosen per transaction."
             />
             <StatCard
               label="Provider egress"

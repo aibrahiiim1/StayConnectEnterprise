@@ -1,8 +1,8 @@
 # Customer Operator (Tenant Operator) — User Guide
 
-You handle day-to-day Wi-Fi operations for your hotel group. In **Velonet Central** your role is day-to-day work for your customer; most guest-facing work happens on each hotel's appliance in **Velonet Hotel Admin**, with an operator account created for you on that appliance (usually the **Front office operator** or **Hotel IT manager** role). You **cannot** add or remove other staff, change licenses, or delete the customer.
+You handle day-to-day Wi-Fi operations for your hotel group. In **OneGate Central** your role is day-to-day work for your customer; most guest-facing work happens on each hotel's appliance in **OneGate Hotel Admin**, with an operator account created for you on that appliance (usually the **Front office operator** or **Hotel IT manager** role). You **cannot** add or remove other staff, change licenses, or delete the customer.
 
-If you need any of those things, your customer admin (or the Velonet platform admin, for licenses) does it.
+If you need any of those things, your customer admin (or the OneGate platform admin, for licenses) does it.
 
 ## Your daily workflow
 

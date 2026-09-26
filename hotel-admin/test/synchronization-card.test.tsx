@@ -58,8 +58,10 @@ describe("synchronization", () => {
     expect(document.querySelector('[role="progressbar"]')).toBeNull();
   });
 
-  it("explains that the first connection syncs automatically and this asks for another", () => {
+  it("explains that the first connection syncs automatically and this asks for another", async () => {
     render(<SynchronizationCard id="i1" health={health()} onRefreshed={() => {}} />);
+    // The explanation lives behind the section's lightbulb.
+    await userEvent.click(screen.getByRole("button", { name: "Tips: Guest list refresh" }));
     expect(screen.getByText(/first successful connection/i)).toBeInTheDocument();
     expect(screen.getByText(/looks out of date/i)).toBeInTheDocument();
   });

@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { PageHeader, PageShell } from "@/components/ui/page";
+import { HelpList, HelpSection } from "@/components/help";
 import { FilterChips, KeyValueGrid } from "@/components/ui/data";
 import { Skeleton, SkeletonRows } from "@/components/ui/misc";
 import { Sheet, SheetBody, SheetContent, SheetFooter, SheetHeader, SheetSection } from "@/components/ui/sheet";
@@ -97,6 +98,24 @@ export function SettlementsView() {
         eyebrow="Charges"
         title="Settlements"
         description="Whether a guest was actually charged for internet, and what has been given back since."
+        help={
+          <>
+            <HelpSection title="What a settlement is">
+              <p>
+                A settlement records whether a guest was actually charged for internet, and what has been given back
+                since. Open one to see the charge and everything that followed it.
+              </p>
+            </HelpSection>
+            <HelpSection title="Using the list">
+              <HelpList
+                items={[
+                  <>Filter by status to narrow the list. The newest 200 are shown.</>,
+                  <>Where a settlement offers no action, its detail says why.</>,
+                ]}
+              />
+            </HelpSection>
+          </>
+        }
       />
 
       <ErrorBanner err={err} className="mb-0" />

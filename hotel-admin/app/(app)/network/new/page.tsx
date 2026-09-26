@@ -19,6 +19,7 @@ import { NotAvailable, PendingChangeBanner } from "@/components/ui/patterns";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ArrowLeft, ArrowRight, Cable, Network, Plus, Radio, X } from "lucide-react";
 import { cn, errMsg } from "@/lib/utils";
+import { HelpList, HelpSection } from "@/components/help";
 import { HealthCheckList, SwitchRow, ValidationIssueList, useNetworkAccess } from "@/components/network/shared";
 
 const STEPS = ["Identity", "Interface / VLAN", "Subnet & gateway", "DHCP & DNS", "Captive portal", "Review", "Apply"];
@@ -241,7 +242,38 @@ export default function NewGuestNetworkPage() {
         icon={<Network />}
         eyebrow="Networking"
         title="New guest network"
-        description="Seven short steps. Nothing reaches guests until the last one, and even then the change rolls back on its own unless you keep it."
+        description="Seven short steps; nothing reaches guests until the last one."
+        help={
+          <>
+            <HelpSection title="How the wizard works">
+              <HelpList
+                items={[
+                  <>Steps 1–6 only collect settings. Nothing is created until the <strong>Apply</strong> step.</>,
+                  <>The last step creates the network, validates the whole configuration, then applies it.</>,
+                  <>After applying you have a short window to keep the change; if nobody does, it rolls back on its own.</>,
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="Parent interface">
+              <p>
+                Only ports set aside for guest traffic (guest access, guest trunk or unused) can carry a guest network.
+                The others are shown so you can see why they are not offered.
+              </p>
+            </HelpSection>
+            <HelpSection title="Sign-in page">
+              <p>
+                With the captive portal on, the sign-in page is served at <span className="font-mono">{portalNote}</span>{" "}
+                once the network is applied.
+              </p>
+            </HelpSection>
+            <HelpSection title="Wi-Fi">
+              <p>
+                OneGate manages the gateway, DHCP and captive portal; it does not broadcast Wi-Fi. Map the SSID to the
+                network&rsquo;s VLAN on your wireless controller.
+              </p>
+            </HelpSection>
+          </>
+        }
       />
 
       <nav aria-label="Steps">
@@ -270,7 +302,7 @@ export default function NewGuestNetworkPage() {
               </Field>
               <Field
                 label="SSID label"
-                hint="For reference only. Velonet does not broadcast Wi-Fi — this label records which SSID your wireless controller maps to this network."
+                hint="For reference only. OneGate does not broadcast Wi-Fi — this label records which SSID your wireless controller maps to this network."
               >
                 <Input value={ssidLabel} onChange={(e) => setSsidLabel(e.target.value)} placeholder="Hotel Guest" />
               </Field>
@@ -283,10 +315,6 @@ export default function NewGuestNetworkPage() {
                 <legend className="mb-1.5 text-label">
                   Parent interface<span className="ms-0.5 text-destructive">*</span>
                 </legend>
-                <p className="text-caption text-muted-foreground">
-                  Only ports set aside for guest traffic can carry a guest network. The others are shown so you can
-                  see why they are not offered.
-                </p>
                 {interfaces === null ? (
                   <div className="space-y-2" aria-busy="true">
                     <span className="sr-only">Loading interfaces</span>
@@ -415,9 +443,6 @@ export default function NewGuestNetworkPage() {
               <SwitchRow label="Internet access" hint="Guests can reach the internet once signed in." checked={internetAccess} onChange={setInternetAccess} />
               <SwitchRow label="NAT (masquerade)" hint="Guest traffic leaves through the appliance's own address." checked={nat} onChange={setNat} />
               <SwitchRow label="Client isolation" hint="Guest devices cannot reach each other." checked={clientIsolation} onChange={setClientIsolation} />
-              <Callout tone="info">
-                The sign-in page will be served at <span className="font-mono">{portalNote}</span> once the network is applied.
-              </Callout>
             </div>
           )}
 
@@ -442,7 +467,7 @@ export default function NewGuestNetworkPage() {
               />
               <Callout tone="warning" title="Wireless controller action required" icon={<Radio className="size-4" />}>
                 Map the &lsquo;{ssidLabel || name}&rsquo; SSID to VLAN {vlanTagged ? vlanId : "(untagged)"} on your wireless
-                controller. Velonet manages the gateway, DHCP and captive portal; it does not broadcast Wi-Fi.
+                controller. OneGate manages the gateway, DHCP and captive portal; it does not broadcast Wi-Fi.
               </Callout>
             </div>
           )}

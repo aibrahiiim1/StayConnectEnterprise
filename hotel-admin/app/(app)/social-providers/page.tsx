@@ -14,6 +14,7 @@
 import { useEffect, useState } from "react";
 import { api, ListResp, Whoami, SocialOAuthProvider } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
+import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -148,7 +149,27 @@ export default function SocialProvidersPage() {
         icon={<AtSign />}
         eyebrow="Guest portal"
         title="Social login"
-        description="Let guests sign in with an account they already have. Each entry is an OAuth application you register with that provider; the client secret is stored write-only and is never shown again."
+        description="Let guests sign in with an account they already have."
+        help={
+          <>
+            <HelpSection title="What a provider entry is">
+              <p>
+                Each entry is an OAuth application you register with that provider (for example Google). The values
+                on it come from that registered application.
+              </p>
+            </HelpSection>
+            <HelpSection title="Setting one up">
+              <HelpList
+                items={[
+                  <>The <strong>client secret</strong> is stored write-only and is never shown again. When editing, leave it blank to keep the one already stored.</>,
+                  <>The <strong>redirect URI</strong> must match the one registered with the provider exactly.</>,
+                  <>The provider of an entry cannot be changed; remove it and add it again instead.</>,
+                  <>Whether guests are actually offered a provider is switched on in <strong>Sign-in methods</strong>.</>,
+                ]}
+              />
+            </HelpSection>
+          </>
+        }
         actions={writable && <Button onClick={openNew}><Plus /> Add provider</Button>}
       />
 

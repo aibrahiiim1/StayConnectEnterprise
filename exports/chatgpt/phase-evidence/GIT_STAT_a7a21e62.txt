@@ -1,0 +1,4 @@
+commit a7a21e6292a67e5e365de1eb42107b30013ea6f0
+Date:   Sat Sep 26 06:08:12 2026 +0300
+
+    Governance: the delivery head is the e2e focus-tooltip fix; the deployed source is unchanged

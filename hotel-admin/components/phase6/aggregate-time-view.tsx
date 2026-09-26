@@ -21,6 +21,7 @@ import { Hourglass, Timer, Wifi } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import { PageHeader, PageShell, StatCard } from "@/components/ui/page";
+import { HelpList, HelpSection } from "@/components/help";
 import { Card } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -86,7 +87,31 @@ export function AggregateTimeView() {
         eyebrow="Guests"
         title="Online-time budgets"
         icon={<Hourglass />}
-        description="These packages are sold as an amount of connected time rather than a period. The time left counts down only while a device is actually connected — but the end date arrives either way, and any time left at that point is lost."
+        description="Packages sold as an amount of connected time. Check both the time left and the end date."
+        help={
+          <>
+            <HelpSection title="Two clocks, never one">
+              <p>
+                These packages are sold as an amount of connected time rather than a period. The time left counts
+                down only while a device is actually connected &mdash; but the end date arrives either way, and any
+                time left at that point is lost.
+              </p>
+            </HelpSection>
+            <HelpSection title="How a budget ends">
+              <HelpList items={[
+                "Its online time is used up.",
+                "Its end date is reached, with or without time still unused.",
+                "Its validity period ends.",
+              ]} />
+            </HelpSection>
+            <HelpSection title="The same numbers the guest sees">
+              <p>
+                The time left shown here comes from the same record as the guest&rsquo;s own page, so the desk and
+                the guest&rsquo;s phone agree.
+              </p>
+            </HelpSection>
+          </>
+        }
       />
 
       <ErrorBanner err={error} />

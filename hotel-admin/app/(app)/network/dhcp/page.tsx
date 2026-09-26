@@ -19,6 +19,7 @@ import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { Pencil, Pin, Plus, Trash2, Wifi } from "lucide-react";
 import { errMsg, formatRelative } from "@/lib/utils";
+import { HelpList, HelpSection } from "@/components/help";
 import {
   AddReservationDialog, EditReservationDialog, RemoveReservationDialog, useNetworkAccess,
 } from "@/components/network/shared";
@@ -96,7 +97,29 @@ export default function DhcpPage() {
         icon={<Wifi />}
         eyebrow="Networking"
         title="DHCP & leases"
-        description="Which guest devices hold an address right now, and which devices always get the same one."
+        description="Guest devices holding an address now, and fixed reservations."
+        help={
+          <>
+            <HelpSection title="Active leases">
+              <p>
+                Every guest device that has been handed an address by the appliance&rsquo;s DHCP server, with the time its
+                lease runs out. Leases appear once guests connect.
+              </p>
+            </HelpSection>
+            <HelpSection title="Reservations">
+              <HelpList
+                items={[
+                  "A reservation pins a device, by MAC address, to a fixed address on one guest network.",
+                  "Use it for devices that must stay reachable at one address — a printer, a TV or a door lock.",
+                  "You can also manage reservations from each guest network's own page.",
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="Search">
+              <p>Search looks at the IP address, MAC address and hostname.</p>
+            </HelpSection>
+          </>
+        }
         actions={writable && (
           <Button onClick={() => { setTab("reservations"); setAdding(true); }}>
             <Plus /> New reservation

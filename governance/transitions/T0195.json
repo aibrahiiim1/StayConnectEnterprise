@@ -1,0 +1,57 @@
+{
+  "transition_id": "T0195",
+  "seq": 195,
+  "timestamp": "2026-09-26T03:59:41+03:00",
+  "timestamp_derivation": "Written after both deployments were installed and verified live, and before the commit that introduces this receipt.",
+  "record_type": "ONEGATE_BRANDING_HELP_NIGHTLY_0600_DEPLOYED",
+  "authorisation": "Product-Owner mission of 2026-09-26: finalise the product branding as OneGate (company: Semantics), move always-visible guidance behind a consistent lightbulb help drawer in the Guest Portal, Hotel Admin and Central, move the authoritative nightly validation from 03:10 to 06:00 Africa/Cairo, deliver through the protected PR path, and deploy to PRE-LIVE 172.21.60.25 and to Central 150.0.0.252. It did NOT authorise Go-Live, networking or topology change, PMS configuration or financial traffic, or any permission, authentication or security semantic change.",
+  "brand": {
+    "wordmark": "OneGate: 'One' bold in a green linear gradient (#0b7a3b -> #149c4a -> #3cc05a -> #8fdc5f), 'Gate' bold in solid black (#0a0a0a); set as type, on a light tile on dark surfaces so 'Gate' stays black. A gradient 'O' ring is the compact mark and the favicon. Company attribution: 'OneGate by Semantics'.",
+    "where": "Hotel Admin login, sidebar, title and favicon; Central login, sidebar, title and favicon; every guest page ends with a discreet, translated 'Wi-Fi by OneGate'. Every visible 'Velonet' now reads OneGate, or Semantics where the sentence is about the company (support, licence files, who to contact). Historical manifests and receipts keep their names.",
+    "semantics_presentation": "External demo hotel names in UI placeholders, examples, operator guides and test fixtures now read Semantics / Semantics Demo Hotel. Operational records were not changed: the site name Central assigned (shown in the Hotel Admin eyebrow) is untouched, and PRE-LIVE's saved portal hotel name -- set by a hotel operator to 'Hotel Name' before this delivery -- was left as the operator set it."
+  },
+  "help_ux": "components/help.tsx in both consoles (HelpTip, HelpSection, HelpList): a lightbulb beside a page or section title opens a Tips drawer. Every Hotel Admin screen (39) and every Central screen (12) carries exactly one page-level lightbulb; long descriptions became one sentence and explanatory paragraphs and neutral callouts moved into the drawers. Warnings about consequences, current-state warnings, why a control is disabled, errors, empty states, confirmation text and one-time-reveal warnings stay on the page. The guest portal gains an accessible lightbulb sheet (nonce script, focus trap, Esc, a no-JavaScript <details> fallback) with per-method tips in all six languages; errors, countdowns, notices, labels and short field hints stay visible.",
+  "portal_string_bound": "portaldesign.MaxTranslationKeys raised from 120 to 160, because the portal now ships 130 translatable strings and an existing rule requires every shipped string to be overridable by a hotel. MaxBodyBytes (2 MB) is unchanged. edged, which enforces the bound on save, and portald were deployed together.",
+  "nightly_schedule": "One cron '0 6 * * *' with timezone Africa/Cairo (was '10 3 * * *'). The schedule sanity check targets 06:00 local; an ignored timezone now shows as 06:00 UTC = 08:00 (winter, +120) or 09:00 (summer, +180) Cairo and is still refused by the 105-minute threshold. The delivery-protocol validator requires exactly '0 6 * * *'; the nightly negative suite (86 assertions) and the 366-night sweep are re-derived for 06:00. All four gates, the re-run mechanism and every protection are unchanged.",
+  "deployment_pre_live": {
+    "source": "A clean clone of 334f9d917939a21eeeb52530b2c6a8db29c6b165 (the content head of this delivery, pushed to GitHub before building).",
+    "edged": "sha256 3ad921a727568252a88b98204a9769ece996db09ced8eb7aaa6b207b6117ac7d; installed bytes read back: vcs.revision=334f9d91, -tags=stayconnect_production, vcs.modified=false. Backup edged.bak-pre-334f9d91-20260926T003836Z.",
+    "portald": "sha256 c210b0c802b2076770c638f1b6074e48ea58f89b21134b3dfa56ba404cb2c14f; installed bytes read back: vcs.revision=334f9d91, -tags=stayconnect_production, vcs.modified=false. Backup portald.bak-pre-334f9d91-20260926T003838Z.",
+    "hotel_admin": "bundle sha256 005ce6dce5aeebe03edc03641aaf6db903b07e28f3fc76cdef71edf83d70520d, release 20260926-003848, hotel-admin-release.json source_commit 334f9d91 clean, BUILD_ID gIy6BezNHwu13nfh5jxlw (matches .next/BUILD_ID); installer smoke 30/30; previous release 20260925-210739 kept as the rollback target.",
+    "restarts": "Only stayconnect-edged (00:38:37Z), stayconnect-portald (00:38:38Z) and stayconnect-hotel-admin (00:38:55Z). scd, netd, pmsd, acctd and caddy kept their start times; kea-dhcp4-server and unbound stayed active.",
+    "unchanged": "Interface, netplan and stateless nftables fingerprints identical before and after; migration ledger 42 rows ending 0091; licence Active (2,000, valid until 2026-12-01); PMS CONTINUOUS, room sign-in ready, sync COMPLETE, 0 pending, 0 review; assignment 'assigned' and refreshed; no error logged since the deployment. /opt/stayconnect/DEPLOYED_BINARIES.sha256 rewritten from the installed bytes, all six OK."
+  },
+  "deployment_central": {
+    "target_verified": "150.0.0.252 answers as sc-central, runs stayconnect-cloud-admin and stayconnect-ctrlapi, and is the recorded licensing-only Central. Its ctrlapi runs 0582eb78 (clean); no control-plane source changed between 0582eb78 and this delivery's head except one comment, so the new console needs no API change and ctrlapi was not touched.",
+    "cloud_admin": "Standalone bundle sha256 b791b8a444285e1247335868565cf2ffdf403d40de20a8674fbe8af7ab2c5790, built from 334f9d91 clean, BUILD_ID Uf1lYB7U-Snn0R2z2kRCu, with a cloud-admin-release.json identity. Installed as /opt/stayconnect/releases/cloud-admin/20260926-003937; cloud-admin-current switched atomically; cloud-admin-current.previous -> 20260821-135642 (the release it replaced) kept for rollback. Only stayconnect-cloud-admin restarted.",
+    "before": "Central had never received the Velonet console: it served a release from 2026-08-21."
+  },
+  "verification_live": {
+    "hotel_admin": "Chrome, https://172.21.60.25: login shows the OneGate wordmark and 'OneGate by Semantics', title 'OneGate Hotel Admin'; 39/39 operator screens 200 with no application or console error, each with a lightbulb that opens its drawer, and no 'Velonet' anywhere in the markup. Read-only apart from the operator login.",
+    "central": "Chrome, https://150.0.0.252: login shows the wordmark and 'OneGate by Semantics', title 'OneGate Central'; 12/12 screens 200 with no error, each with a lightbulb that opens, no 'Velonet'.",
+    "guest_portal": "Through a tunnel to portald :8380 at an iPhone profile and at desktop width: 200, 'Wi-Fi by OneGate' present, the lightbulb opens the tips sheet, no horizontal overflow, no console or CSP error, Arabic switches to right to left with the attribution intact. No sign-in was submitted."
+  },
+  "repository_verification": "Hotel Admin: tsc, vitest 45 files / 534 tests, next build, Playwright 171/171 on the integrated branch after two lines the suite rightly requires were kept visible. Central: tsc, vitest 116, next build. data-plane: go test cmd/portald, cmd/edged, internal/portaldesign pass; gofmt clean; go vet clean; the portal fixture parity test passes. Nightly negative suite 86 assertions; delivery-protocol validator PASS; mutation anchors 0 drifted.",
+  "deployment_provenance": "PRE-LIVE: edged and portald 334f9d91, Hotel Admin 334f9d91 / gIy6BezNHwu13nfh5jxlw. Central: cloud-admin 334f9d91 / Uf1lYB7U-Snn0R2z2kRCu. Go-Live not performed.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. THIS transition is a current-tree redaction: it changed no phase, no historical fact or outcome, no runtime behaviour, applied no migration, deployed nothing and contacted no appliance or environment. PRE-LIVE remains PRE-LIVE."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. THIS delivery changes presentation, one portal string-count bound and the hour of the nightly validation, and deploys under the standing PRE-LIVE decision and this mission's Central authorisation; it changed no phase, applied no migration, changed no permission, authentication, PMS, financial, network or licensing behaviour, and enabled no capability. PRE-LIVE remains PRE-LIVE."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Phase 7 remains ACCEPTED_AND_CLOSED under D41, Guest activation remains DEFERRED by D41, Go-Live remains unauthorised.",
+  "base": "50c1458893778c63b868c0c85a4aaa65f77d0c46",
+  "base_note": "Master after the merge of PR #188 (T0194).",
+  "head": "334f9d91",
+  "head_note": "The CONTENT commit of this delivery and the deployed source.",
+  "previous_delivery": "T0194",
+  "go_live": "NOT authorised. Guest activation remains DEFERRED by D41."
+}

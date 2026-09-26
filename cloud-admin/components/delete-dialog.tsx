@@ -34,7 +34,7 @@ export function DeleteDialog({
   open: boolean;
   onClose: () => void;
   onDeleted: () => void;
-  title: string;                 // e.g. 'Delete customer "Acme"'
+  title: string;                 // e.g. 'Delete customer "Semantics"'
   what: string;                  // e.g. "Customer" | "Site" | "Appliance"
   expected: string;              // the exact string the user must type
   confirmHint: string;           // e.g. "Type the customer name"

@@ -1,7 +1,7 @@
 "use client";
 
 /*
-  VELONET PRODUCT PATTERNS — the recurring states every screen needs, designed once.
+  ONEGATE PRODUCT PATTERNS — the recurring states every screen needs, designed once.
 
   The primitives (Button, Card, Badge, Dialog…) say how a thing looks. These say how a SITUATION looks:
   a secret shown once, a network change waiting for confirmation, data that refreshes on its own, a role

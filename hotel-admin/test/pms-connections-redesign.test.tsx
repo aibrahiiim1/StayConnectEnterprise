@@ -58,7 +58,7 @@ const REST_PROVIDER = {
     { key: "poll_interval_s", label: "Check for changes every", type: "int", default: 60, min: 30, max: 3600, unit: "seconds" },
   ],
   capabilities: { full_resync: false, live_events: false, test_connection: true, arrivals: true, departures: true },
-  setup_steps: ["Create an API client for Velonet in the provider's console."],
+  setup_steps: ["Create an API client for OneGate in the provider's console."],
 };
 const PROTEL_PROVIDER = {
   kind: "protel-fias", label: "Protel (FIAS)", vendor: "Protel", integration: "FIAS interface", transport: "SOCKET",

@@ -646,9 +646,9 @@ MUTATIONS = [
                  "&& github.run_attempt != 1 }}",
                  "          NIGHTLY_VALIDATION_DISABLED: 'false'")])),
  # M61c WAS "loses the cron that covers half the year", which was the dual-cron design. With one
- # timezone-aware entry the equivalent defect is losing the TIMEZONE: the same cron then means 03:10 UTC,
+ # timezone-aware entry the equivalent defect is losing the TIMEZONE: the same cron then means 06:00 UTC,
  # which is 05:10 or 06:10 in Cairo, and the nightly merge runs at the wrong hour while still going green.
- ("M61c the nightly orchestrator loses the timezone that makes its cron mean 03:10 Cairo",
+ ("M61c the nightly orchestrator loses the timezone that makes its cron mean 06:00 Cairo",
   ".github/workflows/nightly-authoritative-validation.yml",
    ("replace", [('      timezone: "Africa/Cairo"', "      # timezone removed")])),
  ("M61d the nightly orchestrator stops proving its own fail-closed rules before merging",

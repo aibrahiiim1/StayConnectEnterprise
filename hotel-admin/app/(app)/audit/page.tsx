@@ -32,6 +32,7 @@ import {
   auditWords, auditActor, AUDIT_CATEGORIES, type AuditCategory,
 } from "@/lib/audit-words";
 import { ScrollText, ChevronRight, ShieldAlert, RefreshCw } from "lucide-react";
+import { HelpList, HelpSection } from "@/components/help";
 
 type Row = {
   ts: string;
@@ -169,7 +170,32 @@ export default function ActivityPage() {
         icon={<ScrollText />}
         eyebrow="System"
         title="Activity"
-        description="Every change made to this appliance, by staff and by the system itself. The record is written as it happens and is never edited or removed."
+        description="Every change made to this appliance, by staff and by the system itself."
+        help={
+          <>
+            <HelpSection title="What this record is">
+              <p>
+                The activity trail is written as things happen and is never edited or removed. Each line reads out what
+                happened, who did it and when.
+              </p>
+            </HelpSection>
+            <HelpSection title="Finding an entry">
+              <HelpList
+                items={[
+                  "Search matches what happened, who, a source address or an id.",
+                  <>The <strong>Security</strong> filter shows events such as a guest&rsquo;s typed credentials being viewed, a backup leaving the appliance, or a refused unlicensed-mode attempt.</>,
+                  `Each request reads up to ${LIMIT} entries for the chosen period. Choose a shorter period or a category to see more.`,
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="The exact record">
+              <p>
+                Select a line to see the precise record: the recorded time, action code, actor and target ids, source
+                address and raw payload.
+              </p>
+            </HelpSection>
+          </>
+        }
         actions={
           <Button variant="secondary" onClick={load} disabled={busy}>
             <RefreshCw className={cn(busy && "animate-spin motion-reduce:animate-none")} />

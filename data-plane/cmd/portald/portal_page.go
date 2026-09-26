@@ -172,7 +172,8 @@ func subset(words map[string]string, prefixes ...string) map[string]string {
 // guestBrand is what a server-rendered page draws from the published design. Every value has already been
 // through portaldesign.ForGuests (colour and length patterns, font-stack characters, image URL rules).
 type guestBrand struct {
-	Name, Welcome string
+	// Help is the hotel's own help line (help_text), shown in the help sheet on every guest page.
+	Name, Welcome, Help string
 	// Logo was checked by ForGuests (an appliance path, an https URL or an inline image), which is what
 	// makes it safe to mark as a URL the template need not filter -- a data:image logo would otherwise be
 	// replaced by html/template's placeholder.
@@ -186,7 +187,7 @@ type guestBrand struct {
 func brandFor(d map[string]any) guestBrand {
 	b := guestBrand{Template: portaldesign.TemplateID(d)}
 	str := func(k string) string { s, _ := d[k].(string); return s }
-	b.Name, b.Welcome, b.Logo = str("hotel_name"), str("welcome_text"), template.URL(str("logo_url"))
+	b.Name, b.Welcome, b.Help, b.Logo = str("hotel_name"), str("welcome_text"), str("help_text"), template.URL(str("logo_url"))
 	var style []string
 	set := func(prop, v string) {
 		if v != "" {

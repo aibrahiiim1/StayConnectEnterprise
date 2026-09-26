@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 const ROOT = join(__dirname, "..");
 const REPO = join(ROOT, "..");
 
-describe("Velonet design tokens", () => {
+describe("OneGate design tokens", () => {
   it("app/tokens.css is an exact copy of design-system/tokens.css", () => {
     expect(() =>
       execFileSync(process.execPath, [join(REPO, "tools/sync-design-tokens.mjs"), "--check"], { stdio: "pipe" }),

@@ -25,6 +25,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { api, ApiError, ListResp, PortalAsset, Whoami } from "@/lib/api";
 import { PageHeader, PageShell } from "@/components/ui/page";
+import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -53,6 +54,57 @@ import { AdvancedSection } from "./advanced";
 import { HistorySection } from "./history";
 import { Design, TemplateOptions, advancedChanged, assetSrc, contrastRatio, offeredLanguages } from "./strings";
 import { LanguagesSection } from "./languages";
+
+// The page's tips, shared by the loading header and the loaded one so the lightbulb is there from the start.
+const PAGE_HELP = (
+  <>
+    <HelpSection title="How this page works">
+      <p>
+        Design the Wi-Fi sign-in page: choose a layout, brand it, and check it in the live preview. The preview is
+        the real sign-in page with your unsaved changes. Guests see your changes as soon as you save.
+      </p>
+      <p>
+        Room sign-in, vouchers and personal accounts are all shown in the preview so you can check every tab —
+        which of them guests actually see is decided in Sign-in methods, not on this page.
+      </p>
+    </HelpSection>
+    <HelpSection title="The sections">
+      <HelpList
+        items={[
+          <><strong>Template</strong> — each card is your own sign-in page in that layout. Every sign-in method works the same in all of them; only the arrangement changes. Only the options the chosen layout uses are shown.</>,
+          <><strong>Brand</strong> — logo, background photograph, colours and type. Images are stored on this appliance and served from it, so they load for a guest who has no internet yet.</>,
+          <><strong>Content</strong> — your own words, shown to every guest in every language.</>,
+          <><strong>Sign-in page text</strong> and <strong>Languages</strong> — the wording guests read, and which languages they are offered.</>,
+          <><strong>Advanced HTML &amp; CSS</strong> — your own styling and markup, checked before it is accepted.</>,
+          <><strong>History</strong> — the most recent saves of this page; restoring one makes it what guests see again.</>,
+        ]}
+      />
+    </HelpSection>
+    <HelpSection title="Fonts and links">
+      <p>
+        The portal loads nothing from the internet, so only fonts already on the guest&apos;s device are used. A
+        guest reaching the portal has no internet yet, so an external terms page will not load until they are
+        online; a file uploaded here works straight away.
+      </p>
+    </HelpSection>
+    <HelpSection title="Languages">
+      <p>
+        The portal ships complete wording for its built-in languages — nothing to translate, just choose which
+        your guests are offered. A guest&apos;s device language is detected automatically and matched against
+        that list; English is always available and is what anything else falls back to.
+      </p>
+    </HelpSection>
+    <HelpSection title="Custom CSS and HTML">
+      <HelpList
+        items={[
+          <>Custom CSS is wrapped in its own cascade layer: your rules beat the portal&apos;s styling and template, but cannot hide the sign-in forms. !important is removed — it is not needed.</>,
+          <>Custom HTML is shown below the sign-in (as content blocks in the Resort layout): text, headings, lists, tables, links and images from your uploads or https.</>,
+          <>Saving a change to either asks for your password, because this page collects room numbers and voucher codes.</>,
+        ]}
+      />
+    </HelpSection>
+  </>
+);
 
 /** What an unbranded appliance shows. The portal carries the same values; these mirror them so a colour well
  *  that has never been set shows what a guest is actually looking at rather than black. */
@@ -244,7 +296,7 @@ export default function PortalSettingsPage() {
     return (
       <PageShell width="wide">
         <PageHeader icon={<Palette />} eyebrow="Guest portal" title="Portal settings"
-          description="Design the Wi-Fi sign-in page guests see." />
+          description="Design the Wi-Fi sign-in page guests see." help={PAGE_HELP} />
         {loadErr ? <ErrorBanner err={loadErr} /> : (
           <div className="space-y-3" aria-label="Loading portal settings">
             <Skeleton className="h-16 w-full" />
@@ -279,7 +331,8 @@ export default function PortalSettingsPage() {
         icon={<Palette />}
         eyebrow="Guest portal"
         title="Portal settings"
-        description="Design the Wi-Fi sign-in page: choose a layout, brand it, and check it in the live preview. Guests see your changes as soon as you save."
+        description="Design the Wi-Fi sign-in page guests see. Guests see your changes as soon as you save."
+        help={PAGE_HELP}
         actions={
           writable ? (
             <>
@@ -383,10 +436,7 @@ export default function PortalSettingsPage() {
               <Card>
                 <CardHeader>
                   <CardTitle>Layout</CardTitle>
-                  <CardDescription>
-                    Each card is your own sign-in page in that layout. Every sign-in method works the same in all
-                    of them — only the arrangement changes.
-                  </CardDescription>
+                  <CardDescription>Each card is your own sign-in page in that layout.</CardDescription>
                 </CardHeader>
                 <CardBody>
                   <TemplateGallery design={d} value={tpl.id} disabled={!writable}
@@ -472,9 +522,8 @@ export default function PortalSettingsPage() {
                     src={assetSrc(d.background_url)} busy={uploading === "background_url"} writable={writable} wide
                     onPick={(f) => upload("background_url", f)} onClear={() => set("background_url", "")} error={fieldError("background_url")} />
                   <p className="text-xs text-muted-foreground">
-                    PNG, JPEG, WebP or GIF, up to 8&nbsp;MB. Images are stored on this appliance and served from
-                    it, so they load for a guest who has no internet yet. SVG is refused: it can carry script,
-                    and this page collects room numbers and voucher codes.
+                    PNG, JPEG, WebP or GIF, up to 8&nbsp;MB. SVG is refused: it can carry script, and this page
+                    collects room numbers and voucher codes.
                   </p>
                   {unused.length > 0 && (
                     <div className="border-t border-border pt-4">
@@ -521,7 +570,7 @@ export default function PortalSettingsPage() {
                   <ContrastNote label="White button text on your brand colour" ratio={buttonContrast} />
                   <ContrastNote label="Your text colour on the white card" ratio={textContrast} />
                   <Field label="Typeface" error={fieldError("font_family")}
-                    hint="A font stack. Only fonts already on the guest's device will be used — the portal loads nothing from the internet.">
+                    hint="A font stack. Only fonts already on the guest's device are used.">
                     <Input value={d.font_family ?? ""} disabled={!writable}
                       onChange={(e) => set("font_family", e.target.value)} placeholder="Inter, system-ui, sans-serif" />
                   </Field>
@@ -540,7 +589,7 @@ export default function PortalSettingsPage() {
                 <Field label="Hotel name" error={fieldError("hotel_name")}
                   hint={`Shown at the top of the sign-in page and in the browser tab. ${(d.hotel_name ?? "").length}/${LIMITS.hotelName}`}>
                   <Input value={d.hotel_name ?? ""} disabled={!writable} maxLength={LIMITS.hotelName}
-                    onChange={(e) => set("hotel_name", e.target.value)} placeholder="Coral Sea Holiday Resort" />
+                    onChange={(e) => set("hotel_name", e.target.value)} placeholder="Semantics Demo Hotel" />
                 </Field>
                 <Field label="Welcome line" error={fieldError("welcome_text")}
                   hint={`One short sentence under the hotel name — the headline in the photographic layouts. Leave empty to show nothing. ${(d.welcome_text ?? "").length}/${LIMITS.welcomeText}`}>
@@ -553,7 +602,7 @@ export default function PortalSettingsPage() {
                     onChange={(e) => set("help_text", e.target.value)} placeholder="Ask reception if you need a code" />
                 </Field>
                 <Field label="Terms of use link" error={fieldError("terms_url")}
-                  hint="An https:// address, or a file you uploaded here (/assets/…). A guest reaching the portal has no internet yet, so an external page will not load until they are online.">
+                  hint="An https:// address, or a file you uploaded here (/assets/…). An external page loads only once the guest is online.">
                   <Input value={d.terms_url ?? ""} disabled={!writable}
                     onChange={(e) => set("terms_url", e.target.value)} placeholder="https://…/terms" />
                 </Field>

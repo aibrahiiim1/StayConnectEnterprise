@@ -88,7 +88,7 @@ Two rules make it safe to read:
 - **Never treat deployed PRE-LIVE provenance as authoritative master state.** "It is on the appliance" says
   nothing about whether it passed the gates. Only master says that.
 
-## 4. Nightly: 03:10 Africa/Cairo, one complete fresh validation
+## 4. Nightly: 06:00 Africa/Cairo, one complete fresh validation
 
 `.github/workflows/nightly-authoritative-validation.yml` is the only thing that merges anything.
 
@@ -101,22 +101,22 @@ rather than ours:
 ```yaml
 on:
   schedule:
-    - cron: '10 3 * * *'
+    - cron: '0 6 * * *'
       timezone: "Africa/Cairo"
 ```
 
 **What this replaced, kept here because it matters if `timezone:` is ever removed.** The first implementation
 used two crons — `10 0 * * *` and `10 1 * * *`, one per possible offset — and computed which firing was the
-real 03:10 local, exiting as a deliberate no-op on the other. It was correct, and it cost: one wasted run every
+real target local time, exiting as a deliberate no-op on the other. It was correct, and it cost: one wasted run every
 night, and a session-start check that then had to tell a no-op from a real verdict, because both exit zero.
 
 **One check survives, and it is not that selection logic.** `schedule_sanity()` verifies the platform actually
-honoured the timezone. If `timezone:` were dropped, mistyped, or unsupported, the same cron means 03:10 **UTC**
-— 05:10 or 06:10 in Cairo — and nothing else in the system would notice: the gates would run, the merge would
+honoured the timezone. If `timezone:` were dropped, mistyped, or unsupported, the same cron means 06:00 **UTC**
+— 08:00 or 09:00 in Cairo — and nothing else in the system would notice: the gates would run, the merge would
 happen, and a nightly process would quietly be a morning one for as long as nobody looked. A misconfiguration
 that still produces green merges is the kind that lasts.
 
-So the drift from 03:10 local is measured, and more than **105 minutes** refuses. That threshold is chosen to
+So the drift from 06:00 local is measured, and more than **105 minutes** refuses. That threshold is chosen to
 separate two things that look alike from a distance:
 
 | | drift | verdict |
@@ -126,14 +126,14 @@ separate two things that look alike from a distance:
 | `timezone:` ignored, summer | **+180 min** | `SCHEDULE_DRIFT`, refused |
 
 A `workflow_dispatch` run is exempt — it is expected at any hour, which is what manual means. Asserted for all
-366 nights of a leap year in both directions: a correct 03:10-Cairo start proceeds, and a UTC-read start is
+366 nights of a leap year in both directions: a correct 06:00-Cairo start proceeds, and a UTC-read start is
 refused, with the ±120/±180 drift measured from the tz database rather than written down.
 
 ### The sequence, and what each step refuses
 
 | Step | Refuses |
 |---|---|
-| **1. Schedule sanity** | A scheduled run that did not start near 03:10 Cairo — the signature of an ignored `timezone:`. |
+| **1. Schedule sanity** | A scheduled run that did not start near 06:00 Cairo — the signature of an ignored `timezone:`. |
 | **2. One candidate** | Zero candidates → quiet no-op (green). **Two or more → hard refusal**, naming them; choosing between them would invent an intent nobody expressed. |
 | **3. Re-run** | Each gate's existing `pull_request` run for that exact head is re-run. A gate with no such run to re-run is a refusal (`RERUN_INCOMPLETE`), not something to work around. |
 | **4. Wait** | Partial completion. Three of four green is a refusal, not an opportunity. |
@@ -234,7 +234,7 @@ night judges the resulting head.
 - **All four gates run in full.** No test was removed, shortened, or made unable to fail.
 - **One active delivery owner per branch.**
 - `required_review_thread_resolution` is on, so an unresolved review thread blocks the nightly merge — the
-  orchestrator says so plainly instead of returning an opaque API error at 03:10.
+  orchestrator says so plainly instead of returning an opaque API error at 06:00.
 - `strict_required_status_checks_policy` is on, so a branch **behind** master cannot merge. The orchestrator
   reports and waits rather than rebasing, because writing a new commit would invalidate the verdict it just
   earned.

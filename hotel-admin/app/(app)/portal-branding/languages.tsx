@@ -198,10 +198,8 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
         <CardHeader><CardTitle>Guest languages</CardTitle></CardHeader>
         <CardBody className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            The portal ships complete wording for {SHIPPED_LANGUAGES.length} languages — nothing to translate,
-            just choose which your guests are offered. A guest&apos;s device language is detected
-            automatically and matched against this list; English is always available and is what anything else
-            falls back to.
+            Choose which of the {SHIPPED_LANGUAGES.length} built-in languages guests are offered. English is always
+            available.
           </p>
           <div className="flex flex-wrap gap-2">
             {known.map((l) => {

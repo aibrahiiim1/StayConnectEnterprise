@@ -5,7 +5,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { KeyRound, ShieldCheck } from "lucide-react";
-import { VelonetLockup, VelonetMark } from "@/components/brand";
+import { BySemantics, OneGateLockup, OneGateMark } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import { Input, Field } from "@/components/ui/input";
 import { ErrorBanner } from "@/components/ui/error-banner";
@@ -72,7 +72,7 @@ function LoginInner() {
   return (
     <div className="grid min-h-screen bg-background lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
       <aside className="relative hidden flex-col justify-between overflow-hidden bg-sidebar p-10 text-sidebar-foreground lg:flex">
-        <VelonetLockup product="Central" inverse />
+        <OneGateLockup product="Central" inverse />
         <div className="relative z-10 max-w-md space-y-4">
           <div className="text-micro uppercase tracking-[0.14em] text-sidebar-active">Vendor console</div>
           <p className="text-[1.75rem] font-bold leading-tight tracking-[-0.02em] text-white">
@@ -83,14 +83,14 @@ function LoginInner() {
             own appliance.
           </p>
         </div>
-        <div className="text-caption text-sidebar-muted">Velonet · Central</div>
-        <VelonetMark className="pointer-events-none absolute -bottom-16 -end-24 size-[26rem] text-white/[0.035]" />
+        <BySemantics className="relative z-10 text-sidebar-muted" />
+        <OneGateMark className="pointer-events-none absolute -bottom-16 -end-24 size-[26rem] opacity-[0.07]" />
       </aside>
 
       <div className="flex min-h-screen flex-col">
         <div className="flex items-center justify-between p-4 sm:p-6">
           <div className="lg:invisible">
-            <VelonetLockup product="Central" />
+            <OneGateLockup product="Central" />
           </div>
           <ThemeToggle />
         </div>
@@ -98,7 +98,8 @@ function LoginInner() {
         <main className="flex flex-1 items-center justify-center px-4 pb-16 sm:px-6">
           <div className="w-full max-w-[25rem]">
             <div className="mb-7 space-y-1.5">
-              <h1 className="text-title">Velonet Central</h1>
+              <OneGateMark className="mb-3 size-10" />
+              <h1 className="text-title">OneGate Central</h1>
               <p className="text-sm text-muted-foreground">Admin sign-in. Use your Central operator account.</p>
             </div>
 
@@ -197,6 +198,10 @@ function LoginInner() {
                 Hotel Admin account does not work here.
               </p>
             </div>
+
+            <p className="mt-8 text-center">
+              <BySemantics className="text-muted-foreground" />
+            </p>
           </div>
         </main>
       </div>

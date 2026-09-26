@@ -132,7 +132,7 @@ const config: Config = {
         warn: token("--warning"),
         err: token("--destructive"),
       },
-      // THE VELONET RADIUS SCALE, by role (design-system/tokens.css). `md` is every control, `lg` every card
+      // THE ONEGATE RADIUS SCALE, by role (design-system/tokens.css). `md` is every control, `lg` every card
       // and sheet, `xl` every overlay. Screens written against the old scale keep working because the names
       // did not change -- only what they mean became the brand's.
       borderRadius: {
@@ -154,7 +154,7 @@ const config: Config = {
           "Consolas", "monospace",
         ],
       },
-      // THE VELONET TYPE SCALE, by role. One family (Inter), ten roles; nothing in between.
+      // THE ONEGATE TYPE SCALE, by role. One family (Inter), ten roles; nothing in between.
       fontSize: {
         "2xs": ["0.6875rem", { lineHeight: "1rem", letterSpacing: "0.02em" }],
         title: ["1.625rem", { lineHeight: "1.3", letterSpacing: "-0.025em", fontWeight: "700" }],
@@ -183,7 +183,7 @@ const config: Config = {
         "control-press": "var(--shadow-control-press)",
         panel: "var(--shadow-card)",
       },
-      transitionTimingFunction: { velonet: "var(--motion-ease)" },
+      transitionTimingFunction: { onegate: "var(--motion-ease)" },
       transitionDuration: { press: "80ms", base: "160ms" },
       keyframes: {
         "fade-in": { from: { opacity: "0" }, to: { opacity: "1" } },

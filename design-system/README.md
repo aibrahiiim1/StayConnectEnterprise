@@ -1,9 +1,9 @@
-# Velonet design system
+# OneGate design system
 
-One visual language for the three Velonet front-ends: the **guest portal** (portald), **Hotel Admin**
+One visual language for the three OneGate front-ends: the **guest portal** (portald), **Hotel Admin**
 (the console on each appliance) and **Central** (the vendor console). Hotel Admin and Central are separate
 products with separate logins; they share every token and component and differ only in their accent colour
-and their product line under the Velonet mark.
+and their product line under the OneGate mark.
 
 | Front-end | Where the system lives |
 |---|---|
@@ -85,15 +85,15 @@ Numbers that are compared use `tabular` (tabular figures).
   `rounded-lg` 9px cards and sheets, `rounded-xl` 12px overlays (dialogs, menus), `rounded-full` pills.
 - **Elevation**: `shadow-card` (resting card), `shadow-card-hover` (clickable card on hover/focus),
   `shadow-overlay` (dialog, sheet, menu), `shadow-control-hover` / `shadow-control-press` (buttons).
-- **Motion**: 80ms press feedback, 160ms state changes, easing `cubic-bezier(0.2, 0, 0, 1)` (`ease-velonet`).
+- **Motion**: 80ms press feedback, 160ms state changes, easing `cubic-bezier(0.2, 0, 0, 1)` (`ease-onegate`).
   No bounce, no spring. `prefers-reduced-motion` removes transitions entirely.
 - **Focus**: a 2px ink ring (light) / near-white ring (dark) offset 2px — never brand-coloured, so focus
   never reads as a second primary action.
 
 ## Logo
 
-`components/brand.tsx` exports `VelonetMark` (two dotted chevrons around a node, drawn inline and filled
-with `currentColor`) and `VelonetLockup` (the mark in its brand tile with "Velonet" and the product line).
+`components/brand.tsx` exports `OneGateMark` (two dotted chevrons around a node, drawn inline and filled
+with `currentColor`) and `OneGateLockup` (the mark in its brand tile with "OneGate" and the product line).
 The product name is always set in type beside the mark. No StayConnect branding appears in any redesigned
 surface.
 
@@ -186,7 +186,7 @@ built-in languages, and fully mirrored in Arabic.
 
 ## Design decisions on record
 
-- **Info stays blue.** The brand book defines `info` as `#245d92`, close to the Velonet blue. It is kept as
+- **Info stays blue.** The brand book defines `info` as `#245d92`, close to the brand blue. It is kept as
   the brand defines it; `info` is therefore never used without its word or icon, never on a button and never
   inside the active navigation item (whose tint it resembles).
 - **"Licence" in Hotel Admin, "License" in Central.** Each console uses the spelling of its own menu in the

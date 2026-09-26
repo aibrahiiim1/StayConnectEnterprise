@@ -15,6 +15,7 @@ import { api, ApiError, Whoami } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { PageShell, PageHeader } from "@/components/ui/page";
+import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -53,7 +54,37 @@ export default function InternetPackagesPage() {
         icon={<Package />}
         eyebrow="Internet offering"
         title="Internet packages"
-        description="What guests are offered on the portal, and what those packages are doing for guests right now."
+        description="What guests are offered, and how it is being used."
+        help={
+          <>
+            <HelpSection title="Two views">
+              <HelpList items={[
+                <><strong>Packages</strong> is the catalogue: what each package gives, how many guests are on it now, and Add, Edit, Disable or Delete from the package&rsquo;s record.</>,
+                <><strong>Guest activity</strong> is every grant in a period &mdash; from the portal, a voucher, a guest account, a grace period or staff &mdash; with what it used.</>,
+              ]} />
+            </HelpSection>
+            <HelpSection title="Packages and service plans">
+              <p>
+                A service plan defines the speed, allowances and device limit a package hands out. Speed, data,
+                time and device limits are changed on Service plans; a package shows them as context for the choice.
+              </p>
+              <p>Each saved change to a package is kept permanently. A guest keeps the terms that applied when they connected.</p>
+            </HelpSection>
+            <HelpSection title="Data allowance per stay night">
+              <p>
+                The allowance is worked out once, when the guest is given the package, and does not change
+                afterwards if their stay is extended or shortened. Guests who did not sign in with their room
+                are not offered such a package, because their stay length is not known.
+              </p>
+            </HelpSection>
+            <HelpSection title="Price">
+              <p>
+                Selling packages to guests is not enabled on this appliance, so there is no price to set; a
+                package is granted rather than sold.
+              </p>
+            </HelpSection>
+          </>
+        }
         actions={!disabled && writable && (
           <Button onClick={() => { setTab("packages"); setAddRequest((n) => n + 1); }}>
             <Plus /> Add package
@@ -68,7 +99,7 @@ export default function InternetPackagesPage() {
           <EmptyState
             icon={<Package />}
             title="The internet offering is not switched on for this appliance"
-            hint="Internet packages become available once this capability is enabled for the site. Contact your Velonet administrator."
+            hint="Internet packages become available once this capability is enabled for the site. Contact your Semantics administrator."
           />
         </CardBody></Card>
       ) : (

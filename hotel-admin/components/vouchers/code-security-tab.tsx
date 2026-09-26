@@ -173,10 +173,7 @@ export function CodeSecurityTab({ canEditFormat }: { canEditFormat: boolean }) {
                   <KeyRound className="size-4" aria-hidden /> Code keys
                 </span>
               </CardTitle>
-              <CardDescription>
-                Every code is indexed under a key, and each card stays tied to the key that made it. Retiring a key means
-                new batches use a fresh one; cards already printed keep working.
-              </CardDescription>
+              <CardDescription>Retiring a key means new batches use a fresh one; cards already printed keep working.</CardDescription>
             </div>
           </CardHeader>
           {gensErr ? (

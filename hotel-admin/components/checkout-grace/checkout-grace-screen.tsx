@@ -38,6 +38,7 @@ import {
   termsFromEffective,
 } from "@/lib/api/checkout-grace";
 import { PageHeader, PageShell, StatCard } from "@/components/ui/page";
+import { HelpList, HelpSection } from "@/components/help";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { KeyValueGrid, MetricStrip } from "@/components/ui/data";
@@ -117,7 +118,38 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
         icon={<LogOut />}
         eyebrow="Internet offering"
         title="Checkout grace"
-        description="Keeps a guest online for a short, capped period after they check out, so leaving the hotel does not cut them off mid-journey."
+        description="A short, capped period online after checkout."
+        help={
+          <>
+            <HelpSection title="What checkout grace does">
+              <p>
+                Keeps a guest online for a short, capped period after they check out, so leaving the hotel does not
+                cut them off mid-journey.
+              </p>
+            </HelpSection>
+            <HelpSection title="Who qualifies">
+              <p>
+                Every guest who still has active internet access when they check out qualifies &mdash; free, paid
+                or included with the room. A guest with no active access at checkout gets no grace. Each stay
+                receives grace once.
+              </p>
+            </HelpSection>
+            <HelpSection title="When no hotel policy is published">
+              <p>
+                &ldquo;Nothing published&rdquo; is not &ldquo;nothing happening&rdquo;: departing guests still get
+                the built-in emergency terms, a safe default that was not chosen for this hotel. Each use of it
+                raises a critical alert.
+              </p>
+            </HelpSection>
+            <HelpSection title="Versions and history">
+              <HelpList items={[
+                "Every published version is kept, newest first. The record is append-only: publishing never rewrites what an earlier version promised.",
+                "A change applies to future checkouts only. A guest already in grace keeps the exact terms they were given at checkout.",
+                "Each version records who published it and why.",
+              ]} />
+            </HelpSection>
+          </>
+        }
         actions={
           canWrite ? (
             <Button onClick={() => setEditing(true)} disabled={!state}>
@@ -325,10 +357,7 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
             <CardHeader>
               <div className="min-w-0 space-y-0.5">
                 <CardTitle>Policy history</CardTitle>
-                <CardDescription>
-                  Every published version, newest first. The record is append-only: publishing never rewrites what an
-                  earlier version promised.
-                </CardDescription>
+                <CardDescription>Every published version, newest first.</CardDescription>
               </div>
               {historyAvailable && history.length > 0 && (
                 <Badge tone="neutral">

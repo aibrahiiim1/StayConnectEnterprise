@@ -119,7 +119,7 @@ export const PROTEL_FALLBACK: PmsProvider = {
   fields: PROTEL_FIELDS,
   capabilities: { full_resync: true, live_events: true, test_connection: false, arrivals: true, departures: true },
   setup_steps: [
-    "Ask the property's Protel administrator to enable a FIAS interface for Velonet.",
+    "Ask the property's Protel administrator to enable a FIAS interface for OneGate.",
     "Note the address and port the FIAS interface listens on.",
     "Make sure the appliance can reach that address on the hotel network.",
   ],

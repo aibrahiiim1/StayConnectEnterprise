@@ -65,7 +65,7 @@
       "id": "nightly-authoritative-delivery",
       "path": "docs/NIGHTLY_AUTHORITATIVE_DELIVERY.md",
       "status": "AUTHORITATIVE",
-      "note": "Product-Owner-approved NIGHTLY AUTHORITATIVE DELIVERY model (2026-09-24) and the STANDING PRE-LIVE DEPLOYMENT DECISION. The four authoritative gates no longer run on pull_request, so daytime development is uninterrupted; one complete fresh run of all four is dispatched at 03:10 Africa/Cairo against the exact head of the single active delivery candidate and merged automatically only if all four pass that exact head; and every completed change may be deployed to PRE-LIVE 172.21.60.25 without waiting for that run. Supersedes the CI-hygiene rules in the Fast Delivery protocol that forbade workflow_dispatch on a required check and told an operator to re-run failed jobs."
+      "note": "Product-Owner-approved NIGHTLY AUTHORITATIVE DELIVERY model (2026-09-24) and the STANDING PRE-LIVE DEPLOYMENT DECISION. The four authoritative gates no longer run on pull_request, so daytime development is uninterrupted; one complete fresh run of all four is dispatched at 06:00 Africa/Cairo against the exact head of the single active delivery candidate and merged automatically only if all four pass that exact head; and every completed change may be deployed to PRE-LIVE 172.21.60.25 without waiting for that run. Supersedes the CI-hygiene rules in the Fast Delivery protocol that forbade workflow_dispatch on a required check and told an operator to re-run failed jobs."
     },
     {
       "id": "project-state",

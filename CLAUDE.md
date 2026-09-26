@@ -281,7 +281,7 @@ between pushes, which makes it more valuable rather than less.
 
 ### Nightly
 
-At **03:10 Africa/Cairo** — one `cron: '10 3 * * *'` with `timezone: "Africa/Cairo"`, so the platform owns the
+At **06:00 Africa/Cairo** — one `cron: '0 6 * * *'` with `timezone: "Africa/Cairo"`, so the platform owns the
 DST arithmetic — the orchestrator **re-runs** each gate's existing `pull_request` run for the exact head of the
 single active delivery candidate. A re-run keeps the event and the head SHA, so its checks satisfy the ruleset,
 and arrives as attempt 2+, where the full gate executes. It merges automatically only if all four pass **that

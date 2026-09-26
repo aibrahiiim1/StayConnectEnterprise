@@ -66,7 +66,7 @@ func TestBrandingAcceptsOrdinaryCustomisation(t *testing.T) {
 	// The hatch has to be usable, or operators will ask for something worse. Real styling and real markup
 	// must pass.
 	ok := map[string]any{
-		"hotel_name":       "Coral Sea Holiday Resort",
+		"hotel_name":       "Semantics Demo Hotel",
 		"brand_color":      "#0f6b63",
 		"brand_color_dark": "#0b544e",
 		"text_color":       "rgb(28, 43, 42)",
@@ -135,7 +135,7 @@ func TestBrandingBoundsTheTemplateSize(t *testing.T) {
 // which screen the request came from.
 func TestOnlyAdvancedContentTriggersTheStepUp(t *testing.T) {
 	current := map[string]any{
-		"hotel_name": "Coral Sea", "brand_color": "#0f6b63",
+		"hotel_name": "Semantics Demo Hotel", "brand_color": "#0f6b63",
 		"custom_css": ".card { box-shadow: none; }",
 	}
 	for _, c := range []struct {
@@ -143,12 +143,12 @@ func TestOnlyAdvancedContentTriggersTheStepUp(t *testing.T) {
 		next map[string]any
 		want bool
 	}{
-		{"renaming the hotel", map[string]any{"hotel_name": "Coral Sea Resort", "custom_css": ".card { box-shadow: none; }"}, false},
-		{"changing a colour", map[string]any{"hotel_name": "Coral Sea", "brand_color": "#123456", "custom_css": ".card { box-shadow: none; }"}, false},
-		{"editing the stylesheet", map[string]any{"hotel_name": "Coral Sea", "custom_css": ".card { display: none; }"}, true},
+		{"renaming the hotel", map[string]any{"hotel_name": "Semantics Demo Resort", "custom_css": ".card { box-shadow: none; }"}, false},
+		{"changing a colour", map[string]any{"hotel_name": "Semantics Demo Hotel", "brand_color": "#123456", "custom_css": ".card { box-shadow: none; }"}, false},
+		{"editing the stylesheet", map[string]any{"hotel_name": "Semantics Demo Hotel", "custom_css": ".card { display: none; }"}, true},
 		// REMOVING it counts too. "Advanced is empty now" is still a change to what the page executes, and a
 		// rule that only looked at the new value would let a session clear the hotel's own styling unchallenged.
-		{"clearing the stylesheet", map[string]any{"hotel_name": "Coral Sea"}, true},
+		{"clearing the stylesheet", map[string]any{"hotel_name": "Semantics Demo Hotel"}, true},
 		{"adding markup", map[string]any{"custom_css": ".card { box-shadow: none; }", "custom_html": "<p>hi</p>"}, true},
 	} {
 		if got := advancedChanged(c.next, current); got != c.want {
@@ -227,14 +227,14 @@ func TestTextAndTemplateFieldsAreBounded(t *testing.T) {
 // CHOOSING A TEMPLATE IS NOT ADVANCED. Ordinary branding saves with no password; custom CSS and HTML need it in
 // both directions. Template choice and its options are closed vocabularies, so they must not trip it.
 func TestTemplateChoiceDoesNotTriggerTheStepUp(t *testing.T) {
-	current := map[string]any{"hotel_name": "Coral Sea", "custom_css": ".a{}"}
-	next := map[string]any{"hotel_name": "Coral Sea", "custom_css": ".a{}", "template_id": "split",
+	current := map[string]any{"hotel_name": "Semantics Demo Hotel", "custom_css": ".a{}"}
+	next := map[string]any{"hotel_name": "Semantics Demo Hotel", "custom_css": ".a{}", "template_id": "split",
 		"template_options": map[string]any{"overlay": 30}, "hero_image_url": "/assets/h.jpg"}
 	if advancedChanged(next, current) {
 		t.Error("choosing a template asked for the password")
 	}
 	for _, k := range portaldesign.AdvancedFields {
-		n := map[string]any{"hotel_name": "Coral Sea", "custom_css": ".a{}"}
+		n := map[string]any{"hotel_name": "Semantics Demo Hotel", "custom_css": ".a{}"}
 		n[k] = "changed"
 		if !advancedChanged(n, current) {
 			t.Errorf("changing %s did not ask for the password", k)

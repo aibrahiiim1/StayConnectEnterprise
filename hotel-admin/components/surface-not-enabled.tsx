@@ -14,6 +14,7 @@
 import Link from "next/link";
 import { Info } from "lucide-react";
 import { Card, CardBody } from "@/components/ui/card";
+import { HelpSection, HelpTip } from "@/components/help";
 
 export function SurfaceNotEnabled({ label }: { label: string }) {
   return (
@@ -26,19 +27,28 @@ export function SurfaceNotEnabled({ label }: { label: string }) {
               {/* Two lines, not one sentence. "Guest devices is not enabled" and "Settlements is not
                   enabled" are both wrong, and a product that cannot agree with its own labels reads as
                   careless at exactly the moment an operator is already wondering whether it is broken. */}
-              <h1 className="text-lg font-semibold tracking-tight">{label}</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-semibold tracking-tight">{label}</h1>
+                <HelpTip title={label}>
+                  <HelpSection title="Why this screen is empty">
+                    <p>
+                      The feature exists in OneGate but is not switched on for this property, so there is nothing
+                      here to show or to fix. None of guest internet, sign-in, the PMS connection, sessions or
+                      accounting depends on this screen.
+                    </p>
+                  </HelpSection>
+                  <HelpSection title="Turning it on">
+                    <p>
+                      If this property should have it, ask Semantics support to enable it. It is a deployment decision
+                      rather than something an operator can turn on.
+                    </p>
+                  </HelpSection>
+                </HelpTip>
+              </div>
               <p className="text-sm font-medium">Not enabled on this appliance</p>
               <p className="text-sm text-muted-foreground">
-                This is a configuration of the appliance, not a fault. The feature exists in Velonet but
-                is not switched on for this property, so there is nothing here to show or to fix.
-              </p>
-              <p className="text-sm text-muted-foreground">
-                Guest internet, sign-in, the PMS connection, sessions and accounting are unaffected — none of
-                them depends on this screen.
-              </p>
-              <p className="text-sm text-muted-foreground">
-                If this property should have it, ask Velonet support to enable it; it is a deployment
-                decision rather than something an operator can turn on.
+                This is a configuration of the appliance, not a fault. Guest internet, sign-in, the PMS connection,
+                sessions and accounting are unaffected.
               </p>
             </div>
           </div>

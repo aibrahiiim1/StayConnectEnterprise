@@ -101,7 +101,7 @@ const open = (name: RegExp) => fireEvent.click(screen.getByRole("tab", { name })
 
 describe("the page speaks a hotel's language, not a release manager's", () => {
   it("offers the designer's sections", async () => {
-    mock({ hotel_name: "Coral Sea" });
+    mock({ hotel_name: "Semantics Demo" });
     await renderPage();
     for (const t of ["Template", "Brand", "Content", "Sign-in page text", "Languages", "Advanced HTML & CSS", "History"]) {
       expect(screen.getByRole("tab", { name: new RegExp(t) })).toBeTruthy();
@@ -109,7 +109,7 @@ describe("the page speaks a hotel's language, not a release manager's", () => {
   });
 
   it("never mentions drafts, publishing, versions or rollback", async () => {
-    mock({ hotel_name: "Coral Sea", custom_css: ".a{}" }, {}, [], [
+    mock({ hotel_name: "Semantics Demo", custom_css: ".a{}" }, {}, [], [
       { version: 3, published_at: "2026-09-20T10:00:00Z", published_by: "a@x", note: "rolled back to version 1" },
       { version: 2, published_at: "2026-09-19T10:00:00Z", published_by: "a@x" },
     ]);
@@ -124,36 +124,36 @@ describe("the page speaks a hotel's language, not a release manager's", () => {
   });
 
   it("saves through one button, and offers nothing to save until something changed", async () => {
-    mock({ hotel_name: "Coral Sea" });
+    mock({ hotel_name: "Semantics Demo" });
     await renderPage();
     expect((screen.getByRole("button", { name: /Save changes/i }) as HTMLButtonElement).disabled).toBe(true);
 
     open(/Content/);
-    fireEvent.change(screen.getByLabelText(/Hotel name/i), { target: { value: "Coral Sea Resort" } });
+    fireEvent.change(screen.getByLabelText(/Hotel name/i), { target: { value: "Semantics Demo Hotel" } });
     await waitFor(() => expect((screen.getByRole("button", { name: /Save changes/i }) as HTMLButtonElement).disabled).toBe(false));
 
     fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
     await waitFor(() => expect(saves()).toHaveLength(1));
     const body = saves()[0][1];
-    expect(body.design.hotel_name).toBe("Coral Sea Resort");
+    expect(body.design.hotel_name).toBe("Semantics Demo Hotel");
     // No password for an ordinary settings change.
     expect(body.password).toBeUndefined();
   });
 
   it("discards back to what guests are seeing", async () => {
-    mock({ hotel_name: "Coral Sea" });
+    mock({ hotel_name: "Semantics Demo" });
     await renderPage();
     open(/Content/);
     fireEvent.change(screen.getByLabelText(/Hotel name/i), { target: { value: "Something else" } });
     fireEvent.click(screen.getByRole("button", { name: /Discard/i }));
     await waitFor(() =>
-      expect((screen.getByLabelText(/Hotel name/i) as HTMLInputElement).value).toBe("Coral Sea"));
+      expect((screen.getByLabelText(/Hotel name/i) as HTMLInputElement).value).toBe("Semantics Demo"));
   });
 });
 
 describe("templates", () => {
   it("offers six layouts, with the original as the default", async () => {
-    mock({ hotel_name: "Coral Sea" });
+    mock({ hotel_name: "Semantics Demo" });
     await renderPage();
     const group = screen.getByRole("radiogroup", { name: /Page template/ });
     const radios = within(group).getAllByRole("radio");
@@ -164,7 +164,7 @@ describe("templates", () => {
   });
 
   it("choosing a layout reaches the preview and saves with no password", async () => {
-    mock({ hotel_name: "Coral Sea" });
+    mock({ hotel_name: "Semantics Demo" });
     await renderPage();
     fireEvent.click(screen.getByRole("radio", { name: /Split/ }));
     expect(screen.getByTestId("preview").getAttribute("data-template")).toBe("split");
@@ -195,7 +195,7 @@ describe("templates", () => {
 
 describe("the password step-up is asked for where it matters", () => {
   it("does not ask when only ordinary settings changed", async () => {
-    mock({ hotel_name: "Coral Sea" });
+    mock({ hotel_name: "Semantics Demo" });
     await renderPage();
     open(/Content/);
     fireEvent.change(screen.getByLabelText(/Hotel name/i), { target: { value: "X" } });
@@ -206,7 +206,7 @@ describe("the password step-up is asked for where it matters", () => {
   });
 
   it("asks, and sends it, when the custom CSS or HTML changed", async () => {
-    mock({ hotel_name: "Coral Sea" });
+    mock({ hotel_name: "Semantics Demo" });
     await renderPage();
     open(/Advanced/);
     fireEvent.change(screen.getByLabelText(/Custom CSS/i), { target: { value: ".card { border: 0 }" } });
@@ -226,7 +226,7 @@ describe("the password step-up is asked for where it matters", () => {
 
   it("asks when the custom CSS is CLEARED, too", async () => {
     // Emptying the stylesheet is still a change to what the page carries; the rule holds in both directions.
-    mock({ hotel_name: "Coral Sea", custom_css: ".card { border: 0 }" });
+    mock({ hotel_name: "Semantics Demo", custom_css: ".card { border: 0 }" });
     await renderPage();
     open(/Advanced/);
     fireEvent.change(screen.getByLabelText(/Custom CSS/i), { target: { value: "" } });
@@ -237,7 +237,7 @@ describe("the password step-up is asked for where it matters", () => {
   });
 
   it("opens the password prompt when the server asks for it", async () => {
-    mock({ hotel_name: "Coral Sea" });
+    mock({ hotel_name: "Semantics Demo" });
     const { ApiError } = await import("@/lib/api");
     mockPost(undefined, () => Promise.reject(new (ApiError as any)(401, { error: "reauth_required", message: "confirm your password" })));
     await renderPage();
@@ -261,7 +261,7 @@ describe("the server's verdict on the Advanced fields", () => {
 
   it("names what the portal would remove, previews the safe version, and offers it", async () => {
     mockPost(verdict);
-    mock({ hotel_name: "Coral Sea" });
+    mock({ hotel_name: "Semantics Demo" });
     await renderPage();
     open(/Advanced/);
     fireEvent.change(screen.getByLabelText(/Custom HTML/i), { target: { value: hostile } });
@@ -366,7 +366,7 @@ describe("languages and wording", () => {
   });
 
   it("stores an override only when the wording actually differs", async () => {
-    mock({ hotel_name: "Coral Sea" });
+    mock({ hotel_name: "Semantics Demo" });
     await renderPage();
     open(/Sign-in page text/);
     fireEvent.click(screen.getByRole("tab", { name: /Italiano/ }));
@@ -441,7 +441,7 @@ describe("languages and wording", () => {
   });
 
   it("only sends the languages the operator ticked", async () => {
-    mock({ hotel_name: "Coral Sea" });
+    mock({ hotel_name: "Semantics Demo" });
     await renderPage();
     open(/^Languages/);
     fireEvent.click(screen.getByLabelText(/Offer Русский to guests/));
@@ -470,7 +470,7 @@ describe("the hotel's own words reach the portal", () => {
 
 describe("history", () => {
   it("lists earlier saves and restores one only with the password", async () => {
-    mock({ hotel_name: "Coral Sea" }, {}, [], [
+    mock({ hotel_name: "Semantics Demo" }, {}, [], [
       { version: 4, published_at: "2026-09-23T10:00:00Z", published_by: "front@hotel" },
       { version: 3, published_at: "2026-09-20T10:00:00Z", published_by: "gm@hotel", note: "rolled back to version 1" },
     ]);
@@ -506,7 +506,7 @@ describe("unsaved work is kept only when the server would keep it (found on PRE-
   it("never sends a design the server has refused, and says the work is not being kept", async () => {
     put.mockResolvedValue({});
     mockPost(refuseBase);
-    mock({ hotel_name: "Coral Sea" });
+    mock({ hotel_name: "Semantics Demo" });
     await renderPage();
     open(/Advanced HTML/);
     fireEvent.change(await screen.findByLabelText(/^custom html$/i), { target: { value: '<base href="https://evil.example/">' } });
@@ -518,7 +518,7 @@ describe("unsaved work is kept only when the server would keep it (found on PRE-
   it("still keeps a clean design as the operator types", async () => {
     put.mockResolvedValue({});
     mockPost(refuseBase);
-    mock({ hotel_name: "Coral Sea" });
+    mock({ hotel_name: "Semantics Demo" });
     await renderPage();
     open(/Advanced HTML/);
     fireEvent.change(await screen.findByLabelText(/^custom html$/i), { target: { value: "<p>Breakfast 7-10</p>" } });

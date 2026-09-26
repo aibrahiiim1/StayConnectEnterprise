@@ -27,6 +27,7 @@ import { RoleRestricted } from "@/components/role-restricted";
 import { usePermissions } from "@/lib/permissions";
 import { statusWord } from "@/lib/license-state";
 import { cn, formatRelative, errMsg } from "@/lib/utils";
+import { HelpList, HelpSection } from "@/components/help";
 
 const toneFor = (status: string) =>
   status === "online" ? "ok" :
@@ -218,7 +219,35 @@ export default function AppliancesPage() {
         eyebrow="Infrastructure"
         title="Appliances"
         icon={<Server />}
-        description="Every appliance, where it is and whether it is online. Appliances normally arrive by themselves under Onboarding; the tools here are for recovery."
+        description="Every appliance, where it is and whether it is online."
+        help={
+          <>
+            <HelpSection title="Most appliances install zero-touch">
+              <p>
+                A factory-clean appliance with internet registers itself and appears under{" "}
+                <Link href="/onboarding" className="font-medium underline underline-offset-2">Onboarding</Link> as
+                Pending activation, where you choose its customer, site and license terms and click Activate. No
+                token is needed.
+              </p>
+            </HelpSection>
+            <HelpSection title="Recovery tools on this page">
+              <HelpList
+                items={[
+                  <><strong>Enrollment token</strong> is only a recovery lever: for an appliance that cannot register itself, or one being deliberately re-attached. The full token is shown once, when it is created.</>,
+                  <><strong>New appliance</strong> registers one manually under a site of the selected customer.</>,
+                  <><strong>Config</strong> shows what the appliance at that site should be enforcing.</>,
+                  <>An appliance is created under a site that belongs to one customer, so select a customer in the sidebar first.</>,
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="Online status">
+              <p>
+                A green pulse means a fresh heartbeat; amber means the last heartbeat is late and the appliance is
+                about to be marked offline.
+              </p>
+            </HelpSection>
+          </>
+        }
         actions={
           can["appliances.read"] ? (
             <>
@@ -246,18 +275,8 @@ export default function AppliancesPage() {
         <RoleRestricted what="Appliances belong to a customer, and your sign-in has none." />
       ) : (
       <>
-      <Callout tone="info" title="Most appliances install zero-touch">
-        A factory-clean appliance with internet registers itself and appears under{" "}
-        <Link href="/onboarding" className="font-medium underline underline-offset-2">Onboarding</Link> as Pending
-        activation, where you choose its customer, site and license terms and click Activate — no token. Enrollment
-        tokens are only a recovery lever: an appliance that cannot register itself, or one being deliberately
-        re-attached.
-      </Callout>
       {allCustomers && (canWrite || canMint) && (
-        <Callout tone="neutral">
-          Select a customer in the sidebar to add or enroll an appliance — an appliance is created under a site that
-          belongs to one customer.
-        </Callout>
+        <Callout tone="neutral">Select a customer in the sidebar to add or enroll an appliance.</Callout>
       )}
       {!allCustomers && rows !== null && sites.length === 0 && (
         <Callout tone="warning">Create a site under <strong>{selectedTenantName}</strong> first — appliances belong to a site.</Callout>
@@ -338,7 +357,7 @@ export default function AppliancesPage() {
           <CardHeader>
             <div className="space-y-0.5">
               <CardTitle>Enrollment tokens</CardTitle>
-              <CardDescription>Recovery tokens minted for this customer. The full token is shown only once, when it is created.</CardDescription>
+              <CardDescription>Recovery tokens minted for this customer.</CardDescription>
             </div>
           </CardHeader>
           <Table>

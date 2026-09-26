@@ -54,7 +54,7 @@ export function AdvancedSection({ d, set, writable, issues, sanitized, checking,
       <CodeCard
         field="custom_css"
         title="Custom CSS"
-        description="Wrapped in its own cascade layer: your rules beat the portal's styling and template, but cannot hide the sign-in forms. !important is removed — it is not needed."
+        description="Your rules beat the portal's styling, but cannot hide the sign-in forms."
         language="css"
         value={d.custom_css ?? ""}
         onChange={(v) => set("custom_css", v)}
@@ -67,7 +67,7 @@ export function AdvancedSection({ d, set, writable, issues, sanitized, checking,
       <CodeCard
         field="custom_html"
         title="Custom HTML"
-        description="Shown below the sign-in (as content blocks in the Resort layout). Text, headings, lists, tables, links and images from your uploads or https."
+        description="Shown below the sign-in."
         language="html"
         value={d.custom_html ?? ""}
         onChange={(v) => set("custom_html", v)}

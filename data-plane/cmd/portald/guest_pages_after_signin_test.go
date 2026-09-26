@@ -113,7 +113,7 @@ func TestStatusNavigatedIsABrandedPageAndFetchedIsTheSameJSON(t *testing.T) {
 	}
 	en := builtinStrings["en"]
 	for _, want := range []string{
-		"Coral Bay Resort", esc(en["online.title"]), en["online.remaining"], "2 h 10 min", en["tl.note"],
+		"Semantics Demo Hotel", esc(en["online.title"]), en["online.remaining"], "2 h 10 min", en["tl.note"],
 		`data-at="2026-09-30T12:00:00Z"`, `action="/logout"`, en["online.disconnect"], en["online.back"],
 		`href="/success?s=sess-9&amp;t=8100"`, `id="lang"`,
 	} {

@@ -79,7 +79,7 @@ jobs:
           echo "This attempt exists so the required context '${{ github.job }}' is REPORTED for this commit,"
           echo "and it fails so the pull request cannot become mergeable on a check that validated nothing."
           echo
-          echo "The full four-gate validation runs once a night at 03:10 Africa/Cairo, when the nightly"
+          echo "The full four-gate validation runs once a night at 06:00 Africa/Cairo, when the nightly"
           echo "orchestrator re-runs THIS run for the exact delivery head. That re-run arrives as attempt 2+"
           echo "and executes everything below."
           echo
@@ -211,7 +211,7 @@ jobs:
         if: steps.reuse.outputs.hit != 'true'
         run: python tools/tests/closure_coherence/run_negative.py
 
-      # THE NIGHTLY DELIVERY DECISION IS THE ONLY THING THAT MERGES ANYTHING NOW, unattended, at 03:10. Every
+      # THE NIGHTLY DELIVERY DECISION IS THE ONLY THING THAT MERGES ANYTHING NOW, unattended, at 06:00. Every
       # rule that can refuse a merge is driven here through the states that would make an unattended merge
       # wrong: a wrong head, a stale pass, no candidate, two candidates, partial completion, a failed gate, a
       # merge attempted without a fresh pass, and both halves of the Africa/Cairo year. The positive path is

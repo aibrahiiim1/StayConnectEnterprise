@@ -14,7 +14,7 @@ import {
   DoorOpen, BedDouble, Plug, Route, Inbox, ShieldCheck, UserX, Layers, ArrowLeftRight, HeartPulse, Receipt,
   LifeBuoy, Globe, AtSign, MessageSquare, Stethoscope, Bell, Hourglass, CalendarClock, ChartColumn,
 } from "lucide-react";
-import { VelonetLockup } from "@/components/brand";
+import { BySemantics, OneGateLockup } from "@/components/brand";
 import { Tooltip } from "@/components/ui/tooltip";
 
 // THERE IS NO BUILD-TIME GATE IN THIS FILE, AND THAT IS THE POINT.
@@ -324,7 +324,7 @@ export function Nav({
       >
         {/* The mark is drawn rather than loaded: one fewer asset to ship to an appliance, and it inherits the
             brand token so it is never out of step with the rest of the product. */}
-        <VelonetLockup product="Hotel Admin" collapsed={collapsed} inverse className={collapsed ? undefined : "flex-1"} />
+        <OneGateLockup product="Hotel Admin" collapsed={collapsed} inverse className={collapsed ? undefined : "flex-1"} />
         {onToggleCollapsed && (
           // ONE control, and its accessible name states what activating it will DO, which is what a screen
           // reader user needs — not what the current state is. aria-expanded carries the state.
@@ -548,7 +548,15 @@ export function Nav({
           );
           return collapsed ? <Tooltip content="Sign out" side="right">{signOut}</Tooltip> : signOut;
         })()}
+
+        {/* The company line. The rail has no room for words; the expanded sidebar ends with it. */}
+        {!collapsed && (
+          <div className="mt-2 border-t border-sidebar-border/70 px-2.5 pt-2">
+            <BySemantics className="text-2xs text-sidebar-muted" />
+          </div>
+        )}
       </div>
+
     </aside>
   );
 }

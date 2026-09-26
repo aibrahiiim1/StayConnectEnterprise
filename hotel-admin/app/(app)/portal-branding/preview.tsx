@@ -275,8 +275,7 @@ export function PortalPreview({ design, sanitized }: {
         )}
       </div>
       <p className="text-xs text-muted-foreground">
-        Room sign-in, vouchers and personal accounts are all shown here so you can check every tab — which of
-        them guests actually see is decided in Sign-in methods, not on this page.
+        Every sign-in tab is shown here; which ones guests see is set in Sign-in methods.
       </p>
     </section>
   );
