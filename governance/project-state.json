@@ -856,16 +856,16 @@
     "dhcp_ownership_evidence_monitored_deployed_note": "DEPLOYED AND VERIFIED LIVE 2026-09-01 (T0109). netd health carries an ownership_evidence block filled by a fresh lease read on every request; the operational checker returns OK on the real socket and refuses when the socket is absent; the enforcement-plane gate consults it. Kea's hourly lease-file cleanup, which had failed every hour since 2026-08-28, has run cleanly since the repair with zero PID failures.",
     "hotel_admin_runtime_identity": {
       "_note": "THE UI IS NOT THE BINARIES. deployed_head_on_appliance names the commit whose build produced the nine SERVICE binaries; it says nothing about the Hotel Admin bundle, which is built and shipped separately and is routinely left untouched by a backend deployment. Recording one head for both is how a UI five days older than the backend was reported as current. These fields are read from the bundle's own hotel-admin-release.json on the appliance, never inferred.",
-      "source_commit": "334f9d917939a21eeeb52530b2c6a8db29c6b165",
-      "build_id": "gIy6BezNHwu13nfh5jxlw",
-      "release": "20260926-003848",
-      "previous_release": "20260925-210739",
-      "artifact_sha256": "005ce6dce5aeebe03edc03641aaf6db903b07e28f3fc76cdef71edf83d70520d",
+      "source_commit": "92407b6a8134ce195852b1d3b972748666038e94",
+      "build_id": "fR1HnruWINzrib6c1m3tN",
+      "release": "20260926-055844",
+      "previous_release": "20260926-003848",
+      "artifact_sha256": "8846c18d4ef6405b15060696097f718689581c2961c158fc60808cad7dd586a9",
       "build_flags": "none -- the release manifest records build_flags {}; the capability contract carries no build flags",
       "contract_version": "1",
-      "deployed_at": "2026-09-26T00:38Z UTC (release directory 20260926-003848). The OneGate delivery, packaged by deploy/scripts/deploy-hotel-admin.sh from a CLEAN clone of 334f9d91 (capability contract satisfied) and installed with the appliance installer, which verifies the candidate, flips the symlink atomically and rolls back on a failed smoke test. Recorded by T0195.",
-      "verified_at": "2026-09-26 UTC, immediately after installation. Installer smoke 30/30; the installed release records source_commit 334f9d91, source_state clean and BUILD_ID gIy6BezNHwu13nfh5jxlw, matching .next/BUILD_ID on disk. LIVE: a Chrome browser opened all 39 operator screens, 39 of 39 returning 200 with no application or console error, each with a working lightbulb, the OneGate wordmark on the shell. Read-only apart from the operator login.",
-      "rollback": "PRESENT: /opt/stayconnect/hotel-admin.previous -> /opt/stayconnect/releases/hotel-admin/20260925-210739 (source 38d2ab79, BUILD_ID dY7ynnaj6XBJuq2YR3qYd), the release that was serving immediately before."
+      "deployed_at": "2026-09-26T05:58Z UTC (release directory 20260926-055844): the OneGate closure (neutral placeholders), packaged by deploy/scripts/deploy-hotel-admin.sh from a CLEAN clone of 92407b6a and installed with the appliance installer. Recorded by T0196.",
+      "verified_at": "2026-09-26 UTC, immediately after installation. Installer smoke 30/30; the installed release records source_commit 92407b6a, source_state clean and BUILD_ID fR1HnruWINzrib6c1m3tN; old real-data placeholders in 0 files.",
+      "rollback": "PRESENT: /opt/stayconnect/hotel-admin.previous -> /opt/stayconnect/releases/hotel-admin/20260926-003848 (source 334f9d91, BUILD_ID gIy6BezNHwu13nfh5jxlw), the release that was serving immediately before."
     },
     "hotel_admin_deployment_contract": "PERMANENT RULE for every Hotel Admin release. (1) Exactly ONE servable release: /opt/stayconnect/hotel-admin is a symlink to a verified release under the managed releases directory - never a plain directory, which is what an install-by-copying leaves behind and what removes all provenance. (2) Every bundle carries hotel-admin-release.json recording source commit, BUILD_ID, release timestamp, the capability flags and their values, and the artifact checksum; packaging FAILS if the source commit cannot be identified or the contract is not satisfied. (3) Installation verifies the candidate - checksum, manifest, required routes, and that the flags were really inlined - BEFORE switching, and smoke-tests the live endpoint AFTER, proving the served BUILD_ID and that every required operator surface answers; a failure restores the previous verified release. (4) A rollback target must satisfy the same contract: an obsolete UI that would remove PMS, Service Plan or Package management is archive evidence, never an executable rollback, and the previous pointer is CLEARED rather than left aimed at one. (5) Release selection is explicit and provenance-verified - never by mtime, filename or 'latest-looking' directory. (6) Historical releases are retained under the archive directory, unreachable by Caddy, systemd or either pointer.",
     "hotel_admin_operator_endpoint_verified": true,
@@ -1211,18 +1211,69 @@
     "session_start_check": "EVERY agent session runs `python tools/nightly-status.py` FIRST. Exit 1 / UNRESOLVED_FAILURE means the latest nightly authoritative validation failed and has not been superseded: diagnose and repair that on the same delivery branch before starting new work. UNKNOWN (exit 2) is not the same as clear. Nothing else notifies anyone -- the push that caused the failure succeeded and the evidence sits in a workflow run nobody has opened.",
     "central_console_runtime_identity": {
       "_note": "What Central 150.0.0.252 serves as its operator console (cloud-admin), read back from the installed release's own cloud-admin-release.json. Built and shipped separately from ctrlapi, which this record does not describe.",
-      "source_commit": "334f9d917939a21eeeb52530b2c6a8db29c6b165",
+      "source_commit": "92407b6a8134ce195852b1d3b972748666038e94",
       "source_state": "clean",
-      "build_id": "Uf1lYB7U-Snn0R2z2kRCu",
-      "release": "/opt/stayconnect/releases/cloud-admin/20260926-003937",
-      "artifact_sha256": "b791b8a444285e1247335868565cf2ffdf403d40de20a8674fbe8af7ab2c5790",
-      "previous_release": "/opt/stayconnect/releases/cloud-admin/20260821-135642 (cloud-admin-current.previous)",
+      "build_id": "6bLPqucYlBs9PvHQwSjSP",
+      "release": "/opt/stayconnect/releases/cloud-admin/20260926-055907",
+      "artifact_sha256": "0c5fedc4851b48fdbc6029feb5499dd0489ab8e81e69140967384403fdcc9d9d",
+      "previous_release": "/opt/stayconnect/releases/cloud-admin/20260926-003937 (cloud-admin-current.previous)",
       "ctrlapi_runs": "0582eb7847be23583c9fc6c03d6c6c16f5601b79 (unchanged by this delivery)",
-      "deployed_at": "2026-09-26T00:39Z UTC (T0195)",
-      "verified": "Chrome, https://150.0.0.252: title 'OneGate Central', 12/12 screens 200 with no error, each with a working lightbulb; console /login 200 directly and through Caddy."
-    }
+      "deployed_at": "2026-09-26T05:59Z UTC (T0196)",
+      "verified": "Console /login 200 directly and through Caddy; the old placeholder in 0 files, the new one present."
+    },
+    "receipt_content_corrections": [
+      {
+        "corrected_receipt": "T0189",
+        "field": "previous_state.unchanged_on_purpose",
+        "correcting_receipt": "T0196",
+        "defect": "Copied wholesale from T0188's new_state, so it speaks as 'THIS transition ...' about what T0188 did, inside T0189. Read it as describing T0188: the Velonet redesign was front-end presentation only.",
+        "rule": "T0189 is preserved unchanged as evidence of the mistake. Its own content (record_type, what it records, its new_state, provenance) is correct; only that one sentence describes the previous transition, not this one."
+      },
+      {
+        "corrected_receipt": "T0190",
+        "field": "previous_state.unchanged_on_purpose",
+        "correcting_receipt": "T0196",
+        "defect": "Copied wholesale from T0189's new_state, so it speaks as 'THIS transition ...' about what T0189 did, inside T0190. Read it as describing T0189: PR #184 was merged and the Velonet base moved.",
+        "rule": "T0190 is preserved unchanged as evidence of the mistake. Its own content (record_type, what it records, its new_state, provenance) is correct; only that one sentence describes the previous transition, not this one."
+      },
+      {
+        "corrected_receipt": "T0191",
+        "field": "previous_state.unchanged_on_purpose",
+        "correcting_receipt": "T0196",
+        "defect": "Copied wholesale from T0190's new_state, so it speaks as 'THIS transition ...' about what T0190 did, inside T0191. Read it as describing T0190: one review correction was recorded.",
+        "rule": "T0191 is preserved unchanged as evidence of the mistake. Its own content (record_type, what it records, its new_state, provenance) is correct; only that one sentence describes the previous transition, not this one."
+      },
+      {
+        "corrected_receipt": "T0192",
+        "field": "previous_state.unchanged_on_purpose",
+        "correcting_receipt": "T0196",
+        "defect": "Copied wholesale from T0191's new_state, so it speaks as 'THIS transition ...' about what T0191 did, inside T0192. Read it as describing T0191: PR #185 was merged and the Velonet delivery closed.",
+        "rule": "T0192 is preserved unchanged as evidence of the mistake. Its own content (record_type, what it records, its new_state, provenance) is correct; only that one sentence describes the previous transition, not this one."
+      },
+      {
+        "corrected_receipt": "T0193",
+        "field": "previous_state.unchanged_on_purpose",
+        "correcting_receipt": "T0196",
+        "defect": "Copied wholesale from T0192's new_state, so it speaks as 'THIS transition ...' about what T0192 did, inside T0193. Read it as describing T0192: the closure's test-fixture and manifest-head corrections were recorded.",
+        "rule": "T0193 is preserved unchanged as evidence of the mistake. Its own content (record_type, what it records, its new_state, provenance) is correct; only that one sentence describes the previous transition, not this one."
+      },
+      {
+        "corrected_receipt": "T0194",
+        "field": "previous_state.unchanged_on_purpose",
+        "correcting_receipt": "T0196",
+        "defect": "Copied wholesale from T0193's new_state, so it speaks as 'THIS transition ...' about what T0193 did, inside T0194. Read it as describing T0193: the Velonet redesign was deployed to PRE-LIVE.",
+        "rule": "T0194 is preserved unchanged as evidence of the mistake. Its own content (record_type, what it records, its new_state, provenance) is correct; only that one sentence describes the previous transition, not this one."
+      },
+      {
+        "corrected_receipt": "T0195",
+        "field": "previous_state.unchanged_on_purpose",
+        "correcting_receipt": "T0196",
+        "defect": "Copied wholesale from T0194's new_state, so it speaks as 'THIS transition ...' about what T0194 did, inside T0195. Read it as describing T0194: the retired appliance's literal address was redacted from the current tree.",
+        "rule": "T0195 is preserved unchanged as evidence of the mistake. Its own content (record_type, what it records, its new_state, provenance) is correct; only that one sentence describes the previous transition, not this one."
+      }
+    ]
   },
-  "latest_transition_id": "T0195",
+  "latest_transition_id": "T0196",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1717,17 +1768,17 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "ONEGATE_BRANDING_HELP_NIGHTLY_0600_DEPLOYED",
-    "decision": "Product-Owner mission of 2026-09-26: OneGate branding (company Semantics), lightbulb help across the three front-ends, nightly validation at 06:00 Africa/Cairo, deployed to PRE-LIVE and Central; no Go-Live.",
-    "decision_note": "Presentation, one portal string-count bound and the nightly hour; recorded by T0195. No product, architecture, trust, permission or topology decision was taken inside it.",
-    "manifest": "docs/manifests/OneGate-change-manifest.md",
-    "base": "50c1458893778c63b868c0c85a4aaa65f77d0c46",
-    "base_note": "Master after the merge of PR #188 (T0194).",
-    "head": "27368308",
-    "head_note": "The last CONTENT commit of this delivery (27368308): test-only fixes (the selftest 7m lock holder commits before it unlocks; the sidebar focus-tooltip e2e moves the pointer off the rail first). The source deployed to PRE-LIVE and Central is 334f9d91 (T0195); no runtime file differs between 334f9d91 and 27368308.",
-    "transition": "T0195",
-    "previous_delivery": "T0194",
-    "note": "T0195. OneGate branding and lightbulb help across Guest Portal, Hotel Admin and Central; nightly validation at 06:00 Africa/Cairo; deployed to PRE-LIVE (edged, portald, Hotel Admin) and Central (cloud-admin) from 334f9d91 and verified live."
+    "kind": "ONEGATE_CLOSURE_CORRECTIONS",
+    "decision": "Continuation of the Product-Owner OneGate/nightly mission of 2026-09-26: correct the receipts forward, change the PRE-LIVE portal hotel name, remove real-data placeholders, and record the first 06:00 scheduled run.",
+    "decision_note": "Governance correction, presentation text and one portal presentation setting; recorded by T0196. No product, architecture, trust, permission or topology decision was taken inside it.",
+    "manifest": "docs/manifests/OneGateClosure-change-manifest.md",
+    "base": "e3a90e0acaeaa63cf07234c4a3e8d4618f6ff6b7",
+    "base_note": "Master after the merge of PR #189 (T0195).",
+    "head": "92407b6a",
+    "head_note": "The CONTENT commit of this correction and the source of both redeployed consoles (T0196).",
+    "transition": "T0196",
+    "previous_delivery": "T0195",
+    "note": "T0196. T0189-T0195's copied previous_state sentences are corrected forward; the PRE-LIVE portal shows 'Semantics'; no placeholder points at real data; both consoles redeployed from 92407b6a. The first real 06:00 Africa/Cairo scheduled run is recorded by the receipt that follows."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

@@ -1,0 +1,100 @@
+{
+  "transition_id": "T0196",
+  "seq": 196,
+  "timestamp": "2026-09-26T08:58:24+03:00",
+  "timestamp_derivation": "Written after the PRE-LIVE portal setting was saved and both consoles were redeployed and verified, and before the commit that introduces this receipt.",
+  "record_type": "ONEGATE_CLOSURE_CORRECTIONS",
+  "authorisation": "Continuation of the Product-Owner OneGate/nightly mission (2026-09-26): correct the stale T0194 wording carried into T0195 without rewriting history; change the PRE-LIVE portal hotel name; remove placeholders that point at real data or a real hotel; the Central site name need not change. No Go-Live, PMS, financial or networking change.",
+  "receipt_corrections": {
+    "summary": "T0189 through T0195 each built previous_state by copying the previous receipt's new_state, so each one's previous_state.unchanged_on_purpose says 'THIS transition ...' about what the PREVIOUS transition did. The most visible case: T0195, which deployed to PRE-LIVE and Central, carries 'THIS transition is a current-tree redaction ... deployed nothing and contacted no appliance or environment' -- T0194's sentence. The seven receipts are preserved unchanged; this receipt and current_state_facts.receipt_content_corrections state the correct reading. No verified fact changes: every record_type, new_state, provenance, deployment and verification in those receipts stands.",
+    "corrections": [
+      {
+        "corrected_receipt": "T0189",
+        "field": "previous_state.unchanged_on_purpose",
+        "correcting_receipt": "T0196",
+        "defect": "Copied wholesale from T0188's new_state, so it speaks as 'THIS transition ...' about what T0188 did, inside T0189. Read it as describing T0188: the Velonet redesign was front-end presentation only.",
+        "rule": "T0189 is preserved unchanged as evidence of the mistake. Its own content (record_type, what it records, its new_state, provenance) is correct; only that one sentence describes the previous transition, not this one."
+      },
+      {
+        "corrected_receipt": "T0190",
+        "field": "previous_state.unchanged_on_purpose",
+        "correcting_receipt": "T0196",
+        "defect": "Copied wholesale from T0189's new_state, so it speaks as 'THIS transition ...' about what T0189 did, inside T0190. Read it as describing T0189: PR #184 was merged and the Velonet base moved.",
+        "rule": "T0190 is preserved unchanged as evidence of the mistake. Its own content (record_type, what it records, its new_state, provenance) is correct; only that one sentence describes the previous transition, not this one."
+      },
+      {
+        "corrected_receipt": "T0191",
+        "field": "previous_state.unchanged_on_purpose",
+        "correcting_receipt": "T0196",
+        "defect": "Copied wholesale from T0190's new_state, so it speaks as 'THIS transition ...' about what T0190 did, inside T0191. Read it as describing T0190: one review correction was recorded.",
+        "rule": "T0191 is preserved unchanged as evidence of the mistake. Its own content (record_type, what it records, its new_state, provenance) is correct; only that one sentence describes the previous transition, not this one."
+      },
+      {
+        "corrected_receipt": "T0192",
+        "field": "previous_state.unchanged_on_purpose",
+        "correcting_receipt": "T0196",
+        "defect": "Copied wholesale from T0191's new_state, so it speaks as 'THIS transition ...' about what T0191 did, inside T0192. Read it as describing T0191: PR #185 was merged and the Velonet delivery closed.",
+        "rule": "T0192 is preserved unchanged as evidence of the mistake. Its own content (record_type, what it records, its new_state, provenance) is correct; only that one sentence describes the previous transition, not this one."
+      },
+      {
+        "corrected_receipt": "T0193",
+        "field": "previous_state.unchanged_on_purpose",
+        "correcting_receipt": "T0196",
+        "defect": "Copied wholesale from T0192's new_state, so it speaks as 'THIS transition ...' about what T0192 did, inside T0193. Read it as describing T0192: the closure's test-fixture and manifest-head corrections were recorded.",
+        "rule": "T0193 is preserved unchanged as evidence of the mistake. Its own content (record_type, what it records, its new_state, provenance) is correct; only that one sentence describes the previous transition, not this one."
+      },
+      {
+        "corrected_receipt": "T0194",
+        "field": "previous_state.unchanged_on_purpose",
+        "correcting_receipt": "T0196",
+        "defect": "Copied wholesale from T0193's new_state, so it speaks as 'THIS transition ...' about what T0193 did, inside T0194. Read it as describing T0193: the Velonet redesign was deployed to PRE-LIVE.",
+        "rule": "T0194 is preserved unchanged as evidence of the mistake. Its own content (record_type, what it records, its new_state, provenance) is correct; only that one sentence describes the previous transition, not this one."
+      },
+      {
+        "corrected_receipt": "T0195",
+        "field": "previous_state.unchanged_on_purpose",
+        "correcting_receipt": "T0196",
+        "defect": "Copied wholesale from T0194's new_state, so it speaks as 'THIS transition ...' about what T0194 did, inside T0195. Read it as describing T0194: the retired appliance's literal address was redacted from the current tree.",
+        "rule": "T0195 is preserved unchanged as evidence of the mistake. Its own content (record_type, what it records, its new_state, provenance) is correct; only that one sentence describes the previous transition, not this one."
+      }
+    ],
+    "prevention": "tools/project-state.py validate now refuses, from T0196 on, a previous_state that speaks as 'THIS transition/delivery/increment/receipt/mission'. This receipt's own previous_state names T0195 instead."
+  },
+  "pre_live_portal_hotel_name": {
+    "change": "PRE-LIVE portal hotel_name 'Hotel Name' -> 'Semantics', saved through Hotel Admin's audited POST /portal-branding/settings (no custom CSS/HTML touched, so no step-up). Guests are served 'Semantics -- Wi-Fi'.",
+    "unchanged": "Logo and background (both neutral colour gradients, no hotel imagery), welcome and help lines, languages and the Arabic wording override. The previous design is kept on the appliance at /root/portal-design-before-semantics.json for rollback.",
+    "not_changed_by_decision": "The site name Central assigned (shown in the Hotel Admin eyebrow) stays, by Product-Owner decision: changing it is not required."
+  },
+  "placeholders": "UI placeholders that pointed at real data now use neutral or reserved examples: ops@ and noreply@example.com instead of the real hotel.com domain, portal.example.com for the social callback, 'Appliance model' instead of a real vendor's model, 'e.g. folio number' instead of a folio-shaped number, 'e.g. Europe/London' instead of the site's own timezone. Test inputs follow. Presentation only.",
+  "deployment": {
+    "source": "92407b6a8134ce195852b1d3b972748666038e94 (clean clone)",
+    "hotel_admin_pre_live": "bundle sha256 8846c18d4ef6405b15060696097f718689581c2961c158fc60808cad7dd586a9, release 20260926-055844, source_commit 92407b6a clean, BUILD_ID fR1HnruWINzrib6c1m3tN; installer smoke 30/30; previous release 20260926-003848 kept. Only stayconnect-hotel-admin restarted.",
+    "central_console": "bundle sha256 0c5fedc4851b48fdbc6029feb5499dd0489ab8e81e69140967384403fdcc9d9d, release /opt/stayconnect/releases/cloud-admin/20260926-055907, source_commit 92407b6a clean, BUILD_ID 6bLPqucYlBs9PvHQwSjSP; cloud-admin-current.previous -> 20260926-003937. Only stayconnect-cloud-admin restarted; ctrlapi unchanged at 0582eb78.",
+    "verified": "Old placeholder strings in 0 files of either installed bundle; the new ones present. Console /login 200 directly and through Caddy on Central; Hotel Admin installer smoke 30/30.",
+    "not_redeployed": "edged, portald and every other service: unchanged at T0195's provenance."
+  },
+  "nightly_schedule_evidence": "Pending: the first real 06:00 Africa/Cairo scheduled run after the change is observed and recorded by the receipt that follows this one. No workflow_dispatch run stands in for it.",
+  "repository_verification": "Hotel Admin tsc, vitest 534, the phase-4 financial-operator e2e spec 10/10; Central tsc, vitest 116, next build; project-state validate PASS with the new rule.",
+  "deployment_provenance": "PRE-LIVE Hotel Admin and Central console at 92407b6a; PRE-LIVE edged and portald remain at 334f9d91. Go-Live not performed.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. The previous delivery (T0195) deployed OneGate branding and lightbulb help to PRE-LIVE and Central and moved the nightly validation to 06:00 Africa/Cairo; it changed no phase, applied no migration and enabled no capability. PRE-LIVE remained PRE-LIVE."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. This correction changes presentation text and one portal presentation setting, redeploys the two consoles, and corrects receipts forward; it changed no phase, applied no migration, changed no permission, authentication, PMS, financial, network or licensing behaviour, and enabled no capability. PRE-LIVE remains PRE-LIVE."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Phase 7 remains ACCEPTED_AND_CLOSED under D41, Guest activation remains DEFERRED by D41, Go-Live remains unauthorised.",
+  "base": "e3a90e0acaeaa63cf07234c4a3e8d4618f6ff6b7",
+  "base_note": "Master after the merge of PR #189 (T0195).",
+  "head": "92407b6a",
+  "head_note": "The CONTENT commit of this correction and the source of both redeployed consoles.",
+  "previous_delivery": "T0195",
+  "go_live": "NOT authorised. Guest activation remains DEFERRED by D41."
+}
