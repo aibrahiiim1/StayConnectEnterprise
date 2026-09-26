@@ -95,6 +95,7 @@ const config: Config = {
         },
         input: token("--input"),
         ring: token("--ring"),
+        scrim: token("--scrim"),
 
         sidebar: {
           DEFAULT: token("--sidebar"),

@@ -72,6 +72,7 @@
   --border-strong: 217 12% 79%;
   --input: 218 9% 54%;                /* edge: control boundaries, 3.6:1 on card */
   --ring: 220 13% 9%;                 /* focus: 2px ink, never brand, so focus never reads as a primary */
+  --scrim: 225 12% 7%;                /* behind dialogs, sheets and the drawer: dark in BOTH themes, so it dims */
 
   /* ---- navigation column: inverse in BOTH themes ------------------------------------------------------ */
   --sidebar: 240 5% 12%;
@@ -175,6 +176,7 @@
   --border-strong: 220 9% 25%;
   --input: 218 7% 50%;                /* 4.3:1 on card */
   --ring: 216 15% 94%;
+  --scrim: 225 14% 3%;
 
   --sidebar: 225 11% 8%;
   --sidebar-foreground: 214 8% 84%;
