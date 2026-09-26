@@ -172,7 +172,7 @@ function LoginInner() {
                           <a
                             key={p.name}
                             href={ssoStartHref(p)}
-                            className="flex h-10 items-center justify-center rounded-md border border-foreground/85 bg-card px-4 text-[0.8125rem] font-semibold text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                            className="flex h-10 items-center justify-center rounded-md border border-foreground/85 bg-card px-4 text-label text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                           >
                             Sign in with {p.display_name}
                           </a>

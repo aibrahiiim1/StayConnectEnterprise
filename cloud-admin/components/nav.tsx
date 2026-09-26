@@ -20,7 +20,7 @@ export type NavSection = { title: string; items: NavItem[] };
 // CENTRAL'S FOUR GROUPS (handoff §7, "App shell"). The page title of every screen equals its menu label.
 //
 // "Fleet" is gone: its page was deleted, and a menu item that opens a 404 is worse than no item. The retired
-// /commercial and /subscription pages stay reachable by URL for history but are deliberately NOT listed —
+// /commercial and /subscription URLs redirect permanently to /licenses and are deliberately NOT listed —
 // plans and subscriptions are not part of the product.
 export const NAV_SECTIONS: NavSection[] = [
   {
@@ -100,7 +100,7 @@ export function Nav({
       data-collapsed={collapsed ? "true" : undefined}
       className={cn(
         "sidebar-motion flex h-full shrink-0 flex-col border-e border-sidebar-border bg-sidebar text-sidebar-foreground",
-        onToggleCollapsed ? "w-[var(--sidebar-width)] transition-[width] duration-200 ease-out" : "w-64",
+        onToggleCollapsed ? "w-[var(--sidebar-width)] transition-[width] duration-base ease-onegate motion-reduce:transition-none" : "w-64",
       )}
     >
       <div
@@ -155,7 +155,7 @@ export function Nav({
                     onClick={onNavigate}
                     aria-current={active ? "page" : undefined}
                     className={cn(
-                      "group relative flex items-center rounded-md text-[0.8125rem] transition-colors duration-press",
+                      "group relative flex items-center rounded-md text-label font-normal transition-colors duration-press",
                       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
                       collapsed ? "h-10 justify-center px-0" : "min-h-9 gap-2.5 px-2.5 py-1.5",
                       active

@@ -12,6 +12,7 @@ import { StepUpProvider } from "@/components/step-up";
 import { api, Whoami } from "@/lib/api";
 import { CustomerProvider } from "@/lib/customer-context";
 import { useSidebarCollapsed } from "@/lib/sidebar-state";
+import { cn } from "@/lib/utils";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -76,15 +77,27 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <ToastProvider>
         <StepUpProvider>
           <div className="flex h-screen overflow-hidden">
+            {/* SKIP LINK: the first tab stop on every screen, so a keyboard operator is not walked through the
+                whole sidebar before each page's content. Invisible until it has focus. */}
+            <a
+              href="#main"
+              className={cn(
+                "sr-only focus:not-sr-only focus:fixed focus:start-3 focus:top-3 focus:z-[70] focus:rounded-md",
+                "focus:bg-card focus:px-4 focus:py-2.5 focus:text-sm focus:font-semibold focus:text-foreground focus:shadow-overlay",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              )}
+            >
+              Skip to content
+            </a>
             <div className="hidden lg:block">
               <Nav email={me.email} onLogout={onLogout} collapsed={collapsed} onToggleCollapsed={toggleCollapsed} />
             </div>
 
             <DialogPrimitive.Root open={drawer} onOpenChange={setDrawer}>
               <DialogPrimitive.Portal>
-                <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-foreground/45 backdrop-blur-[2px] lg:hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0" />
+                <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-scrim/45 backdrop-blur-[2px] lg:hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 motion-reduce:animate-none" />
                 <DialogPrimitive.Content
-                  className="fixed inset-y-0 start-0 z-50 h-full w-64 outline-none lg:hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left"
+                  className="fixed inset-y-0 start-0 z-50 h-full w-64 outline-none lg:hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left motion-reduce:animate-none"
                   aria-label="Navigation"
                   aria-describedby={undefined}
                   onOpenAutoFocus={(e) => {
@@ -98,9 +111,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </DialogPrimitive.Portal>
 
               <div className="flex min-w-0 flex-1 flex-col">
-                <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card/90 px-4 backdrop-blur sm:px-6">
+                <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card px-4 sm:px-6">
                   <DialogPrimitive.Trigger
-                    className="-ms-1 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 lg:hidden"
+                    className="-ms-1 inline-flex items-center justify-center rounded-md p-1.5 text-muted-foreground transition-colors pointer-coarse:size-11 hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 lg:hidden"
                     aria-label="Open navigation"
                   >
                     <Menu className="size-5" />
@@ -121,7 +134,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   <ThemeToggle />
                 </header>
 
-                <main ref={mainRef} className="min-w-0 flex-1 overflow-y-auto">
+                <main id="main" tabIndex={-1} ref={mainRef} className="min-w-0 flex-1 overflow-y-auto focus:outline-none">
                   <div className="mx-auto w-full max-w-[104rem] px-4 py-5 sm:px-6 sm:py-6 lg:px-8">{children}</div>
                 </main>
               </div>

@@ -1,28 +1,26 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-// FORM CONTROLS, in one place. `Input` and `Label` kept their signatures; `Select`, `Textarea`, `Field` and
-// `Hint` are added because pages were writing `className="rounded border px-2 py-1"` by hand — which is how a
-// screen ends up with a bordered box and no background colour, invisible against a dark card.
-
+// FORM CONTROLS, in one place. `Input` and `Label` kept their signatures; `Select`, `Field` and `Hint` are
+// added because pages were writing `className="rounded border px-2 py-1"` by hand — which is how a screen ends
+// up with a bordered box and no background colour, invisible against a dark card.
+//
+// Focus is the ink border PLUS a 2px ring at 60%: the old 20% ring measured 1.5:1 against the card, so the
+// border change alone carried the focus state. Placeholders use the full slate (6.2:1 on card), never a
+// faded one.
 const CONTROL = cn(
   "w-full rounded-md border border-input bg-card text-foreground",
   "transition-[border-color,box-shadow] duration-base ease-onegate",
-  "placeholder:text-muted-foreground/80",
-  "focus:outline-none focus-visible:outline-none focus:border-foreground focus:ring-2 focus:ring-ring/20",
+  "placeholder:text-muted-foreground",
+  "focus:outline-none focus-visible:outline-none focus:border-foreground focus:ring-2 focus:ring-ring/60",
   "disabled:cursor-not-allowed disabled:bg-surface disabled:text-muted-foreground",
   "aria-[invalid=true]:border-destructive aria-[invalid=true]:ring-destructive/25",
+  "aria-[invalid=true]:focus:ring-destructive/60",
 );
 
 export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
   function Input({ className, ...p }, ref) {
     return <input ref={ref} className={cn(CONTROL, "h-10 px-3 text-sm", className)} {...p} />;
-  },
-);
-
-export const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(
-  function Textarea({ className, ...p }, ref) {
-    return <textarea ref={ref} className={cn(CONTROL, "min-h-20 px-3 py-2 text-sm", className)} {...p} />;
   },
 );
 
@@ -103,6 +101,9 @@ export function Field({
         ? { "aria-describedby": [childProps["aria-describedby"], describedBy].filter(Boolean).join(" ") }
         : null),
       ...(error ? { "aria-invalid": true } : null),
+      // The asterisk is visual only, so the requirement is announced too. aria-required rather than the native
+      // attribute: several forms validate in their own words, and a browser bubble would pre-empt them.
+      ...(required ? { "aria-required": true } : null),
     });
   }
 
@@ -111,7 +112,7 @@ export function Field({
       {label && (
         <Label htmlFor={controlId}>
           {label}
-          {required && <span className="ms-0.5 text-destructive">*</span>}
+          {required && <span className="ms-0.5 text-destructive" aria-hidden>*</span>}
         </Label>
       )}
       {control}

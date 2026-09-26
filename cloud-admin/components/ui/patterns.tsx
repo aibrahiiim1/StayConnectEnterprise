@@ -4,8 +4,8 @@
   ONEGATE PRODUCT PATTERNS — the recurring states every screen needs, designed once.
 
   The primitives (Button, Card, Badge, Dialog…) say how a thing looks. These say how a SITUATION looks:
-  a secret shown once, a network change waiting for confirmation, data that refreshes on its own, a role
-  that may look but not touch, a block the operator's role cannot see. Before these existed each screen
+  a secret shown once, data that refreshes on its own, a role that may look but not touch, a block the
+  operator's role cannot see, what a destructive action will do. Before these existed each screen
   answered those situations in its own words and its own layout, which is how the same product ended up
   with four different "this is read-only" treatments.
 
@@ -14,7 +14,7 @@
 
 import * as React from "react";
 import {
-  AlertTriangle, Check, Copy, Eye, EyeOff, Lock, RefreshCw, ShieldAlert, Timer, EyeOff as Hidden,
+  AlertTriangle, Check, Copy, Eye, EyeOff, Lock, RefreshCw, ShieldAlert, EyeOff as Hidden,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "./button";
@@ -26,7 +26,7 @@ import {
 /* CopyButton                                                                                              */
 /* ------------------------------------------------------------------------------------------------------ */
 
-export function CopyButton({
+function CopyButton({
   value,
   label = "Copy",
   copiedLabel = "Copied",
@@ -154,120 +154,6 @@ export function OneTimeReveal({
 }
 
 /* ------------------------------------------------------------------------------------------------------ */
-/* Countdown + PendingChangeBanner — apply → confirm → automatic rollback                                  */
-/* ------------------------------------------------------------------------------------------------------ */
-
-/** Seconds left until `deadline` (ISO or epoch ms), ticking once a second. Never negative. */
-export function useSecondsLeft(deadline: string | number | null | undefined): number | null {
-  const target = React.useMemo(() => {
-    if (deadline === null || deadline === undefined || deadline === "") return null;
-    const t = typeof deadline === "number" ? deadline : Date.parse(deadline);
-    return Number.isFinite(t) ? t : null;
-  }, [deadline]);
-  const [now, setNow] = React.useState(() => Date.now());
-  React.useEffect(() => {
-    if (target === null) return;
-    const iv = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(iv);
-  }, [target]);
-  if (target === null) return null;
-  return Math.max(0, Math.ceil((target - now) / 1000));
-}
-
-export function formatCountdown(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return m > 0 ? `${m}:${String(s).padStart(2, "0")}` : `${s}s`;
-}
-
-/**
- * The one banner every network change shows between Apply and Confirm. The countdown is the point: an
- * applied change that nobody confirms is rolled back by the appliance on its own, so the operator must be
- * able to see, at a glance and from across the room, how long they have. The actions are the only two that
- * mean anything in this state.
- */
-export function PendingChangeBanner({
-  title,
-  description,
-  deadline,
-  secondsLeft: secondsOverride,
-  onConfirm,
-  onRollback,
-  confirmLabel = "Keep this change",
-  rollbackLabel = "Roll back now",
-  busy,
-  canAct = true,
-  children,
-  className,
-}: {
-  title: React.ReactNode;
-  description?: React.ReactNode;
-  /** When the appliance rolls back on its own. Either this or secondsLeft. */
-  deadline?: string | number | null;
-  secondsLeft?: number | null;
-  onConfirm?: () => void;
-  onRollback?: () => void;
-  confirmLabel?: string;
-  rollbackLabel?: string;
-  busy?: "confirm" | "rollback" | null;
-  canAct?: boolean;
-  children?: React.ReactNode;
-  className?: string;
-}) {
-  const ticking = useSecondsLeft(deadline ?? null);
-  const left = secondsOverride ?? ticking;
-  const urgent = left !== null && left <= 30;
-  return (
-    <section
-      role="status"
-      aria-live="polite"
-      className={cn(
-        "overflow-hidden rounded-lg border bg-card shadow-card",
-        urgent ? "border-destructive/50" : "border-warning/50",
-        className,
-      )}
-    >
-      <div className={cn("flex flex-wrap items-center gap-4 px-5 py-4", urgent ? "bg-destructive-subtle" : "bg-warning-subtle")}>
-        <div
-          className={cn(
-            "flex size-14 shrink-0 flex-col items-center justify-center rounded-lg bg-card font-mono tabular shadow-card",
-            urgent ? "text-destructive" : "text-warning-subtle-foreground",
-          )}
-          aria-label={left !== null ? `${left} seconds left` : undefined}
-        >
-          <Timer className="size-4" aria-hidden />
-          <span className="text-sm font-bold">{left !== null ? formatCountdown(left) : "—"}</span>
-        </div>
-        <div className="min-w-0 flex-1 space-y-0.5">
-          <div className={cn("text-emphasis", urgent ? "text-destructive-subtle-foreground" : "text-warning-subtle-foreground")}>
-            {title}
-          </div>
-          <p className="text-sm text-foreground/80">
-            {description ??
-              "The change is live now. Confirm it to keep it; if nobody does before the timer runs out, the appliance puts the previous configuration back on its own."}
-          </p>
-        </div>
-        {canAct && (onConfirm || onRollback) && (
-          <div className="flex shrink-0 flex-wrap gap-2">
-            {onRollback && (
-              <Button variant="secondary" onClick={onRollback} disabled={!!busy}>
-                {busy === "rollback" ? "Rolling back…" : rollbackLabel}
-              </Button>
-            )}
-            {onConfirm && (
-              <Button onClick={onConfirm} disabled={!!busy}>
-                {busy === "confirm" ? "Confirming…" : confirmLabel}
-              </Button>
-            )}
-          </div>
-        )}
-      </div>
-      {children && <div className="border-t border-border px-5 py-4">{children}</div>}
-    </section>
-  );
-}
-
-/* ------------------------------------------------------------------------------------------------------ */
 /* LiveStatus — "Updated x ago" for polling screens                                                        */
 /* ------------------------------------------------------------------------------------------------------ */
 
@@ -307,6 +193,21 @@ export function LiveStatus({
     return () => clearInterval(iv);
   }, []);
   const at = updatedAt instanceof Date ? updatedAt.getTime() : updatedAt ?? null;
+
+  // WHAT A SCREEN READER HEARS IS AN EVENT, NOT THE CLOCK. The visible "Updated 25s ago" re-renders every five
+  // seconds; inside a live region that was an announcement every five seconds for as long as the page stayed
+  // open. The live region below changes only when something happened: a refresh failed, recovered, or a
+  // refresh the operator asked for finished.
+  const [announcement, setAnnouncement] = React.useState("");
+  const prev = React.useRef({ error, refreshing });
+  React.useEffect(() => {
+    const was = prev.current;
+    if (error && !was.error) setAnnouncement("Could not refresh — showing the last answer");
+    else if (!error && was.error) setAnnouncement("Refreshed");
+    else if (!error && was.refreshing && !refreshing) setAnnouncement("Refreshed");
+    prev.current = { error, refreshing };
+  }, [error, refreshing]);
+
   return (
     <div className={cn("inline-flex items-center gap-2 text-caption text-muted-foreground", className)}>
       <span className="relative inline-flex size-2" aria-hidden>
@@ -315,7 +216,8 @@ export function LiveStatus({
         ) : null}
         <span className={cn("relative inline-flex size-2 rounded-full", error ? "bg-warning" : intervalSeconds ? "bg-success" : "bg-muted-foreground/50")} />
       </span>
-      <span aria-live="polite" className="tabular">
+      <span role="status" aria-live="polite" className="sr-only">{announcement}</span>
+      <span className="tabular">
         {error
           ? "Could not refresh — showing the last answer"
           : refreshing
@@ -428,80 +330,6 @@ export function ConsequenceList({
           <li key={i}>{it}</li>
         ))}
       </ul>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------------------------------------------ */
-/* SettingField — an operational number with a unit, a default, a range and an explanation                */
-/* ------------------------------------------------------------------------------------------------------ */
-
-export function SettingField({
-  id,
-  label,
-  value,
-  onChange,
-  unit,
-  min,
-  max,
-  defaultValue,
-  explanation,
-  readOnly,
-  error,
-}: {
-  id?: string;
-  label: React.ReactNode;
-  value: string;
-  onChange: (v: string) => void;
-  unit: string;
-  min: number;
-  max: number;
-  defaultValue: number;
-  explanation?: React.ReactNode;
-  readOnly?: boolean;
-  error?: React.ReactNode;
-}) {
-  const gen = React.useId();
-  const fid = id ?? gen;
-  const n = Number(value);
-  const out = value !== "" && (!Number.isFinite(n) || n < min || n > max);
-  return (
-    <div className="min-w-0 space-y-1.5">
-      <label htmlFor={fid} className="block text-label">
-        {label}
-      </label>
-      <div className="flex items-stretch">
-        <input
-          id={fid}
-          inputMode="numeric"
-          value={value}
-          readOnly={readOnly}
-          disabled={readOnly}
-          aria-invalid={out || !!error || undefined}
-          aria-describedby={`${fid}-hint`}
-          onChange={(e) => onChange(e.target.value)}
-          className={cn(
-            "h-10 w-28 rounded-s-md border border-input bg-card px-3 text-sm tabular text-foreground",
-            "focus:border-foreground focus:outline-none focus:ring-2 focus:ring-ring/20",
-            "disabled:bg-surface disabled:text-muted-foreground",
-            (out || error) && "border-destructive",
-          )}
-        />
-        <span className="inline-flex items-center rounded-e-md border border-s-0 border-input bg-surface px-3 text-sm text-muted-foreground">
-          {unit}
-        </span>
-      </div>
-      <p id={`${fid}-hint`} className={cn("text-caption", out || error ? "text-destructive" : "text-muted-foreground")}>
-        {error ??
-          (out
-            ? `Must be between ${min} and ${max} ${unit}.`
-            : (
-                <>
-                  {explanation} {explanation ? " " : ""}
-                  Default {defaultValue} {unit}; allowed {min}–{max}.
-                </>
-              ))}
-      </p>
     </div>
   );
 }

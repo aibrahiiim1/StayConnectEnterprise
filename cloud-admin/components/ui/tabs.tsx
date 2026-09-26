@@ -1,52 +1,7 @@
 "use client";
 
 import * as React from "react";
-import * as TabsPrimitive from "@radix-ui/react-tabs";
 import { cn } from "@/lib/utils";
-
-// Radix Tabs, so arrow-key navigation and the tab/panel ARIA relationship come for free. The admin's existing
-// tab strips are plain buttons plus a `useState`, which look like tabs and behave like nothing.
-export const Tabs = TabsPrimitive.Root;
-
-export function TabsList({ className, ...p }: React.ComponentPropsWithoutRef<typeof TabsPrimitive.List>) {
-  return (
-    <TabsPrimitive.List
-      className={cn("flex items-center gap-1 border-b border-border", className)}
-      {...p}
-    />
-  );
-}
-
-export function TabsTrigger({
-  className,
-  ...p
-}: React.ComponentPropsWithoutRef<typeof TabsPrimitive.Trigger>) {
-  return (
-    <TabsPrimitive.Trigger
-      className={cn(
-        "-mb-px inline-flex min-h-10 items-center gap-2 border-b-2 border-transparent px-3 py-2 text-[0.8125rem] font-semibold",
-        "text-muted-foreground transition-colors hover:text-foreground",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
-        "data-[state=active]:border-primary data-[state=active]:text-foreground",
-        "disabled:pointer-events-none disabled:opacity-50",
-        className,
-      )}
-      {...p}
-    />
-  );
-}
-
-export function TabsContent({
-  className,
-  ...p
-}: React.ComponentPropsWithoutRef<typeof TabsPrimitive.Content>) {
-  return (
-    <TabsPrimitive.Content
-      className={cn("focus-visible:outline-none animate-fade-in", className)}
-      {...p}
-    />
-  );
-}
 
 /**
  * Segmented — a small two-or-three-way switch for a view mode ("Active / Recent", "Cards / Table").
@@ -88,7 +43,7 @@ export function Segmented<T extends string>({
             aria-checked={active}
             onClick={() => onChange(o.value)}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-[5px] font-medium transition-colors",
+              "inline-flex items-center gap-1.5 rounded-sm font-medium transition-colors",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
               size === "sm" ? "h-6 px-2 text-xs" : "h-7 px-2.5 text-sm",
               active

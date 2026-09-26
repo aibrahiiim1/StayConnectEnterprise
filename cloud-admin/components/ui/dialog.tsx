@@ -24,8 +24,6 @@ import { ErrorBanner } from "./error-banner";
 import { Field, Input, Select } from "./input";
 
 export const Dialog = DialogPrimitive.Root;
-export const DialogTrigger = DialogPrimitive.Trigger;
-export const DialogClose = DialogPrimitive.Close;
 
 const SIZES = {
   sm: "max-w-md",
@@ -44,9 +42,9 @@ export function DialogContent({
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay
         className={cn(
-          "fixed inset-0 z-50 bg-[hsl(225_12%_7%/0.55)] backdrop-blur-[2px]",
+          "fixed inset-0 z-50 bg-scrim/55 backdrop-blur-[2px]",
           "data-[state=open]:animate-in data-[state=closed]:animate-out",
-          "data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0",
+          "data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 motion-reduce:animate-none",
         )}
       />
       {/*
@@ -59,10 +57,13 @@ export function DialogContent({
         <DialogPrimitive.Content
           className={cn(
             "relative my-auto flex w-full flex-col rounded-xl border border-border bg-card text-card-foreground shadow-overlay",
+            // vh first as the fallback; dvh where supported, so a phone's collapsing toolbar cannot push the
+            // footer below the fold.
             "max-h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-3rem)]",
+            "supports-[height:100dvh]:max-h-[calc(100dvh-2rem)] sm:supports-[height:100dvh]:max-h-[calc(100dvh-3rem)]",
             "data-[state=open]:animate-in data-[state=closed]:animate-out",
             "data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0",
-            "data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95",
+            "data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95 motion-reduce:animate-none",
             SIZES[size],
             className,
           )}

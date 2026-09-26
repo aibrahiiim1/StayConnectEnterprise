@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
-import { HelpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // THE PRODUCT IS FULL OF TERMS THAT NEED A SENTENCE.
@@ -11,8 +10,7 @@ import { cn } from "@/lib/utils";
 // what pending means, or whether 8,424 dead is a catastrophe. The `title` attribute was the only explanation
 // mechanism available, and it is invisible on touch, unreadable by keyboard and unstyled.
 //
-// Radix Tooltip gives hover, focus AND keyboard access with the right ARIA wiring. `Explain` is the form used
-// throughout: a little question mark next to a number that nobody should have to guess at.
+// Radix Tooltip gives hover, focus AND keyboard access with the right ARIA wiring.
 
 export const TooltipProvider = TooltipPrimitive.Provider;
 
@@ -56,7 +54,7 @@ export function Tooltip({
               "text-xs leading-relaxed text-popover-foreground shadow-md",
               "data-[state=delayed-open]:animate-in data-[state=closed]:animate-out",
               "data-[state=delayed-open]:fade-in-0 data-[state=closed]:fade-out-0",
-              "data-[state=delayed-open]:zoom-in-95",
+              "data-[state=delayed-open]:zoom-in-95 motion-reduce:animate-none",
               className,
             )}
           >
@@ -66,27 +64,5 @@ export function Tooltip({
         </TooltipPrimitive.Portal>
       </TooltipPrimitive.Root>
     </TooltipPrimitive.Provider>
-  );
-}
-
-/** Explain — a focusable help affordance. Use it next to any figure whose meaning is not self-evident. */
-export function Explain({ children, className }: { children: React.ReactNode; className?: string }) {
-  return (
-    <Tooltip content={children}>
-      <button
-        type="button"
-        // aria-label rather than visible text: the tooltip content is the explanation, and announcing "help"
-        // twice is worse than announcing it once.
-        aria-label="What this means"
-        className={cn(
-          "inline-flex size-4 shrink-0 items-center justify-center rounded-full align-text-bottom",
-          "text-muted-foreground/70 transition-colors hover:text-foreground",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
-          className,
-        )}
-      >
-        <HelpCircle className="size-3.5" />
-      </button>
-    </Tooltip>
   );
 }
