@@ -41,7 +41,7 @@
 - **Live WS-L deployment:** transition **T0043** (2026-08-13).
 - **Accepted and closed:** decision **D19**, closure transition **T0044** (2026-08-13).
 - **Branch:** `phase/4-financial-execution`; **PR #12 — MERGED to master on 2026-08-14 under the separate Product-Owner merge decision **D20** (transition **T0048**), merge commit `210154b5ba72178bae715e7c8e4a1398ca629257`**.
-- **Appliance:** `radius` / `172.21.60.23` — the **development** appliance. Production was never migrated or contacted.
+- **Appliance:** `radius` / the retired development reference appliance — the **development** appliance. Production was never migrated or contacted.
 
 ---
 

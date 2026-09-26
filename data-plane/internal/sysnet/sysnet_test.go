@@ -3,7 +3,7 @@ package sysnet
 import "testing"
 
 func goodWAN() WANConfig {
-	return WANConfig{Interface: "ens160", Mode: "static", IP: "172.21.60.23", PrefixLen: 24, Gateway: "172.21.60.1", DNS: []string{"1.1.1.1", "8.8.8.8"}}
+	return WANConfig{Interface: "ens160", Mode: "static", IP: "192.0.2.23", PrefixLen: 24, Gateway: "192.0.2.1", DNS: []string{"1.1.1.1", "8.8.8.8"}}
 }
 func goodLAN() LANConfig {
 	return LANConfig{PhysicalInterface: "ens192", Bridge: "br-lan", IP: "10.10.0.1", PrefixLen: 24, DHCPEnabled: true, DHCPStart: "10.10.0.100", DHCPEnd: "10.10.0.250", DHCPLeaseSeconds: 3600, DNS: []string{"10.10.0.1"}}
@@ -27,7 +27,7 @@ func TestValidBaselinePasses(t *testing.T) {
 
 func TestRule1_SubnetOverlap(t *testing.T) {
 	l := goodLAN()
-	l.IP = "172.21.60.50" // same subnet as WAN
+	l.IP = "192.0.2.50" // same subnet as WAN
 	l.PrefixLen = 24
 	l.DHCPEnabled = false
 	if r := ValidateFull(goodWAN(), l); !hasCode(r, "subnet_overlap") {
@@ -119,14 +119,14 @@ func TestLANIPCannotBeBroadcast(t *testing.T) {
 }
 
 func TestManagementURL(t *testing.T) {
-	if got := ManagementURL(goodWAN()); got != "https://172.21.60.23" {
+	if got := ManagementURL(goodWAN()); got != "https://192.0.2.23" {
 		t.Fatalf("management URL = %q", got)
 	}
 }
 
 func TestRenderWANNetplanHasNoLegacyAddr(t *testing.T) {
 	out := RenderWANNetplan(goodWAN())
-	if !containsAll(out, "172.21.60.23/24", "via: 172.21.60.1", "1.1.1.1") {
+	if !containsAll(out, "192.0.2.23/24", "via: 192.0.2.1", "1.1.1.1") {
 		t.Fatalf("WAN netplan missing expected fields:\n%s", out)
 	}
 }

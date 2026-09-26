@@ -260,9 +260,9 @@ func TestAdminBindsToMgmtAddrWhenSet(t *testing.T) {
 	topo := DefaultTopology()
 	topo.MgmtInterface = "ens160"
 	// Shared mgmt/WAN NIC: pin admin 443 to the mgmt IP.
-	topo.MgmtAddr = "172.21.60.23"
+	topo.MgmtAddr = "192.0.2.23"
 	out := string(RenderNftables(nil, topo))
-	if !strings.Contains(out, `iifname "ens160" ip daddr 172.21.60.23 tcp dport 443 accept`) {
+	if !strings.Contains(out, `iifname "ens160" ip daddr 192.0.2.23 tcp dport 443 accept`) {
 		t.Fatalf("expected admin 443 pinned to mgmt addr, got:\n%s", out)
 	}
 	if strings.Contains(out, `iifname "ens160" tcp dport 443 accept comment "Caddy TLS (admin)"`) {

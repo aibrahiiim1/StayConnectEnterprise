@@ -46,7 +46,7 @@
     "immutability": "Preserved. Revisions remain immutable; the derived package revision superseded the previous one rather than editing it.",
     "no_pms_or_financial": "No PMS configuration change, no PMS write, no financial traffic. The pmsd restart caused its normal reconnect only.",
     "guest_state": "No guest, stay, entitlement or session row was altered. The six live grace entitlements were read, never written.",
-    "retired_host": "172.21.60.23 neither contacted nor modified.",
+    "retired_host": "the retired development reference appliance neither contacted nor modified.",
     "credentials": "The operator password was supplied by the Product Owner for this verification and appears in no committed artefact."
   },
 

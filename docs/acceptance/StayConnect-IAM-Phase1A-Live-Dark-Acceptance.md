@@ -4,7 +4,7 @@
 
 ## Execution date & environment
 - **Date:** 2026-07-16 ~16:37 UTC.
-- **Appliance:** `radius` (172.21.60.23), reached via SSH (root, key auth).
+- **Appliance:** `radius` (the retired development reference appliance), reached via SSH (root, key auth).
 - **Database engine:** container `stayconnect-pg`, image `timescale/timescaledb:2.16.1-pg16`, **PostgreSQL 16.3**, extensions `plpgsql, pgcrypto, uuid-ossp, timescaledb`.
 - **Target database:** `stayconnect_site` (**primary**, `pg_is_in_recovery()=false`), size 23 MB, 42 public base tables.
 - **Runner:** `iam_v2_scratch/prod_live_dark.sh` (copied to appliance `/root/iam_v2_live/`) + the reviewed migration files `iam_v2_scratch/migrations/mg1..mg9_*.sql` from commit `b2a715f`.

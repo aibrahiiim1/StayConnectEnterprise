@@ -41,7 +41,7 @@
     "authorization_boundary": "The migration is exactly the one authorized: SELECT, one table, one role. No other privilege was granted, no schema or data changed, no unrelated work opened.",
     "no_pms_or_financial": "No PMS configuration change, no PMS write, no financial traffic.",
     "guest_state": "No guest, stay, entitlement or session row written by this delivery.",
-    "retired_host": "172.21.60.23 neither contacted nor modified."
+    "retired_host": "the retired development reference appliance neither contacted nor modified."
   },
   "previous_state": {
     "phase": "7",

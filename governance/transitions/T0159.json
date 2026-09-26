@@ -19,7 +19,7 @@
     "no_privilege_escalation": "No service gained a user, group or capability. The only widenings in this mission were four individually named filesystem paths.",
     "no_destructive_action": "Retention values changed during verification were restored. Nothing was deleted.",
     "no_pms_or_financial": "No PMS configuration change, no PMS write, no financial traffic.",
-    "retired_host": "172.21.60.23 neither contacted nor modified."
+    "retired_host": "the retired development reference appliance neither contacted nor modified."
   },
   "previous_state": {
     "phase": "7",

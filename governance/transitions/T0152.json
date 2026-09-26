@@ -33,7 +33,7 @@
     "no_migration": "None performed.",
     "no_pms_or_financial": "No PMS configuration change, no PMS write, no financial traffic.",
     "guest_state": "No guest, stay, entitlement or session row was written by this delivery. The two new grace entitlements were created by the appliance's own conversion path from real PMS checkouts, not by anything performed here.",
-    "retired_host": "172.21.60.23 neither contacted nor modified."
+    "retired_host": "the retired development reference appliance neither contacted nor modified."
   },
   "previous_state": {
     "phase": "7",

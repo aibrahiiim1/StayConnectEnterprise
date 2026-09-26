@@ -348,7 +348,7 @@ def cmd_validate(deep=True, manifest_equality=True):
         dev = st.get("development_reference_appliance", {}) or {}
         if dev.get("cutover_performed") is not False or dev.get("modified_by_zero_legacy_work") is not False:
             fail("development_reference_appliance must record cutover_performed=false and "
-                 "modified_by_zero_legacy_work=false: 172.21.60.23 was not changed by this work")
+                 "modified_by_zero_legacy_work=false: the retired development reference appliance was not changed by this work")
 
     # D: after T0010, no current-state field may present the stale authoritative HEAD or "Production unchanged/untouched".
     if str(st.get("latest_transition_id", "")) >= "T0010":
@@ -1327,13 +1327,23 @@ def check_closure_coherence(st):
     #   (a) an activity tied to the mission that has just closed, still marked in progress; and
     #   (b) an activity whose target is an appliance this same state records as RETIRED -- which is what the
     #       real contradiction was: the DEVELOPMENT trial sat AUTHORIZED_IN_PROGRESS from D29/T0066 against
-    #       172.21.60.23 while prohibited_actions forbade contacting it. An authorisation whose target may
+    #       the retired development reference appliance while prohibited_actions forbade contacting it. An authorisation whose target may
     #       not be touched is not in progress.
     #
     # The retired addresses are READ FROM THE RECORD rather than hardcoded, so this stays true when the
     # record changes. If the record names none, (b) does not apply and (a) still does.
+    #
+    # SINCE T0194 THE CURRENT TREE NAMES A RETIRED HOST BY ROLE, NOT BY ADDRESS. So the identifiers come from
+    # the registry (current_state_facts.retired_hosts): each entry's dotted address, rebuilt from its
+    # address_octets, AND the neutral wording records now use for it. A scope that names the machine either
+    # way is caught. Reading a dotted address out of prohibited_actions is kept as a fallback.
     retired = set(re.findall(r"RETIRED\s+(\d{1,3}(?:\.\d{1,3}){3})",
                              " ".join(str(x) for x in (st.get("prohibited_actions") or []))))
+    for _key, _entry in ((st.get("current_state_facts") or {}).get("retired_hosts") or {}).items():
+        _oct = (_entry or {}).get("address_octets")
+        retired.add(".".join(str(int(o)) for o in _oct) if _oct else str(_key))
+        if str((_entry or {}).get("status") or "").upper() == "RETIRED":
+            retired.update(("retired development reference appliance", "(now retired)"))
     MISSION_MARKS = ("functional-completeness", "functional completeness", "t0175")
 
     for act in st.get("authorized_activities") or []:

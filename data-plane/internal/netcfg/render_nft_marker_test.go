@@ -14,7 +14,7 @@ func markerTestNets() []GuestNetwork {
 }
 
 func markerTestTopo() Topology {
-	return Topology{WANInterface: "ens160", MgmtInterface: "ens160", MgmtAddr: "172.21.60.23"}
+	return Topology{WANInterface: "ens160", MgmtInterface: "ens160", MgmtAddr: "192.0.2.23"}
 }
 
 // The render must carry its own fingerprint into the kernel, and that fingerprint must be the one

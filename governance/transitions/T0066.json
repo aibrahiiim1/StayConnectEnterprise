@@ -39,7 +39,7 @@
     "negative_suite": "63 -> 67 cases, each proved to fail for its own named rule and to pass once restored"
   },
   "development_trial_scope": {
-    "environment": "DEVELOPMENT appliance 172.21.60.23 only",
+    "environment": "DEVELOPMENT appliance (now retired) only",
     "authorized": [
       "enable accepted IAM-v2 capabilities for hands-on DEVELOPMENT testing",
       "set per-appliance product controls as needed for the trial",

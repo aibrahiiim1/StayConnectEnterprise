@@ -39,7 +39,7 @@
     "CONFIGURATION-SELECTABLE LEGACY AUTHORITY: treated as a Production-readiness blocker per the zero-superseded-active-dependency objective. The authority switch is call-level across six files, so legacy guest-auth remains compiled in and selectable by configuration. Per-object assessment recorded: guest_accounts, ticket_templates, vouchers, voucher_batches, sessions, auth_otps and guests are superseded; operators, operator_roles, tenants, sites, appliances, guest_networks, audit_log and accounting_records are retained platform foundations."
   ],
   "boundaries_observed": [
-    "172.21.60.23 NOT modified. Every query against it was read-only reference evidence.",
+    "the retired development reference appliance NOT modified. Every query against it was read-only reference evidence.",
     "No deployment to any server. No Production appliance exists or was contacted.",
     "No historical migration, scratch file or governance evidence deleted.",
     "The reconstruction ran in disposable containers on the workstation and copied no runtime state.",

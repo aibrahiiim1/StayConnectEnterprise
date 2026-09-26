@@ -14,7 +14,7 @@
     "behaviour_unchanged": "Voucher continues to refuse honestly and direct the guest to reception, which is the behaviour accepted at T0171 and needs no further change. Commerce remains dark and nothing here enables it."
   },
   "records_changed": {
-    "decision_register": "D41 added, accepted, with its authorization evidence and an explicit does_not_authorize covering PRE-LIVE, commerce, deployment, service restarts, 172.21.60.23, PMS, financial, networking, schema, security boundary and Go-Live.",
+    "decision_register": "D41 added, accepted, with its authorization evidence and an explicit does_not_authorize covering PRE-LIVE, commerce, deployment, service restarts, the retired development reference appliance, PMS, financial, networking, schema, security boundary and Go-Live.",
     "latest_accepted_po_decision": "D40 -> D41. Every generated current-state block prints this pointer, so leaving it would have made the blocks announce D41 and cite D40 in the same paragraph -- the exact defect the latest-decision-pointer parity rule exists to catch.",
     "next_authorized_action": "Now records the deferral and states that ONE Product-Owner decision remains open, the approving-review question, which is not authorized by being recorded. It still names a single action (none), as the structural validator requires.",
     "open_product_owner_decisions": "The guest entry is marked RESOLVED as DEFERRED against D41, keeping the question as raised, how it was resolved, what the resolution does not mean, and what happens if the deferral is lifted. The approving-review entry is unchanged and still OPEN.",
@@ -25,7 +25,7 @@
     "first_room_login_blocked_reason": "Said 'The first real guest Room Login has NOT been performed and requires its own Product-Owner authorization', while first_room_login_performed_note records two real Room Logins on 2026-08-26 and guest_signin_end_to_end_proven_note records a third on 2026-08-27 carrying real guest traffic. It was written before those logins and never revisited. It now states that no technical blocker remains, points at the logins that did happen, and records the deferral.",
     "first_room_login_blocked_fix_status": "Ended 'What remains is the Product Owner's Room Login retry, which has NOT been performed.' That retry is no longer pending work. The sentence now says so and names the deferral.",
     "environment_scoped_iam_state.production.routing": "Gave the reason no guest traffic is served as the appliance 'awaiting assignment'. The signed assignment is signed and pinned, as the generated block itself states, so the field gave a stale reason for a true fact. The reason is now the decision.",
-    "next_step": "Named the post-roadmap IAM-v2 trial on 172.21.60.23 as THE CURRENT ACTIVITY. That appliance is RETIRED and is not an operational target, so the field described an activity that could not be happening. It now carries the deferral and says what the sentence used to claim.",
+    "next_step": "Named the post-roadmap IAM-v2 trial on the retired development reference appliance as THE CURRENT ACTIVITY. That appliance is RETIRED and is not an operational target, so the field described an activity that could not be happening. It now carries the deferral and says what the sentence used to claim.",
     "verification": "A sweep for pending-guest-action wording across every string in the state file returns zero fields. One near neighbour was deliberately left alone: a historical note about a Kea bootstrap defect uses the word 'retrying' about that defect, not about a guest action."
   },
   "a_dangling_decision_reference_i_created": {
@@ -37,7 +37,7 @@
     "pre_live": "Unchanged. No deployment, no service restart, no configuration change.",
     "commerce": "Still dark. The deferral enables nothing.",
     "guest_behaviour": "Unchanged. Voucher refuses honestly exactly as accepted at T0171.",
-    "retired_appliance": "172.21.60.23 was not contacted.",
+    "retired_appliance": "the retired development reference appliance was not contacted.",
     "other_boundaries": "No PMS, financial, networking, schema, security-boundary or Go-Live change. Repository and governance documentation only, as the instruction scoped it."
   },
   "remaining_open_product_owner_decisions": "ONE. Whether master protection should additionally require one approving review, which is blocked on a second reviewing account because GitHub will not let a pull request's author approve it. Not authorized and not declined.",

@@ -44,7 +44,7 @@
     "builds": "go build, go vet and go test pass on the development build and on -tags stayconnect_production"
   },
   "boundaries_observed": [
-    "Repository-only. 172.21.60.23 NOT modified and NOT contacted.",
+    "Repository-only. the retired development reference appliance NOT modified and NOT contacted.",
     "No deployment. No Production appliance provisioned or contacted.",
     "No PMS, payment-provider or financial traffic.",
     "PR #22 NOT merged.",

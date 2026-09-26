@@ -2,7 +2,7 @@
 
 **Status: PRODUCT-OWNER ACCEPTED_AND_CLOSED at verified DARK maturity (decision D13, closure transition T0014, 2026-07-18). PR #4 MERGED and CLOSED (merge commit `fe6a0d12a49f74b7b7b84ef0c848a38512273370`); post-merge Governance CI green; no open Phase-2 work remains.** Maturity: verified DARK (implementation + automated UI tests + live-dark deployment + TWO reboots with post-reboot re-verification each).
 
-Branch `phase/2-commercial-packages` · PR #4 · **authorized** under **D12** / transition **T0012** · **live-dark deployment** transition **T0013** · **accepted and closed** under **D13** / closure transition **T0014** · appliance `radius` / `172.21.60.23`.
+Branch `phase/2-commercial-packages` · PR #4 · **authorized** under **D12** / transition **T0012** · **live-dark deployment** transition **T0013** · **accepted and closed** under **D13** / closure transition **T0014** · appliance `radius` / the retired development reference appliance.
 
 **Accepted baseline:** base `master@4e3c3ee27a8caa2d0656b57b419e8ed5e0d87b68`; substantive reconciliation HEAD `45323ad5cb8f70e64e1dcd727ac92b52cc878c37`; final pre-acceptance PR HEAD `a8c3b3caac6baf8ac41fa581fca5350c97219bb8`; Governance CI `29649900358` = SUCCESS.
 

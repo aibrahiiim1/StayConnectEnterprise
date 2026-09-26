@@ -31,7 +31,7 @@
     "Connection recovery presented inside one interface -> stated as site-wide."
   ],
   "preserved": "Revision architecture, configuration immutability, publish and rollback semantics (moved into History, same endpoint and expected-revision guard), reconciliation runtime behaviour, permissions, routing, and every historical record. No migration.",
-  "deployment": "NONE. No appliance deployment, no PMS configuration change, no restart or resync, no contact with the retired 172.21.60.23, no migration, no guest-state change.",
+  "deployment": "NONE. No appliance deployment, no PMS configuration change, no restart or resync, no contact with the retired development reference appliance, no migration, no guest-state change.",
   "previous_state": {
     "phase": "7",
     "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",

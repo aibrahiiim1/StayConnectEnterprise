@@ -55,7 +55,7 @@
       "duplicate_runs_note": "A push to the phase branch with an open pull request fires both push and pull_request runs. The push copies (Phase 4 31836122047, Phase 5 31836122169) and a manual Phase-3 dispatch (31836130899) are also SUCCESS on the same head; the pull_request set above is the authoritative one."
     },
     "live_dark_evidence": {
-      "host": "radius (172.21.60.23) DEVELOPMENT appliance",
+      "host": "radius (the retired development reference appliance) DEVELOPMENT appliance",
       "database": "stayconnect_site",
       "production_contacted": false,
       "backup": "/opt/stayconnect/backups/phase5-iam-20260814T174052Z/site.dump 6260737 bytes sha256 cf1bda432c82c7007976d3f51972c225aea862be370264764a3a80163255c07a, taken and verified BEFORE any change",

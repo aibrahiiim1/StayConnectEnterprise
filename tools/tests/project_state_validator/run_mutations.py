@@ -720,7 +720,7 @@ MUTATIONS = [
                   [{"name": "post-roadmap DEVELOPMENT appliance IAM-v2 operational trial",
                     "authorization": "D29/T0066, re-scoped by D31/T0068",
                     "status": "AUTHORIZED_IN_PROGRESS",
-                    "scope": "DEVELOPMENT appliance 172.21.60.23 only."}])])),
+                    "scope": "DEVELOPMENT appliance (now retired) only."}])])),
  ("M70 closure declared while a key name still asserts an unclosed required gap",
   "governance/project-state.json",
    ("json_set", [(["current_state_facts", "functional_completeness_remaining", "increment_3",

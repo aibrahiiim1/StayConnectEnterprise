@@ -177,11 +177,16 @@ operational number, that number ships as a setting.
 |---|---|---|
 | **Central** | `150.0.0.252` (`sc-central.echofusion.com`) | Control plane: `ctrlapi`, `cloud-admin`, `nats-authz`, the mutually-authenticated NATS listener on `4223`, and the fleet telemetry consumer. Verify the actual endpoints and TLS identity before connecting; do not assume them from this table. |
 | **PRE-LIVE appliance** | `172.21.60.25` | The only appliance. **PRE-LIVE remains PRE-LIVE. Go-Live is not authorised.** |
-| ~~Development reference appliance~~ | ~~`172.21.60.23`~~ | **RETIRED.** Not an operational target. Do not contact it, do not diagnose against it, do not treat it as a source of anything. |
+| ~~Development reference appliance~~ | *(address removed from the current tree — T0194)* | **RETIRED.** Not an operational target. Do not contact it, do not diagnose against it, do not treat it as a source of anything. |
 
-**Retiring a target does not falsify its records.** The accepted evidence `172.21.60.23` produced stays exactly as
-it was written, in `governance/` and in the accepted documents that cite it. Do not rewrite historical evidence
-to remove a retired reference — a record of what was true then is not a claim about what is true now.
+**Retiring a target does not falsify its records.** What the retired development reference appliance proved keeps
+its meaning and its outcome, in `governance/` and in the accepted documents that cite it: a record of what was true
+then is not a claim about what is true now, and no historical fact or result may be changed.
+
+**Its literal address is no longer written anywhere in the current tree** (Product-Owner direction, T0194). Records
+name it as *the retired development reference appliance*; the original wording remains in Git history, which is
+never rewritten. Do not reintroduce the literal. Guards that must still refuse it assemble the address from its
+octets (`current_state_facts.retired_hosts.*.address_octets`).
 
 **PMS.** Protel FIAS is connected. Keep the configured connection operational, and preserve local-first
 behaviour for future intentional disconnections: the appliance authorises guests from its last-good mirrored

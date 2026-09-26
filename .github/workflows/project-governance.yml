@@ -186,7 +186,7 @@ jobs:
       # STATIC_SURFACES, and reads markdown and JSON only. A sweep against the standing records found 44
       # current-state contradictions outside that reach, and the two most dangerous were SHELL SCRIPTS,
       # which no validator read at all: two harnesses defaulted PHASE7_APPLIANCE to the RETIRED
-      # 172.21.60.23, and one of them issues a real reboot. The largest cluster — surfaces describing the
+      # the retired development reference appliance, and one of them issues a real reboot. The largest cluster — surfaces describing the
       # Central telemetry that migration 0045 dropped, including a runbook telling an on-call engineer to
       # "restore quorum" — survived because the removal delivery touched no architecture document.
       #

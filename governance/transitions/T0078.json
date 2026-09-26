@@ -41,7 +41,7 @@
     "catalog_diff_unchanged": "the semantic comparison against the development appliance reference is byte-identical to the pre-correction run (1471 reference-only facts, 203 clean-build-only), confirming the correction touched no schema, ownership or privilege outcome"
   },
   "boundaries_observed": [
-    "Repository-only work. 172.21.60.23 NOT modified and NOT contacted for this correction.",
+    "Repository-only work. the retired development reference appliance NOT modified and NOT contacted for this correction.",
     "No deployment to any server. No Production appliance exists or was contacted.",
     "No real PMS, payment-provider or financial traffic.",
     "The accepted DEVELOPMENT trial behaviour is preserved exactly -- that is what this correction protects.",

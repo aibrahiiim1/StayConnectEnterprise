@@ -8,7 +8,7 @@
 - **Product-Owner ACCEPTED and CLOSED** by decision **D26**, closure transition **T0061**
   (`transition_accepted: true`) at verified **LIVE-DARK** maturity.
 - Branch: `phase/6-device-selfservice-and-time-modes`; **PR #14**.
-- Appliance: `radius` / `172.21.60.23` — the **development** appliance. Production was never contacted.
+- Appliance: `radius` / the retired development reference appliance — the **development** appliance. Production was never contacted.
 - Dates are **UTC**, matching the transition ledger.
 
 ---

@@ -16,11 +16,11 @@ UUIDs. Every screen refreshes itself; you never have to wait-and-press-Refresh.
 | Console | URL | Login |
 |---------|-----|-------|
 | **Central Platform** (Control Panel) | `https://150.0.0.252` | your platform operator |
-| **Appliance Hotel Admin** | `https://hotel.stayconnect.local` or `https://172.21.60.23` | your Hotel-IT operator |
+| **Appliance Hotel Admin** | `https://hotel.stayconnect.local` or `the retired development reference appliance's address` | your Hotel-IT operator |
 
 The Hotel Admin is reachable on the **management network only** (guests are firewalled
 off). If your workstation can't resolve `hotel.stayconnect.local`, use the management
-IP `https://172.21.60.23`.
+IP `the retired development reference appliance's address`.
 
 ---
 

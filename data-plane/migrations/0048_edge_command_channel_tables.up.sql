@@ -12,7 +12,7 @@
 --
 -- Declaring them here removes the ordering dependency on a running service, and puts three tables that were
 -- invisible to the ledger under the same auditable path as everything else. Shapes match the accepted
--- appliance exactly (verified column by column against 172.21.60.23, read-only).
+-- appliance exactly (verified column by column against the retired development reference appliance, read-only).
 --
 -- IF NOT EXISTS throughout: on an existing appliance scd has already created them, and this migration must
 -- be a no-op there rather than a conflict.

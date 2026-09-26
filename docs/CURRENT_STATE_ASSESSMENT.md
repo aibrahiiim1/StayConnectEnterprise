@@ -1,6 +1,6 @@
 # Current-State Assessment — Refactor Baseline (2026-07-11)
 
-Input to the cloud-controlled / hotel-local refactor. Facts verified against the running pilot VM (`172.21.60.23`) and the repo on 2026-07-10/11, not assumed from documentation.
+Input to the cloud-controlled / hotel-local refactor. Facts verified against the running pilot VM (the retired development reference appliance) and the repo on 2026-07-10/11, not assumed from documentation.
 
 ## 1. Current architecture (as verified)
 

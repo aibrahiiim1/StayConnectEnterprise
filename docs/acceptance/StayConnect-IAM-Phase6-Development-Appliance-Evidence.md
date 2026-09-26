@@ -1,6 +1,6 @@
 # Phase 6 — DEVELOPMENT-appliance evidence (LIVE-DARK, in progress)
 
-**Appliance:** the development appliance at `172.21.60.23` (`radius`). **Not Production**, which was not contacted.
+**Appliance:** the development appliance at the retired development reference appliance (`radius`). **Not Production**, which was not contacted.
 **Decision:** D25 / T0057; **accepted** by D26 / T0061 (2026-08-16). **Status:** Phase 6 is `ACCEPTED_AND_CLOSED` at verified LIVE-DARK maturity.
 
 Everything below was executed on 2026-08-15 and read back from the appliance itself. Sections 1-6 describe the

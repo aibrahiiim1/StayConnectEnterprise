@@ -4,7 +4,7 @@
   "timestamp": "2026-09-22T06:00:00Z",
   "timestamp_derivation": "After the 17 defective rollback artifacts were quarantined on the appliance and the remaining 19 confirmed to carry the production build profile, and after the rollback guard and its six cases were proven locally. Before the author timestamp of the commit that introduces this receipt.",
   "record_type": "CLOSURE_CORRECTION_OPEN_DECISIONS_AND_ROLLBACK_PROVENANCE",
-  "what_was_authorised": "Two closure corrections. Reconcile next_authorized_action and the open-decision state with current truth, recording the open decisions accurately WITHOUT authorising either. Review the retained defective rollback artifacts so the operational rollback path points only to known-good production-tagged binaries and defective ones cannot be restored as a supported rollback, preserving evidence. Explicitly NOT authorised: product behaviour change, commerce enablement, deployment beyond what rollback safety strictly requires, and any change to 172.21.60.23, PMS, financial, networking, schema, security boundary or Go-Live.",
+  "what_was_authorised": "Two closure corrections. Reconcile next_authorized_action and the open-decision state with current truth, recording the open decisions accurately WITHOUT authorising either. Review the retained defective rollback artifacts so the operational rollback path points only to known-good production-tagged binaries and defective ones cannot be restored as a supported rollback, preserving evidence. Explicitly NOT authorised: product behaviour change, commerce enablement, deployment beyond what rollback safety strictly requires, and any change to the retired development reference appliance, PMS, financial, networking, schema, security boundary or Go-Live.",
   "open_decisions_corrected": {
     "what_was_wrong": "next_authorized_action said the approving-review question was THE ONLY open Product-Owner item. That was true when written and stopped being true when the guest pilot raised the voucher and commerce question and left it for the Product Owner in T0170, carried forward by T0171 and T0172. The register went on asserting singularity while a second decision sat open in the same repository.",
     "what_was_done": "next_authorized_action now states that two decisions are open, names both in one sentence each, and says plainly that neither is authorised by being recorded. A new open_product_owner_decisions block carries each in full: the question, its options where they exist, what it is blocked on, where it was recorded and its status.",
@@ -43,7 +43,7 @@
     "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
   },
   "authorization": "Closure corrections only: open-decision reconciliation and rollback-artifact provenance. No product capability was enabled, no decision was taken on the Product Owner's behalf, and no binary was deployed or restarted.",
-  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE. 172.21.60.23 was not contacted.",
+  "go_live": "NOT AUTHORISED. PRE-LIVE remains PRE-LIVE. the retired development reference appliance was not contacted.",
   "base": "225edbf24f8b5abc8c46ad0a6a849bb8abde5685",
   "head": "65705e38d9eec10a9cf9f7cadf8c7971aa8c2803"
 }

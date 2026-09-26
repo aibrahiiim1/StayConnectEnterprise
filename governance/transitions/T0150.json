@@ -53,7 +53,7 @@
     "immutability": "Preserved. Revisions are still immutable and still validated by the same function the checkout conversion uses.",
     "validation": "Nothing weakened. The database remains the authority; the page's own bounds mirror it and never widen it.",
     "no_pms_or_financial": "No PMS configuration change, no PMS write, no financial traffic.",
-    "retired_host": "172.21.60.23 neither contacted nor modified."
+    "retired_host": "the retired development reference appliance neither contacted nor modified."
   },
 
   "previous_state": {
