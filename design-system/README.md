@@ -155,9 +155,12 @@ one-time secret again.
 - **App shell** (both consoles): inverse sidebar (16rem; collapses to a 3.75rem icon rail on desktop,
   remembered per device; a slide-in drawer below 1024px), a 56px sticky top bar with the breadcrumb
   "Group / Page", status pill and theme switch, and a content pane that owns the page gutter.
-- **Admin Console** navigation: 8 groups — Overview · Internet offering · Clients · Property management system ·
-  Charges · Client Portal · Networking · System. Menu items are hidden when the role cannot read them or the
-  appliance does not serve them. The page title always equals the menu label.
+- **Admin Console** navigation: 7 groups — Overview · Internet offering · Clients · Client Portal · Hotel ·
+  Networking · System. **Hotel** groups every hospitality/PMS screen (PMS connection, Stays, PMS activity,
+  Guest sign-in checks and attempts, Grace Period, Post-stay access, the charge pages, PMS routing, Duplicate
+  sources, Cross-PMS transfer); the rest of the navigation is industry-neutral (docs/PRODUCT_TERMINOLOGY.md).
+  Menu items are hidden when the role cannot read them or the appliance does not serve them. The page title
+  always equals the menu label.
 - **Central** navigation: five destinations — Overview · Customers · Appliances · Licenses · System (Security
   alerts, Trust & keys, Audit log, Team, Backup health as a secondary bar). There is no customer selector: a
   screen is fleet-wide or reached by drilling into a customer or appliance; a customer's own user sees only

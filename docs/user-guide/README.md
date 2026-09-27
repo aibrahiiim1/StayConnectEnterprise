@@ -28,7 +28,7 @@ If you want a **page-by-page reference** (what every screen shows and does) or a
 |---|---|
 | [control-panel-reference.md](control-panel-reference.md) | Every **OneGate Central** page — Overview, Customers (and the customer page), Appliances (and the appliance page), Licenses, System (Security alerts, Trust & keys, Audit log, Team, Backup health) |
 | [control-panel-config-manual.md](control-panel-config-manual.md) | How to create a **Customer → Site**, **activate** an appliance, manage its **licence**, and run day-2 operations in Central |
-| [hotel-admin-reference.md](hotel-admin-reference.md) | Every **OneGate Admin Console** page, group by group — Overview; Internet offering; Clients; Property management system; Charges; Client Portal; Networking; System |
+| [hotel-admin-reference.md](hotel-admin-reference.md) | Every **OneGate Admin Console** page, group by group — Overview; Internet offering; Clients; Client Portal; Hotel; Networking; System |
 | [hotel-admin-config-manual.md](hotel-admin-config-manual.md) | How to **activate and fully configure** an appliance from the Admin Console — networking, guest networks, sign-in methods, packages, vouchers, PMS, portal, operators |
 | [guest-portal.md](guest-portal.md) | What **clients** see on the Wi-Fi sign-in page, and which Admin Console settings control it |
 
@@ -45,8 +45,8 @@ The role-based guides below are shorter, task-oriented walkthroughs for each rol
 | **Viewer / Auditor** | [viewer-and-billing.md](viewer-and-billing.md#viewer) | You can look at everything for your customer but not change anything. |
 | **Customer operator**, **Billing** (retired) | [tenant-operator.md](tenant-operator.md) · [viewer-and-billing.md](viewer-and-billing.md#billing) | These roles grant nothing in Central any more; day-to-day site work is in the Admin Console. |
 
-**OneGate Admin Console** (site staff) has seven roles of its own — Site admin, Site IT manager, Front office
-operator, Client relations operator, Voucher operator, Payments operator and Site viewer. Which pages each can
+**OneGate Admin Console** (site staff) has seven roles of its own — Site admin, Site IT manager, Client
+services operator, Client relations operator, Voucher operator, Payments operator and Site viewer. Which pages each can
 use is listed in [hotel-admin-reference.md](hotel-admin-reference.md#who-can-use-which-page).
 
 If a client can't get online and you're trying to help them, jump straight to
@@ -77,18 +77,21 @@ and no action buttons.
 | **Licenses** | Every licence, by state |
 | **System** | Security alerts · Trust & keys · Audit log · Team · Backup health (platform staff only) |
 
-**OneGate Admin Console** — eight groups:
+**OneGate Admin Console** — seven groups:
 
 | Group | Pages |
 |---|---|
 | **Overview** | Overview — the shift view |
-| **Internet offering** | Internet packages · Service plans · Checkout grace · Vouchers |
-| **Clients** | Stays · Client accounts · Active sessions · Usage explorer · Client devices · Online-time budgets · Post-stay access |
-| **Property management system** | PMS connection · Network routing · PMS activity · Client sign-in checks · Client sign-in attempts · Duplicate sources · Cross-PMS transfer |
-| **Charges** | Charge health · Manual review · Settlements · Recovery |
+| **Internet offering** | Internet packages · Service plans · Vouchers |
+| **Clients** | Client accounts · Active sessions · Usage explorer · Client devices · Online-time budgets |
 | **Client Portal** | Sign-in methods · Portal settings · Allowed sites · Social login · Email & SMS |
+| **Hotel** | PMS connection · Stays · PMS activity · Guest sign-in checks · Guest sign-in attempts · Grace Period · Post-stay access · Charge health · Manual review · Settlements · Recovery · PMS routing · Duplicate sources · Cross-PMS transfer |
 | **Networking** | Guest networks · DHCP & leases · WAN / LAN settings · Config history · TLS certificate |
 | **System** | Diagnostics · Alerts · Activity · Appliance & licence · Backups · Operators |
+
+Hospitality and PMS functions are grouped under **Hotel**, which replaces the former *Property management
+system* and *Charges* groups; inside it, *guest*, *stay* and *room* keep the PMS's meaning. The rest of the
+console is industry-neutral and speaks of *clients*.
 
 ## Client Portal
 

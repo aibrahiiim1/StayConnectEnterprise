@@ -50,7 +50,7 @@ Printed cards with a code, each giving an internet package. **Issue vouchers** (
 
 ### PMS (room + name)
 
-**Admin Console → Property management system → PMS connection** and **Network routing**
+**Admin Console → Hotel → PMS connection** and **Hotel → PMS routing**
 
 Guests sign in with their room number plus their name or reservation number, checked against the appliance's copy of the PMS guest list. Set up by the site's Site admin or Site IT manager.
 
@@ -70,7 +70,7 @@ A sender (SendGrid, Amazon SES or Twilio) delivers one-time codes. Then switch *
 
 ### Paid Wi-Fi
 
-Internet packages are free to clients today; selling internet is not switched on. The **Charges** pages in the Admin Console show *Not enabled on this appliance* until it is.
+Internet packages are free to clients today; selling internet is not switched on. The charge pages under **Hotel** in the Admin Console show *Not enabled on this appliance* until it is.
 
 ## Managing users
 
