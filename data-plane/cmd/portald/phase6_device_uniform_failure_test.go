@@ -4,7 +4,7 @@ package main
 //
 // Phase 6 device management is deliberately off on this appliance, and the portal fires /devices/list on every
 // success-page load. Those requests used the AUTHENTICATION uniform failure, so each one answered the guest
-// "We could not verify your stay. Please check your details or contact reception." — on a page they reached BY
+// "We could not verify your stay. Please check your details or contact the site team for assistance." — on a page they reached BY
 // verifying their stay — and wrote "phase3 guest auth not verified" into the operator's journal. Nothing had
 // been authenticated. A feature being switched off was being reported as guests failing to log in.
 //

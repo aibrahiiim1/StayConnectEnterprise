@@ -38,7 +38,7 @@ const helpOpen = `
 
 // helpClose ends the sheet: what to do when something does not work, and the hotel's own help line.
 const helpClose = `
-<p class="help-fail" data-i18n="help.fail" data-i18n-en="Something not working? Please contact reception — they are happy to help.">{{index .T "help.fail"}}</p>
+<p class="help-fail" data-i18n="help.fail" data-i18n-en="Something not working? Please contact the site team for assistance.">{{index .T "help.fail"}}</p>
 <p class="help-hotel" id="help-hotel" dir="auto"{{if not .Brand.Help}} hidden{{end}}>{{.Brand.Help}}</p>
 </div></div></details>`
 
@@ -210,7 +210,7 @@ const deviceFacts = `
   <dt><span data-i18n="info.ip" data-i18n-en="IP address">{{index .T "info.ip"}}</span></dt><dd dir="ltr">{{if .ClientIP}}{{.ClientIP}}{{else}}<span data-i18n="info.none" data-i18n-en="Not detected">{{index .T "info.none"}}</span>{{end}}</dd>
   <dt><span data-i18n="info.mac" data-i18n-en="MAC address">{{index .T "info.mac"}}</span></dt><dd dir="ltr">{{if .ClientMAC}}{{.ClientMAC}}{{else}}<span data-i18n="info.none" data-i18n-en="Not detected">{{index .T "info.none"}}</span>{{end}}</dd>
 </dl>
-<p data-i18n="info.help" data-i18n-en="Reception may ask for these if you need help connecting.">{{index .T "info.help"}}</p>
+<p data-i18n="info.help" data-i18n-en="The site team may ask for these if you need help connecting.">{{index .T "info.help"}}</p>
 `
 
 // ============================================================================================================
@@ -436,7 +436,7 @@ const landingHTML = `<!doctype html>
         <li data-help-method="sms"><strong data-i18n="method.sms" data-i18n-en="Phone">{{index .T "method.sms"}}</strong><span data-i18n="help.sms" data-i18n-en="Enter your phone number with the country code and tap Send code, then type the 6-digit code from the text message.">{{index .T "help.sms"}}</span></li>
         <li data-help-method="social"><strong data-i18n="method.social" data-i18n-en="Social">{{index .T "method.social"}}</strong><span data-i18n="social.note" data-i18n-en="You will be redirected to the provider, then back here.">{{index .T "social.note"}}</span></li>
       </ul>
-      <p class="help-fail" data-i18n="help.fail" data-i18n-en="Something not working? Please contact reception — they are happy to help.">{{index .T "help.fail"}}</p>
+      <p class="help-fail" data-i18n="help.fail" data-i18n-en="Something not working? Please contact the site team for assistance.">{{index .T "help.fail"}}</p>
       <div class="help-device">` + deviceFacts + `</div>
       <p class="help-hotel" id="help-hotel" dir="auto"{{if not .Brand.Help}} hidden{{end}}>{{.Brand.Help}}</p>
       </div></div></details>

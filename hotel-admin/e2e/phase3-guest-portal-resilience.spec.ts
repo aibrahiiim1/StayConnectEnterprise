@@ -26,7 +26,7 @@ import { portalHTML as renderLanding } from "./portal-page";
 // become a second grant (asserted against a real database in cmd/scd's Phase-3 integration suite).
 
 const UNIFORM_MESSAGE =
-  "We could not verify your stay. Please check your details or contact reception.";
+  "We could not verify your stay. Please check your details or contact the site team for assistance.";
 
 // renderLanding comes from ./portal-page now.
 //

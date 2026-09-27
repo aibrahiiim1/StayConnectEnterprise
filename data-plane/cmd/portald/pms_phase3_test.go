@@ -90,13 +90,13 @@ func TestTheGuestLearnsWhatToDoAndNothingMore(t *testing.T) {
 			t.Errorf("the incorrect-details message does not mention %q: %q", want, cred)
 		}
 	}
-	// ...and it must NOT send them to Reception. That is the technical message's job, and conflating the two
+	// ...and it must NOT send them to the site team. That is the technical message's job, and conflating the two
 	// is the specific behaviour this change removes.
-	if containsFold(cred, "contact reception") {
-		t.Errorf("an ordinary wrong value tells the guest to contact Reception: %q", cred)
+	if containsFold(cred, "contact the site team") {
+		t.Errorf("an ordinary wrong value tells the guest to contact the site team: %q", cred)
 	}
-	if !containsFold(messageForClass(classTechnical, 0), "contact reception") {
-		t.Errorf("the technical message does not offer Reception: %q", messageForClass(classTechnical, 0))
+	if !containsFold(messageForClass(classTechnical, 0), "contact the site team") {
+		t.Errorf("the technical message does not offer the site team: %q", messageForClass(classTechnical, 0))
 	}
 }
 

@@ -85,7 +85,7 @@ func (h *handler) postStayIssue(w http.ResponseWriter, r *http.Request) {
 	writeJSONPortal(w, http.StatusOK, postStayOut{
 		OK: true, PIN: out.PIN, ExpiresAt: out.ExpiresAt,
 		Message: "Write this down now. It is shown once and cannot be shown again — if you lose it, ask the " +
-			"front desk for a new one.",
+			"site team for a new one.",
 	})
 }
 

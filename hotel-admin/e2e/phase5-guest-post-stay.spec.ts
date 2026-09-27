@@ -11,7 +11,7 @@ import { portalHTML as renderLanding } from "./portal-page";
 // in the first place, on a real DOM, with the real event handlers.
 
 const UNIFORM_MESSAGE =
-  "We could not verify your stay. Please check your details or contact reception.";
+  "We could not verify your stay. Please check your details or contact the site team for assistance.";
 
 // renderLanding comes from ./portal-page now.
 //

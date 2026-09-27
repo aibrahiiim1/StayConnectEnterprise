@@ -171,7 +171,7 @@ func TestEveryServerSentenceHasATranslation(t *testing.T) {
 		}
 		switch msg {
 		case "Please enter a voucher code.", "Your device isn't on the guest network.", "Unable to detect your device address.",
-			"Internet packages are not available right now. Please ask reception.", "Please sign in again.",
+			"Internet packages are not available right now. Please contact the site team for assistance.", "Please sign in again.",
 			"That package is not available. Please choose another.":
 			t.Errorf("%q no longer reaches an English guest as written", msg)
 		}

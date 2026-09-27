@@ -77,7 +77,7 @@ func (h *handler) tryIAMv2Auth(w http.ResponseWriter, r *http.Request, payload [
 	if h.commerceSessions == nil {
 		// The store is only constructed when the Phase-2 portal surface is on. Authenticating with nowhere to
 		// put the pins means the guest cannot proceed, and saying "connected" would be false.
-		h.landing(w, r, "Internet packages are not available right now. Please ask reception.")
+		h.landing(w, r, "Internet packages are not available right now. Please contact the site team for assistance.")
 		return true
 	}
 	token, err := newCommerceToken()
