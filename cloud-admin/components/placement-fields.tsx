@@ -84,8 +84,18 @@ export function TimezoneSelect({ value, onChange }: { value: string; onChange: (
   );
 }
 
-/** Activate's customer and site. Move stays within the customer and picks its site itself (appliance-dialogs.tsx). */
-export function PlacementFields({ value, onChange }: { value: Placement; onChange: (next: Placement) => void }) {
+/** Activate's customer and site. Move stays within the customer and picks its site itself (appliance-dialogs.tsx).
+ *  `lockedCustomer` pins the customer (an appliance that still holds that customer's data): the customer cannot
+ *  be changed and no new customer can be created; only the site is chosen. */
+export function PlacementFields({
+  value,
+  onChange,
+  lockedCustomer,
+}: {
+  value: Placement;
+  onChange: (next: Placement) => void;
+  lockedCustomer?: { id: string; name: string };
+}) {
   const [customers, setCustomers] = useState<Customer[] | null>(null);
   const [sites, setSites] = useState<Site[] | null>(null);
   const set = (patch: Partial<Placement>) => onChange({ ...value, ...patch });
@@ -111,17 +121,23 @@ export function PlacementFields({ value, onChange }: { value: Placement; onChang
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <Field label="Customer" required>
-        <Select
-          value={value.customerId}
-          disabled={customers === null}
-          onChange={(e) => set({ customerId: e.target.value, siteId: e.target.value === NEW ? NEW : "" })}
-        >
-          <option value="">{customers === null ? "Loading…" : "Choose a customer…"}</option>
-          {(customers ?? []).map((c) => (
-            <option key={c.id} value={c.id}>{c.name}</option>
-          ))}
-          <option value={NEW}>New customer…</option>
-        </Select>
+        {lockedCustomer ? (
+          <Select value={lockedCustomer.id} disabled onChange={() => undefined}>
+            <option value={lockedCustomer.id}>{lockedCustomer.name}</option>
+          </Select>
+        ) : (
+          <Select
+            value={value.customerId}
+            disabled={customers === null}
+            onChange={(e) => set({ customerId: e.target.value, siteId: e.target.value === NEW ? NEW : "" })}
+          >
+            <option value="">{customers === null ? "Loading…" : "Choose a customer…"}</option>
+            {(customers ?? []).map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+            <option value={NEW}>New customer…</option>
+          </Select>
+        )}
       </Field>
 
       {newCustomer ? (

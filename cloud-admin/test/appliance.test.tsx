@@ -120,6 +120,51 @@ describe("Activate", () => {
     expect(calls.some((c) => c.url === "/api/v1/auth/reauth")).toBe(true);
   });
 
+  it("an appliance that still holds a customer's data: that customer is preselected and cannot be changed", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetch([
+      detail(appliance("waiting", { holds_customer_id: "c1", holds_customer_name: "Semantics Hotels" })),
+      ...lists,
+      { method: "POST", match: "/api/cloud/v1/appliances/a1/activate", body: { ok: true } },
+    ]);
+    renderAs(PLATFORM_ME, <AppliancePage params={{ id: "a1" }} />);
+    expect(await screen.findByText(/can be activated only for\s+that customer/)).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Activate" }));
+    const dialog = await screen.findByRole("dialog", { name: "Activate OG-0001" });
+    expect(within(dialog).getByText("This appliance still holds a customer's data")).toBeInTheDocument();
+    expect(within(dialog).getByText(/factory-reset it first/)).toBeInTheDocument();
+    const customer = within(dialog).getByLabelText(/^Customer/);
+    expect(customer).toBeDisabled();
+    expect(customer).toHaveValue("c1");
+    expect(within(customer).queryByRole("option", { name: "New customer…" })).not.toBeInTheDocument();
+    const site = within(dialog).getByLabelText(/^Site/);
+    await waitFor(() => expect(within(site).getByRole("option", { name: "Demo Resort" })).toBeInTheDocument());
+    await user.selectOptions(site, "s1");
+    await user.click(within(dialog).getByRole("button", { name: "Activate" }));
+
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith("/activate"))).toBe(true));
+    const body = calls.find((c) => c.url.endsWith("/activate"))!.body as Record<string, any>;
+    expect(body.customer_id).toBe("c1");
+    expect(body.site_id).toBe("s1");
+    expect(body.new_customer).toBeUndefined();
+  });
+
+  it("an appliance holding a customer Central no longer has cannot be activated: factory-reset first", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetch([
+      detail(appliance("waiting", { holds_customer_id: "c-gone", holds_customer_name: null })),
+      ...lists,
+      { method: "POST", match: "/api/cloud/v1/appliances/a1/activate", body: { ok: true } },
+    ]);
+    renderAs(PLATFORM_ME, <AppliancePage params={{ id: "a1" }} />);
+    await user.click(await screen.findByRole("button", { name: "Activate" }));
+    const dialog = await screen.findByRole("dialog", { name: "Activate OG-0001" });
+    expect(within(dialog).getByText(/no longer in Central, so it cannot be activated for anyone/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Activate" }));
+    expect(await within(dialog).findByText(/still holds another customer's data\. Factory-reset it/)).toBeInTheDocument();
+    expect(calls.some((c) => c.url.endsWith("/activate"))).toBe(false);
+  });
+
   it("creates the customer and site in the same step, with an end date", async () => {
     const user = userEvent.setup();
     const { calls } = mockFetch([

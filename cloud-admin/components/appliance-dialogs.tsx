@@ -24,6 +24,10 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+/** The server's operator sentence for 409 holds_other_customer_data, shown before the call when the outcome is known. */
+const HOLDS_OTHER_CUSTOMER =
+  "This appliance still holds another customer's data. Factory-reset it before activating it for a different customer.";
+
 /** Activate a waiting appliance: where it goes and what its license allows, in one step. */
 export function ActivateDialog({
   appliance,
@@ -31,26 +35,35 @@ export function ActivateDialog({
   onOpenChange,
   onDone,
 }: {
-  appliance: Pick<ApplianceRow, "id" | "serial">;
+  appliance: Pick<ApplianceRow, "id" | "serial" | "holds_customer_id" | "holds_customer_name">;
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onDone: () => void;
 }) {
   const toast = useToast();
-  const [placement, setPlacement] = useState<Placement>(emptyPlacement());
+  // An appliance that still holds a customer's data is activated for that customer or not at all (the server
+  // refuses any other with 409 holds_other_customer_data). Preselect it and lock the choice.
+  const heldId = appliance.holds_customer_id ?? "";
+  const heldName = appliance.holds_customer_name ?? "";
+  const heldGone = !!heldId && !heldName; // the customer it holds is no longer in Central
+  const [placement, setPlacement] = useState<Placement>(emptyPlacement(heldGone ? "" : heldId));
   const [terms, setTerms] = useState<TermsDraft>(DEFAULT_TERMS);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
 
   useEffect(() => {
     if (open) {
-      setPlacement(emptyPlacement());
+      setPlacement(emptyPlacement(heldGone ? "" : heldId));
       setTerms(DEFAULT_TERMS);
       setErr(null);
     }
-  }, [open]);
+  }, [open, heldId, heldGone]);
 
   async function submit() {
+    if (heldGone) {
+      setErr(HOLDS_OTHER_CUSTOMER);
+      return;
+    }
     const problem = placementProblem(placement) ?? termsProblem(terms);
     if (problem) {
       setErr(problem);
@@ -85,8 +98,27 @@ export function ActivateDialog({
       error={err}
       onSubmit={submit}
     >
+      {heldId && (
+        <Callout tone="warning" title="This appliance still holds a customer's data">
+          {heldGone ? (
+            <>
+              It holds the data of a customer that is no longer in Central, so it cannot be activated for anyone.
+              Factory-reset it; it then registers again and can be activated for any customer.
+            </>
+          ) : (
+            <>
+              It can be activated only for <strong>{heldName}</strong>, whose data is still on it. To give it to
+              another customer, factory-reset it first; it then registers again and can be activated for anyone.
+            </>
+          )}
+        </Callout>
+      )}
       <Section title="Where it is installed">
-        <PlacementFields value={placement} onChange={setPlacement} />
+        <PlacementFields
+          value={placement}
+          onChange={setPlacement}
+          lockedCustomer={heldId && !heldGone ? { id: heldId, name: heldName } : undefined}
+        />
       </Section>
       <Section title="License">
         <LicenseTermsFields value={terms} onChange={setTerms} />

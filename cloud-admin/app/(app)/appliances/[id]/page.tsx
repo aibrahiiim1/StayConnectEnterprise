@@ -254,6 +254,21 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
               <Button onClick={() => setDialog("activate")}>Activate</Button>
             )}
           </CardHeader>
+          {a.holds_customer_id && (
+            <CardBody className="text-sm">
+              {a.holds_customer_name ? (
+                <>
+                  It still holds the data of <strong>{a.holds_customer_name}</strong> and can be activated only for
+                  that customer. For another customer, factory-reset it first.
+                </>
+              ) : (
+                <>
+                  It still holds the data of a customer that is no longer in Central. Factory-reset it before
+                  activating it.
+                </>
+              )}
+            </CardBody>
+          )}
           {!can["appliances.activate"] && (
             <CardBody className="text-sm text-muted-foreground">A platform admin can activate it.</CardBody>
           )}

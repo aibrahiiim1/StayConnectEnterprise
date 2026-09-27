@@ -185,6 +185,10 @@ export type ApplianceRow = {
   registered_at?: string | null;
   activated_at?: string | null;
   open_alerts?: number;
+  /** The customer whose data the appliance reported still holding when it registered; it can be activated only
+   *  for that customer. The name is null when that customer is no longer in Central. */
+  holds_customer_id?: string | null;
+  holds_customer_name?: string | null;
 };
 
 export type LicenseRow = {
