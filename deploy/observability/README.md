@@ -28,8 +28,8 @@ deploy/observability/
 
 ## Prerequisites
 
-1. The main stack (`deploy/compose/docker-compose.yml`) is running —
-   postgres, redis.
+1. The backing services are running — postgres, redis (`deploy/compose/infra.yml` on an appliance,
+   `deploy/compose/central-infra.yml` on Central).
 2. `ctrlapi` is running on `127.0.0.1:8080` with `/metrics` exposed.
 3. `scd` has `SCD_METRICS_ADDR=127.0.0.1:9101` set in `/etc/stayconnect/scd.env`
    so Prometheus can scrape it. (The existing unix-socket /metrics endpoint
@@ -50,10 +50,7 @@ curl -s http://127.0.0.1:9101/metrics | head
 ## Running
 
 ```sh
-docker compose \
-    -f deploy/compose/docker-compose.yml \
-    -f deploy/observability/docker-compose.yml \
-    up -d
+docker compose -f deploy/observability/docker-compose.yml up -d
 ```
 
 Access:

@@ -106,7 +106,7 @@ an unpacked appliance to live, licensed guest WiFi and covers day-2 operations.
 | Edge / appliance architecture | [EDGE_ARCHITECTURE.md](EDGE_ARCHITECTURE.md) · [EDGE_NETWORKING.md](EDGE_NETWORKING.md) |
 | Guest VLANs | [GUEST_VLAN_CONFIGURATION.md](GUEST_VLAN_CONFIGURATION.md) · [ARUBA_SSID_VLAN_MAPPING.md](ARUBA_SSID_VLAN_MAPPING.md) |
 | DHCP | [DHCP_MANAGEMENT.md](DHCP_MANAGEMENT.md) · [DHCP_OPTION_114.md](DHCP_OPTION_114.md) · [EXTERNAL_DHCP_MODE.md](EXTERNAL_DHCP_MODE.md) |
-| Sync protocol (historical — telemetry is off, CLAUDE.md §0E) | [SYNC_PROTOCOL.md](SYNC_PROTOCOL.md) |
+| Sync protocol (historical — the appliance's telemetry subsystem was removed, CLAUDE.md §0E) | [SYNC_PROTOCOL.md](SYNC_PROTOCOL.md) |
 | Deployment | [DEPLOYMENT_CLOUD.md](DEPLOYMENT_CLOUD.md) · [DEPLOYMENT_APPLIANCE.md](DEPLOYMENT_APPLIANCE.md) |
 | Roles & scope | [ROLE_AND_SCOPE_MATRIX.md](ROLE_AND_SCOPE_MATRIX.md) |
 | Data ownership | [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md) |

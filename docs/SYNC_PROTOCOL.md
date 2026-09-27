@@ -1,13 +1,15 @@
 # Sync Protocol — Edge ⇄ Cloud (HISTORICAL / SUPERSEDED)
 
 > **HISTORICAL — SUPERSEDED. This is not how an appliance talks to Central today.**
-> Central serves the appliance for **licensing only** (CLAUDE.md §0E, 2026-09-13): the telemetry outbox and
-> every producer are off, the NATS transport is not opened, the remote command / PMS / config-push channels
-> are removed, and Central's telemetry tables were dropped (migration 0045). What the appliance does exchange
-> with Central — registration, signed assignment, certificate, licence and hello, all over HTTPS — is
+> Central serves the appliance for **licensing only** (CLAUDE.md §0E). The path below was switched off by
+> the 2026-09-13 decision and then **removed** on 2026-09-27: the appliance no longer has an outbox, a
+> producer, a NATS client or the remote command / PMS / config-push channels, appliance migration 0093
+> dropped `sync_outbox`, `sync_checkpoints` and the cloud-mode / cloud-sync settings, and Central's telemetry
+> tables were dropped by Central migration 0045. What the appliance does exchange with Central —
+> registration, signed assignment, certificate, licence, hello and offline reconcile, all over HTTPS — is
 > specified in [CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md) §6 and summarised in
-> [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md) §4. The design below is kept only as the record of the switched-off
-> telemetry path; do not use it as a description of current behaviour or as a repair instruction.
+> [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md) §4. The design below is kept only as the record of that removed
+> path; it describes no current behaviour.
 
 > How an appliance talks to the cloud: a durable outbox drained over
 > appliance-initiated channels, deduplicated cloud-side for exactly-once

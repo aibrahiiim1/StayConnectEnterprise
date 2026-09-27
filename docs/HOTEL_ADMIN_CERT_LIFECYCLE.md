@@ -3,8 +3,8 @@
 Production, self-managing lifecycle for the Hotel Admin dual-SAN leaf certificate
 (`hotel.stayconnect.local` + the current Management/WAN IP). No operator has to
 remember to renew anything. Scope is ONLY this local Hotel Admin HTTPS leaf — it
-never touches the vendor appliance mTLS PKI, Root/Intermediate CA, API-client /
-NATS certs, or assignment/license/command/update keys.
+never touches the vendor appliance mTLS PKI, Root/Intermediate CA, API-client certificates,
+or assignment/license keys.
 
 ## Components
 
@@ -69,8 +69,8 @@ material is never printed to logs or sent in telemetry.
 The manager writes `/etc/caddy/hotel-admin/status.json` (subject, issuer, serial,
 SHA-256 fingerprint, DNS/IP SANs, issued/expires, days remaining, threshold,
 current mgmt IP, SAN match, last attempt/success/result/error). edged serves it at
-`GET /edge/v1/hotel-admin-cert`. (The sanitized subset used to go to Central as health
-telemetry; telemetry is off — CLAUDE.md §0E.) Local audit events (site
+`GET /edge/v1/hotel-admin-cert`. (A sanitized subset used to go to Central as health
+telemetry; the appliance's telemetry subsystem was removed — CLAUDE.md §0E.) Local audit events (site
 `audit_log`): `renewal_started/succeeded/failed`, `rollback_succeeded/failed`,
 `management_ip_changed`, `certificate_san_changed`; edged additionally records
 `hotel_admin_cert.rotate_requested` with the operator + reason.

@@ -26,7 +26,7 @@ documentation is in [`docs/user-guide/`](docs/user-guide/README.md).
 ## Phase 0 quickstart
 
 ```bash
-make infra-up          # Postgres+Timescale, Redis, NATS
+make infra-up          # Postgres+Timescale, Redis
 make migrate           # apply SQL migrations
 make ctrlapi-run       # start control-plane API on :8080
 curl localhost:8080/healthz

@@ -2,8 +2,9 @@
 
 > **HISTORICAL — COMPLETED.** This cutover is finished and cannot be repeated: Central no longer holds any
 > guest-domain table (the empty legacy tables were verified empty and dropped by Central migration 0046),
-> the legacy `/v1` routes are removed ([API_DEPRECATIONS.md](API_DEPRECATIONS.md)), plans/subscriptions are
-> archived in schema `legacy_archive`, and fleet telemetry was dropped (migration 0045). Central schema
+> the legacy `/v1` routes are removed ([API_DEPRECATIONS.md](API_DEPRECATIONS.md)), the plans/subscriptions
+> history 0046 archived in schema `legacy_archive` was deleted with that schema by migration 0047, and fleet
+> telemetry was dropped (migration 0045). Central schema
 > changes today are applied with `deploy/scripts/central-migrate.sh up` ([DEPLOYMENT_CLOUD.md](DEPLOYMENT_CLOUD.md) §4).
 > The steps below are kept as the record of how the pilot was cut over.
 
