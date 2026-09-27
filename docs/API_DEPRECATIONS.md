@@ -30,11 +30,12 @@ Nothing else is mounted (`control-plane/internal/http/router.go`):
 | `/cloud/v1/tenants*` (incl. subscription, effective-limits, usage sub-routes), `/v1/tenants*` | `/cloud/v1/customers*` (`customer_id` is the old `tenant_id`) |
 | `/cloud/v1/sites` (flat list/create) | `/cloud/v1/customers/{id}/sites`, `PATCH|DELETE /cloud/v1/sites/{id}`, `…/archive|restore` |
 | `/cloud/v1/appliances` create (manual appliance creation), `…/effective-config` | Removed — appliances only register themselves; Central holds no appliance configuration |
-| `/cloud/v1/commercial-plans`, `/v1/plans`, subscriptions, `tenant_limit_overrides` | Removed — the signed appliance licence is the only entitlement; commercial history is in schema `legacy_archive` |
+| `/cloud/v1/commercial-plans`, `/v1/plans`, subscriptions, `tenant_limit_overrides` | Removed — the signed appliance licence is the only entitlement; the archived commercial history was deleted with schema `legacy_archive` (migration 0047) |
 | `/cloud/v1/licenses` POST (site-scoped issue from a subscription) | `POST /cloud/v1/appliances/{id}/activate` and `POST /cloud/v1/appliances/{id}/license` |
 | `/cloud/v1/operators*`, `/v1/operators*` | `/cloud/v1/team*` (Central operators) and `/cloud/v1/customers/{id}/users*` (customer users); hotel staff are `/edge/v1/operators` on the appliance |
 | `/cloud/v1/fleet/*` (registry + telemetry) | `/cloud/v1/overview` and `/cloud/v1/appliances` (activation, connection and licence state derived by ctrlapi); telemetry is off (CLAUDE.md §0E, migration 0045) |
 | Appliance deactivate / decommission / reconcile / claim endpoints | `POST /cloud/v1/appliances/{id}/retire` (two-phase or emergency), `…/move`, `…/replace`, `…/rebind-wan-mac`, `…/reissue-certificate`, `DELETE /cloud/v1/appliances/{id}` |
+| A **cross-customer** `POST /cloud/v1/appliances/{id}/move` (licence revoked, appliance purged its local data in place) | Refused with `409 cross_customer_move`. Changing customer is Retire → factory-reset the appliance → it registers again → `…/activate` for the new customer. A same-customer move re-issues the licence with the same terms and answers `503 licensing_unavailable` when it cannot |
 | Assignment-key state changes over HTTP | Host command `ctrlapi assignment-key verify-only|revoke --key-id <id> --reason <text> [--emergency]`; `GET /cloud/v1/trust` is read-only |
 | `GET /v1/version`, `/cloud/v1/version` | `GET /readyz` reports the version |
 
@@ -49,8 +50,13 @@ and Hotel Admin is `hotel-admin` on each appliance.
 | `/edge/v1/setup/*` (setup wizard, "Connect with token" enrollment) | Token-less registration by scd; `GET /edge/v1/central/offline-request`, `POST /edge/v1/central/offline-package` for offline activation |
 | `/edge/v1/network/cloud*`, `/edge/v1/network/setup/*` | `GET /edge/v1/central/status` |
 | scd socket `/v1/setup/*` (incl. `/v1/setup/enroll`) | scd socket `/v1/central/status`, `/v1/central/refresh`, `/v1/central/offline-request`, `/v1/central/offline-package`, `/v1/license/install` |
+| `GET/PUT /edge/v1/cloud-sync-settings`, `GET/POST /edge/v1/cloud-sync-recovery` (delivered-record retention and recovery of the telemetry queue) and their role permissions | Removed with the telemetry subsystem (2026-09-27, appliance migration 0093). Nothing replaces them: there is no queue |
+| `sync_outbox` figures in edged `GET /edge/v1/health`, and edged's `service_health` telemetry producer | Removed; local service health is still recorded in `appliance_service_health` and shown in Hotel Admin |
+| scd socket `GET /v1/admin/outbox/stats` | Removed with the outbox |
+| scd NATS subjects: RPC dispatcher and heartbeat, remote guest-session revoke, remote PMS test / cache / health, tenant PMS config broadcast, nft set replication (`nft.<siteID>`), the signed command channel and the software-update agent; env `SCD_NATS_URL`, `SCD_NATS_MTLS_URL`, `SCD_COMMAND_PUB`, `SCD_UPDATE_PUB` | Removed — the appliance has no message-bus client (CLAUDE.md §0E). Session revoke, PMS operations and configuration are local, in Hotel Admin |
 
-`POST /edge/v1/license` (licence file upload) stays.
+`POST /edge/v1/license` (licence file upload) stays. While the appliance is *Removed from OneGate Central* it
+answers `409 removed_from_central`, as do `POST /edge/v1/central/offline-package` and the scd install routes.
 
 ## 4. Old console addresses
 
