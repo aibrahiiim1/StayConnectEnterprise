@@ -80,7 +80,8 @@ TENA_CLOUD=$(echo "SELECT id FROM tenants WHERE slug='dev';" | $PSQLC)
 TENB_CLOUD=$(echo "SELECT id FROM tenants WHERE slug='acme';" | $PSQLC)
 curl -s -c "$CJ" -X POST $API/v1/auth/login -H 'Content-Type: application/json' \
   -d '{"email":"admin@stayconnect.local","password":"adminadmin01"}' -o /dev/null
-# ensure an acme-scoped operator exists
+# ensure an acme-scoped operator exists (changing a sign-in needs a recent password re-entry)
+curl -s -b "$CJ" -c "$CJ" -X POST $API/v1/auth/reauth -H 'Content-Type: application/json' -d '{"password":"adminadmin01"}' -o /dev/null
 curl -s -b "$CJ" -X POST "$API/cloud/v1/customers/$TENB_CLOUD/users" -H 'Content-Type: application/json' \
   -d '{"email":"iso-acme@test.local","display_name":"Iso Acme","password":"isolationpass1","role":"tenant_admin"}' -o /dev/null || true
 curl -s -c "$CJB" -X POST $API/v1/auth/login -H 'Content-Type: application/json' \

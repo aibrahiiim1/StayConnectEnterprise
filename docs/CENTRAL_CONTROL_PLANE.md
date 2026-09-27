@@ -197,7 +197,8 @@ state,status,valid_from,valid_until,grace_period_days,grace_ends_at,max_concurre
 `GET /cloud/v1/trust` → `{ca:[…],certificates:{active,revoked,expiring_30d,items:[…]},assignment_keys:[…],registry:{version,issued_at}}`
 `GET /cloud/v1/audit?customer_id=&appliance_id=&action=&since=&limit=&cursor=`
 `GET|POST /cloud/v1/team` · `PATCH|DELETE /cloud/v1/team/{id}` · `POST /cloud/v1/team/{id}/password` (Central operators) —
-customer users: `GET|POST /cloud/v1/customers/{id}/users`, `PATCH|DELETE /cloud/v1/customers/{id}/users/{uid}`
+customer users: `GET|POST /cloud/v1/customers/{id}/users`, `PATCH|DELETE /cloud/v1/customers/{id}/users/{uid}`. Every write
+to a sign-in (create, role, status, password, delete) is **SU**
 `GET /cloud/v1/backup-health`
 
 ### Appliance (unchanged paths)

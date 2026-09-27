@@ -43,9 +43,10 @@ func (b *Base) CloudRoutes(off *OfflineBase) http.Handler {
 
 	// Customer users (customer-level writes).
 	r.Get("/customers/{id}/users", b.listCustomerUsers)
-	r.Post("/customers/{id}/users", b.postCustomerUser)
-	r.Patch("/customers/{id}/users/{uid}", b.patchCustomerUser)
-	r.Delete("/customers/{id}/users/{uid}", b.deleteCustomerUser)
+	// Every change to who can sign in to Central, or with what, re-confirms the operator's password.
+	r.With(su).Post("/customers/{id}/users", b.postCustomerUser)
+	r.With(su).Patch("/customers/{id}/users/{uid}", b.patchCustomerUser)
+	r.With(su).Delete("/customers/{id}/users/{uid}", b.deleteCustomerUser)
 
 	// Appliances.
 	r.Get("/appliances", b.listAppliances)
@@ -85,10 +86,11 @@ func (b *Base) CloudRoutes(off *OfflineBase) http.Handler {
 	r.With(perm(auth.PermFleetView)).Get("/trust", b.trust)
 	r.Get("/audit", b.listAudit)
 	r.With(perm(auth.PermFleetView)).Get("/team", b.listTeam)
-	r.With(perm(auth.PermTeamManage)).Post("/team", b.postTeam)
-	r.With(perm(auth.PermTeamManage)).Patch("/team/{id}", b.patchTeam)
-	r.With(perm(auth.PermTeamManage)).Delete("/team/{id}", b.deleteTeam)
-	r.With(perm(auth.PermTeamManage)).Post("/team/{id}/password", b.teamPassword)
+	tm := r.With(perm(auth.PermTeamManage), su)
+	tm.Post("/team", b.postTeam)
+	tm.Patch("/team/{id}", b.patchTeam)
+	tm.Delete("/team/{id}", b.deleteTeam)
+	tm.Post("/team/{id}/password", b.teamPassword)
 	r.With(perm(auth.PermFleetView)).Get("/backup-health", b.BackupHealthHandler)
 
 	return r

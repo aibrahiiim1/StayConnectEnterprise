@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { KeyRound, Plus, UserCheck, UserMinus, UserPen, Users } from "lucide-react";
-import { api, itemsOf, type CentralUser, type Items } from "@/lib/api";
+import { api, itemsOf, withStepUp, type CentralUser, type Items } from "@/lib/api";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -88,7 +88,8 @@ export function UsersManager({
     setBusy(true);
     setDErr(null);
     try {
-      await fn();
+      // Central requires a recent password re-entry for every change to a sign-in; the prompt appears once.
+      await withStepUp(fn);
       toast.success(done, detail);
       setDialog(null);
       await load();

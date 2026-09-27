@@ -193,6 +193,7 @@ func main() {
 
 	// ---------------- customer roles ----------------
 	custAdmin := "acc-admin-" + run + "@example.test"
+	reauth(op)
 	code, _ = do(op, "POST", "/cloud/v1/customers/"+custID+"/users", jb(map[string]any{"email": custAdmin, "password": pass, "role": "tenant_admin"}))
 	check(code == 201, "platform creates a customer admin (HTTP %d)", code)
 	ta := login(custAdmin)
@@ -224,6 +225,10 @@ func main() {
 		"a customer's audit log is its own")
 
 	sup := "acc-support-" + run + "@example.test"
+	fresh := login(pa)
+	code, body = do(fresh, "POST", "/cloud/v1/team", jb(map[string]any{"email": "acc-nosu-" + run + "@example.test", "password": pass, "role": "platform_support"}))
+	check(code == 403 && strings.Contains(body, "reauth_required"), "a Team change without step-up is refused (HTTP %d)", code)
+	reauth(op)
 	post(op, "/cloud/v1/team", jb(map[string]any{"email": sup, "password": pass, "role": "platform_support"}), 201)
 	sp := login(sup)
 	check(strings.Contains(get(sp, "/cloud/v1/appliances"), a2.serial), "platform_support reads the fleet")
