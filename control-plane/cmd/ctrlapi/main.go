@@ -13,7 +13,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/stayconnect/enterprise/control-plane/internal/api"
@@ -25,57 +24,55 @@ import (
 	apihttp "github.com/stayconnect/enterprise/control-plane/internal/http"
 	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
 	"github.com/stayconnect/enterprise/control-plane/internal/metrics"
-	"github.com/stayconnect/enterprise/control-plane/internal/oidc"
 	"github.com/stayconnect/enterprise/control-plane/internal/pki"
 	"github.com/stayconnect/enterprise/license"
 )
 
 var version = "0.0.2-dev"
 
+// logLevel is set from CTRLAPI_LOG_LEVEL once the configuration is loaded.
+var logLevel = new(slog.LevelVar)
+
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	slog.SetDefault(logger)
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})))
 
 	if len(os.Args) > 1 {
+		var err error
 		switch os.Args[1] {
 		case "seed-admin":
-			if err := runSeedAdmin(os.Args[2:]); err != nil {
-				slog.Error("seed-admin failed", "err", err)
-				os.Exit(1)
-			}
-			return
+			err = runSeedAdmin(os.Args[2:])
 		case "gen-vendor-key":
-			if err := runGenVendorKey(os.Args[2:]); err != nil {
-				slog.Error("gen-vendor-key failed", "err", err)
-				os.Exit(1)
-			}
-			return
+			err = runGenVendorKey(os.Args[2:])
 		case "gen-assignment-key":
-			if err := runGenAssignmentKey(os.Args[2:]); err != nil {
-				slog.Error("gen-assignment-key failed", "err", err)
-				os.Exit(1)
-			}
-			return
+			err = runGenAssignmentKey(os.Args[2:])
 		case "gen-registry-key":
-			if err := runGenRegistryKey(os.Args[2:]); err != nil {
-				slog.Error("gen-registry-key failed", "err", err)
-				os.Exit(1)
-			}
-			return
+			err = runGenRegistryKey(os.Args[2:])
+		case "assignment-key":
+			err = runAssignmentKey(os.Args[2:])
 		case "serve", "":
-			// fallthrough to default
+			goto serve
 		default:
 			fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", os.Args[1])
-			fmt.Fprintf(os.Stderr, "usage: ctrlapi [serve | seed-admin --email <e> --password <p> | gen-vendor-key --out <key> --pub-out <pub>]\n")
+			fmt.Fprintf(os.Stderr, "usage: ctrlapi [serve | seed-admin | gen-vendor-key | gen-assignment-key | gen-registry-key | assignment-key verify-only|revoke]\n")
 			os.Exit(2)
 		}
+		if err != nil {
+			slog.Error(os.Args[1]+" failed", "err", err)
+			os.Exit(1)
+		}
+		return
 	}
+serve:
+	serve()
+}
 
+func serve() {
 	cfg, err := config.Load()
 	if err != nil {
 		slog.Error("config load failed", "err", err)
 		os.Exit(1)
 	}
+	logLevel.Set(cfg.LogLevel)
 
 	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -87,20 +84,6 @@ func main() {
 	}
 	defer pool.Close()
 	slog.Info("db connected")
-
-	// DEPRECATED-route compatibility pool: after a site's cutover the legacy
-	// /v1 guest-domain routes must operate on the SITE database. Unset =
-	// single-DB mode (pre-cutover behavior). See docs/API_DEPRECATIONS.md.
-	var guestPool *pgxpool.Pool
-	if u := os.Getenv("CTRLAPI_GUEST_COMPAT_DB_URL"); u != "" {
-		guestPool, err = db.Open(rootCtx, u)
-		if err != nil {
-			slog.Error("guest-compat db open failed", "err", err)
-			os.Exit(1)
-		}
-		defer guestPool.Close()
-		slog.Info("guest-domain compatibility pool connected (deprecated /v1 routes → site DB)")
-	}
 
 	rOpt, err := redis.ParseURL(cfg.RedisURL)
 	if err != nil {
@@ -115,75 +98,25 @@ func main() {
 	defer rdb.Close()
 	slog.Info("redis connected")
 
-	// NO APPLIANCE TRANSPORT. Central serves this product for LICENSING ONLY, so there is no NATS
-	// connection, no transport selection and no heartbeat consumer. What an appliance needs from Central --
-	// identity, its certificate, its licence, the signed assignment -- is all HTTPS on this same API. A
-	// connection that exists is one the next feature subscribes to, so none is opened.
+	// NO APPLIANCE TRANSPORT. Central serves this product for LICENSING ONLY (CLAUDE.md §0E): what an
+	// appliance needs from Central -- identity, its certificate, its licence, the signed assignment -- is
+	// all HTTPS on this API. There is no message bus connection.
 	met := metrics.New(version)
 
-	// Phase 5.7.C — bootstrap token expiry sweeper. Hourly DELETE of
-	// unconsumed tokens past expires_at; consumed rows stick around for
-	// audit. Runs unconditionally (DB-only, no NATS dep).
-	go func() {
-		t := time.NewTicker(1 * time.Hour)
-		defer t.Stop()
-		// Fire one immediately so a long-running ctrlapi cleans up at boot.
-		runTokenSweep(rootCtx, pool, met)
-		for {
-			select {
-			case <-rootCtx.Done():
-				return
-			case <-t.C:
-				runTokenSweep(rootCtx, pool, met)
-			}
-		}
-	}()
-
-	// OIDC registry for operator SSO. Phase 4.4 ships only the Stub.
-	oidcReg := oidc.NewRegistry()
-	oidcReg.Register(&oidc.Stub{
-		ProviderName:  "stub",
-		AuthorizeBase: "/api/oauth/stub/authorize-sso",
-	})
-
-	// Vendor license signing key (edge-first refactor). Optional: without it
-	// ctrlapi serves everything except license issuing/fetching, so existing
-	// deployments keep working until the key is provisioned.
+	// Vendor licence signing key. Without it ctrlapi serves everything except licence issuing/fetching.
 	var licSvc *licensing.Service
-	vendorKeyPath := os.Getenv("CTRLAPI_VENDOR_KEY")
-	if vendorKeyPath == "" {
-		vendorKeyPath = "/etc/stayconnect/vendor-license.key"
-	}
+	vendorKeyPath := envOrDefault("CTRLAPI_VENDOR_KEY", "/etc/stayconnect/vendor-license.key")
 	if signer, err := license.LoadSigner(vendorKeyPath); err == nil {
 		licSvc = &licensing.Service{DB: pool, Signer: signer}
 		slog.Info("vendor license signer loaded", "key_id", signer.KeyID(), "path", vendorKeyPath)
-		// Reconcile licensed/grace/license_expired from signed-license validity.
-		go func() {
-			t := time.NewTicker(60 * time.Second)
-			defer t.Stop()
-			for {
-				if n, err := licSvc.ReconcileStates(rootCtx); err != nil {
-					slog.Warn("license state reconcile failed", "err", err)
-				} else if n > 0 {
-					slog.Info("license state reconcile", "changed", n)
-				}
-				select {
-				case <-rootCtx.Done():
-					return
-				case <-t.C:
-				}
-			}
-		}()
 	} else {
 		slog.Warn("vendor license signer unavailable — licensing endpoints disabled",
 			"path", vendorKeyPath, "err", err)
 	}
 
-	// DEDICATED assignment-signing key. Deliberately a separate key from the
-	// license / command / update / CA / auth-callout keys: an assignment must never
-	// be signable by any of those, and the appliance enforces this by trusting only
-	// the keys in its local assignment trust registry. Absent/invalid → signed
-	// assignments disabled (assign still updates Central's DB, but no signed doc).
+	// DEDICATED assignment-signing key. Deliberately a separate key from the licence and CA keys: an
+	// assignment must never be signable by any of those, and the appliance enforces this by trusting only
+	// the keys in its local assignment trust registry. Absent → activation, moves and retirement refuse.
 	assignKeyPath := envOrDefault("CTRLAPI_ASSIGN_KEY", "/etc/stayconnect/assignment-signing.key")
 	var assignKey ed25519.PrivateKey
 	if raw, err := os.ReadFile(assignKeyPath); err == nil && len(raw) == ed25519.PrivateKeySize {
@@ -202,38 +135,29 @@ func main() {
 			}
 		}
 	} else {
-		slog.Warn("dedicated assignment signing key unavailable — signed assignments disabled",
+		slog.Warn("dedicated assignment signing key unavailable — activation disabled",
 			"path", assignKeyPath, "hint", "run: ctrlapi gen-assignment-key --out "+assignKeyPath)
 	}
 
-	// Registry ROOT-OF-TRUST key: signs the versioned trust registry the appliance
-	// verifies. Distinct from the assignment keys it authorises; its PUBLIC half is
-	// a manufacture-time trust anchor on the appliance.
-	regRootPath := envOrDefault("CTRLAPI_REGISTRY_ROOT_KEY", "/etc/stayconnect/assignment-registry-root.key")
-	var regRoot ed25519.PrivateKey
-	if raw, err := os.ReadFile(regRootPath); err == nil && len(raw) == ed25519.PrivateKeySize {
-		regRoot = ed25519.PrivateKey(raw)
-		slog.Info("assignment registry root key loaded",
-			"key_id", assignment.KeyID(regRoot.Public().(ed25519.PublicKey)), "path", regRootPath)
-		// Publish (or refresh) the signed registry from the current key table.
+	// Registry ROOT-OF-TRUST key: signs the versioned trust registry the appliance verifies.
+	regRoot := loadRegistryRoot()
+	if regRoot != nil {
 		regBase := &api.RegistryBase{Base: &api.Base{DB: pool}, RootKey: regRoot}
 		if sr, err := regBase.Rebuild(rootCtx, "ctrlapi boot"); err != nil {
 			slog.Warn("signed registry rebuild failed", "err", err)
 		} else if sr != nil {
 			slog.Info("signed trust registry published", "registry_version", sr.RegistryVersion, "keys", len(sr.Keys))
 		}
-	} else {
-		slog.Warn("assignment registry root key unavailable — signed registry disabled",
-			"path", regRootPath, "hint", "run: ctrlapi gen-registry-key --out "+regRootPath)
 	}
 
-	// Terminal-delivery timeout reconciler: a Phase-1 delivery that is never
-	// acknowledged within policy becomes terminal_delivery_failed + a security
-	// alert — credentials are NOT revoked and the box is NOT reported decommissioned.
+	// Housekeeping, every minute: a retirement never acknowledged within policy becomes
+	// terminal_delivery_failed + a security alert (credentials are NOT revoked); an elapsed replacement
+	// window raises an alert; and, hourly, assignment-fetch log rows older than 30 days are deleted.
 	go func() {
 		t := time.NewTicker(60 * time.Second)
 		defer t.Stop()
 		tb := &api.Base{DB: pool}
+		var lastPrune time.Time
 		for {
 			select {
 			case <-rootCtx.Done():
@@ -242,36 +166,34 @@ func main() {
 				if n, err := api.ReconcileTerminalTimeouts(rootCtx, tb); err != nil {
 					slog.Warn("terminal-delivery timeout reconcile failed", "err", err)
 				} else if n > 0 {
-					slog.Warn("terminal delivery failed (no ack within policy)", "count", n)
+					slog.Warn("retirement unconfirmed (no ack within policy)", "count", n)
 				}
 				if n, err := api.ReconcileReplacements(rootCtx, tb); err != nil {
 					slog.Warn("replacement window reconcile failed", "err", err)
 				} else if n > 0 {
 					slog.Warn("replacement window elapsed (operator decision required)", "count", n)
 				}
+				if time.Since(lastPrune) >= time.Hour {
+					lastPrune = time.Now()
+					if n, err := api.PruneAssignmentFetchLog(rootCtx, tb); err != nil {
+						slog.Warn("assignment fetch log retention failed", "err", err)
+					} else if n > 0 {
+						slog.Info("assignment fetch log retention", "deleted", n)
+					}
+				}
 			}
 		}
 	}()
 
-	// Appliance certificate authority (Phase 3 PKI/mTLS). The CA private key
-	// lives only in a file on Central; the CA cert (public) is versioned in DB
-	// and distributed to appliances as a trust anchor. Absent key → PKI routes
-	// and the mTLS listener stay disabled (existing deployments keep working).
+	// Appliance certificate authority. Two-tier: an offline Root signs an online Intermediate; runtime
+	// issuance uses ONLY the intermediate key. Absent key → PKI routes and the mTLS listener stay disabled.
 	var appCA *pki.CA
-	// Two-tier CA: offline Root signs an online Intermediate; runtime issuance
-	// uses ONLY the intermediate key. Root key path is used once (to sign the
-	// intermediate) then moved offline.
 	rootKeyPath := envOrDefault("CTRLAPI_ROOT_CA_KEY", "/etc/stayconnect/pki/root-ca.key")
 	intKeyPath := envOrDefault("CTRLAPI_INTERMEDIATE_CA_KEY", "/etc/stayconnect/pki/intermediate-ca.key")
 	sharedReplay := applianceauth.NewReplayCache(2*time.Minute, 8192)
 	if ca, err := pki.LoadCAChain(rootKeyPath, intKeyPath, 1); err == nil {
 		appCA = ca
-		// Move the ROOT private key offline: the runtime never needs it again
-		// once the intermediate is signed. We relocate it to a restricted
-		// offline directory (operationally it should be moved to cold storage).
 		relocateRootOffline(rootKeyPath)
-		// Persist/refresh CA version rows (root + intermediate) for trust-bundle
-		// versioning.
 		_, _ = pool.Exec(rootCtx, `
             INSERT INTO appliance_ca_versions (version, cert_pem, subject, key_fingerprint, active)
             VALUES (0, $1, 'StayConnect Root CA', 'offline', true)
@@ -282,14 +204,7 @@ func main() {
             ON CONFLICT (version) DO UPDATE SET cert_pem=EXCLUDED.cert_pem, subject=EXCLUDED.subject, key_fingerprint=EXCLUDED.key_fingerprint`,
 			ca.Version, string(ca.IntermediatePEM()), ca.Subject(), ca.KeyFingerprint())
 		slog.Info("appliance CA chain loaded (root offline → online intermediate)", "intermediate_version", ca.Version, "subject", ca.Subject())
-		// Dedicated per-purpose signing keys (never reuse one key for all).
-		ensureSigningKey(envOrDefault("CTRLAPI_COMMAND_KEY", "/etc/stayconnect/command-signing.key"), "command")
-		ensureSigningKey(envOrDefault("CTRLAPI_UPDATE_KEY", "/etc/stayconnect/update-signing.key"), "update")
-		// Dedicated mutual-TLS appliance listener (client-cert required).
-		mtlsAddr := os.Getenv("CTRLAPI_MTLS_ADDR")
-		if mtlsAddr == "" {
-			mtlsAddr = ":9443"
-		}
+		mtlsAddr := envOrDefault("CTRLAPI_MTLS_ADDR", ":9443")
 		applianceMTLSAPI := api.ApplianceMTLSRouter(pool, rdb, sharedReplay, licSvc, ca, assignKey, regRoot)
 		go func() {
 			if err := apihttp.StartMTLS(rootCtx, pool, ca, mtlsAddr, applianceMTLSAPI); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -301,19 +216,19 @@ func main() {
 	}
 
 	handler := apihttp.NewRouter(apihttp.Deps{
-		DB:                 pool,
-		GuestDB:            guestPool,
-		Redis:              rdb,
-		Metrics:            met,
-		OIDC:               oidcReg,
-		Licensing:          licSvc,
-		AssignKey:          assignKey,
-		AssignRegistryRoot: regRoot,
-		CA:                 appCA,
-		ReplayCache:        sharedReplay,
-		Version:            version,
-		AllowOrigins:       cfg.AllowOrigins,
-		CookieSecure:       cfg.CookieSecure,
+		DB:            pool,
+		Redis:         rdb,
+		Metrics:       met,
+		Licensing:     licSvc,
+		AssignKey:     assignKey,
+		CA:            appCA,
+		ReplayCache:   sharedReplay,
+		VendorKeyPath: vendorKeyPath,
+		CABundlePath:  envOrDefault("CTRLAPI_CA_BUNDLE", "/etc/stayconnect/pki/nats-ca-bundle.crt"),
+		ApplianceBase: os.Getenv("CTRLAPI_APPLIANCE_BASE"),
+		Version:       version,
+		AllowOrigins:  cfg.AllowOrigins,
+		CookieSecure:  cfg.CookieSecure,
 	})
 
 	srv := &http.Server{
@@ -324,7 +239,7 @@ func main() {
 
 	errCh := make(chan error, 1)
 	go func() {
-		slog.Info("ctrlapi listening", "addr", cfg.Addr, "env", cfg.Env, "version", version)
+		slog.Info("ctrlapi listening", "addr", cfg.Addr, "env", cfg.Env, "version", version, "log_level", cfg.LogLevel.String())
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
@@ -345,26 +260,18 @@ func main() {
 	slog.Info("bye")
 }
 
-// runTokenSweep deletes unconsumed bootstrap tokens past their expiry. Logs
-// the count when non-zero so operators can see the sweeper at work; also
-// bumps the ctrlapi_bootstrap_tokens_swept_total counter when met != nil.
-func runTokenSweep(ctx context.Context, pool *pgxpool.Pool, met *metrics.Registry) {
-	sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	tag, err := pool.Exec(sctx, `
-        DELETE FROM appliance_bootstrap_tokens
-         WHERE consumed_at IS NULL AND expires_at < now()
-    `)
-	if err != nil {
-		slog.Warn("token sweep failed", "err", err)
-		return
+func loadRegistryRoot() ed25519.PrivateKey {
+	regRootPath := envOrDefault("CTRLAPI_REGISTRY_ROOT_KEY", "/etc/stayconnect/assignment-registry-root.key")
+	raw, err := os.ReadFile(regRootPath)
+	if err != nil || len(raw) != ed25519.PrivateKeySize {
+		slog.Warn("assignment registry root key unavailable — signed registry disabled",
+			"path", regRootPath, "hint", "run: ctrlapi gen-registry-key --out "+regRootPath)
+		return nil
 	}
-	if n := tag.RowsAffected(); n > 0 {
-		slog.Info("token sweep", "deleted", n)
-		if met != nil {
-			met.TokensSwept.Add(float64(n))
-		}
-	}
+	k := ed25519.PrivateKey(raw)
+	slog.Info("assignment registry root key loaded",
+		"key_id", assignment.KeyID(k.Public().(ed25519.PublicKey)), "path", regRootPath)
+	return k
 }
 
 func envOrDefault(k, d string) string {
@@ -374,11 +281,9 @@ func envOrDefault(k, d string) string {
 	return d
 }
 
-// relocateRootOffline moves the root CA private key out of the runtime PKI
-// directory into a restricted offline holding area once the intermediate has
-// been signed. The runtime never opens it again. In production this should be
-// physically moved to cold storage; here we at least remove it from the
-// intermediate signing directory and tighten permissions.
+// relocateRootOffline moves the root CA private key out of the runtime PKI directory into a restricted
+// offline holding area once the intermediate has been signed. The runtime never opens it again. In
+// production it should be physically moved to cold storage.
 func relocateRootOffline(rootKeyPath string) {
 	offlineDir := envOrDefault("CTRLAPI_ROOT_CA_OFFLINE_DIR", "/etc/stayconnect/pki-offline")
 	if _, err := os.Stat(rootKeyPath); err != nil {
@@ -397,18 +302,51 @@ func relocateRootOffline(rootKeyPath string) {
 	slog.Warn("root CA private key relocated offline; move to cold storage", "offline_path", dst)
 }
 
-// ensureSigningKey generates a dedicated Ed25519 signing key at path if absent
-// (0600, atomic-ish). Used to keep command/update signing keys separate from
-// the license key and the CA.
-func ensureSigningKey(path, purpose string) {
-	if _, err := os.Stat(path); err == nil {
-		return
+// runAssignmentKey changes the state of an assignment-signing key and re-signs the trust registry:
+//
+//	ctrlapi assignment-key verify-only --key-id <id> --reason "<why>"
+//	ctrlapi assignment-key revoke      --key-id <id> --reason "<why>" [--emergency]
+//
+// verify-only stops a key signing while keeping it trusted (always safe). revoke removes all trust and is
+// refused while the key still signs a CURRENT assignment, unless --emergency (confirmed compromise).
+func runAssignmentKey(args []string) error {
+	if len(args) == 0 || (args[0] != "verify-only" && args[0] != "revoke") {
+		return fmt.Errorf("usage: ctrlapi assignment-key verify-only|revoke --key-id <id> --reason <text> [--emergency]")
 	}
-	if _, err := license.GenerateVendorKey(path); err != nil {
-		slog.Warn("signing key generate failed", "purpose", purpose, "path", path, "err", err)
-		return
+	fs := flag.NewFlagSet("assignment-key "+args[0], flag.ExitOnError)
+	keyID := fs.String("key-id", "", "assignment signing key id")
+	reason := fs.String("reason", "", "why (recorded in the audit log)")
+	emergency := fs.Bool("emergency", false, "revoke even while current assignments depend on the key (confirmed compromise)")
+	_ = fs.Parse(args[1:])
+	if *keyID == "" || *reason == "" {
+		return fmt.Errorf("--key-id and --reason are required")
 	}
-	slog.Info("dedicated signing key created", "purpose", purpose, "path", path)
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, err := db.Open(ctx, cfg.DBURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	b := &api.Base{DB: pool}
+	regRoot := loadRegistryRoot()
+	if args[0] == "verify-only" {
+		if err := api.KeyToVerifyOnly(ctx, b, regRoot, *keyID, *reason); err != nil {
+			return err
+		}
+		fmt.Printf("key %s is now verify_only (no longer signs; still verifies issued documents)\n", *keyID)
+		return nil
+	}
+	deps, err := api.KeyRevoke(ctx, b, regRoot, *keyID, *reason, *emergency)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("key %s revoked (current assignments it still signed: %d)\n", *keyID, deps)
+	return nil
 }
 
 // runGenVendorKey creates the vendor license-signing keypair. The private

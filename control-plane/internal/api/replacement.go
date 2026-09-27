@@ -5,20 +5,20 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/control-plane/internal/audit"
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 )
 
-// replacementWindow bounds how long an outgoing (replacement_pending) appliance
-// may stay licensed while its replacement is being enrolled. It matches the
-// replacement bootstrap-token lifetime so authority and enrolment expire together.
+// replacementWindow bounds how long an outgoing (replacement_pending) appliance may stay licensed while its
+// replacement registers itself and is activated at the same site.
 const replacementWindow = 72 * time.Hour
 
 // completeReplacementIfPending is invoked when an appliance becomes Active. If the
 // SAME site has an outgoing appliance flagged replacement_pending, the replacement
 // is now complete, so the OLD appliance's authority is terminated through the
 // centralized lifecycle policy: revoke its bound licenses, revoke its credentials
-// (cert → mTLS + NATS denied), mark it decommissioned, and link the two rows.
+// (cert → mTLS denied), mark it decommissioned, and link the two rows.
 // Idempotent and safe: a no-op when no replacement is pending. This is what
 // guarantees the old box cannot remain licensed once its replacement is online.
 func (b *Base) completeReplacementIfPending(ctx context.Context, r *http.Request, newID, siteID string) {
@@ -30,14 +30,20 @@ func (b *Base) completeReplacementIfPending(ctx context.Context, r *http.Request
         SELECT id::text, COALESCE(lifecycle_state,'')
           FROM appliances
          WHERE site_id=$1 AND id <> $2 AND replacement_pending = true AND replaced_by IS NULL
+           AND lifecycle_state = 'assigned'
          ORDER BY updated_at ASC LIMIT 1`, siteID, newID).Scan(&oldID, &prevState); err != nil {
 		return // nothing pending — normal activation
 	}
 
 	licRevoked, _ := b.revokeApplianceBoundLicenses(ctx, oldID)
+	// The outgoing box is told, in a signed terminal document, that it is retired — the same authority every
+	// other retirement uses — and its credentials are pulled now: its replacement is already live.
+	if err := b.issueAssignment(ctx, oldID, assignment.StateDecommissioned); err != nil {
+		audit.Op(ctx, b.DB, r, "appliance.replacement_terminal_unsigned", "appliance", oldID, map[string]any{"error": err.Error()})
+	}
 	_ = b.phase2ShutCredentials(ctx, r, oldID, "replaced")
 	_, _ = b.DB.Exec(ctx, `
-        UPDATE appliances SET lifecycle_state='decommissioned', status='retired',
+        UPDATE appliances SET lifecycle_state='decommissioned',
                replacement_pending=false, replacement_deadline=NULL, replaced_by=$2::uuid, updated_at=now()
          WHERE id=$1`, oldID, newID)
 	_, _ = b.DB.Exec(ctx, `UPDATE appliances SET replacement_of=$2::uuid, updated_at=now() WHERE id=$1`, newID, oldID)

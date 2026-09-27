@@ -19,12 +19,6 @@ type Operator struct {
 	DefaultTenant string   // first non-NULL tenant_id in operator_roles, or ""
 	Roles         []string // role strings (e.g. platform_admin, tenant_admin)
 	IsSuperAdmin  bool
-	// SiteIDs are the sites this operator is explicitly bound to (site_admin /
-	// hotel_it / hotel_operator role rows with a non-NULL site_id).
-	SiteIDs []string
-	// TenantWide is true when the operator holds at least one tenant-level role
-	// (site_id NULL) — i.e. may act across all sites in their tenant.
-	TenantWide bool
 }
 
 type Repo struct {
@@ -71,9 +65,10 @@ func (r *Repo) FindByID(ctx context.Context, id string) (*Operator, error) {
 
 func (r *Repo) loadRoles(ctx context.Context, op *Operator) error {
 	rows, err := r.DB.Query(ctx, `
-        SELECT role, COALESCE(tenant_id::text,''), COALESCE(site_id::text,'')
+        SELECT role, COALESCE(tenant_id::text,'')
           FROM operator_roles
          WHERE operator_id = $1
+         ORDER BY role
     `, op.ID)
 	if err != nil {
 		return err
@@ -81,8 +76,8 @@ func (r *Repo) loadRoles(ctx context.Context, op *Operator) error {
 	defer rows.Close()
 	var firstTenant string
 	for rows.Next() {
-		var role, tenID, siteID string
-		if err := rows.Scan(&role, &tenID, &siteID); err != nil {
+		var role, tenID string
+		if err := rows.Scan(&role, &tenID); err != nil {
 			return err
 		}
 		op.Roles = append(op.Roles, role)
@@ -91,11 +86,6 @@ func (r *Repo) loadRoles(ctx context.Context, op *Operator) error {
 		}
 		if tenID != "" && firstTenant == "" {
 			firstTenant = tenID
-		}
-		if siteID != "" {
-			op.SiteIDs = append(op.SiteIDs, siteID)
-		} else if tenID != "" {
-			op.TenantWide = true // a tenant-level (non-site) binding
 		}
 	}
 	op.DefaultTenant = firstTenant

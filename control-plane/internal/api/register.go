@@ -143,8 +143,7 @@ func (b *EnrollmentBase) RegisterHandler(w http.ResponseWriter, r *http.Request)
 	// (serial + hardware fingerprint are not secret), so we alert and reject.
 	// A legit factory-reset of an active box requires the operator to decommission
 	// it first (or use a bootstrap token) — a deliberate, audited action.
-	reusable := map[string]bool{"pending_approval": true, "installed_unenrolled": true, "": true,
-		"revoked": true, "decommissioned": true, "retired": true}
+	reusable := map[string]bool{"pending_approval": true, "": true, "revoked": true, "decommissioned": true}
 	if reuseID != "" {
 		if !reusable[reuseState] {
 			// Surface the old↔new HARDWARE link explicitly: same physical serial,
@@ -169,11 +168,23 @@ func (b *EnrollmentBase) RegisterHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		// Re-register after factory reset: adopt the new identity on the existing
-		// row, keep it Pending. No duplicate appliance is created.
+		// row, keep it Pending. No duplicate appliance is created. Anything the
+		// previous identity held is dead: its certificates are revoked and its
+		// retirement record is closed, so the row starts again as a clean WAITING
+		// appliance. The signed-assignment row is kept so versions stay monotonic.
+		_, _ = b.DB.Exec(ctx, `
+            INSERT INTO appliance_certificate_revocations (certificate_id, appliance_id, fingerprint_sha256, reason)
+            SELECT c.id, c.appliance_id, c.fingerprint_sha256, 'identity re-registered'
+              FROM appliance_certificates c WHERE c.appliance_id=$1 AND c.status='active'
+            ON CONFLICT DO NOTHING`, reuseID)
+		_, _ = b.DB.Exec(ctx, `UPDATE appliance_certificates SET status='revoked', revoked_at=now(),
+            revocation_reason='identity re-registered' WHERE appliance_id=$1 AND status='active'`, reuseID)
+		_, _ = b.DB.Exec(ctx, `DELETE FROM appliance_terminal_delivery WHERE appliance_id=$1`, reuseID)
 		_, _ = b.DB.Exec(ctx, `
             UPDATE appliances SET
-                public_key = $2, status = 'pending', lifecycle_state = 'pending_approval',
-                tenant_id = NULL, site_id = NULL,
+                public_key = $2, lifecycle_state = 'pending_approval',
+                tenant_id = NULL, site_id = NULL, activated_at = NULL,
+                current_cert_fingerprint = NULL, replacement_pending = false, replacement_deadline = NULL,
                 wan_mac = NULLIF($3,''), lan_mac = NULLIF($4,''), hardware_fingerprint = NULLIF($5,''),
                 hostname = NULLIF($6,''), model = NULLIF($7,''),
                 enrolled_at = now(), first_seen_at = COALESCE(first_seen_at, now()),
@@ -186,10 +197,10 @@ func (b *EnrollmentBase) RegisterHandler(w http.ResponseWriter, r *http.Request)
 
 	// (3) Brand-new appliance → Pending Activation (unassigned).
 	err = b.DB.QueryRow(ctx, `
-        INSERT INTO appliances(serial, name, status, lifecycle_state, public_key,
+        INSERT INTO appliances(serial, name, lifecycle_state, public_key,
                                wan_mac, lan_mac, hardware_fingerprint, hostname, model,
                                enrolled_at, first_seen_at, last_seen_at, last_public_ip)
-        VALUES ($1, $1, 'pending', 'pending_approval', $2,
+        VALUES ($1, $1, 'pending_approval', $2,
                 NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLIF($7,''),
                 now(), now(), now(), $8)
         RETURNING id::text

@@ -1,12 +1,9 @@
-// Command pkitest is a Phase-3 acceptance client. It plays the appliance role
-// end-to-end against a live ctrlapi: enroll → submit CSR → (platform issues) →
-// fetch cert → mTLS hello (accepted) → (platform revokes) → mTLS hello
-// (rejected). It reuses the real applianceauth signer so it exercises the
-// exact production request-binding. Intended to run ON the central server.
+// Command pkitest plays the appliance role end-to-end against a live ctrlapi to prove the PKI/mTLS path:
+// token-less registration → operator activation → CSR (auto-signed because the appliance is activated) →
+// fetch certificate → hello over mTLS (accepted) → operator reissue-certificate with no waiting CSR, which
+// revokes the certificate → hello over mTLS (rejected). It reuses the production request signer.
 //
-// It also drives the platform-side actions via a password login + reauth, so a
-// single invocation proves the whole PKI/mTLS path. All fixtures it creates use
-// the ACPT-PKI serial and are cleaned by the caller.
+// Fixtures: serial ACPT-PKI-<n> in a customer/site it creates. Needs a platform_admin login.
 package main
 
 import (
@@ -32,8 +29,6 @@ import (
 var (
 	base  = env("PKITEST_BASE", "http://127.0.0.1:8080")
 	mtls  = env("PKITEST_MTLS", "https://127.0.0.1:9443")
-	tenA  = env("PKITEST_TENANT", "aaaaaaaa-0000-0000-0000-00000000000a")
-	siteA = env("PKITEST_SITE", "a5170000-0000-0000-0000-0000000000a1")
 	pass  = env("PKITEST_PASS", "AcceptTest!2026")
 	email = env("PKITEST_EMAIL", "accept-pa@stayconnect.local")
 	pass2 = 0
@@ -52,87 +47,93 @@ func ok(msg string, args ...any)   { fmt.Printf("  PASS: "+msg+"\n", args...); p
 func main() {
 	jar, _ := cookiejar.New(nil)
 	cl := &http.Client{Jar: jar, Timeout: 15 * time.Second}
-
-	// 1. Platform login.
 	must(cl, "POST", base+"/v1/auth/login", jbody(map[string]string{"email": email, "password": pass}), 200)
-	// reauth for sensitive actions.
 	must(cl, "POST", base+"/v1/auth/reauth", jbody(map[string]string{"password": pass}), 200)
 
-	// 2. Mint a Site-A token + enroll a synthetic appliance.
+	// 1. Token-less, self-signed registration → WAITING.
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
-	pubB64 := base64.RawStdEncoding.EncodeToString(pub)
-	tokResp := must(cl, "POST", base+"/cloud/v1/appliance-bootstrap-tokens?tenant_id="+tenA,
-		jbody(map[string]any{"site_id": siteA, "expected_serial": "ACPT-PKI", "ttl_hours": 1}), 201)
-	token := gjson(tokResp, "token")
-	enr := must(nil, "POST", base+"/v1/appliances/enroll",
-		jbody(map[string]any{"bootstrap_token": token, "serial": "ACPT-PKI", "public_key": pubB64}), 200)
-	appID := gjson(enr, "appliance_id")
+	serial := fmt.Sprintf("ACPT-PKI-%d", time.Now().Unix()%100000)
+	regBody := jbody(map[string]any{"serial": serial, "public_key": base64.RawStdEncoding.EncodeToString(pub),
+		"hardware_fingerprint": "HWF-" + serial, "wan_mac": "02:00:00:00:00:01"})
+	reg := signedCall(priv, applianceauth.KeyID(pub), "POST", "/v1/appliances/register", regBody, 200)
+	appID := gjson(reg, "appliance_id")
 	if appID == "" {
-		fail("enroll returned no appliance_id: %s", enr)
+		fail("register returned no appliance_id: %s", reg)
 	}
-	ok("synthetic appliance enrolled id=%s", appID)
+	ok("appliance registered id=%s", appID)
 
-	// 3. Platform claim + assign.
-	must(cl, "POST", base+"/cloud/v1/appliances-admin/"+appID+"/claim", jbody(map[string]any{}), 200)
-	must(cl, "POST", base+"/cloud/v1/appliances-admin/"+appID+"/assign",
-		jbody(map[string]any{"tenant_id": tenA, "site_id": siteA, "reason": "pki test"}), 200)
-	ok("assigned to Site A")
+	// 2. Operator activates it (new customer + site, licence terms).
+	must(cl, "POST", base+"/cloud/v1/appliances/"+appID+"/activate", jbody(map[string]any{
+		"new_customer": map[string]any{"name": "PKI test " + serial},
+		"new_site":     map[string]any{"name": "PKI site", "timezone": "UTC"},
+		"license":      map[string]any{"max_concurrent_online_guests": 10, "valid_days": 30},
+	}), 200)
+	ok("activated")
 
-	// 4. Appliance generates CSR (same ed25519 identity key) and submits it,
-	//    authenticated with a bound signed request.
-	csrPEM := makeCSR(priv, appID)
-	csrBody := jbody(map[string]any{"csr_pem": string(csrPEM)})
-	signedPost(priv, appID, "POST", "/v1/appliance/csr", csrBody, 202)
-	ok("CSR submitted (signed-auth)")
+	// 3. The appliance submits a CSR with a SEPARATE transport key; it is signed on arrival.
+	_, tlsPriv, _ := ed25519.GenerateKey(rand.Reader)
+	signedCall(priv, appID, "POST", "/v1/appliance/csr", jbody(map[string]any{"csr_pem": string(makeCSR(tlsPriv, appID))}), 201)
+	ok("CSR auto-signed for an activated appliance")
 
-	// 5. Platform issues the certificate.
-	iss := must(cl, "POST", base+"/cloud/v1/certificates/"+appID+"/issue", jbody(map[string]any{}), 201)
-	fpr := gjson(iss, "fingerprint_sha256")
-	if fpr == "" {
-		fail("issue returned no fingerprint: %s", iss)
-	}
-	ok("certificate issued fpr=%s…", fpr[:16])
-
-	// 6. Appliance fetches the certificate + CA chain.
+	// 4. Fetch the certificate + CA chain.
 	fetch := signedGet(priv, appID, "/v1/appliance/certificate")
-	certPEM := gjson(fetch, "certificate_pem")
-	caPEM := gjson(fetch, "ca_chain")
+	certPEM, caPEM := gjson(fetch, "certificate_pem"), gjson(fetch, "ca_chain")
 	if certPEM == "" || caPEM == "" {
 		fail("fetch missing cert/ca: %s", fetch)
 	}
 	ok("certificate + CA chain fetched")
 
-	// 7. mTLS hello with the issued client cert — must be ACCEPTED.
-	mc := mtlsClient(certPEM, priv, caPEM)
-	code, body := rawGet(mc, mtls+"/mtls/hello")
-	if code != 200 {
-		fail("mTLS hello expected 200, got %d %s", code, body)
+	// 5. hello over mTLS — ACCEPTED.
+	mc := mtlsClient(certPEM, tlsPriv, caPEM)
+	code, body := mtlsHello(mc, priv, appID)
+	if code != 200 || gjson(body, "appliance_id") != appID {
+		fail("mTLS hello expected 200 for %s, got %d %s", appID, code, body)
 	}
-	if gjson(body, "appliance_id") != appID {
-		fail("mTLS identity mismatch: %s", body)
-	}
-	ok("mTLS hello accepted, server bound appliance_id=%s", appID)
+	ok("mTLS hello accepted, appliance_id=%s", appID)
 
-	// 8. Find the cert id, platform revokes it.
-	certList := must(cl, "GET", base+"/cloud/v1/certificates", nil, 200)
-	certID := firstCertIDForFpr(certList, fpr)
-	if certID == "" {
-		fail("could not find issued cert id in list")
-	}
-	must(cl, "POST", base+"/cloud/v1/certificates/"+certID+"/revoke", jbody(map[string]any{"reason": "pki test revoke"}), 200)
-	ok("certificate revoked")
+	// 6. Operator reissues the certificate with no CSR waiting → the current one is revoked.
+	must(cl, "POST", base+"/v1/auth/reauth", jbody(map[string]string{"password": pass}), 200)
+	must(cl, "POST", base+"/cloud/v1/appliances/"+appID+"/reissue-certificate", jbody(map[string]any{"reason": "pki test"}), 200)
+	ok("certificate revoked by reissue")
 
-	// 9. mTLS hello again — must be REJECTED (revoked cert).
-	code, body = rawGet(mc, mtls+"/mtls/hello")
-	if code == 200 {
-		fail("revoked cert still accepted by mTLS! %s", body)
+	// 7. hello over mTLS — REJECTED.
+	if code, body = mtlsHello(mc, priv, appID); code == 200 {
+		fail("revoked certificate still accepted by mTLS! %s", body)
 	}
 	ok("revoked certificate rejected by mTLS (code=%d)", code)
 
-	fmt.Printf("\nPKI/mTLS: %d checks passed. appliance_id=%s\n", pass2, appID)
+	fmt.Printf("\nPKI/mTLS: %d checks passed. appliance_id=%s serial=%s\n", pass2, appID, serial)
 }
 
 // ---- helpers ----
+
+func mtlsHello(cl *http.Client, idPriv ed25519.PrivateKey, appID string) (int, string) {
+	req, _ := http.NewRequest("GET", mtls+"/v1/appliance/hello", nil)
+	req.Header.Set("Authorization", "Bearer "+signedTok(idPriv, appID, "GET", "/v1/appliance/hello", nil))
+	resp, err := cl.Do(req)
+	if err != nil {
+		return 0, err.Error()
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
+func signedCall(priv ed25519.PrivateKey, iss, method, path string, body []byte, want int) string {
+	req, _ := http.NewRequest(method, base+path, bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+signedTok(priv, iss, method, path, body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fail("%s %s: %v", method, path, err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != want {
+		fail("%s %s expected %d got %d: %s", method, path, want, resp.StatusCode, b)
+	}
+	return string(b)
+}
 
 func makeCSR(priv ed25519.PrivateKey, cn string) []byte {
 	der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
@@ -159,22 +160,6 @@ func signedTok(priv ed25519.PrivateKey, appID, method, path string, body []byte)
 		fail("sign: %v", err)
 	}
 	return tok
-}
-
-func signedPost(priv ed25519.PrivateKey, appID, method, path string, body []byte, want int) string {
-	req, _ := http.NewRequest(method, base+path, bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+signedTok(priv, appID, method, path, body))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		fail("%s %s: %v", method, path, err)
-	}
-	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != want {
-		fail("%s %s expected %d got %d: %s", method, path, want, resp.StatusCode, b)
-	}
-	return string(b)
 }
 
 func signedGet(priv ed25519.PrivateKey, appID, path string) string {
@@ -251,21 +236,6 @@ func gjson(s, key string) string {
 	if v, ok := m[key]; ok {
 		if str, ok := v.(string); ok {
 			return str
-		}
-	}
-	return ""
-}
-
-func firstCertIDForFpr(list, fpr string) string {
-	var m struct {
-		Data []map[string]any `json:"data"`
-	}
-	json.Unmarshal([]byte(list), &m)
-	for _, c := range m.Data {
-		if c["fingerprint_sha256"] == fpr {
-			if id, ok := c["id"].(string); ok {
-				return id
-			}
 		}
 	}
 	return ""

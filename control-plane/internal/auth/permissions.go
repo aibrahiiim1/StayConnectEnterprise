@@ -2,71 +2,81 @@ package auth
 
 import (
 	"net/http"
-	"slices"
+	"sort"
 )
 
-// Executable permission catalog. Roles are mapped to explicit permission
-// strings and enforced in the API (RequirePermission), not merely documented.
-// A platform_owner is a super-set. This is authorization, not navigation.
+// The Central permission catalog (docs/CENTRAL_CONTROL_PLANE.md §7). Roles map to explicit permissions and
+// the API enforces permissions, never role names.
+//
+// Platform permissions act on every customer. The customer.* permissions act ONLY on the customer the
+// session belongs to (Session.DefaultTenantID); handlers resolve that scope, never the caller.
+const (
+	PermFleetView        = "fleet.view"        // read everything, every customer
+	PermCustomersManage  = "customers.manage"  // create, rename, archive, restore, delete customers
+	PermSitesManage      = "sites.manage"      // any customer's sites
+	PermUsersManage      = "users.manage"      // any customer's users
+	PermAppliancesManage = "appliances.manage" // activate, move, retire, replace, rebind, reissue, delete
+	PermLicensesManage   = "licenses.manage"   // set, suspend, resume, revoke, offline licence
+	PermSecurityManage   = "security.manage"   // security-alert triage
+	PermTeamManage       = "team.manage"       // Central operators
+
+	PermCustomerView        = "customer.view"         // read own customer
+	PermCustomerSitesManage = "customer.sites.manage" // own customer's sites
+	PermCustomerUsersManage = "customer.users.manage" // own customer's users
+)
+
+var platformAll = []string{
+	PermFleetView, PermCustomersManage, PermSitesManage, PermUsersManage,
+	PermAppliancesManage, PermLicensesManage, PermSecurityManage, PermTeamManage,
+}
+
+// rolePermissions is the executable catalog. A role that is absent grants nothing — which is exactly what the
+// legacy roles (platform_billing, billing, tenant_operator, site_admin, hotel_it, hotel_operator) get.
 var rolePermissions = map[string][]string{
-	"platform_owner": {"*"}, // everything
-	"platform_admin": {
-		"platform.tenants.view", "platform.tenants.manage",
-		"platform.plans.view", "platform.plans.manage",
-		"platform.subscriptions.view", "platform.subscriptions.manage",
-		"platform.licenses.view", "platform.licenses.issue", "platform.licenses.revoke",
-		"platform.appliances.view", "platform.appliances.manage",
-		"platform.appliances.claim", "platform.appliances.assign",
-		"platform.appliances.reassign", "platform.appliances.revoke",
-		"platform.enrollment_tokens.create", "platform.enrollment_tokens.revoke",
-		"platform.certificates.issue", "platform.certificates.revoke",
-		"platform.commands.issue",
-		"platform.fleet.view", "platform.updates.manage",
-		"platform.operators.manage", "platform.audit.view",
-	},
-	"platform_support": {
-		"platform.tenants.view", "platform.plans.view", "platform.subscriptions.view",
-		"platform.licenses.view", "platform.appliances.view", "platform.fleet.view",
-		"platform.audit.view",
-	},
-	"platform_billing": {
-		"platform.tenants.view", "platform.plans.view", "platform.plans.manage",
-		"platform.subscriptions.view", "platform.subscriptions.manage",
-		"platform.licenses.view", "platform.audit.view",
-	},
-	"tenant_owner": {
-		"tenant.sites.view", "tenant.appliances.view", "tenant.reports.view",
-		"tenant.subscription.view", "tenant.operators.manage", "tenant.audit.view",
-	},
-	"tenant_admin": {
-		"tenant.sites.view", "tenant.appliances.view", "tenant.appliances.support_request",
-		"tenant.reports.view", "tenant.subscription.view", "tenant.operators.manage", "tenant.audit.view",
-	},
-	"tenant_auditor": {
-		"tenant.sites.view", "tenant.appliances.view", "tenant.reports.view",
-		"tenant.subscription.view", "tenant.audit.view",
-	},
-	"site_admin": {
-		"tenant.sites.view", "tenant.appliances.view",
-		"site.reports.view", "site.vouchers.manage", "site.pms.manage",
-		"site.portal.manage", "site.payments.manage", "site.network.manage", "site.audit.view",
-	},
-	"hotel_it": {
-		"site.reports.view", "site.network.manage", "site.pms.manage", "site.portal.manage", "site.audit.view",
-	},
-	"hotel_operator": {
-		"site.reports.view", "site.vouchers.manage", "site.audit.view",
-	},
-	// Legacy role names carried over from the pre-separation schema, mapped to
-	// read-only equivalents so existing operators keep least-privilege access.
-	"viewer": {
-		"tenant.sites.view", "tenant.appliances.view", "tenant.reports.view",
-		"tenant.subscription.view", "tenant.audit.view",
-	},
-	"tenant_operator": {
-		"tenant.sites.view", "tenant.appliances.view", "tenant.reports.view",
-		"tenant.subscription.view", "site.reports.view",
-	},
+	"platform_owner":   platformAll,
+	"platform_admin":   platformAll,
+	"platform_support": {PermFleetView},
+	"tenant_owner":     {PermCustomerView, PermCustomerSitesManage, PermCustomerUsersManage},
+	"tenant_admin":     {PermCustomerView, PermCustomerSitesManage, PermCustomerUsersManage},
+	"tenant_auditor":   {PermCustomerView},
+	"viewer":           {PermCustomerView},
+}
+
+// PlatformRoles are the roles a Central operator (Team) may hold. They carry no customer.
+var PlatformRoles = []string{"platform_owner", "platform_admin", "platform_support"}
+
+// CustomerRoles are the roles a customer's own user may hold. They are always bound to one customer.
+var CustomerRoles = []string{"tenant_owner", "tenant_admin", "tenant_auditor", "viewer"}
+
+// IsPlatformRole reports whether role is one of PlatformRoles.
+func IsPlatformRole(role string) bool { return contains(PlatformRoles, role) }
+
+// IsCustomerRole reports whether role is one of CustomerRoles.
+func IsCustomerRole(role string) bool { return contains(CustomerRoles, role) }
+
+func contains(list []string, v string) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+// PermissionsForRoles returns the sorted union of permissions the roles grant.
+func PermissionsForRoles(roles []string) []string {
+	set := map[string]bool{}
+	for _, role := range roles {
+		for _, p := range rolePermissions[role] {
+			set[p] = true
+		}
+	}
+	out := make([]string, 0, len(set))
+	for p := range set {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // HasPermission reports whether any of the session's roles grants perm.
@@ -75,12 +85,8 @@ func (s *Session) HasPermission(perm string) bool {
 		return false
 	}
 	for _, role := range s.Roles {
-		perms, ok := rolePermissions[role]
-		if !ok {
-			continue
-		}
-		for _, p := range perms {
-			if p == "*" || p == perm {
+		for _, p := range rolePermissions[role] {
+			if p == perm {
 				return true
 			}
 		}
@@ -88,8 +94,15 @@ func (s *Session) HasPermission(perm string) bool {
 	return false
 }
 
-// RequirePermission is middleware that enforces a catalog permission. Role
-// membership alone is not sufficient — the permission must be granted.
+// Permissions lists what the session may do (whoami).
+func (s *Session) Permissions() []string {
+	if s == nil {
+		return []string{}
+	}
+	return PermissionsForRoles(s.Roles)
+}
+
+// RequirePermission is middleware that enforces a catalog permission.
 func RequirePermission(perm string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -105,17 +118,4 @@ func RequirePermission(perm string) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
-}
-
-// EnsureSiteAccess enforces site-level isolation: a site-bound operator may only
-// reach their own site(s); a tenant-wide operator may reach any site in the
-// tenant; a super admin may reach any site. Cross-tenant is handled upstream.
-func (s *Session) EnsureSiteAccess(siteID string) bool {
-	if s == nil {
-		return false
-	}
-	if s.IsSuperAdmin || s.TenantWide {
-		return true
-	}
-	return slices.Contains(s.SiteIDs, siteID)
 }

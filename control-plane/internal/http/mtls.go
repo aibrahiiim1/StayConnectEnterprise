@@ -23,10 +23,10 @@ import (
 // StartMTLS runs a dedicated mutual-TLS listener for appliance transport. It
 // REQUIRES a client certificate signed by our appliance CA (normal TLS
 // verification is fully enabled — no InsecureSkipVerify), extracts the bound
-// appliance_id from the cert's URI SAN, and rejects revoked certificates and
-// suspended/revoked appliances. This is the transport that carries appliance
-// API/RPC once cut over; it runs alongside the signed-JWT layer (defence in
-// depth), never replacing certificate verification with an exception.
+// appliance_id from the cert's URI SAN; applianceAPI rejects revoked certificates
+// and retired identities. It serves the appliance API alongside the signed-JWT
+// layer (defence in depth), never replacing certificate verification with an
+// exception. The assignment channel on it is certificate-only.
 func StartMTLS(ctx context.Context, db *pgxpool.Pool, ca *pki.CA, addr string, applianceAPI http.Handler) error {
 	// The server TLS identity is PERSISTENT and MANAGED: a stable cert signed by
 	// the intermediate CA, hot-rotated before expiry via verify-before-switch
@@ -41,9 +41,6 @@ func StartMTLS(ctx context.Context, db *pgxpool.Pool, ca *pki.CA, addr string, a
 	caPool.AppendCertsFromPEM(ca.CertPEM())
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/mtls/hello", func(w http.ResponseWriter, r *http.Request) {
-		mtlsHandler(w, r, db)
-	})
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
 	// The real appliance API served over mTLS (hello, license, csr, certificate).
 	// Guarded by RequireAppliance + client-cert binding inside applianceAPI.
@@ -342,48 +339,4 @@ func parseCertPEM(p []byte) (*x509.Certificate, error) {
 		return nil, errors.New("cert PEM decode failed")
 	}
 	return x509.ParseCertificate(block.Bytes)
-}
-
-func mtlsHandler(w http.ResponseWriter, r *http.Request, db *pgxpool.Pool) {
-	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "no client certificate"})
-		return
-	}
-	cert := r.TLS.PeerCertificates[0]
-	appID := pki.ApplianceIDFromCert(cert)
-	fpr := pki.FingerprintHex(cert)
-	if appID == "" {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "certificate missing appliance binding"})
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
-	defer cancel()
-	// Revocation check (DB-driven; the fingerprint is the revocation key).
-	var revoked int
-	db.QueryRow(ctx, `SELECT count(*) FROM appliance_certificate_revocations WHERE fingerprint_sha256=$1`, fpr).Scan(&revoked)
-	if revoked > 0 {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "certificate revoked", "appliance_id": appID})
-		return
-	}
-	// Bind check: the cert fingerprint must match the appliance's current cert,
-	// and the appliance must not be suspended/revoked/decommissioned.
-	var lifecycle, curFpr string
-	err := db.QueryRow(ctx, `SELECT COALESCE(lifecycle_state,''), COALESCE(current_cert_fingerprint,'') FROM appliances WHERE id=$1`, appID).Scan(&lifecycle, &curFpr)
-	if err != nil {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "unknown appliance", "appliance_id": appID})
-		return
-	}
-	switch lifecycle {
-	case "suspended", "revoked", "decommissioned":
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "appliance " + lifecycle, "appliance_id": appID})
-		return
-	}
-	if curFpr != "" && curFpr != fpr {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "certificate superseded", "appliance_id": appID})
-		return
-	}
-	_, _ = db.Exec(ctx, `UPDATE appliances SET identity_verified_at=now(), last_seen_at=now() WHERE id=$1`, appID)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok": true, "appliance_id": appID, "cert_fingerprint": fpr, "transport": "mtls",
-	})
 }

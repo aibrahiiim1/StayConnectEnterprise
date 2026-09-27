@@ -52,12 +52,12 @@ func ApplianceMTLSRouter(db *pgxpool.Pool, rdb *redis.Client, replay *appliancea
 			r.Get("/v1/appliance/license", licBase.ApplianceLicenseHandler)
 		}
 		if assignKey != nil {
-			assignBase := &AssignmentBase{Base: &Base{DB: db, Redis: rdb}, SignKey: assignKey}
 			// Signed terminal-adoption acknowledgment (Phase-1 completion). The ack
 			// payload is itself signed by the appliance identity key; the JWT here is
 			// belt-and-braces on the POST.
+			ackBase := &Base{DB: db, Redis: rdb, AssignKey: assignKey}
 			r.With(RateLimit(rdb, "assignment-ack", 10, time.Minute)).
-				Post("/v1/appliance/assignment/ack", assignBase.AckHandler)
+				Post("/v1/appliance/assignment/ack", ackBase.AckHandler)
 		}
 		if regRoot != nil {
 			regBase := &RegistryBase{Base: &Base{DB: db}, RootKey: regRoot}
@@ -68,7 +68,6 @@ func ApplianceMTLSRouter(db *pgxpool.Pool, rdb *redis.Client, replay *appliancea
 			certBase := &CertBase{Base: &Base{DB: db}, CA: ca, ClientValid: 90 * 24 * time.Hour}
 			r.Post("/v1/appliance/csr", certBase.SubmitCSR)
 			r.Get("/v1/appliance/certificate", certBase.FetchCertificate)
-			r.Get("/v1/appliance/ca", certBase.CAHandler)
 		}
 	})
 	return r

@@ -21,11 +21,10 @@ type Session struct {
 	Token           string    `json:"-"`
 	OperatorID      string    `json:"operator_id"`
 	Email           string    `json:"email"`
-	IsSuperAdmin    bool      `json:"is_super_admin"`
-	DefaultTenantID string    `json:"default_tenant_id,omitempty"` // "" if super admin
+	DisplayName     string    `json:"display_name,omitempty"`
+	IsSuperAdmin    bool      `json:"is_super_admin"`              // platform_owner / platform_admin
+	DefaultTenantID string    `json:"default_tenant_id,omitempty"` // the customer a customer-scoped user belongs to
 	Roles           []string  `json:"roles"`
-	SiteIDs         []string  `json:"site_ids,omitempty"`    // explicit site bindings
-	TenantWide      bool      `json:"tenant_wide,omitempty"` // may act across tenant sites
 	CreatedAt       time.Time `json:"created_at"`
 	LastSeenAt      time.Time `json:"last_seen_at"`
 	ExpiresAt       time.Time `json:"expires_at"`

@@ -3,45 +3,24 @@ package api
 import (
 	"context"
 	"crypto/ed25519"
-	"crypto/sha256"
-	"encoding/hex"
-	"net/http"
-	"time"
-
-	"github.com/go-chi/chi/v5"
+	"errors"
+	"fmt"
 
 	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/control-plane/internal/audit"
-	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 )
 
-// AssignmentKeysBase manages the lifecycle of the DEDICATED assignment-signing key.
+// The lifecycle of the DEDICATED assignment-signing key.
 //
-// Three states, because "stop signing with it" and "stop trusting it" are not the
-// same decision:
+// Three states, because "stop signing with it" and "stop trusting it" are not the same decision:
 //
 //	active      — may sign new assignments, and verifies existing ones
 //	verify_only — must NOT sign; still verifies documents already issued under it
 //	revoked     — rejected for ALL verification (compromise, or post-migration)
 //
-// Revoking a key that still signs CURRENT assignments would strand exactly those
-// appliances (they could no longer verify the document they hold, and would fall
-// back to awaiting-assignment on next boot). The API therefore refuses it unless an
-// explicit emergency compromise override is given.
-type AssignmentKeysBase struct {
-	*Base
-	RegRoot ed25519.PrivateKey // registry root key, to re-sign the registry on state change
-}
-
-// resignRegistry rebuilds + re-signs the trust registry after a key-state change,
-// so appliances fetch a new signed registry reflecting the change.
-func (b *AssignmentKeysBase) resignRegistry(ctx context.Context, reason string) {
-	if b.RegRoot == nil {
-		return
-	}
-	rb := &RegistryBase{Base: b.Base, RootKey: b.RegRoot}
-	_, _ = rb.Rebuild(ctx, reason)
-}
+// Key rotation is a rare, deliberate host operation, so it is a ctrlapi subcommand
+// (`ctrlapi assignment-key verify-only|revoke`), not a console button. The keys are shown read-only under
+// GET /cloud/v1/trust.
 
 // RegisterActiveKey records the key ctrlapi is signing with and audits first use.
 func RegisterActiveKey(ctx context.Context, b *Base, pub ed25519.PublicKey, note string) error {
@@ -67,124 +46,42 @@ func SigningKeyState(ctx context.Context, b *Base, keyID string) (string, error)
 	return state, err
 }
 
-func (b *AssignmentKeysBase) Routes() http.Handler {
-	r := chi.NewRouter()
-	r.Use(auth.RequirePermission("platform.appliances.manage"))
-	r.Get("/", b.list)
-	reauth := RequireReauth(b.Redis)
-	r.With(reauth).Post("/{keyID}/verify-only", b.toVerifyOnly)
-	r.With(reauth).Post("/{keyID}/revoke", b.toRevoked)
-	return r
-}
-
-func (b *AssignmentKeysBase) list(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := DBCtx(r)
-	defer cancel()
-	rows, err := b.DB.Query(ctx, `
-        SELECT k.key_id, k.public_key, k.state, k.activated_at, k.verify_only_at, k.revoked_at,
-               k.retired_at, COALESCE(k.reason,''), COALESCE(k.note,''), k.emergency,
-               COALESCE(u.current_assignments, 0)
-          FROM assignment_signing_keys k
-          LEFT JOIN assignment_signer_usage u ON u.key_id = k.key_id
-         ORDER BY k.activated_at DESC`)
-	if err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "query failed")
+func resignRegistry(ctx context.Context, b *Base, regRoot ed25519.PrivateKey, reason string) {
+	if regRoot == nil {
 		return
 	}
-	defer rows.Close()
-	out := []map[string]any{}
-	for rows.Next() {
-		var keyID, state, reason, note string
-		var pub []byte
-		var emergency bool
-		var deps int64
-		var activated time.Time
-		var verifyOnlyAt, revokedAt, retiredAt *time.Time
-		if rows.Scan(&keyID, &pub, &state, &activated, &verifyOnlyAt, &revokedAt,
-			&retiredAt, &reason, &note, &emergency, &deps) != nil {
-			continue
-		}
-		// A public-key fingerprint for display. NEVER the private key — that lives
-		// only in ctrlapi's signer and is never persisted or returned here.
-		sum := sha256.Sum256(pub)
-		fingerprint := hex.EncodeToString(sum[:16])
-		rotation := "current signer"
-		switch state {
-		case "verify_only":
-			rotation = "rotated out — verify only"
-		case "revoked":
-			rotation = "revoked — not trusted"
-		}
-		out = append(out, map[string]any{
-			"key_id": keyID, "fingerprint": fingerprint,
-			"state": state, "purpose": "assignment", "rotation_status": rotation,
-			"can_sign": assignment.CanSign(state), "can_verify": assignment.CanVerify(state),
-			"current_assignments": deps, // appliances that would be stranded by revocation
-			"activated_at":        activated, "verify_only_at": verifyOnlyAt,
-			"revoked_at": revokedAt, "retired_at": retiredAt,
-			"reason": reason, "note": note, "emergency": emergency,
-		})
-	}
-	WriteJSON(w, http.StatusOK, map[string]any{"data": out})
+	rb := &RegistryBase{Base: b, RootKey: regRoot}
+	_, _ = rb.Rebuild(ctx, reason)
 }
 
-// toVerifyOnly stops a key signing while KEEPING it trusted for documents already
-// issued under it. This is always safe — it cannot strand anyone — so it needs no
-// override. It is step 8 of the rotation sequence.
-func (b *AssignmentKeysBase) toVerifyOnly(w http.ResponseWriter, r *http.Request) {
-	keyID := chi.URLParam(r, "keyID")
-	var in struct {
-		Reason string `json:"reason"`
+// KeyToVerifyOnly stops a key signing while KEEPING it trusted for documents already issued under it. Always
+// safe — it cannot strand anyone.
+func KeyToVerifyOnly(ctx context.Context, b *Base, regRoot ed25519.PrivateKey, keyID, reason string) error {
+	if reason == "" {
+		return errors.New("a reason is required")
 	}
-	_ = DecodeJSON(r, &in)
-	if in.Reason == "" {
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "reason is required")
-		return
-	}
-	ctx, cancel := DBCtx(r)
-	defer cancel()
 	tag, err := b.DB.Exec(ctx, `
-        UPDATE assignment_signing_keys
-           SET state='verify_only', verify_only_at=now(), reason=$2
-         WHERE key_id=$1 AND state='active'`, keyID, in.Reason)
+        UPDATE assignment_signing_keys SET state='verify_only', verify_only_at=now(), reason=$2
+         WHERE key_id=$1 AND state='active'`, keyID, reason)
 	if err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
-		return
+		return err
 	}
 	if tag.RowsAffected() == 0 {
-		Fail(w, r, http.StatusNotFound, CodeNotFound, "no active signing key with that id")
-		return
+		return errors.New("no active signing key with that id")
 	}
-	b.resignRegistry(ctx, "key "+keyID+" -> verify_only")
-	audit.Op(ctx, b.DB, r, "assignment.signing_key_verify_only", "assignment_key", keyID,
-		map[string]any{"key_id": keyID, "reason": in.Reason})
-	WriteJSON(w, http.StatusOK, map[string]any{
-		"status": "verify_only", "key_id": keyID,
-		"note": "key can no longer sign; appliances still holding documents signed by it can still verify and boot",
-	})
+	resignRegistry(ctx, b, regRoot, "key "+keyID+" -> verify_only")
+	audit.System(ctx, b.DB, "assignment.signing_key_verify_only", "assignment_key", keyID,
+		map[string]any{"key_id": keyID, "reason": reason})
+	return nil
 }
 
-// toRevoked removes ALL trust in a key. GUARDED: refused while any CURRENT
-// assignment is still signed by it, because those appliances would be unable to
-// verify the document they hold and would strand in awaiting-assignment on reboot.
-//
-// The guard is bypassable ONLY for a confirmed key compromise, which requires an
-// explicit emergency flag + typed confirmation + reason, and is audited as such.
-func (b *AssignmentKeysBase) toRevoked(w http.ResponseWriter, r *http.Request) {
-	keyID := chi.URLParam(r, "keyID")
-	var in struct {
-		Reason       string `json:"reason"`
-		Emergency    bool   `json:"emergency_compromise"`
-		Confirmation string `json:"confirmation"` // must equal the key id
+// KeyRevoke removes ALL trust in a key. GUARDED: refused while any CURRENT assignment is still signed by it
+// (those appliances could no longer verify the document they hold), unless emergency is set for a
+// confirmed key compromise.
+func KeyRevoke(ctx context.Context, b *Base, regRoot ed25519.PrivateKey, keyID, reason string, emergency bool) (int64, error) {
+	if reason == "" {
+		return 0, errors.New("a reason is required")
 	}
-	_ = DecodeJSON(r, &in)
-	if in.Reason == "" {
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "reason is required")
-		return
-	}
-	ctx, cancel := DBCtx(r)
-	defer cancel()
-
 	var state string
 	var deps int64
 	if err := b.DB.QueryRow(ctx,
@@ -192,70 +89,27 @@ func (b *AssignmentKeysBase) toRevoked(w http.ResponseWriter, r *http.Request) {
            FROM assignment_signing_keys k
            LEFT JOIN assignment_signer_usage u ON u.key_id=k.key_id
           WHERE k.key_id=$1`, keyID).Scan(&state, &deps); err != nil {
-		Fail(w, r, http.StatusNotFound, CodeNotFound, "unknown signing key")
-		return
+		return 0, errors.New("unknown signing key")
 	}
 	if state == "revoked" {
-		Fail(w, r, http.StatusConflict, "already_revoked", "key is already revoked")
-		return
+		return deps, errors.New("key is already revoked")
 	}
-
-	// THE GUARD. Revoking a signer that still backs live assignments strands them.
-	if deps > 0 && !in.Emergency {
-		Fail(w, r, http.StatusConflict, "signer_in_use",
-			"refusing to revoke: this key still signs the CURRENT assignment of "+
-				itoa(deps)+" appliance(s), which would strand them in awaiting-assignment. "+
-				"Re-sign them onto the new active key first (rotation step 5), or — only for a "+
-				"confirmed key compromise — retry with emergency_compromise=true and "+
-				"confirmation=<key_id>.")
-		return
+	if deps > 0 && !emergency {
+		return deps, fmt.Errorf("refusing to revoke: this key still signs the CURRENT assignment of %d appliance(s), "+
+			"which would strand them. Re-sign them onto the new active key first, or — only for a confirmed key "+
+			"compromise — pass --emergency", deps)
 	}
-	if in.Emergency && in.Confirmation != keyID {
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest,
-			"emergency revocation requires confirmation=<key_id>")
-		return
-	}
-
 	if _, err := b.DB.Exec(ctx, `
-        UPDATE assignment_signing_keys
-           SET state='revoked', revoked_at=now(), reason=$2, emergency=$3
-         WHERE key_id=$1`, keyID, in.Reason, in.Emergency); err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
-		return
+        UPDATE assignment_signing_keys SET state='revoked', revoked_at=now(), reason=$2, emergency=$3
+         WHERE key_id=$1`, keyID, reason, emergency); err != nil {
+		return deps, err
 	}
 	action := "assignment.signing_key_revoked"
-	if in.Emergency {
+	if emergency {
 		action = "assignment.signing_key_revoked_emergency"
 	}
-	b.resignRegistry(ctx, "key "+keyID+" -> revoked")
-	audit.Op(ctx, b.DB, r, action, "assignment_key", keyID, map[string]any{
-		"key_id": keyID, "reason": in.Reason, "emergency_compromise": in.Emergency,
-		"stranded_assignments": deps,
-	})
-	WriteJSON(w, http.StatusOK, map[string]any{
-		"status": "revoked", "key_id": keyID, "emergency_compromise": in.Emergency,
-		"stranded_assignments": deps,
-	})
-}
-
-func itoa(n int64) string {
-	if n == 0 {
-		return "0"
-	}
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	var b [20]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	if neg {
-		i--
-		b[i] = '-'
-	}
-	return string(b[i:])
+	resignRegistry(ctx, b, regRoot, "key "+keyID+" -> revoked")
+	audit.System(ctx, b.DB, action, "assignment_key", keyID, map[string]any{
+		"key_id": keyID, "reason": reason, "emergency_compromise": emergency, "stranded_assignments": deps})
+	return deps, nil
 }

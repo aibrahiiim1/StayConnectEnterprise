@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -18,48 +17,36 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/api"
 	"github.com/stayconnect/enterprise/control-plane/internal/applianceauth"
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
+	"github.com/stayconnect/enterprise/control-plane/internal/clientip"
 	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
 	"github.com/stayconnect/enterprise/control-plane/internal/metrics"
-	"github.com/stayconnect/enterprise/control-plane/internal/oidc"
 	"github.com/stayconnect/enterprise/control-plane/internal/pki"
 )
 
 type Deps struct {
-	DB    *pgxpool.Pool
-	Redis *redis.Client
-	// GuestDB backs the DEPRECATED legacy /v1 guest-domain routes (vouchers,
-	// sessions, PMS config, walled garden, payments...). After a site's
-	// cutover those tables live in the site-local database, so the
-	// compatibility adapters must read/write THERE, not the cloud schema.
-	// nil = single-DB mode (pre-cutover): falls back to DB.
-	// See docs/API_DEPRECATIONS.md; these mounts disappear after the pilot.
-	GuestDB            *pgxpool.Pool
-	Metrics            *metrics.Registry
-	OIDC               *oidc.Registry
-	Licensing          *licensing.Service         // nil when no vendor key is configured
-	CA                 *pki.CA                    // appliance certificate authority; nil disables PKI routes
-	ReplayCache        *applianceauth.ReplayCache // shared jti replay cache (both transports)
-	AssignKey          ed25519.PrivateKey         // dedicated key for signing appliance assignments; nil disables signed assignments
-	AssignRegistryRoot ed25519.PrivateKey         // registry root key (re-signs the trust registry on key-state change)
-	Version            string
-	AllowOrigins       []string // CORS allowlist for dev UI on :3000
-	CookieSecure       bool     // set true behind HTTPS
+	DB            *pgxpool.Pool
+	Redis         *redis.Client
+	Metrics       *metrics.Registry
+	Licensing     *licensing.Service         // nil when no vendor key is configured
+	CA            *pki.CA                    // appliance certificate authority; nil disables PKI routes
+	ReplayCache   *applianceauth.ReplayCache // shared jti replay cache (both transports)
+	AssignKey     ed25519.PrivateKey         // dedicated key for signing appliance assignments
+	VendorKeyPath string                     // vendor signing key file (offline packages)
+	CABundlePath  string                     // CA bundle handed to appliances in offline packages
+	ApplianceBase string                     // CTRLAPI_APPLIANCE_BASE, written into activation packages
+	Version       string
+	AllowOrigins  []string // CORS allowlist for the console in development
+	CookieSecure  bool     // set true behind HTTPS
 }
 
+// NewRouter serves exactly the §6 contract: /v1/auth/*, the appliance endpoints under /v1/appliance* and
+// /v1/appliances/register, and the operator API under /cloud/v1. Plus /healthz, /readyz and a
+// loopback-only /metrics.
 func NewRouter(d Deps) http.Handler {
 	store := &auth.SessionStore{R: d.Redis}
 	repo := &auth.Repo{DB: d.DB}
-	adeps := authDeps{Repo: repo, Store: store, Secure: d.CookieSecure}
+	adeps := authDeps{Repo: repo, Store: store, Secure: d.CookieSecure, DB: d.DB}
 
-	// Guest-domain compatibility pool (see Deps.GuestDB).
-	guestDB := d.GuestDB
-	if guestDB == nil {
-		guestDB = d.DB
-	}
-
-	// Replay cache for appliance-signed JWTs. 2-minute window + 8k entry cap
-	// is plenty for a single control-plane replica in phase 5.1; promote to
-	// Redis when we horizontally scale ctrlapi (phase 5.2+).
 	replayCache := d.ReplayCache
 	if replayCache == nil {
 		replayCache = applianceauth.NewReplayCache(2*time.Minute, 8192)
@@ -68,7 +55,8 @@ func NewRouter(d Deps) http.Handler {
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	// No middleware.RealIP: it believes any client's X-Forwarded-For. clientip.From decides per request and
+	// trusts forwarding headers only from the loopback proxy.
 	r.Use(traceIDHeader)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -81,210 +69,66 @@ func NewRouter(d Deps) http.Handler {
 	r.Get("/healthz", healthz(d))
 	r.Get("/readyz", readyz(d))
 	if d.Metrics != nil {
-		r.Method("GET", "/metrics", d.Metrics.Handler())
-	}
-
-	// Stub OIDC consent page. The browser reaches it as
-	// /api/oauth/stub/authorize-sso through the Next.js proxy, which strips
-	// /api before forwarding here, so the route is mounted without that prefix.
-	{
-		stubBase := &api.SSOBase{Base: &api.Base{DB: d.DB}, Registry: d.OIDC}
-		r.Mount("/oauth/stub/authorize-sso", stubBase.StubAuthorizeRoutes())
+		r.Method("GET", "/metrics", loopbackOnly(d.Metrics.Handler()))
 	}
 
 	r.Route("/v1", func(r chi.Router) {
-		r.Get("/version", version(d))
-
-		// Unauthenticated auth endpoints.
-		r.Post("/auth/login", adeps.login)
+		// Operator authentication.
+		r.With(api.RateLimit(d.Redis, "login", 20, time.Minute)).Post("/auth/login", adeps.login)
 		r.Post("/auth/logout", adeps.logout)
+		r.Group(func(r chi.Router) {
+			r.Use(auth.RequireAuth(store))
+			r.Get("/auth/whoami", adeps.whoami)
+			r.With(api.RateLimit(d.Redis, "reauth", 20, time.Minute)).Post("/auth/reauth", adeps.reauth)
+		})
 
-		// Public appliance enrollment — scd's first-boot POST. Guarded only
-		// by the single-use bootstrap token.
-		r.With(api.RateLimit(d.Redis, "enroll", 20, time.Minute)).
-			Post("/appliances/enroll", enrollBase.EnrollHandler)
-
-		// Public TOKEN-LESS registration — a factory-clean appliance self-signs
-		// with its locally generated identity key (TOFU) and appears as Pending
-		// Activation. No bootstrap token required for the normal online flow.
+		// Appliance: TOKEN-LESS registration. The appliance self-signs with its locally generated identity
+		// key and appears as WAITING. There is no enrollment token.
 		r.With(api.RateLimit(d.Redis, "register", 30, time.Minute)).
 			Post("/appliances/register", enrollBase.RegisterHandler)
 
-		// Public payments flow (phase 12) — guests are anonymous at the
-		// portal; Stripe webhooks are authenticated by HMAC signature.
-		// Uses the guest-domain pool: issued vouchers must land in the SITE
-		// database where scd redeems them.
-		payBase := &api.PaymentsBase{Base: &api.Base{DB: guestDB}, Metrics: d.Metrics}
-		r.Mount("/", payBase.PublicRoutes())
-
-		// Appliance-JWT-authenticated endpoints. Phase 5.1 ships only the
-		// smoke-test "hello"; 5.2 adds the real NATS-backed RPC surface.
+		// Appliance: signed request JWT (and, on the mTLS listener, a client certificate as well). The
+		// assignment channel (/appliance/assignment, /ack, /assignment-registry) is mTLS-only and is served
+		// by api.ApplianceMTLSRouter, never here.
 		r.Group(func(r chi.Router) {
 			r.Use(auth.RequireAppliance(d.DB, replayCache))
 			r.Get("/appliance/hello", enrollBase.HelloHandler)
 			r.Post("/appliance/offline-reconcile", enrollBase.OfflineReconcile)
 			if d.Licensing != nil {
 				licBase := &api.LicensesBase{Base: &api.Base{DB: d.DB}, Svc: d.Licensing}
-				// A successful fetch doubles as the edge's cloud validation.
 				r.Get("/appliance/license", licBase.ApplianceLicenseHandler)
 			}
-			// NOTE: /appliance/assignment and its /ack + /assignment-registry are
-			// deliberately NOT mounted here. The assignment channel is mTLS-ONLY
-			// (ApplianceMTLSRouter) — no bootstrap-token or JWT-over-:443 fallback —
-			// so a document can only ever reach a box holding a valid client cert.
 			if d.CA != nil {
 				certBase := &api.CertBase{Base: &api.Base{DB: d.DB}, CA: d.CA, ClientValid: 90 * 24 * time.Hour}
 				r.Post("/appliance/csr", certBase.SubmitCSR)
 				r.Get("/appliance/certificate", certBase.FetchCertificate)
-				r.Get("/appliance/ca", certBase.CAHandler)
 			}
-		})
-
-		// SSO (operator) — public; the stub authorize page lives outside
-		// /v1 so it's mounted at the router root below.
-		base := &api.Base{DB: d.DB}
-		ssoBase := &api.SSOBase{
-			Base:         base,
-			Registry:     d.OIDC,
-			Sessions:     store,
-			Redis:        d.Redis,
-			CookieSecure: d.CookieSecure,
-		}
-		r.Mount("/auth/sso", ssoBase.Routes())
-
-		// Everything below requires a session.
-		r.Group(func(r chi.Router) {
-			r.Use(auth.RequireAuth(store))
-			r.Get("/auth/whoami", adeps.whoami)
-			r.Post("/auth/reauth", adeps.reauth)
-
-			// Redis is REQUIRED here: RequireReauth fails closed without it, so any
-			// step-up-gated route on /v1 (plan limits, tenant limit overrides,
-			// subscription terms) would 403 forever even after a successful reauth.
-			base := &api.Base{DB: d.DB, Redis: d.Redis}
-			// gbase: DEPRECATED guest-domain compatibility adapters — rows
-			// live in the site database post-cutover (Deps.GuestDB) while
-			// commercial limits stay in the cloud schema (LimitsDB).
-			gbase := &api.Base{DB: guestDB, LimitsDB: d.DB, Redis: d.Redis}
-			// Appliance routes are cloud-domain but effective-config reads
-			// site-owned tables (PMS providers, walled garden) → GuestDB.
-			// Lic wired so the tenant-scoped appliance delete revokes a bound
-			// license (never leaves an orphaned active license).
-			abase := &api.Base{DB: d.DB, GuestDB: guestDB, Redis: d.Redis, Lic: d.Licensing}
-			r.Mount("/tenants", base.TenantsRoutes())
-			r.Mount("/sites", base.SitesRoutes())
-			r.Mount("/appliances", abase.AppliancesRoutes())
-			r.Mount("/ticket-templates", gbase.TemplatesRoutes())
-			r.Mount("/plans", base.PlansRoutes())
-			r.Mount("/operators", base.OperatorsRoutes())
-			// RETIRED centrally — raw guest-operational data + hotel credentials
-			// (guest sessions, voucher codes, PMS config/creds, payments, social
-			// secrets, walled-garden runtime) are owned ONLY by the appliance
-			// Edge API. These return 410 Gone in the Cloud so no Platform or
-			// Tenant user can retrieve raw operational records.
-			r.Mount("/voucher-batches", gone410())
-			r.Mount("/vouchers", gone410())
-			r.Mount("/sessions", gone410())
-			r.Mount("/pms-providers", gone410())
-			r.Mount("/social-providers", gone410())
-			r.Mount("/walled-garden", gone410())
-			r.Mount("/payments", gone410())
-			nbase := &api.NotificationAdminBase{Base: gbase}
-			r.Mount("/notification-providers", nbase.Routes())
-			strBase := &api.StripeAdminBase{Base: gbase}
-			r.Mount("/stripe-accounts", strBase.Routes())
-			ebase := &api.EnrollmentBase{Base: base, ReplayCache: replayCache}
-			r.Mount("/appliance-bootstrap-tokens", ebase.TokenRoutes())
 		})
 	})
 
-	// -------------------------------------------------------------------
-	// /cloud/v1 — canonical Cloud API namespace (edge-first refactor).
-	//
-	// Carries ONLY the vendor-commercial / fleet-management domain:
-	// customers (tenants), sites, appliance inventory + enrollment,
-	// commercial plans, subscriptions, licenses/entitlements, fleet health
-	// and platform/group operators. Guest-domain resources (vouchers,
-	// sessions, PMS config, walled garden, guest access plans) are owned by
-	// the per-site Edge API (/edge/v1 on the appliance) and are NOT mounted
-	// here. The legacy /v1 guest-domain routes remain temporarily as
-	// deprecated compatibility adapters — see docs/API_DEPRECATIONS.md.
-	// -------------------------------------------------------------------
+	base := &api.Base{DB: d.DB, Redis: d.Redis, AssignKey: d.AssignKey, CA: d.CA,
+		ClientValid: 90 * 24 * time.Hour, Lic: d.Licensing}
+	if d.ApplianceBase == "" {
+		slog.Warn("offline activation packages are DISABLED: CTRLAPI_APPLIANCE_BASE is not set. Set it to " +
+			"the appliance-facing HTTPS endpoint (a stable FQDN, not an IP) that appliances dial, then restart.")
+	}
+	off := api.NewOfflineBase(base, d.VendorKeyPath, d.CABundlePath, d.ApplianceBase)
 	r.Route("/cloud/v1", func(r chi.Router) {
-		r.Get("/version", version(d))
-		r.Group(func(r chi.Router) {
-			r.Use(auth.RequireAuth(store))
-			base := &api.Base{DB: d.DB, Redis: d.Redis}
-			abase := &api.Base{DB: d.DB, GuestDB: guestDB, Redis: d.Redis, AssignKey: d.AssignKey,
-				CA: d.CA, ClientValid: 90 * 24 * time.Hour, Lic: d.Licensing}
-			r.Mount("/tenants", base.TenantsRoutes())
-			r.Mount("/sites", base.SitesRoutes())
-			r.Mount("/appliances", abase.AppliancesRoutes())
-			// Platform-only appliance enrollment lifecycle (pending, claim,
-			// assign, revoke, security alerts) — permission-gated, no tenant scope.
-			r.Mount("/appliances-admin", abase.LifecycleRoutes())
-			// Dedicated assignment-signing key lifecycle (list, retire/rotate).
-			r.Mount("/assignment-keys", (&api.AssignmentKeysBase{Base: base, RegRoot: d.AssignRegistryRoot}).Routes())
-			// Platform certificate lifecycle (list, issue, revoke, CA).
-			if d.CA != nil {
-				certBase := &api.CertBase{Base: base, CA: d.CA, ClientValid: 90 * 24 * time.Hour}
-				r.Mount("/certificates", certBase.PlatformRoutes())
-			}
-			// Backup/rollback retention health for the Central host (read-only).
-			r.With(auth.RequirePermission("platform.appliances.view")).Get("/backup-health", base.BackupHealthHandler)
-			// Tenant-facing own-appliance support/replacement/reassignment requests.
-			r.Mount("/appliances-support", abase.TenantSupportRoutes())
-			// Offline signed activation packages (vendor-signed, appliance-bound).
-			vendorKey := os.Getenv("CTRLAPI_VENDOR_KEY")
-			if vendorKey == "" {
-				vendorKey = "/etc/stayconnect/vendor-license.key"
-			}
-			if ob := api.NewOfflineBase(base, vendorKey, "/etc/stayconnect/pki/nats-ca-bundle.crt"); ob != nil {
-				r.Mount("/offline-packages", ob.Routes())
-			}
-			// OFFLINE FIRST ACTIVATION (separate envelope; see api/offline_activation_api.go).
-			//
-			// CTRLAPI_APPLIANCE_BASE is the APPLIANCE-FACING endpoint written into every activation package.
-			// It is a stable HTTPS FQDN on purpose: appliances that learn an IP cannot be moved to cloud
-			// hosting later without touching every hotel, and the appliance API is deliberately a different
-			// surface from the human admin UI so the UI can gain MFA/VPN/Zero-Trust without becoming a
-			// runtime dependency of a hotel's connectivity.
-			// NO DEFAULT, ON PURPOSE. This value is written into every activation package and becomes the
-			// address a hotel's appliance will dial for the rest of its life. Defaulting it to a plausible
-			// name would mean shipping packages pointing at DNS that may not exist, and the failure would
-			// surface months later at a site nobody is standing in. Unset disables offline activation and
-			// says why; it does not guess.
-			applianceBase := os.Getenv("CTRLAPI_APPLIANCE_BASE")
-			if applianceBase == "" {
-				slog.Warn("offline first activation is DISABLED: CTRLAPI_APPLIANCE_BASE is not set. " +
-					"Set it to the appliance-facing HTTPS endpoint (a stable FQDN, not an IP) that " +
-					"appliances should dial, then restart.")
-			} else if oab := api.NewOfflineActivationBase(base, api.AssignmentBaseFrom(base), vendorKey,
-				"/etc/stayconnect/pki/nats-ca-bundle.crt", applianceBase); oab != nil {
-				r.Mount("/offline-activation", oab.Routes())
-			}
-			// Unambiguous name for subscription plans sold by StayConnect.
-			r.Mount("/commercial-plans", base.PlansRoutes())
-			r.Mount("/operators", base.OperatorsRoutes())
-			ebase := &api.EnrollmentBase{Base: base, ReplayCache: replayCache}
-			r.Mount("/appliance-bootstrap-tokens", ebase.TokenRoutes())
-			if d.Licensing != nil {
-				licBase := &api.LicensesBase{Base: base, Svc: d.Licensing}
-				r.Mount("/licenses", licBase.Routes())
-			}
-		})
+		r.Use(auth.RequireAuth(store))
+		r.Mount("/", base.CloudRoutes(off))
 	})
-
 	return r
 }
 
-// gone410 answers every method with 410 Gone. Used to retire raw guest-
-// operational + credential routes from the Cloud (owned by the appliance Edge).
-func gone410() http.Handler {
+// loopbackOnly refuses anything that did not come straight from this host: /metrics is for a local
+// scraper, never for the internet, and a request relayed by the local proxy carries forwarding headers.
+func loopbackOnly(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusGone)
-		_, _ = w.Write([]byte(`{"error":"gone","message":"retired from the Cloud; owned by the appliance Edge API (/edge/v1)"}`))
+		if !clientip.IsLoopback(clientip.Peer(r)) || clientip.Proxied(r) {
+			http.NotFound(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -305,20 +149,14 @@ func readyz(d Deps) http.HandlerFunc {
 		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 		defer cancel()
 		if err := d.DB.Ping(ctx); err != nil {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "not-ready", "db": err.Error()})
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "not-ready", "db": "unreachable"})
 			return
 		}
 		if err := d.Redis.Ping(ctx).Err(); err != nil {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "not-ready", "redis": err.Error()})
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "not-ready", "redis": "unreachable"})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"status": "ready"})
-	}
-}
-
-func version(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"version": d.Version, "service": "ctrlapi"})
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ready", "version": d.Version})
 	}
 }
 
