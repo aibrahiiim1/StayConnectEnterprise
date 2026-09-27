@@ -59,8 +59,8 @@ The console never derives a state itself; ctrlapi returns these three fields on 
 | `waiting` | The appliance registered itself with Central and is waiting for an operator to activate it. |
 | `activating` | Activated by an operator; the appliance has not yet collected its certificate or licence. Normally clears within a minute of the appliance's next contact. |
 | `activated` | Assigned to a customer and site, certificate issued, current licence installed-able. |
-| `retiring` | Retirement signed; waiting for the appliance to confirm (two-phase terminal delivery). |
-| `retired` | Revoked or decommissioned. Its credentials are dead. It can only be deleted. |
+| `retiring` | Retirement signed; waiting for the appliance to confirm (two-phase terminal delivery). Its credentials stay valid until it confirms, so it can collect the retirement. The detail's `retirement.state` is `terminal_delivery_pending`, or `terminal_delivery_failed` when it did not confirm within 10 minutes (overview attention `retirement_unconfirmed`, plus a security alert). |
+| `retired` | Decommissioned (normal retirement, confirmed by the appliance) or revoked (emergency). Its credentials are dead. It can only be deleted, and its identity key can never register again. |
 
 **`connection`** — from `last_seen_at` (updated by every authenticated appliance call; a healthy appliance calls every
 30 s): `connected` (≤ 5 min), `recently_seen` (≤ 24 h), `offline` (> 24 h), `never`.
@@ -96,15 +96,25 @@ power on ──► appliance registers itself (signed, hardware-bound, no token)
   request, then download the activation package (signed assignment + CA + licence) and upload it in Hotel Admin.
 * **Licence operations** (per appliance): *Set licence* (issue, renew or change terms — always a new signed version
   that supersedes the current one), *Suspend*, *Resume*, *Revoke*, *Download offline licence*.
-* **Move** re-assigns an activated appliance to another site or customer (a cross-customer move revokes its licence
-  and the appliance purges the previous customer's local data).
-* **Retire** is two-phase (signed terminal assignment, appliance acknowledges, credentials revoked); an emergency
-  retire skips the acknowledgement.
-* **Replace hardware** marks an appliance for replacement; activating the new appliance at the same site retires the
-  old one.
+* **Move** re-assigns an activated appliance to another site **of the same customer**. The licence follows it: it is
+  re-issued with exactly the same terms, bound to the new site, as the next version, in the same transaction as the
+  new signed assignment. The move fails closed: if licensing is unavailable on Central or the licence cannot be read
+  it is refused (503) and nothing changes; a licence already past its end date must be renewed first (409). A move to
+  another customer is refused (409): the appliance's local data cannot be guaranteed to be cleared in place.
+* **Changing customer** is: Retire → factory-reset the box (it gets a new identity key) → it registers again and
+  waits → Activate for the new customer.
+* **Retire** is two-phase: the licence is revoked at once; a signed terminal (decommissioned) assignment is issued;
+  the appliance collects it, stands down and sends a signed acknowledgement; only then are its credentials revoked
+  and it becomes `retired`. An **emergency** retire (also "retire now" while already retiring) revokes the
+  credentials immediately and marks the identity revoked without waiting.
+* **Replace hardware** marks an appliance for replacement; it keeps working and licensed. Activating the new
+  appliance at the same site revokes the old appliance's licence and retires it through the same acknowledged
+  two-phase retirement: its credentials stay valid until it confirms (or until an emergency retire).
 * **Advanced** (appliance page, collapsed): reissue certificate, rebind WAN MAC after a NIC change (keeps the licence
   terms), mark for replacement.
-* **Delete** removes a `waiting` or `retired` appliance's record (typed serial). Audit history is kept.
+* **Delete** removes a `waiting` or `retired` appliance's record (typed serial). Audit history is kept; its open
+  security alerts are closed. A retired appliance's identity key is remembered: that key can never register or be
+  imported again (`403`/`409 identity_retired`) — the box must be factory-reset first.
 
 ## 5. Security invariants (unchanged by this redesign)
 
@@ -120,7 +130,9 @@ a Central outage is never a guest outage.
 
 Operator console: `/cloud/v1/*` behind the `sc_session` cookie. Authentication: `/v1/auth/*`. Appliance: `/v1/appliance*`
 (unchanged paths). Nothing else is mounted. Writes marked **SU** require step-up (`403 reauth_required` → re-enter
-password → retry). `customer_id` is the old `tenant_id`.
+password → retry). `customer_id` is the old `tenant_id`. Errors are `{error, message, trace_id}`: `error` is the stable
+code, `message` an operator sentence the console shows verbatim. Login, re-authentication and registration are
+rate-limited per client address, which ctrlapi derives itself (the TCP peer, or the loopback proxy's `X-Real-IP`).
 
 ### Authentication
 `POST /v1/auth/login` · `POST /v1/auth/logout` · `GET /v1/auth/whoami` → `{operator_id,email,display_name,roles[],is_super_admin,customer_id|null,customer_name|null,permissions[]}` · `POST /v1/auth/reauth`
@@ -159,11 +171,14 @@ Row shape used by every list:
 `GET /cloud/v1/appliances?customer_id=&site_id=&activation=&connection=&license=&q=` → `{items:[row]}`
 `GET /cloud/v1/appliances/{id}` → `row` + `{identity:{wan_mac,lan_mac,hardware_fingerprint,identity_key_fingerprint,cert_fingerprint,cert_not_after},
 assignment:{version,state,signer_key_id,issued_at,acked_version},licenses:[history newest first],events:[recent lifecycle/audit],
-replacement:{pending,deadline,replaces,replaced_by}|null,retirement:{state,deadline}|null}`
+replacement:{pending,deadline,replaces,replaced_by}|null,retirement:{state,deadline}|null}` — `replaces`/`replaced_by` are
+appliance ids; `retirement.state` is `terminal_delivery_pending|terminal_delivery_failed|credential_revoked`
 `POST /cloud/v1/appliances/{id}/activate {customer_id|new_customer{name}, site_id|new_site{name,timezone,country?},
 license{max_concurrent_online_guests,valid_until|valid_days,grace_period_days}}` **SU** — `waiting` only
-`POST /cloud/v1/appliances/{id}/move {customer_id, site_id, reason}` **SU**
-`POST /cloud/v1/appliances/{id}/retire {reason, emergency?:bool, confirm_serial?}` **SU**
+`POST /cloud/v1/appliances/{id}/move {customer_id, site_id, reason}` **SU** — `customer_id` must be the current customer
+(`409 cross_customer_move` otherwise); `503 licensing_unavailable` when the licence cannot follow; `409 license_expired`
+`POST /cloud/v1/appliances/{id}/retire {reason, emergency?:bool, confirm_serial?}` **SU** — `activated`, or `retiring`
+with `emergency:true` (retire now without waiting); emergency needs `confirm_serial`
 `POST /cloud/v1/appliances/{id}/replace {reason}` **SU** · `POST …/{id}/rebind-wan-mac {reason}` **SU** ·
 `POST …/{id}/reissue-certificate {reason}` **SU**
 `DELETE /cloud/v1/appliances/{id} {confirm_serial, reason}` **SU** — `waiting` or `retired` only
@@ -187,7 +202,8 @@ customer users: `GET|POST /cloud/v1/customers/{id}/users`, `PATCH|DELETE /cloud/
 
 ### Appliance (unchanged paths)
 `POST /v1/appliances/register` · `GET /v1/appliance/hello|license|certificate` · `POST /v1/appliance/csr|offline-reconcile` ·
-`GET /v1/appliance/assignment|assignment-registry` · `POST /v1/appliance/assignment/ack`.
+`GET /v1/appliance/assignment|assignment-registry` · `POST /v1/appliance/assignment/ack`. Registration with a retired
+identity key answers `403 identity_retired`.
 
 ## 7. Roles
 
