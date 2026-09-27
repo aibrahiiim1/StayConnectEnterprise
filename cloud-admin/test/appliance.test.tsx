@@ -104,7 +104,7 @@ describe("Activate", () => {
     const site = within(dialog).getByLabelText(/^Site/);
     await waitFor(() => expect(within(site).getByRole("option", { name: "Demo Resort" })).toBeInTheDocument());
     await user.selectOptions(site, "s1");
-    expect(within(dialog).getByLabelText(/Guests online at once/)).toHaveValue("500");
+    expect(within(dialog).getByLabelText(/Clients online at once/)).toHaveValue("500");
     expect(within(dialog).getByLabelText(/Days from today/)).toHaveValue("365");
     expect(within(dialog).getByLabelText(/Grace period/)).toHaveValue("30");
     await user.click(within(dialog).getByRole("button", { name: "Activate" }));
@@ -181,8 +181,8 @@ describe("Activate", () => {
     await user.type(within(dialog).getByLabelText(/New customer's name/), "Red Sea Hotels");
     await user.type(within(dialog).getByLabelText(/New site's name/), "Marsa Resort");
     await user.type(within(dialog).getByLabelText(/^Country/), "eg");
-    await user.clear(within(dialog).getByLabelText(/Guests online at once/));
-    await user.type(within(dialog).getByLabelText(/Guests online at once/), "250");
+    await user.clear(within(dialog).getByLabelText(/Clients online at once/));
+    await user.type(within(dialog).getByLabelText(/Clients online at once/), "250");
     await user.click(within(dialog).getByRole("radio", { name: "Until a date" }));
     await user.type(within(dialog).getByLabelText(/Ends on/), "2030-12-31");
     await user.click(within(dialog).getByRole("button", { name: "Activate" }));

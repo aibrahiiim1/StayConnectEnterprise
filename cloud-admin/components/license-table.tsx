@@ -17,7 +17,7 @@ export function LicenseTable({ rows, showCustomer = true }: { rows: LicenseRow[]
           <TH>Appliance</TH>
           {showCustomer && <TH className="hidden md:table-cell">Customer · site</TH>}
           <TH>State</TH>
-          <TH className="hidden sm:table-cell">Guests online at once</TH>
+          <TH className="hidden sm:table-cell">Clients online at once</TH>
           <TH>Valid until</TH>
           <TH className="hidden lg:table-cell">Version</TH>
         </TR>

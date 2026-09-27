@@ -162,7 +162,7 @@ func (s *server) uploadPortalAsset(w http.ResponseWriter, r *http.Request) {
 	if ext == "" {
 		jsonErr(w, http.StatusBadRequest, "unsupported_image",
 			"only PNG, JPEG, WebP and GIF images are accepted. SVG is refused because it can carry script, "+
-				"and this file is served to every guest device before sign-in.")
+				"and this file is served to every client device before sign-in.")
 		return
 	}
 

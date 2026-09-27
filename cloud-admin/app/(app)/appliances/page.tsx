@@ -97,7 +97,7 @@ function Appliances() {
       try {
         body = JSON.parse(await file.text());
       } catch {
-        throw new Error("That file is not an activation request. Download it again from the appliance's Hotel Admin.");
+        throw new Error("That file is not an activation request. Download it again from the appliance's Admin Console.");
       }
       const row = await api.post<ApplianceRow>("/cloud/v1/offline-activation/requests", body);
       toast.success(`${row.serial} imported`, "Activate it, then download its activation package.");
@@ -130,9 +130,9 @@ function Appliances() {
             </HelpSection>
             <HelpSection title="Appliances without internet">
               <p>
-                In the appliance&apos;s Hotel Admin, download its activation request, then use{" "}
+                In the appliance&apos;s Admin Console, download its activation request, then use{" "}
                 <strong>Import activation request</strong> here. Activate it, download its activation package from its
-                page, and upload that file in Hotel Admin.
+                page, and upload that file in the Admin Console.
               </p>
             </HelpSection>
           </>

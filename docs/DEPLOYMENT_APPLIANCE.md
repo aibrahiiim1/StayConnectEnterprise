@@ -1,13 +1,13 @@
 # Deployment — Appliance (Edge)
 
-> Production layout for one hotel appliance (or HA pair). Everything the
-> guest and the hotel staff touch runs here, against the site-local database.
+> Production layout for one site appliance (or HA pair). Everything the
+> client and the site staff touch runs here, against the site-local database.
 > Cloud counterpart: [DEPLOYMENT_CLOUD.md](DEPLOYMENT_CLOUD.md).
 
 > **⚠️ Topology correction (2026-07-16) — approved two-NIC rule governs.** The approved,
 > permanent appliance topology is **exactly two physical NICs: WAN and LAN.** **WAN is
-> also the management interface** (Hotel Admin, SSH, outbound sync, PMS reachability if the
-> PMS is on the WAN-side hotel network); **LAN** carries guest connectivity and guest
+> also the management interface** (the Admin Console, formerly Hotel Admin; SSH, outbound sync, PMS reachability if the
+> PMS is on the WAN-side site network); **LAN** carries guest connectivity and guest
 > VLAN/trunk behavior. There is **no separate physical management NIC** and **no approved
 > third HA-sync NIC.** The historical "separate `mgmt` at `172.21.15.30`" and "optional
 > `hasync` third NIC" wording below is **superseded** — see `SYSTEM_OVERVIEW.md` (WAN=`ens160`,
@@ -18,7 +18,7 @@
 
 | Interface | Example | Role |
 |---|---|---|
-| **WAN = management** (`ens160`) | `the retired development reference appliance's address`, default route | uplink/masquerade **and** management: Hotel Admin (`https://<WAN-IP>`), SSH, outbound HTTPS to Central (licensing only), PMS reachability when the PMS is on the WAN-side hotel network, monitoring |
+| **WAN = management** (`ens160`) | `the retired development reference appliance's address`, default route | uplink/masquerade **and** management: Admin Console (`https://<WAN-IP>`), SSH, outbound HTTPS to Central (licensing only), PMS reachability when the PMS is on the WAN-side site network, monitoring |
 | **LAN = guest** (`ens192`, over `br-lan` / per-VLAN bridges) | `10.20.0.1/24` (and per-VLAN gateways) | guest gateway: DHCP/DNS/captive portal/shaping + 802.1Q guest VLAN trunk; option 114 → `http://10.20.0.1:8380/` (**keep the RFC 8910 stanza in the repo Kea config — it was VM-only drift once already**) |
 
 Guest traffic masquerades out the **WAN** interface, never onto the guest LAN. ESXi installs:
@@ -37,10 +37,10 @@ synchronization transport is an **OPEN architecture decision** (see §7 and
 | `stayconnect-scd` | session controller **+ Central agent** (token-less registration, assignment, certificate, licence fetch, hello — [EDGE_ARCHITECTURE.md](EDGE_ARCHITECTURE.md) §6) | root (CAP_NET_ADMIN); `SCD_DB_URL` → site DSN; `SCD_CTRLAPI_BASE` / `SCD_MTLS_BASE` from `deploy/config/central-endpoint.env` (`https://sc-central.echofusion.com`, mTLS `:9443`). scd has no message-bus client and no telemetry, command or update settings (`SCD_NATS_URL`, `SCD_NATS_MTLS_URL`, `SCD_COMMAND_PUB`, `SCD_UPDATE_PUB` are removed — CLAUDE.md §0E). `SCD_REMOVED_MARKER` (default `/etc/stayconnect/removed-from-central.json`) is the removed-from-Central marker |
 | `stayconnect-portald` | captive portal | user `stayconnect`, guest iface :8380/:8343 |
 | `stayconnect-acctd` | accounting/quotas | root (tc); site DSN |
-| `stayconnect-edged` | Hotel Admin API `/edge/v1` + serves `hotel-admin/` | loopback listener, fronted by Caddy on mgmt; site DSN; reads license store |
+| `stayconnect-edged` | Admin Console API `/edge/v1` + serves `hotel-admin/` | loopback listener, fronted by Caddy on mgmt; site DSN; reads license store |
 | `kea-dhcp4` / `unbound` | guest DHCP/DNS | bound to 10.20.0.1 |
 | `nftables` | `inet stayconnect` ruleset | see §3 |
-| `stayconnect-caddy` | TLS for Hotel Admin on the **mgmt IP only** | internal CA (`local_certs`) unless the site has real names |
+| `stayconnect-caddy` | TLS for the Admin Console on the **mgmt IP only** | internal CA (`local_certs`) unless the site has real names |
 | backup agent (timer) | nightly `pg_dump` → `backup_records` | [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md) §1 |
 | monitoring | scd/edged Prometheus endpoints, loopback | scraped locally; nothing is sent to Central as telemetry |
 | software updates | no on-appliance update agent | staged binary rollout via the deployment procedure |
@@ -56,7 +56,7 @@ revoked.json), env files, and the Postgres data dir.
 
 ## 3. nftables policy (deltas vs the pilot ruleset)
 
-- input (drop default): mgmt allows SSH 22 + Caddy 443 (Hotel Admin) **from the
+- input (drop default): mgmt allows SSH 22 + Caddy 443 (Admin Console) **from the
   mgmt VLAN only**; guest allows DHCP/DNS/8380/8343/ICMP. **No 8080/3000
   accepts anywhere** ([SECURITY_HARDENING.md](SECURITY_HARDENING.md) §2).
 - forward: guest→uplink iff `saddr @auth_ipv4` or `daddr @walled_garden_ip`;
@@ -64,15 +64,15 @@ revoked.json), env files, and the Postgres data dir.
 - **IPv6: dropped on the guest LAN** (no RAs, no v6 forwarding from br-lan)
   until dual-stack capture exists ([SECURITY_HARDENING.md](SECURITY_HARDENING.md) §4).
 - prerouting DNAT :80→10.20.0.1:8380, :443→10.20.0.1:8343 for unauthenticated
-  guests; masquerade guest subnet out the uplink.
+  clients; masquerade guest subnet out the uplink.
 
 ## 4. Caddy exposure
 
 One vhost: `https://172.21.15.30` → hotel-admin static bundle + `/edge/v1/*`
 reverse-proxy to edged (loopback). Bind the listener to the mgmt address —
-never `:443` on all interfaces. Guest portal traffic does **not** pass Caddy
+never `:443` on all interfaces. Client Portal (formerly Guest Portal) traffic does **not** pass Caddy
 (portald serves the captive path directly; plain HTTP is required for
-RFC 8910/probe flows). Hotel staff import the appliance's internal CA root
+RFC 8910/probe flows). Site staff import the appliance's internal CA root
 once, or the site installs a real cert.
 
 ## 5. Outbound connectivity (all appliance-initiated)
@@ -82,10 +82,10 @@ once, or the site installs a real cert.
 | `sc-central.echofusion.com:443` | HTTPS | token-less registration, and all appliance calls before a certificate exists |
 | `sc-central.echofusion.com:9443` | HTTPS, mutual TLS | assignment, licence, certificate renewal, hello once a certificate is issued |
 | Twilio / SendGrid / Google / Stripe / Mews / Apaleo | HTTPS | only if the respective feature is enabled |
-| hotel PMS (FIAS) | TCP on the hotel LAN | local — not internet |
+| hotel PMS (FIAS) | TCP on the site LAN | local — not internet |
 
-No inbound rule from the internet exists at all. The hotel firewall needs only
-these outbound allowances; a hotel that blocks them still has working guest
+No inbound rule from the internet exists at all. The site firewall needs only
+these outbound allowances; a site that blocks them still has working guest
 WiFi ([OFFLINE_OPERATION.md](OFFLINE_OPERATION.md)).
 
 ## 6. Bring-up order (new site)
@@ -102,10 +102,10 @@ WiFi ([OFFLINE_OPERATION.md](OFFLINE_OPERATION.md)).
 4. **Activate** it in Central (customer, site, licence terms); scd collects the
    signed assignment, certificate and licence and installs the licence
    (populates `tenant_effective_limits`). For a site without internet, use
-   offline activation (activation request → activation package) via Hotel
-   Admin → **Appliance & licence**.
+   offline activation (activation request → activation package) via Admin
+   Console → **Appliance & licence**.
 5. Start portald, acctd, edged, Caddy; seed the first `site_admin` operator.
-6. Verify: phase 1/2 suites (guest path), Hotel Admin login on the mgmt IP,
+6. Verify: phase 1/2 suites (guest path), Admin Console login on the mgmt IP,
    **Appliance & licence** shows *Activated*, licence *Active*, OneGate Central
    *Connected* (`GET /edge/v1/central/status`), and Central shows the appliance
    **Activated** and **Connected**.
@@ -137,7 +137,7 @@ locally) and fence manually.
 
 ## 8. Appliance sizing (guidance)
 
-Pilot-verified on a modest VM: 2 vCPU / 4 GB / 40 GB serves a mid-size hotel
+Pilot-verified on a modest VM: 2 vCPU / 4 GB / 40 GB serves a mid-size site
 (hundreds of concurrent devices; scd's nft/tc ops are O(1) per session).
 Postgres and accounting growth are bounded by license retention limits;
 nightly backups need headroom for one extra dump generation.

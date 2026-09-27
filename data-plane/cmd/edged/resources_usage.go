@@ -252,7 +252,7 @@ func (s *server) getStayUsage(w http.ResponseWriter, r *http.Request) {
 		&out.Stay.Status, &out.Stay.Arrival, &out.Stay.Departure, &out.Stay.EffectiveOut,
 		&out.Stay.QuotaBytes, &out.Stay.ConsumedBytes, &out.Stay.EndReason, &out.Plan)
 	if err != nil {
-		jsonErr(w, http.StatusNotFound, "not_found", "no such stay at this property")
+		jsonErr(w, http.StatusNotFound, "not_found", "no such stay at this site")
 		return
 	}
 

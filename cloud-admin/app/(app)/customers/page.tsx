@@ -88,7 +88,7 @@ function Customers() {
     <PageShell>
       <PageHeader
         title="Customers"
-        description="The organisations that own hotels. Open one to manage its sites, appliances, licenses and users."
+        description="The organisations that own sites. Open one to manage its sites, appliances, licenses and users."
         actions={
           can["customers.create"] ? (
             <Button onClick={() => { setName(""); setCreateErr(null); setCreating(true); }}>
@@ -170,7 +170,7 @@ function Customers() {
         open={creating}
         onOpenChange={setCreating}
         title="New customer"
-        description="An organisation that owns one or more hotels. Add its sites next."
+        description="An organisation that runs one or more sites. Add its sites next."
         submitLabel="Create customer"
         busyLabel="Creating…"
         busy={busy}

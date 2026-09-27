@@ -50,7 +50,7 @@ export const ACTIVATION: Record<Activation, StateInfo> = {
 export const CONNECTION: Record<Connection, StateInfo> = {
   connected: { label: "Connected", tone: "ok", explain: "Contacted Central in the last 5 minutes." },
   recently_seen: { label: "Recently seen", tone: "default", explain: "Contacted Central in the last 24 hours." },
-  offline: { label: "Offline", tone: "err", explain: "Has not contacted Central for more than a day. Guests are not affected." },
+  offline: { label: "Offline", tone: "err", explain: "Has not contacted Central for more than a day. Clients are not affected." },
   never: { label: "Never connected", tone: "default", explain: "Has not contacted Central since it was registered." },
 };
 
@@ -59,7 +59,7 @@ export const LICENSE: Record<LicenseState, StateInfo> = {
   active: { label: "Active", tone: "ok", explain: "Licensed and valid." },
   expiring: { label: "Expiring", tone: "warn", explain: "Valid, with 30 days or fewer left." },
   grace: { label: "In grace period", tone: "warn", explain: "Past its end date; still working until the grace period ends." },
-  expired: { label: "Expired", tone: "err", explain: "Past its grace period. Guest access stops until it is renewed." },
+  expired: { label: "Expired", tone: "err", explain: "Past its grace period. Client access stops until it is renewed." },
   suspended: { label: "Suspended", tone: "warn", explain: "Paused by an operator. Resume it to restore service." },
   revoked: { label: "Revoked", tone: "err", explain: "Permanently cancelled. Set a new license to restore service." },
 };

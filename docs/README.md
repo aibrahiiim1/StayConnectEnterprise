@@ -1,25 +1,27 @@
 # StayConnect Enterprise — Documentation Index
 
 Start here. This index is organized by what you're trying to do. If you're new to
-StayConnect, read the **Complete Operations Manual** first — it takes a hotel from
+StayConnect, read the **Complete Operations Manual** first — it takes a site from
 an unpacked appliance to live, licensed guest WiFi and covers day-2 operations.
+The product words used throughout (Client, Admin Console, Client Portal, Site) are defined in
+[PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md).
 
 > **Current production model (read this first):** onboarding is **zero-touch** —
 > a factory-clean appliance with internet registers itself with Central (no token)
 > and appears under **Appliances** as **Waiting for activation**, where one
 > **Activate** step picks the customer, site and licence terms. A site without
 > internet uses **offline activation** (one file each way). The entitlement is a
-> **signed appliance licence** (max concurrent online guests + validity + grace).
+> **signed appliance licence** (max concurrent online clients + validity + grace).
 > **Plans, subscriptions and enrollment tokens no longer exist.** Central is
 > licensing, activation and fleet status only — the binding description is
 > [CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md).
 
 ---
 
-## 1. Quick start — new hotel installation
+## 1. Quick start — new site installation
 
 - [APPLIANCE_ONBOARDING_MANUAL.md](APPLIANCE_ONBOARDING_MANUAL.md) — the shortest
-  UI-only path to bring one hotel online (zero-touch, two consoles).
+  UI-only path to bring one site online (zero-touch, two consoles).
 
 ## 2. Complete Operations Manual — **recommended starting point**
 
@@ -48,16 +50,16 @@ an unpacked appliance to live, licensed guest WiFi and covers day-2 operations.
   (and the appliance page), Licenses, and System (Security alerts, Trust & keys,
   Audit log, Team, Backup health).
 
-## 5. Hotel Admin (Appliance) — configuration manual
+## 5. Admin Console (Appliance) — configuration manual
 
 - [user-guide/hotel-admin-config-manual.md](user-guide/hotel-admin-config-manual.md)
   — activate (Appliance & licence page), then fully configure the appliance: WAN/LAN, guest VLANs,
   auth methods, vouchers, integrations, branding, operators, TLS, diagnostics.
 
-## 6. Hotel Admin (Appliance) — page reference
+## 6. Admin Console (Appliance) — page reference
 
 - [user-guide/hotel-admin-reference.md](user-guide/hotel-admin-reference.md) — every
-  Hotel Admin page and what each option does.
+  Admin Console (formerly Hotel Admin) page and what each option does.
 
 ## 7. Troubleshooting & recovery
 
@@ -100,6 +102,7 @@ an unpacked appliance to live, licensed guest WiFi and covers day-2 operations.
 
 | Topic | Document |
 |---|---|
+| Product terminology — *Client*, *Admin Console*, *Client Portal*, *Site* (binding for product-facing text) | [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md) |
 | Full system reference (historical snapshot, 2026-07-10) | [SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md) |
 | Central (licensing, activation, fleet status) — authoritative | [CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md) |
 | Cloud / control-plane architecture | [CLOUD_ARCHITECTURE.md](CLOUD_ARCHITECTURE.md) · [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md) |

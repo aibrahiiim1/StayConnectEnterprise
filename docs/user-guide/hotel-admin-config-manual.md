@@ -1,12 +1,12 @@
-# OneGate Hotel Admin — Configuration Manual
+# OneGate Admin Console — Configuration Manual
 
-Step-by-step instructions for configuring an appliance from **OneGate Hotel
-Admin**, the console on the appliance. For a description of what each page shows,
+Step-by-step instructions for configuring an appliance from **OneGate Admin
+Console** (formerly Hotel Admin), the console on the appliance. (In the Admin Console the **Clients** and **Client Portal** menu groups were formerly *Guests* and *Guest portal*; Client Portal was formerly Guest Portal.) For a description of what each page shows,
 see [hotel-admin-reference.md](hotel-admin-reference.md).
 
 **Typical order:** Activate (licence) → WAN / LAN → build a Guest
 network → Service plans and Internet packages → Sign-in methods → Vouchers and
-guest accounts → PMS → Email & SMS / Social login → Allowed sites → Portal
+client accounts → PMS → Email & SMS / Social login → Allowed sites → Portal
 settings → Operators.
 
 > Sensitive actions ask you to **confirm your password** in a dialog — for
@@ -45,7 +45,7 @@ Only the Site admin and Hotel IT manager can upload files; other roles can
 follow the status.
 
 **Retired** or **Removed from OneGate Central** means this appliance no longer
-admits new guests (guests already online are not disconnected). *Removed from
+admits new clients (clients already online are not disconnected). *Removed from
 OneGate Central* appears when Central deleted the appliance after it had served
 a customer: it keeps its data, refuses licence and activation files and never
 registers again by itself. Moving it to another customer, or using it again at
@@ -57,7 +57,7 @@ and a new activation by your vendor.
 
 ## 2. The licence
 
-An appliance serves no guests until a **signed licence** is installed.
+An appliance serves no clients until a **signed licence** is installed.
 Activation delivers the first one, and renewals arrive by themselves: until it is
 licensed the appliance asks Central every minute, and afterwards every 6 hours
 (and on **Check now**).
@@ -67,25 +67,25 @@ licensed the appliance asks Central every minute, and afterwards every 6 hours
 a file for another appliance or an older licence, and nothing changes.
 
 **Reading the Licence part:**
-- **Active** — licensed; guests can connect up to the licensed maximum, shown as
-  **Guests online, all guest networks** with a meter (amber from 80%, red at
+- **Active** — licensed; clients can connect up to the licensed maximum, shown as
+  **Clients online, all guest networks** with a meter (amber from 80%, red at
   100%).
 - **Expires soon** — 30 days or fewer left; ask your vendor to renew.
-- **Grace period** — the licence has ended but guests keep signing in until the
+- **Grace period** — the licence has ended but clients keep signing in until the
   grace period ends; renew soon.
-- **Expired / Suspended / Revoked** — new guest sign-ins are refused; guests
-  already online are not disconnected; DHCP, DNS, the sign-in page and Hotel
-  Admin keep working.
+- **Expired / Suspended / Revoked** — new client sign-ins are refused; clients
+  already online are not disconnected; DHCP, DNS, the sign-in page and Admin
+  Console keep working.
 - **Wrong appliance** — the installed licence was issued for a different
   appliance; ask your vendor for one for this serial number and upload it.
-- **Licensed capacity reached** — new guests cannot sign in until someone goes
+- **Licensed capacity reached** — new clients cannot sign in until someone goes
   offline.
 - **The internet (WAN) network adapter has changed** — the licence stays in
   force; if the adapter was replaced on purpose, ask your vendor to rebind it.
 
 The **OneGate Central** part shows *Connected*, *Temporarily unreachable* or
 *Not configured*. Central is used for licensing and activation only; losing it
-never stops guests.
+never stops clients.
 
 ---
 
@@ -120,10 +120,10 @@ Go to **Networking → Guest networks** (`/network`) → **New guest network**. 
 seven steps:
 
 1. **Identity** — name, description, SSID label (a label only; the appliance
-   does not broadcast Wi-Fi — the hotel's wireless controller does).
+   does not broadcast Wi-Fi — the site's wireless controller does).
 2. **Interface / VLAN** — pick the parent interface; for a tagged network tick
    the VLAN option and set the **VLAN id** (1–4094).
-3. **Subnet & gateway** — e.g. `10.20.0.0/22` and `10.20.0.1`. Guests use the
+3. **Subnet & gateway** — e.g. `10.20.0.0/22` and `10.20.0.1`. Clients use the
    gateway as their router and DNS.
 4. **DHCP & DNS** — one or more address pools; DNS from the appliance or custom
    servers; domain name; lease times.
@@ -135,7 +135,7 @@ seven steps:
 
 > The topology (type, VLAN, parent interface) cannot change after creation — to
 > change it, delete and recreate the network. Other settings are editable on the
-> network's own page; saved edits reach guests only after **Apply changes** on
+> network's own page; saved edits reach clients only after **Apply changes** on
 > Guest networks (and confirming in time).
 
 **DHCP reservations:** pin a device's MAC to a fixed address on **DHCP & leases**
@@ -144,22 +144,22 @@ own page.
 
 ---
 
-## 5. Choose guest sign-in methods
+## 5. Choose client sign-in methods
 
-Go to **Guest portal → Sign-in methods** (`/sign-in-methods`). Each switch applies
+Go to **Client Portal → Sign-in methods** (`/sign-in-methods`). Each switch applies
 immediately. Which methods can be offered also depends on the license.
 
 - **Voucher code** — needs an internet package and printed cards (§6).
-- **Guest account** — username and password accounts (§6).
+- **Client account** — username and password accounts (§6).
 - **Room sign-in (from the PMS)** — needs a working PMS connection and Network
   routing (§7). Choose what the guest types besides the room number: *Any of the
   three (recommended)*, *Last name (surname)*, *First name* or *Reservation
   number*.
 - **Email code / SMS code** — need a sender under **Email & SMS** (§8).
 - **Social login** — tick each provider set up under **Social login** (§9).
-- **Guest sign-in protection** — maximum failed attempts, observation window and
+- **Client sign-in protection** — maximum failed attempts, observation window and
   how long a device must wait. Only the Site admin and Hotel IT manager can
-  change these; reception can release a single waiting device on **Guest sign-in
+  change these; reception can release a single waiting device on **Client sign-in
   attempts**.
 
 Make sure anything the sign-in page needs before sign-in is listed under
@@ -167,7 +167,7 @@ Make sure anything the sign-in page needs before sign-in is listed under
 
 ---
 
-## 6. Create service plans, internet packages, vouchers and guest accounts
+## 6. Create service plans, internet packages, vouchers and client accounts
 
 **Service plan** (**Internet offering → Service plans → Add plan**) — the technical
 recipe: plan code, display name, download/upload speed (Mbps; empty = unlimited),
@@ -175,24 +175,24 @@ recipe: plan code, display name, download/upload speed (Mbps; empty = unlimited)
 allowance, data allowance (GB), disconnect after inactivity, maximum single
 session, and whether the speed is per device or shared. Saving creates a new
 version; you are then offered **Apply these settings to packages?** for future
-guests.
+clients.
 
 **Internet package** (**Internet offering → Internet packages → Add package**) —
-what the guest is offered: name, short code, the service plan, how long access
+what the client is offered: name, short code, the service plan, how long access
 lasts, the data allowance (the service plan's, or per night of the stay), and **who it is
 offered to** (conditions; empty means everyone who signs in). Packages are free to
-the guest. Only the Site admin can create or change packages and service plans (the
+the client. Only the Site admin can create or change packages and service plans (the
 Site viewer can read them; other roles do not see these pages).
 
 > **License capacity vs. max devices.** The signed license caps the total number
-> of guests online **across the whole appliance**, whatever the sign-in method —
-> room sign-in, vouchers, guest accounts, OTP and social login share it. A
-> service plan's **devices at once** caps the devices **per guest, voucher or
+> of clients online **across the whole appliance**, whatever the sign-in method —
+> room sign-in, vouchers, client accounts, OTP and social login share it. A
+> service plan's **devices at once** caps the devices **per client, voucher or
 > account**. Both are checked on every sign-in; a device refused for either reason gets a clear message on the
 > portal and no session. A device that is already signed in does not use a
 > second place when it reconnects.
 
-**Vouchers** (**Internet offering → Vouchers**) — printed cards a guest redeems for
+**Vouchers** (**Internet offering → Vouchers**) — printed cards a client redeems for
 internet access.
 
 - **Code format** (Site admin or Hotel IT manager, on the **Code security** tab):
@@ -206,10 +206,10 @@ internet access.
 - **Batches**: every issue run is a batch. **Export codes** (whole batch or unused
   only) asks for a **reason and your password**.
 - **Show full code** recovers one code for a card already in circulation — the
-  guest at the desk whose card is smudged. It asks for a **reason and your
+  client at the desk whose card is smudged. It asks for a **reason and your
   password** and records both permanently with your name.
 - **Cancel card** stops an unused card working (**reason and password**). It
-  cannot be undone. A used card cannot be cancelled; end that guest's access from
+  cannot be undone. A used card cannot be cancelled; end that client's access from
   **Active sessions**.
 - **Access log** lists every code that was read, by whom and why. Nobody can edit
   or remove it.
@@ -222,12 +222,12 @@ internet access.
 > produced again. A voucher code can be read again — but never without leaving a
 > record of who read it and why.
 
-**Guest accounts** (**Guests → Guest accounts → Add account**) — username and
+**Client accounts** (**Clients → Client accounts → Add account**) — username and
 password sign-in, an alternative to vouchers:
-- **Username** (what the guest types; a single character is allowed), **Name**
+- **Username** (what the client types; a single character is allowed), **Name**
   (for staff only), **Password** (typed, with show/hide and a warning when it is
   short, or **generated**), optional **Valid from / Valid until** and **Notes**.
-  Which internet package the guest may then take is decided by the package rules.
+  Which internet package the client may then take is decided by the package rules.
 - **Passwords are shown once**, with **Copy** and **I have it**. They cannot be
   looked up later — if lost, set a new one with **Password** (optionally
   disconnecting the account's devices).
@@ -261,7 +261,7 @@ complete.
 
 ## 8. Set up code delivery (Email & SMS)
 
-**Guest portal → Email & SMS** (`/notifications`) → add a sender:
+**Client Portal → Email & SMS** (`/notifications`) → add a sender:
 - **Channel** (Email or Text message) and **Service** (SendGrid or Amazon SES for
   email, Twilio for SMS, or *Test only*), **Name**, **API key** (write-only),
   **Account SID** (SMS) or **API user**; for email also **From address** and
@@ -271,7 +271,7 @@ complete.
 
 ## 9. Add social login
 
-**Guest portal → Social login** (`/social-providers`) → add a provider:
+**Client Portal → Social login** (`/social-providers`) → add a provider:
 - **Provider** (Google, Apple, Facebook or Microsoft), **Name on the portal**,
   **Client ID**, **Client secret** (write-only), **Redirect URI** (must match the
   one registered with the provider), **Scopes**, and **Offer this provider**.
@@ -280,7 +280,7 @@ complete.
 
 ## 10. Charges (room charges and online payments)
 
-Selling internet is not switched on today; packages are free to the guest. The
+Selling internet is not switched on today; packages are free to the client. The
 **Charges** group (Charge health, Manual review, Settlements, Recovery) shows how
 room charges and online payments are moving where the feature is enabled, and is
 otherwise *Not enabled on this appliance*. Decisions there belong to the Site
@@ -290,7 +290,7 @@ admin and Payments operator and each needs your password.
 
 ## 11. Allowed sites (before sign-in)
 
-**Guest portal → Allowed sites** (`/walled-garden`) → **Allow a site**: **Type**
+**Client Portal → Allowed sites** (`/walled-garden`) → **Allow a site**: **Type**
 (Domain name, Single address or Address range), **Address**, **Ports** (comma
 separated; empty = every port), and **Why it is needed**. Add only what the
 sign-in page itself needs — every entry is reachable without signing in.
@@ -299,9 +299,9 @@ sign-in page itself needs — every entry is reachable without signing in.
 
 ## 12. Portal settings
 
-**Guest portal → Portal settings** (`/portal-branding`) — design the guest
+**Client Portal → Portal settings** (`/portal-branding`) — design the client
 sign-in page with a live preview (desktop, tablet, mobile), then **Save
-changes**. Guests see it immediately.
+changes**. Clients see it immediately.
 
 - **Template** — Classic, Split, Immersive, Header bar, Resort or Kiosk, and its
   options.
@@ -313,11 +313,11 @@ changes**. Guests see it immediately.
 - **Advanced HTML & CSS** — custom code, saved with **password confirmation**.
 - **History** — restore an earlier save (**password confirmation**).
 
-What guests see is described in [guest-portal.md](guest-portal.md).
+What clients see is described in [guest-portal.md](guest-portal.md).
 
 ---
 
-## 13. Manage Hotel Admin staff (operators)
+## 13. Manage Admin Console staff (operators)
 
 **System → Operators** → **Add operator** (Site admin only): **Email or username**,
 **Name**, **Password (at least 10 characters)**, **Role** (*Site viewer* by
@@ -325,9 +325,9 @@ default). Roles:
 
 | Role | Can do |
 |---|---|
-| Site viewer | Read-only across the appliance; never sees guest credentials or voucher codes |
-| Voucher operator | Issue, cancel and show voucher codes; guest accounts; read sessions |
-| Guest relations operator | Vouchers (including showing codes), guest accounts, sessions (including disconnect), post-stay access, releasing a waiting device; read-only elsewhere |
+| Site viewer | Read-only across the appliance; never sees client credentials or voucher codes |
+| Voucher operator | Issue, cancel and show voucher codes; client accounts; read sessions |
+| Guest relations operator | Vouchers (including showing codes), client accounts, sessions (including disconnect), post-stay access, releasing a waiting device; read-only elsewhere |
 | Front office operator | As guest relations, plus read-only Charges and roster reconciliation |
 | Payments operator | Charges decisions; read-only sessions, usage and voucher cards |
 | Hotel IT manager | Networking, PMS connection, sign-in methods and protection, portal settings, checkout grace, code format, diagnostics; cannot show voucher codes, does not see Internet packages or Service plans, cannot manage operators or take backups |
@@ -345,7 +345,7 @@ cannot remove your own Site admin role or disable yourself.
 
 ## 14. TLS certificate maintenance
 
-**Networking → TLS certificate** — the certificate Hotel Admin is served with
+**Networking → TLS certificate** — the certificate the Admin Console is served with
 renews automatically. Use **Check certificate** to check it now, and **Rotate**
 (**reason + type `ROTATE` + password**) to force a new one. You never upload a key.
 
@@ -371,12 +371,12 @@ normally need to intervene. If you do: **Recheck** re-runs a health check,
 | Add a new guest network | Networking → Guest networks → New guest network |
 | Pin a device to a fixed address | Networking → DHCP & leases → Reservations |
 | Define speeds and limits | Internet offering → Service plans |
-| Decide what guests are offered | Internet offering → Internet packages |
+| Decide what clients are offered | Internet offering → Internet packages |
 | Issue guest Wi-Fi cards | Internet offering → Vouchers → Issue vouchers |
-| Turn sign-in methods on or off | Guest portal → Sign-in methods |
+| Turn sign-in methods on or off | Client Portal → Sign-in methods |
 | Room-number sign-in | Property management system → PMS connection, Network routing |
-| Email/SMS codes | Guest portal → Email & SMS |
-| Google/Apple sign-in | Guest portal → Social login |
-| Change how the sign-in page looks | Guest portal → Portal settings |
+| Email/SMS codes | Client Portal → Email & SMS |
+| Google/Apple sign-in | Client Portal → Social login |
+| Change how the sign-in page looks | Client Portal → Portal settings |
 | Add a staff login | System → Operators |
 | Check appliance health | System → Diagnostics |

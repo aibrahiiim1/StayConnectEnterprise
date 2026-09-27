@@ -38,7 +38,7 @@
      │ (Next.js,  │   │          /cloud/v1, appliance protocol  │   │ TimescaleDB 2.16.1 │
      │  :3000)    │   │          :9443 appliance mutual TLS     │   └────────────────────┘
      └────────────┘   └─────────────────────────────────────────┘──▶ sc-central-redis (sessions)
-     appliances dial in over HTTPS only (outbound from the hotel) — no message bus, no telemetry
+     appliances dial in over HTTPS only (outbound from the site) — no message bus, no telemetry
 ```
 
 | Component | What runs it |
@@ -56,13 +56,13 @@
 | Port | Exposure |
 |---|---|
 | 443 (Caddy) | public — console, `/v1/auth`, `/cloud/v1`, the appliance HTTPS protocol |
-| **9443 (ctrlapi)** | **public, client-certificate-gated** — the appliance mutual-TLS listener. `RequireAndVerifyClientCert` against the appliance CA rejects anything without a certificate that CA signed, during the handshake. It must be reachable from wherever hotels are. |
+| **9443 (ctrlapi)** | **public, client-certificate-gated** — the appliance mutual-TLS listener. `RequireAndVerifyClientCert` against the appliance CA rejects anything without a certificate that CA signed, during the handshake. It must be reachable from wherever sites are. |
 | 22 | management |
 | 5432 · 6379 · 8080 · 3000 | **never public** — bound to 127.0.0.1 (Docker publishes the two containers on 127.0.0.1 only, so ufw is not what protects them) |
 
 `central-firewall.sh --enable` applies exactly this (and also allows whatever port `sshd` really listens on, so
 enabling ufw cannot lock the operator out). It reads the mTLS port from `deploy/config/central-endpoint.env`, so
-it cannot drift from what appliances are told to dial. Central initiates **no** connection toward hotels.
+it cannot drift from what appliances are told to dial. Central initiates **no** connection toward sites.
 
 ## 3. Names, TLS and the host layout
 
@@ -71,7 +71,7 @@ it cannot drift from what appliances are told to dial. Central initiates **no** 
   `CENTRAL_MTLS_BASE`, `CTRLAPI_APPLIANCE_BASE`); the installer, ctrlapi and appliance provisioning all read it.
   **Moving Central is a DNS change** — no appliance knows an IP.
 - The console may have its own name(s) (`--admin-name`), so it can later sit behind MFA/VPN without that
-  becoming a dependency of a hotel's connectivity. Those names become `CTRLAPI_ALLOW_ORIGINS`.
+  becoming a dependency of a site's connectivity. Those names become `CTRLAPI_ALLOW_ORIGINS`.
 - **:443 certificate**, two modes (`--tls`):
   - `internal` (default, what the first Central uses): Central's own TLS CA in `/opt/stayconnect/central/tls`
     issues the certificate (`central-mint-tls.sh`); appliances trust that CA (`install-central-trust.sh`).
@@ -188,7 +188,7 @@ Root CA is a Product-Owner decision, not a deployment step.
    `central-export-<host>-<stamp>.tar.gz.enc` (AES-256, PBKDF2 600k; `--no-encrypt` only onto encrypted media),
    verified to decrypt. **The bundle holds every private key of the vendor.** Move it over an encrypted channel,
    keep the passphrase separate, destroy all copies once the move is verified.
-   Appliances keep serving guests throughout; they retry Central until DNS points at the new host.
+   Appliances keep serving clients throughout; they retry Central until DNS points at the new host.
 4. **Restore on the new host**:
    ```sh
    export CENTRAL_BUNDLE_PASSPHRASE='…'
@@ -306,7 +306,7 @@ Restoring a whole Central from an export bundle is §6 on a clean host. Restorin
 
 ## 11. Failure modes and their blast radius
 
-| Failure | Effect on hotels | Effect on cloud users | Recovery |
+| Failure | Effect on sites | Effect on cloud users | Recovery |
 |---|---|---|---|
 | ctrlapi down | none (licence fetch retries with backoff) | console unusable | `central-deploy.sh rollback`, or redeploy — stateless |
 | Postgres down | none | everything Central down | restart the container; restore §7 |
@@ -314,7 +314,7 @@ Restoring a whole Central from an export bundle is §6 on a clean host. Restorin
 | Host lost | none until renewals are due | cannot issue licences | §6 from the latest export bundle |
 | Vendor key lost | none until renewals are due | cannot issue licences | restore from an export bundle / escrow — there is no other way that keeps the fleet |
 
-The recurring answer in column two — "none" — is the acceptance test: no Central failure may reach a guest.
+The recurring answer in column two — "none" — is the acceptance test: no Central failure may reach a client.
 
 ## 12. Pilot topology (HISTORICAL)
 

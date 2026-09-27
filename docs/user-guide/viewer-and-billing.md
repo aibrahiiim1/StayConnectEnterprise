@@ -1,6 +1,6 @@
 # Viewer & Billing — User Guide
 
-**Viewer** and **Auditor** are the read-only roles in **OneGate Central**; **Billing** is a retired role. Keep this short because there's not much to do. (On an appliance, the equivalent read-only role in **OneGate Hotel Admin** is **Site viewer** — see [hotel-admin-reference.md](hotel-admin-reference.md#who-can-use-which-page).) Roles are defined in [CENTRAL_CONTROL_PLANE.md §7](../CENTRAL_CONTROL_PLANE.md#7-roles).
+**Viewer** and **Auditor** are the read-only roles in **OneGate Central**; **Billing** is a retired role. Keep this short because there's not much to do. (On an appliance, the equivalent read-only role in **OneGate Admin Console** (formerly Hotel Admin) is **Site viewer** — see [hotel-admin-reference.md](hotel-admin-reference.md#who-can-use-which-page).) Roles are defined in [CENTRAL_CONTROL_PLANE.md §7](../CENTRAL_CONTROL_PLANE.md#7-roles).
 
 ---
 
@@ -11,7 +11,7 @@
 ### Who typically gets this role
 
 - Internal or external auditors.
-- Regional managers doing spot checks across properties.
+- Regional managers doing spot checks across sites.
 - Customer support reps who need context but shouldn't touch configuration.
 - Engineers debugging a problem who don't need write access.
 
@@ -27,7 +27,7 @@ Open **Overview**, **Customers** (which opens your customer's page: Summary, Sit
 ### Most useful pages for you
 
 - **Customer → Activity** — who did what, when. Your primary tool for investigations.
-- **Licenses** — each appliance's licence state, guests online at once, and validity.
+- **Licenses** — each appliance's licence state, clients online at once, and validity.
 - **Overview** — what needs attention at a glance.
 - **Appliances** — each appliance's activation and connection state.
 
@@ -43,7 +43,7 @@ A retired role: it **grants nothing in Central** and is no longer offered. Someo
 
 ### Changing what you are licensed for
 
-There is nothing to change in Central yourself: the signed appliance licence is issued and renewed by the OneGate platform admin. Contact your Semantics account contact with what you need (more concurrent guests, a longer term); when it is renewed, a new licence version appears in the appliance's licence history.
+There is nothing to change in Central yourself: the signed appliance licence is issued and renewed by the OneGate platform admin. Contact your Semantics account contact with what you need (more concurrent clients, a longer term); when it is renewed, a new licence version appears in the appliance's licence history.
 
 ### Getting invoices
 
