@@ -161,18 +161,24 @@ eq "no runtime role may execute the boundary termination" \
           WHERE has_function_privilege(r,'iam_v2.terminate_entitlement_at_boundary(uuid,timestamptz,text)','EXECUTE')")" "0"
 
 # ---------------------------------------------------------------------------------------------------------
-sec "5. the three scd-created public tables are deterministic, documented bootstrap"
+sec "5. the offline-package ledger is deterministic, documented bootstrap"
 #
-# No migration creates edge_executed_commands, edge_installed_updates or edge_offline_packages; scd creates
-# them at first use. That is a real property of this system and is recorded rather than papered over -- but it
-# must be DETERMINISTIC and OWNED, or a restore would silently produce a different database.
-for t in edge_executed_commands edge_installed_updates edge_offline_packages; do
+# edge_offline_packages is declared by migration 0048 (scd used to create it at first use). It must be
+# DETERMINISTIC and OWNED, or a restore would silently produce a different database. Its two siblings from
+# 0048, edge_executed_commands and edge_installed_updates, recorded the signed command channel and the
+# software-update agent; both are removed, and migration 0093 drops them.
+for t in edge_offline_packages; do
   eq "public.$t exists and is owned by the installation superuser" \
      "$(q "SELECT pg_get_userbyid(relowner) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
             WHERE n.nspname='public' AND c.relname='$t'")" "stayconnect"
   eq "...and Gate P's grant to svc_scd on it is present" \
      "$(q "SELECT (count(*) > 0)::text FROM information_schema.role_table_grants
             WHERE table_schema='public' AND table_name='$t' AND grantee='svc_scd'")" "true"
+done
+for t in edge_executed_commands edge_installed_updates; do
+  eq "public.$t is gone with the channel that wrote it (0093)" \
+     "$(q "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+            WHERE n.nspname='public' AND c.relname='$t'")" "0"
 done
 
 # ---------------------------------------------------------------------------------------------------------

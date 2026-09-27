@@ -80,17 +80,18 @@ TENA_CLOUD=$(echo "SELECT id FROM tenants WHERE slug='dev';" | $PSQLC)
 TENB_CLOUD=$(echo "SELECT id FROM tenants WHERE slug='acme';" | $PSQLC)
 curl -s -c "$CJ" -X POST $API/v1/auth/login -H 'Content-Type: application/json' \
   -d '{"email":"admin@stayconnect.local","password":"adminadmin01"}' -o /dev/null
-# ensure an acme-scoped operator exists
-curl -s -b "$CJ" -X POST "$API/v1/operators?tenant_id=$TENB_CLOUD" -H 'Content-Type: application/json' \
+# ensure an acme-scoped operator exists (changing a sign-in needs a recent password re-entry)
+curl -s -b "$CJ" -c "$CJ" -X POST $API/v1/auth/reauth -H 'Content-Type: application/json' -d '{"password":"adminadmin01"}' -o /dev/null
+curl -s -b "$CJ" -X POST "$API/cloud/v1/customers/$TENB_CLOUD/users" -H 'Content-Type: application/json' \
   -d '{"email":"iso-acme@test.local","display_name":"Iso Acme","password":"isolationpass1","role":"tenant_admin"}' -o /dev/null || true
 curl -s -c "$CJB" -X POST $API/v1/auth/login -H 'Content-Type: application/json' \
   -d '{"email":"iso-acme@test.local","password":"isolationpass1"}' -o /dev/null
-# acme operator asks for dev tenant's licenses: tenant_id override must be ignored
-N=$(curl -s -b "$CJB" "$API/cloud/v1/licenses?tenant_id=$TENA_CLOUD" | python3 -c '
+# acme operator asks for dev tenant's licenses: a customer user's customer_id filter must be ignored
+N=$(curl -s -b "$CJB" "$API/cloud/v1/licenses?customer_id=$TENA_CLOUD" | python3 -c '
 import sys, json
 d = json.load(sys.stdin)
-rows = d.get("data") or []
-print(sum(1 for r in rows if r.get("tenant_id") == "'"$TENA_CLOUD"'"))' 2>/dev/null || echo "parse-fail")
+rows = d.get("items") or []
+print(sum(1 for r in rows if r.get("customer_id") == "'"$TENA_CLOUD"'"))' 2>/dev/null || echo "parse-fail")
 [ "$N" = "0" ] && ok "tenant B operator sees zero tenant-A licenses" || bad "tenant A licenses visible to tenant B: $N"
 
 echo

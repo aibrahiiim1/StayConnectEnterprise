@@ -3,8 +3,8 @@
 Production, self-managing lifecycle for the Hotel Admin dual-SAN leaf certificate
 (`hotel.stayconnect.local` + the current Management/WAN IP). No operator has to
 remember to renew anything. Scope is ONLY this local Hotel Admin HTTPS leaf — it
-never touches the vendor appliance mTLS PKI, Root/Intermediate CA, API-client /
-NATS certs, or assignment/license/command/update keys.
+never touches the vendor appliance mTLS PKI, Root/Intermediate CA, API-client certificates,
+or assignment/license keys.
 
 ## Components
 
@@ -15,7 +15,6 @@ NATS certs, or assignment/license/command/update keys.
 | scd `/v1/hotel-admin-cert/{check,rotate,renew}` | data-plane (root) | executes the manager on behalf of the sandboxed edged |
 | edged `/edge/v1/hotel-admin-cert[/check|/rotate]` | data-plane | status surface + manual controls (permission + step-up); proxies exec to scd |
 | Hotel Admin → **Networking → TLS certificate** | hotel-admin UI | live status card + “Check certificate” + “Rotate Hotel Admin certificate” |
-| Central **Fleet → TLS cert** column | cloud-admin UI | fleet-wide warning/critical/expired/renewal-failure from sanitized telemetry |
 | `/etc/caddy/hotel-admin/vhost.caddy` | imported by main Caddyfile | managed vhost: site address (DNS + current IP), `tls`, reverse_proxy — rewritten on renewal |
 
 ## Renewal triggers & thresholds
@@ -23,7 +22,8 @@ NATS certs, or assignment/license/command/update keys.
 The manager renews when ANY of: remaining validity ≤ **45 days**; the management
 IP changed; the certificate SAN set no longer equals `{DNS:hotel.stayconnect.local,
 IP:<current mgmt IP>}`; or the cert is missing/invalid. Otherwise it is a **no-op**
-(idempotent). Status thresholds surfaced in both UIs and telemetry:
+(idempotent). Status thresholds surfaced in Hotel Admin (Central receives no telemetry and does not show
+the Hotel Admin certificate — CLAUDE.md §0E):
 
 `healthy` > 45d · `renewal_due` ≤ 45d · `warning` ≤ 30d · `critical` ≤ 14d ·
 `emergency` ≤ 7d · `expired` invalid.
@@ -69,8 +69,8 @@ material is never printed to logs or sent in telemetry.
 The manager writes `/etc/caddy/hotel-admin/status.json` (subject, issuer, serial,
 SHA-256 fingerprint, DNS/IP SANs, issued/expires, days remaining, threshold,
 current mgmt IP, SAN match, last attempt/success/result/error). edged serves it at
-`GET /edge/v1/hotel-admin-cert`; scd folds the **sanitized** subset into its
-health telemetry (`hotel_admin_cert`) → Central Fleet. Local audit events (site
+`GET /edge/v1/hotel-admin-cert`. (A sanitized subset used to go to Central as health
+telemetry; the appliance's telemetry subsystem was removed — CLAUDE.md §0E.) Local audit events (site
 `audit_log`): `renewal_started/succeeded/failed`, `rollback_succeeded/failed`,
 `management_ip_changed`, `certificate_san_changed`; edged additionally records
 `hotel_admin_cert.rotate_requested` with the operator + reason.
@@ -97,7 +97,7 @@ timer never becomes a rapid loop.
 ## Operations runbook
 
 **Check status:** `stayconnect-hotel-admin-cert-manager status` (or Hotel Admin →
-Networking → TLS certificate, or Central Fleet).
+Networking → TLS certificate).
 **Force a rotation:** UI “Rotate”, or `systemctl start
 stayconnect-hotel-admin-cert-renew.service` for a due-only run, or (root)
 `stayconnect-hotel-admin-cert-manager rotate`.
@@ -125,7 +125,7 @@ re-mints from the CA.
 
 ## Certificate incident procedure
 
-- **`warning`/`critical`/`emergency`/renewal-failure** on Central Fleet or Hotel
+- **`warning`/`critical`/`emergency`/renewal-failure** in Hotel
   Admin: open `journalctl -u stayconnect-hotel-admin-cert-renew`, read
   `status.json` `last_error`. Common causes: ambiguous mgmt IP (fix the interface
   config), CA unavailable. Force a `rotate` once resolved.

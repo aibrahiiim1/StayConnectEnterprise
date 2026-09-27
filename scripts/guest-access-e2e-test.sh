@@ -232,6 +232,26 @@ pmschoose(){ local n=$1 j=$2 acx prv
     j=$(ip netns exec $n curl -s -H 'Content-Type: application/json' -d "{\"auth_context_id\":\"$acx\",\"package_revision_id\":\"$prv\"}" "$PORTAL/auth/pms/phase3")
   fi
   printf '%s' "$j"; }
+# caplimit: how many more guests the appliance's signed licence admits right now ("" = unlimited or unknown).
+# Room sign-in now takes a licensed slot exactly like a voucher or account does, so a full appliance must
+# refuse it with the shared capacity answer rather than admit it.
+caplimit(){ curl -sk $R -b $CK "$B/central/status" | python3 -c '
+import sys, json
+try:
+    l = (json.load(sys.stdin).get("license") or {})
+    m, c = l.get("max_concurrent_online_guests"), l.get("current_online_guests")
+    print("" if not m or m <= 0 else max(0, m - (c or 0)))
+except Exception:
+    print("")' 2>/dev/null; }
+if [ -n "$STAY" ] && [ "$(caplimit)" = 0 ]; then
+  ok "test stay selected (${STAY:0:8}); the appliance is at its licensed guest capacity"
+  j=$(pmschoose ga2 "$(pms ga2 "$RES")")
+  ! printf '%s' "$j" | grep -q '"ok":true' && printf '%s' "$j" | grep -qi "at capacity" && [ "$(lastroom)" = LICENSE_CAPACITY_REACHED ] \
+    && ok "room sign-in refused at licensed capacity (recorded LICENSE_CAPACITY_REACHED), like every other method" \
+    || bad "room sign-in at capacity: $(lastroom) $(printf '%s' "$j" | head -c 160)"
+  STAY=""   # the positive room test needs a free slot; nothing was granted, so there is nothing to clean up
+  SKIP_ROOM=1
+fi
 if [ -n "$STAY" ]; then
   ok "test stay selected (${STAY:0:8}): in house, alone in its room, no access held"
   j=$(pms ga2 "wrong-$RES"); ! printf '%s' "$j" | grep -q '"ok":true' && [ "$(lastroom)" = CREDENTIAL_MISMATCH ] && ok "the right room with the wrong verification is refused (CREDENTIAL_MISMATCH)" || bad "wrong verification: $(lastroom)"
@@ -241,8 +261,14 @@ if [ -n "$STAY" ]; then
   [ -n "$PSID" ] && [ "$($PSQL "SELECT stay_id FROM iam_v2.entitlements WHERE id='$PMS_ENT'")" = "$STAY" ] && ok "room sign-in granted the stay's entitlement and a session" || bad "PMS grant: $(printf '%s' "$j" | head -c 200)"
   inset "$CIP2" && [ "$(online ga2)" = 204 ] && ok "room device enforced and online (204)" || bad "room device probe $(online ga2)"
   PMAX=$($PSQL "SELECT sp.max_concurrent_devices FROM iam_v2.entitlements e JOIN iam_v2.service_plan_revisions sp ON sp.id=e.service_plan_revision_id WHERE e.id='$PMS_ENT'")
+  LEFT=$(caplimit)
   j=$(pmschoose ga4 "$(pms ga4 "$RES")")
-  if [ "${PMAX:-1}" -gt 1 ]; then
+  if [ "$LEFT" = 0 ]; then
+    # The second device of the room is verified, but joining opens a new session and the licence is full.
+    printf '%s' "$j" | grep -qi "at capacity" && [ "$(lastroom)" = LICENSE_CAPACITY_REACHED ] && [ "$(online ga4)" != 204 ] \
+      && ok "a second room device is refused at the licensed guest capacity (LICENSE_CAPACITY_REACHED)" \
+      || bad "second room device at capacity: $(lastroom) $(printf '%s' "$j" | head -c 200)"
+  elif [ "${PMAX:-1}" -gt 1 ]; then
     PSID2=$(printf '%s' "$j" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("session_id",""))' 2>/dev/null)
     [ -n "$PSID2" ] && [ "$(ent_of_session "$PSID2")" = "$PMS_ENT" ] && [ "$(online ga4)" = 204 ] && [ "$(online ga2)" = 204 ] \
       && ok "a second device of the same room JOINED the stay's entitlement; both online (limit $PMAX)" || bad "second room device: $(printf '%s' "$j" | head -c 200)"
@@ -270,7 +296,7 @@ if [ -n "$STAY" ]; then
   else
     [ "$($PSQL "SELECT count(*) FROM iam_v2.purchases WHERE stay_id='$STAY'")" = 1 ] && ok "no package left for the stay: refused without a second purchase" || bad "re-sign-in: $(printf '%s' "$j" | head -c 160)"
   fi
-else
+elif [ -z "${SKIP_ROOM:-}" ]; then
   bad "no in-house stay suitable for the positive room test"
 fi
 

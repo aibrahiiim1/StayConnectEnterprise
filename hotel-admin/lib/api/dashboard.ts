@@ -399,6 +399,8 @@ const RESULTS: Record<string, string> = {
   SERVICE_UNAVAILABLE: "Service unavailable",
   SPENT_REQUEST_ID: "Repeated submission",
   MALFORMED_SUBMISSION: "Incomplete form",
+  LICENSE_REFUSED: "Licence does not admit new guests",
+  LICENSE_CAPACITY_REACHED: "Licensed guest capacity full",
 };
 export const resultLabel = (r: string) => RESULTS[r] ?? r.replace(/_/g, " ").toLowerCase();
 

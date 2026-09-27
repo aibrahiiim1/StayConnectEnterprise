@@ -236,10 +236,6 @@ var rolePerms = map[string]map[string]perm{
 		// because it is an integration action, and because closing several hundred stays at once is not
 		// something a desk under pressure should be able to reach for.
 		"pms-roster-reconciliation": permWrite,
-		// Reporting to the cloud is appliance infrastructure, which is this role's territory. The two keys
-		// stay separate: a retention period is a policy, and releasing nine thousand abandoned records onto
-		// the wire is an action with a far end that has to absorb it.
-		"cloud-sync-settings": permWrite, "cloud-sync-recovery": permWrite,
 		// VOUCHERS. The row in docs/ROLE_AND_SCOPE_MATRIX.md 3 has said W for this role since before the
 		// resource key existed, which is why it was never enforced: there was no `vouchers` key at all, so
 		// the documented boundary was decorative. It is the document's row, not a new decision.
@@ -357,10 +353,9 @@ var rolePerms = map[string]map[string]perm{
 		"commercial-packages": permRead,
 		// Phase 3 (DARK): a viewer sees the evidence and never acts on it.
 		"pms-stays": permRead, "pms-events": permRead, "pms-resolutions": permRead,
-		// The reconciliation backlog and the cloud queue's history are evidence of the same kind — including
-		// the recovery log, which records what somebody did about it. A viewer reads both and acts on neither.
-		"pms-reconciliation":  permRead,
-		"cloud-sync-settings": permRead, "cloud-sync-recovery": permRead,
+		// The reconciliation backlog is evidence of the same kind. A viewer reads it and acts on none of it.
+		"pms-reconciliation": permRead,
+
 		"checkout-grace": permRead, "operational-alerts": permRead,
 		"pms-interfaces": permRead, "pms-routing": permRead, "pms-source-conflicts": permRead,
 		// Phase 5 (DARK): a viewer sees WHETHER a post-stay identity can authenticate, and never acts on it.

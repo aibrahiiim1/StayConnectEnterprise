@@ -85,7 +85,7 @@ function healthy(): any {
     },
     appliance: {
       version: "0.1.0-edge",
-      license: { available: true, state: "Active", installed: true, valid_until: "2027-01-01T00:00:00Z" },
+      license: { available: true, state: "active", installed: true, valid_until: "2027-01-01T00:00:00Z" },
       network: { available: true, wan_address: "172.21.60.25/24", wan_mode: "static", lan_address: "10.10.0.1/24", internet_reachable: true },
       revisions: { available: true, latest_active: { seq: 12, state: "active", confirmed_at: "2026-09-20T10:00:00Z" } },
       resources: {
@@ -120,7 +120,7 @@ function allUnavailable(): any {
   return s;
 }
 
-const HEALTH = { service: "edged", version: "0.1.0-edge", site_id: "s", status: "ok", db: true, scd: true, license_state: "Active", license_installed: true, sync_outbox: { enabled: false, mode: "LICENSING_ONLY" } };
+const HEALTH = { service: "edged", version: "0.1.0-edge", site_id: "s", status: "ok", db: true, scd: true, license_state: "active", license_installed: true };
 
 function route(overview: (range: string) => any, health: any = HEALTH) {
   get.mockImplementation((path: string) => {
@@ -130,7 +130,7 @@ function route(overview: (range: string) => any, health: any = HEALTH) {
     }
     if (path === "/health") return Promise.resolve(health);
     if (path === "/capabilities") return Promise.resolve({ surfaces: [] });
-    if (path === "/setup/status") return Promise.resolve({ assignment: { site_name: "Semantics Demo" }, hardware: { hostname: "sc-01" } });
+    if (path === "/central/status") return Promise.resolve({ site_name: "Semantics Demo", serial: "SC-01" });
     return Promise.reject(new Error(`unexpected ${path}`));
   });
 }
@@ -143,7 +143,7 @@ describe("the overview", () => {
   it("renders the measured figures and the property context", async () => {
     route(() => healthy());
     render(<DashboardPage />);
-    expect(await screen.findByText("Semantics Demo · sc-01")).toBeInTheDocument();
+    expect(await screen.findByText("Semantics Demo · SC-01")).toBeInTheDocument();
     expect((await screen.findAllByText("5.40 GB")).length).toBeGreaterThan(0);
     expect(screen.getByText("80%")).toBeInTheDocument(); // 20 of 25 room checks
     expect(screen.getByText("Name or reservation did not match")).toBeInTheDocument();

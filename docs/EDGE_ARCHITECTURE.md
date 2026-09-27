@@ -9,13 +9,15 @@
 
 | Daemon | Listens | Role |
 |---|---|---|
-| `scd` | Unix socket `/run/stayconnect/scd.sock` (+ loopback `/metrics`) | Session controller: owns nft `auth_ipv4` set, tc classes, sessions table; validates vouchers/OTP/social/PMS; PMS provider registry; reaper. **Also hosts the sync agent**: outbox drain to NATS, periodic license fetch, config-push subscriber, heartbeat |
+| `scd` | Unix socket `/run/stayconnect/scd.sock` (+ loopback `/metrics`) | Session controller: owns nft `auth_ipv4` set, tc classes, sessions table; validates vouchers/OTP/social/PMS; PMS provider registry; reaper. **Also hosts the Central agent**: token-less registration, signed assignment poll, certificate, licence fetch, hello (§6) |
 | `portald` | `:8380` HTTP / `:8343` HTTPS on the guest interface | Captive portal front end; no DB, no business logic — proxies to scd over the socket |
 | `acctd` | none (1s tick) | tc byte-counter snapshots → `accounting_records`, quota enforcement via scd |
-| `edged` | loopback, fronted by Caddy on the **management IP** | The Hotel Admin API (`/edge/v1`): local operator auth, guest-domain CRUD, license status, reports, backups. Serves the `hotel-admin/` UI bundle |
+| `edged` | loopback, fronted by Caddy on the **management IP** | The Hotel Admin API (`/edge/v1`): local operator auth, guest-domain CRUD, Central/licence status, reports, backups. Serves the `hotel-admin/` UI bundle |
 
-All four read/write only the local DB. The single cloud-touching component is
-the sync agent inside scd (outbound NATS + outbound HTTPS license fetch).
+All four read/write only the local DB, and each takes its tenant/site from the
+**verified** signed assignment (no environment fallback in a production build).
+The single cloud-touching component is the Central agent inside scd (outbound
+HTTPS only; the appliance has no message-bus client — CLAUDE.md §0E).
 
 ## 2. Site-local database (`stayconnect_site`)
 
@@ -34,7 +36,7 @@ by changing only their DSN and `sitemigrate` copies rows 1:1.
 | Providers & payments | `notification_providers`, `social_oauth_providers`, `stripe_accounts`, `payments`, `stripe_events` |
 | Compliance | `audit_log` (local; hotel actions stay at the hotel) |
 | Entitlements bridge | `tenant_effective_limits` — a **plain table** (the cloud version is a view) rewritten by scd/edged from the verified signed license. Existing limit queries (`session.CheckConcurrency`, provisioning caps) work unchanged; source of truth is the license file, never a cloud DB |
-| Sync & ops | `sync_outbox` (seq identity, attempts, next_attempt_at, dead, last_error), `sync_checkpoints` (named jsonb checkpoints), `backup_records` |
+| Ops | `backup_records`, `edge_offline_packages` (single-use ledger of imported offline activation packages, reconciled with Central), `appliance_service_health` (local service health, read by Hotel Admin). The former telemetry queue (`sync_outbox`, `sync_checkpoints`) and the command/update ledgers were dropped by migration 0093 |
 
 `accounting_records` and `audit_log` become hypertables when TimescaleDB is
 installed (pilot), plain indexed tables otherwise.
@@ -49,7 +51,8 @@ Provisioning writes are additionally gated by license state
 | Resource | Routes | Purpose |
 |---|---|---|
 | health | `GET /edge/v1/health` | daemon + DB + license-state summary |
-| license | `GET /edge/v1/license` (status/evaluation), `POST /edge/v1/license` (manual envelope upload — offline renewal path) | license page |
+| central | `GET /edge/v1/central/status` (activation, licence, Central connection, technical details — [CENTRAL_CONTROL_PLANE.md §8](CENTRAL_CONTROL_PLANE.md#8-hotel-admin--central)), `POST /edge/v1/central/refresh` (Check now), `GET /edge/v1/central/offline-request`, `POST /edge/v1/central/offline-package` | Appliance & licence page |
+| license | `POST /edge/v1/license` (licence file upload — offline renewal path) | Appliance & licence page |
 | operators | CRUD + set-password/roles | local hotel staff |
 | guest-access-plans | CRUD (`ticket_templates`) | duration/caps/bandwidth/price |
 | voucher-batches | list/create/detail/codes/CSV/revoke | |
@@ -71,7 +74,7 @@ Provisioning writes are additionally gated by license state
 
 | Interface | Example | Carries |
 |---|---|---|
-| **Management** | `172.21.15.30/24` on the hotel's IT/management VLAN | Hotel Admin (`https://172.21.15.30` via Caddy), SSH, outbound sync (NATS + license HTTPS), monitoring |
+| **Management** | `172.21.15.30/24` on the hotel's IT/management VLAN | Hotel Admin (`https://172.21.15.30` via Caddy), SSH, outbound HTTPS to Central, monitoring |
 | **Guest gateway** | `10.20.0.1/24` on the guest bridge | Kea DHCP (+ RFC 8910 option 114 → `http://10.20.0.1:8380/`), Unbound DNS, nftables captive DNAT :80→8380/:443→8343, portald, tc shaping, masquerade to uplink |
 | **HA sync** (optional) | dedicated link/VLAN between the pair | VRRP adverts, conntrackd FTFW, Postgres streaming replication |
 
@@ -92,9 +95,9 @@ Caddy on the appliance is the only TLS terminator:
 | guest portal | portald `:8380/:8343` | Guest interface only; portal HTTP stays direct-to-portald for RFC 8910 (no HTTPS redirect on the captive path) |
 
 Hotel Admin is therefore reachable exclusively from the hotel's management
-network — not from guest devices and not from the internet. Cloud operators who
-need site data see it through fleet telemetry, never through a direct connection
-to the appliance.
+network — not from guest devices and not from the internet. Central operators
+see only activation, connection and licence state; there is no telemetry and no
+direct connection to the appliance.
 
 ## 5A. PMS transport offline is an OPERATING MODE, not an incident
 
@@ -165,30 +168,54 @@ Preferred wording:
 **Do not classify the system as globally impaired while the local mirror remains usable.** "PMS disconnected"
 and "guests cannot get online" are different statements, and only the second is an incident.
 
-## 6. Sync agent (inside scd)
+## 6. Central agent (inside scd)
 
-- **Outbox writer**: every reportable local event (heartbeat, health snapshot,
-  usage rollup, auth counters, PMS health, license ack, backup result, sync
-  stats, update progress) is a row in `sync_outbox`.
-- **Drain loop**: publishes pending rows to `telemetry.<applianceID>` in `seq`
-  order via NATS request/reply; marks `sent_at` only on `Nats-Status: 200`;
-  otherwise exponential backoff via `next_attempt_at`, `dead=true` after the
-  retry budget. Details: [SYNC_PROTOCOL.md](SYNC_PROTOCOL.md).
-- **License refresh**: periodic `GET /v1/appliance/license` (Ed25519 appliance
-  JWT); on success installs the envelope (rollback-protected) and calls
-  `MarkCloudValidated`.
-- **Inbound**: `config.<tenantID>.pms` reload events and revocation data
-  (embedded in license fetch responses). Both tolerate arbitrarily long outages.
+Central serves the appliance for licensing only (CLAUDE.md §0E). Every call is
+appliance-initiated HTTPS, signed with the appliance's Ed25519 identity key
+(and over mutual TLS once it holds a certificate):
+
+- **Registration**: token-less, self-signed `POST /v1/appliances/register` at
+  boot; retried in the background (30 s, backing off to 5 minutes) until Central
+  answers, and on **Check now**.
+- **Assignment**: `GET /v1/appliance/assignment` every 30 s, verified against
+  the signed key registry; the verified document is the only tenant/site
+  authority; `POST /v1/appliance/assignment/ack` confirms the adopted version.
+- **Certificate**: CSR → issue → fetch, rotated before expiry.
+- **Licence refresh**: `GET /v1/appliance/license` every minute until a usable
+  licence is installed, then every 6 hours, and at once on **Check now**; on
+  success installs the envelope (rollback-protected) and calls
+  `MarkCloudValidated`. Revocations arrive embedded in the response. The
+  licence (including its hardware binding) is re-evaluated locally every minute
+  and at boot.
+- **Hello**: `GET /v1/appliance/hello` at boot and every 5 minutes. If Central
+  twice answers that it no longer knows the appliance: one that **never held a
+  customer** clears its identity and registers again as waiting; one that **has
+  held a customer** (a granting or terminal assignment on disk, or tenant data in
+  the site DB) removes its licence and client certificate, keeps its identity and
+  data, writes `/etc/stayconnect/removed-from-central.json` and never registers
+  again — the status reads `activation: retired`, `details.reason:
+  removed_from_central`, and only a factory-clean install brings it back
+  (`cmd/scd/removed_from_central.go`).
+- **Terminal acknowledgement and offline reconcile**: the signed ack of a
+  terminal (retirement) assignment and `POST /v1/appliance/offline-reconcile`
+  for a consumed offline package are retried until Central confirms
+  (`cmd/scd/central_retry.go`); neither is on a guest path.
+
+There is nothing else: no telemetry outbox or producer, no remote command
+channel, no software-update agent and no cloud-mode setting. That subsystem was
+removed on 2026-09-27 (appliance migration 0093); its historical design is in
+[SYNC_PROTOCOL.md](SYNC_PROTOCOL.md).
 
 ## 7. HA pair specifics
 
-Data path HA is unchanged from phase 5.5 (keepalived VRRP on the guest VIP,
-conntrackd, nft `auth_ipv4` replication over `nft.<siteID>`, boot reconcile from
-`sessions`). New: the site DB runs on the primary with **streaming replication**
-to the secondary; edged and scd on the secondary point at the local replica and
-promote it on failover. Split-brain risk and the recommended cloud-heartbeat
-witness are documented in [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md) §6 —
-a known limitation, witness not yet implemented.
+**Not implemented.** HA failover under the two-NIC (WAN+LAN) architecture is
+not designed, implemented or accepted, and its synchronisation transport is an
+open decision ([TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md) §6). The earlier
+design — keepalived VRRP, conntrackd, nft `auth_ipv4` replication over a message
+bus and site-DB streaming replication — is design history only: the message-bus
+replication was removed from scd with the rest of the NATS transport, and scd's
+nft wrapper is local-only. Boot reconcile of `auth_ipv4` from `sessions` is
+current single-appliance behaviour.
 
 ## 8. Phase 19 — Networking
 

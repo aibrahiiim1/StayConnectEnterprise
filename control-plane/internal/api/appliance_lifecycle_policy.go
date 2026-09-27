@@ -2,56 +2,39 @@ package api
 
 import "context"
 
-// Appliance lifecycle termination policy — the single authoritative contract for
-// ending or changing an appliance's authority. Every terminal/lifecycle handler
-// routes its license-termination decision through revokeApplianceBoundLicenses so
-// no path can silently leave an orphaned active/suspended license behind.
+// Appliance authority termination — what each path does with the licence (per-appliance, always):
 //
-// Per-action contract (what each path MUST do):
+//	Retire (normal)     licence: revoked at once | credentials: two-phase (signed terminal doc, ack, revoke)
+//	Retire (emergency)  licence: revoked at once | credentials: revoked immediately, identity revoked
+//	Replace             licence: KEPT until the replacement is activated at the same site, then revoked;
+//	                    the old appliance is retired exactly like a normal Retire (signed terminal doc, ack,
+//	                    THEN credentials revoked)
+//	Move, same customer licence: re-issued, terms unchanged, bound to the new site, next version; refused
+//	                    (fail closed) when licensing is unavailable or the licence cannot be read
+//	Move, new customer  REFUSED. Changing customer is Retire -> factory-reset -> register -> Activate.
+//	Delete              only waiting or retired appliances; licence and certificates revoked defensively; a
+//	                    retired identity key is remembered and can never register again
 //
-//	Delete (admin + tenant)  license: revoke bound  | cert/assignment: cascade-removed | NATS: denied (cert gone)
-//	Decommission (terminal)  license: revoke bound  | cert/NATS: two-phase (ack) or immediate (emergency) | assignment: signed terminal doc
-//	Revoke (terminal)        license: revoke bound  | cert/NATS: two-phase (ack) or immediate (emergency) | assignment: signed terminal doc
-//	Emergency compromise     license: revoke bound  | cert/NATS: revoked IMMEDIATELY | assignment: signed terminal doc (unconfirmed)
-//	Deactivate (reversible)  license: revoke bound  | cert/assignment: PRESERVED (may re-activate)
-//	Replace                  license: KEEP (old box stays operational until the replacement is online) — revoke via the terminal path afterwards
-//	Reassign (cross-tenant)  license: revoke bound old-tenant entitlement | assignment: re-signed for the new owner
-//	Factory reset (local)    Central authority UNCHANGED — surfaced/reconciled via orphan reconcile + boot-hello, never treated as a Central delete
-//
-// Certificate/NATS termination is deliberately NOT folded in here: it differs by
-// action (two-phase terminal delivery for terminal states, ON DELETE CASCADE for
-// hard delete, preserved for reversible deactivate) and already lives in one place
-// per mode (phase2ShutCredentials for the terminal path).
+// Credentials (certificate) are revoked ONLY by a verified terminal ack (AckHandler) or an emergency retire.
+// Licence operations (suspend / resume / revoke / set) NEVER touch the appliance lifecycle.
 
-// revokeApplianceBoundLicenses revokes every active/suspended license BOUND to
-// this appliance (its id present in licenses.appliance_ids). Site-wide licenses
-// (empty appliance_ids) are intentionally left untouched — a site license stays
-// valid while its site exists and may entitle other appliances. Idempotent:
-// re-running revokes nothing already terminal. Returns the revoked license ids.
+// revokeApplianceBoundLicenses revokes every current (active/suspended) licence bound to this appliance.
+// Idempotent. Returns the revoked licence ids.
 func (b *Base) revokeApplianceBoundLicenses(ctx context.Context, applianceID string) ([]string, error) {
-	if b.Lic == nil {
-		return nil, nil
-	}
-	rows, err := b.DB.Query(ctx,
-		`SELECT id::text FROM licenses WHERE $1 = ANY(appliance_ids) AND status IN ('active','suspended')`,
-		applianceID)
+	rows, err := b.DB.Query(ctx, `
+        UPDATE licenses SET status='revoked', revoked_at=now()
+         WHERE $1::uuid = ANY(appliance_ids) AND status IN ('active','suspended')
+        RETURNING id::text`, applianceID)
 	if err != nil {
 		return nil, err
 	}
-	var ids []string
+	defer rows.Close()
+	revoked := []string{}
 	for rows.Next() {
 		var id string
 		if rows.Scan(&id) == nil {
-			ids = append(ids, id)
+			revoked = append(revoked, id)
 		}
 	}
-	rows.Close()
-
-	revoked := make([]string, 0, len(ids))
-	for _, lid := range ids {
-		if b.Lic.Revoke(ctx, lid) == nil {
-			revoked = append(revoked, lid)
-		}
-	}
-	return revoked, nil
+	return revoked, rows.Err()
 }

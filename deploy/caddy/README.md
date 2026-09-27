@@ -6,7 +6,7 @@ roles do not overlap:
 | File | Deployed on | Sites it terminates |
 |---|---|---|
 | `Caddyfile.edge` | Hotel Appliance (Edge) | `portal.stayconnect.local` -> portald `127.0.0.1:8380`; `hotel.stayconnect.local` + management IP -> hotel-admin `127.0.0.1:3100` (imported from `/etc/caddy/hotel-admin/vhost.caddy`) |
-| `Caddyfile.central` | Central Control Plane | one site -> ctrlapi `127.0.0.1:8080` for `/v1/* /cloud/* /healthz /readyz /metrics`, cloud-admin `127.0.0.1:3000` for everything else |
+| `Caddyfile.central` | OneGate Central | a **template** rendered by `central-install.sh`: one site (the appliance-facing name first, then the console name(s)) -> ctrlapi `127.0.0.1:8080` for `/v1/* /cloud/* /healthz /readyz`, cloud-admin `127.0.0.1:3000` for everything else. `/metrics` is deliberately not proxied. |
 | `Caddyfile.dev` | single-box dev VM only | all three sites on one host - **never deploy this to a real Edge or Central** |
 
 **Why the split exists.** A single all-in-one template used to serve all three sites, written when Central
@@ -54,13 +54,27 @@ service then cannot open it and *every* start fails with `setting up custom log 
 If you add a site that does need its own log file, create it first with
 `install -o caddy -g caddy -m 0640 /dev/null /var/log/caddy/<name>.log`.
 
+## Central: rendered, never copied
+
+`Caddyfile.central` carries three tokens — `__CENTRAL_SITE_ADDRESSES__`, `__CENTRAL_TLS__`,
+`__CENTRAL_GLOBAL_EXTRA__` — and is not a valid Caddyfile until they are filled. `deploy/scripts/central-install.sh`
+renders it into `/etc/caddy/Caddyfile` from the settings it records in `/etc/stayconnect/central-install.env`
+(site names; `internal` TLS with `/etc/caddy/tls/server.{crt,key}` from `central-mint-tls.sh`, or `acme` with an
+email), validates it, creates `/var/log/caddy/central.log` owned by `caddy` first, installs
+`stayconnect-caddy.central.service` as `stayconnect-caddy.service` and **masks** the package's stock
+`caddy.service` (both would bind :443). `central-deploy.sh` re-renders it from each new release and restarts
+Caddy only when the result differs. Smoke-test Central **by name**
+(`curl --resolve <name>:443:127.0.0.1 https://<name>/readyz`): an unmatched Host gets Caddy's empty 200. The full
+runbook is [docs/DEPLOYMENT_CLOUD.md](../../docs/DEPLOYMENT_CLOUD.md). Everything below this heading is the
+generic (Edge-era) Caddy guide.
+
 ## What this gives you
 
 | Public host           | Terminates at Caddy → forwards to |
 |-----------------------|-----------------------------------|
 | `portal.example.com`  | `127.0.0.1:8380` (portald)        |
 | `api.example.com`     | `127.0.0.1:8080` (ctrlapi)        |
-| `admin.example.com`   | `127.0.0.1:3000` (web-admin)      |
+| `admin.example.com`   | `127.0.0.1:3000` (cloud-admin)    |
 
 Every response carries:
 - `Strict-Transport-Security: max-age=31536000; includeSubDomains`
@@ -81,7 +95,7 @@ HTTP → HTTPS is automatic (Caddy's default redirect).
    `:80`; `:443` is the whole point).
 3. A real email address in the Caddyfile global block (used by Let's
    Encrypt for renewal warnings).
-4. portald/ctrlapi/web-admin running and bound to `127.0.0.1` — NEVER
+4. portald/ctrlapi/cloud-admin running and bound to `127.0.0.1` — NEVER
    expose their raw ports to the internet.
 
 ## Install
@@ -96,12 +110,10 @@ curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
 apt update && apt install -y caddy
 ```
 
-Then drop the config in:
+Then drop the config in (on the **appliance**; Central's is rendered by `central-install.sh`, see above):
 
 ```sh
-install -o caddy -g caddy -m 0644 \
-    deploy/caddy/Caddyfile.edge /etc/caddy/Caddyfile      # on the appliance
-    deploy/caddy/Caddyfile.central /etc/caddy/Caddyfile   # on Central
+install -o caddy -g caddy -m 0644 deploy/caddy/Caddyfile.edge /etc/caddy/Caddyfile
 sed -i "s/example.com/yourdomain.com/g" /etc/caddy/Caddyfile
 sed -i "s/ops@example.com/you@yourdomain.com/" /etc/caddy/Caddyfile
 mkdir -p /var/log/caddy && chown caddy:caddy /var/log/caddy
@@ -111,10 +123,8 @@ caddy validate --config /etc/caddy/Caddyfile
 systemctl reload caddy
 ```
 
-You can use the stock `caddy.service` shipped by the apt package — it
-already binds `CAP_NET_BIND_SERVICE` and runs as the `caddy` user. The
-`stayconnect-caddy.service` template in this dir is just for reference
-if you ever need to diverge.
+Both roles run the role's own `stayconnect-caddy.service` from this directory, not the apt package's stock
+`caddy.service` (which must be disabled/masked: two Caddy units cannot both bind :443).
 
 ## First-boot cert issuance
 
@@ -145,15 +155,9 @@ public URLs updated:
    and add your admin hostname to `CTRLAPI_ALLOW_ORIGINS`. The cookie
    must be secure-flagged once it travels over real HTTPS or browsers
    will refuse it.
-2. **web-admin**: no change needed — it already uses relative URLs and
-   honours `X-Forwarded-*`.
-3. **Google OAuth**: in the Google Cloud console, update the authorised
-   redirect URI of each `social_oauth_providers` row to
-   `https://portal.example.com/auth/social/callback`.
-4. **Stripe**: in the Stripe dashboard, set the webhook endpoint to
-   `https://api.example.com/v1/webhooks/stripe/{tenant_id}` (one per
-   tenant). The webhook_secret stays identical; only the URL changes.
-5. **scd**: no change needed — the appliance's RPC path is still NATS.
+2. **cloud-admin**: no change needed — it uses relative URLs and honours `X-Forwarded-*`.
+3. **Google sign-in for guests**: the authorised redirect URI of the hotel's social sign-in provider (configured
+   on the appliance in Hotel Admin) must be `https://portal.example.com/auth/social/callback`.
 
 ## Dev-mode: `tls internal`
 

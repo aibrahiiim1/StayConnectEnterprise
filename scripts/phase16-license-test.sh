@@ -29,24 +29,28 @@ echo "== 16.1 login =="
 curl -s -c "$CJ" -X POST $API/v1/auth/login -H 'Content-Type: application/json' \
   -d '{"email":"admin@stayconnect.local","password":"adminadmin01"}' -o /dev/null
 grep -q sc_session "$CJ" && ok "admin session" || bad "admin session"
+# Licence writes are step-up gated; licences are per appliance.
+curl -s -b "$CJ" -c "$CJ" -X POST $API/v1/auth/reauth -H 'Content-Type: application/json' -d '{"password":"adminadmin01"}' -o /dev/null
+APPL=$(echo "SELECT id FROM appliances WHERE site_id='$SITE' AND lifecycle_state='assigned' ORDER BY activated_at DESC NULLS LAST LIMIT 1;" | $PSQLC)
 
 echo "== 16.2 current license Active on appliance =="
-state=$(curl -s --unix-socket $SCD_SOCK http://unix/v1/license/status | python3 -c 'import sys,json;print(json.load(sys.stdin)["state"])')
-[ "$state" = "Active" ] && ok "scd state Active" || bad "scd state = $state (want Active)"
+state=$(curl -s --unix-socket $SCD_SOCK http://unix/v1/central/status | python3 -c 'import sys,json;print(json.load(sys.stdin)["license"]["state"])')
+[ "$state" = "active" ] && ok "scd state Active" || bad "scd state = $state (want Active)"
 
 echo "== 16.3 license-gated method visible =="
 m=$(curl -s --unix-socket $SCD_SOCK http://unix/v1/tenant/auth-methods)
 grep -q '"pms"' <<<"$m" && ok "pms method offered (entitled)" || bad "pms method missing while entitled"
 
 echo "== 16.4 revoke current license =="
-LIC=$(echo "SELECT id FROM licenses WHERE site_id='$SITE' AND status IN ('active','suspended') ORDER BY issued_at DESC LIMIT 1;" | $PSQLC)
-code=$(curl -s -b "$CJ" -X POST "$API/cloud/v1/licenses/$LIC/revoke" -o /dev/null -w '%{http_code}')
+LIC=$(echo "SELECT id FROM licenses WHERE '$APPL'=ANY(appliance_ids) AND status IN ('active','suspended') ORDER BY issued_at DESC LIMIT 1;" | $PSQLC)
+code=$(curl -s -b "$CJ" -X POST "$API/cloud/v1/licenses/$LIC/revoke" -H 'Content-Type: application/json' -d '{"reason":"phase16 test"}' -o /dev/null -w '%{http_code}')
 [ "$code" = "200" ] && ok "cloud revoke 200" || bad "cloud revoke HTTP $code"
 
 echo "== 16.5 appliance refresh applies revocation =="
-curl -s --unix-socket $SCD_SOCK -X POST http://unix/v1/license/refresh -o /dev/null || true
-state=$(curl -s --unix-socket $SCD_SOCK http://unix/v1/license/status | python3 -c 'import sys,json;print(json.load(sys.stdin)["state"])')
-[ "$state" = "Revoked" ] && ok "scd state Revoked after refresh" || bad "scd state = $state (want Revoked)"
+curl -s --unix-socket $SCD_SOCK -X POST http://unix/v1/central/refresh -o /dev/null || true
+sleep 5   # Check now wakes the licence fetch; it completes asynchronously
+state=$(curl -s --unix-socket $SCD_SOCK http://unix/v1/central/status | python3 -c 'import sys,json;print(json.load(sys.stdin)["license"]["state"])')
+[ "$state" = "revoked" ] && ok "scd state Revoked after refresh" || bad "scd state = $state (want Revoked)"
 
 echo "== 16.6 guest auth refused under Revoked =="
 CODE=$(echo "SELECT v.code FROM vouchers v JOIN ticket_templates t ON t.id=v.template_id WHERE v.state='unused' AND t.is_active AND (v.expires_at IS NULL OR v.expires_at > now()) ORDER BY v.issued_at DESC LIMIT 1;" | $PSQLS)
@@ -56,11 +60,11 @@ resp=$(curl -s --unix-socket $SCD_SOCK -X POST http://unix/v1/sessions/authorize
 grep -q license_expired <<<"$resp" && ok "voucher auth blocked (license_expired)" || bad "voucher auth not blocked: $resp"
 
 echo "== 16.7 re-issue → appliance recovers =="
-curl -s -b "$CJ" -X POST $API/cloud/v1/licenses -H 'Content-Type: application/json' \
-  -d "{\"tenant_id\":\"$TEN\",\"site_id\":\"$SITE\",\"valid_days\":365,\"offline_grace_days\":30}" -o /dev/null
-curl -s --unix-socket $SCD_SOCK -X POST http://unix/v1/license/refresh -o /dev/null || true
-state=$(curl -s --unix-socket $SCD_SOCK http://unix/v1/license/status | python3 -c 'import sys,json;print(json.load(sys.stdin)["state"])')
-[ "$state" = "Active" ] && ok "scd state Active after re-issue" || bad "scd state = $state (want Active)"
+curl -s -b "$CJ" -X POST "$API/cloud/v1/appliances/$APPL/license" -H 'Content-Type: application/json'   -d '{"valid_days":365,"grace_period_days":30,"reason":"phase16 re-issue"}' -o /dev/null
+curl -s --unix-socket $SCD_SOCK -X POST http://unix/v1/central/refresh -o /dev/null || true
+sleep 5
+state=$(curl -s --unix-socket $SCD_SOCK http://unix/v1/central/status | python3 -c 'import sys,json;print(json.load(sys.stdin)["license"]["state"])')
+[ "$state" = "active" ] && ok "scd state Active after re-issue" || bad "scd state = $state (want Active)"
 
 resp=$(curl -s --unix-socket $SCD_SOCK -X POST http://unix/v1/sessions/authorize \
   -H 'Content-Type: application/json' \
@@ -73,7 +77,7 @@ curl -s --unix-socket $SCD_SOCK -X POST http://unix/v1/sessions/revoke \
 echo "== 16.8 rollback protection (older envelope rejected) =="
 # Any non-current envelope with an older issued_at (superseded OR revoked)
 # must be refused by the store's monotonic issued_at check.
-OLD_ENV=$(echo "SELECT signed_envelope FROM licenses WHERE site_id='$SITE' AND status IN ('superseded','revoked') ORDER BY issued_at ASC LIMIT 1;" | $PSQLC)
+OLD_ENV=$(echo "SELECT signed_envelope FROM licenses WHERE '$APPL'=ANY(appliance_ids) AND status IN ('superseded','revoked') ORDER BY issued_at ASC LIMIT 1;" | $PSQLC)
 if [ -n "$OLD_ENV" ]; then
   code=$(curl -s --unix-socket $SCD_SOCK -X POST http://unix/v1/license/install \
     -H 'Content-Type: application/json' --data-raw "$OLD_ENV" -o /tmp/rb.json -w '%{http_code}')

@@ -1,11 +1,14 @@
-// API client — talks to /api/* which Next.js rewrites to the Go backend.
+// API client — talks to /api/* which Next.js rewrites to ctrlapi (/api/v1/* and /api/cloud/* only).
 // Cookies flow naturally same-origin; no credentials: 'include' needed.
+//
+// The shapes below are the contract in docs/CENTRAL_CONTROL_PLANE.md §6. The console never derives an appliance
+// or license state itself: ctrlapi returns `activation`, `connection` and `license.state` on every row (§3).
 
 export class ApiError extends Error {
   status: number;
-  code: string;          // machine-readable, e.g. "limit_exceeded"
+  code: string;          // machine-readable, e.g. "reauth_required"
   traceId?: string;      // server request id for support tickets
-  body: any;             // full envelope for limit_key/limit/current etc.
+  body: any;             // full envelope
   constructor(status: number, body: any) {
     const code = (typeof body === "object" && typeof body?.error === "string") ? body.error : "http_error";
     const msg  = (typeof body === "object" && typeof body?.message === "string") ? body.message
@@ -19,18 +22,12 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(
-  method: string,
-  path: string,
-  body?: any,
-  init?: RequestInit
-): Promise<T> {
+async function request<T>(method: string, path: string, body?: any): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method,
     headers: body ? { "Content-Type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined,
     cache: "no-store",
-    ...init,
   });
   const contentType = res.headers.get("content-type") ?? "";
   const payload = contentType.includes("application/json") ? await res.json() : await res.text();
@@ -39,28 +36,38 @@ async function request<T>(
 }
 
 export const api = {
-  get:   <T>(path: string)                => request<T>("GET", path),
-  post:  <T>(path: string, body?: any)    => request<T>("POST", path, body),
-  put:   <T>(path: string, body?: any)    => request<T>("PUT", path, body),
-  patch: <T>(path: string, body?: any)    => request<T>("PATCH", path, body),
-  del:   <T>(path: string, body?: any)    => request<T>("DELETE", path, body),
+  get:   <T>(path: string)             => request<T>("GET", path),
+  post:  <T>(path: string, body?: any) => request<T>("POST", path, body),
+  patch: <T>(path: string, body?: any) => request<T>("PATCH", path, body),
+  del:   <T>(path: string, body?: any) => request<T>("DELETE", path, body),
 };
+
+/** A list endpoint answers `{items:[…]}` (§6). */
+export type Items<T> = { items: T[] };
+
+/** The rows of a list answer. Tolerates the pre-redesign `{data:[…]}` envelope so a half-deployed API still reads. */
+export function itemsOf<T>(r: { items?: T[] | null; data?: T[] | null } | null | undefined): T[] {
+  return r?.items ?? r?.data ?? [];
+}
+
+/** Builds `?a=1&b=2` from the non-empty entries. */
+export function qs(params: Record<string, string | number | undefined | null>): string {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== "") q.set(k, String(v));
+  const s = q.toString();
+  return s ? `?${s}` : "";
+}
 
 // ------- Step-up re-authentication -------
 //
-// Billing/identity-sensitive Platform actions (appliance assign/reassign/revoke,
-// certificate issue/revoke, license issue/suspend/revoke) are gated server-side
-// by RequireReauth: if the operator has not re-entered their password recently
-// the server replies 403 { error: "reauth_required" }. Without handling that, the
-// UI buttons simply fail — so every such action is wrapped in withStepUp().
+// License and activation writes (every §6 route marked SU) need a recent password re-entry: without one the
+// server replies 403 { error: "reauth_required" }. withStepUp() asks for the password in a designed dialog
+// (components/step-up.tsx), re-authenticates and retries once.
 
 export async function reauth(password: string): Promise<void> {
   await api.post("/v1/auth/reauth", { password });
 }
 
-// The password is asked for by a designed dialog (components/step-up.tsx), not the browser's prompt box: a
-// native prompt shows the password in clear text and cannot say what it is for. The app shell registers the
-// dialog here; the contract is unchanged — resolve with the password, or null when the operator cancels.
 type StepUpPrompter = (message: string) => Promise<string | null>;
 let stepUpPrompter: StepUpPrompter | null = null;
 
@@ -87,324 +94,189 @@ export async function withStepUp<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-// ------- Types -------
-
-export type ListResp<T> = { data: T[]; meta: { has_more: boolean; cursor?: string } };
+// ------- Types (§6) -------
 
 export type Whoami = {
   operator_id: string;
   email: string;
-  display_name?: string;
-  is_super_admin: boolean;
-  default_tenant_id?: string;
+  display_name?: string | null;
   roles: string[];
-  expires_at: string;
+  is_super_admin: boolean;
+  customer_id?: string | null;
+  customer_name?: string | null;
+  permissions?: string[];
+};
+
+export type Activation = "waiting" | "activating" | "activated" | "retiring" | "retired";
+export type Connection = "connected" | "recently_seen" | "offline" | "never";
+export type LicenseState = "none" | "active" | "expiring" | "grace" | "expired" | "suspended" | "revoked";
+
+export type AttentionKind =
+  | "waiting_activation" | "license_expiring" | "license_grace" | "license_expired" | "license_suspended"
+  | "appliance_offline" | "security_alert" | "retirement_unconfirmed";
+
+export type AttentionItem = {
+  kind: AttentionKind;
+  appliance_id?: string | null;
+  serial?: string | null;
+  customer_id?: string | null;
+  customer_name?: string | null;
+  site_name?: string | null;
+  detail?: string | null;
+  since?: string | null;
+};
+
+export type Overview = {
+  customers: number;
+  sites: number;
+  appliances: Record<"total" | Activation | Connection, number>;
+  licenses: Record<LicenseState, number>;
+  attention: AttentionItem[];
+};
+
+export type Customer = {
+  id: string;
+  name: string;
+  slug?: string;
+  status: "active" | "archived" | string;
+  created_at?: string;
+  sites: number;
+  appliances: number;
+  activated: number;
+  licenses_active: number;
+  attention: number;
 };
 
 export type Site = {
-  id: string; tenant_id: string; code: string; name: string;
-  timezone: string; country?: string; status?: string; created_at: string; updated_at: string;
-};
-
-export type Appliance = {
-  id: string; tenant_id: string; site_id: string; serial: string; name: string;
-  status: string; last_seen_at?: string;
-  version?: string;
-  identity_verified_at?: string;
-};
-
-// EffectiveConfig is what scd at this appliance should currently be
-// enforcing — PMS providers after override resolution + walled-garden
-// rules unioned across tenant + site scope.
-export type EffectiveConfig = {
-  appliance_id: string;
-  tenant_id: string;
-  site_id: string;
-  pms_providers: PMSProvider[];
-  walled_garden: WalledGardenRule[];
-};
-
-export type VoucherBatch = {
-  id: string; tenant_id: string; template_id: string; name?: string | null;
-  count: number; created_by?: string | null; created_at: string;
-};
-
-export type Voucher = {
-  id: string; tenant_id: string; template_id: string; batch_id?: string | null;
-  code: string; code_display: string; state: string; issued_at: string;
-  activated_at?: string; expires_at?: string;
-  bytes_used: number; seconds_used: number;
-};
-
-export type Session = {
-  id: string; tenant_id: string; site_id: string; appliance_id: string;
-  guest_id: string; voucher_id?: string | null;
-  ip: string; mac: string;
-  state: string; end_reason?: string | null;
-  started_at: string; last_activity_at: string; ended_at?: string | null;
-  bytes_up: number; bytes_down: number;
-};
-
-export type UsageSummary = {
-  tz: string; period_start: string; period_end: string;
-  bytes_up: number; bytes_down: number; total_bytes: number;
-  active_sessions: number; sessions_today: number;
-  cap_bytes?: number; cap_used_percent?: number;
-};
-
-export type TopRow = {
-  id: string; name: string;
-  bytes_up: number; bytes_down: number; total_bytes: number;
-};
-
-export type TopResp = { tz: string; from: string; to: string; rows: TopRow[] };
-
-export type Subscription = {
-  id: string; tenant_id: string; plan_id: string;
-  plan_code: string; plan_name: string;
-  status: string; billing_cycle: string;
-  current_period_start: string; current_period_end: string;
-  trial_end?: string | null;
-};
-
-export type TicketTemplate = {
-  id: string; tenant_id: string; code: string; name: string;
-  description?: string | null;
-  duration_seconds?: number | null; data_cap_bytes?: number | null;
-  down_kbps?: number | null; up_kbps?: number | null;
-  max_concurrent_devices: number; is_active: boolean;
-  price_cents?: number | null; currency?: string | null;
-};
-
-export type Plan = {
-  id: string; code: string; name: string;
-  description?: string | null;
-  billing_cycle: "monthly" | "yearly";
-  price_cents: number; currency: string;
-  trial_days: number; is_public: boolean; is_active: boolean;
-  sort_order: number;
-  limits?: PlanLimit[];
-};
-
-export type PlanLimit = {
-  key: string; value_type: "int" | "bool" | "string";
-  int_value?: number; bool_value?: boolean; str_value?: string;
-  unit?: string;
-};
-
-export type EffectiveLimit = PlanLimit & { source: "plan" | "override" };
-
-export type Operator = {
   id: string;
-  tenant_id?: string | null;
-  email: string;
-  display_name?: string;
-  status: "active" | "disabled" | "invited";
-  roles?: { id: string; role: string; tenant_id?: string | null }[];
-  created_at: string;
-  updated_at: string;
-};
-
-export type WalledGardenRule = {
-  id: string; tenant_id: string; site_id?: string | null;
-  kind: "domain" | "cidr" | "ip";
-  value: string;
-  ports?: number[] | null;
-  description?: string | null;
-  created_at: string;
-};
-
-export type PMSProvider = {
-  id: string;
-  tenant_id: string;
-  site_id?: string; // empty/undefined → tenant-wide row
+  customer_id: string;
+  code?: string;
   name: string;
-  kind: "stub" | "protel-fias" | "opera-fias" | "fidelio-fias" | "mews" | "apaleo";
-  enabled: boolean;
-  display_name?: string;
-  host?: string;
-  port?: number;
-  use_tls: boolean;
-  base_url?: string;
-  property_id?: string;
-  extra?: Record<string, unknown>;
-  field_map?: Record<string, string>;
-  normalization?: { room_format?: string; name_strip_titles?: boolean; reservation_case?: string };
-  stay_window?: { early_checkin_minutes?: number; late_checkout_minutes?: number; min_remaining_seconds?: number };
-  status: "idle" | "connecting" | "connected" | "degraded" | "down";
-  last_record_at?: string;
-  last_error?: string;
-  last_error_at?: string;
-  created_at: string;
-  updated_at: string;
+  timezone: string;
+  country?: string | null;
+  status: "active" | "archived" | string;
+  appliances: number;
 };
 
-export type PMSTestResult = { ok: boolean; latency_ms: number; error?: string };
-
-export type PMSCacheRow = {
-  room_number: string;
-  first_name: string;
-  last_name: string;
-  guest_display_name?: string;
-  reservation_number: string;
-  check_in?: string;
-  check_out?: string;
-  email?: string;
+export type ApplianceLicense = {
+  id?: string | null;
+  state: LicenseState;
+  valid_until?: string | null;
+  grace_ends_at?: string | null;
+  max_concurrent_online_guests?: number | null;
+  license_version?: number | null;
 };
-export type PMSCacheResult = { provider: string; kind: string; count: number; rows: PMSCacheRow[] };
 
-export type PMSHealthSnapshot = {
-  status: string;
-  connected_since?: string;
-  last_record_at?: string;
-  last_error?: string;
-  last_error_at?: string;
-  cache_size: number;
-};
-export type PMSHealthResult = { provider: string; kind: string; health: PMSHealthSnapshot };
-
-export type StripeAccount = {
+export type ApplianceRow = {
   id: string;
-  tenant_id: string;
-  enabled: boolean;
-  display_name?: string;
-  publishable_key: string;        // pk_live / pk_test — not a secret
-  success_url: string;
-  cancel_url: string;
-  last_success_at?: string;
-  last_error?: string;
-  last_error_at?: string;
-  created_at: string;
-  updated_at: string;
+  serial: string;
+  hostname?: string | null;
+  model?: string | null;
+  version?: string | null;
+  customer_id?: string | null;
+  customer_name?: string | null;
+  site_id?: string | null;
+  site_name?: string | null;
+  activation: Activation;
+  connection: Connection;
+  last_seen_at?: string | null;
+  last_public_ip?: string | null;
+  license: ApplianceLicense;
+  registered_at?: string | null;
+  activated_at?: string | null;
+  open_alerts?: number;
+  /** The customer whose data the appliance reported still holding when it registered; it can be activated only
+   *  for that customer. The name is null when that customer is no longer in Central. */
+  holds_customer_id?: string | null;
+  holds_customer_name?: string | null;
 };
 
-export type Payment = {
+export type LicenseRow = {
   id: string;
-  tenant_id: string;
-  site_id?: string;
-  template_id: string;
-  stripe_session_id: string;
-  status: "pending" | "paid" | "failed" | "expired" | "cancelled";
-  amount_cents: number;
-  currency: string;
-  voucher_id?: string;
-  created_at: string;
-  completed_at?: string;
+  appliance_id: string;
+  serial: string;
+  customer_id?: string | null;
+  customer_name?: string | null;
+  site_id?: string | null;
+  site_name?: string | null;
+  state: LicenseState | "superseded" | string;
+  status?: string;
+  valid_from?: string | null;
+  valid_until?: string | null;
+  grace_period_days?: number | null;
+  grace_ends_at?: string | null;
+  max_concurrent_online_guests?: number | null;
+  license_version?: number | null;
+  issued_at?: string | null;
 };
 
-export type SocialOAuthProvider = {
-  id: string;
-  tenant_id: string;
-  provider: "google" | "apple" | "facebook" | "microsoft";
-  enabled: boolean;
-  display_name?: string;
-  client_id: string;
-  redirect_uri: string;
-  scopes?: string;
-  last_success_at?: string;
-  last_error?: string;
-  last_error_at?: string;
-  created_at: string;
-  updated_at: string;
+export type ActivityEvent = {
+  ts?: string;
+  at?: string;
+  action: string;
+  actor?: string | null;
+  actor_email?: string | null;
+  detail?: string | null;
+  reason?: string | null;
+  payload?: Record<string, unknown> | null;
 };
 
-export type NotificationProvider = {
-  id: string;
-  tenant_id: string;
-  channel: "email" | "sms";
-  kind: "stub" | "sendgrid" | "ses" | "twilio";
-  enabled: boolean;
-  display_name?: string;
-  api_user?: string;       // Twilio account SID — not a secret
-  from_address?: string;
-  from_name?: string;
-  region?: string;
-  last_success_at?: string;
-  last_error?: string;
-  last_error_at?: string;
-  created_at: string;
-  updated_at: string;
+export type ApplianceDetail = ApplianceRow & {
+  identity?: {
+    wan_mac?: string | null;
+    lan_mac?: string | null;
+    hardware_fingerprint?: string | null;
+    identity_key_fingerprint?: string | null;
+    cert_fingerprint?: string | null;
+    cert_not_after?: string | null;
+  } | null;
+  assignment?: {
+    version?: number | null;
+    state?: string | null;
+    signer_key_id?: string | null;
+    issued_at?: string | null;
+    acked_version?: number | null;
+  } | null;
+  licenses?: LicenseRow[];
+  events?: ActivityEvent[];
+  replacement?: { pending: boolean; deadline?: string | null; replaces?: string | null; replaced_by?: string | null } | null;
+  retirement?: { state: string; deadline?: string | null } | null;
 };
 
-export type BootstrapToken = {
-  id: string;
-  tenant_id: string;
-  site_id: string;
-  expected_serial?: string;
-  token_hint: string;
-  created_by?: string;
-  expires_at: string;
-  consumed_at?: string;
-  consumed_by_appliance?: string;
-  created_at: string;
+/** The license terms an operator chooses (Activate and Set license). Exactly one of valid_days / valid_until. */
+export type LicenseTerms = {
+  max_concurrent_online_guests: number;
+  valid_days?: number;
+  valid_until?: string;
+  grace_period_days: number;
 };
-// On create the server returns the plaintext token exactly once, alongside
-// the row. Store the plaintext only for the brief moment the UI shows it.
-export type BootstrapTokenCreated = { token: string; row: BootstrapToken };
 
 export type AuditEntry = {
+  id?: string;
   ts: string;
-  tenant_id?: string | null;
-  actor_type: string;
+  customer_id?: string | null;
+  customer_name?: string | null;
+  appliance_id?: string | null;
+  serial?: string | null;
+  actor_type?: string;
   actor_id?: string | null;
+  actor_email?: string | null;
   action: string;
   target_type?: string | null;
   target_id?: string | null;
   ip?: string | null;
-  user_agent?: string | null;
   payload?: Record<string, unknown> | null;
 };
 
-// ------- Cloud domain (/cloud/v1) — licensing + fleet -------
+export type AuditPage = { items?: AuditEntry[]; data?: AuditEntry[]; next_cursor?: string | null };
 
-// License mirrors control-plane's licenses row. status is one of
-// active/suspended/revoked/superseded (badge-colored in the UI).
-export type License = {
+/** A Central sign-in: a platform operator (Team) or a customer's user. */
+export type CentralUser = {
   id: string;
-  tenant_id: string;
-  site_id: string;
-  commercial_plan_code: string;
-  status: string;
-  issued_at: string;
-  valid_until: string;
-  offline_grace_days: number;
-  appliance_ids?: string[] | null;
-  features?: unknown;
-  limits?: unknown;
-  key_id: string;
-  revoked_at?: string | null;
-  created_at: string;
-  // Simple model (v3): the license IS the entitlement.
-  license_version?: number;
-  max_concurrent_online_guests?: number;
-  grace_period_days?: number;
-  valid_from?: string | null;
-  supersedes_license_id?: string | null;
-};
-
-// FleetAppliance is the vendor/group health view of one appliance — no guest
-// data, just registry status plus the latest fleet_telemetry health push.
-export type FleetAppliance = {
-  appliance_id: string;
-  tenant_id: string;
-  site_id?: string | null;
-  name: string;
-  serial: string;
-  status: string;
-  version?: string | null;
-  last_seen_at?: string | null;
-  license_status?: string | null;
-  license_valid_until?: string | null;
-  last_health?: unknown;
-  last_usage?: any;
-  last_usage_at?: string | null;
-  last_service_health?: any;
-  last_service_health_at?: string | null;
-};
-
-export type TelemetryRow = {
-  ts: string;
-  kind: string;
-  seq: number;
-  payload: unknown;
+  email: string;
+  display_name?: string | null;
+  status: "active" | "disabled" | "invited" | string;
+  roles: string[];
+  created_at?: string;
+  last_login_at?: string | null;
 };

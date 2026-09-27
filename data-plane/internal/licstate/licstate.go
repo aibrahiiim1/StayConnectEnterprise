@@ -51,9 +51,17 @@ type Manager struct {
 	// the primary trust anchor; serial/hw-fingerprint/WAN-MAC are mismatch and
 	// clone-detection signals. hwMismatch holds a non-empty reason when the
 	// current license matches the identity but the WAN MAC differs (NIC swap /
-	// migration) — a grace state, not a hard reject.
-	local      lic.LocalIdentity
-	hwMismatch string
+	// migration) — a warning, not a reject: the licence stays in force, with no
+	// time limit, until a rebind issues a corrected one.
+	//
+	// wrongDevice holds a non-empty reason when the licence on disk is bound to a
+	// DIFFERENT appliance (identity key, appliance id, serial or hardware
+	// fingerprint). It is recomputed on EVERY evaluation -- boot included -- so a
+	// licence copied onto another box, or a box whose identity was replaced, is
+	// refused after a reboot exactly as it is refused at install.
+	local       lic.LocalIdentity
+	hwMismatch  string
+	wrongDevice string
 
 	// Required=false (dev/pilot pre-cutover): no license file → permissive
 	// unlicensed mode with a warning. Required=true (production): no
@@ -69,6 +77,45 @@ type Manager struct {
 	// plain HTTPS ingress. Set via SetMTLSTransport; nil = use ctrlBase.
 	mtlsClient *http.Client
 	mtlsBase   string
+
+	// Cloud fetch scheduling (see runFetchLoop). kick asks for an immediate fetch; onFetch observes every
+	// fetch outcome (scd uses it to track when Central last answered). fastEvery is the poll interval while
+	// no licence is installed.
+	kick      chan struct{}
+	onFetch   func(error)
+	fastEvery time.Duration
+}
+
+// DefaultFastFetchInterval is how often an appliance with NO installed licence asks Central for one. A freshly
+// activated appliance used to wait for the next six-hour tick; now it collects its licence within a minute.
+const DefaultFastFetchInterval = time.Minute
+
+// ErrNoLicenseYet is Central answering that no licence has been issued for this appliance yet. It is a
+// successful conversation with Central, not a connectivity failure.
+var ErrNoLicenseYet = errors.New("no license issued for this appliance yet")
+
+// HTTPError is Central answering a licence fetch with an unexpected status.
+type HTTPError struct {
+	Code int
+	Body string
+}
+
+func (e *HTTPError) Error() string { return fmt.Sprintf("license fetch: HTTP %d: %s", e.Code, e.Body) }
+
+// OnFetch registers an observer called after every cloud fetch attempt with its outcome.
+func (m *Manager) OnFetch(fn func(error)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onFetch = fn
+}
+
+// Kick asks the fetch loop to contact Central now (Check now, a newly adopted assignment). Non-blocking; a
+// kick while one is already pending is merged into it.
+func (m *Manager) Kick() {
+	select {
+	case m.kick <- struct{}{}:
+	default:
+	}
 }
 
 // SetMTLSTransport routes subsequent cloud license fetches over the given mTLS
@@ -94,7 +141,8 @@ func (m *Manager) transport() (*http.Client, string, bool) {
 // Returns a manager even when the pub key is missing (unlicensed mode) so
 // the appliance still boots; Install/Fetch will fail until the key exists.
 func New(db *pgxpool.Pool, tenantID, dir, pubKeyPath string, required bool) *Manager {
-	m := &Manager{db: db, tenantID: tenantID, required: required}
+	m := &Manager{db: db, tenantID: tenantID, required: required, kick: make(chan struct{}, 1),
+		fastEvery: DefaultFastFetchInterval}
 	raw, err := os.ReadFile(pubKeyPath)
 	if err != nil || len(raw) != 32 {
 		if required {
@@ -122,12 +170,38 @@ func (m *Manager) Load(ctx context.Context) {
 			slog.Warn("licstate: evaluate failed", "err", err)
 		}
 		m.loaded = false
+		m.wrongDevice, m.hwMismatch = "", ""
 		m.mu.Unlock()
 		return
 	}
+	// THE BINDING IS CHECKED ON EVERY EVALUATION, not only at install. It used to live in Install alone, and the
+	// verdict was held in memory: a reboot cleared it, and a licence file copied from another appliance -- or a
+	// box whose identity had been replaced under an installed licence -- evaluated as valid. Fail closed exactly
+	// as install does.
+	res, reason := lic.BindingOK, ""
+	if ev.Doc != nil {
+		res, reason = ev.Doc.CheckBinding(m.local)
+	}
+	prevWrong := m.wrongDevice
+	m.wrongDevice, m.hwMismatch = "", ""
+	switch res {
+	case lic.BindingWrongDevice:
+		m.wrongDevice = reason
+	case lic.BindingWANMismatch:
+		m.hwMismatch = reason
+	}
 	m.current = ev
 	m.loaded = true
+	wrong := m.wrongDevice
 	m.mu.Unlock()
+
+	if wrong != "" {
+		if prevWrong == "" {
+			slog.Error("licstate: installed licence is bound to a DIFFERENT appliance — refusing it (no new guest sessions)",
+				"reason", wrong, "license_id", ev.Doc.LicenseID)
+		}
+		return // never bridge the limits of a licence this appliance does not hold
+	}
 
 	slog.Info("licstate: license evaluated",
 		"state", ev.State, "license_id", ev.Doc.LicenseID,
@@ -151,6 +225,10 @@ func (m *Manager) Evaluation() (lic.Evaluation, bool) {
 func (m *Manager) State() lic.State {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	if m.loaded && m.wrongDevice != "" {
+		// A licence for another appliance is no licence at all, in EVERY build profile.
+		return lic.StateUnlicensed
+	}
 	if !m.loaded {
 		if m.required {
 			// No valid signed license on a production appliance: the SAFE state.
@@ -174,6 +252,9 @@ func (m *Manager) AllowsNewSessions() bool { return m.State().AllowsNewSessions(
 func (m *Manager) MaxConcurrentOnlineGuests() int64 {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	if m.loaded && m.wrongDevice != "" {
+		return 0
+	}
 	if !m.loaded || m.current.Doc == nil {
 		if m.required {
 			return 0 // unlicensed production: cap 0 (defence in depth; gate denies first)
@@ -186,61 +267,6 @@ func (m *Manager) MaxConcurrentOnlineGuests() int64 {
 	return -1
 }
 
-// LicenseInfo is the operator-facing snapshot for Hotel Admin / setup status.
-// It carries no private keys or secret material.
-type LicenseInfo struct {
-	Installed       bool       `json:"installed"`
-	State           string     `json:"state"`
-	LicenseID       string     `json:"license_id,omitempty"`
-	LicenseVersion  int64      `json:"license_version,omitempty"`
-	MaxGuests       int64      `json:"max_concurrent_online_guests"` // -1 unlimited
-	ValidFrom       *time.Time `json:"valid_from,omitempty"`
-	ValidUntil      *time.Time `json:"valid_until,omitempty"`
-	GracePeriodDays int        `json:"grace_period_days"`
-	GraceEndsAt     *time.Time `json:"grace_ends_at,omitempty"`
-	CloudStale      bool       `json:"cloud_stale,omitempty"`
-}
-
-// Info returns the current license snapshot for status endpoints.
-func (m *Manager) Info() LicenseInfo {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	out := LicenseInfo{Installed: m.loaded, MaxGuests: -1}
-	if !m.loaded {
-		if m.required {
-			out.State = string(lic.StateUnlicensed)
-			out.MaxGuests = 0
-		} else {
-			out.State = string(lic.StateActive)
-		}
-		return out
-	}
-	ev := m.current
-	out.State = string(ev.State)
-	out.CloudStale = ev.CloudStale
-	if ev.Doc != nil {
-		d := ev.Doc
-		out.LicenseID = d.LicenseID
-		out.LicenseVersion = d.LicenseVersion
-		if v := d.EffectiveMaxConcurrentOnlineGuests(); v > 0 {
-			out.MaxGuests = int64(v)
-		}
-		if !d.ValidFrom.IsZero() {
-			vf := d.ValidFrom
-			out.ValidFrom = &vf
-		}
-		vu := d.ValidUntil
-		out.ValidUntil = &vu
-		out.GracePeriodDays = d.EffectiveGraceDays()
-		ge := ev.GraceUntil
-		out.GraceEndsAt = &ge
-	}
-	return out
-}
-
-// AllowsProvisioning gates management writes (plans, batches, providers).
-func (m *Manager) AllowsProvisioning() bool { return m.State().AllowsProvisioning() }
-
 // FeatureEnabled evaluates a commercial feature under the current state.
 // Unlicensed dev mode allows everything (with the boot warning); a loaded
 // license is authoritative.
@@ -249,6 +275,9 @@ func (m *Manager) FeatureEnabled(name string) bool {
 	defer m.mu.RUnlock()
 	if !m.loaded {
 		return !m.required
+	}
+	if m.wrongDevice != "" {
+		return false
 	}
 	f := m.current.Doc.Features
 	var entitled bool
@@ -298,20 +327,12 @@ func (m *Manager) Install(ctx context.Context, raw []byte) (*lic.Document, error
 	if err != nil {
 		return nil, err
 	}
-	// WAN MAC mismatch is a soft hardware signal (NIC replaced / migration):
-	// the license stays installed and the hotel keeps running in a grace state
-	// while a Hardware Binding Mismatch alert is surfaced until an authorized
-	// rebind issues a corrected license.
+	// WAN MAC mismatch is a soft hardware signal (NIC replaced / migration): the licence stays installed and in
+	// force -- there is no time limit -- and a warning is shown until an authorised rebind issues a corrected
+	// licence. Load (below) records it, and re-derives it on every evaluation.
 	if res == lic.BindingWANMismatch {
-		m.mu.Lock()
-		m.hwMismatch = reason
-		m.mu.Unlock()
 		slog.Warn("licstate: hardware binding mismatch", "reason", reason,
 			"license_id", doc.LicenseID, "doc_wan_mac", doc.WANMAC, "local_wan_mac", m.local.WANMAC)
-	} else {
-		m.mu.Lock()
-		m.hwMismatch = ""
-		m.mu.Unlock()
 	}
 	// Legacy site-wide binding warning (v1 / unbound docs).
 	if m.applianceID != "" && len(doc.ApplianceIDs) > 0 && !applianceBound(doc, m.applianceID) {
@@ -328,6 +349,25 @@ func (m *Manager) SetLocalIdentity(local lic.LocalIdentity) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.local = local
+}
+
+// WrongHardware returns a non-empty reason when the installed licence is bound to a different appliance and is
+// therefore refused (no new guest sessions).
+func (m *Manager) WrongHardware() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if !m.loaded {
+		return ""
+	}
+	return m.wrongDevice
+}
+
+// HasUsableLicense reports whether a real signed licence for THIS appliance is installed (whatever its time
+// state). It is what decides the fast "collect my first licence" fetch cadence.
+func (m *Manager) HasUsableLicense() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.loaded && m.wrongDevice == "" && m.current.Doc != nil
 }
 
 // HardwareMismatch returns a non-empty reason when the installed license is
@@ -435,12 +475,12 @@ func (m *Manager) FetchFromCloud(ctx context.Context, ctrlBase, applianceID stri
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return errors.New("no license issued for this site yet")
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusNoContent {
+		return ErrNoLicenseYet
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("license fetch: HTTP %d: %s", resp.StatusCode, string(body))
+		return &HTTPError{Code: resp.StatusCode, Body: string(body)}
 	}
 	var out struct {
 		LicenseID string          `json:"license_id"`
@@ -474,9 +514,8 @@ func (m *Manager) FetchFromCloud(ctx context.Context, ctrlBase, applianceID stri
 	return nil
 }
 
-// StartLoops runs (a) a minute-level re-evaluation so time-based state
-// transitions take effect, and (b) a cloud refresh every refreshEvery when
-// fetch parameters are configured. Both stop with ctx.
+// StartLoops runs (a) a minute-level re-evaluation so time-based state transitions -- and the hardware binding
+// -- are re-checked, and (b) the cloud fetch loop when fetch parameters are configured. Both stop with ctx.
 func (m *Manager) StartLoops(ctx context.Context, ctrlBase, applianceID string, priv ed25519.PrivateKey, refreshEvery time.Duration) {
 	go func() {
 		t := time.NewTicker(time.Minute)
@@ -493,22 +532,47 @@ func (m *Manager) StartLoops(ctx context.Context, ctrlBase, applianceID string, 
 	if ctrlBase == "" || applianceID == "" || len(priv) == 0 || m.store == nil {
 		return
 	}
-	go func() {
-		// Immediate first fetch, then periodic.
-		if err := m.FetchFromCloud(ctx, ctrlBase, applianceID, priv); err != nil {
-			slog.Warn("licstate: initial cloud license fetch failed (offline-safe)", "err", err)
+	go m.runFetchLoop(ctx, func(ctx context.Context) error {
+		return m.FetchFromCloud(ctx, ctrlBase, applianceID, priv)
+	}, refreshEvery)
+}
+
+// nextFetchInterval is the cadence rule: while no usable licence is installed (factory-clean, waiting for
+// activation, just activated, or a licence for another appliance) ask every fastEvery; once a licence is in
+// place, every slow interval. Kick() overrides either.
+func (m *Manager) nextFetchInterval(slow time.Duration) time.Duration {
+	m.mu.RLock()
+	fast := m.fastEvery
+	m.mu.RUnlock()
+	if !m.HasUsableLicense() && fast > 0 && fast < slow {
+		return fast
+	}
+	return slow
+}
+
+// runFetchLoop fetches immediately, then on the cadence nextFetchInterval decides, and at once on Kick.
+func (m *Manager) runFetchLoop(ctx context.Context, fetch func(context.Context) error, slow time.Duration) {
+	for {
+		fctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		err := fetch(fctx)
+		cancel()
+		if err != nil && !errors.Is(err, ErrNoLicenseYet) {
+			slog.Warn("licstate: cloud license fetch failed (offline-safe)", "err", err)
 		}
-		t := time.NewTicker(refreshEvery)
-		defer t.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-				if err := m.FetchFromCloud(ctx, ctrlBase, applianceID, priv); err != nil {
-					slog.Warn("licstate: cloud license refresh failed (offline-safe)", "err", err)
-				}
-			}
+		m.mu.RLock()
+		obs := m.onFetch
+		m.mu.RUnlock()
+		if obs != nil {
+			obs(err)
 		}
-	}()
+		t := time.NewTimer(m.nextFetchInterval(slow))
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return
+		case <-t.C:
+		case <-m.kick:
+			t.Stop()
+		}
+	}
 }

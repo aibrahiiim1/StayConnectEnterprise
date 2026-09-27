@@ -50,7 +50,7 @@ package main
 // while stayconnect-hotel-admin.service was still running `/usr/bin/node server.js` as User=stayconnect,
 // holding exactly edged's uid (998, read off the appliance) with a group that opens this socket. A uid-only
 // gate therefore admitted the Node process that renders the admin web UI to /v1/backup/restore,
-// /v1/license/install and /v1/setup/enroll. Six Go services were enumerated and the one written in another
+// /v1/license/install and /v1/central/offline-package. Six Go services were enumerated and the one written in another
 // language was not.
 //
 // SO BOTH CHECKS ARE REQUIRED FOR THE ADMINISTRATIVE SURFACE, and neither subsumes the other: the uid stops
@@ -279,7 +279,7 @@ func requireAdminPeer(w http.ResponseWriter, r *http.Request) bool {
 		// `/usr/bin/node server.js` as User=stayconnect -- read off the appliance: the next-server process
 		// reports Uid 998 Gid 998, exactly edged's -- and its primary group opens scd.sock. So a uid-only
 		// gate admitted the Node process that renders the admin web UI to /v1/backup/restore,
-		// /v1/license/install and /v1/setup/enroll, with none of edged's operator authentication, permission
+		// /v1/license/install and /v1/central/offline-package, with none of edged's operator authentication, permission
 		// check or step-up.
 		//
 		// I had enumerated the six Go services and never looked at the one written in another language.

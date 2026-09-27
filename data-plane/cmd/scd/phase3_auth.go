@@ -38,6 +38,7 @@ import (
 
 	"github.com/stayconnect/enterprise/data-plane/internal/authctx"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsresolve"
 	"github.com/stayconnect/enterprise/data-plane/internal/signinattempt"
 	"github.com/stayconnect/enterprise/data-plane/internal/staygrant"
@@ -125,6 +126,11 @@ type phase3Response struct {
 	// is what the guest counts down; a browser that ignores it gains nothing, because the same gate refuses
 	// the next submission.
 	RetryAfterSeconds int `json:"retry_after_seconds,omitempty"`
+	// Error is present ONLY on a licence refusal (FailureClass LICENSE or CAPACITY), and it carries exactly the
+	// code the other guest methods answer with for the same condition -- unlicensed, license_expired,
+	// feature_not_licensed, tenant_transition_pending or LICENSE_CAPACITY_REACHED. Every one of them is a fact
+	// about the whole appliance, never about a room, so it is safe on this hop.
+	Error string `json:"error,omitempty"`
 	// AuthContextID, ExpiresIn and Offers are present ONLY on VERIFIED.
 	AuthContextID string        `json:"auth_context_id,omitempty"`
 	ExpiresIn     int           `json:"expires_in_seconds,omitempty"`
@@ -156,6 +162,38 @@ func notVerifiedRetryAfter(w http.ResponseWriter, result signinattempt.Result, d
 		Outcome:           outcomeNotVerified,
 		FailureClass:      string(result.GuestClass()),
 		RetryAfterSeconds: retryAfter,
+	})
+}
+
+// ---- the licence contract every guest method shares -------------------------------------------------------
+//
+// ROOM SIGN-IN IS A GUEST ACCESS METHOD LIKE ANY OTHER, and it answers to the same licence. Vouchers,
+// accounts, OTP and social sign-in are refused by licenseGate when the appliance's licence does not permit a
+// new guest (or a cross-tenant transition is still pending), and their session is opened only through
+// reserveLicensedSlot, the atomic concurrent-guest reservation. The room path inserted its session directly
+// and asked neither, so an unlicensed, expired or full appliance still admitted every PMS guest. It now asks
+// the same two questions, through the same two functions, and refuses with the same codes.
+
+// pmsLicenseRefusal is licenseRefusal for the room sign-in: the PMS method is a commercial feature
+// (licstate.FeatPMS), exactly as applyLicenseToMethods already treats it when deciding whether the portal may
+// show the room tab at all.
+func (p *phase3Auth) pmsLicenseRefusal() (string, bool) {
+	body := p.srv.licenseRefusal(licstate.FeatPMS)
+	if body == nil {
+		return "", false
+	}
+	code, _ := body["error"].(string)
+	return code, true
+}
+
+// notVerifiedLicense writes a licence refusal: the uniform envelope, the licence class the guest's sentence is
+// chosen by, and the shared refusal code.
+func notVerifiedLicense(w http.ResponseWriter, result signinattempt.Result, code, detail string) {
+	slog.Info("phase3 auth: refused by the appliance licence", "result", string(result), "code", code, "detail", detail)
+	writeJSONScd(w, http.StatusOK, phase3Response{
+		Outcome:      outcomeNotVerified,
+		FailureClass: string(result.GuestClass()),
+		Error:        code,
 	})
 }
 
@@ -312,6 +350,19 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	at.GuestNetworkID, at.GuestNetworkName = dev.GuestNetwork, dev.GuestNetworkName
 	at.DeviceIP, at.DeviceMAC = dev.IP.String(), signinattempt.NormalizeMAC(dev.MAC)
+	// THE LICENCE, asked first -- the same question, through the same function, the voucher, account, OTP and
+	// social routes ask before anything else, including before their method switch. A refusal is a fact about
+	// the whole appliance, so it is recorded as its own result, looks up no room, and never counts against the
+	// device as a wrong credential.
+	if code, refused := p.pmsLicenseRefusal(); refused {
+		at.Result = signinattempt.LicenseRefused
+		at.RequestID = strings.TrimSpace(req.RequestID)
+		if !validRequestID(at.RequestID) {
+			at.RequestID = ""
+		}
+		notVerifiedLicense(w, at.Result, code, "license_refused")
+		return
+	}
 	// Room sign-in switched off in Hotel Admin is refused here as well as hidden on the portal. It answers as
 	// the service not being available -- which it is not -- and looks up no room.
 	if !p.srv.guestMethodEnabled(ctx, guestMethodPMS) {
@@ -814,6 +865,15 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// THE LICENCE AGAIN, because it can change between the resolve and the grant (an expiry, a suspension, a
+	// cross-tenant transition), and because the voucher and account activation asks it before anything else --
+	// including before returning a session the device already holds.
+	if code, refused := p.pmsLicenseRefusal(); refused {
+		grantResult = signinattempt.LicenseRefused
+		notVerifiedLicense(w, grantResult, code, "license_refused_at_grant")
+		return
+	}
+
 	// THE ALREADY-GRANTED CASE, answered before anything is locked.
 	//
 	// A grant is one transaction, but the ANSWER to it crosses a network hop, and that hop can be lost after
@@ -943,6 +1003,23 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 			LIMIT 1`, granted.EntitlementID, dev.DeviceID).Scan(&sessionID)
 	}
 	if sessionID == "" {
+		// LICENSED CONCURRENT-GUEST CAP -- first sign-in, a second device joining the stay, and a device
+		// rejoining after its session ended all open a NEW session here, so all three take a slot. It is the
+		// same reservation the voucher and account activation makes (reserveLicensedSlot: appliance-scoped,
+		// advisory-locked, counted inside THIS transaction), so a room guest and a voucher guest pressing
+		// Connect at the same instant contend for one licensed capacity. A refusal rolls the whole grant back:
+		// the Auth Context stays unconsumed and no entitlement is left behind without a session.
+		if err := reserveLicensedSlot(ctx, tx, p.srv.applID, p.srv.lic.MaxConcurrentOnlineGuests()); err != nil {
+			var capErr *licenseCapacityError
+			if errors.As(err, &capErr) {
+				grantResult = signinattempt.LicenseCapacityReached
+				notVerifiedLicense(w, grantResult, "LICENSE_CAPACITY_REACHED",
+					fmt.Sprintf("licensed capacity %d reached (%d online)", capErr.Limit, capErr.Current))
+				return
+			}
+			notVerified(w, signinattempt.ServiceUnavailable, "capacity: "+err.Error())
+			return
+		}
 		sessionID, err = p.openSessionTx(ctx, tx, granted.EntitlementID, dev)
 	}
 	if err != nil {

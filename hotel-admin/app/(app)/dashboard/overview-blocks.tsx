@@ -631,7 +631,7 @@ export function ApplianceCard({ snap, licenseHeadline }: { snap: OverviewSnapsho
   const net = a?.network;
   const rev = a?.revisions;
   const lic = a?.license;
-  const licWords = lic?.available ? describeLicense(lic.state, lic.installed) : null;
+  const licWords = lic?.available ? describeLicense(lic.state) : null;
   return (
     <BlockCard title="Appliance" description="Its configuration, licence and resources." href="/appliance" linkLabel="Appliance">
       {!snap || !a ? (

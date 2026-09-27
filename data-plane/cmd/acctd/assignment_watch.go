@@ -27,7 +27,10 @@ func reexecSelf() {
 // waitForAssignment parks an unassigned appliance's accounting daemon until a
 // signed assignment appears, then re-execs into the normal path. An appliance
 // with no customer must not attribute usage to anyone.
-func waitForAssignment(ctx context.Context, store *assignment.Store) {
+//
+// assigned is the VERIFIED check (resolveAcctdScope), never the raw file: a document that cannot be verified
+// must not wake accounting up.
+func waitForAssignment(ctx context.Context, assigned func() bool) {
 	// Beat the liveness heartbeat while paused: acctd IS alive and doing its job
 	// (waiting for an assignment), so the health supervisor must see it as
 	// healthy-idle, not degraded. Beat immediately, then on a short cadence.
@@ -43,8 +46,8 @@ func waitForAssignment(ctx context.Context, store *assignment.Store) {
 		case <-beat.C:
 			livez.Touch("acctd")
 		case <-t.C:
-			if ten, _, _, _ := store.Resolved(); ten != "" {
-				slog.Info("acctd: assignment arrived; re-executing to start accounting", "tenant_id", ten)
+			if assigned() {
+				slog.Info("acctd: a verified assignment arrived; re-executing to start accounting")
 				reexecSelf()
 			}
 		}

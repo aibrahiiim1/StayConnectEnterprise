@@ -178,10 +178,6 @@ func (c *scdClient) proxy(w http.ResponseWriter, r *http.Request, method, path s
 
 // ----- license endpoints (proxied to scd, which owns the license store) -----------
 
-func (s *server) licenseStatus(w http.ResponseWriter, r *http.Request) {
-	s.scd.proxy(w, r, http.MethodGet, "/v1/license/status", nil)
-}
-
 func (s *server) licenseInstall(w http.ResponseWriter, r *http.Request) {
 	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil || len(raw) == 0 {
@@ -201,10 +197,6 @@ func (s *server) licenseInstall(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(resp)
 }
 
-func (s *server) licenseRefresh(w http.ResponseWriter, r *http.Request) {
-	s.scd.proxy(w, r, http.MethodPost, "/v1/license/refresh", nil)
-}
-
 // ----- health -----------------------------------------------------------------------
 
 func (s *server) health(w http.ResponseWriter, r *http.Request) {
@@ -215,35 +207,21 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	out["db"] = dbOK
 
 	scdOK := false
-	var licState any
-	// licenseInstalled is true ONLY for a real signed license (installed with a
-	// non-empty license_id). The permissive "unlicensed-dev" licstate reports
-	// state="Active" with no license_id and must NOT read as licensed/activated —
-	// otherwise the dashboard shows a green "Active" on a factory-clean box while
-	// the License page correctly says "Pending activation".
-	licenseInstalled := false
-	if st, raw, err := s.scd.call(ctx, http.MethodGet, "/v1/license/status", nil); err == nil && st == 200 {
+	// The licence summary comes from the SAME scd computation as /central/status (section 8 vocabulary:
+	// none|active|expiring|grace|expired|suspended|revoked|wrong_hardware), so the dashboard and the Appliance
+	// & licence page can never disagree about it.
+	var licState, activation any
+	if sum, ok := s.readLicenceSummary(ctx); ok {
 		scdOK = true
-		var lic map[string]any
-		if json.Unmarshal(raw, &lic) == nil {
-			licState = lic["state"]
-			installed, _ := lic["installed"].(bool)
-			licID, _ := lic["license_id"].(string)
-			licenseInstalled = installed && licID != ""
-		}
+		licState, activation = sum.State, sum.Activation
 	} else if st2, _, err2 := s.scd.call(ctx, http.MethodGet, "/v1/health", nil); err2 == nil && st2 == 200 {
 		scdOK = true
 	}
 	out["scd"] = scdOK
 	out["license_state"] = licState
-	out["license_installed"] = licenseInstalled
+	out["license_installed"] = licState != nil && licState != "none"
+	out["activation"] = activation
 
-	if st, raw, err := s.scd.call(ctx, http.MethodGet, "/v1/admin/outbox/stats", nil); err == nil && st == 200 {
-		var ob map[string]any
-		if json.Unmarshal(raw, &ob) == nil {
-			out["sync_outbox"] = ob
-		}
-	}
 	code := http.StatusOK
 	if !dbOK {
 		code = http.StatusServiceUnavailable

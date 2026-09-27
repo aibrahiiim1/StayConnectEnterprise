@@ -37,8 +37,8 @@ import (
 // Manager owns the cert files and the live mTLS client.
 type Manager struct {
 	dir         string // cert directory, e.g. /etc/stayconnect/certs
-	ctrlBase    string // https ingress for signed-auth CSR submit/fetch (e.g. https://150.0.0.252)
-	mtlsBase    string // mTLS listener (e.g. https://150.0.0.252:9443)
+	ctrlBase    string // https ingress for signed-auth CSR submit/fetch (e.g. https://sc-central.echofusion.com)
+	mtlsBase    string // mTLS listener (e.g. https://sc-central.echofusion.com:9443)
 	applianceID string
 	priv        ed25519.PrivateKey
 
@@ -48,7 +48,23 @@ type Manager struct {
 	notAfter time.Time
 	fpr      string
 	ready    bool
+
+	// kick cuts the bootstrap backoff short (Check now, a freshly adopted assignment); onAttempt observes every
+	// bootstrap attempt's outcome, which is how scd knows Central is answering while the appliance waits.
+	kick      chan struct{}
+	onAttempt func(error)
 }
+
+// Kick asks a waiting certificate bootstrap to try again now. Non-blocking.
+func (m *Manager) Kick() {
+	select {
+	case m.kick <- struct{}{}:
+	default:
+	}
+}
+
+// OnAttempt registers an observer for every bootstrap attempt's outcome. Set it before EnsureUntilInstalled.
+func (m *Manager) OnAttempt(fn func(error)) { m.onAttempt = fn }
 
 func (m *Manager) mtlsKeyPath() string { return filepath.Join(m.dir, "mtls-client.key") }
 
@@ -95,7 +111,8 @@ func (m *Manager) ensureMTLSKey() error {
 }
 
 func New(dir, ctrlBase, mtlsBase, applianceID string, priv ed25519.PrivateKey) *Manager {
-	return &Manager{dir: dir, ctrlBase: ctrlBase, mtlsBase: mtlsBase, applianceID: applianceID, priv: priv}
+	return &Manager{dir: dir, ctrlBase: ctrlBase, mtlsBase: mtlsBase, applianceID: applianceID, priv: priv,
+		kick: make(chan struct{}, 1)}
 }
 
 func (m *Manager) certPath() string { return filepath.Join(m.dir, "client.crt") }
@@ -120,37 +137,6 @@ func (m *Manager) Transport() (*http.Client, string, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.client, m.mtlsBase, m.ready
-}
-
-// NATSTLSConfig builds a tls.Config presenting the appliance client cert +
-// mtls key and trusting the CA bundle — for connecting to Central NATS over
-// mTLS. Requires a cert to be installed (call Ensure first).
-func (m *Manager) NATSTLSConfig() (*tls.Config, error) {
-	if err := m.ensureMTLSKey(); err != nil {
-		return nil, err
-	}
-	certPEM, err := os.ReadFile(m.certPath())
-	if err != nil {
-		return nil, err
-	}
-	caPEM, err := os.ReadFile(m.caPath())
-	if err != nil {
-		return nil, err
-	}
-	keyDER, err := x509.MarshalPKCS8PrivateKey(m.mtlsPriv)
-	if err != nil {
-		return nil, err
-	}
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
-	pair, err := tls.X509KeyPair(certPEM, keyPEM)
-	if err != nil {
-		return nil, err
-	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(caPEM) {
-		return nil, errors.New("ca bundle parse failed")
-	}
-	return &tls.Config{Certificates: []tls.Certificate{pair}, RootCAs: pool, MinVersion: tls.VersionTLS12}, nil
 }
 
 // apiBase picks the mTLS transport once a cert is loaded, else the HTTPS
@@ -212,8 +198,8 @@ var (
 // Ensure loads an existing local certificate, or makes ONE bootstrap attempt if none is present.
 //
 // It no longer blocks for ten minutes waiting for issuance. Callers that need the certificate for the life
-// of the process use EnsureUntilInstalled; callers that only want it if it happens to be ready (the NATS
-// transport choice at startup) get a fast answer instead of a startup stall.
+// of the process use EnsureUntilInstalled; callers that only want it if it happens to be ready get a fast
+// answer instead of a startup stall.
 func (m *Manager) Ensure(ctx context.Context) error {
 	if err := m.ensureMTLSKey(); err != nil {
 		return err
@@ -247,6 +233,9 @@ func (m *Manager) EnsureUntilInstalled(ctx context.Context) error {
 	for {
 		attempt++
 		err := m.Ensure(ctx)
+		if m.onAttempt != nil {
+			m.onAttempt(err)
+		}
 		if err == nil {
 			if attempt > 1 {
 				slog.Info("appliancecert: certificate acquired after waiting", "attempts", attempt)
@@ -287,6 +276,9 @@ func (m *Manager) EnsureUntilInstalled(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(delay):
+		case <-m.kick:
+			delay = first // an operator asked, or activation just happened: start the short backoff again
+			continue
 		}
 		if delay < cap {
 			delay *= 2

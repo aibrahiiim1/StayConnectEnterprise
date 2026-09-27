@@ -48,7 +48,8 @@ Tunable in `/etc/stayconnect/backup-retention.conf` (`KEEP_BINARIES`, `KEEP_RELE
 2. The previous known-good rollback version (`*.previous` symlink target).
 3. The newest successful full DB backup.
 4. PKI / custody / recovery material — Central `ca-ceremony-backup`,
-   `nats-migration-backup`, all `/etc/stayconnect/*.key|*.pub|*.crt`; Appliance
+   `nats-migration-backup` (a historical backup directory from the removed message
+   bus, kept protected), all `/etc/stayconnect/*.key|*.pub|*.crt`; Appliance
    `/etc/stayconnect/{identity,certs,tls,assignment,license,generated}` and
    `vendor-license.key`. These are classified **PROTECTED** and never enumerated
    for deletion.
@@ -70,8 +71,8 @@ failure makes the run exit non-zero so the systemd timer surfaces it.
 
 ## Central visibility
 
-`GET /cloud/v1/backup-health` and the **Backup health** page (Administration →
-Operations) show Central's last cleanup, disk usage + alert, rollback-path
+`GET /cloud/v1/backup-health` and the **Backup health** page (**System → Backup
+health**) show Central's last cleanup, disk usage + alert, rollback-path
 validity, failures, and the retained / pinned / protected / delete-candidate
 artifact lists. The Appliance writes the same status file locally
 (`/opt/stayconnect/backup-retention-status.json`).

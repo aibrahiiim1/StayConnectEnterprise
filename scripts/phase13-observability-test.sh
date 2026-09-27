@@ -73,7 +73,6 @@ for expr in \
     'up{job="scd"}' \
     'ctrlapi_build_info' \
     'scd_build_info' \
-    'ctrlapi_heartbeats_received_total' \
     'scd_sessions_started_total'; do
     q=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$expr")
     result=$(curl -s "$PROM_URL/api/v1/query?query=$q" | jq -r '.data.result | length')

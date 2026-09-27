@@ -143,21 +143,16 @@ echo "$api_csp" | grep -q "default-src 'none'" \
     && pass "api host has tight CSP (default-src 'none')" \
     || fail "api CSP wrong" "got=$api_csp"
 
-# ---- 6. Backend integration: api webhook on unknown tenant → 403 ----
+# ---- 6. Backend integration: an unauthenticated whoami → 401 ----
 # Proves the request reaches ctrlapi (not a 502 from Caddy).
-wh_code=$(curl -sk -o /dev/null -w '%{http_code}' -X POST \
-    -H 'Content-Type: application/json' \
-    -H 'Stripe-Signature: t=0,v1=deadbeef' \
-    --data '{}' \
-    "https://api.stayconnect.local:${HTTPS_PORT}/v1/webhooks/stripe/00000000-0000-0000-0000-000000000000")
-[[ "$wh_code" == "403" ]] && pass "webhook path reaches ctrlapi through proxy (403 unknown tenant)" \
-                          || fail "webhook path broken" "code=$wh_code"
+wa_code=$(curl -sk -o /dev/null -w '%{http_code}' "https://api.stayconnect.local:${HTTPS_PORT}/v1/auth/whoami")
+[[ "$wa_code" == "401" ]] && pass "api path reaches ctrlapi through proxy (401 without a session)" \
+                          || fail "api path broken" "code=$wa_code"
 
-# Bonus: ctrlapi /metrics is reachable via the proxy — sanity check that
-# Caddy isn't inadvertently blocking the route.
+# ctrlapi /metrics is loopback-only: through the proxy it must NOT be served.
 m_code=$(curl -sk -o /dev/null -w '%{http_code}' "https://api.stayconnect.local:${HTTPS_PORT}/metrics")
-[[ "$m_code" == "200" ]] && pass "/metrics reachable via api host" \
-                         || fail "/metrics blocked" "code=$m_code"
+[[ "$m_code" != "200" ]] && pass "/metrics is not reachable through the proxy (code=$m_code)" \
+                         || fail "/metrics exposed through the proxy" "code=$m_code"
 
 echo
 echo "ALL GREEN"

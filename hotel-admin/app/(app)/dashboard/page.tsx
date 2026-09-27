@@ -22,7 +22,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { api, EdgeHealth, SetupStatus } from "@/lib/api";
+import { api, CentralStatus, EdgeHealth } from "@/lib/api";
 import {
   type OverviewRange, type OverviewSnapshot, OVERVIEW_RANGES, fetchOverview, fmtInt, normalizeOverview, reasonText,
 } from "@/lib/api/dashboard";
@@ -38,7 +38,7 @@ import { Sparkline } from "@/components/ui/chart";
 import { Segmented } from "@/components/ui/tabs";
 import { useCapabilities, surfaceAvailable } from "@/lib/capabilities";
 import { cn, formatBytes, formatRelative } from "@/lib/utils";
-import { describeOutbox, describeDatabase, describeSessionController, describeLicense } from "@/lib/health-words";
+import { describeDatabase, describeSessionController, describeLicense } from "@/lib/health-words";
 import { ArrowDownUp, CheckCircle2, Hotel, LayoutDashboard, LogIn, RefreshCw, Users } from "lucide-react";
 import {
   ApplianceCard, ConcurrencyCard, DhcpDnsCard, NetworksCard, PackagesCard, PmsCard, ServicesGrid, SignInOutcomesCard,
@@ -92,31 +92,25 @@ export default function DashboardPage() {
 
   // Which property and which box this is, once. Purely a label: if it cannot be read the header just omits it.
   useEffect(() => {
-    api.get<SetupStatus>("/setup/status")
+    api.get<CentralStatus>("/central/status")
       .then((s) => {
-        const parts = [s.assignment?.site_name, s.hardware?.hostname].filter(Boolean) as string[];
+        const parts = [s.site_name, s.serial].filter(Boolean) as string[];
         if (parts.length) setContext(parts.join(" · "));
       })
       .catch(() => {});
   }, []);
 
   const caps = useCapabilities();
-  const outbox = describeOutbox(health?.sync_outbox);
   const stale = !!snap && snap.range !== range;
   const rangeLong = OVERVIEW_RANGES.find((r) => r.value === range)?.long ?? "";
 
   // NEEDS ATTENTION. The server derives the operational items from the blocks this operator may read; the two
-  // runtime dependencies and the cloud queue come from /health, exactly as before.
+  // runtime dependencies come from /health, exactly as before.
   const attention: AttentionRow[] = (snap?.attention ?? []).map((a) => ({
     text: a.title, detail: a.detail, href: a.href, action: a.action, tone: a.severity,
   }));
   if (health && !health.db) attention.push({ text: describeDatabase(false).summary, href: "/health", tone: "err" });
   if (health && !health.scd) attention.push({ text: describeSessionController(false).summary, href: "/health", tone: "err" });
-  // A licensing-only appliance never raises a cloud item: that state is a decision, and the obvious "repair"
-  // is the one thing that must not happen.
-  if (outbox.tone === "err" && health?.sync_outbox?.mode !== "LICENSING_ONLY") {
-    attention.push({ text: outbox.summary, href: "/appliance?section=license", tone: "warn" });
-  }
   // Worth knowing, not worth doing: kept out of the attention list on purpose.
   const notes: { text: string; href: string }[] = [];
   const historical = snap?.pms.historical_exceptions ?? 0;
@@ -131,7 +125,7 @@ export default function DashboardPage() {
   const t = snap?.traffic;
   const pms = snap?.pms;
   const so = snap?.sign_in_outcomes;
-  const license = describeLicense(health?.license_state, health?.license_installed);
+  const license = describeLicense(health?.license_state);
 
   return (
     <PageShell width="wide">
@@ -357,14 +351,6 @@ export default function DashboardPage() {
                 <>
                   <ServiceRow title="Site database" info={describeDatabase(!!health.db)} />
                   <ServiceRow title="Session controller" info={describeSessionController(!!health.scd)} />
-                  {/*
-                    THE CLOUD IS NOT A RUNTIME DEPENDENCY OF THIS SITE WHILE IT IS LICENSING-ONLY, SO IT IS NOT
-                    LISTED AS ONE. If the mode is ever something else, the cloud is a live dependency and comes
-                    back as an ordinary row.
-                  */}
-                  {outbox.headline !== "Licensing only" && (
-                    <ServiceRow title="Reporting to the OneGate cloud" info={outbox} href="/appliance?section=license" />
-                  )}
                 </>
               )}
             </CardBody>

@@ -1,10 +1,12 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
-	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/control-plane/internal/api"
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
@@ -13,6 +15,7 @@ import (
 type authDeps struct {
 	Repo   *auth.Repo
 	Store  *auth.SessionStore
+	DB     *pgxpool.Pool
 	Secure bool // set true in prod to add Secure on cookies
 }
 
@@ -21,14 +24,35 @@ type loginReq struct {
 	Password string `json:"password"`
 }
 
+// whoamiResp is the §6 whoami shape; login answers with the same.
 type whoamiResp struct {
-	OperatorID      string   `json:"operator_id"`
-	Email           string   `json:"email"`
-	DisplayName     string   `json:"display_name,omitempty"`
-	IsSuperAdmin    bool     `json:"is_super_admin"`
-	DefaultTenantID string   `json:"default_tenant_id,omitempty"`
-	Roles           []string `json:"roles"`
-	ExpiresAt       string   `json:"expires_at"`
+	OperatorID   string   `json:"operator_id"`
+	Email        string   `json:"email"`
+	DisplayName  string   `json:"display_name"`
+	Roles        []string `json:"roles"`
+	IsSuperAdmin bool     `json:"is_super_admin"`
+	CustomerID   *string  `json:"customer_id"`
+	CustomerName *string  `json:"customer_name"`
+	Permissions  []string `json:"permissions"`
+}
+
+func (d authDeps) describe(ctx context.Context, s *auth.Session) whoamiResp {
+	roles := s.Roles
+	if roles == nil {
+		roles = []string{}
+	}
+	resp := whoamiResp{OperatorID: s.OperatorID, Email: s.Email, DisplayName: s.DisplayName, Roles: roles,
+		IsSuperAdmin: s.IsSuperAdmin, Permissions: s.Permissions()}
+	// A customer-scoped user belongs to one customer; a platform operator to none.
+	if s.DefaultTenantID != "" && !s.HasPermission(auth.PermFleetView) {
+		id := s.DefaultTenantID
+		resp.CustomerID = &id
+		var name string
+		if d.DB != nil && d.DB.QueryRow(ctx, `SELECT name FROM tenants WHERE id=$1`, id).Scan(&name) == nil {
+			resp.CustomerName = &name
+		}
+	}
+	return resp
 }
 
 func (d authDeps) login(w http.ResponseWriter, r *http.Request) {
@@ -57,11 +81,10 @@ func (d authDeps) login(w http.ResponseWriter, r *http.Request) {
 	sess, err := d.Store.Create(r.Context(), auth.Session{
 		OperatorID:      op.ID,
 		Email:           op.Email,
+		DisplayName:     op.DisplayName,
 		IsSuperAdmin:    op.IsSuperAdmin,
 		DefaultTenantID: op.DefaultTenant,
 		Roles:           op.Roles,
-		SiteIDs:         op.SiteIDs,
-		TenantWide:      op.TenantWide,
 	})
 	if err != nil {
 		api.Fail(w, r, http.StatusInternalServerError, api.CodeInternal, "session create failed")
@@ -77,21 +100,12 @@ func (d authDeps) login(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 		Expires:  sess.ExpiresAt,
 	})
-	writeJSON(w, http.StatusOK, whoamiResp{
-		OperatorID:      op.ID,
-		Email:           op.Email,
-		DisplayName:     op.DisplayName,
-		IsSuperAdmin:    op.IsSuperAdmin,
-		DefaultTenantID: op.DefaultTenant,
-		Roles:           op.Roles,
-		ExpiresAt:       sess.ExpiresAt.UTC().Format(time.RFC3339),
-	})
+	writeJSON(w, http.StatusOK, d.describe(r.Context(), sess))
 }
 
-// reauth re-verifies the CURRENT session operator's password. Sensitive
-// Platform actions (assign, reassign, revoke, issue/revoke license, replace,
-// decommission, mint offline package) require a fresh password confirmation
-// on top of the permission check. Returns 200 {"ok":true} or 401.
+// reauth re-verifies the CURRENT session operator's password. Licence and activation writes (and every
+// other SU route) require this fresh confirmation on top of the permission check. Returns 200 {"ok":true}
+// or 401.
 func (d authDeps) reauth(w http.ResponseWriter, r *http.Request) {
 	s := auth.FromContext(r.Context())
 	if s == nil {
@@ -105,7 +119,7 @@ func (d authDeps) reauth(w http.ResponseWriter, r *http.Request) {
 		api.Fail(w, r, http.StatusBadRequest, api.CodeBadRequest, "password required")
 		return
 	}
-	op, err := d.Repo.FindByEmail(r.Context(), s.Email)
+	op, err := d.Repo.FindByID(r.Context(), s.OperatorID)
 	if err != nil || op.Status != "active" || op.PasswordHash == "" {
 		api.Fail(w, r, http.StatusUnauthorized, api.CodeUnauthenticated, "reauthentication failed")
 		return
@@ -142,12 +156,5 @@ func (d authDeps) whoami(w http.ResponseWriter, r *http.Request) {
 		api.Fail(w, r, http.StatusUnauthorized, api.CodeUnauthenticated, "not authenticated")
 		return
 	}
-	writeJSON(w, http.StatusOK, whoamiResp{
-		OperatorID:      s.OperatorID,
-		Email:           s.Email,
-		IsSuperAdmin:    s.IsSuperAdmin,
-		DefaultTenantID: s.DefaultTenantID,
-		Roles:           s.Roles,
-		ExpiresAt:       s.ExpiresAt.UTC().Format(time.RFC3339),
-	})
+	writeJSON(w, http.StatusOK, d.describe(r.Context(), s))
 }

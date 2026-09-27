@@ -4,13 +4,15 @@ Start here. This index is organized by what you're trying to do. If you're new t
 StayConnect, read the **Complete Operations Manual** first — it takes a hotel from
 an unpacked appliance to live, licensed guest WiFi and covers day-2 operations.
 
-> **Current production model (read this first):** normal onboarding is
-> **zero-touch** — a factory-clean appliance with internet self-registers with
-> Central and appears as **Pending activation**, where one operator click activates
-> and licenses it. The entitlement is a **signed appliance license** (max concurrent
-> online guests + validity + grace + entitled features). **Plans and subscriptions
-> are retired** and are not part of any workflow. Enrollment tokens are an
-> advanced/manual path only.
+> **Current production model (read this first):** onboarding is **zero-touch** —
+> a factory-clean appliance with internet registers itself with Central (no token)
+> and appears under **Appliances** as **Waiting for activation**, where one
+> **Activate** step picks the customer, site and licence terms. A site without
+> internet uses **offline activation** (one file each way). The entitlement is a
+> **signed appliance licence** (max concurrent online guests + validity + grace).
+> **Plans, subscriptions and enrollment tokens no longer exist.** Central is
+> licensing, activation and fleet status only — the binding description is
+> [CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md).
 
 ---
 
@@ -26,27 +28,30 @@ an unpacked appliance to live, licensed guest WiFi and covers day-2 operations.
   convergence, the license model & states, concurrent capacity, guest VLANs (with
   worked VLAN 100 / VLAN 200 examples), DHCP/DNS/NAT/portal, auth methods, access
   plans & vouchers, integrations, renewal & anti-replay, recovery, Central-outage
-  behavior, replacement & rebind, factory reset, deactivate/revoke/decommission/
-  delete, safe-deletion order, security/certs, backup, audit, troubleshooting, and
+  behavior, replacement & rebind, factory reset, move/retire/delete,
+  safe-deletion order, security/certs, backup, audit, troubleshooting, and
   go-live / day-2 checklists.
 
 ## 3. Control Panel (Central) — configuration manual
 
+- [CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md) — **authoritative**: what
+  Central is, the console structure, appliance states, lifecycle, API contract and
+  roles.
 - [user-guide/control-panel-config-manual.md](user-guide/control-panel-config-manual.md)
-  — how to create a **Customer → Site → Appliance → License** and run day-2
-  operations from the Control Panel.
+  — how to create a **Customer → Site**, activate an **Appliance**, set its
+  **Licence**, and run day-2 operations from the Central console.
 
 ## 4. Control Panel (Central) — page reference
 
 - [user-guide/control-panel-reference.md](user-guide/control-panel-reference.md) —
-  every Control Panel page: Dashboard, Sites, Appliances, Onboarding, Fleet,
-  Customers, Licenses, Operators, Security alerts, Certificates, Assignment keys,
-  Backup health, Audit (legacy `/subscription` and `/commercial` noted as retired).
+  every Central console page: Overview, Customers (and the customer page), Appliances
+  (and the appliance page), Licenses, and System (Security alerts, Trust & keys,
+  Audit log, Team, Backup health).
 
 ## 5. Hotel Admin (Appliance) — configuration manual
 
 - [user-guide/hotel-admin-config-manual.md](user-guide/hotel-admin-config-manual.md)
-  — connect & activate, then fully configure the appliance: WAN/LAN, guest VLANs,
+  — activate (Appliance & licence page), then fully configure the appliance: WAN/LAN, guest VLANs,
   auth methods, vouchers, integrations, branding, operators, TLS, diagnostics.
 
 ## 6. Hotel Admin (Appliance) — page reference
@@ -95,12 +100,13 @@ an unpacked appliance to live, licensed guest WiFi and covers day-2 operations.
 
 | Topic | Document |
 |---|---|
-| Full system reference | [SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md) |
+| Full system reference (historical snapshot, 2026-07-10) | [SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md) |
+| Central (licensing, activation, fleet status) — authoritative | [CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md) |
 | Cloud / control-plane architecture | [CLOUD_ARCHITECTURE.md](CLOUD_ARCHITECTURE.md) · [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md) |
 | Edge / appliance architecture | [EDGE_ARCHITECTURE.md](EDGE_ARCHITECTURE.md) · [EDGE_NETWORKING.md](EDGE_NETWORKING.md) |
 | Guest VLANs | [GUEST_VLAN_CONFIGURATION.md](GUEST_VLAN_CONFIGURATION.md) · [ARUBA_SSID_VLAN_MAPPING.md](ARUBA_SSID_VLAN_MAPPING.md) |
 | DHCP | [DHCP_MANAGEMENT.md](DHCP_MANAGEMENT.md) · [DHCP_OPTION_114.md](DHCP_OPTION_114.md) · [EXTERNAL_DHCP_MODE.md](EXTERNAL_DHCP_MODE.md) |
-| Sync protocol | [SYNC_PROTOCOL.md](SYNC_PROTOCOL.md) |
+| Sync protocol (historical — the appliance's telemetry subsystem was removed, CLAUDE.md §0E) | [SYNC_PROTOCOL.md](SYNC_PROTOCOL.md) |
 | Deployment | [DEPLOYMENT_CLOUD.md](DEPLOYMENT_CLOUD.md) · [DEPLOYMENT_APPLIANCE.md](DEPLOYMENT_APPLIANCE.md) |
 | Roles & scope | [ROLE_AND_SCOPE_MATRIX.md](ROLE_AND_SCOPE_MATRIX.md) |
 | Data ownership | [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md) |

@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { mockFetch } from "./helpers";
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/sites",
+  usePathname: () => "/customers/c1",
   useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
 }));
@@ -69,7 +69,7 @@ describe("DeleteDialog — the destructive-action pattern", () => {
     const { calls } = mockFetch([
       {
         method: "DELETE",
-        match: /\/api\/v1\/sites\/s1/,
+        match: /\/api\/cloud\/v1\/sites\/s1/,
         status: 409,
         body: { error: "conflict", message: "Site still has appliances.", blocking: [{ type: "appliances", label: "appliances", count: 2, resource: "appliances" }] },
       },
@@ -83,7 +83,8 @@ describe("DeleteDialog — the destructive-action pattern", () => {
         what="Site"
         expected="demo"
         confirmHint="Type the site code"
-        deleteUrl="/v1/sites/s1?tenant_id=t1"
+        deleteUrl="/cloud/v1/sites/s1"
+        blockerHref={() => "/appliances?site_id=s1"}
       />,
     );
     expect(screen.getByText("It cannot be undone.")).toBeInTheDocument();
@@ -91,10 +92,10 @@ describe("DeleteDialog — the destructive-action pattern", () => {
     await user.type(screen.getByLabelText(/Reason/), "duplicate");
     await user.click(screen.getByRole("button", { name: "Delete site" }));
 
-    await waitFor(() => expect(screen.getByText(/cannot be deleted because it still contains/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/cannot be deleted because it still has/)).toBeInTheDocument());
     expect(screen.getByText("2 appliances")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /View appliances/ })).toHaveAttribute("href", "/appliances");
-    expect(calls[0]).toMatchObject({ method: "DELETE", url: "/api/v1/sites/s1?tenant_id=t1", body: { confirm: "demo", reason: "duplicate" } });
+    expect(screen.getByRole("link", { name: /View appliances/ })).toHaveAttribute("href", "/appliances?site_id=s1");
+    expect(calls[0]).toMatchObject({ method: "DELETE", url: "/api/cloud/v1/sites/s1", body: { confirm: "demo", reason: "duplicate" } });
   });
 });
 

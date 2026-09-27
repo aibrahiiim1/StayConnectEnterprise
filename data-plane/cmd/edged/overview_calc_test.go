@@ -398,7 +398,7 @@ func TestAttentionRulesEachLinkToTheScreenThatFixesThem(t *testing.T) {
 		KeaKnown: true, KeaConfigured: true, KeaHealthy: false,
 		Pools:        []attentionPool{{Network: "Guest", Pct: 91.2}, {Network: "Lobby", Pct: 100}},
 		Disks:        []attentionDisk{{Path: "/", Pct: 96}},
-		LicenseKnown: true, LicenseInstalled: true, LicenseState: "GracePeriod",
+		LicenseKnown: true, LicenseInstalled: true, LicenseState: "grace",
 		RevisionPending: true, SystemNetPending: true,
 	}
 	got := deriveAttention(in)
@@ -412,7 +412,7 @@ func TestAttentionRulesEachLinkToTheScreenThatFixesThem(t *testing.T) {
 		"pool:Guest":               "/network/dhcp",
 		"pool:Lobby":               "/network/dhcp",
 		"disk:/":                   "/health",
-		"license-grace":            "/appliance?section=license",
+		"license-grace":            "/appliance",
 		"network-revision-pending": "/network/revisions",
 		"system-network-pending":   "/network/system",
 	}
@@ -452,10 +452,12 @@ func TestLicenceAttention(t *testing.T) {
 		state     string
 		id        string
 	}{
-		"missing":   {false, "Active", "license-missing"},
-		"expired":   {true, "Expired", "license-expired"},
-		"revoked":   {true, "Revoked", "license-revoked"},
-		"suspended": {true, "Suspended", "license-suspended"},
+		"missing":        {false, "none", "license-missing"},
+		"expired":        {true, "expired", "license-expired"},
+		"revoked":        {true, "revoked", "license-revoked"},
+		"suspended":      {true, "suspended", "license-suspended"},
+		"expiring":       {true, "expiring", "license-expiring"},
+		"wrong hardware": {true, "wrong_hardware", "license-wrong-hardware"},
 	}
 	for name, c := range cases {
 		got := deriveAttention(attentionInput{LicenseKnown: true, LicenseInstalled: c.installed, LicenseState: c.state})

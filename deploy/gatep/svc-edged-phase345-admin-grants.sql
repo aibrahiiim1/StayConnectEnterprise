@@ -202,31 +202,14 @@ GRANT EXECUTE ON FUNCTION iam_v2.guest_signin_release(uuid,uuid,uuid,text,text) 
 -- move an event's state with no record that anybody decided to — and the outcome of that decision can check a
 -- guest out and revoke their access.
 --
--- WHY NO UPDATE ON public.sync_outbox. Recovery clears the flag on records the appliance abandoned and writes
--- the append-only log row saying who released them and why, in one call. Split them and a recovery could
--- happen with nothing recording it; and an operator API with UPDATE on the queue could also mark undelivered
--- records as sent, which is the one way to make a backlog disappear without delivering it.
---
 -- The three views run as their owner, which is how a role with no SELECT on iam_v2.stays or iam_v2.stay_events
 -- reads the reconciliation lists: a scoped projection rather than the tables underneath.
 GRANT SELECT  ON iam_v2.pms_reconciliation_cases   TO svc_edged;
 GRANT SELECT  ON iam_v2.pms_rooms_multi_occupancy  TO svc_edged;
 GRANT SELECT  ON iam_v2.pms_stays_past_departure   TO svc_edged;
-GRANT SELECT  ON iam_v2.cloud_sync_settings_changes TO svc_edged;
-GRANT SELECT  ON iam_v2.sync_outbox_recovery_log   TO svc_edged;
-GRANT EXECUTE ON FUNCTION iam_v2.cloud_sync_settings_get(uuid,uuid)                                  TO svc_edged;
-GRANT EXECUTE ON FUNCTION iam_v2.cloud_sync_settings_set(uuid,uuid,integer,text,text)                TO svc_edged;
-GRANT EXECUTE ON FUNCTION iam_v2.sync_outbox_recover_exhausted(text,text,integer)                    TO svc_edged;
-GRANT EXECUTE ON FUNCTION iam_v2.sync_outbox_accounting()                                            TO svc_edged;
 
--- CLOUD OPERATING MODE (migration 0071). edged reads the mode to show it on the Cloud connection screen and
--- to refuse to enqueue service-health when the appliance is licensing-only.
---
--- NO EXECUTE ON cloud_mode_set, DELIBERATELY. The Product-Owner decision says the operating model must not be
--- contradicted by a casual UI switch, so the admin API has no path to change it. Changing the mode is a
--- deliberate act performed with the owner role, and the append-only change log records who did it.
-GRANT EXECUTE ON FUNCTION iam_v2.cloud_mode_get(uuid,uuid) TO svc_edged;
-GRANT SELECT  ON iam_v2.cloud_mode_changes                 TO svc_edged;
+-- The cloud-sync settings / recovery surface (0069) and the cloud operating mode (0071) are REMOVED with the
+-- cloud telemetry subsystem (migration 0093); so are the grants that served them.
 
 -- ---------------------------------------------------------------------------------------------------------
 -- FOUR GRANTS THAT MIGRATIONS MADE AND A RECONCILE DELETED

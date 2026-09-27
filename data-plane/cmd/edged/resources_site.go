@@ -372,8 +372,7 @@ func (s *server) auditRoutes() http.Handler {
 func (s *server) reportsRoutes() http.Handler {
 	r := chi.NewRouter()
 	// The richer operational snapshot the dashboard reads. /summary stays exactly as it is: it is a stable
-	// contract that scd's cloud telemetry shape mirrors, and widening it would change what gets reported
-	// upward as a side effect of changing a screen.
+	// contract other screens read, and widening it would change them as a side effect of changing one.
 	r.Get("/dashboard", s.reportsDashboard)
 	// The overview (range-selectable analytics + operational state) and the appliance's own resources. Both
 	// are additive; /dashboard is unchanged. See resources_overview.go and appliance_resources.go.

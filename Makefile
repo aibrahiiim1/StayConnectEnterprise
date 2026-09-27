@@ -48,6 +48,23 @@ ctrlapi-install: ctrlapi-build
 	systemctl restart stayconnect-ctrlapi.service
 	@[ -x /opt/stayconnect/bin/stayconnect-backup-cleanup ] && /opt/stayconnect/bin/stayconnect-backup-cleanup --apply || true
 
+# ---- OneGate Central (docs/DEPLOYMENT_CLOUD.md) ----------------------------
+# A Central host is installed and upgraded from a RELEASE, never from a checkout:
+#   make central-build                                   (workstation/CI, docker) -> dist/central/*.tar.gz
+#   central-install.sh --mode new|restore / central-deploy.sh   (on the host, from the extracted release)
+# The targets below the build are read-only checks for an installed Central.
+.PHONY: central-build central-preflight central-migrate-status central-smoke central-status
+central-build:
+	bash deploy/scripts/central-build.sh
+central-preflight:
+	bash deploy/scripts/central-preflight.sh --pg-exec "docker exec -i sc-central-pg" --db stayconnect
+central-migrate-status:
+	bash deploy/scripts/central-migrate.sh --pg-exec "docker exec -i sc-central-pg" --db stayconnect status
+central-smoke:
+	bash deploy/scripts/central-deploy.sh smoke
+central-status:
+	bash deploy/scripts/central-deploy.sh status
+
 # Install the backup-retention tool, config, and daily safety-net timer (both hosts).
 backup-cleanup-install:
 	install -m 0755 deploy/scripts/stayconnect-backup-cleanup.sh /opt/stayconnect/bin/stayconnect-backup-cleanup
@@ -93,13 +110,6 @@ phase1-install: dataplane-build
 	systemctl daemon-reload
 	systemctl enable --now stayconnect-scd.service
 	systemctl enable --now stayconnect-portald.service
-
-web-install:
-	cd web-admin && npm install --no-fund --no-audit
-	install -m 0644 deploy/systemd/stayconnect-web-admin.service /etc/systemd/system/
-	systemctl daemon-reload
-	systemctl enable --now stayconnect-web-admin.service
-	systemctl restart stayconnect-web-admin.service
 
 # NO tc-setup. The HTB roots, the guest IFB, the ingress redirect and every per-session and SHARED class are
 # created and reconciled by netd (internal/shape EnsureBridgeInfra + the Phase-3 applier), idempotently, on

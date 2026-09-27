@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/control-plane/internal/applianceauth"
 	"github.com/stayconnect/enterprise/control-plane/internal/audit"
@@ -24,21 +26,24 @@ type registerReq struct {
 	Hostname            string `json:"hostname"`
 	Model               string `json:"model"`
 	PublicKey           string `json:"public_key"` // base64-raw Ed25519 (32 bytes)
+	// HoldsCustomerID is the customer whose data the appliance's local site database still holds; absent for
+	// a factory-clean appliance. It is inside the signed body. Stored on every registration (NULL when
+	// absent); activation for any other customer is refused (holdsOtherCustomerRefusal).
+	HoldsCustomerID string `json:"holds_customer_id"`
 }
 
 // RegisterHandler is PUBLIC and TOKEN-LESS. A factory-clean appliance generates
 // its Ed25519 identity locally and calls this endpoint with a request SIGNED BY
 // THAT KEY (trust-on-first-use): the signature proves possession of the private
 // key for the enclosed public key. On success the appliance appears as Pending
-// Activation with its hardware inventory; no bootstrap token is required for the
-// normal online flow.
+// Activation with its hardware inventory; no token of any kind is involved.
 //
 // Clone protection: the identity key is the trust anchor. If a request presents
 // a KNOWN identity key from DIFFERENT hardware (different serial / hardware
 // fingerprint), that is a copied-identity clone — we raise a security alert and
 // reject, and (because the license binds to the original hardware) the clone can
 // never install an active license anyway.
-func (b *EnrollmentBase) RegisterHandler(w http.ResponseWriter, r *http.Request) {
+func (b *IdentityBase) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
 	if err != nil {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body")
@@ -61,6 +66,11 @@ func (b *EnrollmentBase) RegisterHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	pub := ed25519.PublicKey(pubRaw)
+	held, ok := normalizeHeldCustomer(req.HoldsCustomerID)
+	if !ok {
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "holds_customer_id must be a customer id (uuid)")
+		return
+	}
 
 	// Verify the self-signed registration JWT against the ENCLOSED key (TOFU).
 	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
@@ -115,9 +125,10 @@ func (b *EnrollmentBase) RegisterHandler(w http.ResponseWriter, r *http.Request)
                 hardware_fingerprint = COALESCE(NULLIF($4,''), hardware_fingerprint),
                 hostname = COALESCE(NULLIF($5,''), hostname),
                 model = COALESCE(NULLIF($6,''), model),
+                held_customer_id = NULLIF($8,'')::uuid,
                 last_seen_at = now(), last_public_ip = $7, updated_at = now()
              WHERE id = $1`,
-			appID, req.WANMAC, req.LANMAC, req.HardwareFingerprint, req.Hostname, req.Model, ip)
+			appID, req.WANMAC, req.LANMAC, req.HardwareFingerprint, req.Hostname, req.Model, ip, held)
 		state := exLifecycle
 		if state == "" {
 			state = "pending_approval"
@@ -127,6 +138,16 @@ func (b *EnrollmentBase) RegisterHandler(w http.ResponseWriter, r *http.Request)
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "lookup failed")
+		return
+	}
+	// A RETIRED identity key never comes back as a waiting appliance, even after its record was deleted: the
+	// box still holds whatever its previous customer left on it. Factory-reset it (a new key) first.
+	if retired, err := identityRetired(ctx, b.DB, req.PublicKey); err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "lookup failed")
+		return
+	} else if retired {
+		Fail(w, r, http.StatusForbidden, "identity_retired",
+			"registration rejected: this appliance identity was retired; factory-reset the appliance to register it again")
 		return
 	}
 
@@ -141,10 +162,9 @@ func (b *EnrollmentBase) RegisterHandler(w http.ResponseWriter, r *http.Request)
 	// claimed/assigned/activated/online state means the hardware already has a
 	// live identity — a new key there is a clone or a hijack of a known serial
 	// (serial + hardware fingerprint are not secret), so we alert and reject.
-	// A legit factory-reset of an active box requires the operator to decommission
-	// it first (or use a bootstrap token) — a deliberate, audited action.
-	reusable := map[string]bool{"pending_approval": true, "installed_unenrolled": true, "": true,
-		"revoked": true, "decommissioned": true, "retired": true}
+	// A legit factory-reset of an active box requires the operator to retire
+	// it first — a deliberate, audited action.
+	reusable := map[string]bool{"pending_approval": true, "": true, "revoked": true, "decommissioned": true}
 	if reuseID != "" {
 		if !reusable[reuseState] {
 			// Surface the old↔new HARDWARE link explicitly: same physical serial,
@@ -165,41 +185,73 @@ func (b *EnrollmentBase) RegisterHandler(w http.ResponseWriter, r *http.Request)
                 VALUES ($1, $2, 'hardware_reused', $3::jsonb, $4)`,
 				reuseID, req.Serial, string(hwDetail), ip)
 			Fail(w, r, http.StatusForbidden, CodeForbidden,
-				"registration rejected: this hardware (serial "+req.Serial+") already has an active appliance under another identity — decommission it first (likely a factory reset)")
+				"registration rejected: this hardware (serial "+req.Serial+") already has an active appliance under another identity — retire it in Central first (likely a factory reset)")
 			return
 		}
 		// Re-register after factory reset: adopt the new identity on the existing
-		// row, keep it Pending. No duplicate appliance is created.
+		// row, keep it Pending. No duplicate appliance is created. Anything the
+		// previous identity held is dead: its certificates are revoked, its key is
+		// recorded as retired (so it can never register again) and its retirement
+		// record is closed, so the row starts again as a clean WAITING appliance.
+		// The signed-assignment row is kept so versions stay monotonic.
+		_, _ = b.DB.Exec(ctx, `
+            INSERT INTO retired_appliance_identities (public_key, serial, appliance_id, reason)
+            SELECT public_key, serial, id, 'replaced by a new identity (factory reset)'
+              FROM appliances WHERE id=$1 AND lifecycle_state IN ('revoked','decommissioned') AND COALESCE(public_key,'') <> ''
+            ON CONFLICT (public_key) DO NOTHING`, reuseID)
+		_, _ = b.DB.Exec(ctx, `
+            INSERT INTO appliance_certificate_revocations (certificate_id, appliance_id, fingerprint_sha256, reason)
+            SELECT c.id, c.appliance_id, c.fingerprint_sha256, 'identity re-registered'
+              FROM appliance_certificates c WHERE c.appliance_id=$1 AND c.status='active'
+            ON CONFLICT DO NOTHING`, reuseID)
+		_, _ = b.DB.Exec(ctx, `UPDATE appliance_certificates SET status='revoked', revoked_at=now(),
+            revocation_reason='identity re-registered' WHERE appliance_id=$1 AND status='active'`, reuseID)
+		_, _ = b.DB.Exec(ctx, `DELETE FROM appliance_terminal_delivery WHERE appliance_id=$1`, reuseID)
 		_, _ = b.DB.Exec(ctx, `
             UPDATE appliances SET
-                public_key = $2, status = 'pending', lifecycle_state = 'pending_approval',
-                tenant_id = NULL, site_id = NULL,
+                public_key = $2, lifecycle_state = 'pending_approval',
+                tenant_id = NULL, site_id = NULL, activated_at = NULL,
+                current_cert_fingerprint = NULL, replacement_pending = false, replacement_deadline = NULL,
                 wan_mac = NULLIF($3,''), lan_mac = NULLIF($4,''), hardware_fingerprint = NULLIF($5,''),
                 hostname = NULLIF($6,''), model = NULLIF($7,''),
-                enrolled_at = now(), first_seen_at = COALESCE(first_seen_at, now()),
+                held_customer_id = NULLIF($9,'')::uuid,
+                registered_at = now(), first_seen_at = COALESCE(first_seen_at, now()),
                 last_seen_at = now(), last_public_ip = $8, updated_at = now()
              WHERE id = $1`,
-			reuseID, req.PublicKey, req.WANMAC, req.LANMAC, req.HardwareFingerprint, req.Hostname, req.Model, ip)
+			reuseID, req.PublicKey, req.WANMAC, req.LANMAC, req.HardwareFingerprint, req.Hostname, req.Model, ip, held)
+		if held != "" {
+			audit.Op(r.Context(), b.DB, r, "appliance.registered_holding_customer_data", "appliance", reuseID, map[string]any{
+				"serial": req.Serial, "holds_customer_id": held, "source_ip": ip})
+		}
 		WriteJSON(w, http.StatusOK, map[string]any{"appliance_id": reuseID, "status": "pending_approval"})
 		return
 	}
 
 	// (3) Brand-new appliance → Pending Activation (unassigned).
 	err = b.DB.QueryRow(ctx, `
-        INSERT INTO appliances(serial, name, status, lifecycle_state, public_key,
+        INSERT INTO appliances(serial, lifecycle_state, public_key,
                                wan_mac, lan_mac, hardware_fingerprint, hostname, model,
-                               enrolled_at, first_seen_at, last_seen_at, last_public_ip)
-        VALUES ($1, $1, 'pending', 'pending_approval', $2,
+                               registered_at, first_seen_at, last_seen_at, last_public_ip, held_customer_id)
+        VALUES ($1, 'pending_approval', $2,
                 NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLIF($7,''),
-                now(), now(), now(), $8)
+                now(), now(), now(), $8, NULLIF($9,'')::uuid)
         RETURNING id::text
-    `, req.Serial, req.PublicKey, req.WANMAC, req.LANMAC, req.HardwareFingerprint, req.Hostname, req.Model, ip).Scan(&appID)
+    `, req.Serial, req.PublicKey, req.WANMAC, req.LANMAC, req.HardwareFingerprint, req.Hostname, req.Model, ip, held).Scan(&appID)
 	if err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "create appliance failed")
 		return
 	}
-	audit.Op(r.Context(), b.DB, r, "appliance.registered", "appliance", appID, map[string]any{
-		"serial": req.Serial, "wan_mac": req.WANMAC, "source_ip": ip,
-	})
+	details := map[string]any{"serial": req.Serial, "wan_mac": req.WANMAC, "source_ip": ip}
+	if held != "" {
+		details["holds_customer_id"] = held
+	}
+	audit.Op(r.Context(), b.DB, r, "appliance.registered", "appliance", appID, details)
 	WriteJSON(w, http.StatusOK, map[string]any{"appliance_id": appID, "status": "pending_approval"})
+}
+
+// identityRetired reports whether this identity key belonged to a retired appliance.
+func identityRetired(ctx context.Context, db *pgxpool.Pool, publicKey string) (bool, error) {
+	var n int
+	err := db.QueryRow(ctx, `SELECT count(*) FROM retired_appliance_identities WHERE public_key=$1`, publicKey).Scan(&n)
+	return n > 0, err
 }

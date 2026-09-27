@@ -16,5 +16,7 @@ export default defineConfig({
     include: ["test/**/*.test.{ts,tsx}"],
     css: false,
     restoreMocks: true,
+    // Same reason as asyncUtilTimeout in test/setup.ts: parallel jsdom workers on a loaded machine.
+    testTimeout: 20000,
   },
 });

@@ -4,11 +4,13 @@ package main
 //
 // Two endpoints, one per file the operator carries:
 //
-//	GET  /v1/setup/activation-request   emit the request (generates the local keypair if absent)
-//	POST /v1/setup/activation-package   verify and apply the package Central returned
+//	GET  /v1/central/offline-request    emit the request (generates the local keypair if absent)
+//	POST /v1/central/offline-package    verify and apply the package Central returned (a first-activation
+//	                                    package is recognised by shape; see centralOfflinePackage)
 //
-// This is SEPARATE from /v1/setup/offline-import, which transports a licence to an appliance that is already
-// assigned. That path is untouched; nothing here changes its envelope, its checks or its ledger.
+// This is SEPARATE from the offline LICENCE package (offline_import.go), which transports a licence to an
+// appliance that is already assigned. That path is untouched; nothing here changes its envelope, its checks or
+// its ledger.
 //
 // APPLYING IS ATOMIC IN THE ONLY sense that matters operationally: the appliance either ends up assigned AND
 // licensed, or it ends up exactly as it started. The order below is chosen so that the step most likely to
@@ -30,6 +32,7 @@ import (
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/activation"
+	"github.com/stayconnect/enterprise/data-plane/internal/applianceauth"
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/data-plane/internal/hwid"
 	lic "github.com/stayconnect/enterprise/license"
@@ -64,7 +67,10 @@ func (s *server) activationJournalPath() string {
 // It generates the identity keypair locally if this appliance has none. The private half never leaves: the
 // request carries the public key and a signature made with the private one, which is the whole proof.
 func (s *server) setupActivationRequest(w http.ResponseWriter, r *http.Request) {
-	if s.enrolled || s.applID != "" {
+	if s.refuseWhileRemoved(w) {
+		return
+	}
+	if s.applID != "" {
 		httpErr(w, http.StatusConflict, "this appliance is already enrolled — first activation does not apply")
 		return
 	}
@@ -77,12 +83,22 @@ func (s *server) setupActivationRequest(w http.ResponseWriter, r *http.Request) 
 		httpErr(w, http.StatusInternalServerError, "could not prepare an identity for this appliance")
 		return
 	}
+	// The request says whose customer data this appliance still holds, exactly as an online registration
+	// does (held_customer.go): Central will not activate it for anyone else.
+	held, err := heldCustomerID(r.Context(), s.db, envOr("SCD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment"))
+	if errors.Is(err, errHoldsSeveralCustomers) {
+		httpErr(w, http.StatusConflict, err.Error())
+		return
+	} else if err != nil {
+		httpErr(w, http.StatusServiceUnavailable, "could not read which customer's data this appliance holds; try again")
+		return
+	}
 	// Reuse an outstanding request rather than minting a new one on every click: a fresh nonce would
 	// silently invalidate the package the operator is already carrying back.
 	if raw, err := os.ReadFile(s.activationRequestPath()); err == nil {
 		var prev activation.Request
 		if json.Unmarshal(raw, &prev) == nil && activation.VerifyRequest(&prev) &&
-			prev.PublicKey == id.PublicKeyB64 {
+			prev.PublicKey == id.PublicKeyB64 && prev.HoldsCustomerID == held {
 			writeJSON(w, http.StatusOK, prev)
 			return
 		}
@@ -100,6 +116,8 @@ func (s *server) setupActivationRequest(w http.ResponseWriter, r *http.Request) 
 		Model:         hw.Model,
 		CreatedAt:     time.Now().Unix(),
 		Nonce:         offlineNonceHex(),
+
+		HoldsCustomerID: held,
 	}
 	activation.SignRequest(id.PrivateKey(), req)
 	b, _ := json.MarshalIndent(req, "", "  ")
@@ -154,11 +172,29 @@ func (s *server) setupActivationPackage(w http.ResponseWriter, r *http.Request) 
 	if d := s.assignmentStore().Doc(); d != nil && d.TenantID != "" {
 		alreadyAssigned = true
 	}
+	serial := firstNonEmpty(s.serial, id.Serial)
 	if reason := activation.AcceptForFirstActivation(ed25519.PublicKey(vendorRaw), &pkg,
-		firstNonEmpty(s.serial, id.Serial), identityFpr, req.RequestID, req.Nonce,
+		serial, identityFpr, req.RequestID, req.Nonce,
 		alreadyAssigned, time.Now()); reason != "" {
 		httpErr(w, http.StatusForbidden, "package rejected: "+reason)
 		return
+	}
+	// VERIFY THE SIGNED ASSIGNMENT BEFORE ANYTHING IS WRITTEN (F8). The package signature proves the vendor
+	// sent the envelope; it does not prove the assignment inside it would survive the check every boot applies.
+	// Adopting it unverified meant an appliance could come up "activated" and then, on its very next boot,
+	// refuse its own assignment -- or, worse, hold a tenant/site that no trusted assignment key ever signed.
+	// Same function, same registry, same binding as the online path and as boot.
+	if _, reason := verifyPackageAssignment(&pkg, id.PublicKeyB64, serial, s.assignmentStore(), time.Now()); reason != "" {
+		httpErr(w, http.StatusForbidden, "package rejected: "+reason)
+		return
+	}
+	// Bind the licence check at install to this identity and the appliance id the package names, so the
+	// licence inside it is checked against THIS key rather than against an identity not loaded yet.
+	if s.lic != nil {
+		s.lic.SetLocalIdentity(lic.LocalIdentity{
+			ApplianceID: pkg.ApplianceID, IdentityKeyFingerprint: applianceauthKeyIDFromB64(id.PublicKeyB64),
+			Serial: s.hw.Serial, HardwareFingerprint: s.hw.Fingerprint, WANMAC: s.hw.WANMAC,
+		})
 	}
 	if err := s.applyActivationPackage(r, &pkg); err != nil {
 		if errors.Is(err, errPackageConsumed) {
@@ -169,10 +205,10 @@ func (s *server) setupActivationPackage(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// Restart so the daemon comes up holding the new identity, assignment and licence, exactly as the online
-	// path does after enrollment.
+	// path does after registration.
 	go func() {
 		time.Sleep(500 * time.Millisecond)
-		_ = exec.Command("systemctl", "restart", "stayconnect-scd").Run()
+		restartAfterActivation()
 	}()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "activated", "package_id": pkg.PackageID,
@@ -182,6 +218,49 @@ func (s *server) setupActivationPackage(w http.ResponseWriter, r *http.Request) 
 }
 
 var errPackageConsumed = errors.New("package already consumed")
+
+// restartAfterActivation restarts scd under systemd once an offline activation has landed. A variable so a test
+// can apply a package without restarting anything.
+var restartAfterActivation = func() { _ = exec.Command("systemctl", "restart", "stayconnect-scd").Run() }
+
+// verifyPackageAssignment checks the signed assignment a first-activation package carries exactly as the
+// online assignment agent and every boot do: trusted assignment-signing key, bound to the appliance id the
+// package names and to THIS identity key, a version newer than anything held, and a granting state for the
+// tenant/site the package claims. Returns "" when it verifies.
+func verifyPackageAssignment(pkg *activation.Package, identityPubB64, serial string, store *assignment.Store,
+	now time.Time) (*assignment.Document, string) {
+	var doc assignment.Document
+	if err := json.Unmarshal(pkg.Assignment, &doc); err != nil {
+		return nil, "the signed assignment inside the package is unreadable"
+	}
+	if doc.TenantID != pkg.TenantID || doc.SiteID != pkg.SiteID {
+		return nil, "the signed assignment disagrees with the package about customer or site"
+	}
+	if !assignment.Grants(doc.State) {
+		return nil, "the signed assignment does not assign this appliance to a site"
+	}
+	reg, _ := currentRegistryOnDisk()
+	have := int64(0)
+	if rec, err := store.Load(); err == nil && rec != nil {
+		have = rec.Version
+	}
+	if reason := assignment.AcceptForRegistry(reg, &doc, pkg.ApplianceID, serial,
+		applianceauthKeyIDFromB64(identityPubB64), have, now); reason != "" {
+		return nil, "the signed assignment inside it could not be verified (" + reason + ")"
+	}
+	return &doc, ""
+}
+
+// applianceauthKeyIDFromB64 is the hex identity-key fingerprint the assignment and the licence carry (NOT the
+// base64url form the activation envelope uses -- see internal/activation.KeyID; both sides of each document
+// agree on their own encoding).
+func applianceauthKeyIDFromB64(pubB64 string) string {
+	raw, err := base64.RawStdEncoding.DecodeString(pubB64)
+	if err != nil || len(raw) != ed25519.PublicKeySize {
+		return ""
+	}
+	return applianceauth.KeyID(ed25519.PublicKey(raw))
+}
 
 // applyActivationPackage performs the durable writes, and undoes them on any failure.
 //

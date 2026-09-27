@@ -1,11 +1,12 @@
-// Package licensing issues vendor-signed entitlement documents for sites.
+// Package licensing issues vendor-signed licences, one appliance at a time.
 //
-// The Service reads the tenant's active commercial subscription (plans /
-// tenant_effective_limits) and the site's appliances, projects them into a
-// license.Document, signs it with the vendor key, and persists both the
-// queryable projection and the exact signed envelope in the licenses table.
-// Appliances fetch the envelope over their authenticated channel and verify
+// A licence is bound to ONE appliance: its id, serial, hardware fingerprint, identity key and WAN MAC. Its
+// only commercial terms are a concurrent-online-guest cap, a validity window and a grace period. The Service
+// signs the document with the vendor key and persists both the queryable projection and the exact signed
+// envelope in the licenses table. Appliances fetch the envelope over their authenticated channel and verify
 // it offline; nothing in the guest path ever calls back here.
+//
+// Licence state is never written into the appliance lifecycle. ctrlapi derives it on read.
 package licensing
 
 import (
@@ -24,6 +25,10 @@ import (
 	lic "github.com/stayconnect/enterprise/license"
 )
 
+// PlanCode is the commercial_plan_code field of every signed licence document. There are no plans; the field
+// stays in the document because deployed appliances verify that exact signed format (license/doc.go).
+const PlanCode = "direct"
+
 // newUUID returns a random RFC 4122 v4 UUID string (avoids an extra dep).
 func newUUID() string {
 	var b [16]byte
@@ -39,62 +44,16 @@ type Service struct {
 }
 
 var (
-	ErrNoSubscription = errors.New("tenant has no active subscription")
-	ErrNoSigner       = errors.New("vendor signing key not configured (CTRLAPI_VENDOR_KEY)")
-	ErrNoLicense      = errors.New("no current license for site")
+	ErrNoSigner  = errors.New("vendor signing key not configured (CTRLAPI_VENDOR_KEY)")
+	ErrNoLicense = errors.New("no current licence")
 )
 
-// effective limit lookup helpers (bool + int) against the merged view.
-
-func (s *Service) intLimit(ctx context.Context, tenantID, key string) (int64, bool, error) {
-	var v *int64
-	err := s.DB.QueryRow(ctx, `
-        SELECT int_value FROM tenant_effective_limits
-         WHERE tenant_id = $1 AND key = $2 AND value_type = 'int' LIMIT 1
-    `, tenantID, key).Scan(&v)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, false, nil
-	}
-	if err != nil {
-		return 0, false, err
-	}
-	if v == nil {
-		return 0, false, nil
-	}
-	return *v, true, nil
-}
-
-func (s *Service) boolLimit(ctx context.Context, tenantID, key string) (bool, error) {
-	var v *bool
-	err := s.DB.QueryRow(ctx, `
-        SELECT bool_value FROM tenant_effective_limits
-         WHERE tenant_id = $1 AND key = $2 AND value_type = 'bool' LIMIT 1
-    `, tenantID, key).Scan(&v)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return v != nil && *v, nil
-}
-
-// docLimit converts effective-limit semantics (-1 unlimited, 0/missing
-// unmodelled) into license-document semantics (0 = unlimited).
-func docLimit(v int64, ok bool) int {
-	if !ok || v <= 0 {
-		return 0
-	}
-	return int(v)
-}
-
-// IssueParams describes ONE license in the simple model: bound to one
-// appliance, one concurrent-online-guest cap, one validity window with an
-// explicit grace period. No plan or subscription is required.
+// IssueParams describes ONE licence: bound to one appliance, one concurrent-online-guest cap, one validity
+// window with an explicit grace period.
 type IssueParams struct {
 	TenantID    string
 	SiteID      string
-	ApplianceID string // empty = legacy site-wide license
+	ApplianceID string // required
 	CreatedBy   string
 
 	MaxConcurrentOnlineGuests int       // 0 = unlimited
@@ -107,40 +66,29 @@ type IssueParams struct {
 	Status lic.DocStatus // zero value -> active
 }
 
-// IssueForSite builds, signs and persists a new license for a site,
-// superseding any previous current license. validFor is the validity window
-// from now; graceDays the grace period. createdBy may be empty (system).
-func (s *Service) IssueForSite(ctx context.Context, tenantID, siteID, createdBy string, validFor time.Duration, graceDays int) (*lic.Document, *lic.Envelope, error) {
-	return s.issue(ctx, IssueParams{TenantID: tenantID, SiteID: siteID, CreatedBy: createdBy,
-		ValidFor: validFor, GracePeriodDays: graceDays, OfflineGraceDays: graceDays})
-}
-
-// IssueForAppliance signs a license bound to ONE specific appliance's
-// cryptographic identity + hardware (appliance_id, identity-key fingerprint,
-// StayConnect serial, hardware fingerprint, WAN MAC). The appliance verifies
-// this binding locally and rejects a license minted for a different device.
-func (s *Service) IssueForAppliance(ctx context.Context, tenantID, siteID, applianceID, createdBy string, validFor time.Duration, graceDays int) (*lic.Document, *lic.Envelope, error) {
-	return s.issue(ctx, IssueParams{TenantID: tenantID, SiteID: siteID, ApplianceID: applianceID,
-		CreatedBy: createdBy, ValidFor: validFor, GracePeriodDays: graceDays, OfflineGraceDays: graceDays})
-}
-
-// Issue is the simple-model entry point with fully explicit commercial
-// parameters (appliance binding, concurrent-guest cap, validity, grace).
-func (s *Service) Issue(ctx context.Context, p IssueParams) (*lic.Document, *lic.Envelope, error) {
-	return s.issue(ctx, p)
+// PreservedTerms is the re-issue rule used whenever a licence is re-signed WITHOUT the operator changing its
+// terms (suspend, resume, WAN-MAC rebind, same-customer move): every term and the status carry over unchanged; only
+// the actor differs, and issue() assigns the next licence_version.
+func PreservedTerms(cur IssueParams, createdBy string) IssueParams {
+	p := cur
+	p.CreatedBy = createdBy
+	p.ValidFor = 0 // valid_until is carried explicitly; never re-derived from "now"
+	return p
 }
 
 // applianceBinding reads the per-appliance binding facts from the appliances row.
 type applianceBinding struct {
-	serial, wanMAC, hwFingerprint, identityFpr string
+	serial, wanMAC, hwFingerprint, identityFpr, tenantID, siteID string
 }
 
-func (s *Service) applianceBinding(ctx context.Context, applianceID string) (applianceBinding, error) {
+func applianceBindingTx(ctx context.Context, q pgx.Tx, applianceID string) (applianceBinding, error) {
 	var b applianceBinding
 	var serial, wanMAC, hwFpr, pubB64 *string
-	err := s.DB.QueryRow(ctx, `
-        SELECT serial, wan_mac, hardware_fingerprint, public_key
-          FROM appliances WHERE id = $1`, applianceID).Scan(&serial, &wanMAC, &hwFpr, &pubB64)
+	err := q.QueryRow(ctx, `
+        SELECT serial, wan_mac, hardware_fingerprint, public_key,
+               COALESCE(tenant_id::text,''), COALESCE(site_id::text,'')
+          FROM appliances WHERE id = $1`, applianceID).
+		Scan(&serial, &wanMAC, &hwFpr, &pubB64, &b.tenantID, &b.siteID)
 	if err != nil {
 		return b, err
 	}
@@ -173,26 +121,47 @@ func identityFprFromB64(pubB64 string) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// issue builds, signs and persists one license under the SIMPLE model.
+// Issue signs and persists a licence in its own transaction.
+func (s *Service) Issue(ctx context.Context, p IssueParams) (*lic.Document, *lic.Envelope, error) {
+	tx, err := s.DB.Begin(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback(ctx)
+	doc, env, err := s.IssueTx(ctx, tx, p)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, nil, err
+	}
+	return doc, env, nil
+}
+
+// IssueTx builds, signs and persists one licence inside the caller's transaction, superseding the
+// appliance's current licence. Activation uses it so the assignment and the licence commit together.
 //
-// No plan or subscription is required: when the tenant still has one the plan
-// code is recorded for reporting continuity, otherwise the license is issued
-// as plan "direct". The commercial entitlement comes from the params
-// (concurrent cap, validity, grace) — never from plan limits.
-//
-// Anti-rollback: license_version is a per-appliance/site MONOTONIC sequence
-// assigned inside the same transaction that supersedes the previous current
-// license, under a pg advisory lock, so concurrent issuance can never mint
-// two current documents or reuse a version.
-func (s *Service) issue(ctx context.Context, p IssueParams) (*lic.Document, *lic.Envelope, error) {
+// Anti-rollback: license_version is a per-appliance MONOTONIC sequence assigned under a transaction-scoped
+// advisory lock on the appliance, so concurrent issuance can never mint two current documents or reuse a
+// version.
+func (s *Service) IssueTx(ctx context.Context, tx pgx.Tx, p IssueParams) (*lic.Document, *lic.Envelope, error) {
 	if s.Signer == nil {
 		return nil, nil, ErrNoSigner
+	}
+	if p.ApplianceID == "" {
+		return nil, nil, errors.New("a licence is always bound to one appliance: appliance_id is required")
 	}
 	if p.Status == "" {
 		p.Status = lic.DocActive
 	}
 	if p.OfflineGraceDays <= 0 {
 		p.OfflineGraceDays = 30
+	}
+	if p.MaxConcurrentOnlineGuests < 0 {
+		return nil, nil, errors.New("max_concurrent_online_guests cannot be negative")
+	}
+	if p.GracePeriodDays < 0 || p.GracePeriodDays > 365 {
+		return nil, nil, errors.New("grace_period_days must be between 0 and 365")
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	validFrom := p.ValidFrom.UTC().Truncate(time.Second)
@@ -202,7 +171,7 @@ func (s *Service) issue(ctx context.Context, p IssueParams) (*lic.Document, *lic
 	validUntil := p.ValidUntil.UTC().Truncate(time.Second)
 	if p.ValidUntil.IsZero() {
 		if p.ValidFor <= 0 {
-			return nil, nil, fmt.Errorf("valid_until (or valid_for) is required")
+			return nil, nil, fmt.Errorf("valid_until (or valid_days) is required")
 		}
 		validUntil = now.Add(p.ValidFor)
 	}
@@ -210,110 +179,48 @@ func (s *Service) issue(ctx context.Context, p IssueParams) (*lic.Document, *lic
 		return nil, nil, fmt.Errorf("valid_until must be in the future and after valid_from")
 	}
 
-	// Optional plan code (reporting only). No subscription -> "direct".
-	planCode := "direct"
-	_ = s.DB.QueryRow(ctx, `
-        SELECT p.code
-          FROM tenant_subscriptions ts
-          JOIN plans p ON p.id = ts.plan_id
-         WHERE ts.tenant_id = $1 AND ts.status IN ('trialing','active','past_due')
-         ORDER BY ts.created_at DESC LIMIT 1
-    `, p.TenantID).Scan(&planCode)
-
-	// Site must belong to the tenant (cross-tenant safety).
-	var siteOK bool
-	if err := s.DB.QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM sites WHERE id = $1 AND tenant_id = $2)`,
-		p.SiteID, p.TenantID).Scan(&siteOK); err != nil {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 42))`, p.ApplianceID); err != nil {
 		return nil, nil, err
 	}
-	if !siteOK {
-		return nil, nil, fmt.Errorf("site %s does not belong to tenant %s", p.SiteID, p.TenantID)
-	}
-
-	// Binding target list (legacy site-wide form when no appliance named).
-	applianceIDs := []string{}
-	var bind applianceBinding
-	if p.ApplianceID != "" {
-		applianceIDs = []string{p.ApplianceID}
-		b, err := s.applianceBinding(ctx, p.ApplianceID)
-		if err != nil {
-			return nil, nil, fmt.Errorf("appliance binding: %w", err)
-		}
-		bind = b
-	} else {
-		rows, err := s.DB.Query(ctx,
-			`SELECT id FROM appliances WHERE site_id = $1 AND status <> 'retired' ORDER BY created_at`, p.SiteID)
-		if err != nil {
-			return nil, nil, err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
-				return nil, nil, err
-			}
-			applianceIDs = append(applianceIDs, id)
-		}
-	}
-
-	// Simple model: all product features are available; the ONLY commercial
-	// controls are the binding, the concurrent cap, and the validity window.
-	// The legacy Limits mirror carries the cap so pre-v3 appliances enforce it.
-	feats := lic.Features{PMS: true, PaidWiFi: true, SMSOTP: true, EmailOTP: true,
-		SocialLogin: true, HA: true, WhiteLabel: true}
-	lims := lic.Limits{MaxConcurrentGuestSessions: p.MaxConcurrentOnlineGuests}
-
-	tx, err := s.DB.Begin(ctx)
+	bind, err := applianceBindingTx(ctx, tx, p.ApplianceID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("appliance binding: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	// The licence is scoped to where the appliance IS, never to a caller-supplied site: the appliance row,
+	// read inside this transaction, is the authority.
+	if bind.tenantID == "" || bind.siteID == "" {
+		return nil, nil, errors.New("appliance is not activated at a customer site")
+	}
+	if p.TenantID != "" && p.TenantID != bind.tenantID || p.SiteID != "" && p.SiteID != bind.siteID {
+		return nil, nil, errors.New("licence customer/site does not match the appliance's assignment")
+	}
+	p.TenantID, p.SiteID = bind.tenantID, bind.siteID
 
-	// The license is scoped to ONE APPLIANCE (Site is organizational only and
-	// never limits license count). Serialize version assignment + supersede on
-	// the appliance key so two appliances under the same site are fully
-	// independent; fall back to the site key only for a legacy unbound
-	// (site-wide) license with no appliance binding.
-	scopeByAppliance := p.ApplianceID != ""
-	lockKey := p.SiteID
-	if scopeByAppliance {
-		lockKey = p.ApplianceID
-	}
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 42))`, lockKey); err != nil {
+	var maxVer int64
+	if err := tx.QueryRow(ctx, `
+        SELECT COALESCE(MAX(license_version), 0) FROM licenses WHERE $1::uuid = ANY(appliance_ids)`,
+		p.ApplianceID).Scan(&maxVer); err != nil {
 		return nil, nil, err
 	}
 	var prevID *string
-	var maxVer int64
-	if scopeByAppliance {
-		if err := tx.QueryRow(ctx, `
-            SELECT COALESCE(MAX(license_version), 0)
-              FROM licenses WHERE $1::uuid = ANY(appliance_ids)
-        `, p.ApplianceID).Scan(&maxVer); err != nil {
-			return nil, nil, err
-		}
-		_ = tx.QueryRow(ctx, `
-            SELECT id::text FROM licenses
-             WHERE $1::uuid = ANY(appliance_ids) AND status IN ('active','suspended')
-             ORDER BY issued_at DESC LIMIT 1`, p.ApplianceID).Scan(&prevID)
-	} else {
-		if err := tx.QueryRow(ctx, `
-            SELECT COALESCE(MAX(license_version), 0) FROM licenses WHERE site_id = $1
-        `, p.SiteID).Scan(&maxVer); err != nil {
-			return nil, nil, err
-		}
-		_ = tx.QueryRow(ctx, `
-            SELECT id::text FROM licenses
-             WHERE site_id = $1 AND status IN ('active','suspended')
-             ORDER BY issued_at DESC LIMIT 1`, p.SiteID).Scan(&prevID)
-	}
+	_ = tx.QueryRow(ctx, `
+        SELECT id::text FROM licenses
+         WHERE $1::uuid = ANY(appliance_ids) AND status IN ('active','suspended')
+         ORDER BY issued_at DESC LIMIT 1`, p.ApplianceID).Scan(&prevID)
+
+	// All product features are available; the ONLY commercial controls are the binding, the concurrent cap,
+	// and the validity window. The legacy Limits mirror carries the cap so pre-v3 appliances enforce it.
+	feats := lic.Features{PMS: true, PaidWiFi: true, SMSOTP: true, EmailOTP: true,
+		SocialLogin: true, HA: true, WhiteLabel: true}
+	lims := lic.Limits{MaxConcurrentGuestSessions: p.MaxConcurrentOnlineGuests}
+	applianceIDs := []string{p.ApplianceID}
 
 	doc := &lic.Document{
 		LicenseID:          newUUID(),
 		TenantID:           p.TenantID,
 		SiteID:             p.SiteID,
 		ApplianceIDs:       applianceIDs,
-		CommercialPlanCode: planCode,
+		CommercialPlanCode: PlanCode,
 		Status:             p.Status,
 		IssuedAt:           now,
 		ValidUntil:         validUntil,
@@ -346,17 +253,9 @@ func (s *Service) issue(ctx context.Context, p IssueParams) (*lic.Document, *lic
 		return nil, nil, err
 	}
 
-	// Atomically supersede the previous current license for THIS APPLIANCE and
-	// insert the new one. Other appliances at the same site are untouched.
-	if scopeByAppliance {
-		if _, err := tx.Exec(ctx,
-			`UPDATE licenses SET status = 'superseded' WHERE $1::uuid = ANY(appliance_ids) AND status IN ('active','suspended')`,
-			p.ApplianceID); err != nil {
-			return nil, nil, err
-		}
-	} else if _, err := tx.Exec(ctx,
-		`UPDATE licenses SET status = 'superseded' WHERE site_id = $1 AND status IN ('active','suspended')`,
-		p.SiteID); err != nil {
+	if _, err := tx.Exec(ctx,
+		`UPDATE licenses SET status = 'superseded' WHERE $1::uuid = ANY(appliance_ids) AND status IN ('active','suspended')`,
+		p.ApplianceID); err != nil {
 		return nil, nil, err
 	}
 	var createdByArg any
@@ -367,81 +266,25 @@ func (s *Service) issue(ctx context.Context, p IssueParams) (*lic.Document, *lic
 	if p.Status == lic.DocSuspended {
 		rowStatus = "suspended"
 	}
+	// The queryable projection. Features, limits and the plan code live only in the signed envelope.
 	if _, err := tx.Exec(ctx, `
-        INSERT INTO licenses (id, tenant_id, site_id, commercial_plan_code, status,
+        INSERT INTO licenses (id, tenant_id, site_id, status,
                               issued_at, valid_until, valid_from, offline_grace_days, appliance_ids,
-                              features, limits, signed_envelope, key_id, created_by,
+                              signed_envelope, key_id, created_by,
                               license_version, max_concurrent_online_guests, grace_period_days,
                               supersedes_license_id)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-                jsonb_build_object('pms',true,'paid_wifi',true,'sms_otp',true,
-                                   'email_otp',true,'social_login',true,'ha',true,
-                                   'white_label',true),
-                jsonb_build_object('max_appliances_for_site',0,
-                                   'max_concurrent_guest_sessions',$11::int,
-                                   'max_local_operators',0,
-                                   'max_guest_access_plans',0,
-                                   'accounting_retention_days',0,
-                                   'audit_retention_days',0),
-                $12,$13,$14,$15,$16,$17,NULLIF($18,'')::uuid)
-    `, doc.LicenseID, p.TenantID, p.SiteID, planCode, rowStatus,
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NULLIF($16,'')::uuid)
+    `, doc.LicenseID, p.TenantID, p.SiteID, rowStatus,
 		doc.IssuedAt, doc.ValidUntil, doc.ValidFrom, p.OfflineGraceDays, applianceIDs,
-		p.MaxConcurrentOnlineGuests,
 		string(envRaw), env.KeyID, createdByArg,
 		doc.LicenseVersion, p.MaxConcurrentOnlineGuests, p.GracePeriodDays,
 		doc.SupersedesLicenseID); err != nil {
 		return nil, nil, err
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, nil, err
-	}
 	return doc, env, nil
 }
 
-// ReconcileStates moves each appliance in a license-driven commercial state
-// between licensed → grace → license_expired based ONLY on time vs the site's
-// current signed license (valid_until + offline_grace_days). It never touches
-// suspended, revoked, decommissioned, or pre-license states — those are set
-// explicitly and must not be overridden by the time reconcile. Run on a ticker.
-func (s *Service) ReconcileStates(ctx context.Context) (int64, error) {
-	// Per-APPLIANCE reconcile: each appliance's commercial state follows ITS OWN
-	// current license (not the site's). Two appliances at one site can be in
-	// different states (e.g. one licensed, one in grace).
-	tag, err := s.DB.Exec(ctx, `
-        WITH cur AS (
-          SELECT a.id AS appliance_id, l.valid_until,
-                 CASE WHEN COALESCE(l.grace_period_days,0) > 0
-                      THEN l.grace_period_days ELSE l.offline_grace_days END AS eff_grace
-            FROM appliances a
-            JOIN LATERAL (
-              SELECT valid_until, grace_period_days, offline_grace_days
-                FROM licenses l
-               WHERE a.id = ANY(l.appliance_ids) AND l.status IN ('active','suspended')
-               ORDER BY issued_at DESC LIMIT 1
-            ) l ON true
-        ), want AS (
-          SELECT c.appliance_id AS id,
-                 CASE
-                   WHEN now() <= c.valid_until THEN 'licensed'
-                   WHEN now() <= c.valid_until + make_interval(days => c.eff_grace) THEN 'grace'
-                   ELSE 'license_expired'
-                 END AS target
-            FROM cur c JOIN appliances a ON a.id = c.appliance_id
-           WHERE a.lifecycle_state IN ('licensed','grace','license_expired')
-        )
-        UPDATE appliances a SET lifecycle_state = w.target, updated_at = now()
-          FROM want w
-         WHERE a.id = w.id AND a.lifecycle_state <> w.target`)
-	if err != nil {
-		return 0, err
-	}
-	return tag.RowsAffected(), nil
-}
-
-// CurrentEnvelopeForAppliance returns the signed envelope of the current
-// license bound to THIS appliance. Binding is per-appliance (its id in
-// licenses.appliance_ids), NOT per-site: two appliances at the same site each
-// fetch their own current license.
+// CurrentEnvelopeForAppliance returns the signed envelope of the current licence bound to THIS appliance.
 func (s *Service) CurrentEnvelopeForAppliance(ctx context.Context, applianceID string) (string, string, error) {
 	var envelope, licenseID string
 	err := s.DB.QueryRow(ctx, `
@@ -456,8 +299,7 @@ func (s *Service) CurrentEnvelopeForAppliance(ctx context.Context, applianceID s
 	return envelope, licenseID, err
 }
 
-// Revoke marks a license revoked. Delivery of the revocation notice to the
-// appliance happens via sync (license fetch returns the revoked state).
+// Revoke marks a licence revoked. The appliance learns of it from the revocation list on its next fetch.
 func (s *Service) Revoke(ctx context.Context, licenseID string) error {
 	tag, err := s.DB.Exec(ctx, `
         UPDATE licenses SET status = 'revoked', revoked_at = now()
@@ -472,53 +314,95 @@ func (s *Service) Revoke(ctx context.Context, licenseID string) error {
 	return nil
 }
 
-// licenseParams reads the fields needed to re-issue a license under a new
-// signed status, preserving the original commercial terms.
-func (s *Service) licenseParams(ctx context.Context, licenseID string) (p IssueParams, err error) {
-	var validFrom *time.Time
-	err = s.DB.QueryRow(ctx, `
-        SELECT tenant_id::text, site_id::text, valid_until, valid_from, offline_grace_days,
+const currentTermsColumns = `tenant_id::text, site_id::text, valid_until, valid_from, offline_grace_days,
                COALESCE(max_concurrent_online_guests, 0), COALESCE(grace_period_days, 0),
-               COALESCE(appliance_ids[1]::text, '')
-          FROM licenses WHERE id = $1 AND status IN ('active','suspended')
-    `, licenseID).Scan(&p.TenantID, &p.SiteID, &p.ValidUntil, &validFrom, &p.OfflineGraceDays,
-		&p.MaxConcurrentOnlineGuests, &p.GracePeriodDays, &p.ApplianceID)
+               COALESCE(appliance_ids[1]::text, ''), status`
+
+func scanTerms(row pgx.Row) (p IssueParams, err error) {
+	var validFrom *time.Time
+	var status string
+	err = row.Scan(&p.TenantID, &p.SiteID, &p.ValidUntil, &validFrom, &p.OfflineGraceDays,
+		&p.MaxConcurrentOnlineGuests, &p.GracePeriodDays, &p.ApplianceID, &status)
 	if errors.Is(err, pgx.ErrNoRows) {
-		err = ErrNoLicense
+		return IssueParams{}, ErrNoLicense
+	}
+	if err != nil {
+		return IssueParams{}, err
 	}
 	if validFrom != nil {
 		p.ValidFrom = *validFrom
 	}
-	return
+	p.Status = lic.DocActive
+	if status == "suspended" {
+		p.Status = lic.DocSuspended
+	}
+	return p, nil
 }
 
-// Suspend re-issues the site's current license as a signed 'suspended'
-// document (billing hold). The appliance evaluates StateSuspended offline.
-// Returns the site id so the caller can drive appliance lifecycle_state.
-func (s *Service) Suspend(ctx context.Context, licenseID, createdBy string) (string, error) {
+// CurrentTerms reads the terms of a CURRENT (active or suspended) licence, including its status, so it can
+// be re-signed unchanged. ErrNoLicense means verified: there is no current licence with that id.
+func (s *Service) CurrentTerms(ctx context.Context, licenseID string) (IssueParams, error) {
+	return scanTerms(s.DB.QueryRow(ctx, `SELECT `+currentTermsColumns+`
+          FROM licenses WHERE id = $1 AND status IN ('active','suspended')`, licenseID))
+}
+
+// CurrentTermsForApplianceTx reads the appliance's current licence terms inside the caller's transaction,
+// holding the same per-appliance lock IssueTx takes, so what is read cannot change before it is re-signed.
+// ErrNoLicense means verified: the appliance has no current licence. Any other error means unknown.
+func (s *Service) CurrentTermsForApplianceTx(ctx context.Context, tx pgx.Tx, applianceID string) (IssueParams, error) {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 42))`, applianceID); err != nil {
+		return IssueParams{}, err
+	}
+	return scanTerms(tx.QueryRow(ctx, `SELECT `+currentTermsColumns+`
+          FROM licenses WHERE $1::uuid = ANY(appliance_ids) AND status IN ('active','suspended')
+         ORDER BY issued_at DESC LIMIT 1`, applianceID))
+}
+
+// CurrentLicenseID returns the id of the appliance's current licence, or ErrNoLicense.
+func (s *Service) CurrentLicenseID(ctx context.Context, applianceID string) (string, error) {
+	var id string
+	err := s.DB.QueryRow(ctx, `
+        SELECT id::text FROM licenses
+         WHERE $1::uuid = ANY(appliance_ids) AND status IN ('active','suspended')
+         ORDER BY issued_at DESC LIMIT 1`, applianceID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNoLicense
+	}
+	return id, err
+}
+
+// Reissue re-signs the current licence with every term preserved (PreservedTerms) and the next version —
+// used after a WAN-MAC rebind so the new document carries the new hardware binding.
+func (s *Service) Reissue(ctx context.Context, licenseID, createdBy string) (*lic.Document, error) {
+	cur, err := s.CurrentTerms(ctx, licenseID)
+	if err != nil {
+		return nil, err
+	}
+	doc, _, err := s.Issue(ctx, PreservedTerms(cur, createdBy))
+	return doc, err
+}
+
+// Suspend re-issues the current licence as a signed 'suspended' document. The appliance evaluates
+// StateSuspended offline.
+func (s *Service) Suspend(ctx context.Context, licenseID, createdBy string) (*lic.Document, error) {
 	return s.reissueStatus(ctx, licenseID, createdBy, lic.DocSuspended)
 }
 
-// Resume re-issues the site's current license as a signed 'active' document.
-func (s *Service) Resume(ctx context.Context, licenseID, createdBy string) (string, error) {
+// Resume re-issues the current licence as a signed 'active' document.
+func (s *Service) Resume(ctx context.Context, licenseID, createdBy string) (*lic.Document, error) {
 	return s.reissueStatus(ctx, licenseID, createdBy, lic.DocActive)
 }
 
-func (s *Service) reissueStatus(ctx context.Context, licenseID, createdBy string, status lic.DocStatus) (string, error) {
-	p, err := s.licenseParams(ctx, licenseID)
+func (s *Service) reissueStatus(ctx context.Context, licenseID, createdBy string, status lic.DocStatus) (*lic.Document, error) {
+	cur, err := s.CurrentTerms(ctx, licenseID)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	if time.Until(p.ValidUntil) <= 0 {
-		return "", fmt.Errorf("license already expired; renew instead of suspend/resume")
+	if time.Until(cur.ValidUntil) <= 0 {
+		return nil, fmt.Errorf("licence already past valid_until; set new terms instead of suspend/resume")
 	}
-	// Preserve every commercial term (binding, cap, validity, grace); the new
-	// document carries the next license_version so the appliance's anti-rollback
-	// state advances and the previous document can never be replayed.
-	p.CreatedBy = createdBy
+	p := PreservedTerms(cur, createdBy)
 	p.Status = status
-	if _, _, err := s.issue(ctx, p); err != nil {
-		return "", err
-	}
-	return p.SiteID, nil
+	doc, _, err := s.Issue(ctx, p)
+	return doc, err
 }

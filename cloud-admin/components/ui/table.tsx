@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 //
 // Three things changed and all three were legibility, not decoration:
 //   * the header row now has its own surface, so a long list keeps a visible top edge when scrolled;
-//   * rows have a hover state, because an operator tracking one room across eight columns needs to be able to
+//   * rows have a hover state, because an operator tracking one appliance across six columns needs to be able to
 //     see which row their eye is on;
 //   * the horizontal scroll container is bounded with a rounded edge instead of bleeding off the card.
 //
@@ -42,7 +42,7 @@ export function Table({
   // `relative` is load-bearing. Without it an absolutely positioned descendant (the `sr-only` label on an
   // icon-only header, a tooltip anchor) takes its containing block from somewhere OUTSIDE this scroller, so it
   // is laid out at the table's full width and stretches the whole DOCUMENT sideways on a phone — measured at
-  // 390px as a 759px page on Internet packages. Positioning the scroller makes it the containing block, so
+  // 390px as a 759px page. Positioning the scroller makes it the containing block, so
   // those elements scroll with the table instead of widening the page.
   return (
     <div

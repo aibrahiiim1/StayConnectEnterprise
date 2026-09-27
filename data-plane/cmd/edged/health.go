@@ -10,8 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/cloudmode"
-	"github.com/stayconnect/enterprise/data-plane/internal/outbox"
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
 )
 
@@ -28,7 +26,6 @@ import (
 //   - persists the authoritative health model + recovery history to the site DB
 //     (survives edged restart and reboot),
 //   - tracks boot convergence,
-//   - enqueues sanitized telemetry for Central,
 //   - and backs the /edge/v1/health API + Hotel Admin Health UI.
 // ---------------------------------------------------------------------------
 
@@ -58,7 +55,7 @@ const bootConvergeDeadline = 4 * time.Minute
 
 // svcSpec describes one supervised service.
 type svcSpec struct {
-	Name     string // health name (matches the backoff tracker + telemetry)
+	Name     string // health name (matches the backoff tracker)
 	Unit     string // systemd unit
 	Critical bool
 	// Check runs a meaningful service-specific health probe. Returns ok, a
@@ -181,16 +178,9 @@ func (s *server) healthMonitorLoop(ctx context.Context) {
 	s.bootConvergeInit(ctx)
 	t := time.NewTicker(10 * time.Second)
 	defer t.Stop()
-	// Telemetry to Central at a slower cadence than local polling.
-	telemetryEvery := 6 // every 6th poll ≈ 60s
-	tick := 0
 	for {
 		s.pollAllServices(ctx)
 		s.bootConvergeStep(ctx)
-		tick++
-		if tick%telemetryEvery == 0 {
-			s.enqueueServiceHealth(ctx)
-		}
 		select {
 		case <-ctx.Done():
 			return
@@ -540,83 +530,14 @@ func (s *server) bootConvergeStep(ctx context.Context) {
 	}
 }
 
-// ---- telemetry to Central --------------------------------------------------
-
-// enqueueServiceHealth pushes a sanitized service-health summary to Central via
-// the outbox (scd's drainer publishes it). No guest PII, no secrets.
-func (s *server) enqueueServiceHealth(ctx context.Context) {
-	all := s.allHealth(ctx)
-	overall, counts := overallHealth(all)
-	svcs := make([]map[string]any, 0, len(all))
-	var worstReason, worstService string
-	for _, h := range all {
-		item := map[string]any{
-			"service":              h.Service,
-			"state":                h.State,
-			"restart_count":        h.RestartCount,
-			"restarts_in_window":   h.RestartsWindow,
-			"consecutive_failures": h.ConsecFailures,
-			"backoff_level":        h.BackoffLevel,
-			"degraded_dependency":  h.DegradedDep,
-		}
-		if h.NextRetryAt != nil {
-			item["next_retry_at"] = h.NextRetryAt.UTC()
-		}
-		if h.LastFailureRsn != "" {
-			item["last_failure_reason"] = h.LastFailureRsn
-		}
-		if h.LastRecoveryAt != nil {
-			item["last_recovery_at"] = h.LastRecoveryAt.UTC()
-		}
-		if h.State != stHealthy && worstService == "" {
-			worstService, worstReason = h.Service, h.LastFailureRsn
-		}
-		svcs = append(svcs, item)
-	}
-	var boot map[string]any
-	{
-		var converged, alertOpen bool
-		var pending []string
-		var convergedAt *time.Time
-		if s.db.QueryRow(ctx, `SELECT converged, alert_open, pending_services, converged_at
-		    FROM appliance_boot_convergence WHERE id`).Scan(&converged, &alertOpen, &pending, &convergedAt) == nil {
-			boot = map[string]any{"converged": converged, "alert_open": alertOpen, "pending": pending}
-			if convergedAt != nil {
-				boot["converged_at"] = convergedAt.UTC()
-			}
-		}
-	}
-	payload := map[string]any{
-		"overall":              overall,
-		"counts":               counts,
-		"services":             svcs,
-		"boot":                 boot,
-		"worst_service":        worstService,
-		"worst_failure_reason": worstReason,
-		"reported_at":          time.Now().UTC(),
-	}
-	// THIS PRODUCER HAS ITS OWN OUTBOX, so it needs its own answer to the same question.
-	//
-	// scd stops producing by leaving s.obx nil, and every one of its producers returns early on that. This
-	// one does not go through scd: it constructs an Outbox of its own and writes straight into the queue. A
-	// licensing-only appliance with this left unguarded would go on accumulating service-health rows for
-	// ever, and the queue depth on the screen would climb while the property was told nothing is being sent
-	// -- both true, and together an invitation to "fix" it by turning the transport back on.
-	if !cloudmode.Resolve(ctx, edgedQuerier{s.db}, s.tenantID, s.siteID).TelemetryAllowed() {
-		return
-	}
-	ob := &outbox.Outbox{DB: s.db, ApplianceID: s.applianceID()}
-	_ = ob.Enqueue(ctx, "service_health", payload)
-}
-
-// applianceID resolves this appliance's id for telemetry (best-effort).
+// applianceID resolves this appliance's id for per-appliance settings (best-effort).
 func (s *server) applianceID() string {
 	if v := os.Getenv("EDGED_APPLIANCE_ID"); v != "" {
 		return v
 	}
 	// The signed assignment / identity carries it; read from identity.json.
 	b, _ := os.ReadFile(envOr("EDGED_IDENTITY_DIR", "/etc/stayconnect/identity") + "/identity.json")
-	// crude extraction to avoid importing identity here; the drainer also stamps it
+	// crude extraction to avoid importing identity here
 	s2 := string(b)
 	if i := strings.Index(s2, "\"appliance_id\""); i >= 0 {
 		rest := s2[i+15:]

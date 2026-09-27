@@ -22,7 +22,9 @@ The only appliance. Onboarded, enrolled, claimed, licensed, under a pinned signe
 is RETIRED and must not be contacted.
 
 * Schema head `0083`. All eight StayConnect units active; `kea-dhcp4-server` enabled; containers
-  `stayconnect-pg` (timescaledb 2.16.1-pg16), `-redis`, `-nats`.
+  `stayconnect-pg` (timescaledb 2.16.1-pg16), `-redis`, `-nats` (as read that day; the NATS container is
+  obsolete since the 2026-09-27 removal of the appliance's message-bus client — `deploy/compose/infra.yml` no
+  longer declares it).
 * **The database superuser role is `stayconnect`, not `postgres`.** `su - postgres` and `psql -U postgres`
   both fail on this appliance; every query goes through
   `docker exec stayconnect-pg psql -U stayconnect -d stayconnect_site`.

@@ -121,7 +121,10 @@ func newAuthFixture(t *testing.T) *authFixture {
 	claimFreeFixtureOctet(t, p)
 	f := &authFixture{pool: p, net: nextFixtureNet()}
 	if err := p.QueryRow(ctx, `WITH
-	  t AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
+	  -- Room sign-in switched ON in the hotel's method settings, as a property using it has it: scd refuses
+	  -- a switched-off method before it looks up any room.
+	  t AS (INSERT INTO public.tenants(id, auth_methods) VALUES (gen_random_uuid(),
+	        '{"voucher":{"enabled":true},"pms":{"enabled":true,"mode":"room_any"}}'::jsonb) RETURNING id),
 	  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id),
 	  gn AS (INSERT INTO public.guest_networks
 	           (id,tenant_id,site_id,name,parent_interface,bridge_name,gateway_cidr,gateway_ip,subnet_cidr,enabled)
@@ -219,7 +222,7 @@ func newAuthFixture(t *testing.T) *authFixture {
 	}
 	f.appliance = mustUUID(t, p)
 
-	f.srv = &server{db: p, tenID: f.tenant, siteID: f.site, applID: f.appliance, legacyBridge: "br-lan"}
+	f.srv = &server{db: p, tenID: f.tenant, siteID: f.site, applID: f.appliance, legacyBridge: "br-lan", lic: devLicence()}
 	f.p3 = newPhase3Auth(iamv2.PMSConfig{MasterEnabled: true, PMSAuthEnabled: true}, f.srv)
 	if f.p3 == nil {
 		t.Fatal("the Phase-3 auth arm was not constructed with the flags on")

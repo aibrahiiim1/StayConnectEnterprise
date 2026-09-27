@@ -3,8 +3,8 @@
 #
 # Manages ONLY the local Hotel Admin HTTPS leaf certificate (hotel.stayconnect.local
 # + the current Management/WAN IP), issued from Caddy's existing local CA. It does
-# NOT touch the vendor appliance mTLS PKI, Root/Intermediate CA, API client / NATS
-# certs, or assignment/license/command/update keys.
+# NOT touch the vendor appliance mTLS PKI, Root/Intermediate CA, API client
+# certs, or assignment/license keys.
 #
 # Subcommands:
 #   renew    (default) idempotent: renew only if due (<=45d), IP changed, or SAN drift
@@ -19,7 +19,7 @@ set -uo pipefail
 DNS_SAN="hotel.stayconnect.local"
 CERT_DIR="/etc/caddy/hotel-admin"
 # Status lives beside the cert material: the dir is root-owned 0755 (traversable),
-# status.json is 0644 (readable by edged/scd for the UI + Central telemetry) while
+# status.json is 0644 (readable by edged/scd for the UI) while
 # the private key stays 0600 caddy-only. /var/lib/stayconnect is 0700 and NOT
 # readable by the unprivileged Hotel Admin app, so it cannot host this.
 STATE_DIR="$CERT_DIR"
@@ -246,7 +246,7 @@ health_check(){ # ip expected_serial
   echo "$fail"
 }
 
-# ---- status JSON (consumed by edged + scd telemetry) -------------------------
+# ---- status JSON (consumed by edged for the Hotel Admin UI) --------------------
 threshold_for(){ # days_remaining
   local d="$1"
   if   [ "$d" -lt 0 ];  then echo expired

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
@@ -79,7 +80,7 @@ func (b *RegistryBase) Rebuild(ctx context.Context, reason string) (*assignment.
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	audit.System(ctx, b.DB, "assignment.registry_signed", "assignment_registry", itoa(ver),
+	audit.System(ctx, b.DB, "assignment.registry_signed", "assignment_registry", strconv.FormatInt(ver, 10),
 		map[string]any{"registry_version": ver, "keys": len(keys), "reason": reason})
 	return sr, nil
 }

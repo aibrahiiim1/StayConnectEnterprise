@@ -154,6 +154,12 @@ func (p *phase5PostStay) verifyHandler(w http.ResponseWriter, r *http.Request) {
 	if !p.decode(w, r, &req) {
 		return
 	}
+	// The same licence decision every guest method takes first (see phase3_auth.go). Post-stay keeps its own
+	// uniform envelope, so the refusal reaches the guest as the post-stay answer and the reason goes to the log.
+	if code, refused := p.p3.pmsLicenseRefusal(); refused {
+		p.unavailable(w, "license_refused: "+code)
+		return
+	}
 	ctx := r.Context()
 	dev, err := p.p3.device(ctx, req.Device)
 	if err != nil {
@@ -203,6 +209,13 @@ type psConvertReq struct {
 func (p *phase5PostStay) convertHandler(w http.ResponseWriter, r *http.Request) {
 	var req psConvertReq
 	if !p.decode(w, r, &req) {
+		return
+	}
+	// Conversion grants access (an entitlement), so it answers to the licence exactly as the room grant does.
+	// It opens no session itself, so there is no concurrent-guest slot to reserve here: the slot is taken by
+	// whichever path turns that entitlement into a session.
+	if code, refused := p.p3.pmsLicenseRefusal(); refused {
+		p.unavailable(w, "license_refused: "+code)
 		return
 	}
 	ctx := r.Context()

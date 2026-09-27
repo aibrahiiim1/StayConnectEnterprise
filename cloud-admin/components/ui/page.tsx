@@ -12,7 +12,7 @@ import { HelpTip } from "@/components/help";
 // appeared, alongside two different padding scales.
 //
 // What this component owns is the maximum measure and the vertical spacing between blocks. `width` is the only
-// knob: a session table with eight columns wants the room, and a single form does not want 96rem of it.
+// knob: a fleet table with six columns wants the room, and a single form does not want 96rem of it.
 
 const WIDTHS = {
   wide: "max-w-[96rem]",
@@ -34,15 +34,13 @@ export function PageShell({
 }
 
 /**
- * PageHeader — the title block. `eyebrow` is the section the screen belongs to, which the sidebar also shows;
- * having it here is what lets someone arriving from a link know where they are.
+ * PageHeader — the title block. The title equals the menu label (or names the record); where the screen sits is
+ * the top bar's job, so there is no label above the title.
  */
 export function PageHeader({
   title,
   description,
-  eyebrow,
   actions,
-  icon,
   help,
   helpTitle,
   className,
@@ -54,31 +52,14 @@ export function PageHeader({
   help?: React.ReactNode;
   /** The tips drawer title; defaults to the page title when that is a string. */
   helpTitle?: string;
-  eyebrow?: React.ReactNode;
   actions?: React.ReactNode;
-  /** A section icon in a tinted tile, left of the title. Optional; existing headers are unchanged. */
-  icon?: React.ReactNode;
   className?: string;
   children?: React.ReactNode;
 }) {
   return (
     <header className={cn("space-y-3", className)}>
       <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
-        <div className="flex min-w-0 items-start gap-3.5">
-        {icon && (
-          <span
-            className="mt-1 hidden size-11 shrink-0 items-center justify-center rounded-lg bg-primary-subtle text-primary-subtle-foreground sm:inline-flex [&_svg]:size-5"
-            aria-hidden
-          >
-            {icon}
-          </span>
-        )}
         <div className="min-w-0 space-y-1">
-          {eyebrow && (
-            <div className="text-micro uppercase tracking-[0.08em] text-muted-foreground">
-              {eyebrow}
-            </div>
-          )}
           <div className="flex items-center gap-2">
             <h1 className="text-subtitle sm:text-title">{title}</h1>
             {help && (
@@ -88,7 +69,6 @@ export function PageHeader({
           {description && (
             <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">{description}</p>
           )}
-        </div>
         </div>
         {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
       </div>

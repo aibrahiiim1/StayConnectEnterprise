@@ -16,9 +16,22 @@ The signed trust registry (root `84655767f9834fa2`) carries both keys with their
 states, so appliances still verify documents already issued under a `verify_only`
 predecessor but reject anything a `revoked` key signs.
 
+**Changing a key's state is a host command on Central** — the console's **System → Trust & keys** page is
+read-only:
+
+```
+ctrlapi assignment-key verify-only --key-id <id> --reason "<why>"             # stop signing, keep verifying (always safe)
+ctrlapi assignment-key revoke      --key-id <id> --reason "<why>" [--emergency] # remove all trust
+```
+
+Both re-sign the trust registry and are audited. `revoke` is refused while the key still signs a current
+assignment, unless `--emergency` (confirmed compromise).
+
 ## Retirement of `c63f848bf5ded3f6` — 2026-07-12
 
 Performed on Central (`150.0.0.252`, host trust domain `sc-central-*`).
+
+> **Follow-up found 2026-09-27, during the move to `172.21.96.196`:** the rotation had left `/etc/stayconnect/assignment-signing.pub` holding the public half of this revoked key. Nothing verified against that file, but `central-export.sh` refused to move an inconsistent key pair. It was replaced by the active key's public half (`027a2c97f6c8fcdb`); the stale file is kept as `assignment-signing.pub.revoked-c63f848bf5ded3f6`.
 
 ### 1. Pre-removal verification (all confirmed)
 

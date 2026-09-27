@@ -1,53 +1,11 @@
 // PLAIN LANGUAGE FOR THE FIGURES THE ADMIN REPORTS.
 //
-// This file exists because of a specific complaint about a specific line on the dashboard:
-//
-//     Cloud sync outbox    69572 pending    8424 dead
-//
-// Three words and two integers, and nothing on the screen said what an outbox is, what "pending" counts, what
-// "dead" means, whether 8,424 is a catastrophe, or — the only question an operator actually has — whether any
-// guest is affected by it. The numbers were true and useless.
-//
-// Everything below turns one of those internal counters into a sentence an operator can act on, plus a tone so
-// the UI can colour it consistently. The rules are kept here rather than in a component because the same
-// figures appear on the dashboard, in the top-bar health pill, on Diagnostics and on Cloud connection, and four
+// Everything below turns one of the appliance's internal states into a sentence an operator can act on, plus a
+// tone so the UI can colour it consistently. The rules are kept here rather than in a component because the same
+// figures appear on the dashboard, in the top-bar health pill, on Diagnostics and on Appliance & licence, and
 // independent descriptions of one number is how a product ends up contradicting itself.
 
 export type Tone = "ok" | "warn" | "err" | "default";
-
-export type OutboxFigures = {
-  enabled: boolean;
-  /** What this appliance may say to Central. LICENSING_ONLY is a decision, not a fault. */
-  mode?: "LICENSING_ONLY" | "FULL";
-  reason?: string;
-  pending?: number;
-  dead?: number;
-  oldest_pending?: string | null;
-  /** Delivered, and the whole-table accounting that makes "recovered" checkable rather than asserted. */
-  delivered?: number;
-  total?: number;
-  bytes?: number;
-  oldest_exhausted?: string | null;
-  balanced?: boolean;
-  retention_days?: number;
-  /**
-   * What the LAST delivery attempt learned — evidence, not a size threshold. The four failure states are
-   * genuinely different problems: no connection at all, a connection with nothing listening at the far end,
-   * a far end that answered and refused, or a queue that is simply large and draining.
-   */
-  delivery?: {
-    state?:
-      | "UNKNOWN"
-      | "TRANSPORT_UNAVAILABLE"
-      | "RECEIVER_UNAVAILABLE"
-      | "RECEIVER_REJECTED"
-      | "DRAINING"
-      | "IDLE";
-    at?: string;
-    sent?: number;
-    detail?: string;
-  };
-};
 
 export type Explained = {
   /** One line, safe to show as the value itself. */
@@ -59,134 +17,6 @@ export type Explained = {
 
 const n = (v?: number | null) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 const num = (v: number) => v.toLocaleString();
-
-/**
- * THE CLOUD SYNC OUTBOX.
- *
- * What it is: the appliance keeps working when the StayConnect cloud is unreachable, so everything it wants to
- * report upward — usage totals, session records, alerts — is written to a local queue first and sent later.
- * "Pending" is that queue. "Dead" is what it gave up on after retrying.
- *
- * The fact that matters and was never stated: NONE of this affects guests. Sign-in, speed and the PMS all run
- * locally. A large backlog is a reporting problem, not an outage.
- */
-export function describeOutbox(o?: OutboxFigures | null): Explained {
-  // LICENSING ONLY IS A DECISION, AND MUST NOT READ AS A FAULT.
-  //
-  // This is the state the property is actually in: the hotel decided its operations stay on its own
-  // appliance, and Central serves it for licensing alone. An operator seeing "not draining" or a nudge to
-  // check the cloud connection would be reading a correct configuration as a problem, and the obvious
-  // "repair" is the one thing that must not happen — turning the reporting back on.
-  //
-  // So there is no tone above neutral here, no call to action, and no mention of a backlog. What there IS:
-  // a plain statement of what still works, because the question behind every cloud message on this screen
-  // is whether guests are affected.
-  if (o && o.mode === "LICENSING_ONLY") {
-    return {
-      headline: "Licensing only",
-      summary:
-        "This appliance uses the OneGate cloud for its licence only. Operational reporting is " +
-        "intentionally switched off, so nothing is being sent and nothing needs reconnecting. Guest " +
-        "internet, sign-in, the PMS connection, sessions and accounting all run locally on this appliance " +
-        "and are unaffected.",
-      tone: "default",
-    };
-  }
-  if (!o || !o.enabled) {
-    return {
-      headline: "Not in use",
-      summary:
-        "This appliance is not reporting to the OneGate cloud, so nothing is queued. Guest internet, " +
-        "sign-in and the PMS connection do not depend on it.",
-      tone: "default",
-    };
-  }
-
-  const pending = n(o.pending);
-  const dead = n(o.dead);
-  const state = o.delivery?.state ?? "UNKNOWN";
-
-  // WHY THE QUEUE IS NOT DRAINING IS A FACT, NOT AN INFERENCE FROM ITS SIZE.
-  //
-  // This used to read the size and conclude: ten thousand waiting meant "the queue is not draining — check
-  // Cloud connection." That sentence sent an operator to look at a network that was working perfectly. It
-  // cannot distinguish a severed link from a connected appliance whose telemetry receiver is not running,
-  // from a receiver that does not recognise this appliance, from a large queue draining normally at speed.
-  // Those are four different problems with four different owners, and only one of them is the hotel's.
-  //
-  // The appliance now records what its last delivery attempt actually learned, and these sentences report
-  // that. Size still decides how LOUD the message is; it no longer decides what the message says.
-  const explain: Record<string, { line: string; tone: Tone; headline?: string }> = {
-    TRANSPORT_UNAVAILABLE: {
-      line:
-        "The appliance currently has no connection to the OneGate cloud, so nothing can be sent. " +
-        "Records are kept safely and go out when the connection returns.",
-      tone: "warn",
-      headline: "No connection to the cloud",
-    },
-    RECEIVER_UNAVAILABLE: {
-      line:
-        "The appliance can reach the OneGate cloud, but nothing there is listening for this " +
-        "appliance's reports. This is a cloud-side problem — the hotel network is not the cause.",
-      tone: "err",
-      headline: "The cloud is not listening",
-    },
-    RECEIVER_REJECTED: {
-      line:
-        "The OneGate cloud answered and refused the records. Retrying will not change that; it needs " +
-        "someone to look at how this appliance is registered.",
-      tone: "err",
-      headline: "The cloud refused the records",
-    },
-    DRAINING: { line: "The queue is being sent now, oldest first.", tone: "ok", headline: "Sending" },
-    IDLE: { line: "", tone: "ok" },
-    UNKNOWN: { line: "The appliance has not tried to send since it last started.", tone: "default" },
-  };
-  const reason = explain[state] ?? explain.UNKNOWN;
-
-  // Size sets the floor on severity. A backlog draining normally is still worth noticing at ten thousand,
-  // because "normal" at that depth still means somebody should know it happened.
-  const sizeTone: Tone = pending >= 10_000 ? "warn" : "ok";
-  const worse = (a: Tone, b: Tone): Tone =>
-    a === "err" || b === "err" ? "err" : a === "warn" || b === "warn" ? "warn" : a === "ok" || b === "ok" ? "ok" : "default";
-  // Records the appliance gave up on are never ordinary: they are outside the retry machinery entirely and
-  // will not move again until somebody recovers them.
-  const tone: Tone = dead > 0 ? worse("warn", worse(reason.tone, sizeTone)) : worse(reason.tone, sizeTone);
-
-  const parts: string[] = [];
-  if (pending === 0 && dead === 0) {
-    parts.push("Everything this appliance has reported to the OneGate cloud has been delivered.");
-  } else {
-    if (pending > 0) {
-      parts.push(
-        `${num(pending)} ${pending === 1 ? "record is" : "records are"} waiting to be sent to the OneGate cloud.`,
-      );
-    }
-    if (dead > 0) {
-      parts.push(
-        `${num(dead)} ${dead === 1 ? "record was" : "records were"} retried until the appliance gave up on ` +
-          `${dead === 1 ? "it" : "them"}. ${dead === 1 ? "It" : "They"} will not be sent again until ` +
-          `${dead === 1 ? "it is" : "they are"} recovered — Cloud connection has the button.`,
-      );
-    }
-    if (reason.line) parts.push(reason.line);
-  }
-  // The reassurance goes LAST and is always present: it is the answer to the question the numbers provoke.
-  parts.push(
-    "Guest internet, sign-in and the PMS connection work locally and are not affected by this queue.",
-  );
-
-  const headline =
-    pending === 0 && dead === 0
-      ? "Up to date"
-      : reason.headline
-        ? reason.headline
-        : dead > 0
-          ? `${num(pending)} waiting · ${num(dead)} given up`
-          : `${num(pending)} waiting`;
-
-  return { headline, summary: parts.join(" "), tone };
-}
 
 /** The site database. Shown as its own row because every screen in the admin reads from it. */
 export function describeDatabase(ok: boolean): Explained {
@@ -226,53 +56,54 @@ export function describeSessionController(ok: boolean): Explained {
       };
 }
 
-/** Licence state, in terms of what it stops rather than what it is called. */
-export function describeLicense(state: string | null | undefined, installed: boolean | undefined): Explained {
-  if (!installed) {
-    return {
-      headline: "Pending activation",
-      summary:
-        "No signed licence is installed. The appliance runs in a permissive mode for commissioning; it is " +
-        "not activated, and it should be activated before the property opens.",
-      tone: "warn",
-    };
-  }
+/**
+ * Licence state, in terms of what it stops rather than what it is called.
+ *
+ * The state is the appliance's own section 8 vocabulary (docs/CENTRAL_CONTROL_PLANE.md): none, active,
+ * expiring, grace, expired, suspended, revoked, wrong_hardware -- computed once by the appliance, so the
+ * dashboard and Appliance & licence cannot disagree. (This used to key on "Unlicensed" while the appliance sent
+ * "unlicensed", and it told operators an unlicensed appliance "runs in a permissive mode". It does not: a
+ * production appliance with no licence signs in no guests at all.)
+ */
+export function describeLicense(state: string | null | undefined): Explained {
   switch (state) {
-    case "Active":
+    case "none":
+    case null:
+    case undefined:
+      return {
+        headline: "Not activated",
+        summary:
+          "No licence is installed yet, so guests cannot sign in. Activate this appliance on Appliance & licence.",
+        tone: "warn",
+      };
+    case "active":
       return { headline: "Active", summary: "This appliance is licensed and fully enabled.", tone: "ok" };
-    case "GracePeriod":
-      // THIS DESCRIBED THE WRONG THING ENTIRELY, and it is the dashboard -- the first screen anyone opens.
-      //
-      // It said the licence "has not been confirmed with the cloud recently" and that the appliance was
-      // "running on its offline grace allowance". Neither is what this state means. Grace is entered because
-      // the licence's own end date passed; losing the cloud does not change the licence state at all (it
-      // raises a separate staleness flag, shown on the Cloud connection page). An operator reading the old
-      // text would have concluded their internet was flaky and done nothing, while the thing that had
-      // actually happened was their licence expiring with a fixed number of days left to renew it.
-      //
-      // It also promised the appliance "will restrict itself", which describes a Restricted state that the
-      // current licence model does not have: after grace the appliance goes to Expired and stops
-      // authorizing NEW guests.
+    case "expiring":
+      return {
+        headline: "Expires soon",
+        summary: "The licence ends within 30 days. Ask your OneGate vendor to renew it; guests are not affected yet.",
+        tone: "warn",
+      };
+    case "grace":
+      // Grace is entered because the licence's own end date passed. Losing the connection to Central does not
+      // change the licence state at all.
       return {
         headline: "Grace period",
         summary:
           "The licence end date has passed and the appliance is running on its renewal grace period. " +
           "Guests keep signing in exactly as before. When the grace period ends, new sign-ins stop; " +
-          "sessions already in progress are not cut off. See the Licence page for the exact end date.",
+          "sessions already in progress are not cut off. Appliance & licence shows the exact end date.",
         tone: "warn",
       };
-    case "Suspended":
-    case "Restricted":
+    case "suspended":
       return {
-        headline: state === "Suspended" ? "Suspended" : "Restricted",
+        headline: "Suspended",
         summary:
-          "The licence is no longer in good standing, so some capabilities are withheld. Contact Semantics.",
-        tone: "warn",
+          "Your OneGate vendor has suspended the licence. New guest sign-ins are refused; guests already online " +
+          "are not disconnected.",
+        tone: "err",
       };
-    case "Expired":
-      // "The licence end date has passed" was true of the GRACE state too, so on its own it did not
-      // distinguish the state where guests still sign in from the one where they no longer can. It also left
-      // the most reassuring fact unsaid: guests already online are not thrown off.
+    case "expired":
       return {
         headline: "Expired",
         summary:
@@ -280,20 +111,24 @@ export function describeLicense(state: string | null | undefined, installed: boo
           "guests already online are not disconnected. Renew to restore service.",
         tone: "err",
       };
-    case "Revoked":
+    case "revoked":
       return {
         headline: "Revoked",
-        summary: "This licence was revoked centrally. The appliance will not operate normally.",
+        summary:
+          "Your OneGate vendor has revoked this licence. New guest sign-ins are refused; guests already online " +
+          "are not disconnected.",
         tone: "err",
       };
-    case "Unlicensed":
+    case "wrong_hardware":
       return {
-        headline: "Unlicensed",
-        summary: "No valid licence is in force on this appliance.",
+        headline: "Wrong appliance",
+        summary:
+          "The installed licence was issued for a different appliance, so new guest sign-ins are refused. Ask your " +
+          "OneGate vendor for a licence for this appliance's serial number.",
         tone: "err",
       };
     default:
-      return { headline: state ?? "Unknown", summary: "The licence state could not be interpreted.", tone: "default" };
+      return { headline: state, summary: "The licence state could not be interpreted.", tone: "default" };
   }
 }
 

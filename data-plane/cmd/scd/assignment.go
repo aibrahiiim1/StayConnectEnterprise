@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -71,13 +70,12 @@ func assignmentPaths() assignment.Paths {
 // appliance falls back to awaiting-assignment rather than operating on an
 // unverifiable identity.
 //
-// Returns (tenantID, siteID, state, version); tenant/site are non-empty only for a
-// verified 'assigned' document.
-func verifiedAssignment(_ *assignment.Store, ident *identity.Identity) (string, string, string, int64) {
-	r := assignment.Resolve(assignmentPaths(), assignment.ApplianceBinding{
+// The Resolution's Outcome says WHY there is no scope (absent vs refused), which is what decides whether a
+// development build may fall back to its env tenant/site: only when nothing is present at all.
+func verifiedAssignment(_ *assignment.Store, ident *identity.Identity) assignment.Resolution {
+	return assignment.Resolve(assignmentPaths(), assignment.ApplianceBinding{
 		ApplianceID: ident.ApplianceID, Serial: ident.Serial, PublicKeyB64: ident.PublicKeyB64,
 	}, time.Now(), slog.Default())
-	return r.TenantID, r.SiteID, r.State, r.Version
 }
 
 // cloudHTTPClient is the plain-HTTPS client used before an mTLS client cert
@@ -85,40 +83,6 @@ func verifiedAssignment(_ *assignment.Store, ident *identity.Identity) (string, 
 // default roots verify it (same approach as the license fetcher).
 func (s *server) cloudHTTPClient() *http.Client {
 	return &http.Client{Timeout: 10 * time.Second}
-}
-
-// assignmentStatus surfaces the durable assignment record for the setup wizard and
-// the Platform. `status: stale` means the document is past expires_at and Central
-// has not refreshed it — the appliance KEEPS operating on it; this is a warning for
-// operators, not a loss of authority.
-func (s *server) assignmentStatus() map[string]any {
-	store := s.assignmentStore()
-	rec, err := store.Load()
-	if err != nil || rec == nil || rec.Current == nil {
-		return map[string]any{"status": assignment.StatusNone, "assigned": false}
-	}
-	d := rec.Current
-	out := map[string]any{
-		"status":               store.Status(), // current | stale
-		"assigned":             assignment.Grants(d.State),
-		"lifecycle_state":      d.State,
-		"version":              rec.Version,
-		"signer_key_id":        rec.SignerKeyID,
-		"tenant_id":            d.TenantID,
-		"site_id":              d.SiteID,
-		"tenant_name":          d.TenantName,
-		"site_name":            d.SiteName,
-		"adopted_at":           rec.AdoptedAt,
-		"last_refresh_success": rec.LastRefreshSuccess,
-		"last_refresh_attempt": rec.LastRefreshAttempt,
-		"stale_since":          rec.StaleSince,
-		"expires_at":           d.ExpiresAt,
-		"expired":              assignment.IsExpired(d, time.Now()),
-	}
-	if rec.Previous != nil {
-		out["previous_version"] = rec.Previous.Version
-	}
-	return out
 }
 
 // startAssignmentAgent polls Central for this appliance's signed assignment,
@@ -187,14 +151,21 @@ func (s *server) startAssignmentAgent(ctx context.Context, ctrlBase string) {
 		}
 		slog.Info("assignment: applied signed assignment", "version", doc.Version, "state", doc.State,
 			"signer_key_id", doc.SignerKeyID, "tenant_id", doc.TenantID, "site_id", doc.SiteID)
+		// A new assignment is when the licence is most likely waiting: fetch it now rather than at the next
+		// tick (F10). If scd re-execs below, the new process fetches at boot anyway.
+		if s.lic != nil {
+			s.lic.Kick()
+		}
 		s.repointGuestNetworks(ctx, doc)
 		prevVersion := currentVersion
 		currentVersion = doc.Version
 
 		// TERMINAL adoption: the box has cleared its authority. Send Central a signed
-		// acknowledgment BEFORE re-exec so Phase 2 (cert + NATS shutdown) can proceed.
+		// acknowledgment BEFORE re-exec so Phase 2 (credential revocation) can proceed; if it is not
+		// confirmed, ensureTerminalAck keeps retrying it (here and in the re-executed process).
 		if assignment.Clears(doc.State) {
 			s.sendTerminalAck(ctx, doc)
+			s.ensureTerminalAck(ctx)
 		}
 
 		// Re-exec when the operational identity actually changes (including an
@@ -207,6 +178,9 @@ func (s *server) startAssignmentAgent(ctx context.Context, ctrlBase string) {
 		}
 	}
 
+	// A terminal assignment adopted earlier whose acknowledgement Central never confirmed -- a re-exec, a
+	// restart or a reboot interrupted it -- is retried until Central answers.
+	s.ensureTerminalAck(ctx)
 	poll() // apply immediately on boot if a newer assignment is waiting
 	go func() {
 		t := time.NewTicker(30 * time.Second)
@@ -216,6 +190,8 @@ func (s *server) startAssignmentAgent(ctx context.Context, ctrlBase string) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
+				poll()
+			case <-s.asgKick: // Check now
 				poll()
 			}
 		}
@@ -263,18 +239,22 @@ func (s *server) fetchAssignment(ctx context.Context, _ string) (*assignment.Doc
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, base+"/v1/appliance/assignment", nil)
 	resp, err := cl.Do(req)
 	if err != nil {
+		s.central.record(err, time.Now())
 		slog.Warn("assignment: fetch failed", "base", base, "err", err)
 		return nil, false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNoContent {
+		s.central.record(nil, time.Now())
 		return nil, false
 	}
 	if resp.StatusCode != http.StatusOK {
+		s.central.record(&httpStatusErr{code: resp.StatusCode}, time.Now())
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		slog.Warn("assignment: fetch non-200", "status", resp.StatusCode, "body", string(b))
 		return nil, false
 	}
+	s.central.record(nil, time.Now())
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	var doc assignment.Document
 	if json.Unmarshal(body, &doc) != nil {
@@ -328,39 +308,28 @@ func (s *server) refreshSignedRegistry(ctx context.Context) {
 	}
 }
 
-// sendTerminalAck signs and delivers the appliance's acknowledgment that it has
-// adopted a TERMINAL assignment (over mTLS). This is what authorises Central to
-// run Phase 2 (certificate + NATS shutdown).
+// sendTerminalAck makes the FIRST delivery of the appliance's signed acknowledgment that it has adopted a
+// TERMINAL assignment (over mTLS) -- what authorises Central to revoke the credentials and complete the
+// retirement. It is attempted once here, synchronously, because scd re-executes right after adopting a
+// terminal document. Anything short of a definitive answer is left to runTerminalAck (central_retry.go),
+// which the re-executed process starts from ensureTerminalAck and which retries with backoff until Central
+// confirms.
 func (s *server) sendTerminalAck(ctx context.Context, doc *assignment.Document) {
-	if s.idPriv == nil || s.applID == "" {
+	if s.terminalAckSettled(doc) {
 		return
 	}
-	cl, base, ready := s.mtlsTransport()
-	if !ready || base == "" {
-		slog.Warn("assignment: terminal adopted but mTLS not ready to acknowledge; Central will retry / time out")
-		return
+	outcome, code := s.deliverTerminalAck(ctx, doc, time.Now())
+	switch outcome {
+	case ackConfirmed:
+		s.settleTerminalAck(doc, "confirmed", code)
+		slog.Info("assignment: sent terminal-adoption ack", "version", doc.Version, "state", doc.State, "http", code)
+	case ackRefused:
+		s.settleTerminalAck(doc, "refused", code)
+		slog.Warn("assignment: Central refused the terminal-adoption ack", "version", doc.Version, "http", code)
+	default:
+		slog.Warn("assignment: terminal-adoption ack not confirmed yet; it will be retried until Central answers",
+			"version", doc.Version, "http", code)
 	}
-	ack := &assignment.Ack{
-		ApplianceID: s.applID, Version: doc.Version, TerminalState: doc.State,
-		Fingerprint: assignment.DocFingerprint(doc), AdoptedAt: time.Now().Unix(),
-	}
-	assignment.SignAck(s.idPriv, ack)
-	body, _ := json.Marshal(ack)
-	tok, err := applianceauth.SignRequest(s.idPriv, s.applID, http.MethodPost, "/v1/appliance/assignment/ack", body)
-	if err != nil {
-		return
-	}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, base+"/v1/appliance/assignment/ack", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+tok)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := cl.Do(req)
-	if err != nil {
-		slog.Warn("assignment: terminal ack send failed", "err", err)
-		return
-	}
-	defer resp.Body.Close()
-	slog.Info("assignment: sent terminal-adoption ack", "version", doc.Version, "state", doc.State,
-		"http", resp.StatusCode)
 }
 
 // repointGuestNetworks updates every appliance-local row that carries a Central

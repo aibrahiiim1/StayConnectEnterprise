@@ -637,27 +637,39 @@ func deriveAttention(in attentionInput) []attentionItem {
 			Detail: "Backups, logs and usage records need free space.",
 			Href:   "/health", Action: "Open diagnostics"})
 	}
+	// LicenseState is the section 8 vocabulary (docs/CENTRAL_CONTROL_PLANE.md), from scd's one computation.
 	if in.LicenseKnown {
 		switch {
-		case !in.LicenseInstalled:
+		case !in.LicenseInstalled || in.LicenseState == "none":
 			add(attentionItem{ID: "license-missing", Severity: "warn",
-				Title:  "This appliance has no signed licence installed",
-				Detail: "Activate it before the property opens.",
-				Href:   "/appliance?section=setup", Action: "Finish setup"})
-		case in.LicenseState == "GracePeriod":
+				Title:  "This appliance is not activated yet",
+				Detail: "Guests cannot sign in until it is activated and licensed.",
+				Href:   "/appliance", Action: "Open appliance"})
+		case in.LicenseState == "wrong_hardware":
+			add(attentionItem{ID: "license-wrong-hardware", Severity: "err",
+				Title:  "The installed licence belongs to a different appliance",
+				Detail: "New guests cannot sign in. Ask your OneGate vendor for a licence for this appliance.",
+				Href:   "/appliance", Action: "Open licence"})
+		case in.LicenseState == "expiring":
+			add(attentionItem{ID: "license-expiring", Severity: "warn",
+				Title:  "The licence expires soon",
+				Detail: "Ask your OneGate vendor to renew it.",
+				Href:   "/appliance", Action: "Open licence"})
+		case in.LicenseState == "grace":
 			add(attentionItem{ID: "license-grace", Severity: "warn",
 				Title:  "The licence is in its renewal grace period",
 				Detail: "New sign-ins stop when the grace period ends.",
-				Href:   "/appliance?section=license", Action: "Open licence"})
-		case in.LicenseState == "Suspended" || in.LicenseState == "Restricted":
+				Href:   "/appliance", Action: "Open licence"})
+		case in.LicenseState == "suspended":
 			add(attentionItem{ID: "license-suspended", Severity: "err",
-				Title: "The licence is suspended",
-				Href:  "/appliance?section=license", Action: "Open licence"})
-		case in.LicenseState == "Expired" || in.LicenseState == "Revoked":
-			add(attentionItem{ID: "license-" + strings.ToLower(in.LicenseState), Severity: "err",
-				Title:  "The licence is " + strings.ToLower(in.LicenseState),
+				Title:  "The licence is suspended",
 				Detail: "New guests cannot sign in.",
-				Href:   "/appliance?section=license", Action: "Open licence"})
+				Href:   "/appliance", Action: "Open licence"})
+		case in.LicenseState == "expired" || in.LicenseState == "revoked":
+			add(attentionItem{ID: "license-" + in.LicenseState, Severity: "err",
+				Title:  "The licence is " + in.LicenseState,
+				Detail: "New guests cannot sign in.",
+				Href:   "/appliance", Action: "Open licence"})
 		}
 	}
 	if in.RevisionPending {

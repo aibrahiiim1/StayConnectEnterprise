@@ -11,5 +11,5 @@ package buildprofile
 // Production is true in the default (production) build.
 const Production = true
 
-// Name identifies the build profile for logs/telemetry.
+// Name identifies the build profile for logs and the licence status.
 const Name = "production"

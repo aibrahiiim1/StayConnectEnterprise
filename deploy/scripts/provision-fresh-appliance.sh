@@ -29,6 +29,11 @@ die() { echo "[provision] ABORT: $*" >&2; exit 1; }
 
 [ "$(id -u)" = 0 ] || die "run as root"
 [ -d "$DEPLOY" ] || die "missing $DEPLOY"
+# AN APPLIANCE CENTRAL REMOVED AFTER IT HELD A CUSTOMER still carries that customer's data (scd's
+# removed_from_central.go). Re-running this script over it would not make it factory-clean -- the database and
+# /etc/stayconnect would survive -- so it refuses. A factory-clean install starts from a blank disk:
+# docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md.
+[ -e "$ETC/removed-from-central.json" ] && die "this appliance was removed from OneGate Central after holding a customer; reinstall it from a blank disk (docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md) instead of re-provisioning over its data"
 
 # ---------------------------------------------------------------- 1. packages
 say "packages"
@@ -298,7 +303,6 @@ SCD_SOCKET=/run/stayconnect/scd.sock
 SCD_CTRLAPI_BASE=${CENTRAL_BASE}
 SCD_MTLS_BASE=${CENTRAL_MTLS_BASE:-${CENTRAL_BASE}:9443}
 SCD_AUTO_REGISTER=true
-SCD_NATS_URL=nats://127.0.0.1:4222
 SCD_METRICS_ADDR=127.0.0.1:9101
 STAYCONNECT_IAMV2_MASTER=true
 EOF

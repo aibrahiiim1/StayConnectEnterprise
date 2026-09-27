@@ -31,7 +31,7 @@ const WINDOW_CALL = /window\.(confirm|prompt|alert)\s*\(/;
 describe("no native browser dialogs in the live console", () => {
   it("scans the live pages, components and lib", () => {
     expect(files.length).toBeGreaterThan(20);
-    expect(files.some((f) => f.includes(join("app", "(app)", "onboarding")))).toBe(true);
+    expect(files.some((f) => f.includes(join("app", "(app)", "appliances")))).toBe(true);
   });
 
   for (const f of files) {

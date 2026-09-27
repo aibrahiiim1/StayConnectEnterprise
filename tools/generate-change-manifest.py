@@ -90,7 +90,7 @@ def domain_of(path):
     if p.startswith("tools/") or "/tests/" in p or p.endswith("_test.go"): return "tests/tooling"
     if p.startswith("docs/"): return "documentation"
     if p.startswith("deploy/") or p.endswith((".yml", ".yaml", ".conf", ".env.example", ".service")): return "configuration"
-    if p.startswith(("data-plane/", "control-plane/", "cloud-admin/", "hotel-admin/", "web-admin/")): return "runtime"
+    if p.startswith(("data-plane/", "control-plane/", "cloud-admin/", "hotel-admin/")): return "runtime"
     return "other"
 
 # in-repo pure-generated (rendered by tooling), outside exports/
@@ -132,7 +132,7 @@ def workstream_of(path, subject):
     if p.startswith("tools/"): return "TOOLING"
     if p.startswith("docs/"): return "DOCS"
     if p.startswith("deploy/"): return "DEPLOY"
-    if p.startswith(("data-plane/", "control-plane/", "cloud-admin/", "hotel-admin/", "web-admin/")): return "RUNTIME"
+    if p.startswith(("data-plane/", "control-plane/", "cloud-admin/", "hotel-admin/")): return "RUNTIME"
     return "OTHER"
 
 def main():

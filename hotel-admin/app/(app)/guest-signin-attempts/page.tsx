@@ -82,6 +82,16 @@ const RESULT_WORDS: Record<string, { tone: "ok" | "warn" | "err" | "info" | "neu
     tone: "err",
     meaning: "The guest's details were RIGHT. The property had no package to offer that stay — this is a configuration problem, not theirs.",
   },
+  LICENSE_REFUSED: {
+    tone: "err",
+    meaning:
+      "The appliance's licence did not admit a new guest at that moment (missing, expired or suspended, or room sign-in not included). Every sign-in method was refused the same way.",
+  },
+  LICENSE_CAPACITY_REACHED: {
+    tone: "warn",
+    meaning:
+      "The guest's details were right, but the appliance was already at the number of guests online its licence allows. The same limit applies to every sign-in method.",
+  },
 };
 
 // The filter's own words. The row labels still come from the server; these only name the choices.
@@ -98,6 +108,8 @@ const RESULT_FILTER_LABELS: Record<string, string> = {
   SPENT_REQUEST_ID: "Stale sign-in page",
   MALFORMED_SUBMISSION: "Unreadable submission",
   VERIFIED_NO_ELIGIBLE_PACKAGE: "Right details, no package to offer",
+  LICENSE_REFUSED: "Licence refused new guests",
+  LICENSE_CAPACITY_REACHED: "Licensed capacity full",
 };
 
 const RESULT_FILTERS = [

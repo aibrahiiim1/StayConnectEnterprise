@@ -4,7 +4,7 @@
 //
 // Before this, a successful save said nothing: the dialog closed and the operator had to infer from the table
 // whether the change took. On a slow appliance that inference is wrong often enough to cause a second click, and a
-// second click on "Issue 50 vouchers" is 100 vouchers.
+// second click on "Activate" is a second activation attempt.
 //
 // Deliberately small and dependency-free. A toast confirms or reports — it never carries the only copy of
 // information the operator needs later (a revealed code, an error explaining what to fix). Those stay in the page.

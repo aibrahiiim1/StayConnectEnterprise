@@ -28,35 +28,6 @@ groups:
             {{ $labels.instance }} has been unreachable by Prometheus for
             more than 2 minutes. Check the service and its network.
 
-      - alert: ApplianceOffline
-        # The heartbeat sweeper flips appliances to offline after 30s of
-        # silence. Alert once that status has stuck for 2 minutes.
-        expr: |
-          increase(ctrlapi_appliances_flipped_offline_total[5m]) > 0
-        labels:
-          severity: critical
-        annotations:
-          summary: "Appliance(s) flipped to offline"
-          description: >
-            The heartbeat staleness sweeper closed {{ $value }}
-            appliance(s) in the last 5 minutes. Verify the site's
-            connectivity and scd process.
-
-      - alert: ApplianceNoHeartbeats
-        # Tenant-scoped: a tenant that normally receives heartbeats has
-        # gone quiet for > 3 minutes.
-        expr: |
-          rate(ctrlapi_heartbeats_received_total[3m]) == 0
-          and on(tenant_id) (max_over_time(ctrlapi_heartbeats_received_total[1h]) > 0)
-        for: 2m
-        labels:
-          severity: critical
-        annotations:
-          summary: "No heartbeats from tenant {{ $labels.tenant_id }}"
-          description: >
-            Tenant had heartbeat traffic in the last hour but none in the
-            last 3 minutes. Appliance(s) may have lost NATS or network.
-
   # ──────────────────────────────────────────────────────────────────
   # ctrlapi HTTP health
   # ──────────────────────────────────────────────────────────────────
@@ -163,50 +134,3 @@ groups:
             > 20 OTP verify attempts hit the per-destination lockout in
             10 minutes. Consider investigating for abuse.
 
-  # ──────────────────────────────────────────────────────────────────
-  # Payments — webhook + checkout failures
-  # ──────────────────────────────────────────────────────────────────
-  - name: payments
-    interval: 30s
-    rules:
-      - alert: StripeSignatureFailures
-        # Any signature_fail events for > 5 min: either the wrong
-        # webhook_secret is configured or someone is attempting to forge.
-        expr: increase(ctrlapi_payment_webhook_total{result="signature_fail"}[5m]) > 0
-        for: 5m
-        labels:
-          severity: critical
-        annotations:
-          summary: "Stripe webhook signature failures"
-          description: >
-            Stripe webhook calls are failing signature verification.
-            Either the webhook_secret drifted in Stripe's config, or
-            someone is attempting to spoof events.
-
-      - alert: StripeVoucherIssueFailures
-        expr: increase(ctrlapi_payment_webhook_total{result="voucher_fail"}[15m]) > 0
-        labels:
-          severity: critical
-        annotations:
-          summary: "Payments completing without vouchers issued"
-          description: >
-            At least one paid checkout failed to issue a voucher in the
-            last 15 minutes. Guests have been charged without getting
-            access — investigate IMMEDIATELY.
-
-      - alert: CheckoutCreateFailureRate
-        expr: |
-          (
-            sum(rate(ctrlapi_payment_checkout_total{result!="ok"}[10m]))
-            /
-            clamp_min(sum(rate(ctrlapi_payment_checkout_total[10m])), 0.001)
-          ) > 0.2
-        for: 10m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Checkout-create failures > 20%"
-          description: >
-            More than 20% of /checkout/create attempts failed in the last
-            10m. Likely Stripe API outage, bad credentials, or template
-            misconfiguration.

@@ -23,9 +23,9 @@ const nextConfig = {
   // served a page. The page files stay as a fallback for any path that reaches them another way.
   async redirects() {
     return [
-      { source: "/license", destination: "/appliance?section=license", permanent: true },
-      { source: "/network/cloud", destination: "/appliance?section=license", permanent: true },
-      { source: "/setup/enrollment", destination: "/appliance?section=setup", permanent: true },
+      { source: "/license", destination: "/appliance", permanent: true },
+      { source: "/network/cloud", destination: "/appliance", permanent: true },
+      { source: "/setup/enrollment", destination: "/appliance", permanent: true },
       { source: "/commercial-packages", destination: "/internet-packages", permanent: true },
     ];
   },

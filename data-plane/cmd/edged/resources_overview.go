@@ -246,12 +246,17 @@ type ovServices struct {
 	Services []ovService    `json:"services"`
 }
 
+// ovLicense is the licence block of the overview, in the section 8 vocabulary (state:
+// none|active|expiring|grace|expired|suspended|revoked|wrong_hardware), from the same scd computation as
+// /central/status.
 type ovLicense struct {
 	section
 	State      string `json:"state,omitempty"`
 	Installed  bool   `json:"installed"`
+	Activation string `json:"activation,omitempty"`
 	ValidUntil string `json:"valid_until,omitempty"`
 	GraceUntil string `json:"grace_until,omitempty"`
+	DaysLeft   *int   `json:"days_left,omitempty"`
 }
 
 type ovNetworkConfig struct {
@@ -1270,28 +1275,12 @@ func (s *server) overviewServices(ctx context.Context, win overviewWindow) ovSer
 func (s *server) overviewLicense(ctx context.Context) ovLicense {
 	lctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
-	code, raw, err := s.scd.call(lctx, http.MethodGet, "/v1/license/status", nil)
-	if err != nil || code != http.StatusOK {
+	sum, ok := s.readLicenceSummary(lctx)
+	if !ok {
 		return ovLicense{section: section{Available: false, Reason: "session_controller_unreachable"}}
 	}
-	var v struct {
-		State      string  `json:"state"`
-		Installed  bool    `json:"installed"`
-		LicenseID  string  `json:"license_id"`
-		ValidUntil string  `json:"valid_until"`
-		GraceUntil *string `json:"grace_until"`
-	}
-	if json.Unmarshal(raw, &v) != nil {
-		return ovLicense{section: section{Available: false, Reason: "license_unreadable"}}
-	}
-	// A real signed licence only: the permissive commissioning mode reports "Active" with no licence id, and
-	// that must not read as licensed (the same rule the /health summary applies).
-	l := ovLicense{section: section{Available: true}, State: v.State, Installed: v.Installed && v.LicenseID != "",
-		ValidUntil: v.ValidUntil}
-	if v.GraceUntil != nil {
-		l.GraceUntil = *v.GraceUntil
-	}
-	return l
+	return ovLicense{section: section{Available: true}, State: sum.State, Installed: sum.State != "none",
+		Activation: sum.Activation, ValidUntil: sum.ValidUntil, GraceUntil: sum.GraceEndsAt, DaysLeft: sum.DaysLeft}
 }
 
 // overviewSystemNetwork reads the WAN/LAN state from netd. That read includes a gateway and an internet

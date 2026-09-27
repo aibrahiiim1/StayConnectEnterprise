@@ -24,3 +24,21 @@ The `.gitignore` beside this file excludes all key material. That is deliberate 
   would then pin appliances to a key nobody chose.
 
 What lives in source is the **path** and the tooling. The key itself is supplied per deployment.
+
+## Where Central publishes its public trust material
+
+`central-install.sh` writes everything an appliance needs to trust a Central — and nothing secret — to
+`/opt/stayconnect/central/appliance-trust/` on the Central host:
+
+| File | Appliance side |
+|---|---|
+| `vendor-license.pub` | copy here (`deploy/pki/vendor-license.pub`); provisioning pins it |
+| `assignment-registry-root.pub` | the signed assignment registry's anchor (`install-assignment-root-anchor.sh`) |
+| `central-tls-ca.crt` | Central's internal TLS CA for :443 (`install-central-trust.sh`) |
+| `appliance-root-ca.crt` | the appliance CA root |
+| `FINGERPRINTS.txt` | the key ids and fingerprints to confirm out of band |
+
+A **moved** Central (`central-install.sh --mode restore`) publishes byte-identical files, because it carries the
+same keys; if its `FINGERPRINTS.txt` differs from the old host's, the move is wrong — stop before switching DNS.
+The private halves never leave Central except inside an encrypted `central-export.sh` bundle
+([docs/DEPLOYMENT_CLOUD.md](../../docs/DEPLOYMENT_CLOUD.md) §6, §9).

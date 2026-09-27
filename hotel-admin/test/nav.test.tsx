@@ -41,7 +41,7 @@ const CONTRACT = JSON.parse(readFileSync(join(process.cwd(), "capability-contrac
 
 /** Every surface PRE-LIVE reports today. Used as a realistic, complete capability answer. */
 const SERVED = [
-  "audit", "auth-methods", "backups", "checkout-grace", "cloud-sync-recovery", "cloud-sync-settings",
+  "audit", "auth-methods", "backups", "checkout-grace",
   "commercial-packages", "diagnostics", "guest-accounts", "guest-signin-attempts", "guest-signin-credentials",
   "guest-signin-protection", "guest-signin-restrictions", "license", "network", "notification-providers",
   "operational-alerts", "operators", "pms-events", "pms-interfaces", "pms-reconciliation", "pms-resolutions",

@@ -102,7 +102,7 @@ base="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc \
 # on a product nobody ships.
 #
 # The count is the check that would catch a chain which silently did not build them. It counts iam_v2 BASE
-# TABLEs, so views (and public.sync_outbox_recovery_log) are outside it by construction.
+# TABLEs, so views are outside it by construction.
 #
 # 0080 DOES NOT MOVE THIS NUMBER, and that is not an oversight. It grants one SELECT and creates nothing, so
 # the expected count stays 86; the privilege it adds is proven by the least-privilege step below, which is

@@ -23,55 +23,27 @@ import (
 type Base struct {
 	DB *pgxpool.Pool
 
-	// LimitsDB (optional) is where commercial limits live when DB points at
-	// a site database (deprecated guest-domain compatibility adapters):
-	// counts run against DB, GetIntLimit against LimitsDB. nil = DB.
-	LimitsDB *pgxpool.Pool
-
-	// GuestDB (optional) is the inverse: for cloud-domain handlers that
-	// need a read of site-owned tables (e.g. appliance effective-config).
-	// nil = DB.
-	GuestDB *pgxpool.Pool
-
-	// Redis (optional) backs step-up re-authentication checks (RequireReauth).
+	// Redis backs step-up re-authentication checks (RequireReauth) and rate limits.
 	Redis *redis.Client
 
-	// AssignKey (optional) is the vendor Ed25519 key used to sign appliance
-	// assignment documents. nil disables signed-assignment issuance (the
-	// lifecycle handlers then only update the Central DB, legacy behavior).
+	// AssignKey is the dedicated Ed25519 key that signs appliance assignment documents. nil disables
+	// activation, moves and retirement (nothing is ever assigned without a signed document).
 	AssignKey ed25519.PrivateKey
 
-	// One-click activation composes assign + certificate + license. These are
-	// nil/zero unless wired for the lifecycle routes.
+	// CA issues appliance client certificates; nil disables certificate issuance.
 	CA          *pki.CA
 	ClientValid time.Duration      // issued client-cert lifetime
-	Lic         *licensing.Service // hardware-bound license issuance
+	Lic         *licensing.Service // hardware-bound licence issuance; nil when no vendor key
 }
 
-// issueAssignment signs + persists a new current assignment for the appliance
-// (bumping its version) when an AssignKey is configured. Errors are non-fatal to
-// the operator action but are surfaced to the caller for logging.
+// issueAssignment signs + persists a new current assignment for the appliance (bumping its version).
 func (b *Base) issueAssignment(ctx context.Context, applianceID, state string) error {
 	if b.AssignKey == nil {
-		return nil
+		return errors.New("assignment signing key not configured")
 	}
 	ab := &AssignmentBase{Base: b, SignKey: b.AssignKey}
 	_, err := ab.Issue(ctx, applianceID, state)
 	return err
-}
-
-func (b *Base) limitsPool() *pgxpool.Pool {
-	if b.LimitsDB != nil {
-		return b.LimitsDB
-	}
-	return b.DB
-}
-
-func (b *Base) guestPool() *pgxpool.Pool {
-	if b.GuestDB != nil {
-		return b.GuestDB
-	}
-	return b.DB
 }
 
 // ----- Response shaping ------------------------------------------------------

@@ -1,6 +1,13 @@
 # StayConnect Root CA — Offline Export & Ceremony Runbook
 
 ## Current status (honest)
+- **Central moved on 2026-09-27** to `172.21.96.196`. The encrypted Root CA backup below was deliberately NOT
+  carried to the new host (the Root key does not belong on a running Central). It is still on the stopped former
+  Central `150.0.0.252`; the commands below still name that host, and it must not be wiped until the export is done.
+- **2026-09-27:** a copy of `root-ca.key.enc`, its sha256 (`a5aa1944…504c`, verified), `root-ca.crt` (fingerprint
+  `D2:60:C6:EE:…:A7:00`, the fleet's Root CA) and the ceremony runbook was taken off the host into the Product
+  Owner's workstation custody folder, access-restricted, to be moved onto two offline media. Shred the host copy
+  (step 5 below) only after both media are verified.
 - **Runtime-isolated NOW:** the Root CA **private** key exists on `150.0.0.252` only as an
   AES-256-CBC / PBKDF2 (300k iter) encrypted blob at
   `/opt/stayconnect/ca-ceremony-backup/root-ca.key.enc`. No plaintext Root private key exists
@@ -10,8 +17,10 @@
 - **Physically offline ONLY AFTER** the operator completes the export below and deletes the two
   Central copies. Until then this is encryption-at-rest, not an air-gap.
 - The online Central runtime retains only: Root **public** cert (`root-ca.crt`), Intermediate cert
-  + Intermediate **private** key (`/etc/stayconnect/pki/`), server-TLS cert/key, and versioned
-  trust bundles in `appliance_ca_versions`.
+  + Intermediate **private** key (`/etc/stayconnect/pki/`), server-TLS cert/key, the appliance CA
+  chain `pki/ca-bundle.crt` (intermediate + root; `CTRLAPI_CA_BUNDLE`, the bundle written into offline
+  activation packages — the first host kept it as `nats-ca-bundle.crt`, a name from the removed message
+  bus), and versioned trust bundles in `appliance_ca_versions`.
 
 ## Backup-area contents (`/opt/stayconnect/ca-ceremony-backup/`, root, 0700)
 | File | Mode | Purpose |
@@ -52,7 +61,9 @@ Performed on a trusted, preferably air-gapped host — never on the routine Cent
    (`CTRLAPI_ROOT_CA_KEY`, `CTRLAPI_INTERMEDIATE_CA_KEY`) with the next version number to sign a new
    intermediate; this yields `intermediate-ca.crt` (+ re-uses the same `root-ca.crt`).
 4. Shred the decrypted `root-ca.key`. Re-encrypt/re-store as in step 1.
-5. Distribute the new intermediate cert + updated trust bundle (`appliance_ca_versions`) to Central;
+5. Distribute the new intermediate cert + updated trust bundle (`appliance_ca_versions`) to Central
+   and rewrite `/etc/stayconnect/pki/ca-bundle.crt` (intermediate + root) so offline activation packages
+   carry the new chain;
    appliances pick up the new bundle on next cert fetch. Overlap old+new intermediates during the
    trust-bundle transition.
 

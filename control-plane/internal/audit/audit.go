@@ -8,17 +8,17 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
+	"github.com/stayconnect/enterprise/control-plane/internal/clientip"
 )
 
 type Entry struct {
 	TenantID   string
-	ActorType  string // operator | system | api | appliance | guest
+	ActorType  string // operator | system | appliance
 	ActorID    string
 	Action     string // e.g. "site.created", "operator.role_added"
 	TargetType string
@@ -68,7 +68,7 @@ func Op(ctx context.Context, db *pgxpool.Pool, r *http.Request, action, targetTy
 		TargetType: targetType,
 		TargetID:   targetID,
 		Payload:    payload,
-		IP:         clientIP(r),
+		IP:         clientip.From(r),
 		UserAgent:  r.UserAgent(),
 	}
 	if s := auth.FromContext(r.Context()); s != nil {
@@ -95,18 +95,4 @@ func System(ctx context.Context, db *pgxpool.Pool, action, targetType, targetID 
 		Payload:    payload,
 		ActorType:  "system",
 	})
-}
-
-// clientIP strips port and trims any IPv6 brackets from RemoteAddr.
-func clientIP(r *http.Request) string {
-	addr := r.RemoteAddr
-	if addr == "" {
-		return ""
-	}
-	if i := strings.LastIndex(addr, ":"); i > 0 {
-		host := addr[:i]
-		host = strings.Trim(host, "[]")
-		return host
-	}
-	return addr
 }

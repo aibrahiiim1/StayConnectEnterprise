@@ -12,7 +12,7 @@
 # Usage:
 #   central-preflight.sh                                   uses /etc/stayconnect/ctrlapi.env
 #   CTRLAPI_ENV_FILE=/path/to/env central-preflight.sh
-#   central-preflight.sh --pg-exec "docker exec -i central-pg" --db stayconnect
+#   central-preflight.sh --pg-exec "docker exec -i sc-central-pg" --db stayconnect
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -80,7 +80,7 @@ fi
 
 # The versioned config is the source of truth for what appliances are told to dial. A Central whose service
 # env disagrees with it will hand out an endpoint the rest of the deployment does not expect.
-CFG="$DEPLOY/config/central-endpoint.env"
+CFG="${CENTRAL_ENDPOINT_CONFIG:-$DEPLOY/config/central-endpoint.env}"
 if [ -f "$CFG" ]; then
   want="$(grep -E '^CTRLAPI_APPLIANCE_BASE=' "$CFG" | tail -1 | cut -d= -f2-)"
   if [ -n "$want" ] && [ -n "$CONFIGURED" ] && [ "$want" != "$CONFIGURED" ]; then
@@ -145,10 +145,51 @@ else
   bad "no assignment signing key at $AKEY — signed assignments are disabled, so no appliance can be
         activated at all. Create one: ctrlapi gen-assignment-key --out $AKEY"
 fi
+RKEY="$(envget CTRLAPI_REGISTRY_ROOT_KEY || echo /etc/stayconnect/assignment-registry-root.key)"
+if [ -s "$RKEY" ] && [ "$(wc -c < "$RKEY")" = 64 ]; then
+  ok "assignment registry root key present"
+else
+  bad "no assignment registry root key at $RKEY — the signed trust registry is not published, so appliances
+        cannot verify any assignment signer. A brand-new Central: ctrlapi gen-registry-key --out $RKEY
+        A MOVED Central: carry the existing one (central-export.sh); a new one breaks every appliance."
+fi
+echo
+
+# ---------------------------------------------------------------- 2b. the appliance certificate authority
+echo "Appliance certificate authority"
+PKI_INT_KEY="$(envget CTRLAPI_INTERMEDIATE_CA_KEY || echo /etc/stayconnect/pki/intermediate-ca.key)"
+PKI_ROOT_KEY="$(envget CTRLAPI_ROOT_CA_KEY || echo /etc/stayconnect/pki/root-ca.key)"
+PKI_INT_CRT="${PKI_INT_KEY%.key}.crt"; PKI_ROOT_CRT="${PKI_ROOT_KEY%.key}.crt"
+if [ -s "$PKI_ROOT_CRT" ] && [ -s "$PKI_INT_CRT" ] && [ -s "$PKI_INT_KEY" ]; then
+  if openssl verify -CAfile "$PKI_ROOT_CRT" "$PKI_INT_CRT" >/dev/null 2>&1; then
+    ok "intermediate CA chains to the Root CA ($(openssl x509 -in "$PKI_ROOT_CRT" -noout -fingerprint -sha256 | sed 's/^.*=//' | cut -c1-23)...)"
+  else
+    bad "$PKI_INT_CRT does not chain to $PKI_ROOT_CRT"
+  fi
+  if [ -s "$PKI_ROOT_KEY" ]; then
+    warn "the Root CA private key is still in the runtime directory ($PKI_ROOT_KEY); ctrlapi moves it to
+        $(envget CTRLAPI_ROOT_CA_OFFLINE_DIR || echo /etc/stayconnect/pki-offline) on start — then take it to cold storage"
+  fi
+else
+  bad "appliance CA incomplete ($PKI_ROOT_CRT, $PKI_INT_CRT, $PKI_INT_KEY) — the mTLS listener and certificate
+        issuance are disabled. On a MOVED Central this material must be carried over, never re-created."
+fi
+BUNDLE="$(envget CTRLAPI_CA_BUNDLE || echo /etc/stayconnect/pki/ca-bundle.crt)"
+if [ -s "$BUNDLE" ]; then
+  ok "CA bundle for offline activation packages present ($BUNDLE)"
+else
+  bad "no CA bundle at $BUNDLE — offline activation packages would carry no trust material.
+        Build it: cat $PKI_INT_CRT $PKI_ROOT_CRT > $BUNDLE"
+fi
 echo
 
 # ---------------------------------------------------------------- 3. schema
 echo "Database schema"
+# A standard Central (central-install.sh) runs Postgres in the sc-central-pg container and has no psql on the
+# host, so the connection string alone cannot be used. With no explicit connection, use that container.
+if [ "${#PG_ARGS[@]}" = 0 ] && [ -z "${CENTRAL_DB_URL:-}" ] && ! command -v psql >/dev/null 2>&1    && command -v docker >/dev/null 2>&1 && docker inspect sc-central-pg >/dev/null 2>&1; then
+  PG_ARGS=(--pg-exec "docker exec -i sc-central-pg" --db stayconnect)
+fi
 if [ "${#PG_ARGS[@]}" -gt 0 ] || [ -n "${CENTRAL_DB_URL:-}" ] || envget CTRLAPI_DB_URL >/dev/null; then
   if [ "${#PG_ARGS[@]}" = 0 ] && [ -z "${CENTRAL_DB_URL:-}" ]; then
     CENTRAL_DB_URL="$(envget CTRLAPI_DB_URL)"; export CENTRAL_DB_URL

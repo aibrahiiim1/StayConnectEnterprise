@@ -2,11 +2,9 @@ package api
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/stayconnect/enterprise/control-plane/internal/audit"
@@ -63,12 +61,11 @@ func (b *CertBase) SubmitCSR(w http.ResponseWriter, r *http.Request) {
 	var lifecycle string
 	b.DB.QueryRow(ctx, `SELECT count(*) FROM appliance_certificates WHERE appliance_id=$1 AND status='active'`, ident.ApplianceID).Scan(&activeCount)
 	b.DB.QueryRow(ctx, `SELECT COALESCE(lifecycle_state,'') FROM appliances WHERE id=$1`, ident.ApplianceID).Scan(&lifecycle)
-	rotatable := activeCount > 0 && lifecycle != "suspended" && lifecycle != "revoked" && lifecycle != "decommissioned"
-	// One-click activation: once an operator has activated the appliance
-	// (assigned/activated), the FIRST certificate is auto-issued the moment the
-	// CSR arrives — the operator already authorized it, so there is no second
-	// button and the appliance converges on its own.
-	firstAfterActivate := activeCount == 0 && (lifecycle == "assigned" || lifecycle == "activated" || lifecycle == "licensed")
+	rotatable := activeCount > 0 && lifecycle == "assigned"
+	// Once an operator has activated the appliance, its FIRST certificate is auto-issued the moment the CSR
+	// arrives — activation already authorized it, so there is no second button and the appliance converges on
+	// its own. A waiting appliance's CSR is queued and signed by the activation itself.
+	firstAfterActivate := activeCount == 0 && lifecycle == "assigned"
 	if rotatable || firstAfterActivate {
 		actor := "appliance-rotation"
 		if firstAfterActivate {
@@ -124,91 +121,6 @@ func (b *CertBase) FetchCertificate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// CAHandler returns the CA trust anchor (public). Safe to expose.
-func (b *CertBase) CAHandler(w http.ResponseWriter, r *http.Request) {
-	WriteJSON(w, http.StatusOK, map[string]any{
-		"ca_version": b.CA.Version, "ca_pem": string(b.CA.CertPEM()), "subject": b.CA.Subject(),
-	})
-}
-
-// ----- Platform-facing (session + permission + reauth) -----
-
-func (b *CertBase) PlatformRoutes() http.Handler {
-	r := chi.NewRouter()
-	reauth := RequireReauth(b.Redis)
-	r.With(auth.RequirePermission("platform.appliances.view")).Get("/", b.list)
-	r.With(auth.RequirePermission("platform.appliances.view")).Get("/requests", b.listRequests)
-	r.With(auth.RequirePermission("platform.appliances.view")).Get("/ca", b.CAHandler)
-	r.With(auth.RequirePermission("platform.certificates.issue"), reauth).Post("/{applianceID}/issue", b.issue)
-	r.With(auth.RequirePermission("platform.certificates.revoke"), reauth).Post("/{id}/revoke", b.revoke)
-	return r
-}
-
-// list returns the appliance-certificate inventory as METADATA ONLY. It never
-// includes cert_pem, private keys, or any secret material — only the public
-// fingerprint, issuer/CA version, validity window, status and revocation reason.
-func (b *CertBase) list(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := DBCtx(r)
-	defer cancel()
-	rows, err := b.DB.Query(ctx, `
-        SELECT c.id::text, c.appliance_id::text, a.serial,
-               COALESCE(t.name,''), COALESCE(s.name,''),
-               c.fingerprint_sha256, c.cert_serial, c.ca_version,
-               c.not_before, c.not_after, c.status, c.created_at,
-               c.revoked_at, COALESCE(c.revocation_reason,''),
-               MAX(c.created_at) OVER (PARTITION BY c.appliance_id) AS last_rotation
-          FROM appliance_certificates c
-          JOIN appliances a ON a.id=c.appliance_id
-          LEFT JOIN tenants t ON t.id=c.tenant_id
-          LEFT JOIN sites   s ON s.id=c.site_id
-         ORDER BY c.created_at DESC LIMIT 500`)
-	if err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "query failed")
-		return
-	}
-	defer rows.Close()
-	out := []map[string]any{}
-	for rows.Next() {
-		var id, appID, serial, tenant, site, fpr, cser, status, revReason string
-		var caVer int
-		var nb, na, created, lastRot time.Time
-		var revokedAt *time.Time
-		_ = rows.Scan(&id, &appID, &serial, &tenant, &site, &fpr, &cser, &caVer,
-			&nb, &na, &status, &created, &revokedAt, &revReason, &lastRot)
-		out = append(out, map[string]any{
-			"id": id, "appliance_id": appID, "serial": serial,
-			"tenant_name": tenant, "site_name": site,
-			"fingerprint_sha256": fpr, "cert_serial": cser,
-			"issuer": fmt.Sprintf("StayConnect Internal CA v%d", caVer), "ca_version": caVer,
-			"not_before": nb, "not_after": na, "status": status, "created_at": created,
-			"revoked_at": revokedAt, "revocation_reason": revReason, "last_rotation": lastRot,
-		})
-	}
-	WriteJSON(w, http.StatusOK, map[string]any{"data": out})
-}
-
-func (b *CertBase) listRequests(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := DBCtx(r)
-	defer cancel()
-	rows, err := b.DB.Query(ctx, `
-        SELECT rq.id::text, rq.appliance_id::text, a.serial, rq.status, rq.requested_at
-          FROM appliance_certificate_requests rq JOIN appliances a ON a.id=rq.appliance_id
-         WHERE rq.status='pending' ORDER BY rq.requested_at DESC LIMIT 200`)
-	if err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "query failed")
-		return
-	}
-	defer rows.Close()
-	out := []map[string]any{}
-	for rows.Next() {
-		var id, appID, serial, status string
-		var at time.Time
-		_ = rows.Scan(&id, &appID, &serial, &status, &at)
-		out = append(out, map[string]any{"id": id, "appliance_id": appID, "serial": serial, "status": status, "requested_at": at})
-	}
-	WriteJSON(w, http.StatusOK, map[string]any{"data": out})
-}
-
 // issueCertForAppliance signs the appliance's latest pending CSR, supersedes
 // any prior active cert (rotation overlap is handled appliance-side), records
 // the issuance, and drives current_cert_fingerprint. actor labels the event.
@@ -247,75 +159,15 @@ func (b *CertBase) issueCertForAppliance(ctx context.Context, r *http.Request, a
 		return nil, err
 	}
 	_, _ = tx.Exec(ctx, `UPDATE appliance_certificate_requests SET status='signed', decided_at=now(), decided_by=NULLIF($2,'')::uuid WHERE appliance_id=$1 AND status='pending'`, appID, operatorID)
-	_, _ = tx.Exec(ctx, `UPDATE appliances SET cert_fingerprint=$2, current_cert_fingerprint=$2, cert_not_after=$3, updated_at=now() WHERE id=$1`, appID, sc.FingerprintHex, sc.NotAfter)
+	_, _ = tx.Exec(ctx, `UPDATE appliances SET current_cert_fingerprint=$2, cert_not_after=$3, updated_at=now() WHERE id=$1`, appID, sc.FingerprintHex, sc.NotAfter)
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
 	b.certEvent(ctx, appID, certID, "issued", actor, clientIP(r))
 	audit.Op(ctx, b.DB, r, "certificate.issued", "certificate", certID, map[string]any{
-		"appliance_id": appID, "fingerprint": sc.FingerprintHex, "not_after": sc.NotAfter, "actor": actor,
+		"_tenant_id": tenantID, "appliance_id": appID, "fingerprint": sc.FingerprintHex, "not_after": sc.NotAfter, "actor": actor,
 	})
 	return sc, nil
-}
-
-// issue is the platform-operator first-issuance handler.
-func (b *CertBase) issue(w http.ResponseWriter, r *http.Request) {
-	appID := chi.URLParam(r, "applianceID")
-	ctx, cancel := DBCtx(r)
-	defer cancel()
-	sc, err := b.issueCertForAppliance(ctx, r, appID, emailOf(auth.FromContext(r.Context())))
-	if err == pgx.ErrNoRows {
-		Fail(w, r, http.StatusNotFound, CodeNotFound, "no pending CSR for appliance")
-		return
-	}
-	if err != nil {
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "issue failed: "+err.Error())
-		return
-	}
-	WriteJSON(w, http.StatusCreated, map[string]any{
-		"fingerprint_sha256": sc.FingerprintHex, "cert_serial": sc.SerialHex,
-		"not_after": sc.NotAfter, "ca_version": b.CA.Version,
-	})
-}
-
-// revoke revokes a certificate: marks it revoked, records the revocation (used
-// by the mTLS verifier), and clears the appliance's current fingerprint.
-func (b *CertBase) revoke(w http.ResponseWriter, r *http.Request) {
-	certID := chi.URLParam(r, "id")
-	var in struct {
-		Reason string `json:"reason"`
-	}
-	_ = DecodeJSON(r, &in)
-	ctx, cancel := DBCtx(r)
-	defer cancel()
-	var appID, fpr string
-	err := b.DB.QueryRow(ctx, `SELECT appliance_id::text, fingerprint_sha256 FROM appliance_certificates WHERE id=$1 AND status='active'`, certID).Scan(&appID, &fpr)
-	if err == pgx.ErrNoRows {
-		Fail(w, r, http.StatusNotFound, CodeNotFound, "no active certificate with that id")
-		return
-	}
-	if err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "lookup failed")
-		return
-	}
-	operatorID := ""
-	if s := auth.FromContext(r.Context()); s != nil {
-		operatorID = s.OperatorID
-	}
-	tx, _ := b.DB.Begin(ctx)
-	defer tx.Rollback(ctx)
-	_, _ = tx.Exec(ctx, `UPDATE appliance_certificates SET status='revoked', revoked_at=now(), revocation_reason=$2 WHERE id=$1`, certID, in.Reason)
-	_, _ = tx.Exec(ctx, `INSERT INTO appliance_certificate_revocations (certificate_id, appliance_id, fingerprint_sha256, reason, revoked_by) VALUES ($1,NULLIF($2,'')::uuid,$3,$4,NULLIF($5,'')::uuid)`, certID, appID, fpr, in.Reason, operatorID)
-	_, _ = tx.Exec(ctx, `UPDATE appliances SET current_cert_fingerprint=NULL WHERE id=$1 AND current_cert_fingerprint=$2`, appID, fpr)
-	if err := tx.Commit(ctx); err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "commit failed")
-		return
-	}
-	b.certEvent(ctx, appID, certID, "revoked", emailOf(auth.FromContext(r.Context())), clientIP(r))
-	audit.Op(r.Context(), b.DB, r, "certificate.revoked", "certificate", certID, map[string]any{
-		"appliance_id": appID, "fingerprint": fpr, "reason": in.Reason,
-	})
-	WriteJSON(w, http.StatusOK, map[string]any{"status": "revoked", "certificate_id": certID})
 }
 
 func (b *CertBase) certEvent(ctx context.Context, appID, certID, event, actor, ip string) {

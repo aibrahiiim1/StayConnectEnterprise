@@ -158,10 +158,9 @@ const SECTIONS: Section[] = [
       { href: "/network/system",      label: "WAN / LAN settings", icon: Router,    resource: "network", keywords: "uplink gateway dns static management" },
       { href: "/network/revisions",   label: "Config history",     icon: History,   resource: "network", keywords: "rollback revision applied" },
       // "Cloud connection" is gone, and its keywords live on Activation so the search that found it still
-      // does. The link to Central exists ONLY to serve licensing (T0071): the NATS transport is never opened
-      // and the telemetry outbox is stopped, both by decision. Everything the page actually showed -- licence
-      // state, certificate health, reachability, appliance identity -- is licensing or identity, and both now
-      // have exactly one home. A page per backend component is how an operator ends up with three screens
+      // does. The link to Central exists ONLY to serve activation and licensing. Everything the page actually
+      // showed -- licence state, certificate health, reachability, appliance identity -- is licensing or
+      // identity, and both now have exactly one home. A page per backend component is how an operator ends up with three screens
       // answering one question.
       //
       // The Hotel Admin TLS certificate stays, and stays HERE: it secures the local HTTPS an operator reaches

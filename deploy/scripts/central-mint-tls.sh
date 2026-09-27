@@ -21,12 +21,13 @@
 # Idempotent: re-running when the certificate already covers every configured name does nothing.
 #
 # Usage (as root on Central):
+#   central-mint-tls.sh --init-ca    create the internal TLS CA (brand-new Central only; no-op if one exists)
 #   central-mint-tls.sh              issue if the current certificate is missing a name (or is absent)
 #   central-mint-tls.sh --show       print the current certificate's names and expiry
 #   central-mint-tls.sh --force      re-issue regardless
 #
 # Extra names (transition, split-horizon, legacy):
-#   CENTRAL_TLS_SANS="150.0.0.252,admin.stayconnect.local,api.stayconnect.local"
+#   CENTRAL_TLS_SANS="203.0.113.10,admin.stayconnect.local,api.stayconnect.local"
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,6 +49,30 @@ if [ "${1:-}" = "--show" ]; then
   say "issuer:  $(openssl x509 -in "$CADDY_CRT" -noout -issuer  | sed 's/^issuer=//')"
   say "expires: $(openssl x509 -in "$CADDY_CRT" -noout -enddate | sed 's/^notAfter=//')"
   say "names:   $(names_of "$CADDY_CRT")"
+  exit 0
+fi
+
+if [ "${1:-}" = "--init-ca" ]; then
+  # A BRAND-NEW Central only. The internal TLS CA is what appliances install into their system trust
+  # (install-central-trust.sh) to verify :443. It is created once; a MOVED Central carries the existing one
+  # (central-export.sh), because a new CA would make every appliance refuse the new host's certificate.
+  [ "$(id -u)" = 0 ] || die "run as root"
+  if [ -s "$TLSDIR/ca.crt" ] || [ -s "$TLSDIR/ca.key" ]; then
+    say "a Central TLS CA already exists at $TLSDIR — not creating another"
+    say "subject: $(openssl x509 -in "$TLSDIR/ca.crt" -noout -subject 2>/dev/null | sed 's/^subject=//')"
+    exit 0
+  fi
+  install -d -m 0700 "$TLSDIR"
+  openssl req -x509 -newkey rsa:4096 -nodes -sha256 -days "${CENTRAL_TLS_CA_DAYS:-3650}" \
+    -keyout "$TLSDIR/ca.key" -out "$TLSDIR/ca.crt" \
+    -subj "/O=OneGate/CN=OneGate Central Internal TLS CA" \
+    -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign" \
+    -addext "subjectKeyIdentifier=hash" 2>/dev/null
+  chmod 0600 "$TLSDIR/ca.key"; chmod 0644 "$TLSDIR/ca.crt"
+  say "created the Central internal TLS CA: $TLSDIR/ca.crt"
+  say "sha256 fingerprint: $(openssl x509 -in "$TLSDIR/ca.crt" -noout -fingerprint -sha256 | sed 's/^.*=//')"
+  say "Appliances must trust it: deploy/scripts/install-central-trust.sh $TLSDIR/ca.crt (on each appliance)"
   exit 0
 fi
 
@@ -78,7 +103,7 @@ for e in "${extras[@]:-}"; do
     *) dns_names+=("$e") ;;
   esac
 done
-ip_names+=("127.0.0.1")
+case " ${ip_names[*]:-} " in *" 127.0.0.1 "*) ;; *) ip_names+=("127.0.0.1") ;; esac
 
 # Already covering everything? Then this is a no-op, and saying so beats re-issuing a certificate that every
 # appliance would have to re-validate for no reason.

@@ -21,7 +21,7 @@ fail() { printf "  ✗ %s\n    %s\n" "$1" "${2:-}"; exit 1; }
 # ---- 1. ctrlapi /metrics serves expected families ----
 ctrl=$(curl -s "$BASE/metrics")
 for m in ctrlapi_build_info ctrlapi_uptime_seconds ctrlapi_http_requests_total \
-         ctrlapi_http_request_duration_seconds ctrlapi_heartbeats_received_total \
+         ctrlapi_http_request_duration_seconds \
          go_goroutines process_resident_memory_bytes; do
     [[ "$ctrl" == *"$m"* ]] || fail "ctrlapi missing metric family" "missing=$m"
 done
@@ -52,20 +52,17 @@ pass "scd series carry constant labels (tenant_id/site_id/appliance_id)"
 
 # ---- 3. ctrlapi HTTP route label uses chi pattern, not raw URL ----
 # Hit a known route that has a path parameter — appliances list — then
-# inspect the metric for the {route="/v1/appliances/"} pattern, not
-# the raw URL.
+# inspect the metric for the /cloud/v1/appliances pattern, not the raw URL.
 CJ=$(mktemp); trap "rm -f $CJ" EXIT
 TENANT=$(docker exec -i stayconnect-pg psql -U stayconnect -d stayconnect -At -q -c "SELECT id FROM tenants WHERE slug='dev'")
 curl -s -o /dev/null -c "$CJ" -X POST -H 'Content-Type: application/json' \
     -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASS\"}" "$BASE/v1/auth/login"
-curl -s -o /dev/null -b "$CJ" "$BASE/v1/appliances?tenant_id=$TENANT"
-curl -s -o /dev/null -b "$CJ" "$BASE/v1/appliances?tenant_id=$TENANT"
+curl -s -o /dev/null -b "$CJ" "$BASE/cloud/v1/appliances?customer_id=$TENANT"
+curl -s -o /dev/null -b "$CJ" "$BASE/cloud/v1/appliances?customer_id=$TENANT"
 ctrl=$(curl -s "$BASE/metrics")
 appliance_route=$(grep -E 'ctrlapi_http_requests_total\{.*route="[^"]*appliances[^"]*"' <<<"$ctrl" | head -n1)
-[[ -n "$appliance_route" ]] || fail "no /v1/appliances request metric" "ctrl=$(echo \"$ctrl\" | head -c 200)"
-# The chi pattern for the mounted /v1/appliances/{id} is "/v1/appliances/*"
-# (chi mounts at "/v1/appliances" with sub-router). Check it's NOT the
-# raw URL with the tenant_id query string baked in.
+[[ -n "$appliance_route" ]] || fail "no /cloud/v1/appliances request metric" "ctrl=$(echo \"$ctrl\" | head -c 200)"
+# Check the label is the chi pattern, NOT the raw URL with the customer_id query string baked in.
 if [[ "$appliance_route" == *"$TENANT"* ]]; then
     fail "route label leaks tenant_id (raw URL captured)" "$appliance_route"
 fi
@@ -126,18 +123,6 @@ if [[ "$have_status" == "0" ]]; then
 fi
 [[ "$have_status" -ge 1 ]] && pass "scd_pms_provider_status emits per-provider series ($have_status)" \
                           || fail "no PMS status series" "count=$have_status"
-
-# ---- 7. heartbeat counter on ctrlapi ----
-# At least one heartbeat received since boot.
-hb=$(curl -s "$BASE/metrics" \
-    | grep -E '^ctrlapi_heartbeats_received_total\{tenant_id=' \
-    | grep -oE '[0-9.]+$' | head -n1)
-hb=${hb:-0}
-if (( $(echo "$hb >= 1" | bc -l) )); then
-    pass "ctrlapi_heartbeats_received_total{tenant_id=...} >= 1 ($hb)"
-else
-    fail "no heartbeats counted" "got=$hb"
-fi
 
 echo
 echo "ALL GREEN"

@@ -13,7 +13,7 @@ package main
 //	INCLUDING /v1/backup/restore. Licence install and refresh. Appliance enrolment. Certificate rotation.
 //
 // Both sets were reachable by anything in the stayconnect group, and portald ran as User=stayconnect. So the
-// network-facing process could call /v1/backup/restore, /v1/license/install and /v1/setup/enroll directly --
+// network-facing process could call /v1/backup/restore, /v1/license/install and /v1/central/offline-package directly --
 // no operator, no permission, no step-up, because all of those live in edged and nothing proved they had
 // happened. The voucher code routes were the ones that made this urgent, and they were never the worst of it.
 //
@@ -99,8 +99,7 @@ var adminPrefixes = []string{
 	"/v1/license/",
 	"/v1/hotel-admin-cert/",
 	"/v1/maintenance",
-	"/v1/cloud/",
-	"/v1/setup/",
+	"/v1/central/",
 	"/v1/phase3/signin-attempts/",
 }
 

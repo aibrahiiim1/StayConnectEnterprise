@@ -116,32 +116,22 @@ tables were dropped by migration 0045, so no fleet view reports backup health fr
   keepalived, no VRRP and no agent anywhere in the tree, so there is no VRRP state to check and no secondary
   to skip.
 
-### Three public tables no migration creates — expected, and what a restore must know
+### The `public` tables 0048 creates and 0093 drops — what a restore must know
 
-A restored site database is **not** built only from `data-plane/migrations/`. Three tables in the `public`
-schema are created by `scd` itself, the first time the feature that needs them is used:
+`public.edge_offline_packages` (the single-use ledger of imported offline activation packages, which the
+offline reconcile reads) is created by appliance migration **0048**, owned on a live appliance by the
+installation superuser (`stayconnect`), and granted to `svc_scd` by Gate P. It is in every dump and in every
+database rebuilt from migrations.
 
-| Table | Created by | First used for |
-|---|---|---|
-| `public.edge_executed_commands` | `data-plane/cmd/scd/commands.go` | the Central command channel |
-| `public.edge_installed_updates` | `data-plane/cmd/scd/updates.go` | recording an installed update |
-| `public.edge_offline_packages` | `data-plane/cmd/scd/offline_import.go` | consuming an offline package |
+Migration **0093** removed the cloud telemetry subsystem and drops `public.sync_outbox`,
+`public.sync_checkpoints`, `public.edge_executed_commands` and `public.edge_installed_updates` with their
+rows (authorized). Where the applying role cannot drop them (a live site applies as `iam_v2_owner`) they are
+left for their owner, see [ROLLBACK_POLICY.md](ROLLBACK_POLICY.md) §"Appliance schema boundaries".
 
-All three are `CREATE TABLE IF NOT EXISTS`, so the behaviour is deterministic and idempotent, and on a live
-appliance all three are owned by the installation superuser (`stayconnect`) and carry Gate P's grants to
-`svc_scd`.
-
-**Why this matters to a restore, and to anyone comparing two databases.** `deploy/gatep/gatep-grants.sql`
-grants on all three. Applying the migration lineage to an empty database and then running Gate P therefore
-**fails** — the tables do not exist yet — unless `scd` has run first or the DDL is applied alongside it. A
-rebuild that reaches "the same schema" without them is not the same schema.
-
-- **Restoring from a dump:** they are in the dump, because they exist in the source database. Nothing to do.
-- **Rebuilding from migrations:** expect them to be absent until `scd` starts, and expect Gate P to fail if it
-  is run before that. This is exercised by `iam_v2_scratch/phase7_reconstruct_from_sources.sh`, which applies
-  the same DDL from those three source files at the point in the accepted history where it belongs.
-- **Comparing a rebuilt database with an appliance:** their absence is the expected difference until `scd` has
-  run, and is not evidence of a failed restore.
+- **Restoring a dump taken before 0093:** the four tables come back with the dump; applying 0093 (and the
+  owner statement) removes them again. Nothing reads them and Gate P no longer grants on them.
+- **Comparing a rebuilt database with an appliance:** an appliance that has applied 0093 but not yet run the
+  owner statement still carries the four tables; that is the expected difference, not a failed restore.
 
 ### Restore (site)
 
@@ -220,49 +210,55 @@ systemctl start stayconnect-netd stayconnect-scd stayconnect-portald stayconnect
 > record is right.
 
 Post-restore checks: scd health; voucher login from the netns client; license
-evaluation (`GET /edge/v1/license`) — note the license store's high-water mark
-restores with `/etc/stayconnect`, so clock-rollback protection stays intact;
-`sync_outbox` rows restored but already-sent seqs re-published are harmless
-(cloud dedupe drops them — replay-safe by design).
+evaluation (`GET /edge/v1/central/status`) — note the license store's high-water mark
+restores with `/etc/stayconnect`, so clock-rollback protection stays intact.
+An appliance restored from a dump of a site that Central has since deleted still
+finds out on its next hello: if it had held a customer it enters the
+*Removed from OneGate Central* state (the marker `/etc/stayconnect/removed-from-central.json`
+restores with `/etc` and is honoured), and only a factory-clean install brings it back.
 
 ## 2. Cloud DB backup
 
 ### What
 
-- `pg_dump -Fc` of `stayconnect` (tenants, sites, appliances, plans,
-  subscriptions, **licenses incl. signed envelopes**, fleet telemetry,
-  operators, audit);
+- `pg_dump -Fc` of `stayconnect`: customers (`tenants`), sites, appliances and
+  their assignment, certificate, retirement, security-alert and
+  offline-activation tables, the assignment signing-key registry, the
+  retired-identity register, **licenses incl. signed envelopes**, operators and
+  roles and `audit_log`
+  ([CLOUD_ARCHITECTURE.md §2](CLOUD_ARCHITECTURE.md#2-central-database-ownership)).
+  Central holds no guest or commercial history (migration 0047 dropped the
+  `legacy_archive` schema);
 - the **vendor signing key** (`CTRLAPI_VENDOR_KEY` file) — backed up
   separately, encrypted, access-restricted: losing it means no new licenses
   can be signed until a key rotation is pushed to every appliance; leaking it
   means anyone can mint licenses. Treat like a CA key.
-- Redis is *not* backed up (operator sessions are disposable). NATS JetStream
-  state is transport-level; the outbox pattern makes it recoverable.
+- the **assignment signing key**, **registry root key** and the appliance CA
+  keys (intermediate online, root offline) — separately, encrypted, like the
+  vendor key.
+- Redis is *not* backed up (operator sessions are disposable). Central runs no
+  message bus.
 
 ### How
 
-Nightly cron on the cloud host (pilot: the VM):
-
-```sh
-pg_dump -Fc -U stayconnect stayconnect > /root/backups/cloud/cloud-$(date +%Y%m%d).dump
-```
-
-Retention 14 daily + 8 weekly, copied off-host. TimescaleDB note: `-Fc` dumps
-handle hypertables (`fleet_telemetry`, `audit_log`, `usage_counters`,
-`accounting_records` while legacy data remains) via the timescaledb catalog;
-restore into a database with the extension pre-created at the same version.
+`stayconnect-central-backup.timer` (daily, 02:15) runs `deploy/scripts/central-backup.sh`: `pg_dump -Fc` of
+the `sc-central-pg` container's `stayconnect` database to
+`/opt/stayconnect/backups/db/central-<stamp>-scheduled.dump` (0600, proven readable with `pg_restore -l`
+before it counts). Every deploy takes the same dump as `central-<stamp>-pre-<sha12>.dump`. Retention is
+`KEEP_DB` in `/etc/stayconnect/backup-retention.conf` (the newest dump and pinned dumps are never deleted);
+*System → Backup health* reports it. The dumps are **local only** — an off-host copy is the operator's
+responsibility ([DEPLOYMENT_CLOUD.md](DEPLOYMENT_CLOUD.md) §9). TimescaleDB note: restore into a database with
+the extension at the same version, between `timescaledb_pre_restore()` and `timescaledb_post_restore()`.
 
 ### Restore (cloud)
 
-```sh
-systemctl stop stayconnect-ctrlapi
-dropdb -U postgres stayconnect && createdb -U postgres -O stayconnect stayconnect
-psql -U postgres -d stayconnect -c "CREATE EXTENSION timescaledb"
-pg_restore -U stayconnect -d stayconnect cloud-<stamp>.dump
-systemctl start stayconnect-ctrlapi
-```
+Use the exact commands in [DEPLOYMENT_CLOUD.md](DEPLOYMENT_CLOUD.md) ("Rolling back the database"): stop
+`stayconnect-ctrlapi` and `stayconnect-cloud-admin`, recreate the database, create the extension,
+`timescaledb_pre_restore()`, `pg_restore`, `timescaledb_post_restore()`, check the hypertables, then start the
+matching binary. Never `pg_restore --clean` a TimescaleDB database. Moving Central to a new host is
+`central-install.sh --mode restore` from an export bundle (same document, §6).
 
-Post-restore checks: `readyz`; `GET /cloud/v1/licenses/` lists envelopes; an
+Post-restore checks: `readyz`; `GET /cloud/v1/licenses` lists the licences; an
 appliance license fetch succeeds. That is the whole list — Central serves the
 appliance for **licensing only**.
 
@@ -278,11 +274,11 @@ appliance for **licensing only**.
 > statement would fail on a table that does not exist, and an operator following
 > it after a restore would reasonably conclude the restore was incomplete.
 >
-> The telemetry link was built, verified and **switched off by decision** —
-> 87 000 records were delivered and both sides reconciled first. A static
-> outbox, a closed transport and a missing fleet view are that decision, not a
-> fault, and reconnecting telemetry is **not** a repair for anything. See
-> `current_state_facts.central_scope` in `governance/project-state.json`.
+> The telemetry link was built, verified (87 000 records delivered, both sides
+> reconciled) and switched off by decision on 2026-09-13; the appliance side was
+> removed on 2026-09-27 (appliance migration 0093). There is no telemetry
+> anywhere to restore. See `current_state_facts.central_scope` in
+> `governance/project-state.json`.
 
 **Key property of the architecture: a cloud restore never interrupts hotels.**
 Appliances keep serving guests on their persisted licenses throughout
@@ -298,7 +294,7 @@ Run quarterly, and once as part of pilot acceptance:
 | Full appliance rebuild | fresh VM → deploy stack → restore site dump + `/etc/stayconnect` → run phase 1 suite | guest login green without touching the cloud |
 | Cloud restore | restore cloud dump to scratch; issue a test license against it | envelope signs & verifies |
 | Vendor-key escrow check | decrypt the escrowed key, `LoadSigner` succeeds, key_id matches production | key_id equality |
-| Outage replay | combine with the cloud-outage drill: restore cloud from a dump taken *before* an edge outage window, confirm outbox re-drain and dedupe | no duplicate `(appliance_id, seq)` rows |
+| Outage replay | combine with the cloud-outage drill: restore cloud from a dump taken *before* an edge outage window; appliances keep serving guests throughout, and their next licence fetch and assignment poll succeed against the restored Central | guests unaffected; appliances `Connected` again |
 
 Record every drill in the cloud audit log (`backup.drill` action) and, for
 site drills, as a `manual` row in `backup_records`.

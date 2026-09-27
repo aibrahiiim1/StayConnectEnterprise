@@ -4,68 +4,57 @@ import { useMemo } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
-  LayoutDashboard, MapPin, Server, Users, LogOut,
-  BadgeCheck, ScrollText, Building2, PlugZap,
-  ShieldAlert, FileBadge, KeyRound, HardDrive,
-  PanelLeftClose, PanelLeftOpen,
+  BadgeCheck, Building2, HardDrive, KeyRound, LayoutDashboard, LogOut, PanelLeftClose, PanelLeftOpen,
+  ScrollText, Server, Settings2, ShieldAlert, Users,
 } from "lucide-react";
 import { BySemantics, OneGateLockup } from "@/components/brand";
-import { CustomerSelector } from "@/components/customer-selector";
 import { Tooltip } from "@/components/ui/tooltip";
-import { PAGE_READ, usePermissions } from "@/lib/permissions";
+import { usePermissions, type Capability } from "@/lib/permissions";
 
-export type NavItem = { href: string; label: string; icon: React.ComponentType<{ className?: string }> };
-export type NavSection = { title: string; items: NavItem[] };
+export type NavItem = {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  /** The capability needed to see this item at all. */
+  needs: Capability;
+};
 
-// CENTRAL'S FOUR GROUPS (handoff §7, "App shell"). The page title of every screen equals its menu label.
-//
-// "Fleet" is gone: its page was deleted, and a menu item that opens a 404 is worse than no item. The retired
-// /commercial and /subscription URLs redirect permanently to /licenses and are deliberately NOT listed —
-// plans and subscriptions are not part of the product.
-export const NAV_SECTIONS: NavSection[] = [
-  {
-    title: "Overview",
-    items: [{ href: "/dashboard", label: "Dashboard", icon: LayoutDashboard }],
-  },
-  {
-    title: "Infrastructure",
-    items: [
-      { href: "/sites", label: "Sites", icon: MapPin },
-      { href: "/onboarding", label: "Onboarding", icon: PlugZap },
-      { href: "/appliances", label: "Appliances", icon: Server },
-    ],
-  },
-  {
-    title: "Commercial",
-    items: [
-      { href: "/tenants", label: "Customers", icon: Building2 },
-      { href: "/licenses", label: "Licenses", icon: BadgeCheck },
-    ],
-  },
-  {
-    title: "Administration",
-    items: [
-      { href: "/operators", label: "Operators", icon: Users },
-      { href: "/security", label: "Security alerts", icon: ShieldAlert },
-      { href: "/certificates", label: "Certificates", icon: FileBadge },
-      { href: "/assignment-keys", label: "Assignment keys", icon: KeyRound },
-      { href: "/backup-health", label: "Backup health", icon: HardDrive },
-      { href: "/audit", label: "Audit log", icon: ScrollText },
-    ],
-  },
+// CENTRAL'S FIVE DESTINATIONS (docs/CENTRAL_CONTROL_PLANE.md §2). One place per job: there is no customer
+// selector, no second appliance list, and no separate onboarding screen — activation happens on the appliance.
+export const NAV_ITEMS: NavItem[] = [
+  { href: "/overview", label: "Overview", icon: LayoutDashboard, needs: "fleet.read" },
+  { href: "/customers", label: "Customers", icon: Building2, needs: "fleet.read" },
+  { href: "/appliances", label: "Appliances", icon: Server, needs: "fleet.read" },
+  { href: "/licenses", label: "Licenses", icon: BadgeCheck, needs: "fleet.read" },
+  { href: "/system", label: "System", icon: Settings2, needs: "system.read" },
 ];
 
-export const NAV_ITEMS: NavItem[] = NAV_SECTIONS.flatMap((s) => s.items);
-export const NAV_SECTION_OF: Record<string, string> = Object.fromEntries(
-  NAV_SECTIONS.flatMap((s) => s.items.map((i) => [i.href, s.title])),
-);
+/** The System section's pages: out of the daily workflow, platform operators only. */
+export const SYSTEM_PAGES: { href: string; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { href: "/system/security-alerts", label: "Security alerts", icon: ShieldAlert },
+  { href: "/system/trust", label: "Trust & keys", icon: KeyRound },
+  { href: "/system/audit", label: "Audit log", icon: ScrollText },
+  { href: "/system/team", label: "Team", icon: Users },
+  { href: "/system/backup-health", label: "Backup health", icon: HardDrive },
+];
 
-/** The longest nav href this path is (or is under). */
+/** The nav item this path is (or is under). */
 export function activeNavHref(path: string): string | null {
-  const matches = NAV_ITEMS.map((it) => it.href).filter(
-    (href) => path === href || path.startsWith(href + "/"),
-  );
+  const matches = NAV_ITEMS.map((it) => it.href).filter((href) => path === href || path.startsWith(href + "/"));
   return matches.sort((a, b) => b.length - a.length)[0] ?? null;
+}
+
+/** The top bar's "Section / Page". A detail page names its parent list as a link back to it. */
+const DETAIL_LABEL: Record<string, string> = { "/customers": "Customer", "/appliances": "Appliance" };
+
+export function crumbs(pathname: string): { parent?: { href: string; label: string }; label: string } {
+  const sys = SYSTEM_PAGES.find((p) => pathname === p.href || pathname.startsWith(p.href + "/"));
+  if (sys) return { parent: { href: "/system", label: "System" }, label: sys.label };
+  const href = activeNavHref(pathname);
+  const item = NAV_ITEMS.find((i) => i.href === href);
+  if (!item) return { label: "Central" };
+  if (pathname === item.href) return { label: item.label };
+  return { parent: { href: item.href, label: item.label }, label: DETAIL_LABEL[item.href] ?? item.label };
 }
 
 export function Nav({
@@ -81,17 +70,13 @@ export function Nav({
 }) {
   const path = usePathname() ?? "";
   const activeHref = useMemo(() => activeNavHref(path), [path]);
-  // A menu item is shown only when the server lets this role read that page (lib/permissions.ts PAGE_READ).
-  const { can } = usePermissions();
-  const sections = useMemo(
+  const { can, subject } = usePermissions();
+  const items = useMemo(
     () =>
-      NAV_SECTIONS.map((sec) => ({
-        ...sec,
-        items: sec.items.filter((it) => {
-          const need = PAGE_READ[it.href];
-          return !need || can[need];
-        }),
-      })).filter((sec) => sec.items.length > 0),
+      NAV_ITEMS.filter((it) => can[it.needs]).map((it) =>
+        // A customer's own user has one customer, so the menu says so.
+        it.href === "/customers" && !can["customers.list"] ? { ...it, label: "Customer" } : it,
+      ),
     [can],
   );
 
@@ -130,65 +115,49 @@ export function Nav({
         )}
       </div>
 
-      {/* THE CUSTOMER CONTEXT sits above the menu because it scopes what every page below it shows. */}
-      <div className={cn("border-b border-sidebar-border py-2.5", collapsed ? "px-2" : "px-3")}>
-        <CustomerSelector collapsed={collapsed} onExpand={onToggleCollapsed} />
-      </div>
-
-      <nav id="sidebar-nav" className="nav-scroll flex-1 overflow-y-auto px-2 py-2.5" aria-label="Main">
-        {sections.map((sec) => (
-          <div key={sec.title} className="mb-3 last:mb-0">
-            {collapsed ? (
-              <div className="mx-2 mb-1.5 mt-1 border-t border-sidebar-border/70 first:mt-0 first:border-t-0" aria-hidden />
-            ) : (
-              <div className="px-2.5 pb-1.5 pt-2 text-nano uppercase tracking-[0.12em] text-sidebar-muted">
-                {sec.title}
-              </div>
-            )}
-            <ul className="space-y-0.5">
-              {sec.items.map((it) => {
-                const active = it.href === activeHref;
-                const Icon = it.icon;
-                const link = (
-                  <Link
-                    href={it.href}
-                    onClick={onNavigate}
-                    aria-current={active ? "page" : undefined}
-                    className={cn(
-                      "group relative flex items-center rounded-md text-label font-normal transition-colors duration-press",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
-                      collapsed ? "h-10 justify-center px-0" : "min-h-9 gap-2.5 px-2.5 py-1.5",
-                      active
-                        ? "bg-sidebar-accent font-semibold text-sidebar-accent-foreground"
-                        : "text-sidebar-foreground/85 hover:bg-sidebar-accent/60 hover:text-white",
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "absolute start-0 top-1/2 -translate-y-1/2 rounded-e-full bg-sidebar-active transition-opacity",
-                        collapsed ? "h-6 w-[3px]" : "h-5 w-[3px]",
-                        active ? "opacity-100" : "opacity-0",
-                      )}
-                      aria-hidden
-                    />
-                    <Icon
-                      className={cn(
-                        "size-4 shrink-0 transition-colors",
-                        active ? "text-sidebar-active" : "text-sidebar-muted group-hover:text-sidebar-foreground",
-                      )}
-                    />
-                    <span className={cn(collapsed ? "sr-only" : "truncate")}>{it.label}</span>
-                  </Link>
-                );
-                return (
-                  <li key={it.href}>
-                    {collapsed ? <Tooltip content={it.label} side="right">{link}</Tooltip> : link}
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ))}
+      <nav id="sidebar-nav" className="nav-scroll flex-1 overflow-y-auto px-2 py-3" aria-label="Main">
+        <ul className="space-y-0.5">
+          {items.map((it) => {
+            const active = it.href === activeHref;
+            const Icon = it.icon;
+            const link = (
+              <Link
+                href={it.href}
+                onClick={onNavigate}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "group relative flex items-center rounded-md text-label font-normal transition-colors duration-press",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
+                  collapsed ? "h-10 justify-center px-0" : "min-h-9 gap-2.5 px-2.5 py-1.5",
+                  active
+                    ? "bg-sidebar-accent font-semibold text-sidebar-accent-foreground"
+                    : "text-sidebar-foreground/85 hover:bg-sidebar-accent/60 hover:text-white",
+                )}
+              >
+                <span
+                  className={cn(
+                    "absolute start-0 top-1/2 -translate-y-1/2 rounded-e-full bg-sidebar-active transition-opacity",
+                    collapsed ? "h-6 w-[3px]" : "h-5 w-[3px]",
+                    active ? "opacity-100" : "opacity-0",
+                  )}
+                  aria-hidden
+                />
+                <Icon
+                  className={cn(
+                    "size-4 shrink-0 transition-colors",
+                    active ? "text-sidebar-active" : "text-sidebar-muted group-hover:text-sidebar-foreground",
+                  )}
+                />
+                <span className={cn(collapsed ? "sr-only" : "truncate")}>{it.label}</span>
+              </Link>
+            );
+            return (
+              <li key={it.href}>
+                {collapsed ? <Tooltip content={it.label} side="right">{link}</Tooltip> : link}
+              </li>
+            );
+          })}
+        </ul>
       </nav>
 
       <div className={cn("border-t border-sidebar-border", collapsed ? "p-2" : "p-2.5")}>
@@ -219,7 +188,9 @@ export function Nav({
               <div className="truncate text-xs font-medium text-sidebar-foreground" title={email}>
                 {email ?? "—"}
               </div>
-              <div className="truncate text-2xs text-sidebar-muted">Signed in to Central</div>
+              <div className="truncate text-2xs text-sidebar-muted">
+                {subject.customerName ? subject.customerName : "Signed in to Central"}
+              </div>
             </div>
           </div>
         )}

@@ -9,5 +9,5 @@ package buildprofile
 // Production is false in a development build.
 const Production = false
 
-// Name identifies the build profile for logs/telemetry.
+// Name identifies the build profile for logs and the licence status.
 const Name = "development"

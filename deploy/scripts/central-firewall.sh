@@ -21,6 +21,7 @@
 #
 # Usage (as root on Central):
 #   central-firewall.sh            apply the rules
+#   central-firewall.sh --enable   apply the rules, then turn ufw on (default deny incoming) if it is off
 #   central-firewall.sh --show     what is allowed now
 set -euo pipefail
 
@@ -38,6 +39,8 @@ if [ "${1:-}" = "--show" ]; then
 fi
 
 [ "$(id -u)" = 0 ] || die "run as root"
+ENABLE=0
+[ "${1:-}" = "--enable" ] && ENABLE=1
 
 # The mTLS port comes from the same versioned endpoint configuration everything else uses, so it cannot
 # drift from what appliances are told to dial.
@@ -53,8 +56,27 @@ say "ensuring the appliance-facing ports are open (mTLS port $MTLS_PORT, from ce
 
 # SSH first and explicitly: enabling ufw without it locks the host out of its own management path.
 ufw allow 22/tcp     >/dev/null && say "  22/tcp    ssh"
+# ...and whatever port sshd ACTUALLY listens on, if it is not 22 — enabling ufw with only 22 open on a host
+# whose sshd was moved would lock the operator out of the machine. Only sockets reachable from outside count:
+# sshd also listens on loopback for X11/agent forwarding of an open session (127.0.0.1:6010, [::1]:6010), and
+# opening THAT port to the world is a rule for a port nobody outside can reach -- found on a real install.
+for p in $(ss -ltnpH 2>/dev/null | awk '/"sshd"/ && $4 !~ /^(127\.|\[::1\]:)/ {n=split($4,a,":"); print a[n]}' | sort -u); do
+  [ "$p" = 22 ] && continue
+  ufw allow "$p/tcp" >/dev/null && say "  $p/tcp   ssh (sshd listens here)"
+done
 ufw allow 443/tcp    >/dev/null && say "  443/tcp   admin UI + /cloud/v1 + appliance protocol (Caddy)"
 ufw allow "$MTLS_PORT/tcp" >/dev/null && say "  $MTLS_PORT/tcp  appliance mutual-TLS (client certificate required)"
+
+if [ "$ENABLE" = 1 ]; then
+  if ufw status | grep -q "Status: active"; then
+    say "ufw already active"
+  else
+    ufw default deny incoming >/dev/null
+    ufw default allow outgoing >/dev/null
+    ufw --force enable >/dev/null
+    say "ufw ENABLED (default deny incoming)"
+  fi
+fi
 
 say ""
 say "current policy:"

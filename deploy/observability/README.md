@@ -21,7 +21,6 @@ deploy/observability/
 │   │   └── dashboards/stayconnect.yml
 │   └── dashboards/
 │       ├── overview.json
-│       ├── payments.json
 │       ├── auth.json
 │       └── system.json
 └── README.md
@@ -29,8 +28,8 @@ deploy/observability/
 
 ## Prerequisites
 
-1. The main stack (`deploy/compose/docker-compose.yml`) is running —
-   postgres, redis, nats.
+1. The backing services are running — postgres, redis (`deploy/compose/infra.yml` on an appliance,
+   `deploy/compose/central-infra.yml` on Central).
 2. `ctrlapi` is running on `127.0.0.1:8080` with `/metrics` exposed.
 3. `scd` has `SCD_METRICS_ADDR=127.0.0.1:9101` set in `/etc/stayconnect/scd.env`
    so Prometheus can scrape it. (The existing unix-socket /metrics endpoint
@@ -51,10 +50,7 @@ curl -s http://127.0.0.1:9101/metrics | head
 ## Running
 
 ```sh
-docker compose \
-    -f deploy/compose/docker-compose.yml \
-    -f deploy/observability/docker-compose.yml \
-    up -d
+docker compose -f deploy/observability/docker-compose.yml up -d
 ```
 
 Access:
@@ -70,22 +66,19 @@ real auth before opening remotely.
 | Dashboard  | What it covers                                                 |
 |------------|----------------------------------------------------------------|
 | Overview   | Active sessions, sessions-started-by-method, nft ops, HTTP rate|
-| Payments   | Checkout success rate, webhook outcomes, 24h revenue, per-tenant|
 | Auth       | OTP issue/verify, social login + latency, PMS validate + latency|
 | System     | Scrape targets, uptimes, Go runtime, ctrlapi p95, reaper rate   |
 
 Every scd-sourced panel is filterable by `$tenant_id` (multi-select).
-Payments panels additionally filter by `$currency`.
 
 ## Alert rules
 
 The rules in `prometheus/alerts.yml` are grouped:
 
-- **system-health**: `ScrapeTargetDown`, `ApplianceOffline`, `ApplianceNoHeartbeats`
+- **system-health**: `ScrapeTargetDown`
 - **ctrlapi-http**: `CtrlapiHigh5xxRate`, `CtrlapiSlow`
 - **pms**: `PMSProviderDown`, `PMSValidationFailuresSpike`
 - **auth**: `SocialLoginFailureRate`, `OTPVerifyLockoutsSpike`
-- **payments**: `StripeSignatureFailures`, `StripeVoucherIssueFailures`, `CheckoutCreateFailureRate`
 
 Wire Alertmanager to Prometheus for routing to Slack/PagerDuty — not
 included in this compose file (keep it up to the operator's existing
@@ -181,8 +174,8 @@ paths.
   + put Prometheus's `alertmanagers` list behind all three.
 - **Long-term TSDB retention** — 30d on-disk; federate to Thanos /
   Mimir for multi-month storage.
-- **Postgres / Redis / NATS exporters** — not deployed here. Add
-  `postgres_exporter`, `redis_exporter`, `nats_exporter` to this
-  compose file if you need DB/cache/bus-internal metrics.
+- **Postgres / Redis exporters** — not deployed here. Add
+  `postgres_exporter`, `redis_exporter` to this compose file if you
+  need DB/cache-internal metrics.
 - **scd /metrics TCP binding is plaintext** — fine for localhost scrapes;
   put it behind an internal TLS proxy if Prometheus runs elsewhere.

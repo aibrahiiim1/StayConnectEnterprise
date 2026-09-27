@@ -101,6 +101,7 @@ checksum() {
 # rows of genuine history survive.
 ensure_ledger() {
   PSQL -q -c "
+    SET client_min_messages = warning;
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version     text PRIMARY KEY,
       applied_at  timestamptz NOT NULL DEFAULT now()

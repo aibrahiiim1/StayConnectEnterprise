@@ -1,6 +1,5 @@
 // Package tenantcfg reads the tenant's auth_methods bundle on-demand. It's a
-// thin DB read with no caching for now; Phase 5 should add a NATS-pushed
-// snapshot to avoid the per-request query.
+// thin DB read with no caching: every request reads the current site setting.
 package tenantcfg
 
 import (

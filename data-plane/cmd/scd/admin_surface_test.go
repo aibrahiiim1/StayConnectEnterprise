@@ -115,7 +115,7 @@ func TestTheGuestSurfaceIsExactlyWhatPortaldNeeds(t *testing.T) {
 // TestTheDangerousRoutesAreAdmin names the operations that made this gate necessary.
 //
 // Vouchers are on the list, and they are not the reason it exists. /v1/backup/restore overwrites the
-// database. /v1/license/install changes what the appliance is entitled to serve. /v1/setup/enroll changes
+// database. /v1/license/install changes what the appliance is entitled to serve. /v1/central/offline-package changes
 // which tenant it belongs to. All three were reachable by the process listening on every guest VLAN.
 func TestTheDangerousRoutesAreAdmin(t *testing.T) {
 	for _, path := range []string{
@@ -123,9 +123,10 @@ func TestTheDangerousRoutesAreAdmin(t *testing.T) {
 		"/v1/backup/run",
 		"/v1/backup/settings",
 		"/v1/license/install",
-		"/v1/license/refresh",
-		"/v1/setup/enroll",
-		"/v1/setup/offline-import",
+		"/v1/central/refresh",
+		"/v1/central/status",
+		"/v1/central/offline-request",
+		"/v1/central/offline-package",
 		"/v1/hotel-admin-cert/rotate",
 		"/v1/admin/pms/protel/test",
 		"/v1/admin/walled-garden/reload",

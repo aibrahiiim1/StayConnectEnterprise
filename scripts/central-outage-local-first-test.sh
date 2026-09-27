@@ -8,7 +8,7 @@
 # "success|granted|authorized" MATCHED THAT HTML and reported a pass while no session existed. The session
 # row is the only thing that proves a guest got access, so it is what this asserts.
 set -uo pipefail
-CENTRAL=150.0.0.252
+CENTRAL="${CENTRAL:-172.21.96.196}"   # sc-central.echofusion.com
 PASS=0; FAIL=0
 ok(){ echo "  ok $1"; PASS=$((PASS+1)); }
 bad(){ echo "  FAIL $1"; FAIL=$((FAIL+1)); }

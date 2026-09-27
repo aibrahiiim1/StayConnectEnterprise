@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0091, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0093, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -581,159 +581,6 @@ END; $$;
 
 
 --
--- Name: cloud_mode_changes_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
---
-
-CREATE FUNCTION iam_v2.cloud_mode_changes_append_only() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
-BEGIN
-    RAISE EXCEPTION 'iam_v2.cloud_mode_changes is append-only: % refused', TG_OP
-        USING ERRCODE = 'restrict_violation';
-END;
-$$;
-
-
---
--- Name: cloud_mode_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
---
-
-CREATE FUNCTION iam_v2.cloud_mode_get(p_tenant uuid, p_site uuid) RETURNS TABLE(mode text, config_version bigint, updated_at timestamp with time zone, is_default boolean)
-    LANGUAGE sql STABLE SECURITY DEFINER
-    SET search_path TO 'iam_v2', 'pg_temp'
-    AS $$
-    SELECT COALESCE(m.mode, 'LICENSING_ONLY'),
-           COALESCE(m.config_version, 0),
-           m.updated_at,
-           (m.tenant_id IS NULL)
-      FROM (SELECT p_tenant AS t, p_site AS s) k
-      LEFT JOIN iam_v2.site_cloud_mode m ON m.tenant_id = k.t AND m.site_id = k.s;
-$$;
-
-
---
--- Name: cloud_mode_set(uuid, uuid, text, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
---
-
-CREATE FUNCTION iam_v2.cloud_mode_set(p_tenant uuid, p_site uuid, p_mode text, p_operator text, p_reason text DEFAULT NULL::text) RETURNS bigint
-    LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'iam_v2', 'pg_temp'
-    AS $$
-DECLARE
-    v_old text;
-    v_new_version bigint;
-BEGIN
-    IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
-        RAISE EXCEPTION 'cloud mode: an operator identity is required'
-            USING ERRCODE = 'invalid_parameter_value';
-    END IF;
-    IF p_mode IS NULL OR p_mode NOT IN ('LICENSING_ONLY','FULL') THEN
-        RAISE EXCEPTION 'cloud mode must be LICENSING_ONLY or FULL (got %)', p_mode
-            USING ERRCODE = 'check_violation';
-    END IF;
-
-    PERFORM pg_advisory_xact_lock(hashtext('cloud_mode'), hashtext(p_site::text));
-
-    SELECT m.mode INTO v_old FROM iam_v2.site_cloud_mode m
-     WHERE m.tenant_id = p_tenant AND m.site_id = p_site FOR UPDATE;
-
-    INSERT INTO iam_v2.site_cloud_mode AS m (tenant_id, site_id, mode, config_version, updated_at)
-    VALUES (p_tenant, p_site, p_mode, 1, now())
-    ON CONFLICT (tenant_id, site_id) DO UPDATE
-       SET mode = EXCLUDED.mode, config_version = m.config_version + 1, updated_at = now()
-    RETURNING m.config_version INTO v_new_version;
-
-    INSERT INTO iam_v2.cloud_mode_changes
-           (tenant_id, site_id, changed_by, reason, old_mode, new_mode, new_config_version)
-    VALUES (p_tenant, p_site, btrim(p_operator), NULLIF(btrim(COALESCE(p_reason,'')), ''),
-            v_old, p_mode, v_new_version);
-
-    RETURN v_new_version;
-END;
-$$;
-
-
---
--- Name: cloud_sync_settings_changes_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
---
-
-CREATE FUNCTION iam_v2.cloud_sync_settings_changes_append_only() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
-BEGIN
-    RAISE EXCEPTION 'iam_v2.cloud_sync_settings_changes is append-only: % refused', TG_OP
-        USING ERRCODE = 'restrict_violation';
-END;
-$$;
-
-
---
--- Name: cloud_sync_settings_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
---
-
-CREATE FUNCTION iam_v2.cloud_sync_settings_get(p_tenant uuid, p_site uuid) RETURNS TABLE(delivered_retention_days integer, config_version bigint, updated_at timestamp with time zone, is_default boolean)
-    LANGUAGE sql STABLE SECURITY DEFINER
-    SET search_path TO 'iam_v2', 'pg_temp'
-    AS $$
-    SELECT COALESCE(s.delivered_retention_days, 30),
-           COALESCE(s.config_version, 0),
-           s.updated_at,
-           (s.tenant_id IS NULL)
-      FROM (SELECT p_tenant AS t, p_site AS s) k
-      LEFT JOIN iam_v2.site_cloud_sync_settings s
-             ON s.tenant_id = k.t AND s.site_id = k.s;
-$$;
-
-
---
--- Name: cloud_sync_settings_set(uuid, uuid, integer, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
---
-
-CREATE FUNCTION iam_v2.cloud_sync_settings_set(p_tenant uuid, p_site uuid, p_days integer, p_operator text, p_reason text DEFAULT NULL::text) RETURNS bigint
-    LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'iam_v2', 'pg_temp'
-    AS $$
-DECLARE
-    v_old integer;
-    v_new_version bigint;
-BEGIN
-    IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
-        RAISE EXCEPTION 'cloud sync settings: an operator identity is required'
-            USING ERRCODE = 'invalid_parameter_value';
-    END IF;
-    IF p_days IS NULL OR p_days < 1 OR p_days > 365 THEN
-        RAISE EXCEPTION 'delivered record retention must be between 1 and 365 days (got %)', p_days
-            USING ERRCODE = 'check_violation';
-    END IF;
-
-    PERFORM pg_advisory_xact_lock(hashtext('cloud_sync_settings'), hashtext(p_site::text));
-
-    SELECT s.delivered_retention_days INTO v_old
-      FROM iam_v2.site_cloud_sync_settings s
-     WHERE s.tenant_id = p_tenant AND s.site_id = p_site
-       FOR UPDATE;
-
-    INSERT INTO iam_v2.site_cloud_sync_settings AS s
-           (tenant_id, site_id, delivered_retention_days, config_version, updated_at)
-    VALUES (p_tenant, p_site, p_days, 1, now())
-    ON CONFLICT (tenant_id, site_id) DO UPDATE
-       SET delivered_retention_days = EXCLUDED.delivered_retention_days,
-           config_version = s.config_version + 1,
-           updated_at = now()
-    RETURNING s.config_version INTO v_new_version;
-
-    INSERT INTO iam_v2.cloud_sync_settings_changes
-           (tenant_id, site_id, changed_by, reason,
-            old_delivered_retention_days, new_delivered_retention_days, new_config_version)
-    VALUES (p_tenant, p_site, btrim(p_operator), NULLIF(btrim(COALESCE(p_reason,'')), ''),
-            v_old, p_days, v_new_version);
-
-    RETURN v_new_version;
-END;
-$$;
-
-
---
 -- Name: complete_sign_in_attempt(uuid, uuid, uuid, text, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -746,7 +593,8 @@ BEGIN
   IF p_request IS NULL THEN
     RETURN 0;
   END IF;
-  IF p_result NOT IN ('VERIFIED','SERVICE_UNAVAILABLE','STAY_NOT_ELIGIBLE','VERIFIED_NO_ELIGIBLE_PACKAGE') THEN
+  IF p_result NOT IN ('VERIFIED','SERVICE_UNAVAILABLE','STAY_NOT_ELIGIBLE','VERIFIED_NO_ELIGIBLE_PACKAGE',
+                      'LICENSE_REFUSED','LICENSE_CAPACITY_REACHED') THEN
     RAISE EXCEPTION 'complete_sign_in_attempt: % is not a terminal grant outcome', p_result;
   END IF;
   UPDATE iam_v2.sign_in_attempts
@@ -7400,133 +7248,6 @@ END $_$;
 
 
 --
--- Name: sync_outbox_accounting(); Type: FUNCTION; Schema: iam_v2; Owner: -
---
-
-CREATE FUNCTION iam_v2.sync_outbox_accounting() RETURNS TABLE(delivered bigint, pending bigint, exhausted bigint, total bigint, oldest_pending timestamp with time zone, newest_created timestamp with time zone, oldest_exhausted timestamp with time zone, bytes bigint)
-    LANGUAGE plpgsql STABLE SECURITY DEFINER
-    SET search_path TO 'iam_v2', 'public', 'pg_temp'
-    AS $$
-BEGIN
-    RETURN QUERY
-    SELECT count(*) FILTER (WHERE o.sent_at IS NOT NULL),
-           count(*) FILTER (WHERE o.sent_at IS NULL AND o.dead = false),
-           count(*) FILTER (WHERE o.sent_at IS NULL AND o.dead = true),
-           count(*),
-           min(o.created_at) FILTER (WHERE o.sent_at IS NULL AND o.dead = false),
-           max(o.created_at),
-           min(o.created_at) FILTER (WHERE o.sent_at IS NULL AND o.dead = true),
-           pg_total_relation_size('public.sync_outbox')
-      FROM public.sync_outbox o;
-END;
-$$;
-
-
---
--- Name: sync_outbox_prune_delivered(integer); Type: FUNCTION; Schema: iam_v2; Owner: -
---
-
-CREATE FUNCTION iam_v2.sync_outbox_prune_delivered(p_days integer) RETURNS bigint
-    LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'iam_v2', 'public', 'pg_temp'
-    AS $$
-DECLARE
-    v_deleted bigint;
-BEGIN
-    IF p_days IS NULL OR p_days < 1 OR p_days > 365 THEN
-        RAISE EXCEPTION 'delivered record retention must be between 1 and 365 days (got %)', p_days
-            USING ERRCODE = 'check_violation';
-    END IF;
-    WITH gone AS (
-        DELETE FROM public.sync_outbox
-         WHERE sent_at IS NOT NULL
-           AND sent_at < now() - make_interval(days => p_days)
-        RETURNING 1
-    )
-    SELECT count(*) INTO v_deleted FROM gone;
-    RETURN v_deleted;
-END;
-$$;
-
-
---
--- Name: sync_outbox_recover_exhausted(text, text, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
---
-
-CREATE FUNCTION iam_v2.sync_outbox_recover_exhausted(p_operator text, p_reason text, p_limit integer DEFAULT 1000) RETURNS TABLE(rows_recovered integer, seq_from bigint, seq_to bigint, exhausted_remaining bigint)
-    LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'iam_v2', 'public', 'pg_temp'
-    AS $$
-DECLARE
-    v_count integer := 0;
-    v_from bigint;
-    v_to bigint;
-    v_oldest timestamptz;
-    v_remaining bigint;
-BEGIN
-    IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
-        RAISE EXCEPTION 'sync outbox recovery: an operator identity is required'
-            USING ERRCODE = 'invalid_parameter_value';
-    END IF;
-    IF p_reason IS NULL OR length(btrim(p_reason)) < 3 THEN
-        RAISE EXCEPTION 'sync outbox recovery: a reason of at least 3 characters is required'
-            USING ERRCODE = 'invalid_parameter_value';
-    END IF;
-    IF p_limit IS NULL OR p_limit < 1 OR p_limit > 20000 THEN
-        RAISE EXCEPTION 'sync outbox recovery: batch size must be between 1 and 20000 (got %)', p_limit
-            USING ERRCODE = 'check_violation';
-    END IF;
-
-    -- One recovery at a time. Two concurrent callers would otherwise each release an overlapping batch and
-    -- both report having moved it.
-    PERFORM pg_advisory_xact_lock(hashtext('sync_outbox_recover'));
-
-    WITH picked AS (
-        SELECT o.seq
-          FROM public.sync_outbox o
-         WHERE o.sent_at IS NULL AND o.dead = true
-         ORDER BY o.seq ASC
-         LIMIT p_limit
-         FOR UPDATE
-    ), moved AS (
-        UPDATE public.sync_outbox o
-           SET dead = false, attempts = 0, next_attempt_at = now()
-          FROM picked
-         WHERE o.seq = picked.seq
-        RETURNING o.seq, o.created_at
-    )
-    SELECT count(*)::integer, min(seq), max(seq), min(created_at)
-      INTO v_count, v_from, v_to, v_oldest
-      FROM moved;
-
-    SELECT count(*) INTO v_remaining
-      FROM public.sync_outbox o
-     WHERE o.sent_at IS NULL AND o.dead = true;
-
-    INSERT INTO iam_v2.sync_outbox_recovery_log
-           (requested_by, reason, rows_recovered, seq_from, seq_to, oldest_created_at, exhausted_remaining)
-    VALUES (btrim(p_operator), btrim(p_reason), v_count, v_from, v_to, v_oldest, v_remaining);
-
-    RETURN QUERY SELECT v_count, v_from, v_to, v_remaining;
-END;
-$$;
-
-
---
--- Name: sync_outbox_recovery_log_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
---
-
-CREATE FUNCTION iam_v2.sync_outbox_recovery_log_append_only() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
-BEGIN
-    RAISE EXCEPTION 'iam_v2.sync_outbox_recovery_log is append-only: % refused', TG_OP
-        USING ERRCODE = 'restrict_violation';
-END;
-$$;
-
-
---
 -- Name: terminate_entitlement_at_boundary(uuid, timestamp with time zone, text); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -8249,44 +7970,6 @@ CREATE TABLE iam_v2.checkout_grace_policy_publications (
     published_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT checkout_grace_policy_publications_config_version_check CHECK ((config_version >= 1)),
     CONSTRAINT checkout_grace_policy_publications_reason_code_check CHECK (((reason_code IS NULL) OR (reason_code ~ '^[A-Z][A-Z0-9_]{0,63}$'::text)))
-);
-
-
---
--- Name: cloud_mode_changes; Type: TABLE; Schema: iam_v2; Owner: -
---
-
-CREATE TABLE iam_v2.cloud_mode_changes (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    tenant_id uuid NOT NULL,
-    site_id uuid NOT NULL,
-    changed_at timestamp with time zone DEFAULT now() NOT NULL,
-    changed_by text NOT NULL,
-    reason text,
-    old_mode text,
-    new_mode text NOT NULL,
-    new_config_version bigint NOT NULL,
-    CONSTRAINT cloud_mode_changes_changed_by_check CHECK ((length(btrim(changed_by)) > 0)),
-    CONSTRAINT cloud_mode_changes_reason_check CHECK (((reason IS NULL) OR (length(reason) <= 500)))
-);
-
-
---
--- Name: cloud_sync_settings_changes; Type: TABLE; Schema: iam_v2; Owner: -
---
-
-CREATE TABLE iam_v2.cloud_sync_settings_changes (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    tenant_id uuid NOT NULL,
-    site_id uuid NOT NULL,
-    changed_at timestamp with time zone DEFAULT now() NOT NULL,
-    changed_by text NOT NULL,
-    reason text,
-    old_delivered_retention_days integer,
-    new_delivered_retention_days integer NOT NULL,
-    new_config_version bigint NOT NULL,
-    CONSTRAINT cloud_sync_settings_changes_changed_by_check CHECK ((length(btrim(changed_by)) > 0)),
-    CONSTRAINT cloud_sync_settings_changes_reason_check CHECK (((reason IS NULL) OR (length(reason) <= 500)))
 );
 
 
@@ -10372,7 +10055,7 @@ CREATE TABLE iam_v2.sign_in_attempts (
     encryption_key_id uuid,
     cipher_version integer,
     CONSTRAINT sign_in_attempts_matched_field_check CHECK (((matched_field IS NULL) OR (matched_field = ANY (ARRAY['FIRST_NAME'::text, 'FAMILY_NAME'::text, 'RESERVATION_NUMBER'::text])))),
-    CONSTRAINT sign_in_attempts_result_check CHECK ((result = ANY (ARRAY['VERIFIED'::text, 'CREDENTIAL_MISMATCH'::text, 'ROOM_NOT_IN_MIRROR'::text, 'STAY_NOT_ELIGIBLE'::text, 'AMBIGUOUS_ROOM_CANDIDATES'::text, 'MIRROR_STALE_OR_MISSING_CHANGE'::text, 'RATE_LIMITED'::text, 'ROUTING_OR_INTERFACE_FAILURE'::text, 'SERVICE_UNAVAILABLE'::text, 'SPENT_REQUEST_ID'::text, 'MALFORMED_SUBMISSION'::text, 'VERIFIED_NO_ELIGIBLE_PACKAGE'::text]))),
+    CONSTRAINT sign_in_attempts_result_check CHECK ((result = ANY (ARRAY['VERIFIED'::text, 'CREDENTIAL_MISMATCH'::text, 'ROOM_NOT_IN_MIRROR'::text, 'STAY_NOT_ELIGIBLE'::text, 'AMBIGUOUS_ROOM_CANDIDATES'::text, 'MIRROR_STALE_OR_MISSING_CHANGE'::text, 'RATE_LIMITED'::text, 'ROUTING_OR_INTERFACE_FAILURE'::text, 'SERVICE_UNAVAILABLE'::text, 'SPENT_REQUEST_ID'::text, 'MALFORMED_SUBMISSION'::text, 'VERIFIED_NO_ELIGIBLE_PACKAGE'::text, 'LICENSE_REFUSED'::text, 'LICENSE_CAPACITY_REACHED'::text]))),
     CONSTRAINT sign_in_attempts_sealed_all_or_none CHECK ((((sensitive_ciphertext IS NULL) AND (sensitive_nonce IS NULL) AND (encryption_key_id IS NULL) AND (cipher_version IS NULL)) OR ((sensitive_ciphertext IS NOT NULL) AND (sensitive_nonce IS NOT NULL) AND (encryption_key_id IS NOT NULL) AND (cipher_version IS NOT NULL)))),
     CONSTRAINT sign_in_attempts_verifier_kind_check CHECK ((verifier_kind = ANY (ARRAY['FULL_NAME'::text, 'RESERVATION_NUMBER_LIKE'::text, 'UNKNOWN'::text])))
 );
@@ -10436,57 +10119,6 @@ CREATE TABLE iam_v2.site_checkout_grace_config (
     CONSTRAINT site_checkout_grace_config_config_version_check CHECK ((config_version >= 1)),
     CONSTRAINT site_checkout_grace_config_grace_device_limit_policy_check CHECK (((grace_device_limit_policy IS NULL) OR (grace_device_limit_policy = 'REJECT_NEW_DEVICE'::text)))
 );
-
-
---
--- Name: site_cloud_mode; Type: TABLE; Schema: iam_v2; Owner: -
---
-
-CREATE TABLE iam_v2.site_cloud_mode (
-    tenant_id uuid NOT NULL,
-    site_id uuid NOT NULL,
-    mode text DEFAULT 'LICENSING_ONLY'::text NOT NULL,
-    config_version bigint DEFAULT 1 NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT scm_mode_known CHECK ((mode = ANY (ARRAY['LICENSING_ONLY'::text, 'FULL'::text]))),
-    CONSTRAINT scm_version_positive CHECK ((config_version >= 1))
-);
-
-
---
--- Name: TABLE site_cloud_mode; Type: COMMENT; Schema: iam_v2; Owner: -
---
-
-COMMENT ON TABLE iam_v2.site_cloud_mode IS 'What this site may say to Central. LICENSING_ONLY (the default, and what absence of a row means): licence, appliance identity, certificate lifecycle and the signed assignment, over HTTPS only. FULL additionally opens the cloud telemetry transport. Changing it takes an audited write; there is no UI switch.';
-
-
---
--- Name: site_cloud_sync_settings; Type: TABLE; Schema: iam_v2; Owner: -
---
-
-CREATE TABLE iam_v2.site_cloud_sync_settings (
-    tenant_id uuid NOT NULL,
-    site_id uuid NOT NULL,
-    delivered_retention_days integer DEFAULT 30 NOT NULL,
-    config_version bigint DEFAULT 1 NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT scs_retention_days_bounds CHECK (((delivered_retention_days >= 1) AND (delivered_retention_days <= 365))),
-    CONSTRAINT scs_version_positive CHECK ((config_version >= 1))
-);
-
-
---
--- Name: TABLE site_cloud_sync_settings; Type: COMMENT; Schema: iam_v2; Owner: -
---
-
-COMMENT ON TABLE iam_v2.site_cloud_sync_settings IS 'Per-site settings for reporting to the StayConnect cloud. Absence of a row means the approved defaults (delivered records kept 30 days), never "retention is off".';
-
-
---
--- Name: COLUMN site_cloud_sync_settings.delivered_retention_days; Type: COMMENT; Schema: iam_v2; Owner: -
---
-
-COMMENT ON COLUMN iam_v2.site_cloud_sync_settings.delivered_retention_days IS 'How many days a SUCCESSFULLY DELIVERED sync record is kept before it is removed, in days. Records still waiting, and records the appliance gave up on, are never removed by this setting.';
 
 
 --
@@ -10605,34 +10237,6 @@ CREATE TABLE iam_v2.stay_links (
     reason text NOT NULL,
     CONSTRAINT stay_links_reason_check CHECK ((reason = ANY (ARRAY['CROSS_PMS_TRANSFER'::text, 'POST_STAY'::text])))
 );
-
-
---
--- Name: sync_outbox_recovery_log; Type: TABLE; Schema: iam_v2; Owner: -
---
-
-CREATE TABLE iam_v2.sync_outbox_recovery_log (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    requested_at timestamp with time zone DEFAULT now() NOT NULL,
-    requested_by text NOT NULL,
-    reason text NOT NULL,
-    rows_recovered integer NOT NULL,
-    seq_from bigint,
-    seq_to bigint,
-    oldest_created_at timestamp with time zone,
-    exhausted_remaining bigint NOT NULL,
-    CONSTRAINT sync_outbox_recovery_log_exhausted_remaining_check CHECK ((exhausted_remaining >= 0)),
-    CONSTRAINT sync_outbox_recovery_log_reason_check CHECK (((length(btrim(reason)) >= 3) AND (length(reason) <= 500))),
-    CONSTRAINT sync_outbox_recovery_log_requested_by_check CHECK ((length(btrim(requested_by)) > 0)),
-    CONSTRAINT sync_outbox_recovery_log_rows_recovered_check CHECK ((rows_recovered >= 0))
-);
-
-
---
--- Name: TABLE sync_outbox_recovery_log; Type: COMMENT; Schema: iam_v2; Owner: -
---
-
-COMMENT ON TABLE iam_v2.sync_outbox_recovery_log IS 'Append-only record of every time exhausted-retry sync records were returned to the queue. Payloads are never copied here.';
 
 
 --
@@ -11139,32 +10743,6 @@ CREATE TABLE public.dhcp_reservations (
 
 
 --
--- Name: edge_executed_commands; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.edge_executed_commands (
-    command_id uuid NOT NULL,
-    command_type text,
-    status text,
-    result jsonb,
-    completed_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: edge_installed_updates; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.edge_installed_updates (
-    update_id uuid NOT NULL,
-    component text,
-    version text,
-    status text,
-    installed_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
 -- Name: edge_offline_packages; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -11554,48 +11132,6 @@ CREATE TABLE public.stripe_events (
 
 
 --
--- Name: sync_checkpoints; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.sync_checkpoints (
-    name text NOT NULL,
-    value jsonb DEFAULT '{}'::jsonb NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: sync_outbox; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.sync_outbox (
-    seq bigint NOT NULL,
-    kind text NOT NULL,
-    payload jsonb DEFAULT '{}'::jsonb NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    sent_at timestamp with time zone,
-    attempts integer DEFAULT 0 NOT NULL,
-    next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,
-    dead boolean DEFAULT false NOT NULL,
-    last_error text
-);
-
-
---
--- Name: sync_outbox_seq_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-ALTER TABLE public.sync_outbox ALTER COLUMN seq ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME public.sync_outbox_seq_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1
-);
-
-
---
 -- Name: system_network_audit; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -11841,22 +11377,6 @@ ALTER TABLE ONLY iam_v2.checkout_grace_policy_publications
 
 ALTER TABLE ONLY iam_v2.checkout_grace_policy_publications
     ADD CONSTRAINT checkout_grace_policy_publications_pkey PRIMARY KEY (id);
-
-
---
--- Name: cloud_mode_changes cloud_mode_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
---
-
-ALTER TABLE ONLY iam_v2.cloud_mode_changes
-    ADD CONSTRAINT cloud_mode_changes_pkey PRIMARY KEY (id);
-
-
---
--- Name: cloud_sync_settings_changes cloud_sync_settings_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
---
-
-ALTER TABLE ONLY iam_v2.cloud_sync_settings_changes
-    ADD CONSTRAINT cloud_sync_settings_changes_pkey PRIMARY KEY (id);
 
 
 --
@@ -12948,22 +12468,6 @@ ALTER TABLE ONLY iam_v2.site_checkout_grace_config
 
 
 --
--- Name: site_cloud_mode site_cloud_mode_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
---
-
-ALTER TABLE ONLY iam_v2.site_cloud_mode
-    ADD CONSTRAINT site_cloud_mode_pkey PRIMARY KEY (tenant_id, site_id);
-
-
---
--- Name: site_cloud_sync_settings site_cloud_sync_settings_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
---
-
-ALTER TABLE ONLY iam_v2.site_cloud_sync_settings
-    ADD CONSTRAINT site_cloud_sync_settings_pkey PRIMARY KEY (tenant_id, site_id);
-
-
---
 -- Name: site_guest_signin_protection site_guest_signin_protection_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -13073,14 +12577,6 @@ ALTER TABLE ONLY iam_v2.stays
 
 ALTER TABLE ONLY iam_v2.stays
     ADD CONSTRAINT stays_tenant_id_site_id_pms_interface_id_id_key UNIQUE (tenant_id, site_id, pms_interface_id, id);
-
-
---
--- Name: sync_outbox_recovery_log sync_outbox_recovery_log_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
---
-
-ALTER TABLE ONLY iam_v2.sync_outbox_recovery_log
-    ADD CONSTRAINT sync_outbox_recovery_log_pkey PRIMARY KEY (id);
 
 
 --
@@ -13257,22 +12753,6 @@ ALTER TABLE ONLY public.dhcp_reservations
 
 ALTER TABLE ONLY public.dhcp_reservations
     ADD CONSTRAINT dhcp_reservations_pkey PRIMARY KEY (id);
-
-
---
--- Name: edge_executed_commands edge_executed_commands_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.edge_executed_commands
-    ADD CONSTRAINT edge_executed_commands_pkey PRIMARY KEY (command_id);
-
-
---
--- Name: edge_installed_updates edge_installed_updates_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.edge_installed_updates
-    ADD CONSTRAINT edge_installed_updates_pkey PRIMARY KEY (update_id);
 
 
 --
@@ -13460,22 +12940,6 @@ ALTER TABLE ONLY public.stripe_events
 
 
 --
--- Name: sync_checkpoints sync_checkpoints_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.sync_checkpoints
-    ADD CONSTRAINT sync_checkpoints_pkey PRIMARY KEY (name);
-
-
---
--- Name: sync_outbox sync_outbox_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.sync_outbox
-    ADD CONSTRAINT sync_outbox_pkey PRIMARY KEY (seq);
-
-
---
 -- Name: system_network_audit system_network_audit_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -13541,20 +13005,6 @@ CREATE INDEX aps_changes_lookup ON iam_v2.appliance_product_setting_changes USIN
 --
 
 CREATE UNIQUE INDEX auth_resolutions_req_idem ON iam_v2.auth_resolutions USING btree (tenant_id, site_id, resolution_request_id) WHERE (resolution_request_id IS NOT NULL);
-
-
---
--- Name: cloud_mode_changes_recent_idx; Type: INDEX; Schema: iam_v2; Owner: -
---
-
-CREATE INDEX cloud_mode_changes_recent_idx ON iam_v2.cloud_mode_changes USING btree (tenant_id, site_id, changed_at DESC);
-
-
---
--- Name: cloud_sync_settings_changes_recent_idx; Type: INDEX; Schema: iam_v2; Owner: -
---
-
-CREATE INDEX cloud_sync_settings_changes_recent_idx ON iam_v2.cloud_sync_settings_changes USING btree (tenant_id, site_id, changed_at DESC);
 
 
 --
@@ -14265,13 +13715,6 @@ CREATE INDEX stripe_events_received_at_idx ON public.stripe_events USING btree (
 
 
 --
--- Name: sync_outbox_pending_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX sync_outbox_pending_idx ON public.sync_outbox USING btree (next_attempt_at) WHERE ((sent_at IS NULL) AND (dead = false));
-
-
---
 -- Name: system_network_audit_created_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -14339,20 +13782,6 @@ CREATE TRIGGER ao_review BEFORE DELETE OR UPDATE ON iam_v2.posting_review_action
 --
 
 CREATE TRIGGER charge_gate BEFORE INSERT ON iam_v2.pms_postings FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_posting_charge_gate();
-
-
---
--- Name: cloud_mode_changes cloud_mode_changes_no_update; Type: TRIGGER; Schema: iam_v2; Owner: -
---
-
-CREATE TRIGGER cloud_mode_changes_no_update BEFORE DELETE OR UPDATE ON iam_v2.cloud_mode_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.cloud_mode_changes_append_only();
-
-
---
--- Name: cloud_sync_settings_changes cloud_sync_settings_changes_no_update; Type: TRIGGER; Schema: iam_v2; Owner: -
---
-
-CREATE TRIGGER cloud_sync_settings_changes_no_update BEFORE DELETE OR UPDATE ON iam_v2.cloud_sync_settings_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.cloud_sync_settings_changes_append_only();
 
 
 --
@@ -15011,13 +14440,6 @@ CREATE TRIGGER purchase_quote_pin_equal BEFORE INSERT OR UPDATE ON iam_v2.purcha
 --
 
 CREATE TRIGGER sg_guard BEFORE DELETE OR UPDATE ON iam_v2.pms_interface_secret_generations FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_secret_gen_guard();
-
-
---
--- Name: sync_outbox_recovery_log sync_outbox_recovery_log_no_update; Type: TRIGGER; Schema: iam_v2; Owner: -
---
-
-CREATE TRIGGER sync_outbox_recovery_log_no_update BEFORE DELETE OR UPDATE ON iam_v2.sync_outbox_recovery_log FOR EACH ROW EXECUTE FUNCTION iam_v2.sync_outbox_recovery_log_append_only();
 
 
 --
@@ -16338,39 +15760,6 @@ REVOKE ALL ON FUNCTION iam_v2.bootstrap_emergency_grace(p_tenant uuid, p_site uu
 
 
 --
--- Name: FUNCTION cloud_mode_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
---
-
-REVOKE ALL ON FUNCTION iam_v2.cloud_mode_get(p_tenant uuid, p_site uuid) FROM PUBLIC;
-GRANT ALL ON FUNCTION iam_v2.cloud_mode_get(p_tenant uuid, p_site uuid) TO svc_scd;
-GRANT ALL ON FUNCTION iam_v2.cloud_mode_get(p_tenant uuid, p_site uuid) TO svc_edged;
-
-
---
--- Name: FUNCTION cloud_mode_set(p_tenant uuid, p_site uuid, p_mode text, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
---
-
-REVOKE ALL ON FUNCTION iam_v2.cloud_mode_set(p_tenant uuid, p_site uuid, p_mode text, p_operator text, p_reason text) FROM PUBLIC;
-
-
---
--- Name: FUNCTION cloud_sync_settings_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
---
-
-REVOKE ALL ON FUNCTION iam_v2.cloud_sync_settings_get(p_tenant uuid, p_site uuid) FROM PUBLIC;
-GRANT ALL ON FUNCTION iam_v2.cloud_sync_settings_get(p_tenant uuid, p_site uuid) TO svc_scd;
-GRANT ALL ON FUNCTION iam_v2.cloud_sync_settings_get(p_tenant uuid, p_site uuid) TO svc_edged;
-
-
---
--- Name: FUNCTION cloud_sync_settings_set(p_tenant uuid, p_site uuid, p_days integer, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
---
-
-REVOKE ALL ON FUNCTION iam_v2.cloud_sync_settings_set(p_tenant uuid, p_site uuid, p_days integer, p_operator text, p_reason text) FROM PUBLIC;
-GRANT ALL ON FUNCTION iam_v2.cloud_sync_settings_set(p_tenant uuid, p_site uuid, p_days integer, p_operator text, p_reason text) TO svc_edged;
-
-
---
 -- Name: FUNCTION complete_sign_in_attempt(p_tenant uuid, p_site uuid, p_request uuid, p_result text, p_entitlement uuid, p_session uuid); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -17335,31 +16724,6 @@ REVOKE ALL ON FUNCTION iam_v2.supersede_entitlement_transition(p_target uuid, p_
 
 
 --
--- Name: FUNCTION sync_outbox_accounting(); Type: ACL; Schema: iam_v2; Owner: -
---
-
-REVOKE ALL ON FUNCTION iam_v2.sync_outbox_accounting() FROM PUBLIC;
-GRANT ALL ON FUNCTION iam_v2.sync_outbox_accounting() TO svc_scd;
-GRANT ALL ON FUNCTION iam_v2.sync_outbox_accounting() TO svc_edged;
-
-
---
--- Name: FUNCTION sync_outbox_prune_delivered(p_days integer); Type: ACL; Schema: iam_v2; Owner: -
---
-
-REVOKE ALL ON FUNCTION iam_v2.sync_outbox_prune_delivered(p_days integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION iam_v2.sync_outbox_prune_delivered(p_days integer) TO svc_scd;
-
-
---
--- Name: FUNCTION sync_outbox_recover_exhausted(p_operator text, p_reason text, p_limit integer); Type: ACL; Schema: iam_v2; Owner: -
---
-
-REVOKE ALL ON FUNCTION iam_v2.sync_outbox_recover_exhausted(p_operator text, p_reason text, p_limit integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION iam_v2.sync_outbox_recover_exhausted(p_operator text, p_reason text, p_limit integer) TO svc_edged;
-
-
---
 -- Name: FUNCTION terminate_entitlement_at_boundary(p_ent uuid, p_at timestamp with time zone, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -17522,20 +16886,6 @@ GRANT SELECT ON TABLE iam_v2.auth_resolutions TO svc_edged;
 --
 
 GRANT SELECT ON TABLE iam_v2.checkout_grace_policy_publications TO svc_edged;
-
-
---
--- Name: TABLE cloud_mode_changes; Type: ACL; Schema: iam_v2; Owner: -
---
-
-GRANT SELECT ON TABLE iam_v2.cloud_mode_changes TO svc_edged;
-
-
---
--- Name: TABLE cloud_sync_settings_changes; Type: ACL; Schema: iam_v2; Owner: -
---
-
-GRANT SELECT ON TABLE iam_v2.cloud_sync_settings_changes TO svc_edged;
 
 
 --
@@ -18071,13 +17421,6 @@ GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.stay_guests TO svc_pmsd;
 
 
 --
--- Name: TABLE sync_outbox_recovery_log; Type: ACL; Schema: iam_v2; Owner: -
---
-
-GRANT SELECT ON TABLE iam_v2.sync_outbox_recovery_log TO svc_edged;
-
-
---
 -- Name: TABLE v_financial_payments; Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -18237,20 +17580,6 @@ GRANT SELECT ON TABLE public.dhcp_pools TO svc_netd;
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.dhcp_reservations TO svc_edged;
 GRANT SELECT ON TABLE public.dhcp_reservations TO svc_netd;
-
-
---
--- Name: TABLE edge_executed_commands; Type: ACL; Schema: public; Owner: -
---
-
-GRANT SELECT,INSERT ON TABLE public.edge_executed_commands TO svc_scd;
-
-
---
--- Name: TABLE edge_installed_updates; Type: ACL; Schema: public; Owner: -
---
-
-GRANT SELECT,INSERT ON TABLE public.edge_installed_updates TO svc_scd;
 
 
 --
@@ -18414,31 +17743,6 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.stripe_accounts TO svc_edged;
 --
 
 GRANT SELECT,DELETE ON TABLE public.stripe_events TO svc_scd;
-
-
---
--- Name: TABLE sync_checkpoints; Type: ACL; Schema: public; Owner: -
---
-
-GRANT SELECT,INSERT,UPDATE ON TABLE public.sync_checkpoints TO svc_scd;
-GRANT SELECT,INSERT ON TABLE public.sync_checkpoints TO svc_edged;
-
-
---
--- Name: TABLE sync_outbox; Type: ACL; Schema: public; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.sync_outbox TO svc_scd;
-GRANT SELECT,INSERT ON TABLE public.sync_outbox TO svc_edged;
-GRANT SELECT,DELETE,UPDATE ON TABLE public.sync_outbox TO iam_v2_owner;
-
-
---
--- Name: SEQUENCE sync_outbox_seq_seq; Type: ACL; Schema: public; Owner: -
---
-
-GRANT SELECT,USAGE ON SEQUENCE public.sync_outbox_seq_seq TO svc_edged;
-GRANT SELECT,USAGE ON SEQUENCE public.sync_outbox_seq_seq TO svc_scd;
 
 
 --

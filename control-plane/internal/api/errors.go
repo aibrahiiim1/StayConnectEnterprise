@@ -11,12 +11,9 @@ import (
 const (
 	CodeUnauthenticated = "unauthenticated"
 	CodeForbidden       = "forbidden"
-	CodePaymentRequired = "payment_required"
 	CodeNotFound        = "not_found"
 	CodeConflict        = "conflict"
 	CodeBadRequest      = "bad_request"
-	CodeLimitExceeded   = "limit_exceeded"
-	CodeBadGateway      = "bad_gateway"
 	CodeInternal        = "internal"
 )
 
@@ -26,11 +23,11 @@ const (
 //	  "error":    "<machine_code>",      // stable, branch on this
 //	  "message":  "<human-readable>",    // show to users
 //	  "trace_id": "<request id>",        // matches X-Trace-Id header
-//	  <extras>                           // flat extras (e.g. limit_key, limit, current)
+//	  <extras>                           // flat extras (e.g. expected, activation)
 //	}
 //
 // Extras are merged into the top-level object; pass one or more maps to include
-// structured context (used by limit_exceeded responses).
+// structured context.
 func Fail(w http.ResponseWriter, r *http.Request, status int, code, message string, extras ...map[string]any) {
 	body := map[string]any{
 		"error":    code,

@@ -1,4 +1,13 @@
-# StayConnect — active/passive HA runbook
+# StayConnect — active/passive HA runbook (HISTORICAL DESIGN — NOT CURRENT)
+
+> **HISTORICAL — NOT a current runbook.** HA failover under the approved two-NIC appliance is **not designed,
+> implemented or accepted** ([TARGET_ARCHITECTURE.md](../../docs/TARGET_ARCHITECTURE.md) §6). This Phase 5.5
+> design also depends on things that no longer exist: Central opens **no NATS** connection and pushes no
+> configuration, and appliances send no heartbeat (CLAUDE.md §0E; Central is licensing only —
+> [CENTRAL_CONTROL_PLANE.md](../../docs/CENTRAL_CONTROL_PLANE.md)). The `config.{tenantID}.pms` push and
+> `hb.{applianceID}` rows below describe removed channels, and so does the `nft.{siteID}` set replication:
+> the appliance's NATS client, and with it every one of these channels, was removed from the code (migration
+> 0093 delivery). Kept as the record of the earlier design only.
 
 Phase 5.5 adds active/passive HA for a **single site**. The pair shares a
 virtual IP (the guest gateway) managed by VRRP; keepalived decides which

@@ -20,9 +20,9 @@ func DocFingerprint(d *Document) string {
 // Ack is the appliance's signed acknowledgment that it has adopted a TERMINAL
 // assignment (revoked / unassigned / decommissioned) and cleared its authority.
 // It is signed with the appliance IDENTITY key (the same key that signs its API
-// requests) — Central holds that public key from enrollment, so it can prove the
+// requests) — Central holds that public key from registration, so it can prove the
 // ack really came from the appliance being retired. This is what gates Phase 2
-// (certificate + NATS shutdown): credentials are only pulled once the appliance
+// (certificate revocation): credentials are only pulled once the appliance
 // has provably given up authority.
 type Ack struct {
 	ApplianceID   string `json:"appliance_id"`

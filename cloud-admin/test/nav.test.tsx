@@ -1,83 +1,92 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
-import { mockFetch, PLATFORM_ME, TENANT_ME } from "./helpers";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { screen } from "@testing-library/react";
+import { PLATFORM_ME, SUPPORT_ME, TENANT_ME, renderAs } from "./helpers";
+import { nav } from "./navigation";
 
-vi.mock("next/navigation", () => ({
-  usePathname: () => "/licenses",
-  useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
-}));
+vi.mock("next/navigation", async () => (await import("./navigation")).navigationModule);
 
-import { Nav, NAV_SECTIONS, activeNavHref } from "@/components/nav";
-import { CustomerSelector } from "@/components/customer-selector";
-import { CustomerProvider } from "@/lib/customer-context";
-import type { Whoami } from "@/lib/api";
+import { Nav, NAV_ITEMS, SYSTEM_PAGES, activeNavHref, crumbs } from "@/components/nav";
 
-beforeEach(() => {
-  window.localStorage.clear();
-  mockFetch([{ match: "/api/v1/tenants", body: { data: [{ id: "t-semantics", slug: "semantics", name: "Semantics" }] } }]);
-});
+beforeEach(() => nav.reset("/licenses"));
 
 describe("Central navigation", () => {
-  it("has exactly the four groups, in order", () => {
-    expect(NAV_SECTIONS.map((s) => s.title)).toEqual(["Overview", "Infrastructure", "Commercial", "Administration"]);
-  });
-
-  it("has no Fleet item and does not list the retired pages", () => {
-    const items = NAV_SECTIONS.flatMap((s) => s.items);
-    expect(items.map((i) => i.label)).not.toContain("Fleet");
-    expect(items.map((i) => i.href)).not.toContain("/fleet");
-    expect(items.map((i) => i.href)).not.toContain("/commercial");
-    expect(items.map((i) => i.href)).not.toContain("/subscription");
-    expect(items.map((i) => i.label)).toEqual([
-      "Dashboard", "Sites", "Onboarding", "Appliances", "Customers", "Licenses",
-      "Operators", "Security alerts", "Certificates", "Assignment keys", "Backup health", "Audit log",
+  it("has exactly five destinations, in order", () => {
+    expect(NAV_ITEMS.map((i) => [i.label, i.href])).toEqual([
+      ["Overview", "/overview"],
+      ["Customers", "/customers"],
+      ["Appliances", "/appliances"],
+      ["Licenses", "/licenses"],
+      ["System", "/system"],
     ]);
   });
 
-  it("resolves the active item by path boundary", () => {
-    expect(activeNavHref("/licenses")).toBe("/licenses");
-    expect(activeNavHref("/fleet")).toBeNull();
+  it("keeps the rarely used pages under System", () => {
+    expect(SYSTEM_PAGES.map((p) => p.label)).toEqual(["Security alerts", "Trust & keys", "Audit log", "Team", "Backup health"]);
+    expect(SYSTEM_PAGES.every((p) => p.href.startsWith("/system/"))).toBe(true);
   });
 
-  it("renders the groups, marks the current page and shows the Central product line", async () => {
-    render(
-      <CustomerProvider me={PLATFORM_ME as Whoami}>
-        <Nav email="admin@example.test" onLogout={() => {}} />
-      </CustomerProvider>,
-    );
-    for (const g of ["Overview", "Infrastructure", "Commercial", "Administration"]) {
-      expect(screen.getByText(g)).toBeInTheDocument();
-    }
-    expect(screen.getByText("Central")).toBeInTheDocument();
-    expect(screen.getByLabelText("OneGate")).toBeInTheDocument();
-    expect(screen.getByText("OneGate by Semantics")).toBeInTheDocument();
-    expect(screen.queryByText("Fleet")).not.toBeInTheDocument();
+  it("marks the current destination, including on a detail page", () => {
+    expect(activeNavHref("/licenses")).toBe("/licenses");
+    expect(activeNavHref("/appliances/a1")).toBe("/appliances");
+    expect(activeNavHref("/system/trust")).toBe("/system");
+    expect(activeNavHref("/dashboard")).toBeNull();
+  });
+
+  it("names the parent in the top bar", () => {
+    expect(crumbs("/overview")).toEqual({ label: "Overview" });
+    expect(crumbs("/appliances/a1")).toEqual({ parent: { href: "/appliances", label: "Appliances" }, label: "Appliance" });
+    expect(crumbs("/system/team")).toEqual({ parent: { href: "/system", label: "System" }, label: "Team" });
+  });
+
+  it("shows a platform admin all five, with the current page marked", () => {
+    renderAs(PLATFORM_ME, <Nav email={PLATFORM_ME.email} onLogout={() => {}} />);
+    const links = screen.getAllByRole("link").filter((l) => NAV_ITEMS.some((i) => i.href === l.getAttribute("href")));
+    expect(links.map((l) => l.textContent)).toEqual(["Overview", "Customers", "Appliances", "Licenses", "System"]);
     expect(screen.getByRole("link", { name: "Licenses" })).toHaveAttribute("aria-current", "page");
-    expect(screen.queryByText(/StayConnect/i)).not.toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("option", { name: "Semantics" })).toBeInTheDocument());
+    expect(screen.getByText("Central")).toBeInTheDocument();
+    expect(screen.getByText("OneGate by Semantics")).toBeInTheDocument();
+  });
+
+  it("shows support staff System too", () => {
+    renderAs(SUPPORT_ME, <Nav email={SUPPORT_ME.email} onLogout={() => {}} />);
+    expect(screen.getByRole("link", { name: "System" })).toBeInTheDocument();
+  });
+
+  it("shows a customer's user their own customer and no System", () => {
+    renderAs(TENANT_ME, <Nav email={TENANT_ME.email} onLogout={() => {}} />);
+    expect(screen.queryByRole("link", { name: "System" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Customer" })).toHaveAttribute("href", "/customers");
+    expect(screen.getByText("Semantics")).toBeInTheDocument();
+  });
+
+  it("has no customer selector anywhere", () => {
+    const { container } = renderAs(PLATFORM_ME, <Nav email={PLATFORM_ME.email} onLogout={() => {}} />);
+    expect(container.querySelector("#customer-context")).toBeNull();
+    expect(screen.queryByLabelText(/customer context/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
   });
 });
 
-describe("Customer context selector", () => {
-  it("offers All customers and each customer to a platform admin", async () => {
-    render(
-      <CustomerProvider me={PLATFORM_ME as Whoami}>
-        <CustomerSelector />
-      </CustomerProvider>,
-    );
-    const select = screen.getByLabelText("Customer context");
-    await waitFor(() => expect(within(select).getByRole("option", { name: "Semantics" })).toBeInTheDocument());
-    expect(within(select).getByRole("option", { name: "All customers" })).toBeInTheDocument();
-  });
+describe("no global customer context in the source", () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const walk = (dir: string, out: string[] = []): string[] => {
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) walk(p, out);
+      else if (/\.(tsx?|mjs)$/.test(name)) out.push(p);
+    }
+    return out;
+  };
+  const files = [...walk(join(root, "app")), ...walk(join(root, "components")), ...walk(join(root, "lib"))];
 
-  it("shows a customer user a fixed label and no selector", async () => {
-    render(
-      <CustomerProvider me={TENANT_ME as Whoami}>
-        <CustomerSelector />
-      </CustomerProvider>,
-    );
-    await waitFor(() => expect(screen.getByText("Your customer")).toBeInTheDocument());
-    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+  it("nothing reads or writes sc.customerContext, and the provider and selector are gone", () => {
+    for (const f of files) {
+      const code = readFileSync(f, "utf8");
+      expect(code, f).not.toContain("sc.customerContext");
+      expect(code, f).not.toMatch(/customer-context|CustomerProvider|useCustomer\b|CustomerSelector|customer-selector/);
+    }
   });
 });

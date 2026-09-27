@@ -97,7 +97,7 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	// where Docker (or anything else) uses the nftables backend, flushing the
 	// whole ruleset wipes Docker's ip/ip6 nat+filter chains, which silently
 	// breaks container port-publishing until dockerd is restarted — and would
-	// break the appliance's own Postgres/NATS/Redis on the next apply or reboot.
+	// break the appliance's own Postgres/Redis on the next apply or reboot.
 	// `table …; delete table …; table … { … }` in one atomic `nft -f` file
 	// removes any prior stayconnect table (the empty decl guarantees the delete
 	// has a target) and installs the fresh one, touching nothing else.

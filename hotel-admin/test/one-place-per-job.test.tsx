@@ -14,64 +14,38 @@ const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 describe("the dashboard states licensing once", () => {
   const src = read("app/(app)/dashboard/page.tsx");
 
-  it("does not list the cloud as a runtime dependency while it is licensing-only", () => {
-    // Central serves this property's LICENCE and nothing else, by decision. A row in "Services this
-    // appliance depends on" reported the health of something that does not run, and sat a few centimetres
-    // below an Appliance & licence card that had already answered the question. A dashboard earns attention
-    // by spending it only on what changed.
-    expect(src).toContain('outbox.headline !== "Licensing only"');
+  it("does not list the cloud as a runtime dependency", () => {
+    // Central serves this property's activation and LICENCE and nothing else. The appliance reports nothing
+    // to it (the cloud telemetry subsystem is removed), so there is no "reporting to the cloud" row to show,
+    // healthy or otherwise -- and nothing on the dashboard may suggest reconnecting one.
+    expect(src).not.toContain("Reporting to the OneGate cloud");
+    expect(src).not.toContain("sync_outbox");
+    expect(src).not.toContain("describeOutbox");
 
     // And the old explanatory box, which was honest but still permanent, must not come back.
     expect(src).not.toContain("Used for this appliance");
     expect(src).not.toMatch(/Operational reporting is intentionally\s*\n?\s*off/);
   });
 
-  it("still shows the cloud as a service when it IS a live dependency", () => {
-    // If the mode is ever something other than licensing-only, the cloud is a real runtime dependency and
-    // belongs in the list like any other.
-    expect(src).toContain('<ServiceRow title="Reporting to the OneGate cloud"');
-  });
-
   it("keeps the real runtime dependencies", () => {
     expect(src).toContain('<ServiceRow title="Site database"');
     expect(src).toContain('<ServiceRow title="Session controller"');
   });
-
-  it("routes a genuine licensing problem through the attention list, not a permanent row", () => {
-    expect(src).toContain('attention.push({ text: outbox.summary');
-    // ...and never raises one for the licensing-only state, where the "repair" is the one thing that must
-    // not happen.
-    expect(src).toContain('health?.sync_outbox?.mode !== "LICENSING_ONLY"');
-  });
 });
 
-describe("an activated appliance has one place to install a licence", () => {
-  const setup = read("app/(app)/appliance/setup-section.tsx");
-  const license = read("app/(app)/appliance/license-section.tsx");
+describe("the appliance has one place for activation and licence files", () => {
+  const view = read("app/(app)/appliance/appliance-status.tsx");
 
-  it("Setup offers no licence upload once the appliance is activated", () => {
-    // The upload is inside the not-activated branch. Two controls that install the same thing is two places
-    // to look when a renewal is refused, and an invitation to upload a renewal into the onboarding flow of
-    // an appliance that finished onboarding months ago.
-    const card = setup.slice(setup.indexOf("LICENCE, ONCE ONBOARDING IS DONE"));
-    const gate = card.indexOf("{complete ? (");
-    const upload = card.indexOf("onPackageFile(e.target.files");
-    expect(gate, "the licence card no longer branches on activation").toBeGreaterThan(-1);
-    expect(upload, "the onboarding licence upload has vanished entirely").toBeGreaterThan(-1);
-    expect(upload, "the licence upload is not behind the not-yet-activated branch").toBeGreaterThan(gate);
-    // The activated branch must point at the one place that owns renewals.
-    const activated = card.slice(gate, upload);
-    expect(activated).toContain("/appliance?section=license");
+  it("installs a licence file only through the one licence upload", () => {
+    expect(view).toContain("Upload licence file");
+    expect(view).toContain('api.postRaw("/license"');
   });
 
-  it("Setup keeps the initial activation package, which is not a licence upload", () => {
-    // Offline ONBOARDING must stay here: the signed activation package carries assignment, trust material
-    // and the first licence together, and there is nowhere else it could go.
-    expect(setup).toContain("/setup/activation-package");
-    expect(setup).toContain("upload the activation package");
-  });
-
-  it("Licence remains the one place a licence file is installed after activation", () => {
-    expect(license).toContain("Upload licence file");
+  it("carries offline activation over the section 8 endpoints only", () => {
+    expect(view).toContain('"/central/offline-request"');
+    expect(view).toContain('"/central/offline-package"');
+    for (const gone of ["/setup/activation-package", "/setup/offline-import", "/setup/enroll", "/setup/status"]) {
+      expect(view, gone).not.toContain(gone);
+    }
   });
 });

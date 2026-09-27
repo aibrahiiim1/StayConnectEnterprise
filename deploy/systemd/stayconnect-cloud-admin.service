@@ -1,0 +1,59 @@
+# OneGate Central console (cloud-admin) — Next.js STANDALONE bundle, run with `node server.js`. Central only.
+#
+# Release layout (deploy/scripts/central-deploy.sh):
+#   /opt/stayconnect/releases/cloud-admin/<stamp>/        one immutable, root-owned release per deployment
+#   /opt/stayconnect/cloud-admin-current   -> <stamp>     what this unit runs
+#   /opt/stayconnect/cloud-admin-current.previous         the rollback target
+# No npm and no build ever run on Central; the bundle is built by deploy/scripts/central-build.sh.
+#
+# Binds 127.0.0.1:3000 only. Caddy (stayconnect-caddy) is the public face; the console's /api/v1/* and
+# /api/cloud/* are proxied by Next to ctrlapi on 127.0.0.1:8080. NOTE: Next evaluates the rewrites in
+# next.config.mjs at BUILD time, so API_UPSTREAM below documents the upstream rather than changing it; a
+# different upstream needs a rebuild.
+[Unit]
+Description=OneGate Central console (cloud-admin, Next.js standalone)
+After=network-online.target stayconnect-ctrlapi.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/stayconnect/cloud-admin-current
+ExecStart=/usr/bin/node server.js
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=HOSTNAME=127.0.0.1
+Environment=API_UPSTREAM=http://127.0.0.1:8080
+Environment=NEXT_TELEMETRY_DISABLED=1
+# Its own unprivileged account. The release is root-owned and world-readable; the process can write nothing
+# of it, which is the point: a compromised UI process cannot change the UI it serves.
+User=stayconnect
+Group=stayconnect
+Restart=on-failure
+RestartSec=3
+MemoryMax=512M
+NoNewPrivileges=yes
+# Filesystem: everything read-only except its private /tmp. Next's standalone server writes nothing it needs
+# (no ISR in this app); its optional image/fetch cache under .next/cache simply stays disabled because the
+# release directory is not writable to this user regardless of these settings.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+# NOT MemoryDenyWriteExecute: V8's JIT needs writable+executable pages and node aborts at start with it.
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

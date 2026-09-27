@@ -54,17 +54,8 @@ func (s *server) networkRoutes() http.Handler {
 	r.Post("/system/confirm", s.sysNetConfirm)
 	r.Post("/system/rollback", s.sysNetRollback)
 
-	// Cloud Connection (carryover F) — real appliance<->Central status. GET =
-	// network.view; POST actions = network.change (Hotel IT / Site Admin).
-	r.Get("/cloud", s.cloudStatus)
-	r.Post("/cloud/test", s.cloudTest)
-	r.Post("/cloud/refresh-license", s.cloudRefreshLicense)
-
-	// Local enrollment wizard (Phase 6). Status is read-only; enroll submission
-	// is Hotel-IT gated + audited. Mgmt-network-only (edged binds mgmt IP).
-	r.Get("/setup/status", s.setupStatus)
-	r.With(s.requireRole("network", permWrite)).Post("/setup/enroll", s.setupEnroll)
-	r.With(s.requireRole("network", permWrite)).Post("/setup/offline-import", s.setupOfflineImport)
+	// The Cloud Connection page and the setup wizard that used to live here (/cloud*, /setup/*) are replaced
+	// by /edge/v1/central/* (resources_cloud.go).
 
 	// DHCP
 	r.Get("/dhcp/leases", s.dhcpLeases)

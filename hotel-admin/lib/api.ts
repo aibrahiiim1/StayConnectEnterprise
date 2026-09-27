@@ -3,7 +3,6 @@
 // connected to exactly one site DB) so no tenant_id/site_id params anywhere.
 // Cookies flow naturally same-origin; no credentials: 'include' needed.
 
-import type { OutboxFigures } from "@/lib/health-words";
 
 export class ApiError extends Error {
   status: number;
@@ -628,49 +627,58 @@ export type AuditEntry = {
   payload?: Record<string, unknown> | null;
 };
 
-// ------- License (GET /edge/v1/license — scd's locally evaluated state) -------
+// ------- Appliance & licence (GET /edge/v1/central/status) -------
+// docs/CENTRAL_CONTROL_PLANE.md section 8. scd computes every state; the UI only words them.
 
+export type ActivationState = "not_registered" | "waiting" | "activating" | "activated" | "retired";
 export type LicenseState =
-  | "Active" | "GracePeriod" | "Suspended" | "Expired" | "Revoked" | "Unlicensed"
-  // "Restricted" is a legacy (pre-v3) intermediate state kept only for old license docs.
-  | "Restricted"
-  | string; // tolerate future states
+  | "none" | "active" | "expiring" | "grace" | "expired" | "suspended" | "revoked" | "wrong_hardware";
+export type CentralLinkState = "connected" | "unreachable" | "not_configured";
 
-export type LicenseFeatures = {
-  pms: boolean;
-  paid_wifi: boolean;
-  sms_otp: boolean;
-  email_otp: boolean;
-  social_login: boolean;
-  ha: boolean;
-  white_label: boolean;
+export type CentralStatus = {
+  activation: ActivationState;
+  serial: string;
+  appliance_id: string | null;
+  customer_name: string | null;
+  site_name: string | null;
+  license: {
+    state: LicenseState;
+    valid_until: string | null;
+    grace_ends_at: string | null;
+    days_left: number | null;
+    /** null: no licence, or no cap (unlimited). */
+    max_concurrent_online_guests: number | null;
+    current_online_guests: number | null;
+    /** The WAN adapter differs from the one the licence names. The licence stays in force. */
+    hardware_notice?: string;
+  };
+  central: { state: CentralLinkState; last_contact_at: string | null; last_error: string | null };
+  details: {
+    identity_key_fingerprint: string;
+    cert_fingerprint: string;
+    cert_not_after: string | null;
+    assignment_version: number | null;
+    license_version: number | null;
+    wan_mac: string;
+    lan_mac: string;
+    central_endpoint: string;
+    assignment_status?: "absent" | "unverifiable" | "not_granting" | "granted" | string;
+    license_id?: string;
+    software_version?: string;
+    build_profile?: string;
+    permissive_blocked?: string;
+    /**
+     * Qualifies a "retired" activation. "removed_from_central": Central deleted this appliance after it had
+     * held a customer -- it keeps its data, admits no new guests and needs a factory-clean install and a new
+     * activation to be used again.
+     */
+    reason?: string;
+  };
 };
 
-export type LicenseLimits = {
-  max_appliances_for_site: number;
-  max_concurrent_guest_sessions: number;
-  max_local_operators: number;
-  max_guest_access_plans: number;
-  accounting_retention_days: number;
-  audit_retention_days: number;
-};
-
-export type LicenseStatus = {
-  state: LicenseState;
-  installed?: boolean;
-  mode?: string;                    // "unlicensed-dev" on dev boxes
-  license_id?: string;
-  commercial_plan_code?: string;
-  issued_at?: string;
-  valid_until?: string;
-  offline_grace_days?: number;
-  grace_until?: string | null;
-  restricted_until?: string | null;
-  features?: LicenseFeatures;
-  limits?: LicenseLimits;
-  cloud_stale?: boolean;
-  clock_rollback?: boolean;
-  last_cloud_validation?: string | null;
+/** POST /edge/v1/central/refresh -- the status plus the network checks Check now ran. */
+export type CentralRefresh = CentralStatus & {
+  diagnostics?: { dns_ok?: boolean; central_https?: boolean; central_mtls?: boolean; clock?: string };
 };
 
 // ------- Health / reports / backups -------
@@ -682,16 +690,13 @@ export type EdgeHealth = {
   status: "ok" | "degraded";
   db: boolean;
   scd: boolean;
+  /** Section 8 licence state, from the same scd computation as /central/status. */
   license_state?: LicenseState | null;
-  // True only for a REAL signed license. The permissive unlicensed-dev licstate
-  // reports license_state="Active" with no license — this flag disambiguates so
-  // the dashboard shows "Pending activation" instead of a false "Active".
   license_installed?: boolean;
-  sync_outbox?: OutboxFigures;
+  activation?: ActivationState | null;
 };
 
-// ReportsSummary mirrors the aggregates edged computes from local data —
-// the same numbers scd pushes to the cloud as `usage` telemetry.
+// ReportsSummary mirrors the aggregates edged computes from local data.
 export type ReportsSummary = {
   active_sessions: number;
   sessions_today: number;
@@ -1071,36 +1076,6 @@ export type SysNetApplyResp = {
   verify?: Record<string, boolean>;
 };
 
-// ------- Cloud Connection (carryover F) — appliance <-> Central status -------
-export type CloudStatus = {
-  cloud: {
-    cloud_api_url?: string;
-    nats_url?: string;
-    tenant_id?: string;
-    site_id?: string;
-    appliance_id?: string;
-    serial?: string;
-    enrolled?: boolean;
-    api_mtls?: { mtls_ready?: boolean; cert_fingerprint?: string; not_after?: string };
-    nats_mtls?: { connected?: boolean; mtls?: boolean; url?: string };
-  };
-  license: {
-    state?: string;
-    installed?: boolean;
-    commercial_plan_code?: string;
-    valid_until?: string;
-    grace_until?: string | null;
-    offline_grace_days?: number;
-    last_cloud_validation?: string | null;
-    cloud_stale?: boolean;
-  };
-  outbox: OutboxFigures;
-  connection: { state?: string; reachable?: boolean; cert_valid?: boolean; http_code?: number; error?: string };
-};
-
-// ------- Appliance setup / enrollment (GET /setup/status, POST /setup/enroll) -------
-// The local enrollment wizard's live state, straight from edged. No secrets are
-// ever included (the bootstrap/enrollment token is write-only, never returned).
 /** What the appliance reports about its own backup posture. Every field is measured, never assumed. */
 export type BackupHealth = {
   retention?: Record<string, any>;
@@ -1145,67 +1120,6 @@ export type BackupSettings = {
 export type PortalAsset = {
   name: string; url: string; size_bytes: number; uploaded_at: string; in_use: boolean;
 };
-
-export type SetupStatus = {
-  serial?: string;
-  hardware?: {
-    serial?: string;
-    wan_interface?: string;
-    wan_mac?: string;
-    lan_interface?: string;
-    lan_mac?: string;
-    hostname?: string;
-    model?: string;
-  };
-  activation_status?: "unlicensed" | "pending_activation" | "licensed" | "activated" | "mismatch" | string;
-  hardware_mismatch?: string;
-  // Non-empty when a production appliance REJECTED an attempt to enable
-  // permissive/dev licensing (critical security event).
-  permissive_blocked?: string;
-  build_profile?: string;
-  appliance_id?: string;
-  identity_key_fingerprint?: string;
-  version?: string;
-  enrolled?: boolean;
-  locked?: boolean;
-  tenant_id?: string;
-  site_id?: string;
-  api_mtls?: { mtls_ready?: boolean; cert_fingerprint?: string; not_after?: string };
-  nats_mtls?: { connected?: boolean; mtls?: boolean };
-  license?: {
-    state?: string; license_id?: string; plan?: string;
-    valid_from?: string; valid_until?: string; offline_grace_days?: number;
-    // Simple license model: usage against the licensed cap.
-    license_version?: number;
-    grace_period_days?: number;
-    grace_ends_at?: string;
-    max_concurrent_online_guests?: number; // -1 unlimited
-    current_online_guests?: number;
-    remaining_capacity?: number;
-    usage_percent?: number;
-  };
-  assignment?: {
-    status?: string;
-    assigned?: boolean;
-    lifecycle_state?: string;
-    version?: number;
-    tenant_name?: string;
-    site_name?: string;
-    adopted_at?: string;
-    last_refresh_success?: string;
-  };
-  outbox?: { pending?: number; dead?: number };
-  network?: {
-    dns_ok?: boolean;
-    central_https_443?: boolean;
-    mtls_9443?: boolean;
-    nats_4223?: boolean;
-    clock?: boolean;
-  };
-};
-
-// POST /setup/enroll success (202) envelope.
-export type EnrollResult = { status: string; appliance_id?: string; note?: string };
 
 export type SysNetAudit = {
   at: string;
@@ -1472,36 +1386,6 @@ export type ReviewPostingDetail = {
   available_actions: string[];
   evidence_contract?: { source_types: string[] };
   limitations: string[];
-};
-
-// ---------------------------------------------------------------------------------------------------------
-// CLOUD SYNC — how long delivered records are kept, and rescuing the ones the appliance gave up on.
-// ---------------------------------------------------------------------------------------------------------
-
-export type CloudSyncSettings = {
-  delivered_retention_days: number;
-  is_default: boolean;
-  /** The server's own bounds, sent so the form cannot validate against a copy that has drifted. */
-  limits: { min_days: number; max_days: number };
-  last_change?: {
-    changed_at: string;
-    changed_by: string;
-    reason?: string;
-    old_delivered_retention_days?: number | null;
-    new_delivered_retention_days: number;
-    new_config_version: number;
-  } | null;
-};
-
-export type CloudSyncRecovery = {
-  requested_at: string;
-  requested_by: string;
-  reason: string;
-  recovered: number;
-  seq_from?: number;
-  seq_to?: number;
-  oldest_created_at?: string | null;
-  exhausted_remaining: number;
 };
 
 // ---------------------------------------------------------------------------------------------------------

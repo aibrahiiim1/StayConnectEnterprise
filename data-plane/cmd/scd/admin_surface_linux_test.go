@@ -88,7 +88,7 @@ func TestAForeignUIDCannotReachTheAdminSurface(t *testing.T) {
 	for _, path := range []string{
 		"/v1/backup/restore",
 		"/v1/license/install",
-		"/v1/setup/enroll",
+		"/v1/central/offline-package",
 		"/v1/vouchers/0f8b9a0e-0000-0000-0000-000000000000/reveal",
 		"/v1/voucher-key-generations",
 	} {
@@ -122,7 +122,7 @@ func TestEdgedItselfIsStillAdmitted(t *testing.T) {
 // then the only thing holding it. stayconnect-hotel-admin.service was still running `/usr/bin/node
 // server.js` as User=stayconnect -- uid 998 on the appliance, exactly edged's -- with a group that opens
 // scd.sock. So the Node process rendering the admin web UI was admitted to /v1/backup/restore,
-// /v1/license/install and /v1/setup/enroll.
+// /v1/license/install and /v1/central/offline-package.
 //
 // It has its own account now, and this asserts the in-process half: sharing the account is not enough.
 func TestSharingEdgedsUIDIsNotEnough(t *testing.T) {
@@ -133,7 +133,7 @@ func TestSharingEdgedsUIDIsNotEnough(t *testing.T) {
 		"/usr/bin/curl",
 		"/opt/stayconnect/bin/edged-copy", // a near-miss name must not pass
 	} {
-		for _, path := range []string{"/v1/backup/restore", "/v1/license/install", "/v1/setup/enroll"} {
+		for _, path := range []string{"/v1/backup/restore", "/v1/license/install", "/v1/central/offline-package"} {
 			code, body := gate(t, asPeer("POST", path, mine, exe))
 			if code != http.StatusForbidden {
 				t.Errorf("%s from edged's uid running %s returned %d, not 403", path, exe, code)

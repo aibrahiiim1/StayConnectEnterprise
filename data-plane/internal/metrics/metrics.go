@@ -45,9 +45,8 @@ type Registry struct {
 	PMSStatus           *prometheus.GaugeVec     // labels: provider, kind; value = enum
 	PMSCacheSize        *prometheus.GaugeVec     // labels: provider, kind
 
-	NFTOps         *prometheus.CounterVec // labels: op (add|del), source (local|peer|reaper)
-	ReaperClosed   *prometheus.CounterVec // labels: reason
-	NATSReconnects prometheus.Counter
+	NFTOps       *prometheus.CounterVec // labels: op (add|del), source (local|reaper)
+	ReaperClosed *prometheus.CounterVec // labels: reason
 
 	// Phase 8 — notification provider observability.
 	NotifySendTotal    *prometheus.CounterVec   // labels: channel, provider, result
@@ -169,12 +168,6 @@ func New(version string, constLabels prometheus.Labels) *Registry {
 		ConstLabels: constLabels,
 	}, []string{"reason"})
 
-	r.NATSReconnects = prometheus.NewCounter(prometheus.CounterOpts{
-		Name:        "scd_nats_reconnects_total",
-		Help:        "Times the NATS client reconnected after a drop.",
-		ConstLabels: constLabels,
-	})
-
 	r.NotifySendTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name:        "scd_notification_send_total",
 		Help:        "Outbound email/SMS sends, by channel, provider, and result.",
@@ -208,7 +201,7 @@ func New(version string, constLabels prometheus.Labels) *Registry {
 		r.SessionsActive, r.SessionsStarted, r.SessionsClosed, r.SessionBytesTotal, r.AuthContextsCreated,
 		r.OTPIssued, r.OTPVerify,
 		r.PMSValidate, r.PMSValidateDuration, r.PMSStatus, r.PMSCacheSize,
-		r.NFTOps, r.ReaperClosed, r.NATSReconnects,
+		r.NFTOps, r.ReaperClosed,
 		r.NotifySendTotal, r.NotifySendDuration,
 		r.SocialLoginTotal, r.SocialLoginDuration,
 	)
@@ -232,7 +225,7 @@ func New(version string, constLabels prometheus.Labels) *Registry {
 		r.OTPIssued.WithLabelValues(ch).Add(0)
 	}
 	for _, op := range []string{"add", "del"} {
-		for _, src := range []string{"local", "peer"} {
+		for _, src := range []string{"local"} {
 			r.NFTOps.WithLabelValues(op, src).Add(0)
 		}
 	}

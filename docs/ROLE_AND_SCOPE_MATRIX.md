@@ -6,29 +6,27 @@
 > against that site's edged. **These are separate account systems** — a cloud
 > credential opens nothing on an appliance, and vice versa.
 
-## 1. Platform level (StayConnect staff, cloud)
+## 1–2. Central roles (platform and customer level)
 
-| Role | Status | Scope |
-|---|---|---|
-| `platform_admin` | **Implemented** | Global super-operator: all tenants (scoped per request via `?tenant_id=`), issues/revokes licenses, manages CommercialPlans, sees the whole fleet |
-| `platform_operations` | Roadmap — not yet implemented | fleet health + update orchestration, no commercial writes |
-| `platform_support` | Roadmap — not yet implemented | read fleet/telemetry, open support sessions |
-| `platform_sales` | Roadmap — not yet implemented | tenants/subscriptions CRUD, no fleet |
-| `platform_billing` | Roadmap — not yet implemented | invoices/subscriptions when billing automation lands |
-| `platform_auditor` | Roadmap — not yet implemented | read-only everything incl. platform audit |
+The authoritative table is [CENTRAL_CONTROL_PLANE.md §7](CENTRAL_CONTROL_PLANE.md#7-roles);
+ctrlapi enforces it (`control-plane/internal/auth/permissions.go`) and the
+console only mirrors it (`cloud-admin/lib/permissions.ts`).
 
-Until the sub-roles land, every platform action requires `platform_admin`.
-
-## 2. Tenant / hotel-group level (cloud)
-
-| Role | Scope (within own tenant only) |
+| Role | Can |
 |---|---|
-| `tenant_admin` | full group control: sites, appliances, bootstrap tokens, group operators, subscription changes, license read |
-| `tenant_operator` | day-to-day fleet ops: sites/appliances read-write, no staff or plan changes |
-| `viewer` | read-only across the group's cloud resources |
-| `billing` | read + change subscription plan only |
+| `platform_owner`, `platform_admin` | everything: customers, sites, activation, licences, appliance lifecycle, security-alert triage, Team |
+| `platform_support` | read everything, change nothing |
+| `tenant_admin`, `tenant_owner` | read their own customer; manage its sites and its users |
+| `tenant_auditor`, `viewer` | read their own customer |
 
-Group roles see **fleet telemetry and license status** for their sites — never
+Licence and activation writes are platform-only and need a recent password
+re-entry (step-up); so does every change to a Central sign-in — creating,
+re-roling, disabling, re-passwording or removing a Team member or a customer
+user, including by a customer admin managing their own users. The legacy roles `platform_billing`, `billing`,
+`tenant_operator`, `site_admin`, `hotel_it`, `hotel_operator` **grant nothing in
+Central**; rows that still carry them are shown but cannot be assigned. A
+customer-scoped user never sees another customer or the fleet. Customer roles
+see **activation, connection and licence status** for their appliances — never
 guest data (it isn't in the cloud; see [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md)).
 
 ## 3. Site level (edge, per-hotel `operators`/`operator_roles`)
@@ -53,9 +51,7 @@ Seven roles, enforced by edged per `/edge/v1` resource. Legend:
 | guest-signin-credentials (`View_Guest_SignIn_Credentials`) | W | R | **R** | **R** | – | – | **–** |
 | guest-signin-protection (`Manage_Guest_SignIn_Protection`) | W | **W** | R | R | – | – | R |
 | pms-reconciliation (`View_PMS_Reconciliation`) | R | R | R | R | – | – | R |
-| cloud-sync-settings (`Manage_Cloud_Sync_Settings`) | W | **W** | – | – | – | – | R |
-| cloud operating mode | *(no role: read-only display; changed only with the owner role, audited)* | | | | | | |
-| cloud-sync-recovery (`Run_Cloud_Sync_Recovery`) | W | **W** | – | – | – | – | R |
+
 | guest-signin-restrictions (`Release_Guest_SignIn_Restriction`) | W | **W** | **W** | **W** | – | – | R |
 | walled-garden | W | W | R | R | – | R | R |
 | portal-branding | W | W | R | R | – | R | R |
@@ -79,16 +75,6 @@ Seven roles, enforced by edged per `/edge/v1` resource. Legend:
   that can be applied. A PMS event is one-way once terminal, and a checkout boundary must be an *applied*
   departure event, so replaying an old one is not something the product can do — and a write permission would
   promise a power it does not have.
-* `cloud-sync-settings` — **W** sets how long DELIVERED cloud-reporting records are kept. It reaches nothing
-  that has not been delivered.
-* **cloud operating mode** — deliberately has **no permission key at all**. This appliance is licensing-only
-  by Product-Owner decision, and the decision says the model must not be contradicted by a casual UI switch.
-  The mode is displayed on Cloud connection and changed only by a deliberate write with the owner role,
-  recorded in an append-only change log. `svc_scd` and `svc_edged` hold read access and nothing more —
-  a daemon that could rewrite the rule it is subject to is not subject to it.
-* `cloud-sync-recovery` — **W** releases records the appliance gave up on back onto the queue. Separate from
-  the setting on purpose: one is a retention policy, the other is an action whose consequences land on a far
-  end shared by the whole fleet. Reading the recovery history does not carry permission to run one.
 * `guest-signin-restrictions` — **W** releases ONE device's wait early, with a mandatory reason.
 
 The blast radii are not comparable. A release affects one device for the remainder of one wait; a policy
@@ -171,12 +157,12 @@ site_admin cannot create GuestAccessPlans or voucher batches
    No `tenant_id` filter bugs can leak across sites — there is no other
    site's data in the process.
 3. **Cloud/edge separation** — platform and group roles cannot read guest
-   data (not present in the cloud); site roles cannot touch commercial data
-   (subscriptions/licenses are cloud-writable only; the edge holds a signed,
-   read-only entitlement).
+   data (not present in the cloud); site roles cannot touch licensing data
+   (licenses are cloud-writable only; the edge holds a signed, read-only
+   entitlement).
 4. **Appliance identity** — appliances authenticate to the cloud with their
-   own Ed25519 keys and can only speak for themselves (subject-identity check
-   in telemetry ingest, JWT identity on license fetch).
+   own Ed25519 keys (signed request tokens with replay protection, then mutual
+   TLS) and can only speak for themselves.
 5. **Audit locality** — hotel-staff actions land in the site's local
    `audit_log`; platform/group actions in the cloud `audit_log`. Neither log
    syncs to the other side.
@@ -195,8 +181,8 @@ applied at the site:
 | viewer | site_viewer |
 | billing | payments_operator |
 
-Group-level duties of former tenant_admins move to cloud accounts under
-`/cloud/v1/operators`. The legacy values are removed from the edge check
+Group-level duties of former tenant_admins move to Central customer users
+(`/cloud/v1/customers/{id}/users`). The legacy values are removed from the edge check
 constraint when the compatibility window closes
 ([API_DEPRECATIONS.md](API_DEPRECATIONS.md)).
 

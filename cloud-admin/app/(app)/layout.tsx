@@ -4,13 +4,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Menu } from "lucide-react";
-import { Nav, NAV_ITEMS, NAV_SECTION_OF, activeNavHref } from "@/components/nav";
+import Link from "next/link";
+import { Nav, crumbs } from "@/components/nav";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Skeleton } from "@/components/ui/misc";
 import { ToastProvider } from "@/components/ui/toast";
 import { StepUpProvider } from "@/components/step-up";
 import { api, Whoami } from "@/lib/api";
-import { CustomerProvider } from "@/lib/customer-context";
+import { SessionProvider } from "@/lib/session";
+import { usePoll } from "@/lib/use-poll";
 import { useSidebarCollapsed } from "@/lib/sidebar-state";
 import { cn } from "@/lib/utils";
 
@@ -29,25 +31,23 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       .then((m) => { if (!cancelled) setMe(m); })
       .catch(() => { if (!cancelled) router.replace("/login"); })
       .finally(() => { if (!cancelled) setLoading(false); });
-    // Re-validate periodically so a session that expires while watching a
-    // long-lived page (e.g. the onboarding wizard's auto-run) recovers to
-    // /login instead of erroring on every poll.
-    const iv = setInterval(() => {
-      api.get<Whoami>("/v1/auth/whoami").catch(() => { if (!cancelled) router.replace("/login"); });
-    }, 30000);
-    return () => { cancelled = true; clearInterval(iv); };
+    return () => { cancelled = true; };
   }, [router]);
+
+  // Re-read whoami every 30 s while the tab is visible: an expired session recovers to /login instead of erroring
+  // on every poll, and a role changed mid-session reaches the role-gated screens without a reload.
+  usePoll(() => {
+    api.get<Whoami>("/v1/auth/whoami")
+      .then((m) => setMe((prev) => (prev && JSON.stringify(prev) === JSON.stringify(m) ? prev : m)))
+      .catch(() => router.replace("/login"));
+  }, 30000, !loading);
 
   // The content pane is the scrolling element, so reset it on navigation.
   useEffect(() => { mainRef.current?.scrollTo?.({ top: 0 }); }, [pathname]);
   // The drawer closes on navigation.
   useEffect(() => { setDrawer(false); }, [pathname]);
 
-  const here = useMemo(() => {
-    const href = activeNavHref(pathname);
-    const item = NAV_ITEMS.find((i) => i.href === href);
-    return { section: href ? NAV_SECTION_OF[href] : undefined, label: item?.label };
-  }, [pathname]);
+  const here = useMemo(() => crumbs(pathname), [pathname]);
 
   async function onLogout() {
     try { await api.post("/v1/auth/logout"); } catch {}
@@ -73,7 +73,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (!me) return null;
 
   return (
-    <CustomerProvider me={me}>
+    <SessionProvider me={me}>
       <ToastProvider>
         <StepUpProvider>
           <div className="flex h-screen overflow-hidden">
@@ -121,13 +121,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
                   <div className="min-w-0 flex-1">
                     <nav aria-label="Breadcrumb" className="flex items-baseline gap-1.5">
-                      {here.section && (
+                      {here.parent && (
                         <>
-                          <span className="hidden truncate text-xs text-muted-foreground sm:inline">{here.section}</span>
+                          <Link
+                            href={here.parent.href}
+                            className="hidden truncate rounded text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:inline"
+                          >
+                            {here.parent.label}
+                          </Link>
                           <span className="hidden text-xs text-muted-foreground/50 sm:inline" aria-hidden>/</span>
                         </>
                       )}
-                      <span className="truncate text-sm font-semibold" aria-current="page">{here.label ?? "Central"}</span>
+                      <span className="truncate text-sm font-semibold" aria-current="page">{here.label}</span>
                     </nav>
                   </div>
 
@@ -142,6 +147,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </StepUpProvider>
       </ToastProvider>
-    </CustomerProvider>
+    </SessionProvider>
   );
 }

@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -15,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/control-plane/internal/applianceauth"
+	"github.com/stayconnect/enterprise/control-plane/internal/clientip"
 )
 
 // maxSignedBody bounds how much request body we buffer to hash for signature
@@ -38,14 +38,6 @@ func ApplianceFromContext(ctx context.Context) *ApplianceIdent {
 	return a
 }
 
-// isAssignmentFetch reports whether this request is an appliance reading its own
-// signed assignment document (GET .../v1/appliance/assignment). This is the one
-// endpoint a terminal (revoked/decommissioned) appliance may still reach, so that
-// a signed `revoked` document can actually be delivered to it.
-func isAssignmentFetch(r *http.Request) bool {
-	return r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/appliance/assignment")
-}
-
 // RequireAppliance verifies an Ed25519-signed request JWT that BINDS the
 // method, path, body hash, audience and signing-key id (see applianceauth).
 // It blocks replay via the shared ReplayCache, rejects suspended/revoked/
@@ -65,14 +57,16 @@ func RequireAppliance(db *pgxpool.Pool, cache *applianceauth.ReplayCache) func(h
 				jsonErr(w, http.StatusUnauthorized, "unauthenticated", "bad appliance JWT", r)
 				return
 			}
-			var pubB64, tenantID, siteID, serial, lifecycle, status string
+			var pubB64, tenantID, siteID, serial, lifecycle string
 			err = db.QueryRow(r.Context(), `
-                SELECT public_key, COALESCE(tenant_id::text,''), COALESCE(site_id::text,''),
-                       serial, COALESCE(lifecycle_state,''), COALESCE(status,'')
+                SELECT COALESCE(public_key,''), COALESCE(tenant_id::text,''), COALESCE(site_id::text,''),
+                       serial, COALESCE(lifecycle_state,'')
                   FROM appliances
                  WHERE id = $1
-            `, iss).Scan(&pubB64, &tenantID, &siteID, &serial, &lifecycle, &status)
-			if errors.Is(err, pgx.ErrNoRows) || pubB64 == "" {
+            `, iss).Scan(&pubB64, &tenantID, &siteID, &serial, &lifecycle)
+			if errors.Is(err, pgx.ErrNoRows) || (err == nil && pubB64 == "") {
+				// WIRE CONTRACT: deployed appliances detect that their record was deleted by a 401 whose body
+				// says "not enrolled" (data-plane cmd/scd orphan recovery). Keep the wording.
 				applianceAuthFail(r.Context(), db, r, iss, "not enrolled")
 				jsonErr(w, http.StatusUnauthorized, "unauthenticated", "appliance not enrolled", r)
 				return
@@ -81,22 +75,13 @@ func RequireAppliance(db *pgxpool.Pool, cache *applianceauth.ReplayCache) func(h
 				jsonErr(w, http.StatusInternalServerError, "internal", "appliance lookup failed", r)
 				return
 			}
-			// Identity-level revocation: a suspended/revoked/decommissioned/retired
-			// appliance cannot authenticate — with ONE deliberate exception.
+			// Identity-level revocation. ONLY a retired identity (revoked / decommissioned) is refused.
 			//
-			// Fetching its own signed ASSIGNMENT must stay reachable, because that
-			// document is how a revoked/decommissioned appliance LEARNS it has been
-			// revoked and stands itself down. Blocking it here made revocation
-			// unenforceable: Central minted a signed `revoked` document, the appliance
-			// was 403'd before it could read it, and so kept operating on its previous
-			// `assigned` document indefinitely.
-			//
-			// The exception is safe: the endpoint is read-only, returns only this
-			// appliance's own terminal document, and the document is signed — it can
-			// only ever cause the box to give up authority, never gain it.
-			terminal := lifecycle == "suspended" || lifecycle == "revoked" ||
-				lifecycle == "decommissioned" || status == "retired"
-			if terminal && !isAssignmentFetch(r) {
+			// Licence state is deliberately NOT consulted: a suspended or revoked LICENCE must never cut the
+			// appliance off from Central, or it could not fetch the signed suspension or the revocation list
+			// that tells it so. Retired appliances learn of their retirement through the certificate-only
+			// assignment channel, which does not run this middleware.
+			if lifecycle == "revoked" || lifecycle == "decommissioned" {
 				applianceAuthFail(r.Context(), db, r, iss, "identity "+lifecycle)
 				jsonErr(w, http.StatusForbidden, "forbidden", "appliance identity "+lifecycle, r)
 				return
@@ -134,7 +119,7 @@ func RequireAppliance(db *pgxpool.Pool, cache *applianceauth.ReplayCache) func(h
 				return
 			}
 			_, _ = db.Exec(r.Context(),
-				`UPDATE appliances SET identity_verified_at = now(), last_seen_at = now(),
+				`UPDATE appliances SET last_seen_at = now(),
 				        version = COALESCE(NULLIF($2,''), version) WHERE id = $1`,
 				iss, claims.Ver)
 			ident := &ApplianceIdent{
@@ -155,7 +140,7 @@ func applianceAuthFail(ctx context.Context, db *pgxpool.Pool, r *http.Request, a
         INSERT INTO audit_log (ts, actor_type, actor_id, action, target_type, target_id, ip, user_agent, payload)
         VALUES (now(), 'appliance', NULLIF($1,''), 'appliance.auth_failed', 'appliance', NULLIF($1,''),
                 CASE WHEN $2 = '' THEN NULL ELSE $2::inet END, NULLIF($3,''), $4::jsonb)`,
-		applianceID, clientIPOnly(r), r.UserAgent(),
+		applianceID, clientip.From(r), r.UserAgent(),
 		`{"reason":`+jsonString(reason)+`,"method":`+jsonString(r.Method)+`,"path":`+jsonString(r.URL.Path)+`}`)
 }
 
@@ -175,20 +160,6 @@ func jsonString(s string) string {
 	}
 	b.WriteByte('"')
 	return b.String()
-}
-
-func clientIPOnly(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if i := strings.IndexByte(xff, ','); i >= 0 {
-			return strings.TrimSpace(xff[:i])
-		}
-		return strings.TrimSpace(xff)
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }
 
 func bearerFrom(r *http.Request) string {

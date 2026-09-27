@@ -54,6 +54,7 @@ If you need to read the full code on a card (e.g. a smudged card), open it and u
 2. **Guest sign-in attempts** → find the attempt by room and read **Why**. Roles allowed to see guest credentials can open **Details** to compare what was entered with what would have been accepted.
    - Room number **exactly** as the PMS has it (some PMSes store "0214", some "214").
    - Name spelling — the guest should enter the full first name, family name, or reservation number, depending on the mode set under **Sign-in methods**.
+   - **Why** says *Licence refused new guests* or *Licensed capacity full* → the guest's details are not the problem: the appliance's licence did not admit a new guest, or the appliance is at its licensed number of guests online (room guests, voucher and account guests all count, and each device of a room takes a place). Check **System → Appliance & licence**.
 3. **Guest sign-in checks** → if every attempt on ONE guest network fails while others work, that network points at the wrong PMS or none: fix it under **Network routing**.
 4. **Too many attempts**: after too many wrong tries (by default 5 within 60 seconds) the device is asked to wait (by default 60 seconds) and sees a countdown. Reception can **Release** it on **Guest sign-in attempts → Active restrictions** — this lets the device try again; it does not sign the guest in.
 5. If all of the above check out and the PMS still rejects, the reservation may not be in the PMS correctly. Have reception check the PMS directly; **PMS activity** shows whether the check-in message ever arrived.
@@ -76,7 +77,7 @@ If you need to read the full code on a card (e.g. a smudged card), open it and u
 
 ## Appliance is offline
 
-1. **Central → Appliances** → find it; note its Status and **Last seen**.
+1. **Central → Appliances** → find it (or filter **Connection: Offline**); note its connection state and last contact.
 2. Call the site. Ask someone to:
    - Check the appliance has power.
    - Check the uplink cable is plugged in.
@@ -84,7 +85,11 @@ If you need to read the full code on a card (e.g. a smudged card), open it and u
 3. If physical looks fine but the appliance still isn't heard from, reboot it (pull power for 10 seconds, plug back in). Wait 2 minutes.
 4. Still offline after 10 minutes → escalate to Semantics support with the appliance serial and last-seen time.
 
-An appliance that cannot reach Central keeps serving guests — Central is used for licensing only. On site, **Hotel Admin → System → Appliance & licence** shows whether Central is reachable.
+An appliance that cannot reach Central keeps serving guests — Central is used for licensing only. On site, **Hotel Admin → System → Appliance & licence** shows whether Central is *Connected*, *Temporarily unreachable* or *Not configured*, when it last answered, and the last problem; **Check now** retries immediately.
+
+## Hotel Admin says "Removed from OneGate Central"
+
+Central deleted this appliance's record after it had served a customer. It keeps its data, admits no new guests (guests already online stay connected) and will not register again by itself. To use it again — for the same or another customer — it must be factory-reset ([DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md](../DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md)) and then activated in Central when it registers as *Waiting for activation*.
 
 ## Sessions count is zero but guests are present
 
@@ -99,7 +104,7 @@ Escalate with specifics: which of the four steps above failed.
 
 ## Too many alerts
 
-Noisy alerts usually mean a policy or threshold needs tuning. Don't just acknowledge everything — figure out which alert is noisy. In Hotel Admin, **System → Alerts** lists checkouts the checkout grace policy could not handle (tune it on **Checkout grace**); in Central, **Security alerts** must each be investigated, because they block activation while open.
+Noisy alerts usually mean a policy or threshold needs tuning. Don't just acknowledge everything — figure out which alert is noisy. In Hotel Admin, **System → Alerts** lists checkouts the checkout grace policy could not handle (tune it on **Checkout grace**); in Central, **System → Security alerts** must each be investigated: each records a registration Central refused or a binding that no longer matches.
 
 ## Someone left the company and still has access
 
@@ -109,13 +114,13 @@ For a **Hotel Admin** account (on the appliance):
 2. Check **System → Activity** (filter by the **Security** chip, or search their name) for their recent actions.
 3. If they knew PMS, email/SMS or social-login credentials (not a role, just knowledge), replace those under **PMS connection**, **Email & SMS** or **Social login**.
 
-For a **Central** account: **Central → Operators** → **Disable**, and check the **Audit log**.
+For a **Central** account: a customer's user → the customer page → **Users** → **Disable**; a vendor operator → **System → Team** → **Disable**. Then check the customer's **Activity** tab or **System → Audit log**.
 
 If they were a platform admin, contact Semantics operations directly — you can't disable them yourself.
 
 ## Useful places to look
 
-- **Central → Audit log**, filter by action (e.g. `site.created,operator.disabled`) — what changed in Central this week.
+- **Central → System → Audit log** (platform staff; filter by customer, action such as `site.created` or `license.issued`, and date) or a customer's **Activity** tab — what changed in Central.
 - **Hotel Admin → System → Activity**, **Security** chip — sign-ins, code reveals and other security events on the appliance.
 - **Hotel Admin → Vouchers → Access log** — who has read voucher codes, and why.
 - **Hotel Admin → Guest sign-in checks** — refusals by reason and by network; a spike hints at a broken PMS connection or routing.

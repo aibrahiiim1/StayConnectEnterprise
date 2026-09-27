@@ -130,8 +130,10 @@ plan_central() {
   else fail "cloud-admin rollback path invalid (current=$cur previous=$prev)"; fi
   retain_group "cloud-admin-release" "$KEEP_RELEASES" "$cur,$prev" $(ls -1d "$ROOT"/releases/cloud-admin/*/ 2>/dev/null | sed 's:/$::')
 
-  # DB dumps
-  retain_db "db-dump" "$KEEP_DB" $(ls -1d /root/backups/*.sql /root/backups/*.sql.gz /root/backups/*.dump 2>/dev/null)
+  # DB dumps: the scheduled backups and pre-deploy dumps (central-backup.sh / central-deploy.sh write
+  # $ROOT/backups/db/central-<stamp>-<reason>.dump), plus dumps from before that location existed in /root/backups.
+  # One group, so KEEP_DB and "the newest is never deleted" apply across both.
+  retain_db "db-dump" "$KEEP_DB" $(ls -1d "$ROOT"/backups/db/central-*.dump /root/backups/*.sql /root/backups/*.sql.gz /root/backups/*.dump 2>/dev/null)
 
   # config backups
   retain_group "config-backup" "$KEEP_CONFIG" "" $(ls -1d /etc/netplan/*.bak* /etc/stayconnect/*.bak* 2>/dev/null)
@@ -254,6 +256,13 @@ json_arr() { local first=1; printf '['; for e in "$@"; do [ -z "$e" ] && continu
   printf '  "delete_candidates": %s,\n' "$N_DEL"
   printf '  "deleted_last_run": %s,\n' "$DELETED"
   printf '  "reclaimed_kb": %s,\n' "$RECLAIMED_KB"
+  # The newest full database backup (additive fields; empty when there is none).
+  NEWEST_DB=""; NEWEST_DB_AT=""
+  for e in "${R_KEEP[@]:-}"; do
+    case "$e" in "db-dump|"*"|newest full backup"*) NEWEST_DB="${e#db-dump|}"; NEWEST_DB="${NEWEST_DB%%|*}" ;; esac
+  done
+  [ -n "$NEWEST_DB" ] && NEWEST_DB_AT="$(date -u -r "$NEWEST_DB" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+  printf '  "newest_db_backup": "%s", "newest_db_backup_at": "%s",\n' "$NEWEST_DB" "$NEWEST_DB_AT"
   printf '  "keep_binaries": %s, "keep_releases": %s, "keep_db": %s, "keep_config": %s,\n' "$KEEP_BINARIES" "$KEEP_RELEASES" "$KEEP_DB" "$KEEP_CONFIG"
   printf '  "protected_items": %s,\n' "$(json_arr "${R_PROT[@]:-}")"
   printf '  "pinned_items": %s,\n' "$(json_arr "${R_PIN[@]:-}")"

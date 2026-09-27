@@ -1,0 +1,105 @@
+# ONEGATE CENTRAL — backing services (Postgres/TimescaleDB + Redis). Central only.
+#
+# This is the Central counterpart of deploy/compose/infra.yml (which is the APPLIANCE's file and must never be
+# run on Central). It replaces the hand-written /opt/stayconnect/central/compose/infra.yml that the first
+# Central host was built with and that was never in the repository.
+#
+# Installed by deploy/scripts/central-install.sh to /opt/stayconnect/central/compose/central-infra.yml and run as
+#
+#   docker compose -p stayconnect-central -f /opt/stayconnect/central/compose/central-infra.yml up -d
+#
+# WHAT IS DELIBERATELY NOT HERE
+#
+#   NATS. Central serves appliances for LICENSING ONLY (CLAUDE.md §0E): every appliance call is HTTPS to ctrlapi.
+#   The first host's file still declared a `nats` service; it is obsolete and is removed from an existing host by
+#   deploy/scripts/central-cleanup-obsolete.sh. Do not add it back.
+#
+# THE CONTAINER NAMES ARE AN INTERFACE. `sc-central-pg` is what central-migrate.sh --pg-exec, central-export.sh,
+# central-deploy.sh and the runbook all address. Renaming them breaks every one of those.
+#
+# SECRETS come from files, never from this file and never from the environment: the passwords are read from
+# ${CENTRAL_SECRETS_DIR}/{db_password,redis_password} (0600, root), which central-install.sh generates once and
+# never regenerates. Neither password appears on a process command line.
+#
+# Everything binds to 127.0.0.1. Postgres and Redis are never public (docs/DEPLOYMENT_CLOUD.md §2).
+name: stayconnect-central
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  pg:
+    # PINNED, and it must be the SAME image on both ends of a host move: a TimescaleDB dump restores only into
+    # the extension version that wrote it (timescaledb_pre_restore/post_restore do not translate versions).
+    image: timescale/timescaledb:2.16.1-pg16
+    container_name: sc-central-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: stayconnect
+      POSTGRES_DB: stayconnect
+      # Read by the image's entrypoint (as root, before it drops to postgres) and used only on first init.
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # OVER TCP, deliberately. On first start the image runs its init scripts against a temporary server that
+      # listens on the unix socket only, then restarts it. A socket-based pg_isready reports "healthy" during
+      # that window and the first real query lands in the restart ("server closed the connection unexpectedly").
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U stayconnect -d stayconnect"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+    mem_limit: 2g
+    logging: *default-logging
+
+  redis:
+    image: redis:7-alpine
+    container_name: sc-central-redis
+    restart: unless-stopped
+    secrets:
+      - redis_password
+    # The password goes into a config file readable only inside the container, NOT onto the command line
+    # (where `ps` on the host would show it). docker-entrypoint.sh then drops to the redis user as usual.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        umask 077
+        printf 'requirepass "%s"\n' "$$(tr -d '\r\n' < /run/secrets/redis_password)" > /tmp/redis-auth.conf
+        chown redis:redis /tmp/redis-auth.conf
+        exec docker-entrypoint.sh redis-server /tmp/redis-auth.conf --appendonly yes --loglevel warning
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$(tr -d '\\r\\n' < /run/secrets/redis_password)\" redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 512m
+    logging: *default-logging
+
+secrets:
+  db_password:
+    file: ${CENTRAL_SECRETS_DIR:-/opt/stayconnect/central/secrets}/db_password
+  redis_password:
+    file: ${CENTRAL_SECRETS_DIR:-/opt/stayconnect/central/secrets}/redis_password
+
+# Volume names are overridable so an EXISTING host can adopt this file without moving its data: point them at
+# the volumes its containers already use (`docker inspect sc-central-pg --format '{{json .Mounts}}'`). A fresh
+# host takes the defaults. Never `docker compose down -v` on Central: -v deletes the licence database.
+volumes:
+  pgdata:
+    name: ${CENTRAL_PG_VOLUME:-stayconnect-central_pgdata}
+  redisdata:
+    name: ${CENTRAL_REDIS_VOLUME:-stayconnect-central_redisdata}

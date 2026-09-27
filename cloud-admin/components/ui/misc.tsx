@@ -68,7 +68,7 @@ export function Switch({
 }
 
 /**
- * Meter — a labelled proportion bar. Used for data allowance, licensed capacity, DHCP pool utilisation.
+ * Meter — a labelled proportion bar. Used for disk use on Backup health.
  *
  * The tone escalates automatically: a pool at 94% should not need the caller to remember to pass "warning".
  */

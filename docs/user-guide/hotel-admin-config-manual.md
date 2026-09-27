@@ -4,7 +4,7 @@ Step-by-step instructions for configuring an appliance from **OneGate Hotel
 Admin**, the console on the appliance. For a description of what each page shows,
 see [hotel-admin-reference.md](hotel-admin-reference.md).
 
-**Typical order:** Connect and activate (license) → WAN / LAN → build a Guest
+**Typical order:** Activate (licence) → WAN / LAN → build a Guest
 network → Service plans and Internet packages → Sign-in methods → Vouchers and
 guest accounts → PMS → Email & SMS / Social login → Allowed sites → Portal
 settings → Operators.
@@ -18,63 +18,74 @@ settings → Operators.
 
 ---
 
-## 1. Connect the appliance to Central
+## 1. Activate the appliance
 
 **The normal path is zero-touch — you type nothing on the appliance.** A
-factory-clean appliance with internet registers itself with OneGate Central and
-appears on Central's **Onboarding** page as **Pending activation**, where a
-Central operator activates it. See the Central manual, "Onboard & activate an
-Appliance."
+factory-clean appliance with internet registers itself with OneGate Central (no
+token) and keeps retrying until Central answers. It then waits as **Waiting for
+activation** until your OneGate vendor activates it in Central for your customer
+and site and sets its licence terms (Central manual, "Activate an Appliance").
 
-Everything about this lives on **System → Appliance & licence** (`/appliance`),
-tab **Appliance setup**:
+Everything about this lives on **System → Appliance & licence** (`/appliance`):
 
-- **Online** (recommended) shows the appliance's serial and whether OneGate
-  Central is reachable. Once it is activated in Central, a three-phase progress
-  runs — **Connect → Verify → Ready** — and ends with *"This appliance is
-  connected"* and **Setup complete**.
-- **Offline**, for an appliance with no route to Central: **Download activation
-  request**, import it in Central under **Onboarding → Offline activation**, have
-  it activated, then upload the returned **Activation package file** here.
-- **Advanced / recovery** (collapsed) is only for an enrollment token minted in
-  Central (*Appliances → Enrollment token*): enter it as the **Enrollment code**.
-  The detailed checks (identity, connectivity, certificate, license, completion)
-  are also here.
+1. Open the page. **Activation** shows *Waiting for activation* and the
+   **Serial number** (with a copy button) — give it to your OneGate vendor.
+   (*Not registered yet* means Central has not been reached yet; check the
+   **OneGate Central** part and the WAN connection.)
+2. Once the vendor activates it, the page shows *Finishing activation…* and then
+   **Activated** with your customer and site, and the **Licence** part shows
+   **Active**. The page updates by itself; **Check now** fetches immediately.
 
-Only the Site admin and Hotel IT manager can activate; other roles can follow
-the progress.
+**Offline activation**, for an appliance with no route to Central: under **Files
+from your OneGate vendor → Offline activation**, **Download activation request**
+and send it to your vendor; they import it in Central, activate it and return an
+activation package; **Upload activation package** here.
+
+Only the Site admin and Hotel IT manager can upload files; other roles can
+follow the status.
+
+**Retired** or **Removed from OneGate Central** means this appliance no longer
+admits new guests (guests already online are not disconnected). *Removed from
+OneGate Central* appears when Central deleted the appliance after it had served
+a customer: it keeps its data, refuses licence and activation files and never
+registers again by itself. Moving it to another customer, or using it again at
+all, needs a factory-clean install
+([DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md](../DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md))
+and a new activation by your vendor.
 
 ---
 
-## 2. Activate / license the appliance
+## 2. The licence
 
-An appliance serves no guests until a **signed license** is installed.
+An appliance serves no guests until a **signed licence** is installed.
+Activation delivers the first one, and renewals arrive by themselves: until it is
+licensed the appliance asks Central every minute, and afterwards every 6 hours
+(and on **Check now**).
 
-**Online (normal):** the Central operator activates the appliance (Onboarding →
-Activate, or Licenses → Issue license). The appliance fetches its signed license
-itself and installs it; the **Licence** tab flips to **Active**.
+**Licence file (offline):** when your vendor sends you a licence file, use
+**Files from your OneGate vendor → Upload licence file**. The appliance refuses
+a file for another appliance or an older licence, and nothing changes.
 
-**Offline:**
-1. On **Appliance & licence → Licence**, copy the **Serial number** and **WAN MAC
-   address** (large, with copy buttons) and send them to your Semantics contact.
-2. You receive a signed license file generated for that exact serial and WAN MAC
-   (Central: *Licenses → Download for offline*).
-3. On the **Licence** tab → **Upload licence file**. The appliance checks that the
-   file belongs to this hardware before accepting it.
-
-**Reading the License tab:**
-- **Active** — licensed; guests can connect up to **Max concurrent online
-  guests** (shown as a bar: green, amber from 80%, red at 100%).
-- **Grace period** — the license has expired but guests are still served (with
-  warnings) until the grace period ends; renew soon.
-- **Expired / Revoked / Suspended** — new guest logins are refused; existing
-  guest sessions are not dropped; DHCP, DNS, the sign-in page and Hotel Admin
-  stay up.
-- **Licensed capacity reached** — new guest logins are refused until someone goes
+**Reading the Licence part:**
+- **Active** — licensed; guests can connect up to the licensed maximum, shown as
+  **Guests online, all guest networks** with a meter (amber from 80%, red at
+  100%).
+- **Expires soon** — 30 days or fewer left; ask your vendor to renew.
+- **Grace period** — the licence has ended but guests keep signing in until the
+  grace period ends; renew soon.
+- **Expired / Suspended / Revoked** — new guest sign-ins are refused; guests
+  already online are not disconnected; DHCP, DNS, the sign-in page and Hotel
+  Admin keep working.
+- **Wrong appliance** — the installed licence was issued for a different
+  appliance; ask your vendor for one for this serial number and upload it.
+- **Licensed capacity reached** — new guests cannot sign in until someone goes
   offline.
-- **Hardware mismatch** — the WAN network card changed; ask Semantics to rebind the
-  license.
-- **Connection to Central** — *Used for: Licensing only*.
+- **The internet (WAN) network adapter has changed** — the licence stays in
+  force; if the adapter was replaced on purpose, ask your vendor to rebind it.
+
+The **OneGate Central** part shows *Connected*, *Temporarily unreachable* or
+*Not configured*. Central is used for licensing and activation only; losing it
+never stops guests.
 
 ---
 
@@ -174,9 +185,10 @@ the guest. Only the Site admin can create or change packages and service plans (
 Site viewer can read them; other roles do not see these pages).
 
 > **License capacity vs. max devices.** The signed license caps the total number
-> of guests online **across the whole appliance**. A service plan's **devices at
-> once** caps the devices **per guest, voucher or account**. Both are checked on
-> every sign-in; a device refused for either reason gets a clear message on the
+> of guests online **across the whole appliance**, whatever the sign-in method —
+> room sign-in, vouchers, guest accounts, OTP and social login share it. A
+> service plan's **devices at once** caps the devices **per guest, voucher or
+> account**. Both are checked on every sign-in; a device refused for either reason gets a clear message on the
 > portal and no session. A device that is already signed in does not use a
 > second place when it reconnects.
 
@@ -353,8 +365,8 @@ normally need to intervene. If you do: **Recheck** re-runs a health check,
 
 | I want to… | Page |
 |---|---|
-| Activate the appliance / enter an enrollment code | System → Appliance & licence → Appliance setup |
-| Install a license file | System → Appliance & licence → Licence |
+| See activation, licence and Central status | System → Appliance & licence |
+| Upload an activation package or licence file | System → Appliance & licence → Files from your OneGate vendor |
 | Change the WAN or management address | Networking → WAN / LAN settings |
 | Add a new guest network | Networking → Guest networks → New guest network |
 | Pin a device to a fixed address | Networking → DHCP & leases → Reservations |

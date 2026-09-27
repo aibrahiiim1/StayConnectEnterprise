@@ -1,39 +1,51 @@
-# StayConnect - CENTRAL CONTROL PLANE Caddyfile.
+# OneGate CENTRAL Caddyfile — a TEMPLATE, rendered by deploy/scripts/central-install.sh (and re-rendered by
+# central-deploy.sh) into /etc/caddy/Caddyfile. Do not install this file verbatim: the three __CENTRAL_*__ tokens
+# are filled from the host's recorded settings (/etc/stayconnect/central-install.env), so the site names and the
+# certificate mode are properties of the installation, not of this repository.
+#
+#   __CENTRAL_SITE_ADDRESSES__  the appliance-facing name FIRST (the host of CTRLAPI_APPLIANCE_BASE in
+#                               deploy/config/central-endpoint.env — appliances reach a vhost that does not answer
+#                               for the name they dialled otherwise), then the admin console name(s), then any
+#                               transition names/IPs. Comma-separated.
+#   __CENTRAL_TLS__             `tls /etc/caddy/tls/server.crt /etc/caddy/tls/server.key` for the internal CA
+#                               (central-mint-tls.sh), or nothing for an automatic public (ACME) certificate.
+#   __CENTRAL_GLOBAL_EXTRA__    `email <addr>` for ACME, or nothing.
 #
 # ROLE BOUNDARY - read this before adding a site block.
 #
 # Central terminates ONE site serving two upstreams by path:
 #
-#   /v1/* /cloud/* /healthz /readyz /metrics -> ctrlapi      127.0.0.1:8080
+#   /v1/* /cloud/* /healthz /readyz          -> ctrlapi      127.0.0.1:8080
 #   everything else                          -> cloud-admin  127.0.0.1:3000
+#
+# /metrics is NOT proxied: it is for a scraper on this host only, and ctrlapi refuses it to anything that
+# is not a direct loopback connection. ctrlapi trusts X-Real-IP (set below, replacing whatever the client
+# sent) ONLY because Caddy connects from loopback; rate limits and the audit log key on that address.
+#
+# The appliance mutual-TLS surface (:9443) is NOT here: ctrlapi terminates it itself, with client-certificate
+# verification against the appliance CA. Caddy must never sit in front of it.
 #
 # It does NOT run portald or hotel-admin. Those are EDGE appliance surfaces
 # (deploy/caddy/Caddyfile.edge) and must not be added here.
 #
-# The site address deliberately does NOT include the machine's bare hostname. It used to read
-# `radius`, inherited from the appliance image this host was cloned from: that both duplicated the
-# appliance's identity and served a name nothing connects by. Central is addressed by IP and by
-# admin.stayconnect.local.
+# AN UNMATCHED HOST GETS AN EMPTY 200. Caddy answers a request for a name no site declares (127.0.0.1, the
+# bare IP when it is not listed) with an empty 200, which an uptime probe reads as healthy. Smoke-test through
+# a configured name: curl --resolve <name>:443:127.0.0.1 https://<name>/readyz
 #
 # `admin off` in the global block disables Caddy's admin API, so `caddy reload` CANNOT work here -
-# apply configuration with `systemctl restart stayconnect-caddy` after validating. The unit's
-# ExecReload is validate-only for exactly that reason.
+# apply configuration with `systemctl restart stayconnect-caddy` after validating. The unit deliberately has
+# no ExecReload (see stayconnect-caddy.central.service).
 #
-# To deploy:
-#   install -m 0644 deploy/caddy/Caddyfile.central /etc/caddy/Caddyfile
 #   caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 #   systemctl restart stayconnect-caddy
 #
 {
 	admin off
 	auto_https disable_redirects
+	__CENTRAL_GLOBAL_EXTRA__
 }
-# THE APPLIANCE-FACING NAME COMES FIRST and is the one that matters: it must match
-# CTRLAPI_APPLIANCE_BASE in deploy/config/central-endpoint.env, or appliances reach a vhost that does not
-# answer for the name they dialled. The IP is kept only so appliances provisioned before the name existed
-# keep working until they are moved; remove it once none are left.
-sc-central.echofusion.com, 150.0.0.252, admin.stayconnect.local {
-	tls /etc/caddy/tls/server.crt /etc/caddy/tls/server.key
+__CENTRAL_SITE_ADDRESSES__ {
+	__CENTRAL_TLS__
 	encode zstd gzip
 	header {
 		Strict-Transport-Security "max-age=31536000"
@@ -41,7 +53,7 @@ sc-central.echofusion.com, 150.0.0.252, admin.stayconnect.local {
 		X-Frame-Options "DENY"
 		-Server
 	}
-	@api path /v1/* /cloud/* /healthz /readyz /metrics
+	@api path /v1/* /cloud/* /healthz /readyz
 	handle @api {
 		reverse_proxy 127.0.0.1:8080 {
 			header_up X-Forwarded-Proto https
@@ -55,6 +67,8 @@ sc-central.echofusion.com, 150.0.0.252, admin.stayconnect.local {
 			header_up X-Real-IP {remote_host}
 		}
 	}
+	# Created (owned by caddy) by central-install.sh BEFORE the first `caddy validate` runs as root: a
+	# root-owned log file makes every later start of the caddy-user service fail to open its log writer.
 	log {
 		output file /var/log/caddy/central.log
 	}
