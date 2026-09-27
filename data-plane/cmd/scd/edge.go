@@ -32,6 +32,14 @@ import (
 // the refusal as a sign-in attempt, but it asks this same function, so the methods cannot disagree about who
 // is refused.
 func (s *server) licenseRefusal(feature string) map[string]any {
+	// An appliance Central deleted after it held a customer admits nobody until it is factory-reset, whatever
+	// licence state a development build would otherwise fall back to (removed_from_central.go).
+	if s.isRemovedFromCentral() {
+		return map[string]any{
+			"error":   removedFromCentralCode,
+			"message": "This appliance was removed from OneGate Central; guest access is unavailable.",
+		}
+	}
 	// Fail CLOSED while a cross-tenant data transition is incomplete: never
 	// authorize a guest until the previous tenant's local data has been fully
 	// purged, so one customer's data can never be exposed under another's ownership.
@@ -80,6 +88,9 @@ func (s *server) licenseGate(w http.ResponseWriter, feature string) bool {
 // licenseInstall: POST /v1/license/install -- the Upload licence file action. Every other licence and
 // activation read goes through /v1/central/status (central.go).
 func (s *server) licenseInstall(w http.ResponseWriter, r *http.Request) {
+	if s.refuseWhileRemoved(w) {
+		return
+	}
 	if s.lic == nil {
 		httpErr(w, http.StatusServiceUnavailable, "license manager unavailable")
 		return

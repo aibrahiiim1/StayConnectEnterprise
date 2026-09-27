@@ -67,6 +67,9 @@ func (s *server) activationJournalPath() string {
 // It generates the identity keypair locally if this appliance has none. The private half never leaves: the
 // request carries the public key and a signature made with the private one, which is the whole proof.
 func (s *server) setupActivationRequest(w http.ResponseWriter, r *http.Request) {
+	if s.refuseWhileRemoved(w) {
+		return
+	}
 	if s.applID != "" {
 		httpErr(w, http.StatusConflict, "this appliance is already enrolled — first activation does not apply")
 		return

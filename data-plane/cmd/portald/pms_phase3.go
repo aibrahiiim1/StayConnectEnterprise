@@ -70,7 +70,7 @@ const (
 // shown to the guest as guestLicenseRefusedMessage.
 func isLicenceRefusal(code string) bool {
 	switch code {
-	case "unlicensed", "license_expired", "feature_not_licensed", "tenant_transition_pending":
+	case "unlicensed", "license_expired", "feature_not_licensed", "tenant_transition_pending", "removed_from_central":
 		return true
 	}
 	return false

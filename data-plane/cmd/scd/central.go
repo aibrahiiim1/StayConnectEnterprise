@@ -192,6 +192,9 @@ type centralInputs struct {
 
 	IdentityFpr, WANMAC, LANMAC, Endpoint string
 	Version, PermissiveBlocked            string
+
+	// Removed: Central deleted this appliance after it held a customer (removed_from_central.go).
+	Removed bool
 }
 
 type centralLicense struct {
@@ -228,6 +231,10 @@ type centralDetails struct {
 	SoftwareVersion   string `json:"software_version,omitempty"`
 	BuildProfile      string `json:"build_profile,omitempty"`
 	PermissiveBlocked string `json:"permissive_blocked,omitempty"`
+	// Reason qualifies a "retired" activation. "removed_from_central": Central deleted this appliance after it
+	// had held a customer; it keeps its data, serves no new guests and will not register again until it is
+	// factory-reset and activated anew.
+	Reason string `json:"reason,omitempty"`
 }
 
 // CentralStatus is the section 8 document.
@@ -380,6 +387,12 @@ func computeCentralStatus(in centralInputs) CentralStatus {
 		// Registered, and no verified granting assignment: absent, refused, or returned to inventory.
 		out.Activation = activationWaiting
 	}
+	if in.Removed {
+		// Whatever the assignment on disk says, Central no longer knows this appliance and it will not
+		// register again: to the operator it is retired, with the reason that tells them what to do.
+		out.Activation = activationRetired
+		out.Details.Reason = removedFromCentralCode
+	}
 	return out
 }
 
@@ -424,6 +437,7 @@ func (s *server) centralInputs(ctx context.Context) centralInputs {
 		Lic: s.licSnapshot(), CentralConfigured: s.ctrlBase != "",
 		IdentityFpr: s.identityKeyFpr, WANMAC: s.hw.WANMAC, LANMAC: s.hw.LANMAC, Endpoint: s.ctrlBase,
 		Version: scdVersion, PermissiveBlocked: s.permissiveBlocked,
+		Removed: s.isRemovedFromCentral(),
 	}
 	var doc *assignment.Document
 	in.Asg, doc = s.resolveOwnAssignment(now)
@@ -468,7 +482,8 @@ func (s *server) centralRefresh(w http.ResponseWriter, r *http.Request) {
 	wg.Add(1)
 	go func() { defer wg.Done(); diag = s.networkChecks(ctx) }()
 
-	if s.ctrlBase != "" {
+	// A removed appliance does not talk to Central at all: Check now only re-reads the local state.
+	if s.ctrlBase != "" && !s.isRemovedFromCentral() {
 		if s.applID == "" {
 			if s.reg != nil {
 				_, _ = s.reg.attempt(ctx) // on success the registrar re-execs scd shortly after we answer
@@ -573,6 +588,9 @@ func (s *server) helloRaw(ctx context.Context) (int, []byte, error) {
 // or an offline LICENCE package for an appliance that is already activated. The appliance tells them apart by
 // shape and verifies each on its own terms.
 func (s *server) centralOfflinePackage(w http.ResponseWriter, r *http.Request) {
+	if s.refuseWhileRemoved(w) {
+		return
+	}
 	raw, err := io.ReadAll(io.LimitReader(r.Body, 2<<20))
 	if err != nil || len(bytes.TrimSpace(raw)) == 0 {
 		httpErr(w, http.StatusBadRequest, "empty upload")

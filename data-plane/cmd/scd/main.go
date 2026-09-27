@@ -149,6 +149,11 @@ func envOr(k, d string) string {
 	return d
 }
 
+// restartSCDUnit restarts this service through systemd so every subsystem starts over.
+func restartSCDUnit() {
+	_ = exec.Command("systemctl", "restart", "stayconnect-scd").Run()
+}
+
 // removeDirContents best-effort deletes everything inside dir (used for orphan
 // self-reset), leaving the directory itself in place.
 func removeDirContents(dir string) error {
@@ -277,6 +282,13 @@ type server struct {
 	// attempt to enable permissive/dev licensing (env var or dev-mode marker).
 	// Surfaced in the license status so Hotel Admin shows the critical alert.
 	permissiveBlocked string
+
+	// removed is set when Central deleted this appliance after it had held a customer
+	// (removed_from_central.go). While set: no new guests, no registration, no Central agent, no licence or
+	// activation import -- a factory-clean install is the only way back. It survives restarts on disk.
+	removed atomic.Pointer[removedRecord]
+	// restartFn replaces the systemd restart in tests.
+	restartFn func()
 }
 
 func (s *server) currentPMSReg() *pms.Registry {
@@ -495,13 +507,20 @@ func main() {
 	// with Central, token-less (identity.Register); the first attempt happens here, and if Central cannot be
 	// reached the registration loop keeps retrying in the background (registration.go).
 	central := &centralContact{}
+	// REMOVED FROM CENTRAL (removed_from_central.go): an appliance Central deleted after it held a customer
+	// never registers again, under any key, until it is factory-reset. Read before anything could register.
+	removedRec := loadRemoved(removedMarkerPath())
+	if removedRec != nil {
+		slog.Warn("this appliance was removed from OneGate Central after holding a customer: it admits no new guests, "+
+			"does not register and does not contact Central until it is factory-reset", "since", removedRec.At)
+	}
 	idStore := &identity.Store{Dir: c.IdentityDir}
 	ident, err := idStore.LoadBound()
 	if err != nil {
 		slog.Error("identity: load failed", "err", err)
 		os.Exit(1)
 	}
-	if ident == nil && c.AutoRegister && c.CtrlAPIBase != "" {
+	if ident == nil && mayRegister(c.AutoRegister, c.CtrlAPIBase, removedRec) {
 		rctx, rcancel := context.WithTimeout(rootCtx, 10*time.Second)
 		ident, err = idStore.Register(rctx, c.CtrlAPIBase, nil)
 		rcancel()
@@ -654,6 +673,12 @@ func main() {
 		}
 	}
 
+	if removedRec != nil {
+		s.removed.Store(removedRec)
+	}
+	// Central agents run only for an appliance Central still knows.
+	talksToCentral := c.CtrlAPIBase != "" && removedRec == nil
+
 	// Identity state + Central contact tracking.
 	s.idStore = idStore
 	s.central = central
@@ -665,7 +690,7 @@ func main() {
 		if raw, err := base64.RawStdEncoding.DecodeString(ident.PublicKeyB64); err == nil && len(raw) == ed25519.PublicKeySize {
 			s.identityKeyFpr = applianceauth.KeyID(ed25519.PublicKey(raw))
 		}
-	} else if c.AutoRegister && c.CtrlAPIBase != "" {
+	} else if mayRegister(c.AutoRegister, c.CtrlAPIBase, removedRec) {
 		// KEEP TRYING while unregistered (F2). On success scd re-executes so every Central agent starts with the
 		// new identity (registration.go explains why a re-exec rather than a late start).
 		s.reg = newRegistrar(
@@ -688,7 +713,7 @@ func main() {
 	// without) a certificate being issued. It verifies the vendor signature + its
 	// own binding + a monotonic version, persists atomically, repoints local
 	// guest-network ownership, and re-execs scd so every subsystem adopts it.
-	if ident != nil && c.CtrlAPIBase != "" {
+	if ident != nil && talksToCentral {
 		s.startAssignmentAgent(rootCtx, c.CtrlAPIBase)
 		// Offline packages consumed locally are offered to Central until it confirms them (central_retry.go).
 		go s.offlineReconcileLoop(rootCtx)
@@ -730,7 +755,7 @@ func main() {
 	// enforced atomically inside session creation -- it now lives in the IAM-v2 activation transaction
 	// (iamv2_session_activate.go), which reads s.lic itself. Central availability plays no part in guest
 	// authorization.
-	if ident != nil && c.CtrlAPIBase != "" {
+	if ident != nil && talksToCentral {
 		// Every fetch outcome feeds the Central contact record. While no licence is installed the loop asks
 		// every minute (F10); once licensed, every six hours; Check now and a newly adopted assignment kick it.
 		s.lic.OnFetch(func(err error) { central.record(err, time.Now()) })
@@ -1005,7 +1030,7 @@ func main() {
 	// yields connection errors / 5xx / timeouts, never a definitive 401
 	// "not enrolled", so a reset can only ever be triggered by a real deletion
 	// (and only after a second confirming call).
-	if ident != nil && c.CtrlAPIBase != "" {
+	if ident != nil && talksToCentral {
 		orphan := func(code int, b []byte) bool {
 			l := strings.ToLower(string(b))
 			return code == 401 && (strings.Contains(l, "not enrolled") || strings.Contains(l, "unknown appliance") || strings.Contains(l, "not found"))
@@ -1023,13 +1048,11 @@ func main() {
 			if c.AutoRegister && orphan(code, body) {
 				time.Sleep(3 * time.Second)
 				if code2, b2, _ := s.helloRaw(context.Background()); orphan(code2, b2) {
-					slog.Warn("hello: appliance unknown to Central (deleted) — self-resetting to re-register as waiting")
-					for _, p := range []string{c.IdentityDir, envOr("SCD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment"), c.LicenseDir} {
-						_ = removeDirContents(p)
-					}
-					_ = os.Remove(c.CertDir + "/client.crt")
-					_ = os.Remove(c.CertDir + "/mtls-client.key")
-					_ = exec.Command("systemctl", "restart", "stayconnect-scd").Run()
+					// Whether it may register again depends on whether it ever held a customer.
+					s.handleConfirmedOrphan(rootCtx, orphanPaths{
+						IdentityDir: c.IdentityDir, AssignmentDir: envOr("SCD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment"),
+						LicenseDir: c.LicenseDir, CertDir: c.CertDir, Marker: removedMarkerPath(),
+					})
 				}
 			}
 		}
@@ -1058,7 +1081,7 @@ func main() {
 	// (CSR→issue→fetch→store), verify the mTLS transport, then rotate before
 	// expiry. Runs alongside the signed-JWT layer (defence in depth); a failure
 	// here never affects local guest operation.
-	if ident != nil && c.CtrlAPIBase != "" && c.MTLSBase != "" {
+	if ident != nil && talksToCentral && c.MTLSBase != "" {
 		certMgr := appliancecert.New(c.CertDir, c.CtrlAPIBase, c.MTLSBase, ident.ApplianceID, ident.PrivateKey())
 		s.certMgr = certMgr
 		// Every bootstrap attempt tells us whether Central is answering -- including while the appliance waits

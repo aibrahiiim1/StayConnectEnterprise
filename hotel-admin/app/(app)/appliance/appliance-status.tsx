@@ -92,6 +92,23 @@ export function activationWords(st: CentralStatus): { title: string; tone: Tone;
           : "This appliance is activated.",
       };
     case "retired":
+      // REMOVED FROM CENTRAL: Central deleted this appliance after it had held a customer. It keeps that
+      // customer's data, serves no new guests and will not register again by itself -- changing customer goes
+      // through a factory-clean install and a new activation, never in place.
+      if (st.details?.reason === "removed_from_central") {
+        return {
+          title: "Removed from OneGate Central",
+          tone: "err",
+          body: (
+            <>
+              This appliance was removed from OneGate Central. To use it again, factory-reset it and have your vendor
+              activate it. Guests already online are not disconnected; nobody new can sign in. The factory-clean
+              procedure is described in <strong>Factory-clean install and disaster recovery</strong> (ask your
+              OneGate vendor).
+            </>
+          ),
+        };
+      }
       return {
         title: "Retired",
         tone: "err",

@@ -667,6 +667,12 @@ export type CentralStatus = {
     software_version?: string;
     build_profile?: string;
     permissive_blocked?: string;
+    /**
+     * Qualifies a "retired" activation. "removed_from_central": Central deleted this appliance after it had
+     * held a customer -- it keeps its data, admits no new guests and needs a factory-clean install and a new
+     * activation to be used again.
+     */
+    reason?: string;
   };
 };
 

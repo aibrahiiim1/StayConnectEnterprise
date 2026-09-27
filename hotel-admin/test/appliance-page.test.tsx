@@ -123,6 +123,15 @@ describe("activation states", () => {
     expect(region("Activation").getByText(/no longer signs guests in/)).toBeTruthy();
   });
 
+  it("removed from Central: says so plainly and points to a factory reset and a new activation", async () => {
+    serve(status({ activation: "retired", details: { reason: "removed_from_central" } }));
+    await renderPage();
+    const act = region("Activation");
+    expect(act.getByText("Removed from OneGate Central")).toBeTruthy();
+    expect(act.getByText(/This appliance was removed from OneGate Central\. To use it again, factory-reset it and have your vendor\s+activate it\./)).toBeTruthy();
+    expect(act.queryByText(/no longer signs guests in/)).toBeNull();
+  });
+
   it("an activation the appliance cannot verify is surfaced, not reported as a quiet wait", async () => {
     serve(status({ activation: "waiting", details: { assignment_status: "unverifiable" } }));
     await renderPage();

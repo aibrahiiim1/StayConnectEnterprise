@@ -26,7 +26,7 @@ func TestLicenceRefusalsReadTheSameForEveryMethod(t *testing.T) {
 			t.Errorf("the %s refusal mentions %q", class, term)
 		}
 	}
-	for _, code := range []string{"unlicensed", "license_expired", "feature_not_licensed", "tenant_transition_pending"} {
+	for _, code := range []string{"unlicensed", "license_expired", "feature_not_licensed", "tenant_transition_pending", "removed_from_central"} {
 		if !isLicenceRefusal(code) {
 			t.Errorf("%s is a licence refusal", code)
 		}
