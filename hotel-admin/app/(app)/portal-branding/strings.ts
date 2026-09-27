@@ -133,6 +133,8 @@ export const PORTAL_STRINGS: { group: string; key: string; english: string }[] =
   { group: "Messages", key: "err.account.empty", english: "Please enter your username and password." },
   { group: "Messages", key: "err.account.invalid", english: "The username or password is incorrect." },
   { group: "Messages", key: "err.account.devices", english: "This account has reached its device limit. Disconnect another device and try again." },
+  { group: "Messages", key: "err.room.devices", english: "This room has reached its device limit. Disconnect another device and try again." },
+  { group: "Messages", key: "err.method.disabled", english: "This sign-in method is not available. Please ask reception." },
   { group: "Messages", key: "err.capacity", english: "The guest network is at capacity. Please try again shortly." },
   { group: "Messages", key: "err.device.network", english: "Your device isn't on the guest network." },
   { group: "Messages", key: "err.device.detect", english: "Unable to detect your device address." },

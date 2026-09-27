@@ -129,6 +129,7 @@ func (t *pgCommerceTx) ResolveActivePackageRevision(ctx context.Context, tenantI
 	var display, duration []byte
 	var settlement []string
 	var cexp *int
+	var cur *string // NULL for a system grace package; see ListActivePackageRevisions
 	err := t.tx.QueryRow(ctx,
 		`SELECT r.id::text, r.package_id::text, r.service_plan_revision_id::text, r.package_type,
 		        r.price_minor, r.currency, r.currency_exponent, r.settlement_methods,
@@ -138,13 +139,16 @@ func (t *pgCommerceTx) ResolveActivePackageRevision(ctx context.Context, tenantI
 		   JOIN iam_v2.internet_package_revisions r ON r.id = p.current_revision_id
 		  WHERE p.tenant_id=$1 AND p.site_id=$2 AND p.id=$3`,
 		tenantID, siteID, packageID).Scan(&row.ID, &row.PackageID, &row.PlanRevisionID, &row.PackageType,
-		&row.PriceMinor, &row.Currency, &cexp, &settlement, &row.VisibleFrom, &row.VisibleUntil,
+		&row.PriceMinor, &cur, &cexp, &settlement, &row.VisibleFrom, &row.VisibleUntil,
 		&row.PackageActive, &row.IsCurrent, &display, &duration)
 	if err == pgx.ErrNoRows {
 		return PackageRevisionRow{}, &Error{Code: ErrInvalidInput, Msg: "package_not_found"}
 	}
 	if err != nil {
 		return PackageRevisionRow{}, err
+	}
+	if cur != nil {
+		row.Currency = *cur
 	}
 	if cexp != nil {
 		row.CurrencyExponent = *cexp
@@ -182,10 +186,18 @@ func (t *pgCommerceTx) ListActivePackageRevisions(ctx context.Context, tenantID,
 		var display, duration []byte
 		var settlement []string
 		var cexp *int
+		// CURRENCY IS NULLABLE, and one row always has it NULL: the system emergency-grace package edged
+		// provisions on every site carries no currency. Scanning it into a string failed the whole query, so
+		// every guest -- voucher, account, any method -- was told no packages existed. A NULL currency reads as
+		// "" and the free-package/currency gates exclude that row, as they would any unofferable package.
+		var cur *string
 		if err := rows.Scan(&row.ID, &row.PackageID, &row.PlanRevisionID, &row.PackageType,
-			&row.PriceMinor, &row.Currency, &cexp, &settlement, &row.VisibleFrom, &row.VisibleUntil,
+			&row.PriceMinor, &cur, &cexp, &settlement, &row.VisibleFrom, &row.VisibleUntil,
 			&row.PackageActive, &row.IsCurrent, &display, &duration); err != nil {
 			return nil, err
+		}
+		if cur != nil {
+			row.Currency = *cur
 		}
 		if cexp != nil {
 			row.CurrencyExponent = *cexp

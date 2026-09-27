@@ -1522,16 +1522,21 @@ const successHTML = guestHead + `
     function devices(d){ return fill(cx('cx.devices'), 'n', num(d.max_concurrent_devices||1)); }
     function unavailable(msg){ note.className='cx-err'; note.textContent = msg||cx('cx.unavailable'); }
     function clearNote(){ note.className=''; note.textContent=''; }
+    // NOTHING TO OFFER IS NOT AN ERROR ON THIS PAGE. The guest reading it is already online: the sign-in that
+    // got them here is spent, so the list is refused or empty. Showing "unavailable" or "none" under a
+    // success message reads as if their connection failed, so the panel simply goes away.
+    var panel = document.getElementById('commerce');
+    function nothingToOffer(){ panel.hidden = true; }
     function loadPackages(){
       clearNote();
       fetch('/api/commerce/packages', {headers:{'Accept':'application/json'}}).then(function(r){
-        if(!r.ok){ list.textContent=''; list.removeAttribute('aria-busy'); unavailable(); return null; }
+        if(!r.ok){ nothingToOffer(); return null; }
         return r.json();
       }).then(function(data){
         if(!data){ return; }
         list.removeAttribute('aria-busy');
         var pkgs = (data.packages||[]);
-        if(pkgs.length===0){ list.textContent=cx('cx.none'); return; }
+        if(pkgs.length===0){ nothingToOffer(); return; }
         list.innerHTML='';
         pkgs.forEach(function(p){
           var d = p.display||{};
@@ -1553,7 +1558,7 @@ const successHTML = guestHead + `
           el.appendChild(btn);
           list.appendChild(el);
         });
-      }).catch(function(){ unavailable(); });
+      }).catch(function(){ nothingToOffer(); });
     }
     function requestQuote(pkgId, btn){
       if(busy) return; busy=true; if(btn) btn.disabled=true; clearNote();

@@ -57,6 +57,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/social"
 	"github.com/stayconnect/enterprise/data-plane/internal/socialloader"
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
+	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
 	"github.com/stayconnect/enterprise/data-plane/internal/throttle"
 	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 	lic "github.com/stayconnect/enterprise/license"
@@ -177,12 +178,15 @@ func removeDirContents(dir string) error {
 }
 
 type server struct {
-	nft       *nftSync // wraps nft.Client with NATS replication; API unchanged
-	shp       *shape.Client
-	mail      mail.Mailer
-	sms       sms.Sender
-	socialReg *social.Registry
-	loginRL   *loginLimiter // layered throttling for guest username/password logins (optional fast in-memory layer)
+	// methodSwitches reads Hotel Admin's guest sign-in method switches; nil means tenants.auth_methods via
+	// tenantcfg.Load. A test with no database supplies its own (guest_method_switch.go).
+	methodSwitches func(ctx context.Context) (*tenantcfg.AuthMethods, error)
+	nft            *nftSync // wraps nft.Client with NATS replication; API unchanged
+	shp            *shape.Client
+	mail           mail.Mailer
+	sms            sms.Sender
+	socialReg      *social.Registry
+	loginRL        *loginLimiter // layered throttling for guest username/password logins (optional fast in-memory layer)
 
 	// Phase 1B dark-auth machinery. All are inert unless explicitly enabled at deploy time:
 	//   - authThrottle: durable, DB-backed authoritative throttle (D4). nil => legacy in-memory only.
@@ -372,6 +376,9 @@ func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 	mac, err := net.ParseMAC(req.MAC)
 	if err != nil {
 		httpErr(w, http.StatusBadRequest, "bad mac")
+		return
+	}
+	if s.refuseDisabledMethod(w, r, guestMethodVoucher) {
 		return
 	}
 	// Durable auth throttle (authoritative; no-op unless enabled). Charged before validation so a

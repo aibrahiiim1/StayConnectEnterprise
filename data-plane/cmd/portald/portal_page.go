@@ -384,6 +384,8 @@ var serverMessageKeys = map[string]string{
 	"Please enter your username and password.":                                            "err.account.empty",
 	"Invalid username or password.":                                                       "err.account.invalid",
 	"This account has reached its device limit. Disconnect another device and try again.": "err.account.devices",
+	"This room has reached its device limit. Disconnect another device and try again.":    "err.room.devices",
+	"This sign-in method is not available. Please ask reception.":                         "err.method.disabled",
 	"Too many attempts. Please wait a minute and try again.":                              "err.attempts",
 	"The guest network is at capacity. Please try again shortly.":                         "err.capacity",
 	"Your device isn't on the guest network.":                                             "err.device.network",

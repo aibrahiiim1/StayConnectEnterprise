@@ -54,10 +54,15 @@ const (
 // guestAuthMessages is the CLOSED SET. A test walks it to prove that every sentence a guest can receive
 // discloses nothing about the property, and callers resolve through messageForClass rather than writing a
 // string at a call site — a fourth sentence added somewhere else is the drift this exists to prevent.
+// guestRoomDeviceLimitMessage names no room, stay or system: it tells the guest the one thing they can act on.
+const guestRoomDeviceLimitMessage = "This room has reached its device limit. Disconnect another device and try again."
+
 var guestAuthMessages = map[string]string{
 	"CREDENTIAL": guestAuthMessage,
 	"TECHNICAL":  guestAuthTechnicalMessage,
 	"POST_STAY":  guestPostStayMessage,
+	// DEVICE_LIMIT: the stay's access is fine and has no free device slot.
+	"DEVICE_LIMIT": guestRoomDeviceLimitMessage,
 	// RATE_LIMITED is deliberately absent: it is the one class whose sentence carries a NUMBER, so it is
 	// produced by guestAuthRateLimitedMessage below rather than looked up. leaksDetail knows about both.
 }

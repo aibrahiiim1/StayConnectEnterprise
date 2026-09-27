@@ -46,6 +46,9 @@ func (s *server) authorizeGuestAccount(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "bad mac")
 		return
 	}
+	if s.refuseDisabledMethod(w, r, guestMethodAccount) {
+		return
+	}
 	username := strings.TrimSpace(req.Username)
 
 	// IAM-v2 IS THE GUEST AUTHORITY for account credentials. The superseded public.guest_accounts lookup,

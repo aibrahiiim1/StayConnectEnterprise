@@ -91,3 +91,38 @@ func TestListEligiblePackagesAuthPin(t *testing.T) {
 		t.Fatalf("wrong-device list must deny with no packages: %+v", res)
 	}
 }
+
+// THE SYSTEM GRACE PACKAGE MUST NOT EMPTY EVERY GUEST'S LIST.
+//
+// edged provisions an emergency-grace system package on every site, and its revision carries NO currency.
+// The listing scanned currency into a string, so that one NULL failed the whole query: every guest -- any
+// method -- was told no packages existed, while a quote for a known package id still worked. Found on
+// PRE-LIVE when guest access was first enabled. The NULL-currency row must simply be excluded.
+func TestListEligiblePackagesSurvivesNullCurrencyPackage(t *testing.T) {
+	db := p2DB(t)
+	ctx := context.Background()
+	s := seedFreeCommerce(t, db, nil)
+	e := newEngine(t, db, 5*time.Minute)
+	gPkg := scan1(t, db, `INSERT INTO iam_v2.internet_packages (tenant_id,site_id,code,active) VALUES ($1,$2,'SYS_EMERGENCY_GRACE',true) RETURNING id::text`, p2Tenant, p2Site)
+	gRev := scan1(t, db, `INSERT INTO iam_v2.internet_package_revisions
+		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent,settlement_methods,duration_policy,display)
+		VALUES ($1,$2,$3,1,$4,'GENERAL',0,NULL,NULL,'{NOT_REQUIRED}','{"end_mode":"MANUAL_END"}'::jsonb,'{}'::jsonb) RETURNING id::text`,
+		p2Tenant, p2Site, gPkg, s.planRevID)
+	if _, err := db.Exec(ctx, `UPDATE iam_v2.internet_packages SET current_revision_id=$1 WHERE id=$2`, gRev, gPkg); err != nil {
+		t.Fatalf("grace pointer: %v", err)
+	}
+	res, err := e.ListEligiblePackages(ctx, PackageListRequest{
+		TenantID: p2Tenant, SiteID: p2Site, AuthContextID: s.authCtxID, DeviceID: s.deviceID, GuestNetworkID: p2GN,
+	})
+	if err != nil || res.Reason != "ok" {
+		t.Fatalf("a NULL-currency package must not fail the list: %+v %v", res, err)
+	}
+	if len(res.Packages) != 1 || res.Packages[0].PackageID != s.packageID {
+		t.Fatalf("the offerable package must still be listed, and only it: %+v", res.Packages)
+	}
+	q, err := e.CreateQuote(ctx, QuoteRequest{TenantID: p2Tenant, SiteID: p2Site, AuthContextID: s.authCtxID,
+		DeviceID: s.deviceID, GuestNetworkID: p2GN, PackageID: gPkg})
+	if err != nil || q.QuoteID != "" || q.Reason == "" {
+		t.Fatalf("the NULL-currency package must be refused as a quote with a reason: %+v %v", q, err)
+	}
+}
