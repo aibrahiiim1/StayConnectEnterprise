@@ -1,18 +1,20 @@
 "use client";
 
-// The small pieces: a loading placeholder, a meter, a toggle, a divider, a copyable identifier, a
-// definition list and an inline metric. Each one exists because three or more screens were building it inline.
+// The small pieces: a loading placeholder, a meter, a toggle and a copyable identifier. Each one exists
+// because three or more screens were building it inline.
 
 import * as React from "react";
 import * as SwitchPrimitive from "@radix-ui/react-switch";
-import * as SeparatorPrimitive from "@radix-ui/react-separator";
 import { Check, Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip } from "./tooltip";
 
-/** Skeleton — a shaped placeholder. "Loading…" as body text makes a page jump when the real content lands. */
+/**
+ * Skeleton — a shaped placeholder. "Loading…" as body text makes a page jump when the real content lands.
+ * Under reduced motion it stops pulsing and stays as a static tint: the shape still says "loading".
+ */
 export function Skeleton({ className }: { className?: string }) {
-  return <div className={cn("animate-pulse rounded-md bg-surface", className)} />;
+  return <div className={cn("animate-pulse rounded-md bg-surface motion-reduce:animate-none", className)} />;
 }
 
 export function SkeletonRows({ rows = 5, cols = 4 }: { rows?: number; cols?: number }) {
@@ -27,25 +29,6 @@ export function SkeletonRows({ rows = 5, cols = 4 }: { rows?: number; cols?: num
         </div>
       ))}
     </div>
-  );
-}
-
-export function Separator({
-  orientation = "horizontal",
-  className,
-}: {
-  orientation?: "horizontal" | "vertical";
-  className?: string;
-}) {
-  return (
-    <SeparatorPrimitive.Root
-      orientation={orientation}
-      className={cn(
-        "shrink-0 bg-border",
-        orientation === "horizontal" ? "h-px w-full" : "h-full w-px",
-        className,
-      )}
-    />
   );
 }
 
@@ -191,54 +174,5 @@ export function MonoId({
         )}
       </button>
     </Tooltip>
-  );
-}
-
-/** DList — a definition list with a consistent label column. The admin has dozens of these, all different. */
-export function DList({
-  items,
-  columns = 2,
-  className,
-}: {
-  items: { label: React.ReactNode; value: React.ReactNode; span?: boolean }[];
-  columns?: 1 | 2 | 3;
-  className?: string;
-}) {
-  const grid =
-    columns === 1 ? "sm:grid-cols-1" : columns === 3 ? "sm:grid-cols-3" : "sm:grid-cols-2";
-  return (
-    <dl className={cn("grid grid-cols-1 gap-x-8 gap-y-3", grid, className)}>
-      {items.map((it, i) => (
-        <div key={i} className={cn("min-w-0", it.span && "sm:col-span-full")}>
-          <dt className="text-xs font-medium text-muted-foreground">{it.label}</dt>
-          <dd className="mt-0.5 break-words text-sm text-foreground">{it.value}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
-
-/** Metric — a label over a figure, for use inside a card that already has a title. */
-export function Metric({
-  label, value, sub, tone, className,
-}: {
-  label: React.ReactNode;
-  value: React.ReactNode;
-  sub?: React.ReactNode;
-  tone?: "default" | "ok" | "warn" | "err";
-  className?: string;
-}) {
-  const colors: Record<string, string> = {
-    default: "text-foreground",
-    ok: "text-success",
-    warn: "text-warning",
-    err: "text-destructive",
-  };
-  return (
-    <div className={cn("min-w-0", className)}>
-      <div className="truncate text-xs font-medium text-muted-foreground">{label}</div>
-      <div className={cn("mt-0.5 text-lg font-semibold tabular", colors[tone ?? "default"])}>{value}</div>
-      {sub && <div className="mt-0.5 truncate text-xs text-muted-foreground">{sub}</div>}
-    </div>
   );
 }

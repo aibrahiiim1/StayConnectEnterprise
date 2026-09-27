@@ -20,8 +20,8 @@
   face is what lets the 650 "emphasis" weight render.
 
   THE LEGACY NAMES STILL WORK. tailwind.config.ts maps the old `bg / panel / panel2 / border / muted / text /
-  brand / ok / warn / err` onto these roles, so the two retired pages (/commercial, /subscription), which are
-  not redesigned, still render in both themes.
+  brand / ok / warn / err` onto these roles, so any screen still written in that vocabulary renders in both
+  themes.
 */
 
 @layer base {
@@ -79,12 +79,13 @@
   /* RESTRAINED MOTION, AND NONE AT ALL WHEN THE OPERATOR HAS ASKED FOR NONE.
      A width transition is the one animation here; it is short enough to read as a state change rather than an
      effect. `prefers-reduced-motion` is honoured by removing the transition entirely rather than shortening
-     it: the setting means "do not animate", not "animate faster". */
+     it: the setting means "do not animate", not "animate faster". Overlays, toasts and skeletons opt out
+     individually with `motion-reduce:` utilities. */
   @media (prefers-reduced-motion: reduce) {
     .sidebar-motion,
     .sidebar-motion * {
-      transition-duration: 0.01ms !important;
-      animation-duration: 0.01ms !important;
+      transition: none !important;
+      animation: none !important;
     }
   }
 }

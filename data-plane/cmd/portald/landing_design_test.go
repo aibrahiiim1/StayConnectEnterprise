@@ -309,8 +309,18 @@ func TestArabicIsLaidOutRightToLeft(t *testing.T) {
 		t.Errorf("right-to-left languages are %v; Arabic and only Arabic should be", rtl)
 	}
 	html := renderLanding(t, "10.77.0.42", "")
-	if !strings.Contains(html, `document.documentElement.dir = (meta && meta.rtl) ? 'rtl' : 'ltr'`) {
+	if !strings.Contains(html, `document.documentElement.dir = isRTL(code) ? 'rtl' : 'ltr'`) {
 		t.Error("the page direction does not follow the chosen language")
+	}
+	// A language the hotel added (Hebrew, Persian, Urdu) reads right to left in the script exactly as the server
+	// renders it (rtlCode): the script's list and the server's rule agree code for code.
+	if !strings.Contains(html, `return ['ar', 'he', 'fa', 'ur'].indexOf(`) {
+		t.Error("the script does not judge a hotel-added language's direction by its code")
+	}
+	for _, code := range []string{"ar", "he", "fa", "ur", "fa-IR"} {
+		if !rtlCode(code) {
+			t.Errorf("rtlCode(%q) is false; the script treats it as right to left", code)
+		}
 	}
 	for _, sel := range []string{`[dir="rtl"] .langbar`, `[dir="rtl"] .info-btn`} {
 		if !strings.Contains(html, sel) {

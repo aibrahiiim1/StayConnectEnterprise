@@ -38,6 +38,7 @@ import { ConnectionSheet, type SheetTab } from "./connection-sheet";
 import { AddConnectionWizard } from "./add-connection-wizard";
 import { HelpList, HelpSection } from "@/components/help";
 import { ChevronDown, ChevronRight, Hotel, Plus, RefreshCw } from "lucide-react";
+import { usePoll } from "@/lib/use-poll";
 
 type Filter = "all" | "attention" | "working";
 
@@ -102,10 +103,7 @@ export default function PMSInterfacesPage() {
 
   // A SLOW POLL WHILE MOUNTED, FASTER WHILE ANY GUEST LIST IS LOADING.
   const anySyncing = Object.values(health).some(isSyncing);
-  useEffect(() => {
-    const t = setInterval(() => void load(), anySyncing ? 4000 : 20000);
-    return () => clearInterval(t);
-  }, [anySyncing, load]);
+  usePoll(() => void load(), anySyncing ? 4000 : 20000);
 
   const writable = canWrite("pms-interfaces", roles);
   const list = rows ?? [];

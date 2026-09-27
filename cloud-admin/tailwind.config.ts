@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import plugin from "tailwindcss/plugin";
 
 // THE TOKEN MAP. Every colour here resolves to a CSS variable defined in app/globals.css, so switching theme
 // is a class on <html> and not a second copy of the palette.
@@ -95,6 +96,7 @@ const config: Config = {
         },
         input: token("--input"),
         ring: token("--ring"),
+        scrim: token("--scrim"),
 
         sidebar: {
           DEFAULT: token("--sidebar"),
@@ -201,6 +203,14 @@ const config: Config = {
       },
     },
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [
+    require("tailwindcss-animate"),
+    // TOUCH TARGETS GROW ONLY WHERE A FINGER IS THE POINTER. The desktop console is dense on purpose; a 44px
+    // floor there would cost every table a third of its rows. `pointer-coarse:` is Tailwind 4.1's name for the
+    // same media query, so the call sites will not change when this config moves to v4.
+    plugin(({ addVariant }) => {
+      addVariant("pointer-coarse", "@media (pointer: coarse)");
+    }),
+  ],
 };
 export default config;

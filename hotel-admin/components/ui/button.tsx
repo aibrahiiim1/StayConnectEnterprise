@@ -36,12 +36,13 @@ const buttonVariants = cva(
         link: "bg-transparent text-primary underline-offset-4 hover:underline px-0",
       },
       size: {
-        xs: "h-7 px-2 text-xs [&_svg]:size-3.5",
-        sm: "h-8 px-3 text-[0.8125rem] font-semibold [&_svg]:size-4",
-        md: "h-9 px-3.5 text-[0.8125rem] font-semibold [&_svg]:size-4",
+        // `pointer-coarse:` lifts every size to a 44px target on touch screens; mouse density is unchanged.
+        xs: "h-7 px-2 text-xs [&_svg]:size-3.5 pointer-coarse:min-h-11",
+        sm: "h-8 px-3 text-[0.8125rem] font-semibold [&_svg]:size-4 pointer-coarse:min-h-11",
+        md: "h-9 px-3.5 text-[0.8125rem] font-semibold [&_svg]:size-4 pointer-coarse:min-h-11",
         lg: "h-11 px-5 text-sm font-semibold [&_svg]:size-4",
-        icon: "h-9 w-9 p-0 [&_svg]:size-4",
-        "icon-sm": "h-8 w-8 p-0 [&_svg]:size-4",
+        icon: "h-9 w-9 p-0 [&_svg]:size-4 pointer-coarse:size-11",
+        "icon-sm": "h-8 w-8 p-0 [&_svg]:size-4 pointer-coarse:size-11",
       },
     },
     defaultVariants: { variant: "primary", size: "md" },

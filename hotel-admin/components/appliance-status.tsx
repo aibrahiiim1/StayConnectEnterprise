@@ -9,32 +9,34 @@
 // The pill is deliberately terse — a dot and a word — and the tooltip carries the detail, including the
 // outbox figures in sentences rather than as two bare integers.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { api, EdgeHealth } from "@/lib/api";
 import { Tooltip } from "@/components/ui/tooltip";
 import { StatusDot } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { describeOutbox } from "@/lib/health-words";
+import { usePoll } from "@/lib/use-poll";
 
 export function ApplianceStatus({ className }: { className?: string }) {
   const [health, setHealth] = useState<EdgeHealth | null>(null);
   const [failed, setFailed] = useState(false);
 
-  useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      try {
-        const h = await api.get<EdgeHealth>("/health");
-        if (alive) { setHealth(h); setFailed(false); }
-      } catch {
-        if (alive) setFailed(true);
-      }
-    };
-    void load();
-    const iv = setInterval(load, 30_000);
-    return () => { alive = false; clearInterval(iv); };
+  const alive = useRef(true);
+  const load = useCallback(async () => {
+    try {
+      const h = await api.get<EdgeHealth>("/health");
+      if (alive.current) { setHealth(h); setFailed(false); }
+    } catch {
+      if (alive.current) setFailed(true);
+    }
   }, []);
+  useEffect(() => {
+    alive.current = true;
+    void load();
+    return () => { alive.current = false; };
+  }, [load]);
+  usePoll(() => void load(), 30_000);
 
   if (!health && !failed) {
     return <span className={cn("h-8 w-8 animate-pulse rounded-full bg-surface sm:w-24", className)} />;

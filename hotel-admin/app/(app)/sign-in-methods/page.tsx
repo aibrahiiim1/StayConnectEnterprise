@@ -365,7 +365,7 @@ export default function SignInMethodsPage() {
                 </div>
                 <p className="text-xs text-muted-foreground">
                   Which property management system a guest is checked against is decided by their network, in{" "}
-                  <Link href="/pms-routing" className="text-primary underline-offset-4 hover:underline">Network routing</Link>.
+                  <Link href="/pms-routing" className="text-primary underline underline-offset-2 hover:decoration-2">Network routing</Link>.
                 </p>
               </fieldset>
               </div>
@@ -415,7 +415,7 @@ export default function SignInMethodsPage() {
               <div className="flex flex-wrap items-center gap-2 text-sm">
                 <Badge tone="default">Not available</Badge>
                 <span className="text-muted-foreground">No social provider is configured.</span>
-                <Link href="/social-providers" className="inline-flex items-center gap-0.5 text-primary underline-offset-4 hover:underline">
+                <Link href="/social-providers" className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2 hover:decoration-2">
                   Set one up in Social login <ArrowUpRight className="size-3.5" aria-hidden />
                 </Link>
               </div>

@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import plugin from "tailwindcss/plugin";
 
 // THE TOKEN MAP. Every colour here resolves to a CSS variable defined in app/globals.css, so switching theme
 // is a class on <html> and not a second copy of the palette.
@@ -95,6 +96,7 @@ const config: Config = {
         },
         input: token("--input"),
         ring: token("--ring"),
+        scrim: token("--scrim"),
 
         sidebar: {
           DEFAULT: token("--sidebar"),
@@ -201,6 +203,14 @@ const config: Config = {
       },
     },
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [
+    require("tailwindcss-animate"),
+    // `pointer-coarse:` -- Tailwind 3.4 has no built-in pointer variant. Desktop density is the designed
+    // default; a touch screen gets its 44px targets from this variant without a single mouse-driven screen
+    // growing by a pixel.
+    plugin(({ addVariant }) => {
+      addVariant("pointer-coarse", "@media (pointer: coarse)");
+    }),
+  ],
 };
 export default config;

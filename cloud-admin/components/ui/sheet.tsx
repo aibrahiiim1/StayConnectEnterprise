@@ -18,7 +18,6 @@ import { cn } from "@/lib/utils";
 
 export const Sheet = DialogPrimitive.Root;
 export const SheetTrigger = DialogPrimitive.Trigger;
-export const SheetClose = DialogPrimitive.Close;
 
 const WIDTHS = {
   sm: "sm:max-w-md",
@@ -37,9 +36,9 @@ export function SheetContent({
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay
         className={cn(
-          "fixed inset-0 z-50 bg-foreground/35 backdrop-blur-[1px]",
+          "fixed inset-0 z-50 bg-scrim/45 backdrop-blur-[1px]",
           "data-[state=open]:animate-in data-[state=closed]:animate-out",
-          "data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0",
+          "data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 motion-reduce:animate-none",
         )}
       />
       <DialogPrimitive.Content
@@ -47,7 +46,7 @@ export function SheetContent({
           "fixed inset-y-0 end-0 z-50 flex h-full w-full flex-col border-s border-border bg-card text-card-foreground shadow-lg",
           "data-[state=open]:animate-in data-[state=closed]:animate-out",
           "data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right",
-          "data-[state=open]:duration-200 data-[state=closed]:duration-150",
+          "data-[state=open]:duration-200 data-[state=closed]:duration-150 motion-reduce:animate-none",
           WIDTHS[width],
           className,
         )}
@@ -122,45 +121,4 @@ export function SheetHeader({
 /** The scrolling middle. */
 export function SheetBody({ className, ...p }: React.HTMLAttributes<HTMLDivElement>) {
   return <div className={cn("min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5", className)} {...p} />;
-}
-
-/** The fixed bottom, for the record's actions. */
-export function SheetFooter({ className, ...p }: React.HTMLAttributes<HTMLDivElement>) {
-  return (
-    <div
-      className={cn(
-        "flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border bg-surface/40 px-5 py-3",
-        className,
-      )}
-      {...p}
-    />
-  );
-}
-
-/** A titled group inside a sheet body. */
-export function SheetSection({
-  title,
-  description,
-  actions,
-  className,
-  children,
-}: {
-  title: React.ReactNode;
-  description?: React.ReactNode;
-  actions?: React.ReactNode;
-  className?: string;
-  children?: React.ReactNode;
-}) {
-  return (
-    <section className={cn("space-y-2.5", className)}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="space-y-0.5">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</h3>
-          {description && <p className="text-sm text-muted-foreground">{description}</p>}
-        </div>
-        {actions && <div className="flex items-center gap-2">{actions}</div>}
-      </div>
-      {children}
-    </section>
-  );
 }

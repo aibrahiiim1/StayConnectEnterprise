@@ -184,7 +184,7 @@ export default function DashboardPage() {
               </span>
             )}
             <Button variant="secondary" size="sm" onClick={() => void load(range, true)} disabled={busy}>
-              <RefreshCw className={busy ? "animate-spin" : undefined} />
+              <RefreshCw className={busy ? "animate-spin motion-reduce:animate-none" : undefined} />
               Refresh
             </Button>
           </>

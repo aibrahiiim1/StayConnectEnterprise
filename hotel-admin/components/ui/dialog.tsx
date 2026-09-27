@@ -44,9 +44,10 @@ export function DialogContent({
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay
         className={cn(
-          "fixed inset-0 z-50 bg-[hsl(225_12%_7%/0.55)] backdrop-blur-[2px]",
+          "fixed inset-0 z-50 bg-scrim/55 backdrop-blur-[2px]",
           "data-[state=open]:animate-in data-[state=closed]:animate-out",
           "data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0",
+          "motion-reduce:animate-none",
         )}
       />
       {/*
@@ -63,6 +64,8 @@ export function DialogContent({
             "data-[state=open]:animate-in data-[state=closed]:animate-out",
             "data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0",
             "data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95",
+            // Reduced motion: the panel simply appears and disappears. The state change stays; the movement goes.
+            "motion-reduce:animate-none",
             SIZES[size],
             className,
           )}
@@ -71,7 +74,8 @@ export function DialogContent({
           {children}
           <DialogPrimitive.Close
             className={cn(
-              "absolute right-3.5 top-3.5 rounded-md p-1 text-muted-foreground",
+              "absolute right-3 top-3 inline-flex size-8 items-center justify-center rounded-md text-muted-foreground",
+              "pointer-coarse:size-11 pointer-coarse:right-1.5 pointer-coarse:top-1.5",
               "transition-colors hover:bg-surface hover:text-foreground",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
             )}

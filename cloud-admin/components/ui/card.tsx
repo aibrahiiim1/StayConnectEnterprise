@@ -47,28 +47,3 @@ export function CardFooter({ className, ...p }: React.HTMLAttributes<HTMLDivElem
     />
   );
 }
-
-// Section — a titled block that is NOT a card, for grouping inside one. Pages were hand-rolling their own
-// <h2> inside card bodies, at four different sizes.
-export function Section({
-  title, description, actions, className, children,
-}: {
-  title: React.ReactNode;
-  description?: React.ReactNode;
-  actions?: React.ReactNode;
-  className?: string;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div className={cn("space-y-3", className)}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-1">
-          <h3 className="text-emphasis tracking-tight">{title}</h3>
-          {description && <p className="max-w-3xl text-sm text-muted-foreground">{description}</p>}
-        </div>
-        {actions && <div className="flex items-center gap-2">{actions}</div>}
-      </div>
-      {children}
-    </div>
-  );
-}

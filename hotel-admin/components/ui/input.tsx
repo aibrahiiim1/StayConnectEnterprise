@@ -8,8 +8,10 @@ import { cn } from "@/lib/utils";
 const CONTROL = cn(
   "w-full rounded-md border border-input bg-card text-foreground",
   "transition-[border-color,box-shadow] duration-base ease-onegate",
-  "placeholder:text-muted-foreground/80",
-  "focus:outline-none focus-visible:outline-none focus:border-foreground focus:ring-2 focus:ring-ring/20",
+  "placeholder:text-muted-foreground",
+  // The ink border alone is the whole focus signal at rest-to-focus contrast; the ring at /60 is what makes it
+  // visible (a /20 ring measured 1.54:1 against the card, which is decoration, not a focus indicator).
+  "focus:outline-none focus-visible:outline-none focus:border-foreground focus:ring-2 focus:ring-ring/60",
   "disabled:cursor-not-allowed disabled:bg-surface disabled:text-muted-foreground",
   "aria-[invalid=true]:border-destructive aria-[invalid=true]:ring-destructive/25",
 );

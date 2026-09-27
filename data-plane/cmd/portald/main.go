@@ -464,6 +464,8 @@ func (h *handler) routes() http.Handler {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(15 * time.Second))
+	// Text responses are gzipped for a client that accepts it (portal_gzip.go); images pass through untouched.
+	r.Use(gzipResponses)
 
 	r.Get("/", h.index)
 	r.Post("/auth/voucher", h.authVoucher)

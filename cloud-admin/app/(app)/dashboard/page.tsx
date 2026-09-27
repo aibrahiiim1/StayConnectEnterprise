@@ -145,7 +145,7 @@ export default function DashboardPage() {
         actions={
           <Link
             href="/licenses"
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3.5 text-[0.8125rem] font-semibold text-primary-foreground shadow-control transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3.5 text-label text-primary-foreground shadow-control transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
             View licenses <ArrowRight className="size-4 rtl:-scale-x-100" aria-hidden />
           </Link>

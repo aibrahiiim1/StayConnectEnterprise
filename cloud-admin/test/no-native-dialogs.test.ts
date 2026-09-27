@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join, relative, sep } from "node:path";
+import { dirname, join, relative } from "node:path";
 
 // Every confirmation, edit and reason prompt in the live console is a designed dialog. The browser's own
 // confirm / prompt / alert boxes cannot say what an action does, show a password in clear text and are not
-// themed. Only the two RETIRED pages (/commercial, /subscription) are exempt: they are not redesigned.
+// themed. There are no exemptions: the two retired pages (/commercial, /subscription) are now redirects.
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const RETIRED = [join("app", "(app)", "commercial"), join("app", "(app)", "subscription")];
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -22,7 +21,7 @@ const files = [
   ...walk(join(root, "app")),
   ...walk(join(root, "components")),
   ...walk(join(root, "lib")),
-].filter((f) => !RETIRED.some((r) => relative(root, f).startsWith(r + sep)));
+];
 
 // A call, not a mention: comments that name `window.prompt` are allowed, `window.prompt(` and a bare
 // `confirm(` are not.

@@ -51,7 +51,7 @@ function ItemTable({
             {rows.map((r, i) => (
               <TR key={i}>
                 <TD><Badge tone={tone}>{r[0]}</Badge></TD>
-                <TD className="break-all font-mono text-[11px]">{r[1]}</TD>
+                <TD className="break-all font-mono text-2xs">{r[1]}</TD>
                 <TD className="hidden text-xs text-muted-foreground md:table-cell">{r[2]}</TD>
               </TR>
             ))}

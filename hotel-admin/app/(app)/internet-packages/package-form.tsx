@@ -12,9 +12,9 @@
 // back, which hid the wrong thing: it let a package silently author technical settings belonging to a plan
 // that other packages also use. Those fields are shown here as read-only context and edited on Service Plans.
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Field, Input, Select } from "@/components/ui/input";
 import { Trash2, Plus, ChevronDown, ChevronRight } from "lucide-react";
 import { durationToSeconds } from "@/lib/units";
 import {
@@ -124,6 +124,12 @@ export function PackageForm({
   const [planID, setPlanID] = useState(initial?.planID ?? "");
   const [advanced, setAdvanced] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The section headings are the visible names of the control each one introduces; these ids bind them.
+  const ids = useId();
+  const planHeadingID = `${ids}-plan`;
+  const endHeadingID = `${ids}-end`;
+  const allocHeadingID = `${ids}-alloc`;
+  const stepsHeadingID = `${ids}-steps`;
 
   const selected = plans.find((p) => p.plan_id === planID);
   // Recomputed on every render, so it follows the plan, the mode and the three numbers immediately.
@@ -160,27 +166,27 @@ export function PackageForm({
 
 
   return (
-    <form onSubmit={submit} className="space-y-5" aria-label="package-form">
+    <form onSubmit={submit} className="space-y-5" data-testid="package-form">
       {error && <div role="alert" className="text-sm text-destructive">{error}</div>}
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <div>
-          <Label>Name</Label>
-          <Input aria-label="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Free WiFi" />
-          <p className="text-xs text-muted mt-1">What the guest sees on the portal.</p>
-        </div>
-        <div>
-          <Label>Short code</Label>
-          <Input aria-label="code" value={code} onChange={(e) => setCode(e.target.value)}
+        {/* THE VISIBLE LABELS ARE THE NAMES. These controls used to carry aria-labels such as "code" and
+            "service-plan" -- test hooks that overrode the words on screen, so a screen reader announced
+            "service-plan, combo box". The hooks survive as data-testid; the names are the labels the operator reads. */}
+        <Field label="Name" hint="What the guest sees on the portal.">
+          <Input data-testid="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Free WiFi" />
+        </Field>
+        <Field
+          label="Short code"
+          hint={mode === "edit" ? "The code identifies this package and cannot be changed." : "A short identifier. It cannot be changed later."}
+        >
+          <Input data-testid="code" value={code} onChange={(e) => setCode(e.target.value)}
             readOnly={mode === "edit"} placeholder="FREEWIFI" />
-          <p className="text-xs text-muted mt-1">
-            {mode === "edit" ? "The code identifies this package and cannot be changed." : "A short identifier. It cannot be changed later."}
-          </p>
-        </div>
+        </Field>
       </div>
 
       <div>
-        <h3 className="text-sm font-medium mb-2">Service plan</h3>
+        <h3 id={planHeadingID} className="text-sm font-medium mb-2">Service plan</h3>
         {plans.length === 0 ? (
           // A PACKAGE CANNOT BE CREATED WITHOUT ONE, so this says what to do rather than presenting an empty
           // dropdown that looks like a loading state.
@@ -191,14 +197,13 @@ export function PackageForm({
           </div>
         ) : (
           <>
-            <select aria-label="service-plan" required value={planID}
-              onChange={(e) => setPlanID(e.target.value)}
-              className="h-10 w-full rounded-md border border-input bg-card text-foreground focus:border-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 px-3 text-sm">
+            <Select data-testid="service-plan" aria-labelledby={planHeadingID} required value={planID}
+              onChange={(e) => setPlanID(e.target.value)}>
               <option value="">Choose a service plan…</option>
               {plans.filter((p) => p.current_revision_id).map((p) => (
                 <option key={p.plan_id} value={p.plan_id}>{p.name || p.code}</option>
               ))}
-            </select>
+            </Select>
             {/* WHAT IT GRANTS, READ-ONLY. These belong to the plan and are edited on the Service Plans
                 screen; showing them here is context for the choice, not a second place to change them. */}
             <p className="text-xs text-muted mt-2" data-testid="plan-summary">
@@ -214,31 +219,29 @@ export function PackageForm({
       </div>
 
       <div>
-        <h3 className="text-sm font-medium mb-2">How long access lasts</h3>
+        <h3 id={endHeadingID} className="text-sm font-medium mb-2">How long access lasts</h3>
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
-            <select aria-label="end-mode" className="h-10 w-full rounded-md border border-input bg-card text-foreground focus:border-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 px-3 text-sm"
+            <Select data-testid="end-mode" aria-labelledby={endHeadingID}
               value={duration.end_mode} onChange={(e) => setDuration({ end_mode: e.target.value as DurationForm["end_mode"] })}>
               {SUPPORTED_END_MODES.map((m) => <option key={m} value={m}>{END_MODE_LABELS[m]}</option>)}
-            </select>
+            </Select>
           </div>
           {duration.end_mode === "VALIDITY_WINDOW" && (
-            <div>
-              <Label>Length of access (hours)</Label>
-              <Input aria-label="duration-hours" type="number" min={0} step="0.5" value={durationHours}
+            <Field label="Length of access (hours)">
+              <Input data-testid="duration-hours" type="number" min={0} step="0.5" value={durationHours}
                 onChange={(e) => {
                   setDurationHours(e.target.value);
                   const secs = durationToSeconds(e.target.value, "hours");
                   setDuration((d) => ({ ...d, duration_seconds: secs ?? "" }));
                 }} />
-            </div>
+            </Field>
           )}
           {duration.end_mode === "FIXED_AT" && (
-            <div>
-              <Label>Ends at</Label>
-              <Input aria-label="ends-at" type="datetime-local" value={duration.ends_at ?? ""}
+            <Field label="Ends at">
+              <Input data-testid="ends-at" type="datetime-local" value={duration.ends_at ?? ""}
                 onChange={(e) => setDuration((d) => ({ ...d, ends_at: e.target.value }))} />
-            </div>
+            </Field>
           )}
         </div>
       </div>
@@ -249,32 +252,29 @@ export function PackageForm({
           ceiling, and the preview below is there because the clamp order is not obvious from three boxes —
           and the revision this publishes cannot be edited afterwards. */}
       <div>
-        <h3 className="mb-1.5 text-sm font-semibold">Data allowance</h3>
-        <select aria-label="allocation-mode" className="h-10 w-full rounded-md border border-input bg-card text-foreground focus:border-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 px-3 text-sm"
+        <h3 id={allocHeadingID} className="mb-1.5 text-sm font-semibold">Data allowance</h3>
+        <Select data-testid="allocation-mode" aria-labelledby={allocHeadingID}
           value={alloc.mode}
           onChange={(e) => setAlloc((a) => ({ ...a, mode: e.target.value as AllocationForm["mode"] }))}>
           {(Object.keys(ALLOCATION_MODE_LABELS) as (keyof typeof ALLOCATION_MODE_LABELS)[]).map((m) => (
             <option key={m} value={m}>{ALLOCATION_MODE_LABELS[m]}</option>
           ))}
-        </select>
+        </Select>
         {alloc.mode === "PER_STAY_NIGHT" && (
           <div className="mt-2 space-y-2">
             <div className="grid gap-2 sm:grid-cols-3">
-              <div>
-                <Label>GB per night</Label>
-                <Input aria-label="gb-per-night" type="number" min={0} step="0.1" value={alloc.gb_per_night}
+              <Field label="GB per night">
+                <Input data-testid="gb-per-night" type="number" min={0} step="0.1" value={alloc.gb_per_night}
                   onChange={(e) => setAlloc((a) => ({ ...a, gb_per_night: e.target.value }))} />
-              </div>
-              <div>
-                <Label>Minimum GB</Label>
-                <Input aria-label="min-gb" type="number" min={0} step="0.1" placeholder="none" value={alloc.min_gb}
+              </Field>
+              <Field label="Minimum GB">
+                <Input data-testid="min-gb" type="number" min={0} step="0.1" placeholder="none" value={alloc.min_gb}
                   onChange={(e) => setAlloc((a) => ({ ...a, min_gb: e.target.value }))} />
-              </div>
-              <div>
-                <Label>Maximum GB</Label>
-                <Input aria-label="max-gb" type="number" min={0} step="0.1" placeholder="no cap" value={alloc.max_gb}
+              </Field>
+              <Field label="Maximum GB">
+                <Input data-testid="max-gb" type="number" min={0} step="0.1" placeholder="no cap" value={alloc.max_gb}
                   onChange={(e) => setAlloc((a) => ({ ...a, max_gb: e.target.value }))} />
-              </div>
+              </Field>
             </div>
             {previewAllocation(alloc, [2, 5, 8, 12, 25]).length > 0 && (
               <div className="text-xs text-muted-foreground" data-testid="allocation-preview">
@@ -359,48 +359,53 @@ export function PackageForm({
             voucher or an account are not offered this package while any of them is set.
           </p>
         )}
-        {rules.map((r, i) => (
+        {/* A condition row has no room for visible labels, so each control is named for the row it sits in:
+            "Condition 1: type", not the test hook "rule-type-0" it used to announce. */}
+        {rules.map((r, i) => {
+          const n = `Condition ${i + 1}`;
+          return (
           <div key={i} className="flex gap-2 items-center mb-2" data-testid={`rule-${i}`}>
-            <select aria-label={`rule-type-${i}`} className="h-9 rounded-md border border-input bg-card text-foreground focus:border-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 px-2.5 text-sm"
+            <Select data-testid={`rule-type-${i}`} aria-label={`${n}: type`} className="h-9 w-auto shrink-0 ps-2.5"
               value={r.type} onChange={(e) => setRules((rs) => rs.map((x, j) => (j === i ? emptyRule(e.target.value as RuleType) : x)))}>
               {SUPPORTED_RULE_TYPES.map((t) => <option key={t} value={t}>{RULE_TYPE_LABELS[t]}</option>)}
-            </select>
-            {r.type === "AUTH_METHOD" && <Input aria-label={`rule-methods-${i}`} placeholder="account, voucher" value={r.methods} onChange={(e) => setRule(i, { methods: e.target.value })} />}
-            {r.type === "SUBJECT_KIND" && <Input aria-label={`rule-kinds-${i}`} placeholder="ACCOUNT, VOUCHER" value={r.kinds} onChange={(e) => setRule(i, { kinds: e.target.value })} />}
+            </Select>
+            {r.type === "AUTH_METHOD" && <Input data-testid={`rule-methods-${i}`} aria-label={`${n}: sign-in methods`} placeholder="account, voucher" value={r.methods} onChange={(e) => setRule(i, { methods: e.target.value })} />}
+            {r.type === "SUBJECT_KIND" && <Input data-testid={`rule-kinds-${i}`} aria-label={`${n}: guest kinds`} placeholder="ACCOUNT, VOUCHER" value={r.kinds} onChange={(e) => setRule(i, { kinds: e.target.value })} />}
             {r.type === "DATE_WINDOW" && <>
-              <Input aria-label={`rule-from-${i}`} type="datetime-local" value={r.from} onChange={(e) => setRule(i, { from: e.target.value })} />
-              <Input aria-label={`rule-until-${i}`} type="datetime-local" value={r.until} onChange={(e) => setRule(i, { until: e.target.value })} />
+              <Input data-testid={`rule-from-${i}`} aria-label={`${n}: from`} type="datetime-local" value={r.from} onChange={(e) => setRule(i, { from: e.target.value })} />
+              <Input data-testid={`rule-until-${i}`} aria-label={`${n}: until`} type="datetime-local" value={r.until} onChange={(e) => setRule(i, { until: e.target.value })} />
             </>}
             {r.type === "PRIOR_PURCHASE" && (
-              <select aria-label={`rule-mode-${i}`} className="h-9 rounded-md border border-input bg-card text-foreground focus:border-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 px-2.5 text-sm"
+              <Select data-testid={`rule-mode-${i}`} aria-label={`${n}: earlier purchase`} className="h-9 w-auto shrink-0 ps-2.5"
                 value={r.mode} onChange={(e) => setRule(i, { mode: e.target.value as "requires_prior" | "forbids_prior" })}>
                 <option value="forbids_prior">forbids prior</option>
                 <option value="requires_prior">requires prior</option>
-              </select>
+              </Select>
             )}
-            {r.type === "SITE_NETWORK" && <Input aria-label={`rule-networks-${i}`} placeholder="uuid,uuid" value={r.guest_network_ids} onChange={(e) => setRule(i, { guest_network_ids: e.target.value })} />}
+            {r.type === "SITE_NETWORK" && <Input data-testid={`rule-networks-${i}`} aria-label={`${n}: guest networks`} placeholder="uuid,uuid" value={r.guest_network_ids} onChange={(e) => setRule(i, { guest_network_ids: e.target.value })} />}
             {/* STAY LENGTH. Either bound may be left empty — "8 nights or more" and "up to 7 nights" are both
                 real rules — so neither input is required and an empty one is omitted rather than sent as 0. */}
             {r.type === "STAY_LENGTH" && <>
-              <Input aria-label={`rule-min-nights-${i}`} type="number" min={0} placeholder="from (nights)"
+              <Input data-testid={`rule-min-nights-${i}`} aria-label={`${n}: from nights`} type="number" min={0} placeholder="from (nights)"
                 value={r.min_nights} onChange={(e) => setRule(i, { min_nights: e.target.value })} />
-              <Input aria-label={`rule-max-nights-${i}`} type="number" min={0} placeholder="to (nights)"
+              <Input data-testid={`rule-max-nights-${i}`} aria-label={`${n}: to nights`} type="number" min={0} placeholder="to (nights)"
                 value={r.max_nights} onChange={(e) => setRule(i, { max_nights: e.target.value })} />
             </>}
-            {r.type === "ROOM_TYPE" && <Input aria-label={`rule-room-types-${i}`} placeholder="DLX, SUITE" value={r.room_types} onChange={(e) => setRule(i, { room_types: e.target.value })} />}
-            {r.type === "RATE_PLAN" && <Input aria-label={`rule-rate-plans-${i}`} placeholder="BAR, CORP" value={r.rate_plans} onChange={(e) => setRule(i, { rate_plans: e.target.value })} />}
+            {r.type === "ROOM_TYPE" && <Input data-testid={`rule-room-types-${i}`} aria-label={`${n}: room types`} placeholder="DLX, SUITE" value={r.room_types} onChange={(e) => setRule(i, { room_types: e.target.value })} />}
+            {r.type === "RATE_PLAN" && <Input data-testid={`rule-rate-plans-${i}`} aria-label={`${n}: rate plans`} placeholder="BAR, CORP" value={r.rate_plans} onChange={(e) => setRule(i, { rate_plans: e.target.value })} />}
             {r.type === "VIP" && (
-              <select aria-label={`rule-vip-${i}`} className="h-9 rounded-md border border-input bg-card text-foreground focus:border-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 px-2.5 text-sm"
+              <Select data-testid={`rule-vip-${i}`} aria-label={`${n}: VIP status`} className="h-9 w-auto shrink-0 ps-2.5"
                 value={r.is_vip} onChange={(e) => setRule(i, { is_vip: e.target.value as "true" | "false" })}>
                 <option value="true">VIP guests only</option>
                 <option value="false">Non-VIP guests only</option>
-              </select>
+              </Select>
             )}
-            {r.type === "TRAVEL_AGENT" && <Input aria-label={`rule-travel-agents-${i}`} placeholder="EXPEDIA, BOOKING" value={r.travel_agents} onChange={(e) => setRule(i, { travel_agents: e.target.value })} />}
-            {r.type === "PMS_INTERFACE" && <Input aria-label={`rule-pms-interfaces-${i}`} placeholder="interface id" value={r.pms_interface_ids} onChange={(e) => setRule(i, { pms_interface_ids: e.target.value })} />}
-            <Button type="button" variant="ghost" aria-label={`remove-rule-${i}`} onClick={() => setRules((rs) => rs.filter((_, j) => j !== i))}><Trash2 size={14} /></Button>
+            {r.type === "TRAVEL_AGENT" && <Input data-testid={`rule-travel-agents-${i}`} aria-label={`${n}: travel agents`} placeholder="EXPEDIA, BOOKING" value={r.travel_agents} onChange={(e) => setRule(i, { travel_agents: e.target.value })} />}
+            {r.type === "PMS_INTERFACE" && <Input data-testid={`rule-pms-interfaces-${i}`} aria-label={`${n}: PMS interfaces`} placeholder="interface id" value={r.pms_interface_ids} onChange={(e) => setRule(i, { pms_interface_ids: e.target.value })} />}
+            <Button type="button" variant="ghost" data-testid={`remove-rule-${i}`} aria-label={`Remove condition ${i + 1}`} onClick={() => setRules((rs) => rs.filter((_, j) => j !== i))}><Trash2 size={14} /></Button>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* ADVANCED. Sale window and speed steps are real controls and stay available, but they are not part of
@@ -414,20 +419,20 @@ export function PackageForm({
         {advanced && (
           <div className="mt-3 space-y-4 border-l-2 border-border pl-3">
             <div className="grid gap-3 sm:grid-cols-2">
-              <div><Label>Offer from</Label><Input aria-label="visible-from" type="datetime-local" value={visFrom} onChange={(e) => setVisFrom(e.target.value)} /></div>
-              <div><Label>Offer until</Label><Input aria-label="visible-until" type="datetime-local" value={visUntil} onChange={(e) => setVisUntil(e.target.value)} /></div>
+              <Field label="Offer from"><Input data-testid="visible-from" type="datetime-local" value={visFrom} onChange={(e) => setVisFrom(e.target.value)} /></Field>
+              <Field label="Offer until"><Input data-testid="visible-until" type="datetime-local" value={visUntil} onChange={(e) => setVisUntil(e.target.value)} /></Field>
             </div>
-            <div>
+            <div role="group" aria-labelledby={stepsHeadingID}>
               <div className="flex items-center justify-between mb-1">
-                <Label>Speed steps (applied in order, kbps)</Label>
+                <span id={stepsHeadingID} className="block text-label text-foreground">Speed steps (applied in order, kbps)</span>
                 <Button type="button" variant="ghost" onClick={() => setTiers((ts) => [...ts, { order: (ts.length + 1) * 10 }])}><Plus size={14} /> Add step</Button>
               </div>
               {tiers.map((t, i) => (
                 <div key={i} className="flex gap-2 items-center mb-2" data-testid={`tier-${i}`}>
-                  <Input aria-label={`tier-order-${i}`} type="number" className="w-24" value={String(t.order)} onChange={(e) => setTier(i, { order: e.target.value })} />
-                  <Input aria-label={`tier-down-${i}`} type="number" min={0} placeholder="down kbps" value={String(t.down_kbps ?? "")} onChange={(e) => setTier(i, { down_kbps: e.target.value })} />
-                  <Input aria-label={`tier-up-${i}`} type="number" min={0} placeholder="up kbps" value={String(t.up_kbps ?? "")} onChange={(e) => setTier(i, { up_kbps: e.target.value })} />
-                  <Button type="button" variant="ghost" aria-label={`remove-tier-${i}`} onClick={() => setTiers((ts) => ts.filter((_, j) => j !== i))}><Trash2 size={14} /></Button>
+                  <Input data-testid={`tier-order-${i}`} aria-label={`Step ${i + 1}: order`} type="number" className="w-24" value={String(t.order)} onChange={(e) => setTier(i, { order: e.target.value })} />
+                  <Input data-testid={`tier-down-${i}`} aria-label={`Step ${i + 1}: download kbps`} type="number" min={0} placeholder="down kbps" value={String(t.down_kbps ?? "")} onChange={(e) => setTier(i, { down_kbps: e.target.value })} />
+                  <Input data-testid={`tier-up-${i}`} aria-label={`Step ${i + 1}: upload kbps`} type="number" min={0} placeholder="up kbps" value={String(t.up_kbps ?? "")} onChange={(e) => setTier(i, { up_kbps: e.target.value })} />
+                  <Button type="button" variant="ghost" data-testid={`remove-tier-${i}`} aria-label={`Remove step ${i + 1}`} onClick={() => setTiers((ts) => ts.filter((_, j) => j !== i))}><Trash2 size={14} /></Button>
                 </div>
               ))}
               <p className="text-xs text-muted-foreground">

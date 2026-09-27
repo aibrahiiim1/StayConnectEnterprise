@@ -477,26 +477,33 @@ export default function OnboardingPage() {
                         </TR>
                       );
                     }
+                    // THE CHOICE IS A REAL RADIO, named by the serial. A focusable <tr> with aria-selected is not
+                    // announced as selectable in a plain table; a radio group is, and it brings the arrow keys
+                    // with it. The whole row still selects on click; the icon is the radio's visible face.
                     return (
                       <TR
                         key={p.id}
-                        tabIndex={0}
-                        aria-selected={selected}
                         onClick={() => { setSel(p); setFormErr(null); }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSel(p); setFormErr(null); }
-                        }}
                         className={cn(
-                          "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                          "cursor-pointer has-[:focus-visible]:outline-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset has-[:focus-visible]:ring-ring",
                           selected && "bg-primary-subtle/60 [tbody_&]:hover:bg-primary-subtle/70",
                         )}
                       >
                         <TD>
+                          <input
+                            type="radio"
+                            name="pending"
+                            value={p.id}
+                            checked={selected}
+                            onChange={() => { setSel(p); setFormErr(null); }}
+                            aria-labelledby={`pending-serial-${p.id}`}
+                            className="sr-only"
+                          />
                           {selected
                             ? <Check className="size-4 text-primary" aria-hidden />
-                            : <Circle className="size-4 text-muted-foreground/40" aria-hidden />}
+                            : <Circle className="size-4 text-muted-foreground" aria-hidden />}
                         </TD>
-                        <TD className="font-mono font-medium">{p.serial}</TD>
+                        <TD id={`pending-serial-${p.id}`} className="font-mono font-medium">{p.serial}</TD>
                         <TD className="font-mono text-xs">{p.wan_mac || "—"}</TD>
                         <TD className="hidden text-muted-foreground md:table-cell">{p.model || "—"}</TD>
                         <TD className="hidden font-mono text-xs text-muted-foreground md:table-cell">{p.source_ip || "—"}</TD>

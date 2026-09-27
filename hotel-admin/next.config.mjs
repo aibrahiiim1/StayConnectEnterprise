@@ -18,6 +18,17 @@ const nextConfig = {
   // It affects `next dev` only, so the deployed appliance bundle is unchanged either way. Turning it off
   // keeps the browser suite measuring the application rather than the development tooling.
   devIndicators: false,
+  // MOVED SCREENS ANSWER WITH A REAL 308, BEFORE ANYTHING RENDERS. A permanentRedirect() inside a page under
+  // the (app) layout arrives inside a streamed 200 (the layout is client-rendered), so the old address briefly
+  // served a page. The page files stay as a fallback for any path that reaches them another way.
+  async redirects() {
+    return [
+      { source: "/license", destination: "/appliance?section=license", permanent: true },
+      { source: "/network/cloud", destination: "/appliance?section=license", permanent: true },
+      { source: "/setup/enrollment", destination: "/appliance?section=setup", permanent: true },
+      { source: "/commercial-packages", destination: "/internet-packages", permanent: true },
+    ];
+  },
   async rewrites() {
     return [
       { source: "/api/:path*", destination: `${EDGE_BASE}/:path*` },

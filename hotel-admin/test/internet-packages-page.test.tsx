@@ -86,10 +86,10 @@ describe("InternetPackagesPage — packages", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /add package/i }));
     // The plan is chosen BY NAME. Its revision id never appears.
-    const sel = (await screen.findByLabelText("service-plan")) as HTMLSelectElement;
+    const sel = (await screen.findByTestId("service-plan")) as HTMLSelectElement;
     expect(Array.from(sel.options).map((o) => o.value)).toContain("p1");
     expect(Array.from(sel.options).map((o) => o.value)).not.toContain("rev-gold");
-    expect(screen.queryByLabelText("down-mbps")).toBeNull();
+    expect(screen.queryByTestId("down-mbps")).toBeNull();
     expect(document.body.innerHTML).not.toContain("rev-gold");
   });
 
@@ -189,11 +189,11 @@ describe("InternetPackagesPage — packages", () => {
     p.mockRejectedValue(new ApiError(400, { error: "invalid_grant_tier" }));
     render(<InternetPackagesPage />);
     fireEvent.click(await screen.findByRole("button", { name: /add package/i }));
-    fireEvent.change(await screen.findByLabelText("code"), { target: { value: "X" } });
-    fireEvent.change(screen.getByLabelText("service-plan"), { target: { value: "p1" } });
+    fireEvent.change(await screen.findByTestId("code"), { target: { value: "X" } });
+    fireEvent.change(screen.getByTestId("service-plan"), { target: { value: "p1" } });
     fireEvent.click(screen.getByRole("button", { name: /^add package$/i }));
     expect(await screen.findByText(/invalid_grant_tier/i)).toBeInTheDocument();
-    expect(screen.getByLabelText("code")).toBeInTheDocument();
+    expect(screen.getByTestId("code")).toBeInTheDocument();
   });
 
   // ADD NEVER BECOMES A SILENT REVISION of a package that already owns the code.
@@ -205,15 +205,15 @@ describe("InternetPackagesPage — packages", () => {
     render(<InternetPackagesPage />);
     await screen.findByText("Free WiFi");
     fireEvent.click(screen.getByRole("button", { name: /add package/i }));
-    fireEvent.change(await screen.findByLabelText("code"), { target: { value: "FREEWIFI" } });
-    fireEvent.change(screen.getByLabelText("service-plan"), { target: { value: "p1" } });
+    fireEvent.change(await screen.findByTestId("code"), { target: { value: "FREEWIFI" } });
+    fireEvent.change(screen.getByTestId("service-plan"), { target: { value: "p1" } });
     fireEvent.click(screen.getByRole("button", { name: /^add package$/i }));
 
     await waitFor(() => expect(p).toHaveBeenCalledTimes(1));
     expect(p.mock.calls[0][1].create_only).toBe(true);
     const dialog = screen.getByRole("dialog");
     expect(await within(dialog).findByText(/already exists/i)).toBeInTheDocument();
-    expect(within(dialog).getByLabelText("code")).toBeInTheDocument();
+    expect(within(dialog).getByTestId("code")).toBeInTheDocument();
   });
 
   it("Edit publishes a new version without create_only", async () => {

@@ -15,6 +15,7 @@ import { PageHeader, PageShell } from "@/components/ui/page";
 import { RoleRestricted } from "@/components/role-restricted";
 import { usePermissions } from "@/lib/permissions";
 import { MonoId, SkeletonRows } from "@/components/ui/misc";
+import { Pagination } from "@/components/ui/data";
 import { CustomerScope, SelectCustomerCard } from "@/components/customer-scope";
 import { formatDate } from "@/lib/utils";
 import { HelpList, HelpSection } from "@/components/help";
@@ -38,6 +39,27 @@ function tone(action: string) {
   return ACTION_TONE[verb] ?? "default";
 }
 
+// The server answers with at most its default 100 entries and takes no offset, so paging is over that answer.
+const PAGE_SIZE = 25;
+
+function hasPayload(e: AuditEntry) {
+  return !!e.payload && Object.keys(e.payload).length > 0;
+}
+
+function PayloadDetails({ payload }: { payload: Record<string, unknown> }) {
+  const n = Object.keys(payload).length;
+  return (
+    <details className="text-xs">
+      <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+        {n} {n === 1 ? "field" : "fields"}
+      </summary>
+      <pre className="mt-1 max-h-48 overflow-auto rounded bg-surface p-2 font-mono text-muted-foreground">
+        {JSON.stringify(payload, null, 2)}
+      </pre>
+    </details>
+  );
+}
+
 export default function AuditPage() {
   // Reading needs "audit.read" (lib/permissions.ts); the server refuses this page's list to other roles.
   const { can } = usePermissions();
@@ -49,11 +71,12 @@ export default function AuditPage() {
   const [rows, setRows] = useState<AuditEntry[] | null>(null);
   const [err, setErr] = useState<unknown>(null);
   const [actionFilter, setActionFilter] = useState("");
+  const [offset, setOffset] = useState(0);
 
   async function load(filter: string = actionFilter) {
     if (!ready) return;
     if (allCustomers) { setRows(null); return; }
-    setRows(null); setErr(null);
+    setRows(null); setErr(null); setOffset(0);
     const q = new URLSearchParams();
     if (filter) q.set("action", filter);
     try {
@@ -130,7 +153,8 @@ export default function AuditPage() {
               action={actionFilter ? <Button variant="secondary" onClick={() => { setActionFilter(""); load(""); }}>Clear filter</Button> : undefined}
             />
           ) : (
-            <Table>
+            <>
+            <Table label="Audit events">
               <THead>
                 <TR>
                   <TH>When</TH>
@@ -142,14 +166,42 @@ export default function AuditPage() {
                 </TR>
               </THead>
               <tbody>
-                {rows.map((e, i) => (
-                  <TR key={i}>
-                    <TD className="whitespace-nowrap text-xs text-muted-foreground tabular">{formatDate(e.ts)}</TD>
-                    <TD>
+                {rows.slice(offset, offset + PAGE_SIZE).map((e, i) => (
+                  // Entries carry no id; the timestamp plus the absolute position is stable within one answer.
+                  <TR key={`${e.ts}-${offset + i}`}>
+                    <TD className="whitespace-nowrap align-top text-xs text-muted-foreground tabular md:align-middle">{formatDate(e.ts)}</TD>
+                    <TD className="align-top md:align-middle">
                       <div className="text-sm">{e.actor_type}</div>
                       {e.actor_id && <MonoId value={e.actor_id} title="Actor id" />}
                     </TD>
-                    <TD><Badge tone={tone(e.action)} className="font-mono">{e.action}</Badge></TD>
+                    <TD className="align-top md:align-middle">
+                      <Badge tone={tone(e.action)} className="font-mono">{e.action}</Badge>
+                      {/* Below md the Target and Payload columns are hidden (IP below lg), so they stack under the
+                          action instead of disappearing. */}
+                      <dl className="mt-2 space-y-1.5 text-xs empty:hidden lg:hidden">
+                        {e.target_type && (
+                          <div className="md:hidden">
+                            <dt className="sr-only">Target</dt>
+                            <dd>
+                              <span className="text-sm">{e.target_type}</span>
+                              {e.target_id && <div><MonoId value={e.target_id} title="Target id" /></div>}
+                            </dd>
+                          </div>
+                        )}
+                        {e.ip && (
+                          <div className="flex gap-1.5">
+                            <dt className="text-muted-foreground">IP</dt>
+                            <dd className="font-mono text-muted-foreground">{e.ip}</dd>
+                          </div>
+                        )}
+                        {hasPayload(e) && (
+                          <div className="md:hidden">
+                            <dt className="sr-only">Payload</dt>
+                            <dd><PayloadDetails payload={e.payload!} /></dd>
+                          </div>
+                        )}
+                      </dl>
+                    </TD>
                     <TD className="hidden md:table-cell">
                       {e.target_type ? (
                         <>
@@ -160,21 +212,23 @@ export default function AuditPage() {
                     </TD>
                     <TD className="hidden font-mono text-xs text-muted-foreground lg:table-cell">{e.ip ?? "—"}</TD>
                     <TD className="hidden max-w-md md:table-cell">
-                      {e.payload && Object.keys(e.payload).length > 0 ? (
-                        <details className="text-xs">
-                          <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-                            {Object.keys(e.payload).length} {Object.keys(e.payload).length === 1 ? "field" : "fields"}
-                          </summary>
-                          <pre className="mt-1 max-h-48 overflow-auto rounded bg-surface p-2 font-mono text-muted-foreground">
-                            {JSON.stringify(e.payload, null, 2)}
-                          </pre>
-                        </details>
-                      ) : <span className="text-muted-foreground">—</span>}
+                      {hasPayload(e) ? <PayloadDetails payload={e.payload!} /> : <span className="text-muted-foreground">—</span>}
                     </TD>
                   </TR>
                 ))}
               </tbody>
             </Table>
+            {rows.length > PAGE_SIZE && (
+              <Pagination
+                className="border-t border-border px-4 py-3"
+                offset={offset}
+                limit={PAGE_SIZE}
+                shown={Math.min(PAGE_SIZE, rows.length - offset)}
+                total={rows.length}
+                onChange={setOffset}
+              />
+            )}
+            </>
           )}
         </Card>
       )}

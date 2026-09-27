@@ -46,7 +46,7 @@ export function CustomerSelector({
     return (
       <div className="px-1">
         <div className="mb-1 text-nano uppercase tracking-[0.12em] text-sidebar-muted">Customer</div>
-        <div className="flex items-center gap-2 text-[0.8125rem] font-medium text-sidebar-foreground">
+        <div className="flex items-center gap-2 text-label font-medium text-sidebar-foreground">
           <Building2 className="size-4 shrink-0 text-sidebar-muted" aria-hidden />
           <span className="truncate">{selectedTenantName}</span>
         </div>
@@ -71,8 +71,11 @@ export function CustomerSelector({
           id="customer-context"
           value={selectedTenantId}
           onChange={(e) => setSelectedTenantId(e.target.value)}
+          // The edge is sidebar-muted at 70%: 4.0:1 against the column in the light theme and 3.9:1 in the dark
+          // one. The sidebar-border it had (1.3:1 / 1.2:1) left the only control in the column without a boundary.
           className={cn(
-            "h-9 w-full cursor-pointer appearance-none rounded-md border border-sidebar-border bg-sidebar-accent/70 ps-8 pe-8 text-[0.8125rem]",
+            "h-9 w-full cursor-pointer appearance-none rounded-md border border-sidebar-muted/70 bg-sidebar-accent/70 ps-8 pe-8 text-label font-normal",
+            "transition-colors hover:border-sidebar-muted pointer-coarse:h-11",
             "text-sidebar-foreground focus:border-sidebar-active focus:outline-none focus:ring-2 focus:ring-sidebar-active/30",
           )}
         >

@@ -12,6 +12,9 @@
     --sc-brand: #1773bd;
     --sc-brand-dark: #125c97;
     --sc-on-brand: #ffffff;
+     
+    --sc-on-brand-dark: #ffffff;
+    --sc-link: var(--sc-brand-dark);
     --sc-ink: #14161a;
     --sc-muted: #5a6270;
     --sc-canvas: #f1f2f4;
@@ -38,12 +41,11 @@
     text-size-adjust: 100%;
   }
    
-  html[lang|="ar"] {
+  html[lang|="ar"], html[lang|="fa"], html[lang|="ur"] {
     --sc-font: "Segoe UI", "SF Arabic", "Geeza Pro", "Noto Naskh Arabic", "Noto Sans Arabic", Tahoma,
       -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif;
     line-height: 1.6;
   }
-  html[lang|="ar"] * { letter-spacing: 0; }
   [data-density="compact"] { --sc-ctl: 44px; --sc-gap: 12px; --sc-pad: 22px; }
   [data-density="spacious"] { --sc-ctl: 56px; --sc-gap: 22px; --sc-pad: 36px; }
 
@@ -63,7 +65,7 @@
   }
   @media (min-width: 640px) { body { background-size: cover, 100% 38vh; } }
   img { border: 0; }
-  a { color: var(--sc-brand-dark); }
+  a { color: var(--sc-link); }
   h1, h2, h3, p { margin: 0; }
   [hidden] { display: none; }
   .sc-vh {
@@ -75,6 +77,7 @@
   .page {
     position: relative;
     min-height: 100vh;
+    min-height: 100dvh;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -91,7 +94,7 @@
     height: 44px; margin: 0; padding: 0 34px 0 38px;
     border: 1px solid rgba(20, 22, 26, 0.12); border-radius: 999px;
     background: rgba(255, 255, 255, 0.95); color: var(--sc-ink);
-    font: inherit; font-size: 0.875rem; font-weight: 600; cursor: pointer;
+    font: inherit; font-size: 1rem;   font-weight: 600; cursor: pointer;
     box-shadow: 0 1px 2px rgba(18, 22, 28, 0.08), 0 4px 14px rgba(18, 22, 28, 0.10);
   }
   [dir="rtl"] .lang select { padding: 0 38px 0 34px; }
@@ -208,7 +211,7 @@
     font: inherit; font-size: 1rem;  
     box-shadow: inset 0 1px 2px rgba(18, 22, 28, 0.04);
   }
-  input::placeholder { color: #80868f; opacity: 1; }
+  input::placeholder { color: #6b717b; opacity: 1; }  
   input[type=text]:hover, input[type=password]:hover, input[type=email]:hover, input[type=tel]:hover { border-color: var(--sc-muted); }
   #voucher { text-transform: uppercase; letter-spacing: 0.08em; }
   #voucher::placeholder { text-transform: none; letter-spacing: 0; }
@@ -229,23 +232,23 @@
     text-decoration: none; cursor: pointer;
     box-shadow: 0 1px 2px rgba(18, 22, 28, 0.10);
   }
-  button.primary:hover, .btn:hover { background: var(--sc-brand-dark); }
+  button.primary:hover, .btn:hover { background: var(--sc-brand-dark); color: var(--sc-on-brand-dark); }
   button.primary:active, .btn:active { box-shadow: inset 0 1px 2px rgba(18, 22, 28, 0.25); }
   button.primary:disabled { opacity: 0.55; cursor: default; }
   .btn--outline {
     border: 1px solid var(--sc-edge); background: var(--sc-card); color: var(--sc-ink);
     box-shadow: 0 1px 2px rgba(18, 22, 28, 0.06);
   }
-  .btn--outline:hover { background: var(--sc-recess); }
+  .btn--outline:hover { background: var(--sc-recess); color: var(--sc-ink); }
   .btn--danger { border: 1px solid #e3a49c; background: var(--sc-card); color: #b42318; }
-  .btn--danger:hover { background: #fdeceb; }
+  .btn--danger:hover { background: #fdeceb; color: #b42318; }
   .btn--solid-danger { background: #b42318; color: #fff; }
-  .btn--solid-danger:hover { background: #8f1c13; }
+  .btn--solid-danger:hover { background: #8f1c13; color: #fff; }
   .btn--sm { width: auto; min-height: 44px; padding: 0 14px; font-size: 0.875rem; }
   button.link {
     display: inline-flex; align-items: center;
     min-height: 44px; margin: 6px 0 0; padding: 0 2px;
-    border: 0; background: none; color: var(--sc-brand-dark);
+    border: 0; background: none; color: var(--sc-link);
     font: inherit; font-size: 0.9375rem; font-weight: 600; cursor: pointer;
     text-decoration: underline; text-underline-offset: 3px;
   }
@@ -272,7 +275,7 @@
 
    
   .alt { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--sc-line); }
-  .alt h3 {
+  .alt h2 {
     margin: 0 0 10px; color: var(--sc-muted);
     font-size: 0.75rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
   }
@@ -368,7 +371,8 @@
   }
   .help-btn svg { width: 22px; height: 22px; }
   .help-btn:hover, .sc-help[open] > .help-btn, .help-btn[aria-expanded="true"] { background: var(--sc-fill); color: var(--sc-ink); }
-  .help-btn:focus-visible, .help-close:focus-visible { outline: 2px solid var(--sc-brand); outline-offset: 2px; }
+   
+  .help-btn:focus-visible, .help-close:focus-visible { outline: 2px solid var(--sc-ink); outline-offset: 2px; box-shadow: 0 0 0 2px #fff; }
   .sc-help[open]:not([data-modal]) { flex: 1 1 100%; }
   .help-card {
     margin: 4px 0 12px; padding: 18px 18px 16px;
@@ -380,10 +384,10 @@
   .help-title { flex: 1 1 auto; margin: 0; font-size: 1.125rem; font-weight: 700; line-height: 1.3; }
   .help-close {
     display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center;
-    width: 40px; height: 40px; margin: -6px -8px -6px 8px; padding: 0;
+    width: 44px; height: 44px; margin: -8px -10px -8px 8px; padding: 0;
     border: 0; border-radius: 999px; background: transparent; color: var(--sc-muted); cursor: pointer;
   }
-  [dir="rtl"] .help-close { margin: -6px 8px -6px -8px; }
+  [dir="rtl"] .help-close { margin: -8px 8px -8px -10px; }
   .help-close svg { width: 20px; height: 20px; }
   .help-close:hover { background: var(--sc-fill); color: var(--sc-ink); }
   .help-sheet:not(.is-modal) .help-close { display: none; }
@@ -537,7 +541,6 @@
 
    
   @media (max-width: 680px) {
-    .lang select { font-size: 0.8125rem; }
     .brand img { max-height: 48px; }
   }
   @media (prefers-reduced-motion: no-preference) {
@@ -583,7 +586,12 @@
     background-repeat: no-repeat;
   }
   [data-template="split"] .sc-hero-name, [data-template="immersive"] .sc-hero-name,
-  [data-template="editorial"] .sc-hero-name { text-shadow: 0 1px 18px rgba(0, 0, 0, 0.22); }
+  [data-template="editorial"] .sc-hero-name, [data-template="split"] .sc-hero-welcome,
+  [data-template="immersive"] .sc-hero-welcome, [data-template="editorial"] .sc-hero-welcome {
+    text-shadow: 0 1px 2px var(--sc-hero-shade, rgba(0, 0, 0, 0.35)), 0 1px 18px var(--sc-hero-shade, rgba(0, 0, 0, 0.35));
+  }
+   
+  [data-template="split"] .sc-hero, [data-template="editorial"] .sc-hero { color: var(--sc-on-hero, #fff); }
    
   [data-template="split"] .sc-hero-logo, [data-template="immersive"] .sc-hero-logo,
   [data-template="editorial"] .sc-hero-logo {
@@ -624,7 +632,8 @@
   }
   [data-template="immersive"] .card {
     max-width: 440px; margin: 0;
-    background: rgba(255, 255, 255, 0.82);
+     
+    background: rgba(255, 255, 255, 0.92);
     -webkit-backdrop-filter: blur(18px) saturate(1.4); backdrop-filter: blur(18px) saturate(1.4);
     border: 1px solid rgba(255, 255, 255, 0.6);
     box-shadow: 0 24px 64px rgba(0, 0, 0, 0.32);
@@ -792,6 +801,9 @@
     [data-template="editorial"] #custom-html:empty { display: none; }
     [data-template="editorial"] #custom-html > * { margin: 0; }
   }
+
+   
+  html[dir="rtl"][dir] *:not(input) { letter-spacing: 0; }
 }
 </style>
 <style id="sc-guard">
@@ -825,13 +837,9 @@ main.card { display: block; }
 #custom-html { position: relative; inset: auto; z-index: 0; contain: layout paint; transform: none; translate: none; }
 </style>
 <script nonce="e2e-nonce">
-  
-  
-  
-  
   (function () {
     if (window.CSSLayerBlockRule) return;
-    ['sc-base', 'sc-templates'].forEach(function (id) {
+    ['sc-base', 'sc-templates', 'sc-hotel'].forEach(function (id) {
       var el = document.getElementById(id);
       if (!el) return;
       var css = el.textContent.replace(/@layer[^;{]*;/g, '').replace(/@layer\s+[\w-]+\s*\{/, '');
@@ -840,6 +848,12 @@ main.card { display: block; }
     });
   })();
 </script>
+<noscript><style>
+   
+  #panel-accountlogin { display: block; }
+  #form-credentials { display: block !important; margin-top: 24px; }
+  #tabs, #panel-accountlogin .pill, #info-btn { display: none; }
+</style></noscript>
 </head><body>
   <div class="page">
   
@@ -858,6 +872,7 @@ main.card { display: block; }
 
   <main class="card">
     <div class="sc-brandblock">
+      
       
       <div class="brand">
         <img id="brand-logo" alt="" style="display:none">
@@ -889,7 +904,7 @@ main.card { display: block; }
         <input id="voucher" name="code" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" required maxlength="32">
       </div>
       <button class="primary" type="submit"><span data-i18n="btn.login" data-i18n-en="Login">Login</span></button>
-      <div class="err" role="alert"></div>
+      <div class="err" id="voucher-err" role="alert" data-for="voucher"></div>
     </form>
 
     <form method="POST" action="/auth/credentials" id="form-credentials" autocomplete="off" style="display:none">
@@ -902,7 +917,7 @@ main.card { display: block; }
         <input id="ga-password" name="password" type="password" autocomplete="current-password" required maxlength="128">
       </div>
       <button class="primary" type="submit"><span data-i18n="btn.login" data-i18n-en="Login">Login</span></button>
-      <div class="err" role="alert"></div>
+      <div class="err" id="cred-err" role="alert" data-for="ga-username ga-password"></div>
     </form>
   </div>
 
@@ -913,7 +928,7 @@ main.card { display: block; }
         <input id="email" name="dest" type="email" required placeholder="you@example.com" autocomplete="email" autocapitalize="none" spellcheck="false">
       </div>
       <button class="primary" type="submit"><span data-i18n="btn.sendcode" data-i18n-en="Send code">Send code</span></button>
-      <div class="err" role="alert"></div>
+      <div class="err" id="email-dest-err" role="alert" data-for="email"></div>
     </form>
     <form data-otp="email" data-stage="code" autocomplete="off" style="display:none">
       <p class="small"><span data-i18n="otp.sent.email" data-i18n-en="We sent a 6-digit code to">We sent a 6-digit code to</span> <bdi class="dest"></bdi></p>
@@ -923,7 +938,7 @@ main.card { display: block; }
       </div>
       <button class="primary" type="submit"><span data-i18n="btn.verify" data-i18n-en="Verify">Verify</span></button>
       <button type="button" class="link" data-resend data-i18n="otp.retry.email" data-i18n-en="Try a different email">Try a different email</button>
-      <div class="err" role="alert"></div>
+      <div class="err" id="email-code-err" role="alert" data-for="email-code"></div>
     </form>
   </div>
 
@@ -932,7 +947,7 @@ main.card { display: block; }
     <form id="form-pms" autocomplete="off">
       <div class="field">
         <label for="pms-room"><span data-i18n="pms.room" data-i18n-en="Room Number">Room Number</span></label>
-        <input id="pms-room" name="room" type="text" inputmode="numeric" autocomplete="off" autocorrect="off" spellcheck="false" required dir="ltr">
+        <input id="pms-room" name="room" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" required dir="ltr">
       </div>
       <div class="field">
         <label for="pms-secondary"><span data-i18n="pms.secondary" data-i18n-en="Password">Password</span></label>
@@ -943,7 +958,7 @@ main.card { display: block; }
       <button class="primary" type="submit"><span data-i18n="btn.submit" data-i18n-en="Submit">Submit</span></button>
     </form>
     
-    <div class="err" id="pms-err" role="alert" aria-live="polite"></div>
+    <div class="err" id="pms-err" role="alert" data-for="pms-room pms-secondary"></div>
     <div id="pms-choices" role="group" aria-label="Choose your internet package" style="display:none"></div>
   </div>
 
@@ -958,7 +973,7 @@ main.card { display: block; }
       </div>
       <button class="primary" type="submit"><span data-i18n="btn.reconnect" data-i18n-en="Reconnect">Reconnect</span></button>
     </form>
-    <div class="err" id="ps-err" role="alert" aria-live="polite"></div>
+    <div class="err" id="ps-err" role="alert" data-for="ps-pin"></div>
   </div>
 
   <div class="panel" id="panel-social">
@@ -973,7 +988,7 @@ main.card { display: block; }
         <p class="hint" id="sms-hint" data-i18n="sms.hint" data-i18n-en="Include the country code, for example +44 20 7946 0958">Include the country code, for example &#43;44 20 7946 0958</p>
       </div>
       <button class="primary" type="submit"><span data-i18n="btn.sendcode" data-i18n-en="Send code">Send code</span></button>
-      <div class="err" role="alert"></div>
+      <div class="err" id="sms-dest-err" role="alert" data-for="phone"></div>
     </form>
     <form data-otp="sms" data-stage="code" autocomplete="off" style="display:none">
       <p class="small"><span data-i18n="otp.sent.sms" data-i18n-en="We texted a 6-digit code to">We texted a 6-digit code to</span> <bdi class="dest"></bdi></p>
@@ -983,7 +998,7 @@ main.card { display: block; }
       </div>
       <button class="primary" type="submit"><span data-i18n="btn.verify" data-i18n-en="Verify">Verify</span></button>
       <button type="button" class="link" data-resend data-i18n="otp.retry.sms" data-i18n-en="Use a different number">Use a different number</button>
-      <div class="err" role="alert"></div>
+      <div class="err" id="sms-code-err" role="alert" data-for="sms-code"></div>
     </form>
   </div>
 
@@ -1016,25 +1031,25 @@ main.card { display: block; }
       </ul>
       <p class="help-fail" data-i18n="help.fail" data-i18n-en="Something not working? Please contact reception — they are happy to help.">Something not working? Please contact reception — they are happy to help.</p>
       <div class="help-device">
-        <strong data-i18n="info.device" data-i18n-en="Your device">Your device</strong>
-        <dl>
-          <dt><span data-i18n="info.ip" data-i18n-en="IP address">IP address</span></dt><dd dir="ltr">192.0.2.10</dd>
-          <dt><span data-i18n="info.mac" data-i18n-en="MAC address">MAC address</span></dt><dd dir="ltr"><span data-i18n="info.none" data-i18n-en="Not detected">Not detected</span></dd>
-        </dl>
-        <p data-i18n="info.help" data-i18n-en="Reception may ask for these if you need help connecting.">Reception may ask for these if you need help connecting.</p>
-      </div>
+<strong data-i18n="info.device" data-i18n-en="Your device">Your device</strong>
+<dl>
+  <dt><span data-i18n="info.ip" data-i18n-en="IP address">IP address</span></dt><dd dir="ltr">192.0.2.10</dd>
+  <dt><span data-i18n="info.mac" data-i18n-en="MAC address">MAC address</span></dt><dd dir="ltr"><span data-i18n="info.none" data-i18n-en="Not detected">Not detected</span></dd>
+</dl>
+<p data-i18n="info.help" data-i18n-en="Reception may ask for these if you need help connecting.">Reception may ask for these if you need help connecting.</p>
+</div>
       <p class="help-hotel" id="help-hotel" dir="auto" hidden></p>
       </div></div></details>
       <button class="info-btn" id="info-btn" type="button" aria-expanded="false" aria-controls="info-panel"
               data-i18n-aria="info.button" aria-label="Device information" title="Device information"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.1"/></svg></button>
       <div class="info-panel" id="info-panel" hidden>
-        <strong data-i18n="info.device" data-i18n-en="Your device">Your device</strong>
-        <dl>
-          <dt><span data-i18n="info.ip" data-i18n-en="IP address">IP address</span></dt><dd dir="ltr">192.0.2.10</dd>
-          <dt><span data-i18n="info.mac" data-i18n-en="MAC address">MAC address</span></dt><dd dir="ltr"><span data-i18n="info.none" data-i18n-en="Not detected">Not detected</span></dd>
-        </dl>
-        <p data-i18n="info.help" data-i18n-en="Reception may ask for these if you need help connecting.">Reception may ask for these if you need help connecting.</p>
-      </div>
+<strong data-i18n="info.device" data-i18n-en="Your device">Your device</strong>
+<dl>
+  <dt><span data-i18n="info.ip" data-i18n-en="IP address">IP address</span></dt><dd dir="ltr">192.0.2.10</dd>
+  <dt><span data-i18n="info.mac" data-i18n-en="MAC address">MAC address</span></dt><dd dir="ltr"><span data-i18n="info.none" data-i18n-en="Not detected">Not detected</span></dd>
+</dl>
+<p data-i18n="info.help" data-i18n-en="Reception may ask for these if you need help connecting.">Reception may ask for these if you need help connecting.</p>
+</div>
 <p class="sc-by"><span data-i18n="brand.by" data-i18n-en="Wi-Fi by">Wi-Fi by</span> <bdi class="og-mark" dir="ltr" lang="en"><b class="og-one">One</b><b class="og-gate">Gate</b></bdi></p>
     </div>
   </main>
@@ -1108,7 +1123,7 @@ main.card { display: block; }
       const seen = {};
       const others = members.filter(m => Tabs[m] && !seen[Tabs[m].panel] && (seen[Tabs[m].panel] = true));
       if (others.length > 1) {
-        const h = document.createElement('h3');
+        const h = document.createElement('h2');
         
         h.dataset.i18n = 'alt.title';
         h.dataset.i18nEn = BUILTIN.en['alt.title'];
@@ -1173,6 +1188,14 @@ main.card { display: block; }
 
     
     
+    function isRTL(code) {
+      var meta = langMeta(code);
+      if (meta) return !!meta.rtl;
+      return ['ar', 'he', 'fa', 'ur'].indexOf(String(code || '').toLowerCase().split('-')[0]) >= 0;
+    }
+
+    
+    
     function words(code) {
       var out = {};
       var base = BUILTIN[code] || {};
@@ -1188,11 +1211,10 @@ main.card { display: block; }
     function applyLanguage(code) {
       LANG = code;
       DICT = words(code);
-      var meta = langMeta(code);
       document.documentElement.lang = code;
       
       
-      document.documentElement.dir = (meta && meta.rtl) ? 'rtl' : 'ltr';
+      document.documentElement.dir = isRTL(code) ? 'rtl' : 'ltr';
       document.querySelectorAll('[data-i18n]').forEach(function (el) {
         var k = el.dataset.i18n;
         if (DICT[k]) el.textContent = DICT[k];
@@ -1287,18 +1309,79 @@ main.card { display: block; }
       if (v) root.setProperty(name, v); else root.removeProperty(name);
     }
     function cssURL(u) { return u ? 'url("' + encodeURI(u) + '")' : ''; }
+
     
-    function lightColour(c) {
-      var m = /^#([0-9a-f]{3,8})$/i.exec(String(c || ''));
-      if (!m) return false;
-      var h = m[1];
-      if (h.length < 6) h = h.charAt(0) + h.charAt(0) + h.charAt(1) + h.charAt(1) + h.charAt(2) + h.charAt(2);
-      var l = [0, 2, 4].map(function (i) {
-        var f = parseInt(h.substr(i, 2), 16) / 255;
-        return f <= 0.03928 ? f / 12.92 : Math.pow((f + 0.055) / 1.055, 2.4);
-      });
-      var lum = 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2];
-      return 1.05 / (lum + 0.05) < 3;
+    
+    
+    var INK_DARK = '#14161a', MIN_CONTRAST = 4.5, MIN_PHOTO_OVERLAY = 0.3, DEFAULT_OVERLAY = 0.35;
+    var WHITE = { r: 255, g: 255, b: 255, a: 1 };
+    function parseColour(s) {
+      s = String(s || '').trim();
+      var m, c;
+      if (s.charAt(0) === '#') {
+        var h = s.slice(1);
+        if (!/^[0-9a-f]*$/i.test(h)) return null;
+        if (h.length === 3 || h.length === 4) h = h.replace(/./g, '$&$&');
+        if (h.length !== 6 && h.length !== 8) return null;
+        c = { r: parseInt(h.substr(0, 2), 16), g: parseInt(h.substr(2, 2), 16), b: parseInt(h.substr(4, 2), 16), a: 1 };
+        if (h.length === 8) c.a = parseInt(h.substr(6, 2), 16) / 255;
+        return c;
+      }
+      m = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*([0-9]*\.?[0-9]+)(%?)\s*)?\)$/i.exec(s);
+      if (!m) return null;
+      c = { r: Math.min(255, +m[1]), g: Math.min(255, +m[2]), b: Math.min(255, +m[3]), a: 1 };
+      if (m[4]) {
+        var a = parseFloat(m[4]);
+        if (m[5] === '%') a /= 100;
+        c.a = Math.min(1, Math.max(0, a));
+      }
+      return c;
+    }
+    function over(c, bg) {
+      return { r: c.r * c.a + bg.r * (1 - c.a), g: c.g * c.a + bg.g * (1 - c.a), b: c.b * c.a + bg.b * (1 - c.a), a: 1 };
+    }
+    function shade(c, k) { return over({ r: 0, g: 0, b: 0, a: k }, c); }
+    function luminance(c) {
+      function lin(v) { var f = v / 255; return f <= 0.03928 ? f / 12.92 : Math.pow((f + 0.055) / 1.055, 2.4); }
+      return 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b);
+    }
+    function contrast(x, y) {
+      var a = luminance(x), b = luminance(y);
+      return a >= b ? (a + 0.05) / (b + 0.05) : (b + 0.05) / (a + 0.05);
+    }
+    function hex(c) {
+      function h(v) { return ('0' + Math.round(Math.max(0, Math.min(255, v))).toString(16)).slice(-2); }
+      return '#' + h(c.r) + h(c.g) + h(c.b);
+    }
+    
+    function inkOn(surfaces) {
+      function worst(ink) { return Math.min.apply(null, surfaces.map(function (s) { return contrast(ink, s); })); }
+      var w = worst(WHITE), d = worst(parseColour(INK_DARK));
+      return (w >= MIN_CONTRAST || w >= d) ? '' : INK_DARK;
+    }
+    function readableOnWhite(c) {
+      c = over(c, WHITE);
+      if (contrast(c, WHITE) >= MIN_CONTRAST) return '';
+      for (var f = 0.95; f > 0; f -= 0.05) {
+        var d = hex({ r: c.r * f, g: c.g * f, b: c.b * f, a: 1 });
+        if (contrast(parseColour(d), WHITE) >= MIN_CONTRAST) return d;
+      }
+      return INK_DARK;
+    }
+    
+    function deriveColours(brand, brandDark, text, overlay, photo) {
+      var out = { '--sc-on-brand': '', '--sc-on-brand-dark': '', '--sc-link': '', '--sc-ink': '', '--sc-on-hero': '', '--sc-hero-shade': '' };
+      var b = parseColour(brand), bd = parseColour(brandDark), t = parseColour(text);
+      var bb = over(b || parseColour('#1773bd'), WHITE), bbd = over(bd || parseColour('#125c97'), WHITE);
+      if (b) out['--sc-on-brand'] = inkOn([bb]);
+      if (b || bd) out['--sc-on-brand-dark'] = inkOn([bbd]);
+      if (bd) out['--sc-link'] = readableOnWhite(bbd);
+      if (t && contrast(over(t, WHITE), WHITE) >= MIN_CONTRAST) out['--sc-ink'] = text;
+      if (!photo && (b || bd)) {
+        var ink = inkOn([shade(bb, overlay), shade(bbd, overlay)]);
+        if (ink) { out['--sc-on-hero'] = ink; out['--sc-hero-shade'] = 'transparent'; }
+      }
+      return out;
     }
     function applyTemplate(d) {
       const el = document.documentElement;
@@ -1308,22 +1391,28 @@ main.card { display: block; }
       el.dataset.panel = ['start', 'center', 'end'].indexOf(o.panel_position) >= 0 ? o.panel_position : '';
       el.dataset.hero = ['short', 'medium', 'tall'].indexOf(o.hero_height) >= 0 ? o.hero_height : '';
       el.dataset.surface = ['solid', 'glass'].indexOf(o.surface) >= 0 ? o.surface : '';
+      const photo = !!(d && (d.hero_image_url || d.background_url));
       const overlay = Number(o.overlay);
       const hasOverlay = o.overlay !== undefined && o.overlay !== null && overlay >= 0 && overlay <= 90;
-      cssProp('--sc-overlay', hasOverlay ? String(overlay / 100) : '');
+      
+      let ov = hasOverlay ? overlay / 100 : DEFAULT_OVERLAY;
+      if (hasOverlay && photo && ov < MIN_PHOTO_OVERLAY) ov = MIN_PHOTO_OVERLAY;
+      cssProp('--sc-overlay', hasOverlay ? String(ov) : '');
       cssProp('--sc-heading-font', o.heading_font || '');
-      cssProp('--sc-hero', cssURL((d && (d.hero_image_url || d.background_url)) || ''));
+      
+      cssProp('--sc-hero', cssURL((d && d.hero_image_url) || ''));
+      return { overlay: ov, photo: photo };
     }
 
     
     
     fetch('/api/branding').then(r => r.ok ? r.json() : {}).then(b => {
       const d = (b && b.design) || b || {};
-      applyTemplate(d);
+      const look = applyTemplate(d);
       cssProp('--sc-brand', d.brand_color);
       cssProp('--sc-brand-dark', d.brand_color_dark);
-      cssProp('--sc-ink', d.text_color);
-      cssProp('--sc-on-brand', d.brand_color && lightColour(d.brand_color) ? '#14161a' : '');
+      const derived = deriveColours(d.brand_color, d.brand_color_dark, d.text_color, look.overlay, look.photo);
+      Object.keys(derived).forEach(function (k) { cssProp(k, derived[k]); });
       cssProp('font-family', d.font_family);
       cssProp('--sc-radius', d.corner_radius);
       cssProp('--sc-bg', cssURL(d.background_url));
@@ -1349,8 +1438,11 @@ main.card { display: block; }
         img.onload = function () { img.style.display = ''; brandRow.classList.add('has-logo'); };
         heroLogo.onerror = function () { heroLogo.hidden = true; };
         heroLogo.onload = function () { heroLogo.hidden = false; };
-        if (img.getAttribute('src') !== d.logo_url) { img.src = d.logo_url; heroLogo.src = d.logo_url; }
-        else if (img.complete) { if (img.naturalWidth) { img.onload(); heroLogo.onload(); } else { img.onerror(); heroLogo.onerror(); } }
+        
+        [img, heroLogo].forEach(function (el) {
+          if (el.getAttribute('src') !== d.logo_url) el.src = d.logo_url;
+          else if (el.complete) { if (el.naturalWidth) el.onload(); else el.onerror(); }
+        });
       } else {
         img.removeAttribute('src'); img.style.display = 'none'; brandRow.classList.remove('has-logo');
         heroLogo.removeAttribute('src'); heroLogo.hidden = true;
@@ -1408,7 +1500,7 @@ main.card { display: block; }
           var meta = langMeta(code);
           
           if (!meta && !(I18N[code] && Object.keys(I18N[code]).length)) return;
-          offered.push({ code: code, label: (l && l.label) || (meta && meta.label) || code.toUpperCase(), rtl: meta && meta.rtl });
+          offered.push({ code: code, label: (l && l.label) || (meta && meta.label) || code.toUpperCase() });
         });
       }
       if (!offered.length) offered = LANGS.map(function (l) { return { code: l.code, label: l.label }; });
@@ -1462,6 +1554,26 @@ main.card { display: block; }
         const open = panel.hasAttribute('hidden');
         if (open) { panel.removeAttribute('hidden'); } else { panel.setAttribute('hidden', ''); }
         btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+    })();
+
+    
+    
+    (function () {
+      document.querySelectorAll('.err[data-for]').forEach(function (box) {
+        const fields = box.getAttribute('data-for').split(' ').map(function (id) { return document.getElementById(id); }).filter(Boolean);
+        fields.forEach(function (el) {
+          const ids = (el.getAttribute('aria-describedby') || '').split(' ').filter(Boolean);
+          if (ids.indexOf(box.id) < 0) ids.push(box.id);
+          el.setAttribute('aria-describedby', ids.join(' '));
+        });
+        function sync() {
+          const bad = box.textContent.trim() !== '' && !box.classList.contains('err--ok');
+          fields.forEach(function (el) { if (bad) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid'); });
+        }
+        if (window.MutationObserver) {
+          new MutationObserver(sync).observe(box, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+        }
       });
     })();
 

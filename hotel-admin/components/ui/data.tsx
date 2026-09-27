@@ -95,8 +95,10 @@ export function FilterChips<T extends string>({
     err: "bg-destructive",
     info: "bg-info",
   };
+  const onKeyDown = useRadioKeys(options.map((o) => o.value), value, onChange);
   return (
-    <div role="radiogroup" aria-label={label} className={cn("flex flex-wrap items-center gap-1.5", className)}>
+    <div role="radiogroup" aria-label={label} onKeyDown={onKeyDown}
+      className={cn("flex flex-wrap items-center gap-1.5", className)}>
       {options.map((o) => {
         const active = o.value === value;
         return (
@@ -105,6 +107,8 @@ export function FilterChips<T extends string>({
             type="button"
             role="radio"
             aria-checked={active}
+            // Roving tabindex: the group is ONE tab stop (the checked chip), and the arrows move within it.
+            tabIndex={active || (!options.some((x) => x.value === value) && o === options[0]) ? 0 : -1}
             onClick={() => onChange(o.value)}
             className={cn(
               "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors",
@@ -130,6 +134,47 @@ export function FilterChips<T extends string>({
         );
       })}
     </div>
+  );
+}
+
+/**
+ * useRadioKeys — the ARIA radiogroup keyboard contract for a group of role="radio" buttons.
+ *
+ * Arrow Right/Down selects the next option, Left/Up the previous (both wrap), Home the first, End the last, and
+ * focus follows the selection. A group of buttons marked role="radio" promises exactly this to a screen-reader
+ * user, and without it the promise was a lie: each chip was its own tab stop and the arrows did nothing.
+ * Attach the returned handler to the radiogroup element; the radios must render in `values` order.
+ */
+export function useRadioKeys<T extends string>(values: readonly T[], value: T, onChange: (v: T) => void) {
+  return React.useCallback(
+    (e: React.KeyboardEvent<HTMLElement>) => {
+      if (values.length === 0) return;
+      const at = Math.max(0, values.indexOf(value));
+      let next: number;
+      switch (e.key) {
+        case "ArrowRight":
+        case "ArrowDown":
+          next = (at + 1) % values.length;
+          break;
+        case "ArrowLeft":
+        case "ArrowUp":
+          next = (at - 1 + values.length) % values.length;
+          break;
+        case "Home":
+          next = 0;
+          break;
+        case "End":
+          next = values.length - 1;
+          break;
+        default:
+          return;
+      }
+      e.preventDefault();
+      onChange(values[next]);
+      const radios = e.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]');
+      radios[next]?.focus();
+    },
+    [values, value, onChange],
   );
 }
 

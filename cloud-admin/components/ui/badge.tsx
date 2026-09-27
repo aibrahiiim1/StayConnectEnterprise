@@ -44,28 +44,3 @@ export function Badge({
     </span>
   );
 }
-
-// StatusDot — the smallest possible health indicator, for dense lists where a full badge is too loud.
-export function StatusDot({
-  tone = "default",
-  className,
-  title,
-}: {
-  tone?: "ok" | "warn" | "err" | "info" | "default";
-  className?: string;
-  title?: string;
-}) {
-  const colors: Record<string, string> = {
-    ok: "bg-success",
-    warn: "bg-warning",
-    err: "bg-destructive",
-    info: "bg-info",
-    default: "bg-muted-foreground/50",
-  };
-  return (
-    <span
-      title={title}
-      className={cn("inline-block size-2 shrink-0 rounded-full", colors[tone] ?? colors.default, className)}
-    />
-  );
-}

@@ -367,7 +367,7 @@ export default function StaysPage() {
                   )}
                   <Link
                     href="/sessions"
-                    className="mt-3 inline-block text-xs text-primary hover:underline"
+                    className="mt-3 inline-block text-xs text-primary underline underline-offset-2 hover:decoration-2"
                   >
                     See this room&rsquo;s devices →
                   </Link>

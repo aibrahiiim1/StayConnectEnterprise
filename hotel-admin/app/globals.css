@@ -76,12 +76,15 @@
   /* RESTRAINED MOTION, AND NONE AT ALL WHEN THE OPERATOR HAS ASKED FOR NONE.
      A width transition is the one animation here; it is short enough to read as a state change rather than an
      effect. `prefers-reduced-motion` is honoured by removing the transition entirely rather than shortening
-     it: the setting means "do not animate", not "animate faster". */
+     it: the setting means "do not animate", not "animate faster" -- so `none`, not a 0.01ms duration that is
+     still a transition with every event it fires. The overlays, toasts and spinners opt out the same way
+     through `motion-reduce:` utilities on their own classes; their end state is the resting state, so the
+     content still appears, only without the movement. */
   @media (prefers-reduced-motion: reduce) {
     .sidebar-motion,
     .sidebar-motion * {
-      transition-duration: 0.01ms !important;
-      animation-duration: 0.01ms !important;
+      transition: none !important;
+      animation: none !important;
     }
   }
 }

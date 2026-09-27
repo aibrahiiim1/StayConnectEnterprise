@@ -230,7 +230,7 @@ export function SynchronizationCard({
             disabled={!canRequest || busy}
             onClick={() => { setErr(null); setConfirming(true); }}
           >
-            <RefreshCw className={active ? "animate-spin" : undefined} />
+            <RefreshCw className={active ? "animate-spin motion-reduce:animate-none" : undefined} />
             Refresh the guest list now
           </Button>
           {!canRequest && (

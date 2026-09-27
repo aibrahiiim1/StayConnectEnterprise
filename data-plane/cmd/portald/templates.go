@@ -145,10 +145,15 @@ const guestHead = `<!doctype html>
 }
 </style>
 {{with .HotelSheet}}{{.}}{{end}}
-<style id="sc-guard">` + portalPageGuardCSS + `</style>
+<style id="sc-guard">` + portalPageGuardCSS + `</style>` + layerFallbackScript
+
+// layerFallbackScript: CASCADE LAYERS, AND THE BROWSERS THAT PREDATE THEM. A browser without cascade layers
+// (iOS before 15.4, for one) drops an entire layered block as an unknown rule -- which here would be the
+// portal's whole stylesheet. On those browsers the layer wrappers are removed before anything paints, and the
+// page falls back to plain source order: base, template, hotel, guard. Every page carries this one copy; on
+// the sign-in page the hotel's sheet does not exist yet (its script inserts it before the guard later).
+const layerFallbackScript = `
 <script nonce="{{.Nonce}}">
-  // A browser without cascade layers drops a layered block whole; there the wrappers come off before anything
-  // paints and plain source order -- base, template, hotel, guard -- keeps the same outcome.
   (function () {
     if (window.CSSLayerBlockRule) return;
     ['sc-base', 'sc-templates', 'sc-hotel'].forEach(function (id) {
@@ -163,12 +168,12 @@ const guestHead = `<!doctype html>
 
 // guestChrome is the hero (decoration, for the photographic and bar layouts) and the language pill.
 const guestChrome = `
-<div class="sc-hero" aria-hidden="true"><div class="sc-hero-inner">{{with .Brand.Logo}}<img class="sc-hero-logo" src="{{.}}" alt="" data-logo>{{end}}<div class="sc-hero-name" dir="auto">{{if .Brand.Name}}{{.Brand.Name}}{{else}}{{index .T "brand.fallback"}}{{end}}</div>{{with .Brand.Welcome}}<p class="sc-hero-welcome" dir="auto">{{.}}</p>{{end}}</div></div>
+<div class="sc-hero" aria-hidden="true"><div class="sc-hero-inner">{{if .Brand.HeroLogo}}<img class="sc-hero-logo" src="{{.Brand.Logo}}" alt="" data-logo>{{end}}<div class="sc-hero-name" dir="auto">{{if .Brand.Name}}{{.Brand.Name}}{{else}}{{index .T "brand.fallback"}}{{end}}</div>{{with .Brand.Welcome}}<p class="sc-hero-welcome" dir="auto">{{.}}</p>{{end}}</div></div>
 {{if gt (len .Languages) 1}}<div class="langbar"><label class="lang">` + iconGlobe + `<select id="lang" aria-label="{{index .T "lang.label"}}">{{range .Languages}}<option value="{{.Code}}"{{if eq .Code $.Lang}} selected{{end}}>{{.Label}}</option>{{end}}</select>` + iconChevDown + `</label></div>{{end}}`
 
 // guestBrandblock is the hotel's logo, or the Wi-Fi mark when there is none, and its name.
 const guestBrandblock = `
-<div class="sc-brandblock"><div class="brand{{if .Brand.Logo}} has-logo{{end}}">{{with .Brand.Logo}}<img src="{{.}}" alt="" data-logo>{{end}}<span class="brand-mark" aria-hidden="true">` + iconWifi + `</span><p class="name" dir="auto">{{if .Brand.Name}}{{.Brand.Name}}{{else}}{{index .T "brand.fallback"}}{{end}}</p></div></div>`
+<div class="sc-brandblock"><div class="brand{{if .Brand.CardLogo}} has-logo{{end}}">{{if .Brand.CardLogo}}<img src="{{.Brand.Logo}}" alt="" data-logo>{{end}}<span class="brand-mark" aria-hidden="true">` + iconWifi + `</span><p class="name" dir="auto">{{if .Brand.Name}}{{.Brand.Name}}{{else}}{{index .T "brand.fallback"}}{{end}}</p></div></div>`
 
 // guestScripts: a logo that fails to load leaves nothing behind, and the language pill remembers the
 // guest's choice exactly as the sign-in page does (cookie and localStorage) before redrawing the page in it.
@@ -197,6 +202,17 @@ const guestScripts = `
 </script>` + guestHelpScript + `
 `
 
+// deviceFacts is the device's own addresses, which reception may ask for. The sign-in page shows them in the
+// help sheet and behind the information button -- the same words from this one source.
+const deviceFacts = `
+<strong data-i18n="info.device" data-i18n-en="Your device">{{index .T "info.device"}}</strong>
+<dl>
+  <dt><span data-i18n="info.ip" data-i18n-en="IP address">{{index .T "info.ip"}}</span></dt><dd dir="ltr">{{if .ClientIP}}{{.ClientIP}}{{else}}<span data-i18n="info.none" data-i18n-en="Not detected">{{index .T "info.none"}}</span>{{end}}</dd>
+  <dt><span data-i18n="info.mac" data-i18n-en="MAC address">{{index .T "info.mac"}}</span></dt><dd dir="ltr">{{if .ClientMAC}}{{.ClientMAC}}{{else}}<span data-i18n="info.none" data-i18n-en="Not detected">{{index .T "info.none"}}</span>{{end}}</dd>
+</dl>
+<p data-i18n="info.help" data-i18n-en="Reception may ask for these if you need help connecting.">{{index .T "info.help"}}</p>
+`
+
 // ============================================================================================================
 // THE SIGN-IN PAGE
 // ============================================================================================================
@@ -218,29 +234,22 @@ const landingHTML = `<!doctype html>
    the same ids, the same script. The hero is decoration and aria-hidden; the card keeps the readable copies. */
 @layer sc-template {` + portalTemplateCSS + `}
 </style>
-<style id="sc-guard">` + portalGuardCSS + `</style>
-<script nonce="{{.Nonce}}">
-  // CASCADE LAYERS, AND THE BROWSERS THAT PREDATE THEM. A browser without cascade layers (iOS before 15.4,
-  // for one) drops an entire layered block as an unknown rule -- which here would be the portal's whole
-  // stylesheet. On those browsers the layer wrappers are removed before anything paints, and the page falls
-  // back to plain source order: base, template, guard, with the hotel's sheet inserted before the guard.
-  (function () {
-    if (window.CSSLayerBlockRule) return;
-    ['sc-base', 'sc-templates'].forEach(function (id) {
-      var el = document.getElementById(id);
-      if (!el) return;
-      var css = el.textContent.replace(/@layer[^;{]*;/g, '').replace(/@layer\s+[\w-]+\s*\{/, '');
-      var end = css.lastIndexOf('}');
-      el.textContent = end >= 0 ? css.slice(0, end) : css;
-    });
-  })();
-</script>
+<style id="sc-guard">` + portalGuardCSS + `</style>` + layerFallbackScript + `
+<noscript><style>
+  /* WITH NO SCRIPT, THE TWO PLAIN-HTML FORMS STILL WORK. The panels are shown by the script once it knows
+     which ways in the hotel offers; without it, the voucher and personal-account forms -- real POST forms --
+     are shown together, and the controls only the script can drive (the group tabs, the switch between the
+     two forms) are left out rather than left dead. */
+  #panel-accountlogin { display: block; }
+  #form-credentials { display: block !important; margin-top: 24px; }
+  #tabs, #panel-accountlogin .pill, #info-btn { display: none; }
+</style></noscript>
 </head><body>
   <div class="page">
   <!-- THE HERO: decoration for the photographic and bar templates, hidden in Classic and Kiosk. -->
   <div class="sc-hero" aria-hidden="true">
     <div class="sc-hero-inner">
-      <img class="sc-hero-logo" alt=""{{with .Brand.Logo}} src="{{.}}"{{else}} hidden{{end}}>
+      <img class="sc-hero-logo" alt=""{{if .Brand.HeroLogo}} src="{{.Brand.Logo}}"{{else}} hidden{{end}}>
       <div class="sc-hero-name" dir="auto">{{.BrandName}}</div>
       <p class="sc-hero-welcome" dir="auto">{{.Brand.Welcome}}</p>
     </div>
@@ -256,8 +265,10 @@ const landingHTML = `<!doctype html>
       <!-- BRANDING. Rendered from the published design so the first paint is already the hotel's, and applied
            again from /api/branding (which is how the admin preview shows unsaved changes). The defaults are
            what an unbranded appliance shows, which must still look deliberate rather than broken. -->
-      <div class="brand{{if .Brand.Logo}} has-logo{{end}}">
-        <img id="brand-logo" alt=""{{with .Brand.Logo}} src="{{.}}"{{else}} style="display:none"{{end}}>
+      <!-- Each logo slot carries the image only where the layout shows it (Brand.HeroLogo / Brand.CardLogo), so
+           an inline logo is not sent twice; the branding script fills the other slot if the layout changes. -->
+      <div class="brand{{if .Brand.CardLogo}} has-logo{{end}}">
+        <img id="brand-logo" alt=""{{if .Brand.CardLogo}} src="{{.Brand.Logo}}"{{else}} style="display:none"{{end}}>
         <span class="brand-mark" aria-hidden="true">` + iconWifi + `</span>
         <h1 class="name" id="brand-name" dir="auto"{{if not .Brand.Name}} data-i18n="brand.fallback" data-i18n-en="Guest Wi-Fi"{{end}}>{{.BrandName}}</h1>
       </div>
@@ -271,8 +282,13 @@ const landingHTML = `<!doctype html>
     {{if .Error}}
     <!-- WHAT THE SERVER SAID, WHERE THE GUEST CAN READ IT, in their language. The voucher and personal-account
          forms are plain HTML POSTs, so this response IS the page they land on. role="alert": it is the answer
-         to something the guest just did. -->
-    <div class="notice notice--error show" id="server-error" role="alert" aria-live="assertive"{{with .ErrorKey}} data-i18n="{{.}}" data-i18n-en="{{$.ErrorEn}}"{{end}}>{{.Error}}</div>
+         to something the guest just did. A live region that is already on the page when it loads is not
+         reliably announced, so focus is moved to it: the guest hears the refusal, and the form they sent
+         points at it (aria-describedby). -->
+    <div class="notice notice--error show" id="server-error" role="alert" tabindex="-1"{{with .ErrorKey}} data-i18n="{{.}}" data-i18n-en="{{$.ErrorEn}}"{{end}}>{{.Error}}</div>
+    <script nonce="{{.Nonce}}">
+      (function () { var e = document.getElementById('server-error'); if (e && e.focus) e.focus(); })();
+    </script>
     {{end}}
 
     <div class="tabs" id="tabs" role="tablist"></div>
@@ -282,29 +298,29 @@ const landingHTML = `<!doctype html>
   <div class="panel panel--wide" id="panel-accountlogin">
     <label class="pill" for="use-personal">
       <span data-i18n="account.personal" data-i18n-en="Use Personal Account">{{index .T "account.personal"}}</span>
-      <input type="checkbox" id="use-personal" role="switch">
+      <input type="checkbox" id="use-personal" role="switch"{{if eq .ErrorForm "account"}} checked{{end}}>
     </label>
 
     <form method="POST" action="/auth/voucher" id="form-voucher">
       <div class="field">
         <label for="voucher"><span data-i18n="voucher.label" data-i18n-en="Voucher Code">{{index .T "voucher.label"}}</span></label>
-        <input id="voucher" name="code" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" required maxlength="32">
+        <input id="voucher" name="code" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" required maxlength="32"{{with .VoucherValue}} value="{{.}}"{{end}}{{if eq .ErrorForm "voucher"}} aria-describedby="server-error"{{if .ErrorInvalid}} aria-invalid="true"{{end}}{{end}}>
       </div>
       <button class="primary" type="submit"><span data-i18n="btn.login" data-i18n-en="Login">{{index .T "btn.login"}}</span></button>
-      <div class="err" role="alert"></div>
+      <div class="err" id="voucher-err" role="alert" data-for="voucher"></div>
     </form>
 
     <form method="POST" action="/auth/credentials" id="form-credentials" autocomplete="off" style="display:none">
       <div class="field">
         <label for="ga-username"><span data-i18n="account.user" data-i18n-en="Username">{{index .T "account.user"}}</span></label>
-        <input id="ga-username" name="username" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required maxlength="64">
+        <input id="ga-username" name="username" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required maxlength="64"{{with .UsernameValue}} value="{{.}}"{{end}}{{if eq .ErrorForm "account"}} aria-describedby="server-error"{{if .ErrorInvalid}} aria-invalid="true"{{end}}{{end}}>
       </div>
       <div class="field">
         <label for="ga-password"><span data-i18n="account.pass" data-i18n-en="Password">{{index .T "account.pass"}}</span></label>
-        <input id="ga-password" name="password" type="password" autocomplete="current-password" required maxlength="128">
+        <input id="ga-password" name="password" type="password" autocomplete="current-password" required maxlength="128"{{if eq .ErrorForm "account"}} aria-describedby="server-error"{{if .ErrorInvalid}} aria-invalid="true"{{end}}{{end}}>
       </div>
       <button class="primary" type="submit"><span data-i18n="btn.login" data-i18n-en="Login">{{index .T "btn.login"}}</span></button>
-      <div class="err" role="alert"></div>
+      <div class="err" id="cred-err" role="alert" data-for="ga-username ga-password"></div>
     </form>
   </div>
 
@@ -315,7 +331,7 @@ const landingHTML = `<!doctype html>
         <input id="email" name="dest" type="email" required placeholder="you@example.com" autocomplete="email" autocapitalize="none" spellcheck="false">
       </div>
       <button class="primary" type="submit"><span data-i18n="btn.sendcode" data-i18n-en="Send code">{{index .T "btn.sendcode"}}</span></button>
-      <div class="err" role="alert"></div>
+      <div class="err" id="email-dest-err" role="alert" data-for="email"></div>
     </form>
     <form data-otp="email" data-stage="code" autocomplete="off" style="display:none">
       <p class="small"><span data-i18n="otp.sent.email" data-i18n-en="We sent a 6-digit code to">{{index .T "otp.sent.email"}}</span> <bdi class="dest"></bdi></p>
@@ -325,16 +341,17 @@ const landingHTML = `<!doctype html>
       </div>
       <button class="primary" type="submit"><span data-i18n="btn.verify" data-i18n-en="Verify">{{index .T "btn.verify"}}</span></button>
       <button type="button" class="link" data-resend data-i18n="otp.retry.email" data-i18n-en="Try a different email">{{index .T "otp.retry.email"}}</button>
-      <div class="err" role="alert"></div>
+      <div class="err" id="email-code-err" role="alert" data-for="email-code"></div>
     </form>
   </div>
 
-  <!-- ROOM — the room number on a numeric keypad, and the one detail this hotel asks for. -->
+  <!-- ROOM — the room number (a full keyboard: rooms like A101 or 12B exist), and the one detail this hotel
+       asks for. -->
   <div class="panel" id="panel-pms">
     <form id="form-pms" autocomplete="off">
       <div class="field">
         <label for="pms-room"><span data-i18n="pms.room" data-i18n-en="Room Number">{{index .T "pms.room"}}</span></label>
-        <input id="pms-room" name="room" type="text" inputmode="numeric" autocomplete="off" autocorrect="off" spellcheck="false" required dir="ltr">
+        <input id="pms-room" name="room" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" required dir="ltr">
       </div>
       <div class="field">
         <label for="pms-secondary"><span data-i18n="pms.secondary" data-i18n-en="Password">{{index .T "pms.secondary"}}</span></label>
@@ -346,7 +363,7 @@ const landingHTML = `<!doctype html>
     </form>
     <!-- the error lives OUTSIDE the form: during package selection the form is hidden, and a failure message
          inside it would be invisible exactly when the guest most needs to see it. -->
-    <div class="err" id="pms-err" role="alert" aria-live="polite"></div>
+    <div class="err" id="pms-err" role="alert" data-for="pms-room pms-secondary"></div>
     <div id="pms-choices" role="group" aria-label="{{index .T "pms.choose"}}" style="display:none"></div>
   </div>
 
@@ -361,7 +378,7 @@ const landingHTML = `<!doctype html>
       </div>
       <button class="primary" type="submit"><span data-i18n="btn.reconnect" data-i18n-en="Reconnect">{{index .T "btn.reconnect"}}</span></button>
     </form>
-    <div class="err" id="ps-err" role="alert" aria-live="polite"></div>
+    <div class="err" id="ps-err" role="alert" data-for="ps-pin"></div>
   </div>
 
   <div class="panel" id="panel-social">
@@ -376,7 +393,7 @@ const landingHTML = `<!doctype html>
         <p class="hint" id="sms-hint" data-i18n="sms.hint" data-i18n-en="Include the country code, for example +44 20 7946 0958">{{index .T "sms.hint"}}</p>
       </div>
       <button class="primary" type="submit"><span data-i18n="btn.sendcode" data-i18n-en="Send code">{{index .T "btn.sendcode"}}</span></button>
-      <div class="err" role="alert"></div>
+      <div class="err" id="sms-dest-err" role="alert" data-for="phone"></div>
     </form>
     <form data-otp="sms" data-stage="code" autocomplete="off" style="display:none">
       <p class="small"><span data-i18n="otp.sent.sms" data-i18n-en="We texted a 6-digit code to">{{index .T "otp.sent.sms"}}</span> <bdi class="dest"></bdi></p>
@@ -386,7 +403,7 @@ const landingHTML = `<!doctype html>
       </div>
       <button class="primary" type="submit"><span data-i18n="btn.verify" data-i18n-en="Verify">{{index .T "btn.verify"}}</span></button>
       <button type="button" class="link" data-resend data-i18n="otp.retry.sms" data-i18n-en="Use a different number">{{index .T "otp.retry.sms"}}</button>
-      <div class="err" role="alert"></div>
+      <div class="err" id="sms-code-err" role="alert" data-for="sms-code"></div>
     </form>
   </div>
 
@@ -420,26 +437,12 @@ const landingHTML = `<!doctype html>
         <li data-help-method="social"><strong data-i18n="method.social" data-i18n-en="Social">{{index .T "method.social"}}</strong><span data-i18n="social.note" data-i18n-en="You will be redirected to the provider, then back here.">{{index .T "social.note"}}</span></li>
       </ul>
       <p class="help-fail" data-i18n="help.fail" data-i18n-en="Something not working? Please contact reception — they are happy to help.">{{index .T "help.fail"}}</p>
-      <div class="help-device">
-        <strong data-i18n="info.device" data-i18n-en="Your device">{{index .T "info.device"}}</strong>
-        <dl>
-          <dt><span data-i18n="info.ip" data-i18n-en="IP address">{{index .T "info.ip"}}</span></dt><dd dir="ltr">{{if .ClientIP}}{{.ClientIP}}{{else}}<span data-i18n="info.none" data-i18n-en="Not detected">{{index .T "info.none"}}</span>{{end}}</dd>
-          <dt><span data-i18n="info.mac" data-i18n-en="MAC address">{{index .T "info.mac"}}</span></dt><dd dir="ltr">{{if .ClientMAC}}{{.ClientMAC}}{{else}}<span data-i18n="info.none" data-i18n-en="Not detected">{{index .T "info.none"}}</span>{{end}}</dd>
-        </dl>
-        <p data-i18n="info.help" data-i18n-en="Reception may ask for these if you need help connecting.">{{index .T "info.help"}}</p>
-      </div>
+      <div class="help-device">` + deviceFacts + `</div>
       <p class="help-hotel" id="help-hotel" dir="auto"{{if not .Brand.Help}} hidden{{end}}>{{.Brand.Help}}</p>
       </div></div></details>
       <button class="info-btn" id="info-btn" type="button" aria-expanded="false" aria-controls="info-panel"
               data-i18n-aria="info.button" aria-label="{{index .T "info.button"}}" title="{{index .T "info.button"}}">` + iconInfo + `</button>
-      <div class="info-panel" id="info-panel" hidden>
-        <strong data-i18n="info.device" data-i18n-en="Your device">{{index .T "info.device"}}</strong>
-        <dl>
-          <dt><span data-i18n="info.ip" data-i18n-en="IP address">{{index .T "info.ip"}}</span></dt><dd dir="ltr">{{if .ClientIP}}{{.ClientIP}}{{else}}<span data-i18n="info.none" data-i18n-en="Not detected">{{index .T "info.none"}}</span>{{end}}</dd>
-          <dt><span data-i18n="info.mac" data-i18n-en="MAC address">{{index .T "info.mac"}}</span></dt><dd dir="ltr">{{if .ClientMAC}}{{.ClientMAC}}{{else}}<span data-i18n="info.none" data-i18n-en="Not detected">{{index .T "info.none"}}</span>{{end}}</dd>
-        </dl>
-        <p data-i18n="info.help" data-i18n-en="Reception may ask for these if you need help connecting.">{{index .T "info.help"}}</p>
-      </div>` + ogAttribution + `
+      <div class="info-panel" id="info-panel" hidden>` + deviceFacts + `</div>` + ogAttribution + `
     </div>
   </main>
   </div>
@@ -512,7 +515,7 @@ const landingHTML = `<!doctype html>
       const seen = {};
       const others = members.filter(m => Tabs[m] && !seen[Tabs[m].panel] && (seen[Tabs[m].panel] = true));
       if (others.length > 1) {
-        const h = document.createElement('h3');
+        const h = document.createElement('h2');
         // Generated text carries its key so the language pass reaches it too.
         h.dataset.i18n = 'alt.title';
         h.dataset.i18nEn = BUILTIN.en['alt.title'];
@@ -575,6 +578,14 @@ const landingHTML = `<!doctype html>
       return null;
     }
 
+    // isRTL: a shipped language says so itself; one the hotel added with its own words (Hebrew, Persian, Urdu)
+    // is judged by its code -- the same rule as rtlCode in portal_page.go, so the script and the server agree.
+    function isRTL(code) {
+      var meta = langMeta(code);
+      if (meta) return !!meta.rtl;
+      return ['ar', 'he', 'fa', 'ur'].indexOf(String(code || '').toLowerCase().split('-')[0]) >= 0;
+    }
+
     // words merges the hotel's overrides over the built-in dictionary for one language. A blank override is
     // not an override.
     function words(code) {
@@ -592,11 +603,10 @@ const landingHTML = `<!doctype html>
     function applyLanguage(code) {
       LANG = code;
       DICT = words(code);
-      var meta = langMeta(code);
       document.documentElement.lang = code;
-      // Arabic reads right to left. A portal that renders it left-aligned has transliterated the words and
-      // left the page in the wrong language.
-      document.documentElement.dir = (meta && meta.rtl) ? 'rtl' : 'ltr';
+      // Arabic reads right to left, and so do the languages a hotel may add. A portal that renders them
+      // left-aligned has transliterated the words and left the page in the wrong language.
+      document.documentElement.dir = isRTL(code) ? 'rtl' : 'ltr';
       document.querySelectorAll('[data-i18n]').forEach(function (el) {
         var k = el.dataset.i18n;
         if (DICT[k]) el.textContent = DICT[k];
@@ -691,18 +701,79 @@ const landingHTML = `<!doctype html>
       if (v) root.setProperty(name, v); else root.removeProperty(name);
     }
     function cssURL(u) { return u ? 'url("' + encodeURI(u) + '")' : ''; }
-    // White text on a pale brand colour is unreadable; such a hotel gets dark button text instead.
-    function lightColour(c) {
-      var m = /^#([0-9a-f]{3,8})$/i.exec(String(c || ''));
-      if (!m) return false;
-      var h = m[1];
-      if (h.length < 6) h = h.charAt(0) + h.charAt(0) + h.charAt(1) + h.charAt(1) + h.charAt(2) + h.charAt(2);
-      var l = [0, 2, 4].map(function (i) {
-        var f = parseInt(h.substr(i, 2), 16) / 255;
-        return f <= 0.03928 ? f / 12.92 : Math.pow((f + 0.055) / 1.055, 2.4);
-      });
-      var lum = 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2];
-      return 1.05 / (lum + 0.05) < 3;
+
+    // THE HOTEL'S COLOURS, MADE READABLE. A port of derivedColours in portal_colour.go, which renders the same
+    // values into the page on the server; it runs here as well because the admin preview hands this script an
+    // unsaved design that never reaches the server. The two must stay in step.
+    var INK_DARK = '#14161a', MIN_CONTRAST = 4.5, MIN_PHOTO_OVERLAY = 0.3, DEFAULT_OVERLAY = 0.35;
+    var WHITE = { r: 255, g: 255, b: 255, a: 1 };
+    function parseColour(s) {
+      s = String(s || '').trim();
+      var m, c;
+      if (s.charAt(0) === '#') {
+        var h = s.slice(1);
+        if (!/^[0-9a-f]*$/i.test(h)) return null;
+        if (h.length === 3 || h.length === 4) h = h.replace(/./g, '$&$&');
+        if (h.length !== 6 && h.length !== 8) return null;
+        c = { r: parseInt(h.substr(0, 2), 16), g: parseInt(h.substr(2, 2), 16), b: parseInt(h.substr(4, 2), 16), a: 1 };
+        if (h.length === 8) c.a = parseInt(h.substr(6, 2), 16) / 255;
+        return c;
+      }
+      m = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*([0-9]*\.?[0-9]+)(%?)\s*)?\)$/i.exec(s);
+      if (!m) return null;
+      c = { r: Math.min(255, +m[1]), g: Math.min(255, +m[2]), b: Math.min(255, +m[3]), a: 1 };
+      if (m[4]) {
+        var a = parseFloat(m[4]);
+        if (m[5] === '%') a /= 100;
+        c.a = Math.min(1, Math.max(0, a));
+      }
+      return c;
+    }
+    function over(c, bg) {
+      return { r: c.r * c.a + bg.r * (1 - c.a), g: c.g * c.a + bg.g * (1 - c.a), b: c.b * c.a + bg.b * (1 - c.a), a: 1 };
+    }
+    function shade(c, k) { return over({ r: 0, g: 0, b: 0, a: k }, c); }
+    function luminance(c) {
+      function lin(v) { var f = v / 255; return f <= 0.03928 ? f / 12.92 : Math.pow((f + 0.055) / 1.055, 2.4); }
+      return 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b);
+    }
+    function contrast(x, y) {
+      var a = luminance(x), b = luminance(y);
+      return a >= b ? (a + 0.05) / (b + 0.05) : (b + 0.05) / (a + 0.05);
+    }
+    function hex(c) {
+      function h(v) { return ('0' + Math.round(Math.max(0, Math.min(255, v))).toString(16)).slice(-2); }
+      return '#' + h(c.r) + h(c.g) + h(c.b);
+    }
+    // '' is white (the stylesheet's default); otherwise the dark ink.
+    function inkOn(surfaces) {
+      function worst(ink) { return Math.min.apply(null, surfaces.map(function (s) { return contrast(ink, s); })); }
+      var w = worst(WHITE), d = worst(parseColour(INK_DARK));
+      return (w >= MIN_CONTRAST || w >= d) ? '' : INK_DARK;
+    }
+    function readableOnWhite(c) {
+      c = over(c, WHITE);
+      if (contrast(c, WHITE) >= MIN_CONTRAST) return '';
+      for (var f = 0.95; f > 0; f -= 0.05) {
+        var d = hex({ r: c.r * f, g: c.g * f, b: c.b * f, a: 1 });
+        if (contrast(parseColour(d), WHITE) >= MIN_CONTRAST) return d;
+      }
+      return INK_DARK;
+    }
+    // Every property, '' where the stylesheet's default is right -- so a colour removed in the preview clears.
+    function deriveColours(brand, brandDark, text, overlay, photo) {
+      var out = { '--sc-on-brand': '', '--sc-on-brand-dark': '', '--sc-link': '', '--sc-ink': '', '--sc-on-hero': '', '--sc-hero-shade': '' };
+      var b = parseColour(brand), bd = parseColour(brandDark), t = parseColour(text);
+      var bb = over(b || parseColour('#1773bd'), WHITE), bbd = over(bd || parseColour('#125c97'), WHITE);
+      if (b) out['--sc-on-brand'] = inkOn([bb]);
+      if (b || bd) out['--sc-on-brand-dark'] = inkOn([bbd]);
+      if (bd) out['--sc-link'] = readableOnWhite(bbd);
+      if (t && contrast(over(t, WHITE), WHITE) >= MIN_CONTRAST) out['--sc-ink'] = text;
+      if (!photo && (b || bd)) {
+        var ink = inkOn([shade(bb, overlay), shade(bbd, overlay)]);
+        if (ink) { out['--sc-on-hero'] = ink; out['--sc-hero-shade'] = 'transparent'; }
+      }
+      return out;
     }
     function applyTemplate(d) {
       const el = document.documentElement;
@@ -712,22 +783,28 @@ const landingHTML = `<!doctype html>
       el.dataset.panel = ['start', 'center', 'end'].indexOf(o.panel_position) >= 0 ? o.panel_position : '';
       el.dataset.hero = ['short', 'medium', 'tall'].indexOf(o.hero_height) >= 0 ? o.hero_height : '';
       el.dataset.surface = ['solid', 'glass'].indexOf(o.surface) >= 0 ? o.surface : '';
+      const photo = !!(d && (d.hero_image_url || d.background_url));
       const overlay = Number(o.overlay);
       const hasOverlay = o.overlay !== undefined && o.overlay !== null && overlay >= 0 && overlay <= 90;
-      cssProp('--sc-overlay', hasOverlay ? String(overlay / 100) : '');
+      // White words over a photograph always get some darkening under them (as brandFor does).
+      let ov = hasOverlay ? overlay / 100 : DEFAULT_OVERLAY;
+      if (hasOverlay && photo && ov < MIN_PHOTO_OVERLAY) ov = MIN_PHOTO_OVERLAY;
+      cssProp('--sc-overlay', hasOverlay ? String(ov) : '');
       cssProp('--sc-heading-font', o.heading_font || '');
-      cssProp('--sc-hero', cssURL((d && (d.hero_image_url || d.background_url)) || ''));
+      // With no hero photograph the stylesheet's --sc-hero falls back to the background one.
+      cssProp('--sc-hero', cssURL((d && d.hero_image_url) || ''));
+      return { overlay: ov, photo: photo };
     }
 
     // BRANDING, applied from /api/branding. Every value is set when the design has it and CLEARED when it does
     // not, so the admin preview -- which starts from the published page -- shows an unsaved removal too.
     fetch('/api/branding').then(r => r.ok ? r.json() : {}).then(b => {
       const d = (b && b.design) || b || {};
-      applyTemplate(d);
+      const look = applyTemplate(d);
       cssProp('--sc-brand', d.brand_color);
       cssProp('--sc-brand-dark', d.brand_color_dark);
-      cssProp('--sc-ink', d.text_color);
-      cssProp('--sc-on-brand', d.brand_color && lightColour(d.brand_color) ? '#14161a' : '');
+      const derived = deriveColours(d.brand_color, d.brand_color_dark, d.text_color, look.overlay, look.photo);
+      Object.keys(derived).forEach(function (k) { cssProp(k, derived[k]); });
       cssProp('font-family', d.font_family);
       cssProp('--sc-radius', d.corner_radius);
       cssProp('--sc-bg', cssURL(d.background_url));
@@ -753,8 +830,11 @@ const landingHTML = `<!doctype html>
         img.onload = function () { img.style.display = ''; brandRow.classList.add('has-logo'); };
         heroLogo.onerror = function () { heroLogo.hidden = true; };
         heroLogo.onload = function () { heroLogo.hidden = false; };
-        if (img.getAttribute('src') !== d.logo_url) { img.src = d.logo_url; heroLogo.src = d.logo_url; }
-        else if (img.complete) { if (img.naturalWidth) { img.onload(); heroLogo.onload(); } else { img.onerror(); heroLogo.onerror(); } }
+        // Each slot on its own: the server drew the logo only in the slot its layout shows.
+        [img, heroLogo].forEach(function (el) {
+          if (el.getAttribute('src') !== d.logo_url) el.src = d.logo_url;
+          else if (el.complete) { if (el.naturalWidth) el.onload(); else el.onerror(); }
+        });
       } else {
         img.removeAttribute('src'); img.style.display = 'none'; brandRow.classList.remove('has-logo');
         heroLogo.removeAttribute('src'); heroLogo.hidden = true;
@@ -812,7 +892,7 @@ const landingHTML = `<!doctype html>
           var meta = langMeta(code);
           // A code the portal has no words for is still offered IF the hotel published a translation for it.
           if (!meta && !(I18N[code] && Object.keys(I18N[code]).length)) return;
-          offered.push({ code: code, label: (l && l.label) || (meta && meta.label) || code.toUpperCase(), rtl: meta && meta.rtl });
+          offered.push({ code: code, label: (l && l.label) || (meta && meta.label) || code.toUpperCase() });
         });
       }
       if (!offered.length) offered = LANGS.map(function (l) { return { code: l.code, label: l.label }; });
@@ -866,6 +946,26 @@ const landingHTML = `<!doctype html>
         const open = panel.hasAttribute('hidden');
         if (open) { panel.removeAttribute('hidden'); } else { panel.setAttribute('hidden', ''); }
         btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+    })();
+
+    // A REFUSAL POINTS AT THE FIELD IT IS ABOUT. Each message box names its fields (data-for): they are described
+    // by it, and marked invalid while it holds a refusal -- not while it holds the blue "you can try again".
+    (function () {
+      document.querySelectorAll('.err[data-for]').forEach(function (box) {
+        const fields = box.getAttribute('data-for').split(' ').map(function (id) { return document.getElementById(id); }).filter(Boolean);
+        fields.forEach(function (el) {
+          const ids = (el.getAttribute('aria-describedby') || '').split(' ').filter(Boolean);
+          if (ids.indexOf(box.id) < 0) ids.push(box.id);
+          el.setAttribute('aria-describedby', ids.join(' '));
+        });
+        function sync() {
+          const bad = box.textContent.trim() !== '' && !box.classList.contains('err--ok');
+          fields.forEach(function (el) { if (bad) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid'); });
+        }
+        if (window.MutationObserver) {
+          new MutationObserver(sync).observe(box, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+        }
       });
     })();
 

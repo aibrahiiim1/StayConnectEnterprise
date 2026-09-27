@@ -37,7 +37,7 @@ const initial = {
 describe("PackageForm", () => {
   it("ADD requires an existing service plan, chosen by name", () => {
     render(<PackageForm mode="add" plans={plans} onSave={() => {}} />);
-    const sel = screen.getByLabelText("service-plan") as HTMLSelectElement;
+    const sel = screen.getByTestId("service-plan") as HTMLSelectElement;
     expect(sel.required).toBe(true);
     const labels = Array.from(sel.options).map((o) => o.textContent);
     expect(labels).toContain("Gold");
@@ -49,25 +49,25 @@ describe("PackageForm", () => {
 
   it("shows what the selected plan grants, read-only, in the Product Owner's wording", () => {
     render(<PackageForm mode="add" plans={plans} onSave={() => {}} />);
-    fireEvent.change(screen.getByLabelText("service-plan"), { target: { value: "plan-gold" } });
+    fireEvent.change(screen.getByTestId("service-plan"), { target: { value: "plan-gold" } });
     expect(screen.getByTestId("plan-summary").textContent)
       .toBe("10 Mbps down · 5 Mbps up · 100 MB · 1 device");
     // ...and the technical values are NOT editable here
     for (const gone of ["down-mbps", "up-mbps", "data-gb", "time-hours", "devices", "speed-allocation"]) {
-      expect(screen.queryByLabelText(gone)).toBeNull();
+      expect(screen.queryByTestId(gone)).toBeNull();
     }
   });
 
   it("ADD refuses to save without a plan, and cannot create one", () => {
     const onSave = vi.fn();
     render(<PackageForm mode="add" plans={plans} onSave={onSave} />);
-    fireEvent.change(screen.getByLabelText("code"), { target: { value: "X" } });
+    fireEvent.change(screen.getByTestId("code"), { target: { value: "X" } });
     fireEvent.click(screen.getByRole("button", { name: /add package/i }));
 
     // Nothing is saved, so nothing downstream can create a Service Plan from a Package.
     expect(onSave).not.toHaveBeenCalled();
     // The field itself is what refuses: it is required and currently invalid.
-    const sel = screen.getByLabelText("service-plan") as HTMLSelectElement;
+    const sel = screen.getByTestId("service-plan") as HTMLSelectElement;
     expect(sel.required).toBe(true);
     expect(sel.checkValidity()).toBe(false);
 
@@ -80,22 +80,22 @@ describe("PackageForm", () => {
 
   it("explains what to do when the site has no service plans, instead of an empty dropdown", () => {
     render(<PackageForm mode="add" plans={[]} onSave={() => {}} />);
-    expect(screen.queryByLabelText("service-plan")).toBeNull();
+    expect(screen.queryByTestId("service-plan")).toBeNull();
     expect(screen.getByText(/no service plans yet/i)).toBeTruthy();
     expect(screen.getByRole("link", { name: /create a service plan/i })).toBeTruthy();
   });
 
   it("EDIT loads the plan the package currently uses", () => {
     render(<PackageForm mode="edit" initial={initial} plans={plans} onSave={() => {}} />);
-    expect((screen.getByLabelText("service-plan") as HTMLSelectElement).value).toBe("plan-gold");
+    expect((screen.getByTestId("service-plan") as HTMLSelectElement).value).toBe("plan-gold");
     expect(screen.getByTestId("plan-summary").textContent).toContain("10 Mbps down");
-    expect((screen.getByLabelText("code") as HTMLInputElement).readOnly).toBe(true);
+    expect((screen.getByTestId("code") as HTMLInputElement).readOnly).toBe(true);
   });
 
   it("EDIT lets the operator switch to another existing plan, and reports which", () => {
     const onSave = vi.fn();
     render(<PackageForm mode="edit" initial={initial} plans={plans} onSave={onSave} />);
-    fireEvent.change(screen.getByLabelText("service-plan"), { target: { value: "plan-silver" } });
+    fireEvent.change(screen.getByTestId("service-plan"), { target: { value: "plan-silver" } });
     expect(screen.getByTestId("plan-summary").textContent).toContain("2 Mbps down");
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
     expect(onSave).toHaveBeenCalledTimes(1);
@@ -114,7 +114,7 @@ describe("PackageForm", () => {
   it("the eligibility rule-type dropdown offers ONLY implemented types and NO PMS types", () => {
     render(<PackageForm mode="add" plans={plans} onSave={() => {}} />);
     fireEvent.click(screen.getByText("Add condition"));
-    const typeSelect = screen.getByLabelText("rule-type-0") as HTMLSelectElement;
+    const typeSelect = screen.getByTestId("rule-type-0") as HTMLSelectElement;
     const offered = Array.from(typeSelect.options).map((o) => o.value);
     expect(offered.sort()).toEqual([...SUPPORTED_RULE_TYPES].sort());
     for (const pms of FORBIDDEN_RULE_TYPES) expect(offered).not.toContain(pms);
@@ -134,7 +134,7 @@ describe("PackageForm", () => {
       rules: [{ type: "AUTH_METHOD", methods: "pms, voucher" }],
       tiers: [{ order: 10, down_kbps: 5000 }, { order: 5, down_kbps: 1000 }],
     }} />);
-    fireEvent.change(screen.getByLabelText("name"), { target: { value: "Renamed" } });
+    fireEvent.change(screen.getByTestId("name"), { target: { value: "Renamed" } });
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
 
     const payload = onSave.mock.calls[0][0].payload;
