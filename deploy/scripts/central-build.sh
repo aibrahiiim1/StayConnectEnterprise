@@ -168,7 +168,9 @@ PY
 ( cd "$REL" && find . -type f ! -name SHA256SUMS -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > SHA256SUMS )
 say "SHA256SUMS: $(wc -l < "$REL/SHA256SUMS") files"
 
-tar -C "$OUT" -czf "$OUT/$NAME.tar.gz" "$NAME"
+# Root-owned in the archive whatever the build user is: extracted as root on Central it must not carry a
+# workstation uid.
+tar -C "$OUT" --owner=0 --group=0 --numeric-owner -czf "$OUT/$NAME.tar.gz" "$NAME"
 ( cd "$OUT" && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256" )
 say ""
 say "RELEASE READY: $OUT/$NAME.tar.gz"
