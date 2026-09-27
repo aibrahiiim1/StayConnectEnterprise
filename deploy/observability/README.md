@@ -21,7 +21,6 @@ deploy/observability/
 │   │   └── dashboards/stayconnect.yml
 │   └── dashboards/
 │       ├── overview.json
-│       ├── payments.json
 │       ├── auth.json
 │       └── system.json
 └── README.md
@@ -70,22 +69,19 @@ real auth before opening remotely.
 | Dashboard  | What it covers                                                 |
 |------------|----------------------------------------------------------------|
 | Overview   | Active sessions, sessions-started-by-method, nft ops, HTTP rate|
-| Payments   | Checkout success rate, webhook outcomes, 24h revenue, per-tenant|
 | Auth       | OTP issue/verify, social login + latency, PMS validate + latency|
 | System     | Scrape targets, uptimes, Go runtime, ctrlapi p95, reaper rate   |
 
 Every scd-sourced panel is filterable by `$tenant_id` (multi-select).
-Payments panels additionally filter by `$currency`.
 
 ## Alert rules
 
 The rules in `prometheus/alerts.yml` are grouped:
 
-- **system-health**: `ScrapeTargetDown`, `ApplianceOffline`, `ApplianceNoHeartbeats`
+- **system-health**: `ScrapeTargetDown`
 - **ctrlapi-http**: `CtrlapiHigh5xxRate`, `CtrlapiSlow`
 - **pms**: `PMSProviderDown`, `PMSValidationFailuresSpike`
 - **auth**: `SocialLoginFailureRate`, `OTPVerifyLockoutsSpike`
-- **payments**: `StripeSignatureFailures`, `StripeVoucherIssueFailures`, `CheckoutCreateFailureRate`
 
 Wire Alertmanager to Prometheus for routing to Slack/PagerDuty — not
 included in this compose file (keep it up to the operator's existing
