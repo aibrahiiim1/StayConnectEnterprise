@@ -1,8 +1,8 @@
 # Customer Operator (Tenant Operator) — User Guide
 
-You handle day-to-day Wi-Fi operations for your hotel group. In **OneGate Central** your role is day-to-day work for your customer; most guest-facing work happens on each hotel's appliance in **OneGate Hotel Admin**, with an operator account created for you on that appliance (usually the **Front office operator** or **Hotel IT manager** role). You **cannot** add or remove other staff, change licenses, or delete the customer.
+You handle day-to-day Wi-Fi operations for your hotel group. That work happens on each hotel's appliance in **OneGate Hotel Admin**, with an operator account created for you on that appliance (usually the **Front office operator** or **Hotel IT manager** role).
 
-If you need any of those things, your customer admin (or the OneGate platform admin, for licenses) does it.
+**The *Customer operator* role grants nothing in OneGate Central** ([CENTRAL_CONTROL_PLANE.md §7](../CENTRAL_CONTROL_PLANE.md#7-roles)). Central is for licensing, activation and fleet status; if you need to see your appliances' licences there, ask your customer admin for a **Viewer** login. You **cannot** add or remove staff, change licences, or change sites — your customer admin (or the OneGate platform admin, for licences) does it.
 
 ## Your daily workflow
 
@@ -116,9 +116,9 @@ The morning check:
 
 ## What you cannot do
 
-- Create / remove operators (including yourself). Ask your customer admin (Central) or the appliance's Site admin (Hotel Admin).
-- Change licenses. Ask your platform admin contact.
-- Delete the customer or any site. Ask your customer admin.
+- Create / remove operators (including yourself). Ask your customer admin (Central users) or the appliance's Site admin (Hotel Admin operators).
+- Change licences. Ask your platform admin contact.
+- Create, change or delete sites. Ask your customer admin.
 - Change PMS, email/SMS or social-login credentials from a desk role. Ask the Hotel IT manager.
 
 ## When to escalate to your customer admin

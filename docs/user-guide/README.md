@@ -1,7 +1,7 @@
 # OneGate — User Guide
 
 This guide explains how to use OneGate's two operator consoles for each operator role:
-**OneGate Central** (the vendor's console in the cloud, used for licensing) and **OneGate Hotel Admin** (the
+**OneGate Central** (the vendor's console in the cloud, used for licensing, activation and fleet status) and **OneGate Hotel Admin** (the
 console on the appliance at each hotel). Start with the section that matches your role; the role pages are
 task-oriented ("how do I…") rather than a feature reference.
 
@@ -10,10 +10,11 @@ task-oriented ("how do I…") rather than a feature reference.
 > it takes a hotel from an unpacked appliance to live, licensed guest Wi-Fi. The full
 > documentation index is at [docs/README.md](../README.md).
 >
-> **Current model:** onboarding is **zero-touch** (the appliance registers itself → *Pending
-> activation* → one-click **Activate** in Central); the only entitlement is the **signed appliance
-> license** (max concurrent online guests + validity + grace period + entitled features). Central is used
-> for licensing only; the hotel's networks, sign-in methods, packages and guests are run from Hotel Admin.
+> **Current model:** onboarding is **zero-touch** (the appliance registers itself, no token → *Waiting for
+> activation* → one **Activate** step in Central); the only entitlement is the **signed appliance
+> licence** (max concurrent online guests + validity + grace period). Central is used for licensing,
+> activation and fleet status only ([CENTRAL_CONTROL_PLANE.md](../CENTRAL_CONTROL_PLANE.md)); the hotel's
+> networks, sign-in methods, packages and guests are run from Hotel Admin.
 >
 > **Design:** both consoles and the guest portal share the
 > [OneGate design system](../../design-system/README.md).
@@ -25,8 +26,8 @@ If you want a **page-by-page reference** (what every screen shows and does) or a
 
 | Document | What it covers |
 |---|---|
-| [control-panel-reference.md](control-panel-reference.md) | Every **OneGate Central** page — Dashboard, Sites, Onboarding, Appliances, Customers, Licenses, Operators, Security alerts, Certificates, Assignment keys, Backup health, Audit log |
-| [control-panel-config-manual.md](control-panel-config-manual.md) | How to create a **Customer → Site → Appliance → License** and run day-2 operations in Central |
+| [control-panel-reference.md](control-panel-reference.md) | Every **OneGate Central** page — Overview, Customers (and the customer page), Appliances (and the appliance page), Licenses, System (Security alerts, Trust & keys, Audit log, Team, Backup health) |
+| [control-panel-config-manual.md](control-panel-config-manual.md) | How to create a **Customer → Site**, **activate** an appliance, manage its **licence**, and run day-2 operations in Central |
 | [hotel-admin-reference.md](hotel-admin-reference.md) | Every **OneGate Hotel Admin** page, group by group — Overview; Internet offering; Guests; Property management system; Charges; Guest portal; Networking; System |
 | [hotel-admin-config-manual.md](hotel-admin-config-manual.md) | How to **activate and fully configure** an appliance from Hotel Admin — networking, guest networks, sign-in methods, packages, vouchers, PMS, portal, operators |
 | [guest-portal.md](guest-portal.md) | What **guests** see on the Wi-Fi sign-in page, and which Hotel Admin settings control it |
@@ -39,11 +40,10 @@ The role-based guides below are shorter, task-oriented walkthroughs for each rol
 
 | Role | Read this | In one sentence |
 |---|---|---|
-| **Platform admin** | [platform-admin.md](platform-admin.md) | You run OneGate Central for all customers: you create customers, activate appliances and issue licenses. |
-| **Customer admin** (tenant admin) | [tenant-admin.md](tenant-admin.md) | You look after one hotel group's sites, appliances and Central operators, and read its licenses. |
-| **Customer operator** (tenant operator) | [tenant-operator.md](tenant-operator.md) | You do day-to-day Central work for one hotel group, and usually run its hotels' Hotel Admin too. |
-| **Viewer** | [viewer-and-billing.md](viewer-and-billing.md#viewer) | You can look at everything for your customer but not change anything. |
-| **Billing** | [viewer-and-billing.md](viewer-and-billing.md#billing) | You can view your customer's licenses and usage. Nothing else. |
+| **Platform admin** (and read-only **Support**) | [platform-admin.md](platform-admin.md) | You run OneGate Central for all customers: you create customers, activate appliances and manage licences. |
+| **Customer admin / Customer owner** (tenant admin) | [tenant-admin.md](tenant-admin.md) | You manage one hotel group's sites and Central users, and see its appliances and licences. |
+| **Viewer / Auditor** | [viewer-and-billing.md](viewer-and-billing.md#viewer) | You can look at everything for your customer but not change anything. |
+| **Customer operator**, **Billing** (retired) | [tenant-operator.md](tenant-operator.md) · [viewer-and-billing.md](viewer-and-billing.md#billing) | These roles grant nothing in Central any more; day-to-day hotel work is in Hotel Admin. |
 
 **OneGate Hotel Admin** (hotel staff) has seven roles of its own — Site admin, Hotel IT manager, Front office
 operator, Guest relations operator, Voucher operator, Payments operator and Site viewer. Which pages each can
@@ -55,11 +55,11 @@ If a guest can't get online and you're trying to help them, jump straight to
 ## Accessing the consoles
 
 - **OneGate Central**: the Central address your platform admin gave you. Sign in with your Central
-  operator account (or your organisation's single sign-on). A Central account does not open any appliance.
+  email and password. A Central account does not open any appliance.
 - **OneGate Hotel Admin**: `https://` + the appliance's management address on the hotel network. Sign in
   with the account created for you on that appliance; it works only at that property.
-- **Session**: both consoles re-check your session every 30 seconds. Click **Sign out** at the bottom of the
-  sidebar when done.
+- **Session**: when your session ends, either console returns you to its sign-in page. Click **Sign out** at
+  the bottom of the sidebar when done.
 - **Theme**: both consoles offer Light, Dark and System (the default) in the top bar.
 
 You only see the menu items your role can use; pages you can read but not change show a read-only notice
@@ -67,14 +67,15 @@ and no action buttons.
 
 ## What each menu item does
 
-**OneGate Central** — four groups:
+**OneGate Central** — five items, no customer selector:
 
-| Group | Pages |
+| Item | What it is for |
 |---|---|
-| **Overview** | Dashboard — licenses by state; usage for one customer |
-| **Infrastructure** | Sites (one per hotel) · Onboarding (activate pending appliances) · Appliances (list and recovery tools) |
-| **Commercial** | Customers (hotel groups) · Licenses (issue, renew, suspend, revoke) |
-| **Administration** | Operators · Security alerts · Certificates · Assignment keys · Backup health · Audit log |
+| **Overview** | Fleet counts and everything that needs attention |
+| **Customers** | Hotel groups; each customer page has Sites, Appliances, Licenses, Users and Activity |
+| **Appliances** | Every appliance (waiting ones first); each appliance page has Activate, licence actions, Move, Retire, Delete and Advanced |
+| **Licenses** | Every licence, by state |
+| **System** | Security alerts · Trust & keys · Audit log · Team · Backup health (platform staff only) |
 
 **OneGate Hotel Admin** — eight groups:
 
@@ -117,10 +118,10 @@ template, brand, wording, languages and custom CSS/HTML. Details: [guest-portal.
 - **Site** — One physical property (one hotel or resort). Buildings, floors and SSIDs are not sites.
 - **Appliance** — The OneGate gateway at a site. Hands out addresses, shows the sign-in page, enforces speed
   and time limits and talks to the PMS. It does not broadcast Wi-Fi; the hotel's access points do.
-- **Activate / Pending activation** — A new appliance registers itself and waits as *Pending activation*
-  until an operator activates it in Central.
-- **License** — The signed appliance license: max concurrent online guests, valid from/until, grace period
-  and entitled features. The only entitlement.
+- **Activate / Waiting for activation** — A new appliance registers itself and waits as *Waiting for
+  activation* until a platform admin activates it in Central.
+- **License** — The signed appliance licence: max concurrent online guests, valid from/until and grace
+  period. The only entitlement.
 - **Max concurrent online guests** — How many guests may be online at once across the whole appliance.
 - **Grace period** — Days after a license expires during which guests are still served, with warnings.
 - **Guest network** — A Wi-Fi network for guests, carried on a VLAN, with its own addresses and portal.
@@ -133,7 +134,8 @@ template, brand, wording, languages and custom CSS/HTML. Details: [guest-portal.
 - **Guest account** — A username and password created by staff for a guest.
 - **Session** — One device's period online.
 - **Allowed sites** (walled garden) — Addresses a guest device can reach *before* signing in. Keep it small.
-- **Operator** — A staff login (Central or Hotel Admin; the two are separate).
+- **Operator / user** — A staff login (Central or Hotel Admin; the two are separate). In Central, vendor staff
+  are the **Team** and a customer's own logins are its **Users**.
 - **Password confirmation** — Re-entering your own password for a sensitive action.
 
 ---

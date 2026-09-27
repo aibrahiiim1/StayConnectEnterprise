@@ -76,7 +76,7 @@ If you need to read the full code on a card (e.g. a smudged card), open it and u
 
 ## Appliance is offline
 
-1. **Central → Appliances** → find it; note its Status and **Last seen**.
+1. **Central → Appliances** → find it (or filter **Connection: Offline**); note its connection state and last contact.
 2. Call the site. Ask someone to:
    - Check the appliance has power.
    - Check the uplink cable is plugged in.
@@ -84,7 +84,7 @@ If you need to read the full code on a card (e.g. a smudged card), open it and u
 3. If physical looks fine but the appliance still isn't heard from, reboot it (pull power for 10 seconds, plug back in). Wait 2 minutes.
 4. Still offline after 10 minutes → escalate to Semantics support with the appliance serial and last-seen time.
 
-An appliance that cannot reach Central keeps serving guests — Central is used for licensing only. On site, **Hotel Admin → System → Appliance & licence** shows whether Central is reachable.
+An appliance that cannot reach Central keeps serving guests — Central is used for licensing only. On site, **Hotel Admin → System → Appliance & licence** shows whether Central is *Connected*, *Temporarily unreachable* or *Not configured*, when it last answered, and the last problem; **Check now** retries immediately.
 
 ## Sessions count is zero but guests are present
 
@@ -99,7 +99,7 @@ Escalate with specifics: which of the four steps above failed.
 
 ## Too many alerts
 
-Noisy alerts usually mean a policy or threshold needs tuning. Don't just acknowledge everything — figure out which alert is noisy. In Hotel Admin, **System → Alerts** lists checkouts the checkout grace policy could not handle (tune it on **Checkout grace**); in Central, **Security alerts** must each be investigated, because they block activation while open.
+Noisy alerts usually mean a policy or threshold needs tuning. Don't just acknowledge everything — figure out which alert is noisy. In Hotel Admin, **System → Alerts** lists checkouts the checkout grace policy could not handle (tune it on **Checkout grace**); in Central, **System → Security alerts** must each be investigated, because they block activation while open.
 
 ## Someone left the company and still has access
 
@@ -109,13 +109,13 @@ For a **Hotel Admin** account (on the appliance):
 2. Check **System → Activity** (filter by the **Security** chip, or search their name) for their recent actions.
 3. If they knew PMS, email/SMS or social-login credentials (not a role, just knowledge), replace those under **PMS connection**, **Email & SMS** or **Social login**.
 
-For a **Central** account: **Central → Operators** → **Disable**, and check the **Audit log**.
+For a **Central** account: a customer's user → the customer page → **Users** → **Disable**; a vendor operator → **System → Team** → **Disable**. Then check the customer's **Activity** tab or **System → Audit log**.
 
 If they were a platform admin, contact Semantics operations directly — you can't disable them yourself.
 
 ## Useful places to look
 
-- **Central → Audit log**, filter by action (e.g. `site.created,operator.disabled`) — what changed in Central this week.
+- **Central → System → Audit log** (platform staff; filter by customer, action such as `site.created` or `license.issued`, and date) or a customer's **Activity** tab — what changed in Central.
 - **Hotel Admin → System → Activity**, **Security** chip — sign-ins, code reveals and other security events on the appliance.
 - **Hotel Admin → Vouchers → Access log** — who has read voucher codes, and why.
 - **Hotel Admin → Guest sign-in checks** — refusals by reason and by network; a spike hints at a broken PMS connection or routing.

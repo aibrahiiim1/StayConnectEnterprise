@@ -73,7 +73,7 @@ states) is defined once in the [OneGate design system](../../design-system/READM
   list, so room sign-in, vouchers, guest accounts and sessions in progress continue while the PMS link is
   down. What is lost is news: a guest who checked in during the outage cannot sign in by room number until
   the link is back.
-- **License state.** When the appliance's license is expired, suspended, revoked or missing, new guest
+- **Licence state.** When the appliance's licence is expired, suspended, revoked or missing, new guest
   sign-ins are refused and some creation actions are blocked for every role; existing guest sessions are
   not dropped. **System → Appliance & licence** says why.
 
@@ -631,29 +631,34 @@ edited or removed.
   viewer.
 
 ### Appliance & licence — `/appliance`
-Whether this appliance is activated and connected to OneGate Central, and what its license allows. Two tabs.
+Whether this appliance is activated, what its licence allows, and whether OneGate Central is reachable. One
+page, fed by one appliance status (contract: [CENTRAL_CONTROL_PLANE.md §8](../CENTRAL_CONTROL_PLANE.md#8-hotel-admin--central)).
+It refreshes by itself (every 15 seconds, every 5 while activating) and has **Check now**, which makes the
+appliance register if needed and fetch its activation and licence from Central immediately.
 
-- **Appliance setup:**
-  - Not yet activated: **Activate this appliance** with two paths. **Online** (recommended) needs nothing
-    typed — it shows the serial and whether OneGate Central is reachable, and the appliance appears in
-    Central under *Onboarding* as *Pending activation*. **Offline** — **Download activation request**, carry
-    it to Central (*Onboarding → Offline activation*), then upload the returned **Activation package file**.
-  - During activation, a three-phase progress: **Connect → Verify → Ready**.
-  - When done: *"This appliance is connected"* and *Setup complete*.
-  - **Advanced / recovery** (collapsed): the **Enrollment code** form for a token minted in Central, and the
-    detailed checks (identity, connectivity, certificate, license, completion).
-- **Licence:**
-  - Banners for a license in its grace period; expired, revoked or suspended (*"New guest logins are
-    refused; existing guest sessions are not dropped"*); licensed capacity reached; hardware mismatch.
-  - **Appliance identity** — large, copyable **Serial number** and **WAN MAC address**.
-  - **Licence** — online guests against *Max concurrent online guests* with a coloured bar, license state,
-    valid from/until, grace period, grace ends, customer, site.
-  - **Upload licence file** (offline).
-  - **Connection to Central** — *Used for: Licensing only*, reachability, secure channel, certificate expiry.
-  - Technical details, including the entitled features.
-- **Who can change it** (activate, upload files): Site admin, Hotel IT manager. **Read-only:** every other
-  role.
-- Old addresses `/license`, `/network/cloud` and `/setup/enrollment` redirect here.
+- **Problems, in words** — banners for a licence in its grace period; expired, suspended or revoked (*new guest
+  sign-ins are refused; guests already online are not disconnected; the sign-in page, DHCP, DNS and this admin
+  keep working*); a licence for a different appliance; a changed WAN network adapter; licensed capacity
+  reached; an activation the appliance cannot verify; a blocked attempt to switch off licence enforcement.
+- **Status card**, three parts:
+  - **Activation** — *Not registered yet* (Central not reached yet; it keeps retrying by itself), *Waiting for
+    activation* (with the copyable **Serial number** to give your OneGate vendor; nothing needs to be typed
+    here), *Finishing activation…*, *Activated* (licensed to customer · site), *Retired*.
+  - **Licence** — *No licence yet*, *Active*, *Expires soon*, *Grace period*, *Expired*, *Suspended*, *Revoked*
+    or *Wrong appliance*, with the end date and days left, and **Guests online, all guest networks** against
+    the licensed maximum with a meter.
+  - **OneGate Central** — *Connected*, *Temporarily unreachable* or *Not configured*, **Last answered** and
+    **Last problem**. Losing Central changes only this part; the licence keeps being checked on the appliance
+    and guests are unaffected.
+- **Files from your OneGate vendor** — shown for an appliance that is not activated or cannot reach Central:
+  **Offline activation** (**Download activation request** while the appliance has never reached Central, then
+  **Upload activation package**) and **Upload licence file** (renewals normally arrive by themselves; the
+  appliance refuses a file for another appliance or an older licence).
+- **Technical details** (collapsed) — serial, appliance ID, identity key fingerprint, client certificate,
+  assignment version and verification, licence version, WAN and LAN MAC, Central endpoint, software version.
+- **Who can change it** (upload files): Site admin, Hotel IT manager. **Read-only:** every other role.
+- Old addresses `/license`, `/network/cloud` and `/setup/enrollment` redirect here. There is no enrollment
+  token or code: an appliance registers itself.
 
 ### Backups — `/backups`
 A complete copy of the property's data, taken nightly and on demand.

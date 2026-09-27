@@ -1,238 +1,173 @@
 # OneGate Central — Page-by-Page Reference
 
 **OneGate Central** (also called the Control Panel or Cloud Admin) is the vendor's console in the cloud. It
-registers and licenses every appliance: which customer owns it, which site it is at, how many guests it may
-serve at once, and until when. **Central is used for licensing only.** It never configures a hotel's guest
-networks, sign-in methods, packages or guests — those are run from **OneGate Hotel Admin** on each appliance
-(see [hotel-admin-reference.md](hotel-admin-reference.md)).
+answers five questions: *who is the customer, which site and appliance, is it activated, what does its licence
+allow, and is it healthy right now.* **Central is used for licensing, activation and fleet status only.** It
+never configures a hotel's guest networks, sign-in methods, packages or guests, and it cannot control an
+appliance remotely — those are run from **OneGate Hotel Admin** on each appliance (see
+[hotel-admin-reference.md](hotel-admin-reference.md)).
 
-This document describes every page in the menu: what it is for, what it shows, what an operator can do, and
-which actions ask for a reason, password confirmation, typed confirmation or a one-time reveal. For
-step-by-step instructions see [control-panel-config-manual.md](control-panel-config-manual.md). The visual
-language is defined in the [OneGate design system](../../design-system/README.md).
+The binding description of Central — states, lifecycle, API and roles — is
+[CENTRAL_CONTROL_PLANE.md](../CENTRAL_CONTROL_PLANE.md). This document describes every page: what it is for, what
+it shows and what an operator can do. For step-by-step instructions see
+[control-panel-config-manual.md](control-panel-config-manual.md). The visual language is defined in the
+[OneGate design system](../../design-system/README.md). The console spells it *License*; this guide uses the
+console's words for buttons and labels.
 
 ---
 
 ## Things that apply to every page
 
-- **Sign-in.** The login page is titled *OneGate Central*: email and password, and a collapsed **single
-  sign-on** option that asks for an **Organisation slug** and then lists that organisation's providers. A
-  Central login opens nothing on an appliance, and a Hotel Admin login does not work here. The session is
-  re-checked every 30 seconds; if it has ended you are returned to the login page.
-- **The sidebar.** Four groups: **Overview · Infrastructure · Commercial · Administration**. The button
-  beside the OneGate mark collapses it to an icon rail (tooltips show each name) and expands it again; the
-  choice is remembered in that browser. On a narrow window the menu is a drawer behind the ☰ button. Your
-  email and **Sign out** are at the bottom. Central has no "Find a screen…" filter; its menu is short.
-- **Customer context.** Under the OneGate mark, a platform admin chooses **All customers** or one customer.
-  The choice is remembered across pages and refreshes. **Dashboard, Sites, Appliances, Licenses, Operators
-  and Audit log** follow it; each page repeats which customer it is showing under its title.
-  - In **All customers** mode, Sites, Appliances and Licenses list every customer's rows (with a Customer
-    column). Creating appliances and licenses is disabled until you pick a customer; **New site** asks you to
-    choose the owning customer in the form. Operators and Audit log show a *"Select a customer"* card
-    instead of data.
-  - Customer-level operators have no selector: they are always on their own customer, and the server
-    enforces it.
-- **Top bar.** Shows where you are (*Group / Page*) and the theme switch: **Light**, **Dark** or **System**
-  (the default, following your computer). The choice is remembered in that browser.
-- **Who can do what is decided by the server.** Central does not hide buttons by role (apart from the
-  customer selector and the fleet license summary, which are for platform admins). If your role may not
-  perform an action, the server refuses it and the page shows the error.
-- **Password confirmation.** License, certificate and appliance actions (issue, renew, suspend, resume,
-  revoke or download a license; activation packages; deactivating; the Advanced Support actions; deletes)
-  are protected by the server. When you have not confirmed your password recently, a **Confirm your
-  password** dialog appears, and the action continues once you enter it. **Activate** on Onboarding always
-  has its own password field.
-- **Confirmation dialogs.** Every destructive or license-changing action opens a dialog listing what will
-  happen. The heaviest deletes also require a **typed confirmation** (the customer's name, the site's code
-  or the appliance's serial) and a **reason** for the audit log; see *The Delete dialog* at the end. No
-  action uses a browser pop-up; results appear as short notifications.
-- **One-time reveals.** An enrollment token is shown **once**, with **Copy** and an acknowledgement.
-- **Live figures.** Onboarding and Appliances refresh on their own and show **"Updated x ago"** with a
-  refresh button.
+- **Sign-in.** The login page is titled *OneGate Central*: email and password only. A Central login opens
+  nothing on an appliance, and a Hotel Admin login does not work here. If the session has ended you are returned
+  to the login page.
+- **The sidebar.** Five items: **Overview · Customers · Appliances · Licenses · System**. The button beside the
+  OneGate mark collapses it to an icon rail and expands it again; the choice is remembered in that browser. On a
+  narrow window the menu is a drawer behind the ☰ button. Your email and **Sign out** are at the bottom.
+- **No customer selector.** Every page is either fleet-wide or reached by opening a customer or an appliance.
+  Lists filter by customer and site where that helps (Appliances, Audit log).
+- **Customer users.** Someone with a customer role (Customer owner, Customer admin, Auditor, Viewer) sees only
+  their own customer: Overview, Appliances and Licenses are limited to it by the server, **Customers** opens
+  their own customer page directly, and System is not shown.
+- **Top bar.** Shows where you are (*Section / Page*) and the theme switch: **Light**, **Dark** or **System**.
+- **Who can do what is decided by the server** (roles in [CENTRAL_CONTROL_PLANE.md §7](../CENTRAL_CONTROL_PLANE.md#7-roles)).
+  The console only hides buttons your role could never use. Activation and licence actions are for platform
+  admins only.
+- **Password confirmation.** Every activation, licence, appliance and delete action is protected by the server.
+  When you have not confirmed your password recently, a **Confirm your password** dialog appears and the action
+  continues once you enter it.
+- **Confirmation dialogs.** Every destructive or licence-changing action opens a dialog that says what will
+  happen and asks for a **reason** for the audit log. Deletes and retirement also ask you to **type** the
+  customer's name, the site's name or the appliance's serial. Results appear as short notifications.
+- **Old addresses.** Bookmarks to the old console pages (`/dashboard`, `/tenants`, `/sites`, `/onboarding`,
+  `/operators`, `/security`, `/certificates`, `/assignment-keys`, `/backup-health`, `/audit`, `/commercial`,
+  `/subscription`) redirect permanently to the page that replaced them.
+
+## States you will see
+
+| | Values |
+|---|---|
+| **Activation** | *Waiting for activation* (registered itself, needs an operator) · *Activating* (activated here; the appliance collects its certificate and licence on its next contact, normally within a minute) · *Activated* · *Retiring* (retirement signed, waiting for the appliance to confirm) · *Retired* (credentials dead; only the record remains) |
+| **Connection** | *Connected* (contacted Central in the last 5 minutes) · *Recently seen* (last 24 hours) · *Offline* (more than a day; guests are not affected) · *Never connected* |
+| **License** | *No license* · *Active* · *Expiring* (30 days or fewer left) · *In grace period* (past its end date, still working until the grace days end) · *Expired* · *Suspended* · *Revoked* · *Replaced* (an older version in the licence history) |
+
+Central computes these; the console never works a state out for itself.
 
 ---
 
-## OVERVIEW
+## Overview — `/overview`
 
-### Dashboard — `/dashboard`
-Licenses issued by state, the sites and appliances they cover, and what needs attention. It follows the
-Customer context.
+The fleet at a glance. Counts of customers, appliances by **Activation**, by **Connection** and by **Licenses**
+state; every number is a link to the list filtered to it.
 
-- **Fleet license summary** (platform admins): *Active*, *Expiring in 30 days or less*, *Expired*,
-  *Suspended*, *Revoked*, and *Orphaned* (a license whose appliance or site was deleted). A link opens
-  Licenses.
-- **Tiles:** *Sites*, *Appliances* (with how many reached Central in the last 5 minutes), *Licensed
-  appliances* (licenses in force, grace included) and *Need attention*. Each opens its page.
-- **Licenses that need attention:** licenses expiring within 30 days, in grace, expired, suspended or not yet
-  bound to an appliance, soonest first.
-- Central is used for licensing only: guests, sessions, usage and network health are on each hotel's
-  appliance, in **Hotel Admin → Overview**. Central shows no guest activity.
-- **Actions:** none (the page links to Licenses).
+- **Needs attention:** appliances waiting for activation, licences expiring, in grace, expired or suspended,
+  appliances offline, open security alerts, and retirements the appliance has not confirmed. Each entry links to
+  the appliance. *Nothing needs attention* when the list is empty.
+- **Actions:** none — it links to the lists.
 
----
+## Customers — `/customers`
 
-## INFRASTRUCTURE
+The organisations that own hotels.
 
-### Sites — `/sites`
-A site is one physical property — one hotel or resort. It belongs to exactly one customer and holds one or
-more appliances. Buildings, floors, SSIDs and guest networks are configured on the appliance, not here.
+- **Shows:** Active / Archived / All, search, and the table Customer, Sites, Appliances, Active licenses, Needs
+  attention.
+- **New customer:** Name. (A customer can also be created inline while activating an appliance.)
 
-- **Shows:** search, a status filter (Active / Archived), and the table Customer (All customers mode), Code,
-  Name, Status, Timezone, Country, Created.
-- **New site:** Owning customer, Code (short and unique), Name, Timezone (UTC if empty), Country (optional).
-- **Row actions:** **Edit** (name, timezone, country; the code cannot change), **Archive / Restore**,
-  **Delete** — the Delete dialog: **type the site code + reason**, password confirmation when asked. Blocked
-  while the site still holds appliances or licenses.
+### A customer — `/customers/[id]`
 
-### Onboarding — `/onboarding`
-Connect an appliance. A factory-clean appliance with internet registers itself and waits here as **Pending
-activation**; you select it, choose its customer, site and license terms, and activate it once.
+Header actions: **Rename**, **Archive** / **Restore**, **Delete** (typed name + reason; refused while the
+customer still has sites or appliances). Tabs:
 
-- **Pending activation** (refreshes every 5 seconds): Serial, WAN MAC, Model, Source IP, First seen. Select a
-  row to open the activate form.
-- **Activate** form: **Customer** (existing, or type a new name), **Site** (existing, or type a new name),
-  **Max concurrent online guests** (0 = unlimited; across the whole appliance), **Valid until** (empty = 365
-  days), **Grace period (days)** (after expiry guests are still served, with warnings), **Confirm your
-  password**, then **Activate**.
-- **Progress:** **Detected → Activating → Appliance converging → Active**, then **Activate another**.
-- **Offline activation:** for an appliance with no route to Central, upload the activation request file the
-  appliance saved (*Hotel Admin → Appliance & licence → Offline*). It then appears as pending; activate it as
-  usual, then download its activation package (below) and carry it back.
-- **Registered appliances:** Serial, State, WAN MAC, and per row:
-  - **Deactivate** — confirmation dialog: its license is revoked, new guest sign-ins are refused, existing
-    guest sessions are not dropped; it can be activated again later. Password confirmation when asked.
-  - **Activation package** — downloads the signed file that completes an offline activation (valid 7 days,
-    single use), to upload in Hotel Admin under Appliance & licence. Password confirmation when asked.
-  - **Delete** — the Delete dialog with an impact preview: **type the appliance serial + reason**. A
-    factory-clean appliance will then register again as pending.
-  - With **Advanced Support** switched on: **Reissue cert**, **Reconcile**, **Decommission** — each asks for a
-    **reason** (recorded) and password confirmation when asked.
+- **Summary** — sites, appliances, active licences, what needs attention, customer since, status.
+- **Sites** — a site is one physical property. **New site**: Name, Time zone, Country (optional), Short code
+  (optional). Row actions **Edit**, **Archive** / **Restore**, **Delete** (typed confirmation + reason).
+  Buildings, floors, SSIDs and guest networks are configured on the appliance, not here.
+- **Appliances** — this customer's appliances (same columns as the Appliances page).
+- **Licenses** — this customer's licences.
+- **Users** — the customer's own Central sign-ins (optional). **Add user**: Email, Name, Initial password,
+  Role (**Customer admin**, **Auditor (read only)**, **Viewer (read only)**). Row actions **Role**,
+  **Disable** / **Enable**, **Remove**.
+- **Activity** — the audit log for this customer.
 
-### Appliances — `/appliances`
-Every appliance, where it is and whether it is online. Appliances normally arrive by themselves under
-Onboarding; the tools here are for recovery.
+## Appliances — `/appliances`
 
-- **Shows:** tiles *Appliances*, *Online*, *Enrolled or pending*, *Offline or other*; search; table Customer
-  (All customers mode), Name, Site (or *unassigned*), Serial, Status (online with a live dot when heard from
-  recently), Version, Last seen. The list refreshes on its own.
-- **Header (needs a customer and a site):**
-  - **Enrollment token** — only for an appliance that cannot register itself: Site, Serial (optional; locks
-    the token to one appliance), Valid for 1–168 hours (default 24). The token is a **one-time reveal**:
-    enter it in the appliance's Hotel Admin under *Appliance & licence → Advanced / recovery*.
-  - **New appliance** — manual registration: Site, Serial, Name, Model.
-- **Row actions:** **Config** — a read-only view of the PMS connections and allowed-site rules Central holds
-  for that appliance's site; **Delete** — **type the appliance serial** to confirm.
-- **Enrollment tokens** table: Hint, Site, Serial lock, Status, Expires, Created; **Revoke** an unused token
-  (confirmation dialog).
+Every appliance across customers. Appliances **waiting for activation** are listed first.
 
----
+- **Filters:** Activation (All · Waiting · Activating · Activated · Retiring · Retired, with counts), search by
+  serial or hostname, Connection, License, Customer and Site.
+- **Table:** serial and hostname, customer and site, activation, connection, licence and last contact.
+- **Import activation request** — for an appliance without internet: upload the activation-request file saved
+  in its Hotel Admin (*Appliance & licence → Files from your OneGate vendor → Download activation request*). It then appears as *Waiting for activation*.
+- There is no manual "new appliance" and no enrollment token: appliances arrive by registering themselves (or by
+  an imported activation request).
 
-## COMMERCIAL
+### An appliance — `/appliances/[id]`
 
-### Customers — `/tenants`
-The hotel groups and companies that own sites. Order of work: Customer, then Site, then activate an
-Appliance, which issues its License.
+Everything about one appliance and every lifecycle action on it (all platform-admin only).
 
-- **Shows:** search, a status filter (Active / Archived), and the table Slug, Name, Status, Created.
-- **New customer:** Slug (lower-case, unique, also used for single sign-on) and Name.
-- **Row actions:** **Rename**; **Archive** (confirmation dialog: hidden from active lists, everything kept)
-  and **Restore**; **Delete** — the Delete dialog: **type the customer name + reason**, blocked while the
-  customer still has sites, appliances or licenses.
+- **Status** — activation, with the action that fits it:
+  - *Waiting for activation* → **Activate**: *Where it is installed* (Customer — existing or **New customer…**;
+    Site — existing or new, with time zone) and *License* (**Guests online at once**, **Valid for** a number of
+    days or **Until a date**, **Grace period (days)**). One step signs the assignment and issues the licence.
+  - *Activating* → **Activation package** (offline sites): the signed file (assignment + CA + licence) to upload
+    in the appliance's Hotel Admin. Valid for 7 days.
+  - *Retiring* / *Retired* / *Marked for replacement* → what is happening and what is left to do.
+- **License** — current terms (guests online at once, valid until, grace period), **Issue license** or **Renew
+  or change** (always a new signed version that replaces the current one), **Suspend** / **Resume**,
+  **Revoke** (permanent; set a new licence to restore service) and **Offline license file**. **License
+  history** lists every version. Suspending or revoking a licence does not cut the appliance off from Central.
+- **Activity** — recent lifecycle and audit events.
+- **Installed at** — customer and site; **Move** re-assigns an activated appliance to another site. Moving to
+  another customer revokes its licence and the appliance erases the previous customer's local data; set a new
+  licence afterwards.
+- **Appliance** — connection, registered, activated, last address, software version; **Retire appliance**
+  (typed serial + reason; two-phase: it is retired once the appliance confirms, normally within a minute; the
+  *Emergency* option, for a lost, stolen or dead appliance, does not wait) or, for a *Waiting* or *Retired*
+  appliance, **Delete record** (typed serial + reason; audit history is kept).
+- **Advanced** (collapsed) — *Repair*: **Reissue certificate**, **Rebind WAN MAC** (after a network-card change;
+  licence terms stay the same), **Mark for replacement** (activating a new appliance at the same site retires
+  this one), **Offline activation package**; and *Technical details* (appliance ID, MACs, hardware and identity
+  key fingerprints, certificate, assignment version and signing key, licence version).
 
-### Licenses — `/licenses`
-Each appliance's signed license: max concurrent online guests, validity window and grace period. The license
-is the only entitlement.
+## Licenses — `/licenses`
 
-- **Shows:** tiles *Active*, *In grace*, *Expired or revoked*, *Awaiting appliance binding*; search and a state
-  filter; table Customer, Site, Appliance (serial or *not bound*), Version, Status, Max online guests (*Unlimited*
-  for 0), validity, grace ends, and when the appliance was last seen. How many guests are online against the
-  limit is shown on the appliance, in Hotel Admin under Appliance & licence.
-- **Issue license** (needs a customer selected and a site): Site, Appliance, **Max concurrent online guests**
-  (0 = unlimited), Grace period (days), Valid from (empty = now), Valid until (empty = 365 days).
-- **Row actions** (each with password confirmation when asked):
-  - **Renew** — new max guests, days from now and grace days. Issues a new signed version; the previous one
-    becomes *Superseded* and can never be used again.
-  - **Download for offline** — the signed, appliance-bound file, to upload in Hotel Admin under Appliance &
-    license.
-  - **Suspend** — confirmation dialog: new guest sign-ins stop; existing sessions are not dropped; the portal,
-    DHCP, DNS and Hotel Admin stay up. **Resume** reverses it.
-  - **Revoke** — confirmation dialog: permanent; the appliance refuses new guest sign-ins; existing sessions
-    are not dropped; issue a new license to restore service.
-
-License states: **Active**, **Grace** (past valid-until, inside the grace days; guests still served with a
-warning), **Expired**, **Suspended**, **Revoked**, **Superseded** (replaced after Renew), **Awaiting appliance
-binding**.
+Every appliance's current licence, filterable by state (Active, Expiring, In grace period, Expired, Suspended,
+Revoked) and searchable by serial or customer. Select one to act on it on its appliance's page. A licence is
+issued when an appliance is activated; there are no plans or subscriptions.
 
 ---
 
-## ADMINISTRATION
+## System — `/system/...`
 
-### Operators — `/operators`
-A customer's own staff sign-ins to Central, and their roles. Requires a customer to be selected.
+Out of the daily workflow; platform roles only.
 
-- **Shows:** tiles *Operators*, *Active*, *Invited*, *Disabled*; search; table Email (*you* marker), Name,
-  Status, Roles.
-- **New operator:** Email, Display name, Initial password (at least 10 characters), Role (**Customer admin**,
-  **Customer operator**, **Viewer**). The legacy *Billing* role is no longer offered: the database has refused
-  it since the role catalogue was expanded, so granting it could only fail.
-- **Row actions:** **Add a role** (dialog), remove a role (confirmation dialog), **Reset password** (new
-  password, at least 10 characters), **Disable** (confirmation dialog). You cannot disable yourself.
+### Security alerts — `/system/security-alerts`
+Suspicious appliance registrations: *Known appliance on different hardware* (e.g. a cloned disk), *Hardware
+already in use*, *WAN MAC does not match its license*. An open alert blocks activation of that appliance.
 
-### Security alerts — `/security`
-Raised when an appliance registration looks wrong — a cloned identity, a reused serial, or a WAN MAC that
-does not match the signed license. Activation is blocked while an alert is open.
+- **Shows:** Open / Closed / All, search, and When, What, Appliance, From address, Details, Status.
+- **Actions:** **Investigate**, **Acknowledge**, **Resolve** and **False positive** (each of these two asks for
+  a reason), **Reopen**.
 
-- **Shows:** tiles *Open*, *Investigating*, *Acknowledged*, *Resolved or false positive*; search and **Show
-  resolved**; table When, Kind, Serial, Source IP, Detail, Status.
-- **Actions:** **Investigate**, **Acknowledge**, **Resolve** and **False positive** (each of the last two asks
-  for a **reason**), **Reopen**.
+### Trust & keys — `/system/trust`
+Read only. **Certificate authority** (its root key is kept offline), **Key registry** (the signed list of
+assignment keys appliances accept: version, signed), **Assignment signing keys** (state, appliances signed, in
+use since, fingerprint) and **Appliance certificates** (state, expiry, fingerprint; searchable). To reissue one
+appliance's certificate use **Advanced** on its page. Setting a signing key to verify-only or revoking it is a
+host command on Central (`ctrlapi assignment-key verify-only|revoke`), see
+[ASSIGNMENT_KEY_CUSTODY_RUNBOOK.md](../ASSIGNMENT_KEY_CUSTODY_RUNBOOK.md).
 
-### Certificates — `/certificates`
-Appliance certificates issued by Central's certificate authority. Read-only, metadata only.
+### Audit log — `/system/audit`
+Every change made in Central and by the appliances, newest first, 50 at a time (**Show older**). Filters:
+Customer, Action (e.g. `license.revoked`), From. Entries cannot be edited or removed.
 
-- **Shows:** tiles *Active*, *Expiring in 30 days*, *Expired*, *Revoked*; search and **Show superseded**; table
-  Appliance, Customer, Site, Fingerprint, Issuer, Issued, Expires, Status, last rotation, revocation.
-- **Actions:** none.
+### Team — `/system/team`
+The people who run Central. **Add team member**: Email, Name, Initial password, Role (**Platform admin** —
+everything, including activation and licences; **Support (read only)**). Row actions **Role**, **Password**,
+**Disable** / **Enable**, **Remove**. A role change takes effect at the next sign-in. A customer's own users are
+managed on that customer's **Users** tab.
 
-### Assignment keys — `/assignment-keys`
-The keys that sign the documents binding an appliance to its customer and site. Read-only.
-
-- **Shows:** tiles *Active*, *Verify-only*, *Revoked*, *Current assignments*; table Key ID, Fingerprint, State,
-  Rotation, Dependencies, Created, Retired, Reason.
-- **Actions:** none.
-
-### Backup health — `/backup-health`
-Whether Central's own backup and rollback storage is healthy. Read-only.
-
-- **Shows:** tiles *Disk used*, *Rollback path*, *Last cleanup*, *Failures*; the retention policy; lists
-  *Protected*, *Operator-pinned* (when any), *Retained* and *Delete candidates*.
-- **Actions:** none.
-
-### Audit log — `/audit`
-Who did what for the selected customer in the last 7 days. Entries are never edited or removed.
-
-- **Shows:** table When, Actor, Action, Target, IP, Payload.
-- **Filter by action** (comma-separated action names) and **Apply**. No paging or date range.
-
----
-
-## Retired pages
-
-`/commercial` and `/subscription` are not in the menu and are labelled *retired*. They belong to a pricing
-model that is no longer part of OneGate; the signed appliance license is the only entitlement. Do not use
-them.
-
----
-
-## The Delete dialog (Customers, Sites, Onboarding)
-
-Deleting a customer, a site or an appliance (from Onboarding) opens one dialog that:
-
-1. states it **cannot be undone**;
-2. lists anything that blocks the delete — delete never cascades, so remove bottom-up: **appliances → sites →
-   customer**;
-3. requires **typing** the customer's name, the site's code or the appliance's serial exactly;
-4. requires a **reason**, recorded in the audit log;
-5. asks for **password confirmation** when the server requires it.
-
-Deleting an appliance from the **Appliances** page asks only for the typed serial.
+### Backup health — `/system/backup-health`
+Whether Central's own backup and rollback storage is healthy. Read only: *Disk used*, *Rollback path*, *Last
+cleanup*, *Failures*; the retention policy; lists *Protected*, *Operator-pinned* (when any), *Retained* and
+*Delete candidates*.
