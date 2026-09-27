@@ -282,6 +282,14 @@ install_trust_file() {
   [ -f "$src" ] || return 0
   if [ -f "$dest" ]; then
     if cmp -s "$src" "$dest"; then say "  same     $dest"; return 0; fi
+    # LEAF material this host legitimately re-issues from the carried CAs (a new name on the :443 or :9443
+    # certificate, the CA serial, the retention policy) differs on a re-run by design. The host's copy stays;
+    # verify_trust_set below still proves it chains to the carried CA.
+    case "$1" in
+      etc/stayconnect/pki/server-mtls.*|opt/stayconnect/central/tls/server.*|opt/stayconnect/central/tls/ca.srl|\
+      opt/stayconnect/central/tls/san.cnf|etc/stayconnect/backup-retention.*|etc/stayconnect/pki/ca-bundle.crt)
+        say "  kept     $dest (re-issued/edited on this host since the restore)"; return 0 ;;
+    esac
     die "$dest already exists with DIFFERENT content than the bundle. Refusing to replace trust material.
     If this host was half-installed from another bundle, rebuild it clean."
   fi
