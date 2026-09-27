@@ -25,6 +25,21 @@ ENVDIR="${SC_ENV_DIR:-/etc/stayconnect}"
 say() { echo "[install-units] $*"; }
 die() { echo "[install-units] ABORT: $*" >&2; exit 1; }
 
+# CENTRAL-ONLY UNITS NEVER REACH AN APPLIANCE.
+#
+# deploy/systemd also carries the OneGate Central units (API, console, Central database backup). Installing them
+# here would be worse than clutter: step 6 enables every timer it installed, so the Central backup timer would
+# fire nightly on the appliance against a database that does not exist. The units this script works on are
+# therefore the shipped set MINUS the Central ones, staged once, and every step below reads only the staged set.
+CENTRAL_ONLY_UNITS="stayconnect-ctrlapi stayconnect-cloud-admin stayconnect-central-backup"
+UNITSRC="$(mktemp -d)"; trap 'rm -rf "$UNITSRC"' EXIT
+for f in "$SRC"/systemd/stayconnect-*; do
+  [ -e "$f" ] || continue
+  b="$(basename "$f")"; base="${b%%.*}"
+  case " $CENTRAL_ONLY_UNITS " in *" $base "*) continue ;; esac
+  cp -R "$f" "$UNITSRC/$b"
+done
+
 # list_service_accounts prints every distinct non-root account the units being installed declare.
 #
 # IT IS A FUNCTION SO THAT THE SELF-TEST CAN ASK THE REAL SCRIPT. Step 3b creates these accounts, and the
@@ -33,7 +48,7 @@ die() { echo "[install-units] ABORT: $*" >&2; exit 1; }
 # of the logic that could drift" this script already warns about above, so instead
 # SC_LIST_SERVICE_ACCOUNTS=1 prints the answer and exits, and the self-test asserts on that.
 list_service_accounts() {
-  for u in "$SRC"/systemd/stayconnect-*.service; do
+  for u in "$UNITSRC"/stayconnect-*.service; do
     [ -f "$u" ] || continue
     # One User= per unit. A commented-out line is ignored; an empty User= means root.
     svcuser="$(sed -n 's/^[[:space:]]*User=[[:space:]]*\([^[:space:]#]*\).*/\1/p' "$u" | head -n1)"
@@ -86,7 +101,7 @@ fi
 # Used to VERIFY; helper INSTALLATION still targets $BIN, with non-$BIN destinations installed explicitly by
 # install_external_helpers below so a path outside /opt/stayconnect/bin can never be silently skipped again.
 unit_exec_paths() {
-  grep -hoE '^Exec[A-Za-z]*=-?/[^ ]+' "$SRC"/systemd/stayconnect-*.service 2>/dev/null |
+  grep -hoE '^Exec[A-Za-z]*=-?/[^ ]+' "$UNITSRC"/stayconnect-*.service 2>/dev/null |
     sed -E 's/^Exec[A-Za-z]*=-?//' |
     grep -vE '^/(bin|sbin|usr/bin|usr/sbin|usr/local/bin/node)/' | sort -u
 }
@@ -127,7 +142,7 @@ install_external_helpers() {
     [ -n "${dest:-}" ] && [ -n "${src:-}" ] || continue
     # A contract entry for a unit this tree no longer ships is skipped, not installed: retiring a unit must
     # not leave its helper behind, and must not fail the install either.
-    [ -f "$SRC/systemd/$unit.service" ] || { say "note: $unit is not shipped here; its helper is not installed"; continue; }
+    [ -f "$UNITSRC/$unit.service" ] || { say "note: $unit is not shipped here; its helper is not installed"; continue; }
     [ -f "$SRC/scripts/$src" ] || die "the helper contract names $src for $unit, but $SRC/scripts/$src does not exist"
     local target="$ROOT_PREFIX$dest"
     mkdir -p "$(dirname "$target")"
@@ -138,7 +153,7 @@ install_external_helpers() {
 
 unit_helpers() {
   # Every Exec* directive across the units in SRC, reduced to the bin paths they reference.
-  grep -hoE '^Exec[A-Za-z]*=[^ ]*/opt/stayconnect/bin/[A-Za-z0-9._-]+' "$SRC"/systemd/stayconnect-*.service 2>/dev/null |
+  grep -hoE '^Exec[A-Za-z]*=[^ ]*/opt/stayconnect/bin/[A-Za-z0-9._-]+' "$UNITSRC"/stayconnect-*.service 2>/dev/null |
     sed 's#.*/opt/stayconnect/bin/##' | sort -u
 }
 
@@ -212,7 +227,7 @@ in_service() { # in_service <unit-basename-without-suffix>
 }
 
 missing=0
-for u in "$SRC"/systemd/stayconnect-*.service; do
+for u in "$UNITSRC"/stayconnect-*.service; do
   [ -f "$u" ] || continue
   b="$(basename "$u")"
   unit="${b%.service}"
@@ -326,7 +341,7 @@ else
     # of these two messages printed $(basename "$u") after the loop over units had been replaced by a loop
     # over accounts, so $u held whatever the previous loop in the script left behind. A diagnostic that
     # names the wrong file is worse than one that names none.
-    namedby="$(grep -l "^[[:space:]]*User=[[:space:]]*$svcuser\$" "$SRC"/systemd/stayconnect-*.service 2>/dev/null \
+    namedby="$(grep -l "^[[:space:]]*User=[[:space:]]*$svcuser\$" "$UNITSRC"/stayconnect-*.service 2>/dev/null \
       | xargs -r -n1 basename | paste -sd, -)"
     if useradd --system --no-create-home --shell /usr/sbin/nologin "$svcuser" 2>/dev/null; then
       say "created system account $svcuser (named by ${namedby:-a unit}, and it did not exist)"
@@ -344,7 +359,7 @@ else
   # read SupplementaryGroups= and silently granted them would be a script that escalates whatever a future
   # unit file asks for. systemd applies SupplementaryGroups= itself at start time, so nothing needs to be
   # done here -- what IS checked is that the group exists, because systemd fails the start if it does not.
-  for u in "$SRC"/systemd/stayconnect-*.service; do
+  for u in "$UNITSRC"/stayconnect-*.service; do
     [ -f "$u" ] || continue
     for g in $(sed -n 's/^[[:space:]]*SupplementaryGroups=[[:space:]]*\(.*\)/\1/p' "$u" | tr ',' ' '); do
       case "$g" in ""|*%*|*\$*) continue ;; esac
@@ -381,7 +396,7 @@ fi
 
 # ---- 4. units --------------------------------------------------------------
 changed=0
-for u in "$SRC"/systemd/stayconnect-*.service "$SRC"/systemd/stayconnect-*.timer; do
+for u in "$UNITSRC"/stayconnect-*.service "$UNITSRC"/stayconnect-*.timer; do
   [ -f "$u" ] || continue
   b="$(basename "$u")"
   if [ -f "$UNITS/$b" ] && cmp -s "$u" "$UNITS/$b"; then continue; fi
@@ -414,7 +429,7 @@ fi
 # ONLY TIMERS. Services are started by their own deployment steps, which know about ordering, health checks
 # and rollback; a blanket enable here would start daemons this script has no business starting.
 if [ "$SKIP_SYSTEMD" != "1" ]; then
-  for u in "$SRC"/systemd/stayconnect-*.timer; do
+  for u in "$UNITSRC"/stayconnect-*.timer; do
     [ -f "$u" ] || continue
     b="$(basename "$u")"
     if systemctl enable --now "$b" >/dev/null 2>&1; then
@@ -425,7 +440,7 @@ if [ "$SKIP_SYSTEMD" != "1" ]; then
   done
   # Enabled is a claim; a listed next-elapse is the evidence. A timer can be enabled and still inert if its
   # OnCalendar never matches, which is silent in exactly the same way.
-  for u in "$SRC"/systemd/stayconnect-*.timer; do
+  for u in "$UNITSRC"/stayconnect-*.timer; do
     [ -f "$u" ] || continue
     b="$(basename "$u")"
     if systemctl list-timers --all --no-legend "$b" 2>/dev/null | grep -q .; then

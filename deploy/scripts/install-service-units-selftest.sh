@@ -159,7 +159,9 @@ done
 # The enablement answer comes from a stub rather than from this machine's systemd: a test whose result depends
 # on which units happen to be enabled on the runner is not a test.
 t="$(new_tree not_in_service)"
-cp "$DEPLOY/systemd/stayconnect-ctrlapi.service" "$t/src/systemd/" 2>/dev/null
+# A unit shipped for some other host, naming a binary this one has no reason to hold. (The real Central units are
+# never installed on an appliance at all -- see the case after this one -- so the fixture is a renamed copy.)
+sed 's#/opt/stayconnect/bin/ctrlapi#/opt/stayconnect/bin/otherhostd#' "$DEPLOY/systemd/stayconnect-ctrlapi.service"   > "$t/src/systemd/stayconnect-otherhost.service"
 printf '#!/bin/sh
 exit 0
 ' > "$t/src/scripts/wait-for-site-db.sh"
@@ -190,6 +192,28 @@ if SC_ROOT_PREFIX="$t/root" SC_BIN_DIR="$t/bin" SC_UNIT_DIR="$t/units" SC_ENV_DI
   bad "an ENABLED unit with a missing executable was installed anyway"
 else
   ok "the same unit, enabled, is refused"
+fi
+
+# ---------------------------------------------------------------- CENTRAL UNITS NEVER REACH AN APPLIANCE
+#
+# deploy/systemd also carries OneGate Central's units. The installer enables every timer it installs, so a
+# Central backup timer copied here would fire nightly against a database the appliance does not have.
+echo "== the Central-only units are never installed on an appliance =="
+c="$(new_tree central_units)"
+for u in stayconnect-ctrlapi.service stayconnect-cloud-admin.service stayconnect-central-backup.service          stayconnect-central-backup.timer stayconnect-site-backup.service; do
+  cp "$DEPLOY/systemd/$u" "$c/src/systemd/" 2>/dev/null
+done
+printf '#!/bin/sh
+exit 0
+' > "$c/src/scripts/stayconnect-site-backup"
+SC_ROOT_PREFIX="$c/root" SC_BIN_DIR="$c/bin" SC_UNIT_DIR="$c/units" SC_ENV_DIR="$c/etc" SC_SKIP_SYSTEMD=1   bash "$INSTALLER" "$c/src" >"$c/out" 2>&1
+leaked="$(cd "$c/units" && ls stayconnect-ctrlapi.* stayconnect-cloud-admin.* stayconnect-central-backup.* 2>/dev/null)"
+if [ -n "$leaked" ]; then
+  bad "Central units were installed on the appliance: $leaked"
+elif [ -f "$c/units/stayconnect-site-backup.service" ]; then
+  ok "Central units are skipped; the appliance's own units in the same tree are installed"
+else
+  bad "the appliance unit shipped next to the Central ones was not installed:"; sed 's/^/      /' "$c/out"
 fi
 
 # ---------------------------------------------------------------- A RETIRED UNIT CANNOT BE RE-ARMED

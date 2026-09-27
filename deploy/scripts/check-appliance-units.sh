@@ -10,8 +10,9 @@
 #
 # Both were visible in `systemctl --failed` the whole time. Nobody was looking, because nothing looked.
 #
-# THE DISTINCTION THAT MATTERS. An appliance legitimately carries units it must never run: this is an EDGE
-# appliance, and stayconnect-ctrlapi / stayconnect-web-admin belong to the Central control plane. Those are
+# THE DISTINCTION THAT MATTERS. An older appliance may still carry units it must never run: this is an EDGE
+# appliance, and units such as stayconnect-ctrlapi belong to the Central control plane. install-service-units.sh
+# no longer installs Central units, but a host installed before that change keeps them. Those are
 # disabled, inactive, unreachable by any dependency edge, and their absent binaries are correct rather than
 # broken. A check that failed on them would be switched off within a week. So dormancy is PROVEN, not assumed:
 # a unit is excused only when it is disabled AND inactive AND nothing pulls it in.
