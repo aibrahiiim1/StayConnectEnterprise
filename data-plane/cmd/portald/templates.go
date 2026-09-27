@@ -457,7 +457,7 @@ const landingHTML = `<!doctype html>
     const ICON_EMPTY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 2l20 20M8.5 16.1a5.5 5.5 0 0 1 7 0M5 12.6a10.5 10.5 0 0 1 5.2-2.4M14.8 10.4a10.6 10.6 0 0 1 4.2 2.2M1.9 9.1A15 15 0 0 1 6.3 6.3M10.7 4.6a15 15 0 0 1 11.4 4.5M12 20h.01"/></svg>';
 
     const Groups = {
-      guest:   { id:'guest',   label:'Guest Login',   icon: ICON_DOOR, members:['pms','poststay'] },
+      guest:   { id:'guest',   label:'Client Login',  icon: ICON_DOOR, members:['pms','poststay'] },
       account: { id:'account', label:'Account Login', icon: ICON_KEYS, members:['voucher','account','email','sms','social'] },
     };
     const Tabs = {

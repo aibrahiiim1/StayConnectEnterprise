@@ -38,10 +38,10 @@ export function AdvancedSection({ d, set, writable, issues, sanitized, checking,
 }) {
   return (
     <div className="space-y-5">
-      <Callout tone="warning" title="This page collects guests' room numbers and voucher codes">
+      <Callout tone="warning" title="This page collects clients' room numbers and voucher codes">
         Styling and markup are accepted. <strong>Scripts, event handlers, frames, forms, external stylesheets,
-        &lt;base&gt;, &lt;meta&gt; and @import are not</strong> — anything that could run or send a guest&apos;s
-        details elsewhere. The portal applies the same rules again before any guest receives the page, and the
+        &lt;base&gt;, &lt;meta&gt; and @import are not</strong> — anything that could run or send a client&apos;s
+        details elsewhere. The portal applies the same rules again before any client receives the page, and the
         sign-in controls stay visible and usable whatever the stylesheet says. Saving a change here, including
         clearing a field, asks for your password.
       </Callout>
@@ -156,8 +156,8 @@ function CodeCard({
             </ul>
             {errors.length > 0 && (
               <p className="text-xs text-muted-foreground">
-                The preview shows the cleaned version, which is what a guest would receive. Save is refused until
-                these are fixed, so what is stored is exactly what guests see.
+                The preview shows the cleaned version, which is what a client would receive. Save is refused until
+                these are fixed, so what is stored is exactly what clients see.
               </p>
             )}
           </div>

@@ -236,7 +236,7 @@ export function PortalPreview({ design, sanitized }: {
   const scale = boxWidth > 0 ? Math.min(1, boxWidth / spec.w, device === "desktop" ? 1 : 760 / spec.h) : 0.3;
 
   return (
-    <section className="space-y-3" aria-label="Guest portal preview">
+    <section className="space-y-3" aria-label="Client Portal preview">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-sm font-semibold">Live preview</h2>
@@ -271,11 +271,11 @@ export function PortalPreview({ design, sanitized }: {
           </div>
         ) : (
           <PortalFrame srcDoc={srcDoc} width={spec.w} height={spec.h} scale={scale}
-            title={`Guest portal, ${spec.label.toLowerCase()}`} />
+            title={`Client Portal, ${spec.label.toLowerCase()}`} />
         )}
       </div>
       <p className="text-xs text-muted-foreground">
-        Every sign-in tab is shown here; which ones guests see is set in Sign-in methods.
+        Every sign-in tab is shown here; which ones clients see is set in Sign-in methods.
       </p>
     </section>
   );

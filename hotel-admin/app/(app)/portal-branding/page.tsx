@@ -61,36 +61,36 @@ const PAGE_HELP = (
     <HelpSection title="How this page works">
       <p>
         Design the Wi-Fi sign-in page: choose a layout, brand it, and check it in the live preview. The preview is
-        the real sign-in page with your unsaved changes. Guests see your changes as soon as you save.
+        the real sign-in page with your unsaved changes. Clients see your changes as soon as you save.
       </p>
       <p>
         Room sign-in, vouchers and personal accounts are all shown in the preview so you can check every tab —
-        which of them guests actually see is decided in Sign-in methods, not on this page.
+        which of them clients actually see is decided in Sign-in methods, not on this page.
       </p>
     </HelpSection>
     <HelpSection title="The sections">
       <HelpList
         items={[
           <><strong>Template</strong> — each card is your own sign-in page in that layout. Every sign-in method works the same in all of them; only the arrangement changes. Only the options the chosen layout uses are shown.</>,
-          <><strong>Brand</strong> — logo, background photograph, colours and type. Images are stored on this appliance and served from it, so they load for a guest who has no internet yet.</>,
-          <><strong>Content</strong> — your own words, shown to every guest in every language.</>,
-          <><strong>Sign-in page text</strong> and <strong>Languages</strong> — the wording guests read, and which languages they are offered.</>,
+          <><strong>Brand</strong> — logo, background photograph, colours and type. Images are stored on this appliance and served from it, so they load for a client who has no internet yet.</>,
+          <><strong>Content</strong> — your own words, shown to every client in every language.</>,
+          <><strong>Sign-in page text</strong> and <strong>Languages</strong> — the wording clients read, and which languages they are offered.</>,
           <><strong>Advanced HTML &amp; CSS</strong> — your own styling and markup, checked before it is accepted.</>,
-          <><strong>History</strong> — the most recent saves of this page; restoring one makes it what guests see again.</>,
+          <><strong>History</strong> — the most recent saves of this page; restoring one makes it what clients see again.</>,
         ]}
       />
     </HelpSection>
     <HelpSection title="Fonts and links">
       <p>
-        The portal loads nothing from the internet, so only fonts already on the guest&apos;s device are used. A
-        guest reaching the portal has no internet yet, so an external terms page will not load until they are
+        The portal loads nothing from the internet, so only fonts already on the client&apos;s device are used. A
+        client reaching the portal has no internet yet, so an external terms page will not load until they are
         online; a file uploaded here works straight away.
       </p>
     </HelpSection>
     <HelpSection title="Languages">
       <p>
         The portal ships complete wording for its built-in languages — nothing to translate, just choose which
-        your guests are offered. A guest&apos;s device language is detected automatically and matched against
+        your clients are offered. A client&apos;s device language is detected automatically and matched against
         that list; English is always available and is what anything else falls back to.
       </p>
     </HelpSection>
@@ -247,7 +247,7 @@ export default function PortalSettingsPage() {
     try {
       await api.post("/portal-branding/settings", { design: d, password: password || undefined });
       setStepUp(false);
-      toast.success("Saved", "Guests see these settings now.");
+      toast.success("Saved", "Clients see these settings now.");
       await load();
     } catch (e) {
       if (e instanceof ApiError && e.code === "reauth_required") {
@@ -277,7 +277,7 @@ export default function PortalSettingsPage() {
       set(field, a.url);
       const list = await api.get<ListResp<PortalAsset>>("/portal-assets");
       setAssets(list.data ?? []);
-      toast.success(`${IMAGE_LABEL[field]} uploaded`, "Save changes to show it to guests.");
+      toast.success(`${IMAGE_LABEL[field]} uploaded`, "Save changes to show it to clients.");
     } catch (e) {
       toast.error("Upload failed", e instanceof ApiError ? e.message : "the image could not be uploaded");
     } finally { setUploading(null); }
@@ -295,8 +295,8 @@ export default function PortalSettingsPage() {
   if (!saved) {
     return (
       <PageShell width="wide">
-        <PageHeader icon={<Palette />} eyebrow="Guest portal" title="Portal settings"
-          description="Design the Wi-Fi sign-in page guests see." help={PAGE_HELP} />
+        <PageHeader icon={<Palette />} eyebrow="Client Portal" title="Portal settings"
+          description="Design the Wi-Fi sign-in page clients see." help={PAGE_HELP} />
         {loadErr ? <ErrorBanner err={loadErr} /> : (
           <div className="space-y-3" aria-label="Loading portal settings">
             <Skeleton className="h-16 w-full" />
@@ -329,9 +329,9 @@ export default function PortalSettingsPage() {
     <PageShell width="wide">
       <PageHeader
         icon={<Palette />}
-        eyebrow="Guest portal"
+        eyebrow="Client Portal"
         title="Portal settings"
-        description="Design the Wi-Fi sign-in page guests see. Guests see your changes as soon as you save."
+        description="Design the Wi-Fi sign-in page clients see. Clients see your changes as soon as you save."
         help={PAGE_HELP}
         actions={
           writable ? (
@@ -498,7 +498,7 @@ export default function PortalSettingsPage() {
                   )}
                   {tpl.options.includes("heading_font") && (
                     <Field label="Heading typeface"
-                      hint="A font stack for the hotel name and headline, e.g. Georgia, serif. Only fonts already on the guest's device are used."
+                      hint="A font stack for the site name and headline, e.g. Georgia, serif. Only fonts already on the client's device are used."
                       error={fieldError("template_options")}>
                       <Input value={opts.heading_font ?? ""} disabled={!writable} placeholder="Georgia, serif"
                         onChange={(e) => setOpt("heading_font", e.target.value || undefined)} />
@@ -570,7 +570,7 @@ export default function PortalSettingsPage() {
                   <ContrastNote label="White button text on your brand colour" ratio={buttonContrast} />
                   <ContrastNote label="Your text colour on the white card" ratio={textContrast} />
                   <Field label="Typeface" error={fieldError("font_family")}
-                    hint="A font stack. Only fonts already on the guest's device are used.">
+                    hint="A font stack. Only fonts already on the client's device are used.">
                     <Input value={d.font_family ?? ""} disabled={!writable}
                       onChange={(e) => set("font_family", e.target.value)} placeholder="Inter, system-ui, sans-serif" />
                   </Field>
@@ -582,27 +582,27 @@ export default function PortalSettingsPage() {
           {section === "content" && (
             <Card>
               <CardHeader>
-                <CardTitle>Hotel identity and content</CardTitle>
-                <CardDescription>Your own words, shown to every guest in every language.</CardDescription>
+                <CardTitle>Site identity and content</CardTitle>
+                <CardDescription>Your own words, shown to every client in every language.</CardDescription>
               </CardHeader>
               <CardBody className="space-y-5">
-                <Field label="Hotel name" error={fieldError("hotel_name")}
+                <Field label="Site name" error={fieldError("hotel_name")}
                   hint={`Shown at the top of the sign-in page and in the browser tab. ${(d.hotel_name ?? "").length}/${LIMITS.hotelName}`}>
                   <Input value={d.hotel_name ?? ""} disabled={!writable} maxLength={LIMITS.hotelName}
-                    onChange={(e) => set("hotel_name", e.target.value)} placeholder="Semantics Demo Hotel" />
+                    onChange={(e) => set("hotel_name", e.target.value)} placeholder="Semantics Demo Site" />
                 </Field>
                 <Field label="Welcome line" error={fieldError("welcome_text")}
-                  hint={`One short sentence under the hotel name — the headline in the photographic layouts. Leave empty to show nothing. ${(d.welcome_text ?? "").length}/${LIMITS.welcomeText}`}>
+                  hint={`One short sentence under the site name — the headline in the photographic layouts. Leave empty to show nothing. ${(d.welcome_text ?? "").length}/${LIMITS.welcomeText}`}>
                   <Input value={d.welcome_text ?? ""} disabled={!writable} maxLength={LIMITS.welcomeText}
                     onChange={(e) => set("welcome_text", e.target.value)} placeholder="Welcome — connect to our Wi-Fi" />
                 </Field>
                 <Field label="Help line" error={fieldError("help_text")}
-                  hint={`Shown below the sign-in, for guests who cannot get on. ${(d.help_text ?? "").length}/${LIMITS.helpText}`}>
+                  hint={`Shown below the sign-in, for clients who cannot get on. ${(d.help_text ?? "").length}/${LIMITS.helpText}`}>
                   <Input value={d.help_text ?? ""} disabled={!writable} maxLength={LIMITS.helpText}
                     onChange={(e) => set("help_text", e.target.value)} placeholder="Ask reception if you need a code" />
                 </Field>
                 <Field label="Terms of use link" error={fieldError("terms_url")}
-                  hint="An https:// address, or a file you uploaded here (/assets/…). An external page loads only once the guest is online.">
+                  hint="An https:// address, or a file you uploaded here (/assets/…). An external page loads only once the client is online.">
                   <Input value={d.terms_url ?? ""} disabled={!writable}
                     onChange={(e) => set("terms_url", e.target.value)} placeholder="https://…/terms" />
                 </Field>
@@ -652,7 +652,7 @@ export default function PortalSettingsPage() {
 
 function fieldName(field: string) {
   const names: Record<string, string> = {
-    hotel_name: "Hotel name", welcome_text: "Welcome line", help_text: "Help line", terms_url: "Terms of use link",
+    hotel_name: "Site name", welcome_text: "Welcome line", help_text: "Help line", terms_url: "Terms of use link",
     logo_url: "Logo", background_url: "Background", hero_image_url: "Hero photograph", brand_color: "Brand colour",
     brand_color_dark: "Button shade", text_color: "Text colour", corner_radius: "Corner radius", font_family: "Typeface",
     template_id: "Layout", template_options: "Layout options", languages: "Languages", translations: "Sign-in page text",
@@ -683,7 +683,7 @@ function ContrastNote({ label, ratio }: { label: string; ratio: number | null })
       ok ? "text-muted-foreground" : "rounded-md border border-warning/30 bg-warning-subtle px-3 py-2 text-warning-subtle-foreground",
     )}>
       {ok ? <Check className="mt-px size-3.5 shrink-0 text-success" aria-hidden /> : <AlertTriangle className="mt-px size-3.5 shrink-0" aria-hidden />}
-      {label}: {ratio.toFixed(1)}:1{ok ? "" : " — below the 4.5:1 many guests need to read it comfortably. Choose a darker colour."}
+      {label}: {ratio.toFixed(1)}:1{ok ? "" : " — below the 4.5:1 many clients need to read it comfortably. Choose a darker colour."}
     </p>
   );
 }

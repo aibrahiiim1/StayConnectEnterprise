@@ -195,10 +195,10 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
       {/* ---- which languages guests are offered ----------------------------------------------------- */}
       {showOffered && (
       <Card>
-        <CardHeader><CardTitle>Guest languages</CardTitle></CardHeader>
+        <CardHeader><CardTitle>Client languages</CardTitle></CardHeader>
         <CardBody className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            Choose which of the {SHIPPED_LANGUAGES.length} built-in languages guests are offered. English is always
+            Choose which of the {SHIPPED_LANGUAGES.length} built-in languages clients are offered. English is always
             available.
           </p>
           <div className="flex flex-wrap gap-2">
@@ -215,7 +215,7 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
                   )}>
                   <input type="checkbox" className="size-4 accent-primary" checked={on}
                     disabled={fixed || !writable}
-                    aria-label={`Offer ${l.label} to guests`}
+                    aria-label={`Offer ${l.label} to clients`}
                     onChange={(e) => setOffered(l.code, e.target.checked)} />
                   {l.label}
                   {!isBuiltIn(l.code) && <Badge tone="warn">needs wording</Badge>}
@@ -281,9 +281,9 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
                   <p className="text-xs text-muted-foreground">
                     {isBuiltIn(current.code)
                       ? countCustom(current.code) === 0
-                        ? "Everything below is the wording that ships with the portal. This is exactly what your guests read."
-                        : `${countCustom(current.code)} of ${PORTAL_STRINGS.length} strings have been changed by this hotel. The rest are the wording that ships with the portal.`
-                      : "This hotel added this language, so the portal has no wording for it. Anything left empty shows English."}
+                        ? "Everything below is the wording that ships with the portal. This is exactly what your clients read."
+                        : `${countCustom(current.code)} of ${PORTAL_STRINGS.length} strings have been changed by this site. The rest are the wording that ships with the portal.`
+                      : "This site added this language, so the portal has no wording for it. Anything left empty shows English."}
                   </p>
                 </div>
                 <span className="flex items-center gap-2">
@@ -361,7 +361,7 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Check className="size-3.5 shrink-0" aria-hidden />
             Only the strings you actually change are stored. Everything else follows the portal, so improved
-            wording reaches your guests without you re-entering anything.
+            wording reaches your clients without you re-entering anything.
           </p>
         </CardBody>
       </Card>

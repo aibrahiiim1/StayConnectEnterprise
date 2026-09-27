@@ -46,7 +46,7 @@ export function HistorySection({ revisions, writable, dirty, onRestored }: {
     setBusy(true); setErr(null);
     try {
       await restoreRevision(target.version, password);
-      toast.success(`Save #${target.version} restored`, "Guests see it now. It was added to the history as a new save.");
+      toast.success(`Save #${target.version} restored`, "Clients see it now. It was added to the history as a new save.");
       setTarget(null);
       await onRestored();
     } catch (e) {
@@ -59,7 +59,7 @@ export function HistorySection({ revisions, writable, dirty, onRestored }: {
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><HistoryIcon className="h-4 w-4" aria-hidden /> History</CardTitle>
         <CardDescription>
-          The most recent saves of this page (up to 20), newest first. Restoring one makes it what guests see
+          The most recent saves of this page (up to 20), newest first. Restoring one makes it what clients see
           again.
         </CardDescription>
       </CardHeader>
@@ -72,7 +72,7 @@ export function HistorySection({ revisions, writable, dirty, onRestored }: {
             title: (
               <span className="inline-flex flex-wrap items-center gap-2">
                 Save #{r.version}
-                {r.version === current && <Badge tone="ok" dot>Guests see this</Badge>}
+                {r.version === current && <Badge tone="ok" dot>Clients see this</Badge>}
               </span>
             ),
             when: <span title={formatDate(r.published_at)}>{formatRelative(r.published_at)}</span>,
@@ -95,7 +95,7 @@ export function HistorySection({ revisions, writable, dirty, onRestored }: {
         title={target ? `Restore save #${target.version}?` : "Restore"}
         description={
           <>
-            Guests will see that design immediately, including its custom CSS and HTML. Nothing is deleted: it is
+            Clients will see that design immediately, including its custom CSS and HTML. Nothing is deleted: it is
             added to the history as a new save, and today&apos;s design stays in the history too.
             {dirty && " Your unsaved changes on this screen will be replaced."}
           </>

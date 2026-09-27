@@ -54,12 +54,12 @@ const SHIPPED = {
     { code: "ru", label: "Русский" },
   ],
   strings: {
-    en: { "pms.room": "Room Number", "btn.submit": "Submit", "tab.guest": "Guest Login" },
-    ar: { "pms.room": "رقم الغرفة", "btn.submit": "إرسال", "tab.guest": "تسجيل دخول النزلاء" },
-    de: { "pms.room": "Zimmernummer", "btn.submit": "Senden", "tab.guest": "Gäste-Anmeldung" },
+    en: { "pms.room": "Room Number", "btn.submit": "Submit", "tab.guest": "Client Login" },
+    ar: { "pms.room": "رقم الغرفة", "btn.submit": "إرسال", "tab.guest": "دخول العملاء" },
+    de: { "pms.room": "Zimmernummer", "btn.submit": "Senden", "tab.guest": "Kunden-Anmeldung" },
     fr: { "pms.room": "Numéro de chambre", "btn.submit": "Envoyer", "tab.guest": "Connexion client" },
-    it: { "pms.room": "Numero di camera", "btn.submit": "Invia", "tab.guest": "Accesso ospiti" },
-    ru: { "pms.room": "Номер комнаты", "btn.submit": "Отправить", "tab.guest": "Вход для гостей" },
+    it: { "pms.room": "Numero di camera", "btn.submit": "Invia", "tab.guest": "Accesso clienti" },
+    ru: { "pms.room": "Номер комнаты", "btn.submit": "Отправить", "tab.guest": "Вход для клиентов" },
   },
 };
 
@@ -129,7 +129,7 @@ describe("the page speaks a hotel's language, not a release manager's", () => {
     expect((screen.getByRole("button", { name: /Save changes/i }) as HTMLButtonElement).disabled).toBe(true);
 
     open(/Content/);
-    fireEvent.change(screen.getByLabelText(/Hotel name/i), { target: { value: "Semantics Demo Hotel" } });
+    fireEvent.change(screen.getByLabelText(/Site name/i), { target: { value: "Semantics Demo Hotel" } });
     await waitFor(() => expect((screen.getByRole("button", { name: /Save changes/i }) as HTMLButtonElement).disabled).toBe(false));
 
     fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
@@ -144,10 +144,10 @@ describe("the page speaks a hotel's language, not a release manager's", () => {
     mock({ hotel_name: "Semantics Demo" });
     await renderPage();
     open(/Content/);
-    fireEvent.change(screen.getByLabelText(/Hotel name/i), { target: { value: "Something else" } });
+    fireEvent.change(screen.getByLabelText(/Site name/i), { target: { value: "Something else" } });
     fireEvent.click(screen.getByRole("button", { name: /Discard/i }));
     await waitFor(() =>
-      expect((screen.getByLabelText(/Hotel name/i) as HTMLInputElement).value).toBe("Semantics Demo"));
+      expect((screen.getByLabelText(/Site name/i) as HTMLInputElement).value).toBe("Semantics Demo"));
   });
 });
 
@@ -198,7 +198,7 @@ describe("the password step-up is asked for where it matters", () => {
     mock({ hotel_name: "Semantics Demo" });
     await renderPage();
     open(/Content/);
-    fireEvent.change(screen.getByLabelText(/Hotel name/i), { target: { value: "X" } });
+    fireEvent.change(screen.getByLabelText(/Site name/i), { target: { value: "X" } });
     await waitFor(() => expect((screen.getByRole("button", { name: /Save changes/i }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
     await waitFor(() => expect(saves()).toHaveLength(1));
@@ -242,7 +242,7 @@ describe("the password step-up is asked for where it matters", () => {
     mockPost(undefined, () => Promise.reject(new (ApiError as any)(401, { error: "reauth_required", message: "confirm your password" })));
     await renderPage();
     open(/Content/);
-    fireEvent.change(screen.getByLabelText(/Hotel name/i), { target: { value: "X" } });
+    fireEvent.change(screen.getByLabelText(/Site name/i), { target: { value: "X" } });
     await waitFor(() => expect((screen.getByRole("button", { name: /Save changes/i }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
     expect(await screen.findByLabelText(/Confirm your password/i)).toBeTruthy();
@@ -345,9 +345,9 @@ describe("languages and wording", () => {
     await renderPage();
     open(/^Languages/);
     for (const l of ["English", "العربية", "Deutsch", "Français", "Italiano", "Русский"]) {
-      expect(screen.getByLabelText(new RegExp(`Offer ${l} to guests`))).toBeTruthy();
+      expect(screen.getByLabelText(new RegExp(`Offer ${l} to clients`))).toBeTruthy();
     }
-    expect((screen.getByLabelText(/Offer English to guests/) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText(/Offer English to clients/) as HTMLInputElement).disabled).toBe(true);
     // The wording is its own section.
     expect(screen.queryByLabelText(/Room Number in English/)).toBeNull();
   });
@@ -444,8 +444,8 @@ describe("languages and wording", () => {
     mock({ hotel_name: "Semantics Demo" });
     await renderPage();
     open(/^Languages/);
-    fireEvent.click(screen.getByLabelText(/Offer Русский to guests/));
-    fireEvent.click(screen.getByLabelText(/Offer Deutsch to guests/));
+    fireEvent.click(screen.getByLabelText(/Offer Русский to clients/));
+    fireEvent.click(screen.getByLabelText(/Offer Deutsch to clients/));
     await waitFor(() => expect((screen.getByRole("button", { name: /Save changes/i }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
     await waitFor(() => expect(saves()).toHaveLength(1));
@@ -477,7 +477,7 @@ describe("history", () => {
     await renderPage();
     open(/History/);
     expect(screen.getByText("Save #4")).toBeTruthy();
-    expect(screen.getByText(/Guests see this/)).toBeTruthy();
+    expect(screen.getByText(/Clients see this/)).toBeTruthy();
     expect(screen.getByText(/Restored save #1/)).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /Restore/ }));
