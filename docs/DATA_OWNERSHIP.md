@@ -6,27 +6,24 @@
 
 ## 1. The rule
 
-**The cloud owns the commercial relationship; the hotel owns the guests.**
-Guest PII is created, used and retained exclusively at the site. What flows up
-is aggregated operational telemetry; what flows down is signed entitlements and
-config-change signals. Neither direction ever carries a guest identity.
+**The cloud owns the licensing relationship; the hotel owns the guests.**
+Guest PII is created, used and retained exclusively at the site. Central serves
+the appliance for licensing only (CLAUDE.md §0E): what flows up is the
+appliance's own identity, certificate request and acknowledgements; what flows
+down is the signed assignment, certificate and signed licence. Neither
+direction ever carries a guest identity, and no operational telemetry is sent.
 
 ## 2. Cloud-owned tables
 
-| Table | Notes |
-|---|---|
-| `tenants` | customer accounts (commercial identity) |
-| `sites` | property registry |
-| `appliances` | inventory, Ed25519 public keys, status/liveness, version |
-| `appliance_bootstrap_tokens` | enrollment (hashed, single-use) |
-| `plans`, `plan_limits`, view `commercial_plans` | CommercialPlan catalog |
-| `tenant_subscriptions`, `tenant_limit_overrides`, `subscription_events` | subscription state |
-| `tenant_effective_limits` (VIEW) | merged plan+override limits — input to license issuance |
-| `invoices`, `invoice_lines` | schema only (Roadmap — billing automation not yet implemented) |
-| `licenses` | signed envelopes + projections; one current per site |
-| `fleet_telemetry`, `fleet_telemetry_dedupe` | non-PII telemetry + exactly-once gate |
-| `operators`, `operator_roles`, `idp_providers`, `auth_oidc_states` | **platform/group** operators only |
-| `audit_log` | platform/group actions |
+Customers (`tenants`), `sites`, `appliances` and their assignment, PKI,
+retirement, security-alert and offline-activation tables, `licenses` (one
+current per appliance), `operators`/`operator_roles` (Central sign-ins only) and
+`audit_log`. The full list is [CLOUD_ARCHITECTURE.md §2](CLOUD_ARCHITECTURE.md#2-central-database-ownership).
+
+Retired commercial history (`plans`, `plan_limits`, `plan_limit_history`,
+`subscription_events`) sits in schema `legacy_archive` and is read by nothing.
+Subscriptions, plan views, enrollment tokens, SSO and fleet telemetry tables no
+longer exist (migrations 0045 and 0046).
 
 ## 3. Edge-owned tables (never leave the hotel)
 
@@ -54,36 +51,28 @@ config-change signals. Neither direction ever carries a guest identity.
 
 ## 4. What syncs (and what never does)
 
-### Edge → Cloud (via `sync_outbox` → NATS `telemetry.<applianceID>`)
+### Edge → Cloud (HTTPS, appliance-initiated)
 
-Allowed kinds only: `heartbeat`, `health`, `usage`, `auth_counts`,
-`pms_health`, `license_ack`, `backup`, `sync`, `update_progress`.
-
-| Kind | Example payload content |
+| Item | Endpoint |
 |---|---|
-| heartbeat | version, uptime |
-| health | daemon states, DB ok, disk, load |
-| usage | aggregate session counts, total bytes per period |
-| auth_counts | logins per method, failure counts (counts, not identities) |
-| pms_health | provider status/last_record_at (no reservation data) |
-| license_ack | installed license_id, evaluated state |
-| backup | last backup status/size |
-| sync | outbox depth, drain lag |
-| update_progress | Roadmap — update orchestration not yet implemented |
+| Self-signed registration (serial, hardware fingerprint, identity public key, MACs) | `POST /v1/appliances/register` |
+| Certificate signing request | `POST /v1/appliance/csr` |
+| Signed hello (orphan detection) | `GET /v1/appliance/hello` |
+| Assignment acknowledgement (adopted version) | `POST /v1/appliance/assignment/ack` |
+| Offline-activation reconciliation | `POST /v1/appliance/offline-reconcile` |
 
-**Defense in depth:** even though payloads are aggregates by contract, the cloud
-ingest (`fleet.Sanitize`) strips any key case-insensitively containing
-`mac`, `email`, `phone`, `guest_name`, `first_name`, `last_name`, `room`,
-`reservation`, `voucher_code`, `code`, `otp`, `password`, `ip` — at the top
-level and one nesting level — before storage.
+**No telemetry.** The telemetry outbox and every producer (usage, health,
+service-health, `license_ack`) are off, and the NATS transport is not opened
+(CLAUDE.md §0E). The outbox tables remain on the appliance; retention still
+prunes records delivered before the switch-off.
 
-### Cloud → Edge
+### Cloud → Edge (pulled by the appliance)
 
-| Item | Channel |
+| Item | Endpoint |
 |---|---|
-| Signed license envelope + revoked license IDs + `server_time` | pull: `GET /v1/appliance/license` (appliance Ed25519 JWT); a push notice over NATS may prompt an immediate fetch |
-| Config-change events | NATS `config.<tenantID>.pms` (today: PMS reload signal — the data itself is already local) |
-| Revocation notices | embedded in the license fetch response (`revoked[]`) |
+| Signed assignment (customer, site, state, version) + signed key registry | `GET /v1/appliance/assignment`, `GET /v1/appliance/assignment-registry` |
+| Client certificate | `GET /v1/appliance/certificate` |
+| Signed license envelope + revoked license IDs + `server_time` | `GET /v1/appliance/license` |
 
 ### Never syncs, in either direction
 
@@ -97,38 +86,33 @@ level and one nesting level — before storage.
 
 ```
         HOTEL SITE (edge DB)                 │            CLOUD
-  guests · sessions · accounting · OTP       │   tenants · sites · appliances
-  PMS attempts · payments · vouchers         │   plans · subscriptions · licenses
-  local operators · local audit              │   fleet_telemetry (aggregates)
-                                             │   platform operators · audit
-        ──────── sync_outbox ────────────────▶   Sanitize() → fleet_telemetry
-              (aggregate kinds only)         │
-        ◀──────── signed license ────────────    (no guest data ever crosses)
+  guests · sessions · accounting · OTP       │   customers · sites · appliances
+  PMS attempts · payments · vouchers         │   assignments · certificates
+  local operators · local audit              │   licenses · Central operators · audit
+                                             │
+        ──── registration · CSR · ack ───────▶   (appliance identity only)
+        ◀── signed assignment · cert · license    (no guest data ever crosses)
 ```
 
 Consequences:
 
 - A cloud compromise cannot expose hotel guests — the data simply is not there.
 - GDPR/data-locality: guest data residency equals the hotel's own premises;
-  retention is enforced locally from the license's
-  `accounting_retention_days` / `audit_retention_days` limits.
-- Cloud support staff diagnose sites from telemetry and, when needed, ask hotel
-  staff to act in Hotel Admin. (Remote support sessions: Roadmap — not yet
-  implemented.)
+  retention is enforced locally on the appliance.
+- Cloud support staff see only activation, connection and licence state; to
+  diagnose a site they ask hotel staff to act in Hotel Admin.
 
 ## 6. Duplicated-by-design rows
 
-The edge DB's `tenants`/`sites`/`appliances` rows mirror the cloud's registry
-for this one site (same UUIDs, copied by `sitemigrate` at cutover, thereafter
-maintained locally). This duplication is intentional: FK integrity for the
-guest domain without any runtime cloud dependency. Commercial fields (status,
-subscription) are **not** authoritative locally — entitlement truth is the
-signed license.
+The edge DB's `tenants`/`sites`/`appliances` rows mirror Central's registry
+for this one site (same UUIDs). This duplication is intentional: FK integrity
+for the guest domain without any runtime cloud dependency. Tenant and site are
+**not** authoritative locally — the only authority is the verified signed
+assignment, and entitlement truth is the signed license.
 
-## 7. Compatibility window
+## 7. Central guest-domain tables are gone
 
-Until the pilot cutover completes, the central DB still contains the historical
-guest-domain rows. After `sitemigrate` copies a site and scd/acctd re-point to
-the site DB, the central copies are frozen (read-only legacy views for the
-deprecated `/v1` adapters) and are dropped when the adapters are removed
-([API_DEPRECATIONS.md](API_DEPRECATIONS.md), [MIGRATION_RUNBOOK.md](MIGRATION_RUNBOOK.md)).
+The historical guest-domain tables on Central (guests, sessions, vouchers,
+accounting, OTP, PMS, payments, walled garden, networks, …) were verified empty
+and dropped by migration 0046, together with the deprecated `/v1` adapters that
+read them ([API_DEPRECATIONS.md](API_DEPRECATIONS.md)).

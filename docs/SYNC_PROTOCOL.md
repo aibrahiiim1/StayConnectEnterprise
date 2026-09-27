@@ -1,4 +1,13 @@
-# Sync Protocol — Edge ⇄ Cloud
+# Sync Protocol — Edge ⇄ Cloud (HISTORICAL / SUPERSEDED)
+
+> **HISTORICAL — SUPERSEDED. This is not how an appliance talks to Central today.**
+> Central serves the appliance for **licensing only** (CLAUDE.md §0E, 2026-09-13): the telemetry outbox and
+> every producer are off, the NATS transport is not opened, the remote command / PMS / config-push channels
+> are removed, and Central's telemetry tables were dropped (migration 0045). What the appliance does exchange
+> with Central — registration, signed assignment, certificate, licence and hello, all over HTTPS — is
+> specified in [CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md) §6 and summarised in
+> [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md) §4. The design below is kept only as the record of the switched-off
+> telemetry path; do not use it as a description of current behaviour or as a repair instruction.
 
 > How an appliance talks to the cloud: a durable outbox drained over
 > appliance-initiated channels, deduplicated cloud-side for exactly-once

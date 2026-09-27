@@ -1,111 +1,65 @@
-# API Deprecations — Legacy `/v1` Route Disposition
+# API Deprecations — Removed Routes and Their Replacements
 
-> The pre-refactor ctrlapi exposed everything under one `/v1/*` namespace.
-> Canonical homes are now `/cloud/v1/*` (ctrlapi) and `/edge/v1/*` (edged, per
-> appliance). Legacy guest-domain routes on ctrlapi remain temporarily as
-> **deprecated compatibility adapters** (they keep the 25 E2E suites and the
-> old web-admin working during the pilot) and are **removed after the pilot
-> cutover**. See the mount comments in
-> `control-plane/internal/http/router.go`.
+> The pre-refactor ctrlapi exposed everything under one `/v1/*` namespace, and the
+> first split kept deprecated compatibility adapters there for the pilot. **That
+> compatibility window is closed.** The Central redesign (Product-Owner mission
+> "Central Control Plane refactor & activation redesign", 2026-09-27) removed every
+> legacy adapter together with the commercial, enrollment-token, SSO and telemetry
+> surfaces. This file records what was removed and where each capability lives now.
+> The current Central contract is [CENTRAL_CONTROL_PLANE.md §6](CENTRAL_CONTROL_PLANE.md#6-api-contract).
 
-## 1. Disposition legend
+## 1. What ctrlapi serves now
 
-- **→ /cloud/v1** — same handler, re-mounted (sometimes renamed) in the cloud namespace.
-- **→ /edge/v1** — resource is site-owned; the successor lives on the appliance (edged) against the site DB.
-- **STAYS** — not deprecated; part of the appliance protocol or infra surface that remains on ctrlapi `/v1`.
+Nothing else is mounted (`control-plane/internal/http/router.go`):
 
-## 2. Route table
-
-| Legacy route (ctrlapi `/v1`) | Disposition | Successor | Notes |
-|---|---|---|---|
-| `GET /healthz`, `/readyz`, `/metrics` | STAYS | — | infra, outside `/v1` |
-| `GET /v1/version` | STAYS (also mounted at `/cloud/v1/version`) | | |
-| `POST /v1/auth/login`, `POST /v1/auth/logout`, `GET /v1/auth/whoami` | STAYS for cloud operators | planned `/cloud/v1/auth/*` mounts | edged has its **own** `/edge/v1/auth/*` for site operators |
-| `GET/POST /v1/auth/sso/*` | STAYS (cloud operator SSO) | planned `/cloud/v1/auth/sso` | |
-| `POST /v1/appliances/enroll` | **STAYS** | — | appliance protocol (bootstrap-token gated) |
-| `GET /v1/appliance/hello` | **STAYS** | — | appliance protocol (Ed25519 JWT) |
-| `GET /v1/appliance/license` | **STAYS** | — | license fetch — new in the refactor, appliance protocol |
-| `/v1/tenants[/{id}]` + subscription/effective-limits/audit/usage | → /cloud/v1 | `/cloud/v1/tenants...` | already mounted |
-| `/v1/sites[/{id}]` | → /cloud/v1 | `/cloud/v1/sites` | already mounted |
-| `/v1/appliances[/{id}]`, effective-config | → /cloud/v1 | `/cloud/v1/appliances` | already mounted |
-| `/v1/appliance-bootstrap-tokens[/{id}]` | → /cloud/v1 | `/cloud/v1/appliance-bootstrap-tokens` | already mounted |
-| `/v1/plans[/{id}]` | → /cloud/v1 **renamed** | `/cloud/v1/commercial-plans` | naming rule: CommercialPlan vs GuestAccessPlan |
-| `/v1/operators[/{id}]` + set-password/roles | **split** | `/cloud/v1/operators` (platform/group) **and** `/edge/v1/operators` (site staff) | one legacy surface becomes two account systems |
-| `/v1/ticket-templates[/{id}]` | → /edge/v1 **renamed** | `/edge/v1/guest-access-plans` | site-owned |
-| `/v1/voucher-batches...` (list/create/detail/codes/csv/revoke) | → /edge/v1 | `/edge/v1/voucher-batches...` | |
-| `/v1/vouchers/{id}[,/revoke]` | → /edge/v1 | `/edge/v1/vouchers...` | |
-| `/v1/sessions[/{id}, /disconnect]` | → /edge/v1 | `/edge/v1/sessions...` | disconnect goes straight to local scd — no NATS hop |
-| `/v1/pms-providers...` (+test/cache/health) | → /edge/v1 | `/edge/v1/pms-providers...` | config + live probes are local |
-| `/v1/walled-garden[/{id}, /effective]` | → /edge/v1 | `/edge/v1/walled-garden...` | |
-| `/v1/notification-providers...` | → /edge/v1 | `/edge/v1/notification-providers...` | |
-| `/v1/social-providers...` | → /edge/v1 | `/edge/v1/social-providers...` | |
-| `/v1/stripe-accounts...` | → /edge/v1 | `/edge/v1/stripe-accounts...` | |
-| `GET /v1/payments/` (admin history) | → /edge/v1 | `/edge/v1/payments` | |
-| `POST /v1/checkout/create`, `GET /v1/checkout/{id}` (guest) | → edge | served on the appliance (portald→scd against the site DB) | guest checkout must work like every other guest flow: locally |
-| `POST /v1/webhooks/stripe/{tenant_id}` | → edge | appliance-served webhook endpoint (see note) | Stripe must reach the site's public endpoint; until per-site exposure exists, a cloud relay forwards verified events — transitional |
-| `GET|POST /oauth/stub/authorize-sso[/confirm]` | STAYS (dev-only stub IdP) | — | |
-
-New cloud-only surfaces (no legacy ancestor): `/cloud/v1/fleet/*`,
-`/cloud/v1/licenses/*`.
-
-## 3. Deprecation mechanics
-
-During the compatibility window the legacy guest-domain routes:
-
-1. keep working against the central DB copies (frozen post-`sitemigrate` for
-   migrated sites);
-2. respond with `Deprecation: true` and
-   `Link: <successor>; rel="successor-version"` headers;
-3. are counted in metrics (`ctrlapi_http_*` by route) so removal is
-   evidence-based — a route with zero traffic for the agreed window is safe to
-   drop.
-
-## 4. Removal plan (after pilot cutover)
-
-Preconditions, then removal in one release:
-
-- [ ] Pilot site fully cut over (scd/acctd on site DSN, edged serving Hotel
-      Admin, phase suites green — [MIGRATION_RUNBOOK.md](MIGRATION_RUNBOOK.md)).
-- [ ] Old `web-admin` replaced by `cloud-admin` + `hotel-admin`.
-- [ ] E2E suites re-pointed: guest/hotel suites at `/edge/v1`, commercial
-      suites at `/cloud/v1`.
-- [ ] Legacy-route traffic at zero for the observation window.
-- Then: delete the `/v1` guest-domain mounts from `router.go`, drop the frozen
-  central guest-domain tables, and remove the legacy role values from the edge
-  `operator_roles` check constraint
-  ([ROLE_AND_SCOPE_MATRIX.md](ROLE_AND_SCOPE_MATRIX.md) §5).
-
-The **appliance protocol** endpoints (`/v1/appliances/enroll`,
-`/v1/appliance/hello`, `/v1/appliance/license`) are explicitly *not* part of
-this removal — fielded appliances depend on those exact paths; any renaming
-would require a coordinated appliance update cycle and is out of scope.
-
-## 5. Impact on the E2E suites
-
-The 25 phase suites assume the shared DB and `/v1` routes
-([CURRENT_STATE_ASSESSMENT.md](CURRENT_STATE_ASSESSMENT.md) §9.4); the
-compatibility adapters exist largely so they don't all go red at once.
-Re-pointing plan:
-
-| Suites | New target |
+| Surface | Routes |
 |---|---|
-| phase 1, 2, 4.x, 6 (guest path) | unchanged — they exercise portald/scd, which move DSN, not routes |
-| phase 3 (admin API), 5.6, 5.7 | split: commercial assertions → `/cloud/v1`, guest-domain CRUD → `/edge/v1` |
-| phase 5.1–5.4 (enrollment/NATS/reload/heartbeat) | unchanged — appliance protocol stays |
-| phase 8, 9, 10, 11 (providers) | provider CRUD → `/edge/v1` |
-| phase 12 (payments) | checkout/webhook → edge-served endpoints |
-| phase 13–15 (observability/TLS/alerting) | unchanged, plus new fleet-telemetry assertions |
+| Infra | `GET /healthz`, `GET /readyz`, `GET /metrics` (loopback only) |
+| Operator session | `POST /v1/auth/login`, `POST /v1/auth/logout`, `GET /v1/auth/whoami`, `POST /v1/auth/reauth` |
+| Operator console | `/cloud/v1/*` — overview, customers, sites, customer users, appliances (and their lifecycle actions), offline activation, licenses, security alerts, trust, audit, team, backup health |
+| Appliance protocol | `POST /v1/appliances/register`; `GET /v1/appliance/hello`, `/license`, `/certificate`; `POST /v1/appliance/csr`, `/offline-reconcile`; mutual-TLS only: `GET /v1/appliance/assignment`, `/assignment-registry`, `POST /v1/appliance/assignment/ack` |
 
-New suites added by the refactor (isolation, offline, license state machine)
-run natively against `/edge/v1` + `/cloud/v1` and have no legacy dependency.
+## 2. Removed from ctrlapi
 
-## 6. Client migration notes
+| Removed | Now |
+|---|---|
+| Legacy guest-domain `/v1/*` adapters (ticket templates, voucher batches, vouchers, sessions, PMS providers, walled garden, notification providers, social providers, Stripe accounts, payments) | On each appliance's Edge API `/edge/v1/*` against the site DB; Central holds no guest domain (tables dropped, migration 0046) |
+| `POST /v1/checkout/*`, `POST /v1/webhooks/stripe/{tenant_id}` (public checkout, Stripe webhook) | Removed from Central; guest payment is an appliance concern |
+| `GET/POST /v1/auth/sso/*`, `/oauth/stub/*`, `idp_providers` | Removed — Central sign-in is email and password only |
+| `POST /v1/appliances/enroll`, `/cloud/v1/appliance-bootstrap-tokens` | Removed — the appliance registers itself (`POST /v1/appliances/register`, token-less); offline sites use offline activation |
+| `/cloud/v1/tenants*` (incl. subscription, effective-limits, usage sub-routes), `/v1/tenants*` | `/cloud/v1/customers*` (`customer_id` is the old `tenant_id`) |
+| `/cloud/v1/sites` (flat list/create) | `/cloud/v1/customers/{id}/sites`, `PATCH|DELETE /cloud/v1/sites/{id}`, `…/archive|restore` |
+| `/cloud/v1/appliances` create (manual appliance creation), `…/effective-config` | Removed — appliances only register themselves; Central holds no appliance configuration |
+| `/cloud/v1/commercial-plans`, `/v1/plans`, subscriptions, `tenant_limit_overrides` | Removed — the signed appliance licence is the only entitlement; commercial history is in schema `legacy_archive` |
+| `/cloud/v1/licenses` POST (site-scoped issue from a subscription) | `POST /cloud/v1/appliances/{id}/activate` and `POST /cloud/v1/appliances/{id}/license` |
+| `/cloud/v1/operators*`, `/v1/operators*` | `/cloud/v1/team*` (Central operators) and `/cloud/v1/customers/{id}/users*` (customer users); hotel staff are `/edge/v1/operators` on the appliance |
+| `/cloud/v1/fleet/*` (registry + telemetry) | `/cloud/v1/overview` and `/cloud/v1/appliances` (activation, connection and licence state derived by ctrlapi); telemetry is off (CLAUDE.md §0E, migration 0045) |
+| Appliance deactivate / decommission / reconcile / claim endpoints | `POST /cloud/v1/appliances/{id}/retire` (two-phase or emergency), `…/move`, `…/replace`, `…/rebind-wan-mac`, `…/reissue-certificate`, `DELETE /cloud/v1/appliances/{id}` |
+| Assignment-key state changes over HTTP | Host command `ctrlapi assignment-key verify-only|revoke --key-id <id> --reason <text> [--emergency]`; `GET /cloud/v1/trust` is read-only |
+| `GET /v1/version`, `/cloud/v1/version` | `GET /readyz` reports the version |
 
-- `web-admin` callers: replace `/api/v1/...` with the split UIs; the tenant
-  selector concept survives only in cloud-admin (Hotel Admin is single-site
-  by construction and needs no `?tenant_id=`).
-- Scripted API users (voucher exports, reports): move to
-  `https://<appliance-mgmt-ip>/edge/v1/...` with a site-operator account —
-  cloud credentials will stop reading guest data the day the adapters go.
-- Error envelope, cursor pagination and `trace_id` semantics are identical in
-  both new namespaces — only paths and auth domains change.
+The legacy `web-admin` console was removed; the Central console is `cloud-admin`,
+and Hotel Admin is `hotel-admin` on each appliance.
+
+## 3. Removed from the appliance (edged `/edge/v1`, scd socket)
+
+| Removed | Now |
+|---|---|
+| `GET /edge/v1/license`, `POST /edge/v1/license/refresh` | `GET /edge/v1/central/status`, `POST /edge/v1/central/refresh` (Check now) |
+| `/edge/v1/setup/*` (setup wizard, "Connect with token" enrollment) | Token-less registration by scd; `GET /edge/v1/central/offline-request`, `POST /edge/v1/central/offline-package` for offline activation |
+| `/edge/v1/network/cloud*`, `/edge/v1/network/setup/*` | `GET /edge/v1/central/status` |
+| scd socket `/v1/setup/*` (incl. `/v1/setup/enroll`) | scd socket `/v1/central/status`, `/v1/central/refresh`, `/v1/central/offline-request`, `/v1/central/offline-package`, `/v1/license/install` |
+
+`POST /edge/v1/license` (licence file upload) stays.
+
+## 4. Old console addresses
+
+Both consoles answer old page addresses with a permanent redirect (308):
+
+- **Central** (`cloud-admin/next.config.mjs`): `/dashboard` → `/overview`; `/tenants`, `/sites` →
+  `/customers`; `/onboarding` → `/appliances?activation=waiting`; `/operators` → `/system/team`;
+  `/security` → `/system/security-alerts`; `/certificates`, `/assignment-keys` → `/system/trust`;
+  `/backup-health` → `/system/backup-health`; `/audit` → `/system/audit`; `/commercial`, `/subscription` →
+  `/licenses`.
+- **Hotel Admin** (`hotel-admin/next.config.mjs`): `/license`, `/network/cloud`, `/setup/enrollment` →
+  `/appliance`.

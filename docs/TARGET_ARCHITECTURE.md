@@ -3,8 +3,9 @@
 > Authoritative design for the cloud-controlled / hotel-local split. Companion docs:
 > [CLOUD_ARCHITECTURE.md](CLOUD_ARCHITECTURE.md), [EDGE_ARCHITECTURE.md](EDGE_ARCHITECTURE.md),
 > [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md), [LICENSING_AND_ENTITLEMENTS.md](LICENSING_AND_ENTITLEMENTS.md),
-> [SYNC_PROTOCOL.md](SYNC_PROTOCOL.md), [OFFLINE_OPERATION.md](OFFLINE_OPERATION.md).
-> The pre-refactor system is described in [SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md).
+> [OFFLINE_OPERATION.md](OFFLINE_OPERATION.md). Central is specified by
+> [CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md), which wins over this file wherever they differ.
+> The pre-refactor system is described in [SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md) (historical).
 
 > **⚠️ Corrections (2026-07-16):**
 > 1. **Appliance topology — approved two-NIC rule.** The appliance has **exactly two physical
@@ -22,13 +23,14 @@
 
 ## 1. Design goal
 
-The hotel's guest WiFi must work with the internet, the cloud, and NATS all down.
+The hotel's guest WiFi must work with the internet and the cloud down.
 Everything a guest or a hotel operator touches runs **on the appliance against a
-site-local database**. The cloud keeps only the commercial and fleet-management
-domain: who the customers are, what they bought (CommercialPlan), which sites and
-appliances exist, signed licenses, and aggregated non-PII telemetry. The appliance
-opens **outbound connections only** — nothing in the cloud ever needs to reach into
-a hotel network.
+site-local database**. The cloud (Central) keeps only licensing, activation and
+fleet status: who the customers are, which sites and appliances exist, whether
+each appliance is activated and connected, and its signed licence (CLAUDE.md
+§0E). It receives no telemetry. The appliance opens **outbound HTTPS
+connections only** — nothing in the cloud ever needs to reach into a hotel
+network.
 
 ## 2. Hierarchy
 
@@ -36,26 +38,26 @@ a hotel network.
                      ┌──────────────────────────┐
                      │        PLATFORM          │  StayConnect (vendor)
                      │  platform operators,     │  cloud DB, vendor signing key,
-                     │  commercial plans,       │  fleet view, platform audit
+                     │  activation,             │  fleet status, platform audit
                      │  license issuance        │
                      └────────────┬─────────────┘
                                   │ 1..n
                      ┌────────────▼─────────────┐
-                     │   TENANT / HOTEL GROUP   │  a hotel chain or brand
-                     │  subscription, group     │  (tenants table, cloud)
-                     │  operators, group audit  │
+                     │  CUSTOMER / HOTEL GROUP  │  a hotel chain or brand
+                     │  sites, customer users,  │  (tenants table, cloud)
+                     │  customer activity       │
                      └────────────┬─────────────┘
                                   │ 1..n
                      ┌────────────▼─────────────┐
                      │      SITE / HOTEL        │  one property
-                     │  one signed license,     │  (sites table, cloud;
-                     │  one ISOLATED local DB   │   stayconnect_site DB, edge)
+                     │  one ISOLATED local DB   │  (sites table, cloud;
+                     │  per appliance           │   stayconnect_site DB, edge)
                      └────────────┬─────────────┘
                                   │ 1..n (usually 1, or an HA pair)
                      ┌────────────▼─────────────┐
-                     │  APPLIANCE (or HA pair)  │  the gateway box/VM
-                     │  Ed25519 identity, local │  (appliances table, cloud;
-                     │  daemons, guest network  │   the whole edge stack)
+                     │  APPLIANCE               │  the gateway box/VM
+                     │  Ed25519 identity, one   │  (appliances table, cloud;
+                     │  signed license, daemons │   the whole edge stack)
                      └──────────────────────────┘
 ```
 
@@ -63,27 +65,28 @@ a hotel network.
 
 | Product | Runs | Serves | Data |
 |---|---|---|---|
-| **Cloud** (`control-plane/` = ctrlapi + `cloud-admin/` UI) | StayConnect's infrastructure, served centrally | Platform + group operators: tenants, sites, appliance inventory, CommercialPlans, subscriptions, license issuance/revocation, fleet health | Cloud Postgres — no guest PII |
+| **Cloud / Central** (`control-plane/` = ctrlapi + `cloud-admin/` UI) | StayConnect's infrastructure, served centrally | Platform operators and customer users: customers, sites, appliance activation and lifecycle, license issuance/suspension/revocation, fleet status | Cloud Postgres — no guest PII |
 | **Edge Appliance** (`data-plane/` = scd, portald, acctd, edged) | On-prem at each hotel, inline on the guest network | Guests (captive portal) and the Hotel Admin API | Site-local Postgres `stayconnect_site` — the entire guest domain |
 | **Hotel Admin** (`hotel-admin/` UI) | Served from the appliance itself via Caddy on the **management IP** (e.g. `https://172.21.15.30`) | Hotel staff: guest access plans, vouchers, sessions, PMS, walled garden, payments, local operators, backups | Talks only to the local `/edge/v1` API — works with the cloud down |
 
-Terminology rule used everywhere: **CommercialPlan** = the `plans` table (what
-StayConnect sells a tenant, cloud domain); **GuestAccessPlan** = the
-`ticket_templates` table (what a hotel sells/grants a guest, edge domain).
-Plain "Plan" is banned in code, UI and docs.
+Terminology rule used everywhere: **GuestAccessPlan** = the edge
+`ticket_templates` table (what a hotel sells/grants a guest). The cloud-side
+**CommercialPlan** (`plans`) is retired — the signed appliance licence is the
+only entitlement, and the old tables sit in schema `legacy_archive`. Plain
+"Plan" is banned in code, UI and docs.
 
 ## 4. Component diagram (one site)
 
 ```
  ┌────────────────────────────── CLOUD ───────────────────────────────┐
- │  cloud-admin UI ──▶ ctrlapi (/cloud/v1)                            │
- │        cloud Postgres · Redis · NATS cluster · Prometheus/Grafana  │
- │  vendor Ed25519 signing key (CTRLAPI_VENDOR_KEY)                   │
- └───────────▲───────────────────────────▲────────────────────────────┘
-             │ OUTBOUND ONLY             │ OUTBOUND ONLY
-             │ NATS: telemetry.<appl>,   │ HTTPS: GET /v1/appliance/license
-             │ hb.*, config.*.pms,       │ (Ed25519 appliance JWT, ≤60s)
-             │ scd.<appl>.> RPC          │
+ │  cloud-admin UI ──▶ ctrlapi (/cloud/v1, /v1/auth)                  │
+ │        cloud Postgres · Redis · Prometheus/Grafana                 │
+ │  vendor, assignment and registry signing keys · appliance CA       │
+ └────────────────────────────────▲───────────────────────────────────┘
+                                  │ OUTBOUND ONLY — HTTPS, licensing only
+                                  │ register · assignment · certificate ·
+                                  │ license · hello  (Ed25519 appliance
+                                  │ JWT, then mutual TLS)
  ┌───────────┴───────────────────────────┴────────────────────────────┐
  │                     APPLIANCE (per site / HA pair)                 │
  │                                                                    │
@@ -115,18 +118,18 @@ Key invariants:
   Ed25519 vendor-signed license offline and mirrors its limits into the local
   `tenant_effective_limits` table, so existing data-plane limit queries keep
   working unchanged. See [LICENSING_AND_ENTITLEMENTS.md](LICENSING_AND_ENTITLEMENTS.md).
-- **All edge→cloud traffic is a durable outbox drain** (`sync_outbox`, exactly-once
-  landing via `fleet_telemetry_dedupe`). See [SYNC_PROTOCOL.md](SYNC_PROTOCOL.md).
-- **Guest PII never syncs to the cloud.** Telemetry is aggregates only; the cloud
-  ingest additionally strips PII-looking keys (defense in depth, `fleet.Sanitize`).
+- **No telemetry.** Edge→cloud traffic is only registration, CSR, hello and
+  assignment acknowledgement (CLAUDE.md §0E). The telemetry outbox design is
+  recorded in [SYNC_PROTOCOL.md](SYNC_PROTOCOL.md) (historical; switched off).
+- **Guest PII never reaches the cloud.**
 
 ## 5. API namespaces
 
 | Namespace | Where | Domain |
 |---|---|---|
-| `/cloud/v1/*` | ctrlapi (cloud) | tenants, sites, appliances, commercial-plans, operators, appliance-bootstrap-tokens, fleet, licenses |
+| `/cloud/v1/*` | ctrlapi (cloud) | overview, customers, sites, appliances, offline activation, licenses, security alerts, trust, audit, team, customer users, backup health — [CENTRAL_CONTROL_PLANE.md §6](CENTRAL_CONTROL_PLANE.md#6-api-contract) |
 | `/edge/v1/*` | edged (per appliance, mgmt IP) | health, license, operators, guest-access-plans, voucher-batches, vouchers, sessions, pms-providers, auth-methods, walled-garden, portal-branding, payments, stripe-accounts, notification-providers, social-providers, audit, reports, backups |
-| `/v1/*` (legacy, ctrlapi) | ctrlapi | **Deprecated** compatibility adapters, removed after the pilot cutover — see [API_DEPRECATIONS.md](API_DEPRECATIONS.md). Appliance protocol endpoints (`/v1/appliances/enroll`, `/v1/appliance/hello`, `/v1/appliance/license`) stay. |
+| `/v1/*` (ctrlapi) | ctrlapi | Only `/v1/auth/*` (operator session) and the appliance protocol (`/v1/appliances/register`, `/v1/appliance*`). The legacy adapters are removed — see [API_DEPRECATIONS.md](API_DEPRECATIONS.md). |
 
 ## 6. High availability (per site)
 
@@ -142,9 +145,10 @@ implemented or accepted under the two-NIC design.
 **Known limitation (documented, accepted for now):** a two-node pair has no
 quorum. If the HA sync link fails while both nodes are up, both can believe they
 are primary (split-brain) and the two local DBs diverge. Recommended mitigation —
-use the **cloud heartbeat as a witness/fencing arbiter**: a node that has lost
-both its peer *and* its cloud heartbeat acknowledgment should refuse promotion.
-This witness role is a design recommendation, not yet implemented.
+use a **cloud witness as a fencing arbiter**: a node that has lost both its
+peer *and* its witness acknowledgment should refuse promotion. This witness
+role is a design recommendation, not yet implemented (and Central currently
+serves appliances for licensing only, CLAUDE.md §0E).
 
 ## 7. Deployment topologies
 
@@ -156,7 +160,7 @@ This witness role is a design recommendation, not yet implemented.
 - **Production:** cloud and appliances are physically separate
   ([DEPLOYMENT_CLOUD.md](DEPLOYMENT_CLOUD.md), [DEPLOYMENT_APPLIANCE.md](DEPLOYMENT_APPLIANCE.md)).
   Each appliance has **exactly two physical NICs**: a **WAN interface that is also the
-  management interface** (Hotel Admin, SSH, outbound sync) and a **LAN guest-gateway
+  management interface** (Hotel Admin, SSH, outbound HTTPS to Central) and a **LAN guest-gateway
   interface** (captive network + guest VLAN trunk). There is **no separate management NIC** and
   **no approved dedicated HA-sync NIC** — the HA-sync transport under two NICs is an **OPEN
   architecture decision** (§6).
