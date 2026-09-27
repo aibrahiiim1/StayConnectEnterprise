@@ -141,8 +141,8 @@ func (b *EnrollmentBase) RegisterHandler(w http.ResponseWriter, r *http.Request)
 	// claimed/assigned/activated/online state means the hardware already has a
 	// live identity — a new key there is a clone or a hijack of a known serial
 	// (serial + hardware fingerprint are not secret), so we alert and reject.
-	// A legit factory-reset of an active box requires the operator to decommission
-	// it first (or use a bootstrap token) — a deliberate, audited action.
+	// A legit factory-reset of an active box requires the operator to retire
+	// it first — a deliberate, audited action.
 	reusable := map[string]bool{"pending_approval": true, "": true, "revoked": true, "decommissioned": true}
 	if reuseID != "" {
 		if !reusable[reuseState] {
@@ -164,7 +164,7 @@ func (b *EnrollmentBase) RegisterHandler(w http.ResponseWriter, r *http.Request)
                 VALUES ($1, $2, 'hardware_reused', $3::jsonb, $4)`,
 				reuseID, req.Serial, string(hwDetail), ip)
 			Fail(w, r, http.StatusForbidden, CodeForbidden,
-				"registration rejected: this hardware (serial "+req.Serial+") already has an active appliance under another identity — decommission it first (likely a factory reset)")
+				"registration rejected: this hardware (serial "+req.Serial+") already has an active appliance under another identity — retire it in Central first (likely a factory reset)")
 			return
 		}
 		// Re-register after factory reset: adopt the new identity on the existing

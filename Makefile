@@ -94,13 +94,6 @@ phase1-install: dataplane-build
 	systemctl enable --now stayconnect-scd.service
 	systemctl enable --now stayconnect-portald.service
 
-web-install:
-	cd web-admin && npm install --no-fund --no-audit
-	install -m 0644 deploy/systemd/stayconnect-web-admin.service /etc/systemd/system/
-	systemctl daemon-reload
-	systemctl enable --now stayconnect-web-admin.service
-	systemctl restart stayconnect-web-admin.service
-
 # NO tc-setup. The HTB roots, the guest IFB, the ingress redirect and every per-session and SHARED class are
 # created and reconciled by netd (internal/shape EnsureBridgeInfra + the Phase-3 applier), idempotently, on
 # every submit pass and therefore on every boot. The retired stayconnect-tc-setup.service primed ens160 and

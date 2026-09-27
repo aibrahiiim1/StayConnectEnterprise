@@ -158,8 +158,8 @@ const (
 	// sessions are allowed to run to their natural end; local admin remains
 	// accessible read-only plus license upload.
 	StateExpired State = "Expired"
-	// StateSuspended — issuer set status=suspended (billing hold). Same
-	// enforcement as Restricted, effective immediately on receipt.
+	// StateSuspended — an operator suspended the licence in Central. New
+	// sessions are refused, effective immediately on receipt.
 	StateSuspended State = "Suspended"
 	// StateRevoked — an authenticated revocation notice names this
 	// license_id. New sessions refused immediately; admin locked to the

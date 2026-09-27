@@ -113,7 +113,7 @@ export default function SecurityAlertsPage() {
     <PageShell width="wide">
       <PageHeader
         title="Security alerts"
-        description="Suspicious appliance registrations. An open alert blocks activation of that appliance."
+        description="Suspicious appliance registrations, such as known hardware returning with a new identity. Central refuses those registrations; triage records what was done about each."
         help={
           <>
             <HelpSection title="When an alert is raised">
