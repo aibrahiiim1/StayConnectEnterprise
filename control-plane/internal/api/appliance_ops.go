@@ -116,13 +116,24 @@ func (b *Base) activate(w http.ResponseWriter, r *http.Request) {
 
 	// Lock the row and re-check the state inside the transaction: two operators clicking Activate at once
 	// get one activation and one 409, never two assignments.
-	var lifecycle string
-	if err := tx.QueryRow(ctx, `SELECT lifecycle_state FROM appliances WHERE id=$1 FOR UPDATE`, id).Scan(&lifecycle); err != nil {
+	var lifecycle, held string
+	if err := tx.QueryRow(ctx, `SELECT lifecycle_state, COALESCE(held_customer_id::text,'') FROM appliances WHERE id=$1 FOR UPDATE`, id).
+		Scan(&lifecycle, &held); err != nil {
 		Fail(w, r, http.StatusNotFound, CodeNotFound, "appliance not found")
 		return
 	}
 	if lifecycle != "pending_approval" {
 		Fail(w, r, http.StatusConflict, "invalid_state", "the appliance is no longer waiting for activation")
+		return
+	}
+	// An appliance that still holds a customer's data is activated for that customer or not at all
+	// (held_customer.go). Checked inside the locked transaction, before anything is created.
+	target := in.CustomerID
+	if in.NewCustomer != nil {
+		target = ""
+	}
+	if ref := holdsOtherCustomerRefusal(held, target); ref != nil {
+		Fail(w, r, ref.Status, ref.Code, ref.Message, map[string]any{"holds_customer_id": held})
 		return
 	}
 

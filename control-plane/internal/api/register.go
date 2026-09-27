@@ -26,6 +26,10 @@ type registerReq struct {
 	Hostname            string `json:"hostname"`
 	Model               string `json:"model"`
 	PublicKey           string `json:"public_key"` // base64-raw Ed25519 (32 bytes)
+	// HoldsCustomerID is the customer whose data the appliance's local site database still holds; absent for
+	// a factory-clean appliance. It is inside the signed body. Stored on every registration (NULL when
+	// absent); activation for any other customer is refused (holdsOtherCustomerRefusal).
+	HoldsCustomerID string `json:"holds_customer_id"`
 }
 
 // RegisterHandler is PUBLIC and TOKEN-LESS. A factory-clean appliance generates
@@ -62,6 +66,11 @@ func (b *IdentityBase) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pub := ed25519.PublicKey(pubRaw)
+	held, ok := normalizeHeldCustomer(req.HoldsCustomerID)
+	if !ok {
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "holds_customer_id must be a customer id (uuid)")
+		return
+	}
 
 	// Verify the self-signed registration JWT against the ENCLOSED key (TOFU).
 	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
@@ -116,9 +125,10 @@ func (b *IdentityBase) RegisterHandler(w http.ResponseWriter, r *http.Request) {
                 hardware_fingerprint = COALESCE(NULLIF($4,''), hardware_fingerprint),
                 hostname = COALESCE(NULLIF($5,''), hostname),
                 model = COALESCE(NULLIF($6,''), model),
+                held_customer_id = NULLIF($8,'')::uuid,
                 last_seen_at = now(), last_public_ip = $7, updated_at = now()
              WHERE id = $1`,
-			appID, req.WANMAC, req.LANMAC, req.HardwareFingerprint, req.Hostname, req.Model, ip)
+			appID, req.WANMAC, req.LANMAC, req.HardwareFingerprint, req.Hostname, req.Model, ip, held)
 		state := exLifecycle
 		if state == "" {
 			state = "pending_approval"
@@ -204,10 +214,15 @@ func (b *IdentityBase) RegisterHandler(w http.ResponseWriter, r *http.Request) {
                 current_cert_fingerprint = NULL, replacement_pending = false, replacement_deadline = NULL,
                 wan_mac = NULLIF($3,''), lan_mac = NULLIF($4,''), hardware_fingerprint = NULLIF($5,''),
                 hostname = NULLIF($6,''), model = NULLIF($7,''),
+                held_customer_id = NULLIF($9,'')::uuid,
                 registered_at = now(), first_seen_at = COALESCE(first_seen_at, now()),
                 last_seen_at = now(), last_public_ip = $8, updated_at = now()
              WHERE id = $1`,
-			reuseID, req.PublicKey, req.WANMAC, req.LANMAC, req.HardwareFingerprint, req.Hostname, req.Model, ip)
+			reuseID, req.PublicKey, req.WANMAC, req.LANMAC, req.HardwareFingerprint, req.Hostname, req.Model, ip, held)
+		if held != "" {
+			audit.Op(r.Context(), b.DB, r, "appliance.registered_holding_customer_data", "appliance", reuseID, map[string]any{
+				"serial": req.Serial, "holds_customer_id": held, "source_ip": ip})
+		}
 		WriteJSON(w, http.StatusOK, map[string]any{"appliance_id": reuseID, "status": "pending_approval"})
 		return
 	}
@@ -216,19 +231,21 @@ func (b *IdentityBase) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	err = b.DB.QueryRow(ctx, `
         INSERT INTO appliances(serial, lifecycle_state, public_key,
                                wan_mac, lan_mac, hardware_fingerprint, hostname, model,
-                               registered_at, first_seen_at, last_seen_at, last_public_ip)
+                               registered_at, first_seen_at, last_seen_at, last_public_ip, held_customer_id)
         VALUES ($1, 'pending_approval', $2,
                 NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLIF($7,''),
-                now(), now(), now(), $8)
+                now(), now(), now(), $8, NULLIF($9,'')::uuid)
         RETURNING id::text
-    `, req.Serial, req.PublicKey, req.WANMAC, req.LANMAC, req.HardwareFingerprint, req.Hostname, req.Model, ip).Scan(&appID)
+    `, req.Serial, req.PublicKey, req.WANMAC, req.LANMAC, req.HardwareFingerprint, req.Hostname, req.Model, ip, held).Scan(&appID)
 	if err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "create appliance failed")
 		return
 	}
-	audit.Op(r.Context(), b.DB, r, "appliance.registered", "appliance", appID, map[string]any{
-		"serial": req.Serial, "wan_mac": req.WANMAC, "source_ip": ip,
-	})
+	details := map[string]any{"serial": req.Serial, "wan_mac": req.WANMAC, "source_ip": ip}
+	if held != "" {
+		details["holds_customer_id"] = held
+	}
+	audit.Op(r.Context(), b.DB, r, "appliance.registered", "appliance", appID, details)
 	WriteJSON(w, http.StatusOK, map[string]any{"appliance_id": appID, "status": "pending_approval"})
 }
 

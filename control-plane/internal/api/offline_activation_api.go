@@ -95,6 +95,13 @@ func (b *OfflineBase) importRequest(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "the activation request carries no serial")
 		return
 	}
+	// holds_customer_id is covered by the request's self-signature when present (package activation), and
+	// is applied exactly as an online registration's: stored, and enforced by activate.
+	held, ok := normalizeHeldCustomer(req.HoldsCustomerID)
+	if !ok {
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "the activation request carries an invalid holds_customer_id")
+		return
+	}
 	ctx, cancel := DBCtx(r)
 	defer cancel()
 
@@ -140,6 +147,12 @@ func (b *OfflineBase) importRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Whose customer data the appliance holds, as of this (signed) request. NULL when it reports none.
+	if _, err := b.DB.Exec(ctx, `UPDATE appliances SET held_customer_id=NULLIF($2,'')::uuid, updated_at=now() WHERE id=$1`,
+		appID, held); err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "could not register the appliance")
+		return
+	}
 	operatorID, _ := actorOf(r)
 	if _, err := b.DB.Exec(ctx, `
         INSERT INTO offline_activation_requests (request_id, appliance_id, serial, public_key, nonce, imported_by)
@@ -149,7 +162,7 @@ func (b *OfflineBase) importRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	audit.Op(r.Context(), b.DB, r, "offline_activation.request_imported", "appliance", appID,
-		map[string]any{"serial": req.Serial, "request_id": req.RequestID})
+		map[string]any{"serial": req.Serial, "request_id": req.RequestID, "holds_customer_id": held})
 	b.writeAppliance(w, r, http.StatusOK, appID)
 }
 

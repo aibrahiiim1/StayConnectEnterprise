@@ -137,3 +137,22 @@ func Test0047DownRestoresStructure(t *testing.T) {
 		t.Error("0047 down must say that it restores structure only")
 	}
 }
+
+// 0048 records whose customer data an appliance still holds. It must carry NO foreign key -- the customer may
+// have been deleted from Central while the appliance still holds its data -- and must touch no existing row.
+func Test0048HeldCustomerHasNoForeignKeyAndNoData(t *testing.T) {
+	up := read(t, "0048_appliance_held_customer.up.sql")
+	if !strings.Contains(up, "ALTER TABLE appliances ADD COLUMN IF NOT EXISTS held_customer_id uuid NULL;") {
+		t.Fatal("0048 must add appliances.held_customer_id uuid NULL")
+	}
+	code := regexp.MustCompile(`(?m)^\s*--.*$`).ReplaceAllString(up, "")
+	for _, bad := range []string{"REFERENCES", "FOREIGN KEY", "UPDATE ", "DELETE ", "INSERT "} {
+		if strings.Contains(strings.ToUpper(code), bad) {
+			t.Errorf("0048 up must not contain %q", bad)
+		}
+	}
+	down := read(t, "0048_appliance_held_customer.down.sql")
+	if !strings.Contains(down, "ALTER TABLE appliances DROP COLUMN IF EXISTS held_customer_id;") {
+		t.Error("0048 down must drop the column")
+	}
+}

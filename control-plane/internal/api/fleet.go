@@ -43,6 +43,11 @@ type ApplianceRow struct {
 	RegisteredAt time.Time      `json:"registered_at"`
 	ActivatedAt  *time.Time     `json:"activated_at"`
 	OpenAlerts   int            `json:"open_alerts"`
+	// HoldsCustomerID is the customer whose data the appliance reported still holding at its last registration
+	// (null = none reported); it can be activated only for that customer. HoldsCustomerName is null when that
+	// customer is no longer in Central.
+	HoldsCustomerID   *string `json:"holds_customer_id"`
+	HoldsCustomerName *string `json:"holds_customer_name"`
 
 	lifecycle          string
 	terminalDelivery   string
@@ -76,9 +81,11 @@ func (b *Base) queryAppliances(ctx context.Context, customerID, applianceID stri
                COALESCE(td.delivery_state,''), td.timeout_at, a.replacement_pending,
                (SELECT count(*) FROM appliance_security_alerts x WHERE x.appliance_id = a.id AND NOT x.resolved),
                l.id::text, l.status, l.valid_until, l.grace_period_days, l.offline_grace_days,
-               l.max_concurrent_online_guests, l.license_version
+               l.max_concurrent_online_guests, l.license_version,
+               COALESCE(a.held_customer_id::text,''), COALESCE(hc.name,'')
           FROM appliances a
           LEFT JOIN tenants t ON t.id = a.tenant_id
+          LEFT JOIN tenants hc ON hc.id = a.held_customer_id
           LEFT JOIN sites   s ON s.id = a.site_id
           LEFT JOIN appliance_terminal_delivery td ON td.appliance_id = a.id
           LEFT JOIN LATERAL (
@@ -99,7 +106,7 @@ func (b *Base) queryAppliances(ctx context.Context, customerID, applianceID stri
 	var out []ApplianceRow
 	for rows.Next() {
 		var a ApplianceRow
-		var custID, custName, siteID, siteName, ip, td string
+		var custID, custName, siteID, siteName, ip, td, heldID, heldName string
 		var hasCert bool
 		var licID, licStatus *string
 		var licUntil *time.Time
@@ -109,9 +116,10 @@ func (b *Base) queryAppliances(ctx context.Context, customerID, applianceID stri
 			&custID, &custName, &siteID, &siteName,
 			&a.lifecycle, &a.LastSeenAt, &ip, &a.RegisteredAt, &a.ActivatedAt,
 			&hasCert, &td, &a.terminalDeadline, &a.replacementPending, &a.OpenAlerts,
-			&licID, &licStatus, &licUntil, &licGrace, &licOffline, &licCap, &licVer); err != nil {
+			&licID, &licStatus, &licUntil, &licGrace, &licOffline, &licCap, &licVer, &heldID, &heldName); err != nil {
 			return nil, err
 		}
+		a.HoldsCustomerID, a.HoldsCustomerName = strPtr(heldID), strPtr(heldName)
 		a.CustomerID, a.CustomerName, a.SiteID, a.SiteName = strPtr(custID), strPtr(custName), strPtr(siteID), strPtr(siteName)
 		a.LastPublicIP = strPtr(ip)
 		a.terminalDelivery = td
