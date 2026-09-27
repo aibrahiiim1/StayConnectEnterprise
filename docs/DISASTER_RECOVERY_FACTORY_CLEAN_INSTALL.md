@@ -440,7 +440,10 @@ cases:
 - **Changing an appliance's customer.** Central never moves an appliance between customers
   (`409 cross_customer_move`): Retire it in Central → factory-reset it here → it registers itself with a new
   identity key and appears as *Waiting for activation* → Activate it for the new customer. The previous
-  customer's data leaves with the disk, not through an in-place purge.
+  customer's data leaves with the disk, not through an in-place purge. A new identity key alone is not
+  enough: an appliance whose site database still holds a customer's data reports it in its signed registration
+  (`holds_customer_id`), and Central activates it only for that customer (`409 holds_other_customer_data`
+  otherwise) — so an identity reset without a blank-disk install cannot move it to someone else.
 - **After Hotel Admin shows *Removed from OneGate Central*.** Central deleted this appliance's record after it
   had held a customer. It keeps that customer's data, admits no new guests, refuses licence and activation
   files and never registers again; the marker is `/etc/stayconnect/removed-from-central.json`.

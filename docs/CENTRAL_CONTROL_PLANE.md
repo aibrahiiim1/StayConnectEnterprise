@@ -101,8 +101,19 @@ power on ──► appliance registers itself (signed, hardware-bound, no token)
   new signed assignment. The move fails closed: if licensing is unavailable on Central or the licence cannot be read
   it is refused (503) and nothing changes; a licence already past its end date must be renewed first (409). A move to
   another customer is refused (409): the appliance's local data cannot be guaranteed to be cleared in place.
-* **Changing customer** is: Retire → factory-reset the box (it gets a new identity key) → it registers again and
-  waits → Activate for the new customer.
+* **Changing customer** is: Retire → factory-reset the box (it gets a new identity key **and** an empty site
+  database) → it registers again and waits → Activate for the new customer.
+* **A new identity key is not a factory reset.** Every registration — and every offline activation request —
+  carries `holds_customer_id`: the customer whose data the appliance's local site database still holds (its
+  `tenants` mirror, or the tenant of a granting or terminal assignment still on disk). A factory-clean appliance
+  omits it. It sits inside the signed body, so the identity key's signature covers it. Central stores it on the
+  appliance (`appliances.held_customer_id`, migration 0048, overwritten on every registration and request
+  import; NULL when omitted) and shows it on the waiting appliance. **Activate** then allows only that customer:
+  any other — an existing one, one created inline, or when the held customer has since been deleted from
+  Central — is refused `409 holds_other_customer_data` (*"This appliance still holds another customer's data.
+  Factory-reset it before activating it for a different customer."*). Activation for the same customer (a
+  breakglass identity reset, a recovery) is allowed. An appliance whose database holds **more than one**
+  customer, or cannot read it, does not register at all until it is factory-reset.
 * **Retire** is two-phase: the licence is revoked at once; a signed terminal (decommissioned) assignment is issued;
   the appliance collects it, stands down and sends a signed acknowledgement; only then are its credentials revoked
   and it becomes `retired`. An **emergency** retire (also "retire now" while already retiring) revokes the
@@ -136,7 +147,9 @@ key registry; the root CA key stays offline; every write is audited; licence and
 role and a recent password re-entry (step-up), and so does every change to a Central sign-in (Team members and
 customer users: create, role, status, password, delete); login and re-authentication are rate-limited per client
 address. A retired appliance's identity key is recorded (`retired_appliance_identities`, migration 0047) and refused
-on registration and offline import. The appliance is local-first: guest service never waits on Central, and
+on registration and offline import. An appliance that reports holding a customer's local data
+(`holds_customer_id`, signed) is never activated for another customer: changing customer always goes through a
+factory reset (§4). The appliance is local-first: guest service never waits on Central, and
 a Central outage is never a guest outage.
 
 ## 6. API contract
@@ -179,15 +192,20 @@ Row shape used by every list:
   "connection":"connected|recently_seen|offline|never","last_seen_at","last_public_ip",
   "license": {"id","state":"none|active|expiring|grace|expired|suspended|revoked","valid_until","grace_ends_at",
               "max_concurrent_online_guests","license_version"} ,
-  "registered_at","activated_at","open_alerts" }
+  "registered_at","activated_at","open_alerts",
+  "holds_customer_id","holds_customer_name" }
 ```
+`holds_customer_id` is the customer whose data the appliance reported still holding at its last registration or
+offline request import (null = none reported); `holds_customer_name` is null when that customer is no longer in
+Central.
 `GET /cloud/v1/appliances?customer_id=&site_id=&activation=&connection=&license=&q=` → `{items:[row]}`
 `GET /cloud/v1/appliances/{id}` → `row` + `{identity:{wan_mac,lan_mac,hardware_fingerprint,identity_key_fingerprint,cert_fingerprint,cert_not_after},
 assignment:{version,state,signer_key_id,issued_at,acked_version},licenses:[history newest first],events:[recent lifecycle/audit],
 replacement:{pending,deadline,replaces,replaced_by}|null,retirement:{state,deadline}|null}` — `replaces`/`replaced_by` are
 appliance ids; `retirement.state` is `terminal_delivery_pending|terminal_delivery_failed|credential_revoked`
 `POST /cloud/v1/appliances/{id}/activate {customer_id|new_customer{name}, site_id|new_site{name,timezone,country?},
-license{max_concurrent_online_guests,valid_until|valid_days,grace_period_days}}` **SU** — `waiting` only
+license{max_concurrent_online_guests,valid_until|valid_days,grace_period_days}}` **SU** — `waiting` only;
+`409 holds_other_customer_data` (with `holds_customer_id`) when the appliance holds another customer's data (§4)
 `POST /cloud/v1/appliances/{id}/move {customer_id, site_id, reason}` **SU** — `customer_id` must be the current customer
 (`409 cross_customer_move` otherwise); `503 licensing_unavailable` when the licence cannot follow; `409 license_expired`
 `POST /cloud/v1/appliances/{id}/retire {reason, emergency?:bool, confirm_serial?}` **SU** — `activated`, or `retiring`
@@ -195,7 +213,9 @@ with `emergency:true` (retire now without waiting); emergency needs `confirm_ser
 `POST /cloud/v1/appliances/{id}/replace {reason}` **SU** · `POST …/{id}/rebind-wan-mac {reason}` **SU** ·
 `POST …/{id}/reissue-certificate {reason}` **SU**
 `DELETE /cloud/v1/appliances/{id} {confirm_serial, reason}` **SU** — `waiting` or `retired` only
-`POST /cloud/v1/offline-activation/requests` (activation-request file) → `row`
+`POST /cloud/v1/offline-activation/requests` (activation-request file) → `row` — the request's optional
+`holds_customer_id` is covered by its self-signature (omitted from the signed bytes when empty, so older requests
+verify unchanged) and stored as on registration
 `POST /cloud/v1/appliances/{id}/offline-activation-package {valid_hours?}` **SU** → file
 
 ### Licences
@@ -217,7 +237,9 @@ to a sign-in (create, role, status, password, delete) is **SU**
 ### Appliance (unchanged paths)
 `POST /v1/appliances/register` · `GET /v1/appliance/hello|license|certificate` · `POST /v1/appliance/csr|offline-reconcile` ·
 `GET /v1/appliance/assignment|assignment-registry` · `POST /v1/appliance/assignment/ack`. Registration with a retired
-identity key answers `403 identity_retired`.
+identity key answers `403 identity_retired`. The registration body is
+`{serial,wan_mac,lan_mac,hardware_fingerprint,hostname,model,public_key,holds_customer_id?}`, signed by the enclosed
+key (the request token carries the body's SHA-256); `holds_customer_id` must be a uuid (`400` otherwise).
 
 ## 7. Roles
 

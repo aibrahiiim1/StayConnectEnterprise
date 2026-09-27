@@ -39,10 +39,23 @@ Wipes identity + credentials; **preserves** WAN/LAN + guest config, trust anchor
 Central URL and the Hotel Admin operator — and therefore the current customer's
 local data. It is **not** a factory reset:
 
-- **Never use it to give the appliance to another customer.** Changing customer is
-  Retire → a factory-clean install from a blank disk
+- **The box stays pinned to its customer.** After the reset scd generates a new
+  identity key and registers again as *Waiting for activation*, but its signed
+  registration carries `holds_customer_id` — the customer whose data is still in
+  its site database. Central shows that customer on the waiting appliance and
+  **Activate accepts only that customer**; any other is refused
+  `409 holds_other_customer_data`. Re-activating it for the same customer is the
+  intended use.
+- **Changing customer requires a factory reset.** Retire → a factory-clean install
+  from a blank disk
   ([DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md §7](DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md#7-when-an-existing-appliance-must-be-factory-reset))
-  → registration → Activate.
+  → registration (it then reports no customer) → Activate. Never wipe the site
+  database by hand to get round the refusal: the factory-clean install is the
+  only supported way to leave a customer.
+- If the site database holds **more than one** customer (an interrupted
+  cross-customer transition) or cannot be read, scd does not register at all and
+  Hotel Admin shows the reason as the last Central error; only a factory-clean
+  install resolves the first case.
 - **It does not clear the *Removed from OneGate Central* state**, and must not be
   made to: leave `/etc/stayconnect/removed-from-central.json` in place. While it
   exists scd never registers; the only way back is the blank-disk install.
