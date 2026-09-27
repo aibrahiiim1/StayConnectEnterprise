@@ -4,8 +4,12 @@
 #
 # Central terminates ONE site serving two upstreams by path:
 #
-#   /v1/* /cloud/* /healthz /readyz /metrics -> ctrlapi      127.0.0.1:8080
+#   /v1/* /cloud/* /healthz /readyz          -> ctrlapi      127.0.0.1:8080
 #   everything else                          -> cloud-admin  127.0.0.1:3000
+#
+# /metrics is NOT proxied: it is for a scraper on this host only, and ctrlapi refuses it to anything that
+# is not a direct loopback connection. ctrlapi trusts X-Real-IP (set below, replacing whatever the client
+# sent) ONLY because Caddy connects from loopback; rate limits and the audit log key on that address.
 #
 # It does NOT run portald or hotel-admin. Those are EDGE appliance surfaces
 # (deploy/caddy/Caddyfile.edge) and must not be added here.
@@ -41,7 +45,7 @@ sc-central.echofusion.com, 150.0.0.252, admin.stayconnect.local {
 		X-Frame-Options "DENY"
 		-Server
 	}
-	@api path /v1/* /cloud/* /healthz /readyz /metrics
+	@api path /v1/* /cloud/* /healthz /readyz
 	handle @api {
 		reverse_proxy 127.0.0.1:8080 {
 			header_up X-Forwarded-Proto https
