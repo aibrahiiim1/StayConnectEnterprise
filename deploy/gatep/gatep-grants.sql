@@ -149,9 +149,9 @@ GRANT SELECT,INSERT,UPDATE,DELETE ON public.pms_providers              TO svc_ed
 GRANT SELECT,INSERT,UPDATE,DELETE ON public.social_oauth_providers     TO svc_edged;
 GRANT SELECT,INSERT,UPDATE,DELETE ON public.stripe_accounts            TO svc_edged;
 -- THE CLOUD TELEMETRY QUEUE IS GONE (migration 0093). public.sync_outbox and public.sync_checkpoints, and
--- the grants to svc_scd, svc_edged and iam_v2_owner that served them, were removed with it; so were svc_scd's
--- grants on the command-channel and update-agent ledgers (edge_executed_commands, edge_installed_updates),
--- whose writers no longer exist -- those two tables are kept as history and are written by nobody.
+-- the grants to svc_scd, svc_edged and iam_v2_owner that served them, were removed with it; so were the
+-- command-channel and update-agent ledgers (edge_executed_commands, edge_installed_updates) and svc_scd's
+-- grants on them.
 GRANT SELECT,UPDATE               ON public.tenants                    TO svc_edged;
 GRANT SELECT,INSERT,UPDATE        ON public.tenant_effective_limits    TO svc_edged;
 GRANT SELECT,INSERT,DELETE        ON public.walled_garden_rules        TO svc_edged;

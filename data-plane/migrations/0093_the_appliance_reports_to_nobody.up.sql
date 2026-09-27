@@ -19,17 +19,18 @@
 --     iam_v2.sync_outbox_prune_delivered, iam_v2.sync_outbox_accounting -- the queue's recovery, retention and
 --     accounting operations (0069).
 --   public.sync_outbox, public.sync_checkpoints -- the queue itself and its checkpoints (0001), WITH THEIR ROWS.
+--   public.edge_executed_commands, public.edge_installed_updates -- the ledgers of the signed command channel
+--     and the software-update agent (0048), WITH THEIR ROWS. Both writers are removed; the Product Owner
+--     authorised deleting that data too.
 --
 -- WHAT IT DELIBERATELY KEEPS
 --   Everything 0069 added for PMS departures (stay_event_reoffers, pms_reoffer_stay_event, the three views);
---   public.appliance_service_health (local health, read by Hotel Admin); public.edge_offline_packages (the
---   offline-activation single-use ledger); public.edge_executed_commands and public.edge_installed_updates --
---   no longer written, but 0048 records them as the evidence of what was done to the machine, and the
---   Product Owner's authorisation covered telemetry data, not that history.
+--   public.appliance_service_health (local health, read by Hotel Admin) and public.edge_offline_packages (the
+--   offline-activation single-use ledger, which the offline reconcile still reads).
 --
--- THE TWO PUBLIC TABLES AND THE ROLE THAT APPLIES THIS. A live site applies migrations as iam_v2_owner, which
--- deliberately cannot drop public objects it does not own (sync_outbox and sync_checkpoints belong to the
--- account that ran 0001). On that path they are skipped here with a NOTICE and removed by the one-line
+-- THE PUBLIC TABLES AND THE ROLE THAT APPLIES THIS. A live site applies migrations as iam_v2_owner, which
+-- deliberately cannot drop public objects it does not own (these four belong to the account that created
+-- them -- 0001, 0048, or scd at runtime before 0048). On that path they are skipped here with a NOTICE and removed by the one-line
 -- owner statement in the deployment notes; everywhere the applying role can drop them (a factory-clean
 -- reconstruction, a disposable database), they go here. Nothing depends on them either way: no code reads
 -- them, and Gate-P no longer grants on them.
@@ -55,11 +56,12 @@ DROP TABLE IF EXISTS iam_v2.sync_outbox_recovery_log;
 DROP FUNCTION IF EXISTS iam_v2.cloud_sync_settings_changes_append_only();
 DROP FUNCTION IF EXISTS iam_v2.sync_outbox_recovery_log_append_only();
 
--- ---- the queue and its checkpoints (0001) -------------------------------------------------------------------
+-- ---- the queue and its checkpoints (0001); the command-channel and update-agent ledgers (0048) --------------
 DO $public$
 DECLARE t text;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['public.sync_outbox', 'public.sync_checkpoints'] LOOP
+  FOREACH t IN ARRAY ARRAY['public.sync_outbox', 'public.sync_checkpoints',
+                           'public.edge_executed_commands', 'public.edge_installed_updates'] LOOP
     IF to_regclass(t) IS NULL THEN
       CONTINUE;
     END IF;

@@ -10743,32 +10743,6 @@ CREATE TABLE public.dhcp_reservations (
 
 
 --
--- Name: edge_executed_commands; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.edge_executed_commands (
-    command_id uuid NOT NULL,
-    command_type text,
-    status text,
-    result jsonb,
-    completed_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: edge_installed_updates; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.edge_installed_updates (
-    update_id uuid NOT NULL,
-    component text,
-    version text,
-    status text,
-    installed_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
 -- Name: edge_offline_packages; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -12779,22 +12753,6 @@ ALTER TABLE ONLY public.dhcp_reservations
 
 ALTER TABLE ONLY public.dhcp_reservations
     ADD CONSTRAINT dhcp_reservations_pkey PRIMARY KEY (id);
-
-
---
--- Name: edge_executed_commands edge_executed_commands_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.edge_executed_commands
-    ADD CONSTRAINT edge_executed_commands_pkey PRIMARY KEY (command_id);
-
-
---
--- Name: edge_installed_updates edge_installed_updates_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.edge_installed_updates
-    ADD CONSTRAINT edge_installed_updates_pkey PRIMARY KEY (update_id);
 
 
 --

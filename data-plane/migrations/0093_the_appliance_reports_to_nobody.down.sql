@@ -3,7 +3,7 @@
 -- Restores exactly the objects 0093 dropped, as 0001, 0069 (part one) and 0071 created them: the cloud-mode
 -- setting and its change log, the delivered-record retention setting and its change log, the recovery log,
 -- the recovery / prune / accounting functions, and (where the applying role may create in schema public)
--- public.sync_outbox and public.sync_checkpoints. Every table comes back EMPTY: the rows were deleted by an
+-- public.sync_outbox, public.sync_checkpoints, public.edge_executed_commands and public.edge_installed_updates. Every table comes back EMPTY: the rows were deleted by an
 -- authorised decision and nothing can honestly restore them. No code in this delivery reads any of it, so a
 -- rollback of the schema is not a rollback of the removal -- the previous binaries are needed for that.
 --
@@ -35,8 +35,23 @@ BEGIN
       value      jsonb NOT NULL DEFAULT '{}'::jsonb,
       updated_at timestamptz NOT NULL DEFAULT now()
     );
+    -- As 0048 declared them.
+    CREATE TABLE IF NOT EXISTS public.edge_executed_commands (
+      command_id   uuid PRIMARY KEY,
+      command_type text,
+      status       text,
+      result       jsonb,
+      completed_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS public.edge_installed_updates (
+      update_id    uuid PRIMARY KEY,
+      component    text,
+      version      text,
+      status       text,
+      installed_at timestamptz NOT NULL DEFAULT now()
+    );
   ELSE
-    RAISE NOTICE '0093 down: % may not create in schema public; public.sync_outbox and public.sync_checkpoints are left to their owner', current_user;
+    RAISE NOTICE '0093 down: % may not create in schema public; public.sync_outbox, sync_checkpoints, edge_executed_commands and edge_installed_updates are left to their owner', current_user;
   END IF;
 END $public$;
 

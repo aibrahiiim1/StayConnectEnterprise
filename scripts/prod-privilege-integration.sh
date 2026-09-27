@@ -213,10 +213,12 @@ assert_priv "and its log table is gone with it"   "SELECT to_regclass('iam_v2.st
 assert_priv "svc_edged CANNOT move a PMS event's processing state directly"   "SELECT has_table_privilege('svc_edged','iam_v2.stay_events','UPDATE')" f
 
 # THE CLOUD TELEMETRY SUBSYSTEM IS GONE (0093). The queue, its settings, recovery and accounting operations
-# (0069) and the licensing-only cloud mode (0071) were removed with the code that used them; asserted ABSENT,
+# (0069), the licensing-only cloud mode (0071) and the command-channel / update-agent ledgers (0048) were
+# removed with the code that used them; asserted ABSENT,
 # so a reconcile or a re-applied old migration that brought any of it back fails here.
 echo "== the cloud telemetry subsystem is absent (0093) =="
-for t in public.sync_outbox public.sync_checkpoints iam_v2.site_cloud_mode iam_v2.cloud_mode_changes \
+for t in public.sync_outbox public.sync_checkpoints public.edge_executed_commands public.edge_installed_updates \
+         iam_v2.site_cloud_mode iam_v2.cloud_mode_changes \
          iam_v2.site_cloud_sync_settings iam_v2.cloud_sync_settings_changes iam_v2.sync_outbox_recovery_log; do
   assert_priv "$t does not exist"   "SELECT to_regclass('$t') IS NULL" t
 done
