@@ -19,28 +19,30 @@ TEMPORARY when phase 15 landed).
   via environment substitution / a secrets file excluded from the tree;
   (3) verify alert delivery end-to-end afterwards (phase 15 suite).
 
-## 2. WAN-open ctrlapi :8080 and web-admin :3000 — OPEN (to be closed)
+## 2. WAN-open ctrlapi :8080 and :3000 — OPEN (to be closed)
+
+(The legacy `web-admin` console that listened on :3000 on the appliance has since been removed from the
+tree; the Central console is `cloud-admin`, loopback `:3000` behind Caddy on the Central host.)
 
 The nftables `input` chain still accepts TCP 8080 and 3000 **from the WAN
 interface** (dev-era rule, commented "restrict later"). Verified live on the
 pilot: ctrlapi listens on all interfaces.
 
 - Fix: remove both accepts from `deploy/nftables/stayconnect.nft`; bind
-  ctrlapi/web-admin to loopback/mgmt and front them only via Caddy. In the
+  any remaining listener to loopback/mgmt and front it only via Caddy. In the
   target architecture the appliance runs no ctrlapi at all and Hotel Admin is
   served **only on the management interface** ([EDGE_ARCHITECTURE.md](EDGE_ARCHITECTURE.md) §5).
 
 ## 3. Dev database credentials — OPEN
 
-Postgres/Redis/NATS use dev defaults (`stayconnect`/`stayconnect`),
+Postgres/Redis use dev defaults (`stayconnect`/`stayconnect`),
 loopback-bound. Acceptable only on the single-box pilot.
 
 - Fix: per-service generated secrets; **separate credentials per database** —
   the cloud role must have no grants on `stayconnect_site` and the site role
   none on `stayconnect` (this credential split is part of the migration
   runbook, Phase 3, and is what makes the one-instance pilot topology
-  acceptable). NATS gets per-appliance credentials scoped to its own subjects
-  (`telemetry.<id>`, `hb.<id>`, `scd.<id>.>`).
+  acceptable). (There is no NATS on Central any more — CLAUDE.md §0E.)
 
 ## 4. IPv6 guest bypass — OPEN (must drop v6 on guest LAN)
 
@@ -85,13 +87,14 @@ ctrlapi, a JWT replayed against a *different* replica would pass.
 
 | Item | Status / note |
 |---|---|
-| Guest-PII boundary | Enforced by design (edge-only data) + `fleet.Sanitize` defense in depth — keep the key list in sync with any new telemetry kinds |
-| License anti-rollback | Implemented: issued_at monotonicity + 48h clock high-water ([LICENSING_AND_ENTITLEMENTS.md](LICENSING_AND_ENTITLEMENTS.md) §7) |
+| Guest-PII boundary | Enforced by design: guest data exists only on the appliance, and Central receives no telemetry (CLAUDE.md §0E); the guest-domain tables on Central were dropped (migration 0046) |
+| License anti-rollback | Implemented: monotonic `license_version` + issued_at + revoked-id store + 48h clock high-water ([LICENSING_AND_ENTITLEMENTS.md](LICENSING_AND_ENTITLEMENTS.md) §7) |
 | Vendor signing key | 0600 file, cloud-only; escrow + rotation procedure documented; treat as CA-grade secret ([BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md) §2) |
 | Hotel Admin exposure | Mgmt interface only, never WAN or guest network — enforce in Caddy binds *and* nftables input chain |
 | Provider secrets (PMS/Stripe/Twilio/SendGrid/OAuth) | Write-only in APIs; stored per-site in the site DB; never sync |
 | No RLS | Cloud tenant isolation remains app-enforced (`EffectiveTenantID`); the edge split removes the worst blast radius (guest data), RLS on the cloud DB remains desirable — Roadmap |
-| Enrollment | Single-use hashed bootstrap tokens, ≤7-day TTL, optional serial lock; opaque failures — unchanged, sound |
+| Registration / activation | Token-less, self-signed registration (proof of the identity key); clone and hardware-reuse attempts are refused with a security alert; nothing is authorized until a platform admin activates it (step-up) and the appliance verifies the signed assignment against its pinned key registry. Enrollment tokens no longer exist ([CENTRAL_CONTROL_PLANE.md §5](CENTRAL_CONTROL_PLANE.md#5-security-invariants-unchanged-by-this-redesign)) |
+| Central operator sign-in | Email + password only (no SSO); licence and activation writes need a platform role and a recent password re-entry |
 | Portal HTTP | Plain HTTP on the captive path is required for RFC 8910 probes; scope it to the guest interface only |
 
 ## 9. Review checklist before pilot cutover

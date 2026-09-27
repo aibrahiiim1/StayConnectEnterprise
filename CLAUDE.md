@@ -170,7 +170,7 @@ operational number, that number ships as a setting.
 
 | Role | Host | Notes |
 |---|---|---|
-| **Central** | `150.0.0.252` (`sc-central.echofusion.com`) | Control plane: `ctrlapi`, `cloud-admin`, `nats-authz`, the mutually-authenticated NATS listener on `4223`, and the fleet telemetry consumer. Verify the actual endpoints and TLS identity before connecting; do not assume them from this table. |
+| **Central** | `150.0.0.252` (`sc-central.echofusion.com`) | Licensing, activation and fleet status ([`docs/CENTRAL_CONTROL_PLANE.md`](docs/CENTRAL_CONTROL_PLANE.md)): `ctrlapi` (behind Caddy on `443`; appliance mutual-TLS listener on `9443`), `cloud-admin`, Caddy, Postgres/TimescaleDB, Redis. No NATS listener and no telemetry consumer are part of Central (§0E). Verify the actual endpoints and TLS identity before connecting; do not assume them from this table. |
 | **PRE-LIVE appliance** | `172.21.60.25` | The only appliance. **PRE-LIVE remains PRE-LIVE. Go-Live is not authorised.** |
 | ~~Development reference appliance~~ | *(address removed from the current tree — T0194)* | **RETIRED.** Not an operational target. Do not contact it, do not diagnose against it, do not treat it as a source of anything. |
 

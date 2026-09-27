@@ -123,7 +123,7 @@ schema are created by `scd` itself, the first time the feature that needs them i
 
 | Table | Created by | First used for |
 |---|---|---|
-| `public.edge_executed_commands` | `data-plane/cmd/scd/commands.go` | the Central command channel |
+| `public.edge_executed_commands` | `data-plane/cmd/scd/commands.go` | the Central command channel (off — CLAUDE.md §0E; the table can still exist on older appliances) |
 | `public.edge_installed_updates` | `data-plane/cmd/scd/updates.go` | recording an installed update |
 | `public.edge_offline_packages` | `data-plane/cmd/scd/offline_import.go` | consuming an offline package |
 
@@ -229,28 +229,33 @@ restores with `/etc/stayconnect`, so clock-rollback protection stays intact;
 
 ### What
 
-- `pg_dump -Fc` of `stayconnect` (tenants, sites, appliances, plans,
-  subscriptions, **licenses incl. signed envelopes**, fleet telemetry,
-  operators, audit);
+- `pg_dump -Fc` of `stayconnect`: customers (`tenants`), sites, appliances and
+  their assignment, certificate, retirement, security-alert and
+  offline-activation tables, the assignment signing-key registry, **licenses
+  incl. signed envelopes**, operators and roles, `audit_log`, and the retired
+  commercial history in schema `legacy_archive`
+  ([CLOUD_ARCHITECTURE.md §2](CLOUD_ARCHITECTURE.md#2-central-database-ownership));
 - the **vendor signing key** (`CTRLAPI_VENDOR_KEY` file) — backed up
   separately, encrypted, access-restricted: losing it means no new licenses
   can be signed until a key rotation is pushed to every appliance; leaking it
   means anyone can mint licenses. Treat like a CA key.
-- Redis is *not* backed up (operator sessions are disposable). NATS JetStream
-  state is transport-level; the outbox pattern makes it recoverable.
+- the **assignment signing key**, **registry root key** and the appliance CA
+  keys (intermediate online, root offline) — separately, encrypted, like the
+  vendor key.
+- Redis is *not* backed up (operator sessions are disposable). There is no
+  NATS on Central.
 
 ### How
 
-Nightly cron on the cloud host (pilot: the VM):
+Nightly cron on the Central host:
 
 ```sh
 pg_dump -Fc -U stayconnect stayconnect > /root/backups/cloud/cloud-$(date +%Y%m%d).dump
 ```
 
 Retention 14 daily + 8 weekly, copied off-host. TimescaleDB note: `-Fc` dumps
-handle hypertables (`fleet_telemetry`, `audit_log`, `usage_counters`,
-`accounting_records` while legacy data remains) via the timescaledb catalog;
-restore into a database with the extension pre-created at the same version.
+handle the `audit_log` hypertable via the timescaledb catalog; restore into a
+database with the extension pre-created at the same version.
 
 ### Restore (cloud)
 
@@ -262,7 +267,7 @@ pg_restore -U stayconnect -d stayconnect cloud-<stamp>.dump
 systemctl start stayconnect-ctrlapi
 ```
 
-Post-restore checks: `readyz`; `GET /cloud/v1/licenses/` lists envelopes; an
+Post-restore checks: `readyz`; `GET /cloud/v1/licenses` lists the licences; an
 appliance license fetch succeeds. That is the whole list — Central serves the
 appliance for **licensing only**.
 

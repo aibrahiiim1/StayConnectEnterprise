@@ -1,6 +1,11 @@
-# Commercial Onboarding — Execution Status (persistent state store)
+# Commercial Onboarding — Execution Status (HISTORICAL)
 
-_Continuously updated. Do not treat chat as the state store._
+> **HISTORICAL — SUPERSEDED. Not a state store and not current.** This was a working log of an earlier
+> commercial-onboarding effort. Enrollment tokens, NATS, plans/subscriptions and the pages it names are gone.
+> The current Central is [CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md); current state is
+> `governance/project-state.json`.
+
+_(Originally: "Continuously updated. Do not treat chat as the state store.")_
 
 ## Servers / access
 - Central: `root@150.0.0.252` (ctrlapi:8080, cloud-admin:3000, mTLS:9443, NATS live :4222, NATS mTLS parallel :4223, authz svc). ufw active.

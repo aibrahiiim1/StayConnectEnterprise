@@ -16,6 +16,17 @@ The signed trust registry (root `84655767f9834fa2`) carries both keys with their
 states, so appliances still verify documents already issued under a `verify_only`
 predecessor but reject anything a `revoked` key signs.
 
+**Changing a key's state is a host command on Central** — the console's **System → Trust & keys** page is
+read-only:
+
+```
+ctrlapi assignment-key verify-only --key-id <id> --reason "<why>"             # stop signing, keep verifying (always safe)
+ctrlapi assignment-key revoke      --key-id <id> --reason "<why>" [--emergency] # remove all trust
+```
+
+Both re-sign the trust registry and are audited. `revoke` is refused while the key still signs a current
+assignment, unless `--emergency` (confirmed compromise).
+
 ## Retirement of `c63f848bf5ded3f6` — 2026-07-12
 
 Performed on Central (`150.0.0.252`, host trust domain `sc-central-*`).

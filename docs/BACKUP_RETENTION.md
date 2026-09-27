@@ -70,8 +70,8 @@ failure makes the run exit non-zero so the systemd timer surfaces it.
 
 ## Central visibility
 
-`GET /cloud/v1/backup-health` and the **Backup health** page (Administration →
-Operations) show Central's last cleanup, disk usage + alert, rollback-path
+`GET /cloud/v1/backup-health` and the **Backup health** page (**System → Backup
+health**) show Central's last cleanup, disk usage + alert, rollback-path
 validity, failures, and the retained / pinned / protected / delete-candidate
 artifact lists. The Appliance writes the same status file locally
 (`/opt/stayconnect/backup-retention-status.json`).

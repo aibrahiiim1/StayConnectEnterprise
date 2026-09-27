@@ -24,10 +24,10 @@ existing machine. This is the procedure behind the **Fresh Production Appliance 
 | Network baseline | `deploy/netplan/`, `deploy/nftables/`, `deploy/sysctl/`, `deploy/tmpfiles/` | WAN/LAN addressing confirmed on site |
 | Reverse proxy | `deploy/caddy/` + the managed hotel-admin vhost | certificate minted on the appliance |
 | DHCP | `deploy/kea/` | leases are runtime state |
-| **Appliance identity** | — | **enrollment → claim → signed assignment** |
+| **Appliance identity** | — | **token-less self-registration → Activate in Central → signed assignment** |
 | **Tenant / Site** | — | **signed assignment document** (never env, never a dump) |
-| **Licence** | — | installed via `POST /license`, hardware/identity bound |
-| **Operators** | — | created through Hotel Admin after claim |
+| **Licence** | — | fetched from Central after activation (or uploaded via `POST /edge/v1/license`), hardware/identity bound |
+| **Operators** | — | created through Hotel Admin after activation |
 | **Guest access config, packages, plans, PMS interfaces, networks** | — | Hotel-Admin configuration |
 | **Guests, accounts, vouchers, sessions, folios** | — | real operation only |
 
@@ -305,7 +305,7 @@ None of this invented business semantics: every replacement already existed and 
 `otp_hmac_key_generations`, `auth_throttle_buckets`, `accounting_records` (a TimescaleDB hypertable and a
 historical series — destroying an accounting series is not a schema cleanup), and every platform foundation:
 `tenants`, `sites`, `appliances`, `operators`, `operator_roles`, `guest_networks`, networking, audit,
-licensing and enrolment.
+licensing and registration.
 
 **One thing the removal nearly took with it.** The site-wide **licensed concurrent-guest cap** lived only in
 the superseded session manager, which owned session creation. Deleting that manager would have deleted the
@@ -413,9 +413,12 @@ production build (`-tags stayconnect_production`); the Hotel-Admin Next build an
    units from `deploy/systemd/`; install the Hotel-Admin bundle with `deploy/scripts/deploy-hotel-admin.sh
    install`.
 7. **Network baseline** from `deploy/netplan/`, `deploy/nftables/`, `deploy/kea/`, `deploy/caddy/`.
-8. **Enrol and claim** the appliance against the Central Control Plane; wait for the **signed assignment**
-   to resolve tenant and site. Do **not** set `EDGED_TENANT_ID` / `EDGED_SITE_ID`.
-9. **Install the licence** through Hotel Admin.
+8. Start scd: the appliance **registers itself** with Central (no token) and shows *Waiting for activation*;
+   a platform admin **activates** it in Central ([CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md) §4).
+   Wait for the **signed assignment** to resolve tenant and site. Do **not** set `EDGED_TENANT_ID` /
+   `EDGED_SITE_ID` — a production build ignores them.
+9. **Confirm the licence** in Hotel Admin → **Appliance & licence** (it arrives by itself after activation; an
+   offline site uploads the activation package or licence file there).
 10. **Configure the hotel** through Hotel Admin: networks, packages, access policy, PMS interfaces.
 11. **Acceptance test**, then a Product-Owner **Go-Live** decision. IAM-v2 is the only guest IAM authority: on
     a production build it cannot be configured off, and an attempt to do so is a startup refusal (§4G).

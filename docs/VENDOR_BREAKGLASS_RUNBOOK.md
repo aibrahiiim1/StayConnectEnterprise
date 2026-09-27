@@ -15,17 +15,15 @@ Every action here:
 Record `incident=<ref> reason=<text> operator=<you>` in the ticket before running any
 command below.
 
-## Enrollment via the unix socket (installer/support fallback)
+## Central status via the unix socket (support fallback)
 
-Only when the browser wizard is unavailable. Runs as root on the appliance:
+Only when Hotel Admin is unavailable. Enrollment tokens no longer exist: the appliance
+registers itself. Runs as root on the appliance:
 ```
-curl --unix-socket /run/stayconnect/scd.sock -X POST \
-  -H 'Content-Type: application/json' \
-  -d '{"token":"<enrollment-token>","serial":"<serial>"}' \
-  http://localhost/v1/setup/enroll
+curl --unix-socket /run/stayconnect/scd.sock http://localhost/v1/central/status        # activation, licence, Central link
+curl --unix-socket /run/stayconnect/scd.sock -X POST http://localhost/v1/central/refresh  # same as "Check now"
 ```
-The token is still single-use, expiring, site-scoped and serial-locked at Central —
-the socket path only skips the browser, not the security checks.
+The socket path only skips the browser; activation itself still happens in Central.
 
 ## Provision / reset a Hotel Admin operator
 
@@ -35,7 +33,7 @@ the socket path only skips the browser, not the security checks.
 `--allow-weak` permits a <10-char password (management-network-only boxes). This is a
 deliberate per-appliance provisioning action, never a shipped default.
 
-## Factory-clean the appliance identity/enrollment state
+## Factory-clean the appliance identity/activation state
 
 Wipes identity + credentials; **preserves** WAN/LAN + guest config, trust anchors,
 Central URL and the Hotel Admin operator:
@@ -53,8 +51,9 @@ systemctl start stayconnect-scd stayconnect-edged
 
 ## Remove an appliance from the Control Panel
 
-Normal path: **Central → Appliances → Delete** (cascades certs, assignment,
-lifecycle, telemetry). Revoke its license under **Licenses**. Only fall back to
+Normal path: **Central → Appliances → the appliance → Retire appliance** (revokes its
+licence and credentials), then **Delete record** (allowed only for a waiting or retired
+appliance; audit history is kept). Only fall back to
 direct DB deletion under an incident when the API is unavailable.
 
 ## Certificate lifecycle (support)
