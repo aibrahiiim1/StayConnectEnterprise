@@ -1214,26 +1214,34 @@
     "nightly_authoritative_validation": "RETIRED by D42 (2026-09-26, T0196). From T0182 to T0195 the four gates ran a failing sentinel on every pull_request and a 06:00 Africa/Cairo orchestrator re-ran them for the single delivery candidate and merged an all-green head unattended. On 2026-09-26 the orchestrator workflow was first disabled in GitHub (disabled_manually) and PR #190 labelled nightly-hold, so no scheduled run could merge anything; T0196 then removed the workflow, tools/nightly_delivery.py, tools/nightly-status.py and scripts/ci/nightly-orchestrate.py. The first 06:00 scheduled run was therefore never observed. The record of the model is docs/NIGHTLY_AUTHORITATIVE_DELIVERY.md (superseded) and T0182-T0195.",
     "session_start_check": "None owed by the delivery model. Nothing runs unattended under D42, so there is no nightly verdict to read at session start (tools/nightly-status.py was removed by T0196). A session starts from the state of its own delivery branch and pull request.",
     "central_console_runtime_identity": {
-      "_note": "What Central 150.0.0.252 serves as its operator console (cloud-admin), read back from the installed release's own cloud-admin-release.json. Built and shipped separately from ctrlapi (recorded in central_ctrlapi_runtime_identity).",
-      "source_commit": "42675ea27f295978178dcb248dc1245c9f77a628",
+      "_note": "What Central (172.21.96.196) serves as its operator console, read back from /opt/stayconnect/central/DEPLOYED.json and the installed release.",
+      "source_commit": "abda23d1f3a3dd5d68130d08fbe356097a78e782",
       "source_state": "clean",
-      "build_id": "Rv6ZAy3ZIsCQQG35pTf7c",
-      "release": "/opt/stayconnect/releases/cloud-admin/20260927-121704",
-      "artifact_sha256": "release onegate-central-42675ea27f29.tar.gz sha256 d23e969fd579123a56179b5d884f8212289959e94134e411b049a923d3f6971b (built by deploy/scripts/central-build.sh)",
-      "previous_release": "/opt/stayconnect/releases/cloud-admin/20260927-080259 (cloud-admin-current.previous; 2bf5b66a)",
-      "deployed_at": "2026-09-27T12:17Z UTC. Central Control Plane redesign, final cleanup round (PR #194, not merged; awaiting Product-Owner review). Deployed to the current Central and PRE-LIVE on 2026-09-27; the codebase is ready for a fresh Central on a new cloud host, which is not yet provided.",
-      "verified": "Chrome, https://150.0.0.252: five destinations, no customer selector, nine screens render with no page error and no API 5xx, the one appliance activated/connected/licensed, phone width without overflow; /v1/tenants 404, /metrics not reachable through Caddy; central-preflight.sh READY."
+      "build_id": "JUXAiMXfW6SxEGRIeQkjD",
+      "release": "/opt/stayconnect/releases/cloud-admin/20260927T150257Z",
+      "artifact_sha256": "release onegate-central-abda23d1f3a3.tar.gz sha256 6d6ca1e2fe6457f91453bb77a1c094b7e9afd7be483a356e881030b0cff8d072",
+      "previous_release": "none on this host (first install); the former host kept its own releases",
+      "deployed_at": "2026-09-27T15:06Z UTC by central-install.sh --mode restore. Central moved to 172.21.96.196 on 2026-09-27 (central-export.sh --final on 150.0.0.252, central-install.sh --mode restore on the new host, release onegate-central-abda23d1f3a3). Every key, certificate and the licence database were carried over; the identity is unchanged: vendor 2fbdfcbde209ebb5, assignment 027a2c97f6c8fcdb, registry root 84655767f9834fa2, appliance Root CA D2:60:C6:EE:21:EB:D7:79:… .",
+      "verified": "Chrome, https://172.21.96.196 with the carried platform admin: five destinations, no customer selector, nine screens without a page error or API 5xx, PRE-LIVE shown activated/connected/licensed, phone width without overflow. Installer smoke PASS; central-preflight.sh READY."
     },
     "prelive_guest_access_testing": "ENABLED on PRE-LIVE 172.21.60.25 for Product Owner testing (D43, T0197, 2026-09-26). STAYCONNECT_PHASE2_MASTER=1 and STAYCONNECT_PHASE2_PORTAL=1 in /etc/stayconnect/scd.env and portald.env; rollback copies *.bak-pre-guest-activation-20260926T193029Z (the portald.env copy removed by the retention sweep was reconstructed exactly as *-reconstructed). Live proof 2026-09-26: scripts/guest-access-e2e-test.sh 53/53 -- captive before sign-in, enforced (nft phase3_auth_ipv4) and online (generate_204 = 204, ICMP 1.1.1.1) after activation for all three methods, device limits, joining, reconnect, termination and backend-enforced method switches, with pms_postings, posting_outbox and payment_transactions unchanged. Test state reset afterwards.",
     "central_ctrlapi_runtime_identity": {
-      "_note": "The Central API binary, read back from /opt/stayconnect/bin/ctrlapi on Central.",
-      "sha256": "6fe22cc34b7a3b764a5c8ab96d3e0fa6f5580ddf4428fb6908dea7b32dc5dd35",
-      "source_commit": "42675ea27f295978178dcb248dc1245c9f77a628",
+      "_note": "The Central API binary on 172.21.96.196, read back from the host.",
+      "sha256": "22e080f7cd3bb1ad7818b08caf3107afc0332c9e36b8de5ea071382c4508545a",
+      "source_commit": "abda23d1f3a3dd5d68130d08fbe356097a78e782",
       "vcs_modified": false,
-      "schema": "Central migrations 0001-0048 applied and verified. 0047 dropped legacy_archive (archived guest/commercial history, deleted on Product-Owner instruction) and SSO/commercial remnant columns; 0048 added appliances.held_customer_id.",
-      "rollback": "Binary /opt/stayconnect/bin/ctrlapi.bak-pre-42675ea2-20260927T121656Z (2bf5b66a). Database: /opt/stayconnect/backups/db/central-20260927T121656Z-pre-42675ea2.dump, taken immediately before 0047/0048.",
-      "deployed_at": "2026-09-27T12:17Z UTC. Central Control Plane redesign, final cleanup round (PR #194, not merged; awaiting Product-Owner review). Deployed to the current Central and PRE-LIVE on 2026-09-27; the codebase is ready for a fresh Central on a new cloud host, which is not yet provided.",
-      "host_cleanup": "central-cleanup-obsolete.sh --apply --remove-legacy-bundle on 2026-09-27: NATS containers, stayconnect-nats-authz unit/binary/account, NATS config and certificates, command/update signing keys, assignment-trust.json, ufw 4222 and nats-ca-bundle.crt (replaced by pki/ca-bundle.crt) removed; the archive of removed keys was shredded. The host's infra compose file is now deploy/compose/central-infra.yml (Postgres + Redis)."
+      "schema": "Central migrations 0001-0048, restored from the former host's final export and verified (central-migrate.sh verify).",
+      "verified": "PRE-LIVE connected (hello, assignment over mTLS :9443, signed registry v68 from the carried root, licence refresh); licence version 3 issued with the carried vendor key and installed by the appliance; restore drill of the daily backup matched every table's row count; backup-health: newest dump, no failures, rollback path valid.",
+      "rollback": "Former host 150.0.0.252 holds the pre-move state, but the new Central has issued licence version 3 since; going back means exporting this host and restoring it there (DEPLOYMENT_CLOUD.md §6), not re-enabling the old services. Local dumps: /opt/stayconnect/backups/db on this host.",
+      "deployed_at": "2026-09-27T15:06Z UTC."
+    },
+    "central_host": {
+      "_note": "Where OneGate Central runs. Appliances reach it by name; the address is a property of the host, the name is a property of the fleet.",
+      "address": "172.21.96.196",
+      "name": "sc-central.echofusion.com",
+      "moved": "Central moved to 172.21.96.196 on 2026-09-27 (central-export.sh --final on 150.0.0.252, central-install.sh --mode restore on the new host, release onegate-central-abda23d1f3a3). Every key, certificate and the licence database were carried over; the identity is unchanged: vendor 2fbdfcbde209ebb5, assignment 027a2c97f6c8fcdb, registry root 84655767f9834fa2, appliance Root CA D2:60:C6:EE:21:EB:D7:79:… .",
+      "name_resolution": "sc-central.echofusion.com is published on the gateway DNS (FortiGate 172.21.60.1), which still points it at the former host. PRE-LIVE carries an interim /etc/hosts line pointing the name at 172.21.96.196; delete it once the FortiGate record is changed.",
+      "former_host": "150.0.0.252: ctrlapi, the console and Caddy stopped and disabled since the move. Not an operational target; not to be re-enabled (the new Central has since issued licence version 3). Kept only for the encrypted Root CA backup (/opt/stayconnect/ca-ceremony-backup), which must be moved to offline custody before the host is decommissioned."
     }
   },
   "latest_transition_id": "T0197",
@@ -1475,7 +1483,7 @@
     "cutover_performed": false,
     "status": "RETIRED",
     "retired_on": "2026-09-12",
-    "operational_targets_note": "The current operational targets are Central 150.0.0.252 (sc-central.echofusion.com) and the PRE-LIVE appliance 172.21.60.25. This host is neither."
+    "operational_targets_note": "The current operational targets are Central 172.21.96.196 (sc-central.echofusion.com; moved from 150.0.0.252 on 2026-09-27) and the PRE-LIVE appliance 172.21.60.25. This host is neither."
   },
   "production_appliance": {
     "_note": "THE FRESH PRODUCTION APPLIANCE, AS DEPLOYED. UPDATED FORWARD as the appliance changed. This dict is a SOURCE for the generated current-state blocks, so leaving it frozen makes every rendered doc contradict the register: it sat at its T0083 values through enrollment (D37), licensing, guest-network configuration, PMS commissioning and the live fresh sync (T0097/T0098), which is exactly the drift ZERO_STALE exists to prevent.",

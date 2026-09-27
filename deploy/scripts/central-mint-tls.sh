@@ -27,7 +27,7 @@
 #   central-mint-tls.sh --force      re-issue regardless
 #
 # Extra names (transition, split-horizon, legacy):
-#   CENTRAL_TLS_SANS="150.0.0.252,admin.stayconnect.local,api.stayconnect.local"
+#   CENTRAL_TLS_SANS="203.0.113.10,admin.stayconnect.local,api.stayconnect.local"
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

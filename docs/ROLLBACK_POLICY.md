@@ -1,6 +1,6 @@
 # Rollback Policy — Central Control Plane
 
-This defines how to roll back `ctrlapi` and `cloud-admin` on Central (150.0.0.252)
+This defines how to roll back `ctrlapi` and `cloud-admin` on Central (`sc-central.echofusion.com`, host `172.21.96.196` since 2026-09-27)
 **without weakening the ownership-tree delete protection** introduced in migration
 `0037_ownership_delete_protection`, and where the schema boundaries lie that a
 binary rollback cannot cross — on Central (0046, 0047) and on the appliance

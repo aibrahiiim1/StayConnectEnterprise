@@ -5,7 +5,7 @@ a workstation that can SSH to both hosts.
 
 ```bash
 # Set once per shell
-C=root@150.0.0.252     # Central control plane
+C=root@172.21.96.196   # Central control plane (sc-central.echofusion.com; moved from 150.0.0.252 on 2026-09-27)
 A=root@172.21.60.25    # PRE-LIVE appliance (the only appliance — CLAUDE.md §0D)
 ```
 
@@ -13,7 +13,7 @@ Host / service map:
 
 | Plane | Host | Key services | Ingress |
 |---|---|---|---|
-| Central control plane | `150.0.0.252` | `stayconnect-ctrlapi` (:8080; appliance mutual TLS :9443), `cloud-admin` (:3000), Caddy, Postgres `sc-central-pg`, Redis `sc-central-redis`. No NATS (CLAUDE.md §0E) | `sc-central.echofusion.com` / `admin.stayconnect.local` → Caddy (`/v1`, `/cloud` → :8080, the rest → :3000) |
+| Central control plane | `172.21.96.196` | `stayconnect-ctrlapi` (:8080; appliance mutual TLS :9443), `cloud-admin` (:3000), Caddy, Postgres `sc-central-pg`, Redis `sc-central-redis`. No NATS (CLAUDE.md §0E) | `sc-central.echofusion.com` / `admin.stayconnect.local` → Caddy (`/v1`, `/cloud` → :8080, the rest → :3000) |
 | Appliance edge | `172.21.60.25` | `stayconnect-scd`, `edged` (:8090), `netd`, `portald` (:8380), `caddy` (:80/:443), `hotel-admin` (:3100), `acctd`, site Postgres `stayconnect-pg` | `portal.stayconnect.local` (guest) · `hotel.stayconnect.local` (Hotel Admin) |
 
 > **UI note:** the admin UIs redirect unauthenticated requests, so a protected

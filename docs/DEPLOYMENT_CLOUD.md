@@ -257,28 +257,29 @@ bash /opt/stayconnect/central/tooling/deploy/scripts/central-deploy.sh rollback 
 
 Never `pg_restore --clean` a TimescaleDB database: it drops the extension and every hypertable with it.
 
-## 8. The first Central host (150.0.0.252)
+## 8. The move from the first Central host (150.0.0.252) — done 2026-09-27
 
-It predates this tooling: its infra runs from a hand-made `/opt/stayconnect/central/compose/infra.yml` (with an
-obsolete `nats` service) and its console unit was written on the host. Nothing here changes it by itself —
-`central-install.sh` refuses to run on a host whose `sc-central-pg` it did not create.
+The first Central predated this tooling. It was moved, as in §6, onto `172.21.96.196`, which the installer built:
 
-- **Remove the obsolete state** (NATS containers, the auth-callout unit and account, NATS credentials and
-  certificates, command/update signing keys, the legacy plain assignment trust file, the NATS secret, ufw rules
-  for 4222/4223/8222): `central-cleanup-obsolete.sh` (dry run) then `--apply`. It archives every file it removes
-  to `/root/central-obsolete-<stamp>.tar.gz` first and never touches live trust material. It copies
-  `pki/nats-ca-bundle.crt` to the neutral `pki/ca-bundle.crt`; point `CTRLAPI_CA_BUNDLE` at that, restart
-  ctrlapi, then `--apply --remove-legacy-bundle`. It warns while the old compose file still declares `nats`.
-- **Adopt the versioned compose file** in a maintenance window: find the volumes the running containers use
-  (`docker inspect sc-central-pg --format '{{json .Mounts}}'`), set `CENTRAL_PG_VOLUME` / `CENTRAL_REDIS_VOLUME`
-  to them (named volumes; a bind mount needs the file edited), write the existing passwords into
-  `/opt/stayconnect/central/secrets/{db_password,redis_password}` (no trailing newline), take a dump, then
-  `docker compose -p stayconnect-central -f central-infra.yml up -d`. Never `down -v`.
-- **Use `central-deploy.sh`** there once it has `/etc/stayconnect/central-install.env` (the settings the
-  installer would have recorded: `CENTRAL_PRIMARY_NAME`, `CENTRAL_ADMIN_NAMES`, `CENTRAL_SITE_ADDRESSES`,
-  `CENTRAL_TLS_MODE=internal`, `CENTRAL_TLS_SANS`, `CENTRAL_ACME_EMAIL=`) and the `stayconnect-cloud-admin` unit
-  from `deploy/systemd`. Compare the rendered Caddyfile with the live one before the first deploy.
-- Or, simplest and cleanest: **move it** (§6) onto a fresh host built by the installer.
+1. `central-cleanup-obsolete.sh --apply --remove-legacy-bundle` on the old host (NATS state, command/update keys,
+   the legacy trust file; `pki/ca-bundle.crt` in place of `nats-ca-bundle.crt`).
+2. `central-export.sh --dry-run` refused the first time: `assignment-signing.pub` was the public half of the key
+   revoked on 2026-07-12, left behind by that rotation. It was replaced by the active key's public half (the stale
+   file is kept as `assignment-signing.pub.revoked-c63f848bf5ded3f6`) and the export then passed every
+   consistency check.
+3. `central-export.sh --final`, then `central-install.sh --mode restore --bundle … --extra-names 172.21.96.196
+   --install-prereqs`: smoke PASS, preflight READY, vendor key `2fbdfcbde209ebb5`, assignment key
+   `027a2c97f6c8fcdb`, registry root `84655767f9834fa2` unchanged.
+4. The old host's Caddy was stopped and disabled as well (`--final` now does this itself): while it answered 502,
+   PRE-LIVE kept using its keep-alive connection to it.
+5. PRE-LIVE resolves `sc-central.echofusion.com` through the gateway DNS (FortiGate `172.21.60.1`). Until that record
+   is changed to `172.21.96.196` an interim `/etc/hosts` line on the appliance points the name at the new host.
+
+**Still to do outside this repository:** change the DNS record on the FortiGate and then delete the appliance's
+interim `/etc/hosts` line; move `/opt/stayconnect/ca-ceremony-backup/root-ca.key.enc` from the old host into
+offline custody ([CA_CEREMONY_RUNBOOK.md](CA_CEREMONY_RUNBOOK.md)); only then decommission `150.0.0.252`.
+Rolling back to the old host is possible only until the new one has issued anything (it had issued licence
+version 3 at verification time) — after that, move again with §6 instead.
 
 ## 9. Backups and key custody
 
