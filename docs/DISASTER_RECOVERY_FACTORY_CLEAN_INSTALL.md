@@ -149,6 +149,8 @@ satisfy the FK while producing a different catalog object from the accepted base
 runtime, and `deploy/scripts/phase7-appliance-m4.sh` says so outright. Gate-P grants on them, and Gate-P runs
 before any service starts, so a clean install failed with `relation "public.edge_executed_commands" does not
 exist`. Migration **`0048`** now declares them, shapes verified column by column against the appliance.
+(Later: migration **`0093`** dropped `edge_executed_commands` and `edge_installed_updates` again, with the
+command channel and update agent that wrote them; `edge_offline_packages` remains.)
 
 ### D. The IAM ownership roles lived in the scratch fixture  ·  **CORRECTED**
 
@@ -375,7 +377,9 @@ The 16-way stress test alone did **not** catch a missing lock — it passed thre
 why the forced-interleaving test exists and why the stress test is not the evidence.
 
 Central Control Plane availability plays no part: the limit is read from the signed licence on disk, so guest
-admission remains local-first.
+admission remains local-first. The same reservation (`reserveLicensedSlot`) admits PMS room sign-in as well
+as voucher, account, OTP and social sign-in (appliance migration 0092 records a room sign-in it refuses as
+`LICENSE_CAPACITY_REACHED`, or `LICENSE_REFUSED` when the licence admits no new guest at all).
 
 **Build and test.** `go build`, `go vet` and `go test ./...` pass on both the development build and the
 production build (`-tags stayconnect_production`); the Hotel-Admin Next build and 83 Playwright tests pass.
@@ -427,3 +431,23 @@ production build (`-tags stayconnect_production`); the Hotel-Admin Next build an
 **Never** restore a database dump, `/etc/stayconnect`, an identity or assignment document, or a licence from
 another appliance in order to reproduce it. Restoring a backup is only valid for recovering *that same*
 appliance's own state.
+
+## 7. When an existing appliance must be factory-reset
+
+This procedure — from a **blank disk** — is also the factory reset, and it is the only way forward in these
+cases:
+
+- **Changing an appliance's customer.** Central never moves an appliance between customers
+  (`409 cross_customer_move`): Retire it in Central → factory-reset it here → it registers itself with a new
+  identity key and appears as *Waiting for activation* → Activate it for the new customer. The previous
+  customer's data leaves with the disk, not through an in-place purge.
+- **After Hotel Admin shows *Removed from OneGate Central*.** Central deleted this appliance's record after it
+  had held a customer. It keeps that customer's data, admits no new guests, refuses licence and activation
+  files and never registers again; the marker is `/etc/stayconnect/removed-from-central.json`.
+  `deploy/scripts/provision-fresh-appliance.sh` **refuses** to run over such an appliance, because
+  re-provisioning over it would keep the database and `/etc/stayconnect` — reinstall from a blank disk.
+- **Re-using a retired appliance.** Its identity key is recorded as retired in Central and refused on
+  registration (`403 identity_retired`); only a new key — a factory reset — lets it register again.
+
+An appliance that **never** held a customer (a waiting one whose record was deleted in Central) needs none of
+this: it clears its identity and registers again by itself.

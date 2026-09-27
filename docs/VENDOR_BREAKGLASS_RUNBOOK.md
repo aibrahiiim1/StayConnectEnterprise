@@ -33,10 +33,19 @@ The socket path only skips the browser; activation itself still happens in Centr
 `--allow-weak` permits a <10-char password (management-network-only boxes). This is a
 deliberate per-appliance provisioning action, never a shipped default.
 
-## Factory-clean the appliance identity/activation state
+## Reset the appliance identity/activation state (same customer only)
 
 Wipes identity + credentials; **preserves** WAN/LAN + guest config, trust anchors,
-Central URL and the Hotel Admin operator:
+Central URL and the Hotel Admin operator — and therefore the current customer's
+local data. It is **not** a factory reset:
+
+- **Never use it to give the appliance to another customer.** Changing customer is
+  Retire → a factory-clean install from a blank disk
+  ([DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md §7](DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md#7-when-an-existing-appliance-must-be-factory-reset))
+  → registration → Activate.
+- **It does not clear the *Removed from OneGate Central* state**, and must not be
+  made to: leave `/etc/stayconnect/removed-from-central.json` in place. While it
+  exists scd never registers; the only way back is the blank-disk install.
 ```
 systemctl stop stayconnect-scd stayconnect-edged
 shred -u /etc/stayconnect/identity/ed25519.key
@@ -52,9 +61,13 @@ systemctl start stayconnect-scd stayconnect-edged
 ## Remove an appliance from the Control Panel
 
 Normal path: **Central → Appliances → the appliance → Retire appliance** (revokes its
-licence and credentials), then **Delete record** (allowed only for a waiting or retired
-appliance; audit history is kept). Only fall back to
-direct DB deletion under an incident when the API is unavailable.
+licence at once, and its credentials once the appliance acknowledges — or at once for
+an emergency retire), then **Delete record** (allowed only for a waiting or retired
+appliance; audit history is kept; the retired identity key stays refused). A running
+appliance that had held a customer and whose record is deleted enters the persistent
+*Removed from OneGate Central* state and needs a blank-disk install before any new
+activation. Only fall back to direct DB deletion under an incident when the API is
+unavailable — and never delete a `retired_appliance_identities` row to let a box back in.
 
 ## Certificate lifecycle (support)
 

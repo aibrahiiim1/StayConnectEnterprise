@@ -10,8 +10,10 @@
 - **Physically offline ONLY AFTER** the operator completes the export below and deletes the two
   Central copies. Until then this is encryption-at-rest, not an air-gap.
 - The online Central runtime retains only: Root **public** cert (`root-ca.crt`), Intermediate cert
-  + Intermediate **private** key (`/etc/stayconnect/pki/`), server-TLS cert/key, and versioned
-  trust bundles in `appliance_ca_versions`.
+  + Intermediate **private** key (`/etc/stayconnect/pki/`), server-TLS cert/key, the appliance CA
+  chain `pki/ca-bundle.crt` (intermediate + root; `CTRLAPI_CA_BUNDLE`, the bundle written into offline
+  activation packages — the first host kept it as `nats-ca-bundle.crt`, a name from the removed message
+  bus), and versioned trust bundles in `appliance_ca_versions`.
 
 ## Backup-area contents (`/opt/stayconnect/ca-ceremony-backup/`, root, 0700)
 | File | Mode | Purpose |
@@ -52,7 +54,9 @@ Performed on a trusted, preferably air-gapped host — never on the routine Cent
    (`CTRLAPI_ROOT_CA_KEY`, `CTRLAPI_INTERMEDIATE_CA_KEY`) with the next version number to sign a new
    intermediate; this yields `intermediate-ca.crt` (+ re-uses the same `root-ca.crt`).
 4. Shred the decrypted `root-ca.key`. Re-encrypt/re-store as in step 1.
-5. Distribute the new intermediate cert + updated trust bundle (`appliance_ca_versions`) to Central;
+5. Distribute the new intermediate cert + updated trust bundle (`appliance_ca_versions`) to Central
+   and rewrite `/etc/stayconnect/pki/ca-bundle.crt` (intermediate + root) so offline activation packages
+   carry the new chain;
    appliances pick up the new bundle on next cert fetch. Overlap old+new intermediates during the
    trust-bundle transition.
 

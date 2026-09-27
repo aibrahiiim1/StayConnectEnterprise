@@ -73,8 +73,12 @@ ssh $A 'curl -s --unix-socket /run/stayconnect/scd.sock http://localhost/v1/cent
 ```
 Expect: `activation: "activated"`, `license.state: "active"`, `central.state: "connected"`, a recent
 `central.last_contact_at`, and a future `details.cert_not_after` ([CENTRAL_CONTROL_PLANE.md §8](CENTRAL_CONTROL_PLANE.md#8-hotel-admin--central)).
+`activation: "retired"` with `details.reason: "removed_from_central"` means Central deleted this appliance after
+it had held a customer (marker `/etc/stayconnect/removed-from-central.json`); it does not register again and
+needs a factory-clean install.
 
-**B3. (removed)** The telemetry outbox is static by decision (CLAUDE.md §0E); there is nothing to drain.
+**B3. (removed)** There is no telemetry outbox to check: the appliance's telemetry subsystem was removed
+(CLAUDE.md §0E, appliance migration 0093). `scripts/prod-privilege-integration.sh` asserts it is absent.
 
 **B4. Link to Central, seen from Central**
 ```bash
@@ -130,10 +134,8 @@ Expect: `generate_204: 308`, `portal HTTPS: 200`, `hotel-admin /login: 200`.
 ## Part E — Automated 37‑point suite (HISTORICAL — pre-redesign)
 
 > **HISTORICAL.** This harness exercised enrollment tokens, the NATS buses, the signed command channel and
-> the update agent — all removed or switched off (CLAUDE.md §0E; [API_DEPRECATIONS.md](API_DEPRECATIONS.md)).
-> It does not run against the current Central. Kept as the record of what it proved at the time. Current
-> lifecycle coverage for Central is `scripts/lifecycle-regression.sh` and the ctrlapi/cloud-admin test
-> suites.
+> the update agent — all removed (CLAUDE.md §0E; [API_DEPRECATIONS.md](API_DEPRECATIONS.md)). It does not run
+> against the current Central. Kept as the record of what it proved at the time. Current coverage is Part F.
 
 Self‑cleaning orchestrator (same one that produced `ACC‑… PASS=56 FAIL=0`):
 ```bash
@@ -147,6 +149,28 @@ ssh $C '/tmp/acceptance'      # cloud points 1–15, 20–29, 36–37
 ssh $C '/tmp/nats-acctest'    # NATS points 11–19
 # if "Permission denied": ssh $C 'chmod +x /tmp/acceptance /tmp/nats-acctest'
 ```
+
+---
+
+## Part F — Current automated coverage
+
+| What | Where |
+|---|---|
+| Central API contract end to end (registration, activation, same-customer move and its refusals, two-phase retirement, retired-identity refusal, removed routes answer 404) | `control-plane/cmd/acceptance` (run on Central) |
+| Every appliance terminal path revokes its licence | `scripts/lifecycle-regression.sh` |
+| Replacement overlap safety and factory-reset visibility | `scripts/replacement-factoryreset-regression.sh` (needs `control-plane/cmd/regtest`) |
+| Move licence decision, rate limits, state derivation | `go test ./...` in `control-plane/` (`internal/api/move_test.go`, `ratelimit_test.go`, `state_test.go`) |
+| Retried terminal ack and offline reconcile; removed-from-Central state | `go test ./cmd/scd/` in `data-plane/` (`central_retry_test.go`, `removed_from_central_test.go`, and their `*_integration_test.go` counterparts against a real PostgreSQL) |
+| Room sign-in under the licence gate and capacity (0092) | `data-plane/cmd/scd/phase3_license_integration_test.go`, `license_capacity_integration_test.go` |
+| The telemetry subsystem is absent; Gate-P grants | `scripts/prod-privilege-integration.sh` |
+| Appliance unit installer skips Central units | `deploy/scripts/install-service-units-selftest.sh` |
+| Consoles | `npm test` in `cloud-admin/` and `hotel-admin/` |
+
+Removed with the features they tested (2026-09-27 and the Central redesign): `scripts/phase5-nats-test.sh`,
+`phase5-ha-test.sh`, `phase5-reload-test.sh`, `phase17-offline-test.sh`, `phase3-api-test.sh`,
+`phase4-sso-test.sh`, `phase5-enrollment-test.sh`, `phase8-notifications-test.sh`, `phase9-social-test.sh`,
+`phase10-mews-test.sh`, `phase12-payments-test.sh`. Local-first behaviour with Central down is
+`scripts/central-outage-local-first-test.sh`.
 
 ---
 
