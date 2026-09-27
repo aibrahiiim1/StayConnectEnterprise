@@ -28,7 +28,7 @@ import { usePoll } from "@/lib/use-poll";
 import { saveFile } from "@/lib/download";
 import {
   actionTone, actionWords, activationInfo, ago, connectionSentence, daysUntil, formatDateTime, formatDay,
-  licenseInfo, licenseSentence,
+  licenseInfo,
 } from "@/lib/status";
 import { cn } from "@/lib/utils";
 
@@ -340,7 +340,7 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
                     </Fact>
                     <Fact label="Valid until">
                       {formatDay(lic.valid_until)}
-                      <div className="text-caption text-muted-foreground">{licenseSentence(lic)}</div>
+                      {lic.valid_until && <div className="text-caption text-muted-foreground">{daysLeftWords(lic.valid_until)}</div>}
                     </Fact>
                     <Fact label="Grace period">
                       {current?.grace_period_days != null ? `${current.grace_period_days} days` : "—"}
@@ -563,11 +563,37 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
   );
 }
 
+// "12 days left", "ends today", "ended 3 days ago" -- the date itself is already on the line above.
+function daysLeftWords(until: string): string {
+  const days = Math.ceil((Date.parse(until) - Date.now()) / 86_400_000);
+  if (Number.isNaN(days)) return "";
+  if (days > 1) return `${days.toLocaleString()} days left`;
+  if (days === 1) return "1 day left";
+  if (days === 0) return "ends today";
+  return days === -1 ? "ended yesterday" : `ended ${(-days).toLocaleString()} days ago`;
+}
+
+// The same event repeated back to back (an appliance retrying with an expired token, say) is one line with a
+// count, not a screen of identical rows that pushes everything else out of view.
+type GroupedEvent = ActivityEvent & { count: number; first_at?: string };
+function groupRepeats(events: ActivityEvent[]): GroupedEvent[] {
+  const out: GroupedEvent[] = [];
+  for (const e of events) {
+    const prev = out[out.length - 1];
+    const key = (x: ActivityEvent) => [x.action, x.actor_email ?? x.actor, x.reason ?? x.detail].join("|");
+    if (prev && key(prev) === key(e)) {
+      prev.count += 1;
+      prev.first_at = e.ts ?? e.at;
+    } else out.push({ ...e, count: 1 });
+  }
+  return out;
+}
+
 function ActivityList({ events }: { events: ActivityEvent[] }) {
   if (events.length === 0) return <EmptyState title="No activity yet" className="py-8" />;
   return (
     <ol className="divide-y divide-border" aria-label="Recent activity">
-      {events.map((e, i) => {
+      {groupRepeats(events).map((e, i) => {
         const at = e.ts ?? e.at;
         const tone = actionTone(e.action);
         return (
@@ -581,7 +607,14 @@ function ActivityList({ events }: { events: ActivityEvent[] }) {
             />
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                <span className="text-sm font-medium">{actionWords(e.action)}</span>
+                <span className="text-sm font-medium">
+                  {actionWords(e.action)}
+                  {e.count > 1 && (
+                    <span className="ml-1.5 font-normal text-muted-foreground" title={`${e.count} times, first ${formatDateTime(e.first_at)}`}>
+                      ×{e.count}
+                    </span>
+                  )}
+                </span>
                 <time className="text-caption text-muted-foreground" dateTime={at} title={formatDateTime(at)}>{ago(at)}</time>
               </div>
               {(e.actor_email || e.actor || e.reason || e.detail) && (
