@@ -170,7 +170,7 @@ operational number, that number ships as a setting.
 
 | Role | Host | Notes |
 |---|---|---|
-| **Central** | `150.0.0.252` (`sc-central.echofusion.com`) | Licensing, activation and fleet status ([`docs/CENTRAL_CONTROL_PLANE.md`](docs/CENTRAL_CONTROL_PLANE.md)): `ctrlapi` (behind Caddy on `443`; appliance mutual-TLS listener on `9443`), `cloud-admin`, Caddy, Postgres/TimescaleDB, Redis. No NATS listener and no telemetry consumer are part of Central (§0E). Verify the actual endpoints and TLS identity before connecting; do not assume them from this table. |
+| **Central** | `150.0.0.252` (`sc-central.echofusion.com`) | Identity, activation and licensing ([`docs/CENTRAL_CONTROL_PLANE.md`](docs/CENTRAL_CONTROL_PLANE.md)): `ctrlapi` (behind Caddy on `443`; appliance mutual-TLS listener on `9443`), `cloud-admin`, Caddy, Postgres/TimescaleDB and Redis (`deploy/compose/central-infra.yml`). Installed and upgraded by `deploy/scripts/central-install.sh` ([`docs/DEPLOYMENT_CLOUD.md`](docs/DEPLOYMENT_CLOUD.md)). Central runs no message bus (§0E). Verify the actual endpoints and TLS identity before connecting; do not assume them from this table. |
 | **PRE-LIVE appliance** | `172.21.60.25` | The only appliance. **PRE-LIVE remains PRE-LIVE. Go-Live is not authorised.** |
 | ~~Development reference appliance~~ | *(address removed from the current tree — T0194)* | **RETIRED.** Not an operational target. Do not contact it, do not diagnose against it, do not treat it as a source of anything. |
 
@@ -198,41 +198,31 @@ freshness rules, not every mirrored stay is eligible, and not all offline condit
 
 ## 0E. CENTRAL SERVES THIS APPLIANCE FOR LICENSING ONLY
 
-**Standing Product-Owner decision, 2026-09-13. It supersedes the earlier authorisation to activate
-operational telemetry, and it is not a defect to repair.**
+**Standing Product-Owner decision, 2026-09-13.** OneGate Central serves an appliance for identity, activation
+and licensing only. The hotel's operations — guests, sessions, PMS, accounting, reports — belong on the
+hotel's appliance, and no guest data goes to Central.
 
-The cloud telemetry link was built, completed and verified — 87,000 records delivered, both sides
-reconciled. It is switched off because the hotel's operations belong on the hotel's appliance. Anyone who
-later finds the outbox static, the transport closed or the dashboard silent is looking at a decision, not a
-fault. **Do not propose reconnecting telemetry as a repair.**
-
-**What the appliance may still say to Central — all of it HTTPS to `ctrlapi`, none of it NATS:**
+**This is now true by construction.** The appliance has no telemetry outbox, no producer, no NATS client, no
+remote command or PMS channel, no software-update agent and no cloud-mode setting: there is nothing to switch
+on. Everything the appliance says to Central is HTTPS to `ctrlapi`:
 
 | Endpoint | Why it is licensing |
 |---|---|
-| `/v1/appliances/register`, `/enroll` | appliance identity |
+| `/v1/appliances/register` | appliance identity: token-less self-registration with the locally generated identity key; the appliance then waits for an operator to activate it |
 | `/v1/appliance/csr`, `/certificate` | the certificate that authenticates the rest |
-| `/v1/appliance/license`, `/offline-reconcile` | the licence itself |
-| `/v1/appliance/hello` | licence **enforcement**: how a deleted appliance discovers it is orphaned and stops serving on a stale cached licence |
-| `/v1/appliance/assignment`, `/assignment-registry`, `/assignment/ack` | the signed tenant/site binding the licence is scoped to |
+| `/v1/appliance/license`, `/offline-reconcile` | the licence itself, and accounting for a consumed offline package |
+| `/v1/appliance/hello` | licence **enforcement**: how a deleted appliance discovers it has been removed and stops admitting new guests |
+| `/v1/appliance/assignment`, `/assignment-registry`, `/assignment/ack` | the signed tenant/site binding the licence is scoped to (mutual TLS only) |
 
-**What is off, and stays off:** the telemetry outbox and every producer (usage, health, service-health,
-`license_ack`), remote guest-session revocation, remote PMS test/cache/health, the tenant PMS config
-broadcast, the signed command channel, and the software-update agent. The NATS transport is **not opened at
-all** — a connection that exists is one the next feature will subscribe to.
+**Adding a new kind of message from the appliance to Central is a product decision, not an implementation
+detail.** Do not reclassify a message as licensing because it shares an endpoint, a service or a name with one.
 
-**`license_ack` is not licensing.** Central accepts it as a telemetry kind and stores a row; nothing consumes
-it and no licence operation depends on it. It is a report *about* licensing. Do not reclassify a message as
-licensing because it shares an endpoint, a service or a name with one.
-
-**The mode is `iam_v2.site_cloud_mode`, and absence of a row means `LICENSING_ONLY`.** Every uncertainty —
-no row, no tenant/site scope, an unreadable setting, an unrecognised value — resolves to licensing-only, on
-purpose: being wrong that way costs telemetry until somebody notices, being wrong the other way sends
-guest-adjacent data out of a building that decided it should not. **There is no UI switch**, and no runtime
-role holds `EXECUTE` on `cloud_mode_set`.
-
-**Retention still runs.** It is local housekeeping on records already delivered and opens no connection.
-Stopping a producer is not a retention policy, and no historical record was deleted by this decision.
+**History.** The telemetry link was built, completed and verified (87,000 records delivered, both sides
+reconciled), then switched off by the 2026-09-13 decision. Central's telemetry tables were dropped by Central
+migration 0045. On 2026-09-27 the dormant appliance subsystem was removed by Product-Owner direction: the scd
+NATS transport, outbox, producers, command channel and update agent, edged's cloud-sync resources and
+service-health producer, and appliance migration 0093, which dropped the cloud-mode and cloud-sync settings
+and the outbox, checkpoint, executed-command and installed-update tables with their rows.
 
 ---
 

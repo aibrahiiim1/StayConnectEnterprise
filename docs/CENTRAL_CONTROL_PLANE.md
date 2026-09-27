@@ -115,6 +115,16 @@ power on ──► appliance registers itself (signed, hardware-bound, no token)
 * **Delete** removes a `waiting` or `retired` appliance's record (typed serial). Audit history is kept; its open
   security alerts are closed. A retired appliance's identity key is remembered: that key can never register or be
   imported again (`403`/`409 identity_retired`) — the box must be factory-reset first.
+* **What the appliance does when its record is deleted.** Its next `hello` tells it Central no longer knows it.
+  An appliance that **never held a customer** (a deleted `waiting` record) clears its identity and registers again
+  as `waiting`. An appliance that **has held a customer** (any granting or terminal assignment on disk, or tenant
+  data in its database — for example a retired appliance whose record was then deleted) removes its licence and
+  client certificate, keeps its identity and every local record, writes `/etc/stayconnect/removed-from-central.json`
+  and **never registers again**, under any key, across restarts and reboots. It admits no new guests (guests already
+  online are not disconnected), refuses licence and activation uploads (`409 removed_from_central`), and Hotel Admin
+  shows *Removed from OneGate Central* (§8). The only way back is the factory-clean install
+  ([DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md](DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md)) and a new activation;
+  there is no remote wipe.
 
 ## 5. Security invariants (unchanged by this redesign)
 
@@ -123,7 +133,10 @@ vendor-signed and bound to appliance id, serial, hardware fingerprint, identity 
 assignment versions are monotonic (anti-rollback on the appliance); appliance API calls are Ed25519-signed request
 tokens with replay protection, and after activation mutual TLS; assignment signing uses its own key with a signed
 key registry; the root CA key stays offline; every write is audited; licence and activation writes need a platform
-role and a recent password re-entry (step-up). The appliance is local-first: guest service never waits on Central, and
+role and a recent password re-entry (step-up), and so does every change to a Central sign-in (Team members and
+customer users: create, role, status, password, delete); login and re-authentication are rate-limited per client
+address. A retired appliance's identity key is recorded (`retired_appliance_identities`, migration 0047) and refused
+on registration and offline import. The appliance is local-first: guest service never waits on Central, and
 a Central outage is never a guest outage.
 
 ## 6. API contract
@@ -229,8 +242,16 @@ Hotel Admin shows one card on **Appliance & licence** (`/appliance`), fed by one
   "license": {"state":"none|active|expiring|grace|expired|suspended|revoked|wrong_hardware",
               "valid_until","grace_ends_at","days_left","max_concurrent_online_guests","current_online_guests"},
   "central": {"state":"connected|unreachable|not_configured","last_contact_at","last_error"},
-  "details": { "identity_key_fingerprint","cert_fingerprint","cert_not_after","assignment_version","license_version","wan_mac","lan_mac","central_endpoint" } }
+  "details": { "identity_key_fingerprint","cert_fingerprint","cert_not_after","assignment_version","license_version",
+               "wan_mac","lan_mac","central_endpoint","assignment_status","license_id?","software_version?",
+               "build_profile?","permissive_blocked?","reason?" } }
 ```
+
+`license.hardware_notice` is present when the WAN adapter differs from the one the licence names (the licence stays in
+force; *Rebind WAN MAC* issues a corrected one). `details.reason` qualifies a `retired` activation: the value
+`removed_from_central` means Central deleted this appliance after it had held a customer (§4); Hotel Admin then shows
+*Removed from OneGate Central — factory-reset it and have your vendor activate it* instead of *Retired*, and the
+licence and offline-activation uploads answer `409 removed_from_central`.
 
 Actions: **Check now** (`POST /edge/v1/central/refresh` — register if needed, fetch assignment and licence now),
 **Offline activation** (`GET /edge/v1/central/offline-request`, `POST /edge/v1/central/offline-package`), **Upload
@@ -240,4 +261,13 @@ licence file** (`POST /edge/v1/license`). Protocol details (fingerprints, versio
 The appliance registers itself at boot and keeps retrying until Central answers; after activation it collects the
 assignment (every 30 s), the certificate and the licence (immediately after activation, then every 6 h, and on *Check
 now*). Losing Central changes only `central.state` to `unreachable`; the licence keeps being evaluated locally and
-guests are unaffected.
+guests are unaffected. The terminal-assignment acknowledgement and the offline-package reconciliation are retried until
+Central confirms them; neither is on a guest path.
+
+**Every Guest Access method answers to the same licence.** Voucher, guest account, OTP, social and PMS room sign-in
+are all refused while the licence does not admit new guests (no licence, expired past grace, suspended, revoked, wrong
+hardware, the feature not licensed, a tenant transition pending, or removed from Central), and every new guest
+session — including a room guest's second device joining the stay — takes a slot from the same atomic
+`max_concurrent_online_guests` reservation. Room sign-in records these refusals as the attempt results
+`LICENSE_REFUSED` and `LICENSE_CAPACITY_REACHED` (appliance migration 0092) in **Guest Sign-in Attempts**. A device
+that signs in again while it still has an open session on the stay keeps that session and takes no new slot.
