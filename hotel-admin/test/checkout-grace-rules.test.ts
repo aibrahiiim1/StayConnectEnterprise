@@ -64,7 +64,7 @@ describe("the guest sentence", () => {
       grace_device_limit_policy: "REJECT_NEW_DEVICE",
     });
     expect(s).toBe(
-      "A client who still has internet access when they check out keeps it for 1 hour 30 minutes after checkout, " +
+      "A guest who still has internet access when they check out keeps it for 1 hour 30 minutes after checkout, " +
         "at up to 2.5 Mbps down and 800 kbps up, with 1.5 GB of data. Devices already connected at checkout stay " +
         "online; new devices are refused.",
     );

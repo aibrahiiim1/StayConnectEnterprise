@@ -217,7 +217,7 @@ describe("checkout grace states what is actually in force", () => {
     await renderScreen();
     expect(screen.getAllByText(/cannot be read on this appliance/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/does not mean no policy has been published/i)).toBeTruthy();
-    expect(screen.queryByLabelText("Checkout grace policy history")).toBeNull();
+    expect(screen.queryByLabelText("Grace Period policy history")).toBeNull();
     expect(screen.queryByText("No version published yet")).toBeNull();
   });
 

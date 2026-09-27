@@ -95,7 +95,7 @@ export function methodLabel(method?: string | null): string {
     SMS_OTP: "Texted code",
     SOCIAL: "Social login",
     POST_STAY: "Post-stay access",
-    GRACE: "Checkout grace",
+    GRACE: "Grace Period",
     ADMIN: "Granted by an operator",
   };
   return map[method] ?? method.replace(/_/g, " ").toLowerCase();

@@ -321,7 +321,7 @@ test("phase-3 pages are accessible: named controls, one heading, labelled filter
   await expect(page.getByLabel(/Filter by what happened to the message/i)).toBeVisible();
 
   await page.goto("/checkout-grace");
-  await expect(page.getByRole("heading", { level: 1, name: "Checkout grace" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Grace Period" })).toBeVisible();
   await openGraceEditor(page);
   for (const label of [
     "Grace time",

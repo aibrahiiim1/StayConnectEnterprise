@@ -189,8 +189,8 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
             was given — shortening the wait here does not end a wait already running.
           </p>
           <p>
-            To let one client try again now, use <strong>Release</strong> on the Active restrictions tab of Client
-            sign-in attempts. Releasing allows another attempt; it does not sign anyone in.
+            To let one client try again now, use <strong>Release</strong> on the Active restrictions tab of Guest
+            sign-in attempts, under Hotel. Releasing allows another attempt; it does not sign anyone in.
           </p>
         </div>
 

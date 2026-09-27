@@ -189,7 +189,7 @@ export function ActivityTab({ guard, setErr }: TabProps) {
           <CardHeader>
             <div>
               <CardTitle>How access was given</CardTitle>
-              <CardDescription>Portal choices, vouchers, client accounts, grace periods and staff grants.</CardDescription>
+              <CardDescription>Portal choices, vouchers, client accounts, the Grace Period and staff grants.</CardDescription>
             </div>
           </CardHeader>
           <CardBody>
@@ -218,7 +218,7 @@ export function ActivityTab({ guard, setErr }: TabProps) {
             <SkeletonRows rows={6} cols={6} />
           ) : rows.length === 0 ? (
             <EmptyState icon={<Activity />} title="Nothing in this period"
-              hint="Widen the period or clear a filter. Grants appear here as clients are given internet access — by the portal, a voucher, a client account, a grace period or staff." />
+              hint="Widen the period or clear a filter. Grants appear here as clients are given internet access — by the portal, a voucher, a client account, the Grace Period or staff." />
           ) : (
             <Table>
               <THead><TR>
@@ -299,7 +299,7 @@ function ActivityRecord({ r }: { r: ActivityRow }) {
         badges={<>
           <Badge tone={st.tone} dot>{st.label}</Badge>
           <Badge tone="neutral">{r.source_label}</Badge>
-          {r.emergency_grace && <Badge tone="warn">Emergency grace</Badge>}
+          {r.emergency_grace && <Badge tone="warn">Emergency Grace Period</Badge>}
         </>}
       />
       <SheetBody>

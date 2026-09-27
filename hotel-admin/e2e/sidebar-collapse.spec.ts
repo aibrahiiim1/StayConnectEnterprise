@@ -40,7 +40,7 @@ test("expanded is the first-time default, and the control names the action it pe
   await page.goto("/dashboard");
   await expect(page.getByRole("link", { name: "Internet packages" })).toBeVisible();
   // The section headings are part of the expanded design and must survive.
-  await expect(desktopAside(page).getByText("Property management system", { exact: true })).toBeVisible();
+  await expect(desktopAside(page).getByText("Hotel", { exact: true })).toBeVisible();
 
   const btn = collapseBtn(page);
   await expect(btn).toBeVisible();
@@ -63,7 +63,7 @@ test("collapsing hides labels and headings, keeps every destination, and flips t
   await expect(expandBtn(page)).toBeVisible();
   await expect(expandBtn(page)).toHaveAttribute("aria-expanded", "false");
   // Section headings are gone from the column entirely -- not merely hidden, not relocated.
-  await expect(desktopAside(page).getByText("Property management system", { exact: true })).toHaveCount(0);
+  await expect(desktopAside(page).getByText("Hotel", { exact: true })).toHaveCount(0);
   // But no destination was removed: the labels are still the accessible names, merely not painted.
   expect(await desktopAside(page).getByRole("link").count()).toBe(before);
   await expect(desktopAside(page).getByRole("link", { name: "Internet packages" })).toHaveCount(1);
@@ -73,9 +73,9 @@ test("every icon-only item exposes its label on hover AND on keyboard focus", as
   await page.goto("/dashboard");
   await collapseBtn(page).click();
 
-  const link = page.getByRole("link", { name: "Client sign-in checks" });
+  const link = page.getByRole("link", { name: "Guest sign-in checks" });
   await link.hover();
-  await expect(page.getByRole("tooltip")).toContainText("Client sign-in checks");
+  await expect(page.getByRole("tooltip")).toContainText("Guest sign-in checks");
 
   // Keyboard focus, not just hover. A rail whose labels are mouse-only is not navigable.
   // The pointer leaves the rail first and the hover tooltip is gone before focusing: a keyboard user is not also
@@ -85,7 +85,7 @@ test("every icon-only item exposes its label on hover AND on keyboard focus", as
   await page.mouse.move(900, 400);
   await expect(page.getByRole("tooltip")).toHaveCount(0);
   await link.focus();
-  await expect(page.getByRole("tooltip")).toContainText("Client sign-in checks");
+  await expect(page.getByRole("tooltip")).toContainText("Guest sign-in checks");
 });
 
 test("the choice survives navigation, a reload, and a later session", async ({ page }) => {
@@ -152,7 +152,7 @@ test("the filter stays reachable: using it from the rail expands and focuses the
   const filter = page.getByRole("textbox", { name: "Filter navigation" });
   await expect(filter).toBeFocused();                          // and focus landed in it
   await filter.fill("routing");
-  await expect(page.getByRole("link", { name: "Network routing" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "PMS routing" })).toBeVisible();
 });
 
 test("profile and Sign out remain reachable in both modes", async ({ page }) => {
@@ -220,7 +220,7 @@ test("mobile keeps the labelled drawer and never shows the desktop rail", async 
   // The drawer is the LABELLED list, exactly as before this feature existed.
   const drawer = page.getByLabel("Navigation", { exact: true });
   await expect(drawer.getByRole("link", { name: "Duplicate sources" })).toBeVisible();
-  await expect(drawer.getByText("Property management system", { exact: true })).toBeVisible();
+  await expect(drawer.getByText("Hotel", { exact: true })).toBeVisible();
 });
 
 test("a stored collapse does not leak into the mobile drawer", async ({ page }) => {
@@ -232,5 +232,5 @@ test("a stored collapse does not leak into the mobile drawer", async ({ page }) 
   await page.getByRole("button", { name: "Open navigation" }).click();
   // Still labelled: the rail is a desktop affordance and the preference must not follow it to a phone, where
   // these labels are not guessable from an icon.
-  await expect(page.getByRole("link", { name: "Checkout grace" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Grace Period" })).toBeVisible();
 });

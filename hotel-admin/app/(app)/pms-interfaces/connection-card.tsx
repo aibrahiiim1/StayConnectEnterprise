@@ -123,7 +123,7 @@ export function ConnectionCard({
     );
   }
   if (networks && networks.length === 0 && iface.lifecycle_state !== "DECOMMISSIONED") {
-    warnings.push("No guest network uses this connection, so no client is ever checked against it.");
+    warnings.push("No guest network uses this connection, so no guest is ever checked against it.");
   }
 
   const tone = !active ? "default" : !healthLoaded || !h ? "default" : readiness.tone;

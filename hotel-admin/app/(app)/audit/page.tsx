@@ -49,8 +49,8 @@ type Row = {
 const CATEGORY_PREFIX: Record<AuditCategory, string[]> = {
   "Sign-in & access": ["operator", "session", "guest_signin", "auth_methods"],
   "Client Portal": ["branding", "portal_asset"],
-  "Internet offering": ["commercial_package", "service_plan", "checkout_grace"],
-  "Property management system": ["pms_"],
+  "Internet offering": ["commercial_package", "service_plan"],
+  "Hotel": ["pms_", "checkout_grace"],
   "Networks": ["network"],
   "Licence & cloud": ["license", "cloud", "renewal", "hotel_admin_cert"],
   "Backups": ["backup"],

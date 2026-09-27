@@ -332,10 +332,10 @@ describe("an operator authors the hotel's checkout grace policy", () => {
     );
     await renderScreen();
 
-    const list = screen.getByLabelText("Checkout grace policy history");
+    const list = screen.getByLabelText("Grace Period policy history");
     expect(within(list).getByText("Version 2")).toBeTruthy();
     expect(within(list).getByText("Version 1")).toBeTruthy();
-    expect(within(list).getByText(/Client feedback/)).toBeTruthy();
+    expect(within(list).getByText(/Guest feedback/)).toBeTruthy();
     // An unknown code is humanised, not shown raw.
     expect(within(list).getByText(/Shorter grace/)).toBeTruthy();
 
@@ -363,7 +363,7 @@ describe("an operator authors the hotel's checkout grace policy", () => {
     }));
     mockGrace([{ ...live, config_version: 8 }], hist);
     await renderScreen();
-    const list = screen.getByLabelText("Checkout grace policy history");
+    const list = screen.getByLabelText("Grace Period policy history");
     expect(within(list).queryByText("Version 3")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Show 3 older versions/ }));
     expect(within(list).getByText("Version 1")).toBeTruthy();

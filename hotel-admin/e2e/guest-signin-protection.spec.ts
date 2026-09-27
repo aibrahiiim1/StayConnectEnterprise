@@ -189,7 +189,7 @@ test.describe("the active restrictions tab", () => {
     await page.getByRole("button", { name: /^release$/i }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByText(/it is not being given access/i)).toBeVisible();
-    await expect(dialog.getByText(/releasing does not sign the client in/i)).toBeVisible();
+    await expect(dialog.getByText(/releasing does not sign the guest in/i)).toBeVisible();
     await expect(dialog.getByText(/unverified — what was typed/i)).toBeVisible();
 
     const submit = dialog.getByRole("button", { name: "Release", exact: true });
