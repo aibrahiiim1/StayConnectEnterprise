@@ -47,7 +47,8 @@ type cfg struct {
 	DBURL       string
 	SCDSocket   string
 	IdentityDir string
-	// Legacy identity fallback (pre-enrollment dev boxes).
+	// Resolved from the verified assignment at startup (scope.go); never read from the environment in a
+	// production build.
 	TenantID string
 	SiteID   string
 	// CookieSecure should be true when Caddy fronts edged with TLS.
@@ -60,8 +61,6 @@ func loadCfg() cfg {
 		DBURL:        envOr("EDGED_DB_URL", "postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect_site?sslmode=disable"),
 		SCDSocket:    envOr("EDGED_SCD_SOCKET", "/run/stayconnect/scd.sock"),
 		IdentityDir:  envOr("EDGED_IDENTITY_DIR", "/etc/stayconnect/identity"),
-		TenantID:     os.Getenv("EDGED_TENANT_ID"),
-		SiteID:       os.Getenv("EDGED_SITE_ID"),
 		CookieSecure: os.Getenv("EDGED_COOKIE_SECURE") == "true",
 	}
 }
@@ -143,19 +142,15 @@ func main() {
 	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Site identity comes from the signed ASSIGNMENT document — the appliance-local
-	// source of truth written by scd's assignment agent — NOT from identity.json or
-	// env. A generic appliance ships with no tenant/site; before assignment edged
-	// runs in awaiting-assignment mode. Legacy env is a migration-only fallback.
+	// Site identity comes from the VERIFIED signed assignment (scope.go) — NOT from identity.json or env. A
+	// generic appliance ships with no tenant/site; before assignment edged runs in awaiting-assignment mode.
 	asgStore := &assignment.Store{Dir: envOr("EDGED_ASSIGNMENT_DIR", "/etc/stayconnect/assignment")}
-	if aTen, aSite, _, _ := asgStore.Resolved(); aTen != "" && aSite != "" {
-		c.TenantID, c.SiteID = aTen, aSite
-		slog.Info("assignment resolved", "tenant_id", aTen, "site_id", aSite)
-	} else if c.TenantID != "" && c.SiteID != "" {
-		slog.Warn("no signed assignment; using legacy env tenant/site as migration fallback")
+	var scope assignment.Resolution
+	c.TenantID, c.SiteID, scope = resolveSiteScope(os.Getenv)
+	if c.TenantID != "" && c.SiteID != "" {
+		slog.Info("assignment resolved", "tenant_id", c.TenantID, "site_id", c.SiteID)
 	} else {
-		c.TenantID, c.SiteID = "", ""
-		slog.Warn("awaiting assignment: edged running without a tenant/site (generic appliance)")
+		slog.Warn("awaiting assignment: edged running without a tenant/site", "assignment_outcome", scope.Outcome.String())
 	}
 	// Adopt a new assignment with no manual restart: re-exec when the locally
 	// persisted assignment version changes (scd's agent writes it).
@@ -356,8 +351,6 @@ func main() {
 			r.Use(s.requireAuth)
 			r.Get("/auth/whoami", s.whoami)
 
-			// License is readable by anyone who can log in; install/refresh
-			// are site_admin actions.
 			// ALWAYS-PRESENT SURFACES THAT DO NOT GO THROUGH mountResource.
 			//
 			// The licence, diagnostics and the setup wizard are registered as plain routes because they are not
@@ -371,21 +364,18 @@ func main() {
 			s.surfaces.add("diagnostics")
 			s.surfaces.add("reports")
 
-			r.Get("/license", s.licenseStatus)
+			// APPLIANCE & LICENCE (docs/CENTRAL_CONTROL_PLANE.md section 8; resources_cloud.go). One status
+			// document, Check now, offline activation in both directions, and the licence file upload. They
+			// replace /license (GET), /license/refresh, /setup/*, and /network/cloud*.
+			r.With(s.requireRole("license", permRead)).Get("/central/status", s.centralStatus)
+			r.With(s.requireRole("license", permRead)).Post("/central/refresh", s.centralRefresh)
+			r.With(s.requireAnyWrite("license", "network")).Get("/central/offline-request", s.centralOfflineRequest)
+			r.With(s.requireAnyWrite("license", "network")).Post("/central/offline-package", s.centralOfflinePackage)
 			r.With(s.requireRole("license", permWrite)).Post("/license", s.licenseInstall)
-			r.With(s.requireRole("license", permWrite)).Post("/license/refresh", s.licenseRefresh)
 
-			// Local enrollment wizard. These also exist under /network/setup/* for
-			// backwards compatibility, but the wizard is a SETUP concern, not a
-			// networking one, and the Hotel Admin UI calls them here — without this
-			// the whole wizard renders "Could not read setup status: HTTP 404".
 			// WHAT THIS APPLIANCE SERVES. Read by the navigation so it never offers a destination that would
 			// 404. Authenticated, but not role-filtered -- see capabilities.go.
 			r.Get("/capabilities", s.capabilities)
-
-			r.Get("/setup/status", s.setupStatus)
-			r.With(s.requireRole("network", permWrite)).Post("/setup/enroll", s.setupEnroll)
-			r.With(s.requireRole("network", permWrite)).Post("/setup/offline-import", s.setupOfflineImport)
 
 			// Hotel Admin TLS certificate: status (read), diagnostic Check, and the
 			// manual Rotate (step-up inside the handler). Same "network" role as the
