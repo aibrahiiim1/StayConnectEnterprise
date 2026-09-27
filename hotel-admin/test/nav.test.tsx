@@ -181,3 +181,27 @@ describe("authorized consolidations stay reachable", () => {
     }
   });
 });
+
+// THE INFORMATION ARCHITECTURE IS A PRODUCT DECISION (docs/PRODUCT_TERMINOLOGY.md, "The Hotel module"): the
+// industry-neutral core comes first, and everything that depends on hospitality or a PMS sits in ONE Hotel
+// section after it. Pinned here because the order once drifted from the documented one with every test green.
+describe("the Hotel module in the navigation", () => {
+  it("orders the sections core-first, then Hotel", async () => {
+    const { NAV_SECTION_OF } = await import("@/components/nav");
+    expect([...new Set(Object.values(NAV_SECTION_OF))]).toEqual([
+      "Overview", "Internet offering", "Clients", "Client Portal", "Hotel", "Networking", "System",
+    ]);
+  });
+
+  it("holds every hospitality destination in Hotel and none elsewhere", async () => {
+    const { NAV_SECTION_OF } = await import("@/components/nav");
+    const hotel = [
+      "/pms-interfaces", "/stays", "/stay-events", "/pms-resolutions", "/guest-signin-attempts", "/checkout-grace",
+      "/post-stay", "/financial-health", "/financial-review", "/financial-settlements", "/financial-recovery",
+      "/pms-routing", "/pms-source-conflicts", "/stay-transfers",
+    ];
+    for (const href of hotel) expect(NAV_SECTION_OF[href], href).toBe("Hotel");
+    const outside = Object.entries(NAV_SECTION_OF).filter(([, s]) => s !== "Hotel").map(([h]) => h);
+    expect(outside.filter((h) => /pms|stay|grace|financial|signin/.test(h))).toEqual([]);
+  });
+});
