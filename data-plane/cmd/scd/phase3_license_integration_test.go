@@ -160,10 +160,8 @@ func TestIntegration_Phase3License_CapacityCoversFirstJoinAndRejoin(t *testing.T
 		t.Fatalf("the first guest was refused under a free licence slot: %+v", first)
 	}
 
-	// A second free package, so the stay still has something to be offered once it holds access: a device
-	// joins a stay by being verified and choosing an offered package, and the grant then joins the stay's live
-	// entitlement rather than buying a second one.
-	f.addPackage(t, "SECOND_FREE", nil)
+	// The fixture has ONE free package and the stay now holds it. The second device is still offered it --
+	// choosing it joins the stay's live entitlement rather than buying it again (phase3_offers.go).
 
 	// SECOND DEVICE JOINING the same stay: verified, then refused at the grant with the capacity answer.
 	joinReq := "00001c22-0000-4000-8000-000000000000"

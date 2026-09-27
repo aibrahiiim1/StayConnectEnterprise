@@ -122,10 +122,20 @@ func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID string, 
 		   -- was still offered, and choosing it failed on that index -- after the guest's details were right,
 		   -- as "we are unable to verify your stay". Same predicate as the index, so the offer set and the
 		   -- grant can never disagree.
+		   --
+		   -- EXCEPT the package behind the stay's LIVE access. While the stay holds an ACTIVE, unexpired
+		   -- entitlement, choosing its package does not buy it again: the grant JOINS that entitlement (a second
+		   -- device of the room, or the same guest signing in again), and no purchase is written. Excluding it
+		   -- left a property with one free package unable to admit anyone into a room that already had access
+		   -- -- the guest proved who they were and was told the stay could not be verified.
 		   AND NOT EXISTS (SELECT 1 FROM iam_v2.purchases pu
 		                    WHERE pu.stay_id = $3::uuid AND pu.package_revision_id = ipr.id
 		                      AND pu.trigger = 'GUEST_SELECTION'
-		                      AND pu.state IN ('PENDING','AWAITING_SETTLEMENT','MANUAL_REVIEW','GRANTED'))
+		                      AND pu.state IN ('PENDING','AWAITING_SETTLEMENT','MANUAL_REVIEW','GRANTED')
+		                      AND NOT EXISTS (SELECT 1 FROM iam_v2.entitlements e
+		                                       WHERE e.purchase_id = pu.id AND e.stay_id = $3::uuid
+		                                         AND e.status = 'ACTIVE'
+		                                         AND (e.window_ends_at IS NULL OR e.window_ends_at > now())))
 		 ORDER BY ip.code`, p.srv.tenID, p.srv.siteID, stayID)
 	if err != nil {
 		return nil, err
