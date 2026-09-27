@@ -272,12 +272,14 @@ The first Central predated this tooling. It was moved, as in §6, onto `172.21.9
    `027a2c97f6c8fcdb`, registry root `84655767f9834fa2` unchanged.
 4. The old host's Caddy was stopped and disabled as well (`--final` now does this itself): while it answered 502,
    PRE-LIVE kept using its keep-alive connection to it.
-5. PRE-LIVE resolves `sc-central.echofusion.com` through the gateway DNS (FortiGate `172.21.60.1`). Until that record
-   is changed to `172.21.96.196` an interim `/etc/hosts` line on the appliance points the name at the new host.
+5. PRE-LIVE resolves `sc-central.echofusion.com` through the gateway DNS (FortiGate `172.21.60.1`). An interim
+   `/etc/hosts` line pointed the name at the new host until the record was changed to `172.21.96.196`; it was then
+   removed, and a restarted scd reconnected over DNS alone (mTLS, assignment, licence).
 
-**Still to do outside this repository:** change the DNS record on the FortiGate and then delete the appliance's
-interim `/etc/hosts` line; move `/opt/stayconnect/ca-ceremony-backup/root-ca.key.enc` from the old host into
-offline custody ([CA_CEREMONY_RUNBOOK.md](CA_CEREMONY_RUNBOOK.md)); only then decommission `150.0.0.252`.
+**Still to do outside this repository:** the encrypted Root CA backup
+(`/opt/stayconnect/ca-ceremony-backup/root-ca.key.enc`) was copied off the old host and checksum-verified on
+2026-09-27; once it is on offline media ([CA_CEREMONY_RUNBOOK.md](CA_CEREMONY_RUNBOOK.md)), shred the old host's
+copy, and only then decommission `150.0.0.252`.
 Rolling back to the old host is possible only until the new one has issued anything (it had issued licence
 version 3 at verification time) — after that, move again with §6 instead.
 

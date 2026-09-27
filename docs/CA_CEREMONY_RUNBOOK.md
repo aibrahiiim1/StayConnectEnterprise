@@ -4,6 +4,10 @@
 - **Central moved on 2026-09-27** to `172.21.96.196`. The encrypted Root CA backup below was deliberately NOT
   carried to the new host (the Root key does not belong on a running Central). It is still on the stopped former
   Central `150.0.0.252`; the commands below still name that host, and it must not be wiped until the export is done.
+- **2026-09-27:** a copy of `root-ca.key.enc`, its sha256 (`a5aa1944…504c`, verified), `root-ca.crt` (fingerprint
+  `D2:60:C6:EE:…:A7:00`, the fleet's Root CA) and the ceremony runbook was taken off the host into the Product
+  Owner's workstation custody folder, access-restricted, to be moved onto two offline media. Shred the host copy
+  (step 5 below) only after both media are verified.
 - **Runtime-isolated NOW:** the Root CA **private** key exists on `150.0.0.252` only as an
   AES-256-CBC / PBKDF2 (300k iter) encrypted blob at
   `/opt/stayconnect/ca-ceremony-backup/root-ca.key.enc`. No plaintext Root private key exists

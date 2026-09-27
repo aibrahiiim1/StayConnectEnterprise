@@ -1240,8 +1240,8 @@
       "address": "172.21.96.196",
       "name": "sc-central.echofusion.com",
       "moved": "Central moved to 172.21.96.196 on 2026-09-27 (central-export.sh --final on 150.0.0.252, central-install.sh --mode restore on the new host, release onegate-central-abda23d1f3a3). Every key, certificate and the licence database were carried over; the identity is unchanged: vendor 2fbdfcbde209ebb5, assignment 027a2c97f6c8fcdb, registry root 84655767f9834fa2, appliance Root CA D2:60:C6:EE:21:EB:D7:79:… .",
-      "name_resolution": "sc-central.echofusion.com is published on the gateway DNS (FortiGate 172.21.60.1), which still points it at the former host. PRE-LIVE carries an interim /etc/hosts line pointing the name at 172.21.96.196; delete it once the FortiGate record is changed.",
-      "former_host": "150.0.0.252: ctrlapi, the console and Caddy stopped and disabled since the move. Not an operational target; not to be re-enabled (the new Central has since issued licence version 3). Kept only for the encrypted Root CA backup (/opt/stayconnect/ca-ceremony-backup), which must be moved to offline custody before the host is decommissioned."
+      "name_resolution": "sc-central.echofusion.com is published on the gateway DNS (FortiGate 172.21.60.1) and points at 172.21.96.196 since 2026-09-27. PRE-LIVE's interim /etc/hosts line was removed after the switch; a restarted scd then reconnected over DNS alone (mTLS transport verified, assignment served, licence refreshed).",
+      "former_host": "150.0.0.252: ctrlapi, the console and Caddy stopped and disabled since the move, nothing listening on 443/9443/8080/3000. Not an operational target; not to be re-enabled (the new Central has since issued licence version 3). It still holds the encrypted Root CA backup; a checksum-verified copy (sha256 a5aa19446fb20294fb3ea1d22d42bb6668a75b39d3900a6763bf715c35bd504c) was taken off the host on 2026-09-27 for offline custody. Shred the host copy, then decommission, once the backup is confirmed on offline media."
     }
   },
   "latest_transition_id": "T0197",
