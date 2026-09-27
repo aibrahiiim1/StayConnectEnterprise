@@ -89,15 +89,15 @@ const WORDS: Record<string, AuditWords> = {
     title: "Published PMS connection settings", category: "Hotel", severity: "change",
   },
   "pms_routing.set": {
-    title: "Pointed a guest network at a PMS", category: "Hotel", severity: "change",
+    title: "Pointed a client network at a PMS", category: "Hotel", severity: "change",
     note: "Which PMS guest list room sign-ins on that network are checked against.",
   },
 
   // ---- networks ----------------------------------------------------------------------------------------
-  "network.guest.created": { title: "Created a guest network", category: "Networks", severity: "change" },
-  "network.guest.updated": { title: "Changed a guest network", category: "Networks", severity: "change" },
-  "network.guest.disabled": { title: "Disabled a guest network", category: "Networks", severity: "change" },
-  "network.guest.deleted": { title: "Deleted a guest network", category: "Networks", severity: "change" },
+  "network.guest.created": { title: "Created a client network", category: "Networks", severity: "change" },
+  "network.guest.updated": { title: "Changed a client network", category: "Networks", severity: "change" },
+  "network.guest.disabled": { title: "Disabled a client network", category: "Networks", severity: "change" },
+  "network.guest.deleted": { title: "Deleted a client network", category: "Networks", severity: "change" },
   "network.apply": {
     title: "Applied network changes", category: "Networks", severity: "change",
     note: "Applied to the running appliance, pending confirmation.",

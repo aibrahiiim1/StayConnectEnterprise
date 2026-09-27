@@ -173,7 +173,7 @@ func keaApplicableFrom(v keaView, reachable bool) (bool, string) {
 	}
 	detail := v.KeaDetail
 	if detail == "" {
-		detail = "waiting for guest networking: Kea serves the LAN bridge, which does not exist yet"
+		detail = "waiting for client networking: Kea serves the LAN bridge, which does not exist yet"
 	}
 	return false, detail
 }

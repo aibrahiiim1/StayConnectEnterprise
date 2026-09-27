@@ -382,7 +382,7 @@ export function PackageForm({
                 <option value="requires_prior">requires prior</option>
               </Select>
             )}
-            {r.type === "SITE_NETWORK" && <Input data-testid={`rule-networks-${i}`} aria-label={`${n}: guest networks`} placeholder="uuid,uuid" value={r.guest_network_ids} onChange={(e) => setRule(i, { guest_network_ids: e.target.value })} />}
+            {r.type === "SITE_NETWORK" && <Input data-testid={`rule-networks-${i}`} aria-label={`${n}: client networks`} placeholder="uuid,uuid" value={r.guest_network_ids} onChange={(e) => setRule(i, { guest_network_ids: e.target.value })} />}
             {/* STAY LENGTH. Either bound may be left empty — "8 nights or more" and "up to 7 nights" are both
                 real rules — so neither input is required and an empty one is omitted rather than sent as 0. */}
             {r.type === "STAY_LENGTH" && <>

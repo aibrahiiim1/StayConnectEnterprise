@@ -123,7 +123,7 @@ export function ConnectionCard({
     );
   }
   if (networks && networks.length === 0 && iface.lifecycle_state !== "DECOMMISSIONED") {
-    warnings.push("No guest network uses this connection, so no guest is ever checked against it.");
+    warnings.push("No client network uses this connection, so no guest is ever checked against it.");
   }
 
   const tone = !active ? "default" : !healthLoaded || !h ? "default" : readiness.tone;
@@ -192,7 +192,7 @@ export function ConnectionCard({
             </dd>
           </div>
           <div className="col-span-2 min-w-0">
-            <dt className="text-muted-foreground">Guest networks</dt>
+            <dt className="text-muted-foreground">Client networks</dt>
             <dd className="truncate font-medium" title={networks?.join(", ")}>
               {networks === null ? "—" : networks.length === 0 ? "None" : networks.join(", ")}
             </dd>

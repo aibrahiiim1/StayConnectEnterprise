@@ -142,7 +142,7 @@ export function ActiveRestrictions({
             <THead>
               <TR>
                 <TH>Device</TH>
-                <TH className="hidden md:table-cell">Guest network</TH>
+                <TH className="hidden md:table-cell">Client network</TH>
                 <TH className="hidden sm:table-cell">Last room typed (unverified)</TH>
                 <TH className="hidden lg:table-cell">Why</TH>
                 <TH className="hidden lg:table-cell">Started</TH>
@@ -216,7 +216,7 @@ export function ActiveRestrictions({
             <KeyValueGrid
               items={[
                 { label: "Device", value: <span className="font-mono text-xs">{target.device_mac}</span> },
-                { label: "Guest network", value: target.guest_network || "—" },
+                { label: "Client network", value: target.guest_network || "—" },
                 {
                   label: "Last room typed",
                   value: (

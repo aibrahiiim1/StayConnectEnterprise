@@ -128,7 +128,7 @@ export function ConnectionSheet({
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="configuration">Configuration</TabsTrigger>
               {showCreds && <TabsTrigger value="credentials">Credentials</TabsTrigger>}
-              <TabsTrigger value="networks">Guest networks</TabsTrigger>
+              <TabsTrigger value="networks">Client networks</TabsTrigger>
               <TabsTrigger value="history">History</TabsTrigger>
               <TabsTrigger value="actions">Actions</TabsTrigger>
             </TabsList>
@@ -306,7 +306,7 @@ function OverviewTab({
             { label: "Property management system", value: providerLabel(iface, provider) },
             { label: "Connects to", value: safeHost(iface.endpoint) ?? "—" },
             { label: "Link", value: (iface.transport || provider.transport) ? TRANSPORT_KIND_WORDS[(iface.transport || provider.transport) as string] ?? "—" : "—" },
-            { label: "Guest networks", value: routes === null ? "—" : routes.length === 0 ? "None" : routes.map((r) => r.guest_network_name || "Unnamed network").join(", ") },
+            { label: "Client networks", value: routes === null ? "—" : routes.length === 0 ? "None" : routes.map((r) => r.guest_network_name || "Unnamed network").join(", ") },
             {
               label: "Verification",
               value: verificationWords(iface.verification ?? provider.verification).label,
@@ -831,7 +831,7 @@ function CredentialsTab({
 function NetworksTab({ routes }: { routes: PmsGuestNetworkRoute[] | null }) {
   return (
     <SheetSection
-      title="Guest networks using this connection"
+      title="Client networks using this connection"
       description="A guest is only checked against this PMS if they are on one of these networks."
       actions={<Link href="/pms-routing" className="text-sm font-medium underline underline-offset-2">Change routing</Link>}
     >

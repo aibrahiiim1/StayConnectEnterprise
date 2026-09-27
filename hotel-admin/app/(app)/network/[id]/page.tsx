@@ -127,7 +127,7 @@ export default function EditGuestNetworkPage() {
     try {
       await api.put(`/network/guest-networks/${id}`, body);
       setSaved(true);
-      toast.success("Saved", "Apply changes from Guest networks to put it live.");
+      toast.success("Saved", "Apply changes from Client networks to put it live.");
     } catch (e) { setErr(errMsg(e)); }
     finally { setBusy(false); }
   }
@@ -137,7 +137,7 @@ export default function EditGuestNetworkPage() {
 
   const backLink = (
     <Link href="/network" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "-ms-3 self-start")}>
-      <ArrowLeft /> Guest networks
+      <ArrowLeft /> Client networks
     </Link>
   );
 
@@ -146,8 +146,8 @@ export default function EditGuestNetworkPage() {
       {backLink}
       <PageHeader
         icon={<Network />}
-        eyebrow="Networking · Guest networks"
-        title={net?.name || "Guest network"}
+        eyebrow="Networking · Client networks"
+        title={net?.name || "Client network"}
         description={
           net ? (
             <span className="inline-flex flex-wrap items-center gap-1.5">
@@ -156,13 +156,13 @@ export default function EditGuestNetworkPage() {
             </span>
           ) : "Loading the network…"
         }
-        helpTitle="Guest network"
+        helpTitle="Client network"
         help={
           <>
             <HelpSection title="Saving is staging">
               <p>
                 <strong>Save changes</strong> stages the new settings. Clients keep the previous settings until you
-                validate and apply the changes from <strong>Guest networks</strong>.
+                validate and apply the changes from <strong>Client networks</strong>.
               </p>
             </HelpSection>
             <HelpSection title="What cannot be edited">
@@ -188,14 +188,14 @@ export default function EditGuestNetworkPage() {
         )}
       />
 
-      {known && !writable && <ReadOnlyNotice>Your role can view this guest network but not change it.</ReadOnlyNotice>}
+      {known && !writable && <ReadOnlyNotice>Your role can view this client network but not change it.</ReadOnlyNotice>}
 
       <ErrorBanner err={err} className="mb-0" />
 
       {saved && (
         <Callout tone="success" title="Saved — not applied yet">
           Clients are still on the previous settings.{" "}
-          <Link href="/network" className="font-medium underline">Go to Guest networks</Link> to validate and apply.
+          <Link href="/network" className="font-medium underline">Go to Client networks</Link> to validate and apply.
         </Callout>
       )}
 

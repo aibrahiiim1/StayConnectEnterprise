@@ -159,7 +159,7 @@ export default function PMSInterfacesPage() {
             <HelpSection title="Reading this page">
               <HelpList
                 items={[
-                  <><strong>Room sign-in</strong> says whether guests can sign in with a room number right now, per guest network where the routing is known.</>,
+                  <><strong>Room sign-in</strong> says whether guests can sign in with a room number right now, per client network where the routing is known.</>,
                   <><strong>Guests in house</strong> is the guest list mirrored from the PMS.</>,
                   <>Each card shows one connection: which system, whether it is on, which check room sign-in depends on is failing, which Wi-Fi networks use it and what configuration is live. Open a card for details.</>,
                   <>Connections that were started but never configured, or retired, are kept apart under <strong>Inactive / not configured</strong> so a half-finished setup is never read as a PMS link that is down.</>,
@@ -418,7 +418,7 @@ function RoomSignInStat({
     return (
       <StatCard label="Room sign-in" tone="ok" icon={<Hotel />}
         value={<Badge tone="ok" className="text-sm" dot>Working</Badge>}
-        hint={`Every guest network using a PMS can sign guests in${signIn.unchecked.length ? ` (${signIn.unchecked.length} not yet checked)` : ""}.`} />
+        hint={`Every client network using a PMS can sign guests in${signIn.unchecked.length ? ` (${signIn.unchecked.length} not yet checked)` : ""}.`} />
     );
   }
   if (signIn.state === "partial" || signIn.state === "down") {

@@ -125,7 +125,7 @@ export default function NetworkPage() {
   async function onApply() {
     setBusy("apply"); setErr(null);
     try {
-      const r = await api.post<ApplyResult>("/network/apply", { summary: "apply from guest networks" });
+      const r = await api.post<ApplyResult>("/network/apply", { summary: "apply from client networks" });
       setValidation(r.validation ?? null);
       setHealth(r.health ?? null);
       if (r.state === "pending_confirmation") {
@@ -163,7 +163,7 @@ export default function NetworkPage() {
 
   const newButton = (
     <Link href="/network/new" className={buttonVariants({ variant: "primary" })}>
-      <Plus /> New guest network
+      <Plus /> New client network
     </Link>
   );
 
@@ -172,13 +172,13 @@ export default function NetworkPage() {
       <PageHeader
         icon={<Network />}
         eyebrow="Networking"
-        title="Guest networks"
+        title="Client networks"
         description="The Wi-Fi networks clients join."
         help={
           <>
-            <HelpSection title="What a guest network is">
+            <HelpSection title="What a client network is">
               <p>
-                Each guest network is a VLAN your wireless controller maps an SSID to, with its own addresses and
+                Each client network is a VLAN your wireless controller maps an SSID to, with its own addresses and
                 sign-in page.
               </p>
             </HelpSection>
@@ -207,7 +207,7 @@ export default function NetworkPage() {
         )}
       />
 
-      {known && !writable && <ReadOnlyNotice>Your role can view guest networks but not change them.</ReadOnlyNotice>}
+      {known && !writable && <ReadOnlyNotice>Your role can view client networks but not change them.</ReadOnlyNotice>}
 
       <ErrorBanner err={err} className="mb-0" />
 
@@ -245,7 +245,7 @@ export default function NetworkPage() {
 
       {rows !== null && rows.length > 0 && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <StatCard label="Guest networks" value={rows.length} icon={<Network />} />
+          <StatCard label="Client networks" value={rows.length} icon={<Network />} />
           <StatCard
             label="Enabled"
             value={enabledCount}
@@ -256,7 +256,7 @@ export default function NetworkPage() {
           <StatCard
             label="Devices connected"
             value={knownClients.length ? clientTotal : "—"}
-            hint="Across all guest networks, now"
+            hint="Across all client networks, now"
             icon={<Users />}
             tone="info"
           />
@@ -269,8 +269,8 @@ export default function NetworkPage() {
         ) : rows.length === 0 ? (
           <EmptyState
             icon={<Network />}
-            title="No guest networks yet"
-            hint="Create a guest network to give clients Wi-Fi with a sign-in page, addresses and internet access."
+            title="No client networks yet"
+            hint="Create a client network to give clients Wi-Fi with a sign-in page, addresses and internet access."
             action={writable ? newButton : undefined}
           />
         ) : (

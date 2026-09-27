@@ -270,7 +270,7 @@ const landingHTML = `<!doctype html>
       <div class="brand{{if .Brand.CardLogo}} has-logo{{end}}">
         <img id="brand-logo" alt=""{{if .Brand.CardLogo}} src="{{.Brand.Logo}}"{{else}} style="display:none"{{end}}>
         <span class="brand-mark" aria-hidden="true">` + iconWifi + `</span>
-        <h1 class="name" id="brand-name" dir="auto"{{if not .Brand.Name}} data-i18n="brand.fallback" data-i18n-en="Guest Wi-Fi"{{end}}>{{.BrandName}}</h1>
+        <h1 class="name" id="brand-name" dir="auto"{{if not .Brand.Name}} data-i18n="brand.fallback" data-i18n-en="Wi-Fi Access"{{end}}>{{.BrandName}}</h1>
       </div>
       <p class="welcome" id="brand-welcome" dir="auto"{{if not .Brand.Welcome}} hidden{{end}}>{{.Brand.Welcome}}</p>
     </div>
@@ -1117,7 +1117,7 @@ const landingHTML = `<!doctype html>
     function otpMessage(stage, j) {
       const e = String((j && j.error) || '').toLowerCase();
       if (e === 'too_many_attempts' || e.indexOf('too many requests') === 0) return t('err.attempts');
-      if (e === 'device not on guest network') return t('err.device.network');
+      if (e === 'device not on this Wi-Fi network') return t('err.device.network');
       if (stage === 'dest') {
         if (e === 'invalid email' || e.indexOf('invalid phone') === 0) return t('err.otp.dest');
         if (e === 'wait before requesting another code') return t('err.otp.wait');

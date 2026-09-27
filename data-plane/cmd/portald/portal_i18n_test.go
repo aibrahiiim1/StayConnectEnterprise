@@ -170,7 +170,7 @@ func TestEveryServerSentenceHasATranslation(t *testing.T) {
 			continue
 		}
 		switch msg {
-		case "Please enter a voucher code.", "Your device isn't on the guest network.", "Unable to detect your device address.",
+		case "Please enter a voucher code.", "Your device isn't connected to this Wi-Fi network.", "Unable to detect your device address.",
 			"Internet packages are not available right now. Please contact the site team for assistance.", "Please sign in again.",
 			"That package is not available. Please choose another.":
 			t.Errorf("%q no longer reaches an English guest as written", msg)
@@ -259,7 +259,7 @@ func TestTheOnlinePageNoLongerPrintsTheSessionID(t *testing.T) {
 }
 
 // THE SOCIAL PROVIDER'S RETURN LEG. A refusal there used to be a bare "Sign-in failed" page carrying scd's own
-// words, or a plain-text "device not on guest network". It is now the branded failure page in the guest's
+// words, or a plain-text "device not on this Wi-Fi network". It is now the branded failure page in the guest's
 // language -- with the status code the handler always sent.
 func TestSocialSignInFailuresAreFriendlyPages(t *testing.T) {
 	h := designHandler(t, map[string]any{"hotel_name": "Semantics Demo Hotel"})
@@ -284,7 +284,7 @@ func TestSocialSignInFailuresAreFriendlyPages(t *testing.T) {
 			!strings.Contains(body, template.HTMLEscapeString(builtinStrings[tc.lang]["errpage.back"])) {
 			t.Errorf("%s: the friendly page is not shown in %s", tc.path, tc.lang)
 		}
-		for _, raw := range []string{"missing provider", "device not on guest network", "Sign-in failed"} {
+		for _, raw := range []string{"missing provider", "device not on this Wi-Fi network", "Sign-in failed"} {
 			if strings.Contains(body, raw) {
 				t.Errorf("%s: the guest reads %q", tc.path, raw)
 			}

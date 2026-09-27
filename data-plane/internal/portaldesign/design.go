@@ -55,8 +55,8 @@ var Templates = []Template{
 	{"split", "Split", "Your photograph and welcome on one side, sign-in on the other. Stacks on a phone."},
 	{"immersive", "Immersive", "A full-screen photograph with a frosted-glass sign-in panel and large type."},
 	{"headerbar", "Header bar", "A business layout: top bar with your logo, sign-in beside a help column, terms in a footer."},
-	{"editorial", "Resort", "A tall banner with your welcome as the headline, the sign-in card overlapping it, your content below."},
-	{"kiosk", "Kiosk", "No imagery and large controls, for a lobby tablet or a client in a hurry."},
+	{"editorial", "Editorial", "A tall banner with your welcome as the headline, the sign-in card overlapping it, your content below."},
+	{"kiosk", "Kiosk", "No imagery and large controls, for a shared tablet or a client in a hurry."},
 }
 
 // TemplateID is the design's template, or the default when it names none or one this build does not have.

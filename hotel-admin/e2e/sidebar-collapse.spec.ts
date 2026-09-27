@@ -94,7 +94,7 @@ test("the choice survives navigation, a reload, and a later session", async ({ p
   await expect(expandBtn(page)).toBeVisible();
 
   // Across a client-side navigation into a NESTED route.
-  await page.getByRole("link", { name: "Guest networks" }).click();
+  await page.getByRole("link", { name: "Client networks" }).click();
   await expect(page).toHaveURL(/\/network$/);
   await expect(expandBtn(page)).toBeVisible();
 

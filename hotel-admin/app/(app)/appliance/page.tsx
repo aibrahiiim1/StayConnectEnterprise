@@ -34,7 +34,7 @@ export default function ApplianceAndLicencePage() {
             <HelpSection title="What the licence limits">
               <HelpList
                 items={[
-                  "The number of clients online at the same time, across all guest networks.",
+                  "The number of clients online at the same time, across all client networks.",
                   "The validity window, and the grace period after it ends.",
                 ]}
               />

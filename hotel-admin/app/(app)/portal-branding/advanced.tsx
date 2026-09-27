@@ -22,9 +22,9 @@ const CSS_EXAMPLE = `/* Your rules take precedence over the portal's own styling
 .card { box-shadow: 0 20px 60px rgba(0, 0, 0, .25); }
 .brand .name { letter-spacing: .04em; text-transform: uppercase; }`;
 
-const HTML_EXAMPLE = `<section class="amenities">
-  <h3>Around the resort</h3>
-  <ul><li>Pool 08:00–20:00</li><li>Spa 10:00–22:00</li></ul>
+const HTML_EXAMPLE = `<section class="notices">
+  <h3>Good to know</h3>
+  <ul><li>Help desk 08:00–20:00</li><li>Printers on the ground floor</li></ul>
 </section>`;
 
 export function AdvancedSection({ d, set, writable, issues, sanitized, checking, needsPassword }: {

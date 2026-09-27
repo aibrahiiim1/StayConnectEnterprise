@@ -89,7 +89,7 @@ export function VoucherCardFace({
       <CutMarks />
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="break-words text-base font-bold leading-tight">{heading || "Guest Wi-Fi"}</div>
+          <div className="break-words text-base font-bold leading-tight">{heading || "Wi-Fi Access"}</div>
           <div className="vp-quiet mt-0.5 text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
             Internet access voucher
           </div>
@@ -113,7 +113,7 @@ export function VoucherCardFace({
       <div className="mt-auto">
         <div className="text-[0.625rem] font-bold uppercase tracking-[0.12em]">How to connect</div>
         <ol className="mt-0.5 list-decimal space-y-px ps-4 text-[0.6875rem] leading-snug">
-          <li>Join the guest Wi-Fi.</li>
+          <li>Join the Wi-Fi network.</li>
           <li>Open any web page; the sign-in page appears.</li>
           <li>Choose the voucher option and enter the code above.</li>
         </ol>

@@ -384,7 +384,7 @@ function DoneView({
         <ol className="list-decimal space-y-1 pl-5 text-muted-foreground">
           <li>Publish the draft configuration — this makes it the one the connection uses.</li>
           <li>Activate the connection — the appliance connects to {provider.label} and loads the guest list.</li>
-          <li>Point at least one guest network at it on the PMS routing screen.</li>
+          <li>Point at least one client network at it on the PMS routing screen.</li>
         </ol>
         <p className="text-muted-foreground">Both steps ask for your password.</p>
       </div>
