@@ -114,9 +114,10 @@ Platform  →  Customer  →  Site  →  Appliance  →  Guest Networks / VLANs
   location). A Site belongs to exactly one Customer and contains one or more
   Appliances. Buildings, floors, wings, SSIDs and guest VLANs are **not** Sites —
   they are configured on the appliance.
-- **Appliance** = the on-site gateway. It belongs to exactly one Site at a time;
-  moving it to another Customer's Site requires the explicit, audited
-  cross-customer reassignment (never a silent move).
+- **Appliance** = the on-site gateway. It belongs to exactly one Site at a time
+  and can **move** only between Sites of the same Customer. Giving it to another
+  Customer is not a move: **retire → factory-reset → it registers again →
+  activate** for the new Customer (§25).
 
 These rules are enforced in the UI, the API, **and** the database (a composite
 foreign key makes an appliance-under-another-customer's-site impossible).
@@ -328,6 +329,14 @@ Key guarantees:
 - It is enforced **locally** on the appliance inside the same transaction that
   creates a guest session (a per-appliance lock + a live count of active
   sessions). Central is never consulted, so enforcement works offline.
+- **Every Guest Access method shares it**: voucher, guest account, OTP, social
+  login and **PMS room sign-in**. A room guest's first device, a second device
+  joining the same stay, and a device rejoining after its session ended each
+  take a slot; a device signing in again while its session is still open keeps
+  that session and takes none. A refused room sign-in is recorded on **Guest
+  sign-in attempts** as *Licensed capacity full* (`LICENSE_CAPACITY_REACHED`);
+  one the licence did not admit at all, as *Licence refused new guests*
+  (`LICENSE_REFUSED`).
 - `0` means **unlimited** (older licenses may carry `-1`, also unlimited).
 - **At capacity**, a new guest login is refused with HTTP 403
   `{"error":"LICENSE_CAPACITY_REACHED","limit":N,"current":M}` and **nothing is
@@ -516,7 +525,8 @@ Guests can authenticate by:
   write-only.
 - **OTP** — email or SMS one-time code (needs a Notifications provider, §16).
 - **PMS** — room number + name checked against the hotel PMS (needs a PMS
-  provider, §16).
+  provider, §16). Subject to the same licence gate and concurrent-guest
+  capacity as every other method (§10).
 - **Social login** — Google/Apple/Facebook/Microsoft (needs a Social provider).
 - **Payment** — paid WiFi via Stripe (needs a Payments provider).
 
@@ -675,96 +685,36 @@ The engine enforces the third one itself: a departure whose matching stay arrive
 
 ---
 
-## 14c. Reporting to the StayConnect cloud
+## 14c. What the appliance sends to OneGate Central
 
-**This appliance uses the StayConnect cloud for its licence only.**
+**The appliance uses OneGate Central for its identity, activation and licence only** (CLAUDE.md §0E). There is
+no reporting link to switch on: the appliance has no telemetry queue, no usage or health producer, no message
+bus client, no remote command channel and no software-update agent. Hotel Admin's **System → Appliance &
+licence** shows activation, licence and whether Central is reachable; the hotel's operations are watched on
+the appliance itself.
 
-Operational reporting is switched off by a Product-Owner decision of 2026-09-13 (CLAUDE.md §0E). It is not
-broken and does not need reconnecting. Hotel Admin's **System → Appliance & licence** shows only activation,
-licence and whether OneGate Central is reachable; there is no reporting screen.
-
-**What the appliance still sends,** and nothing else — all of it HTTPS, none of it over the messaging
-transport:
-
-* its **licence**: activation, retrieval, renewal, validation, and offline reconciliation;
-* its **identity**: token-less registration;
-* the **certificate** that authenticates those calls, and its renewal;
-* a periodic **licence-enforcement check** — this is how an appliance that has been deleted at the cloud
-  discovers it is orphaned and stops serving on a licence it has cached;
-* the **signed assignment** that says which customer and site this appliance belongs to, which is what the
-  licence is scoped to. It is re-verified on this appliance every time it starts.
-
-**What it no longer sends or accepts:** usage and health summaries, service-health reports, licence
-acknowledgements, remote disconnection of a guest, remote PMS tests, remote PMS configuration, remote
-commands, and software-update instructions. Every one of those was reporting or remote control; none was
-licensing.
-
-### The retained allowlist, in full
-
-Every exchange the appliance is still permitted, what it carries, and how often. Nothing else is sent, and
-nothing at all goes over the messaging transport.
+**Everything the appliance exchanges with Central** — all of it HTTPS to Central's API:
 
 | Exchange | Purpose | What it carries | Cadence |
 |---|---|---|---|
-| `POST /v1/appliances/register` | establish this appliance's identity (token-less, signed with its identity key) | appliance id, hardware serial, public key | until Central answers (30 s backing off to 5 min), on **Check now**, and on orphan recovery |
-| `POST /v1/appliance/csr` → `GET /certificate` | obtain and renew the client certificate | certificate signing request; the issued certificate | on issue and before expiry |
-| `GET /v1/appliance/license` | activation, retrieval, renewal, validation | appliance id; the signed licence document | every minute until licensed, then every 6 hours, plus on **Check now** |
-| `POST /v1/appliance/offline-reconcile` | reconcile a licence used offline | licence reference and offline usage counters | on reconnect after offline use |
-| `GET /v1/appliance/hello` | **licence enforcement** — detects that this appliance was deleted at the cloud, so it stops serving on a cached licence and registers again as waiting | signed appliance id only | at boot, then every 5 minutes |
-| `GET /v1/appliance/assignment`, `/assignment-registry`, `POST /assignment/ack` | **licence enforcement** — carries revocation, decommission and re-assignment; the appliance stops serving the guest plane when the assignment no longer grants | signed document: customer, site, state, version. Acknowledgement returns the version adopted | every 30 seconds |
+| `POST /v1/appliances/register` | establish this appliance's identity (token-less, signed with its identity key) | serial, public key, hardware inventory (MACs, hardware fingerprint, hostname, model) | until Central answers (30 s backing off to 5 min) and on **Check now**; never while *Removed from OneGate Central* |
+| `POST /v1/appliance/csr` → `GET /certificate` | obtain and renew the client certificate | certificate signing request; the issued certificate | on activation and before expiry |
+| `GET /v1/appliance/license` | licence retrieval, renewal, suspension, revocation | appliance id; the signed licence document | every minute until licensed, then every 6 hours, plus on **Check now** |
+| `POST /v1/appliance/offline-reconcile` | tell Central an offline activation package was consumed | the package id | after an offline import, retried every 10 minutes until Central confirms |
+| `GET /v1/appliance/hello` | **licence enforcement** — detects that Central deleted this appliance (§26) | signed appliance id only | at boot, then every 5 minutes |
+| `GET /v1/appliance/assignment`, `/assignment-registry`, `POST /assignment/ack` | the signed customer/site binding the licence is scoped to; carries retirement | signed document: customer, site, state, version; the ack returns the version adopted | every 30 seconds (mutual TLS only); a terminal acknowledgement is retried until Central confirms |
 
-**No guest identity, stay, session, usage or log content appears in any of them.** The licence and assignment
-calls carry the appliance's own identity and signed documents about that appliance; nothing describes a
-guest, a room or a reservation.
+**No guest identity, stay, session, usage or log content appears in any of them.**
 
-**All of it is mutually-authenticated HTTPS to the control API.** The assignment channel is certificate-only
-by design — there is no token fallback, so a document can only reach an appliance holding a valid client
-certificate.
+**Nothing local depends on Central.** The PMS connection, mirrored stays, guest sign-in and its attempt
+records, packages, allowances, sessions, accounting, enforcement and every Hotel Admin screen run on this
+appliance. A guest does not need Central to get online, and the offline licence and grace rules apply.
 
-**Nothing local changed.** The PMS connection, mirrored stays, guest sign-in and its attempt records,
-packages, allowances, sessions, accounting, enforcement and every Hotel Admin screen run on this appliance
-and are unaffected. A guest does not need the cloud to get online, and the offline licence and grace rules
-are unchanged.
-
-**The records produced while reporting was enabled are kept, not deleted.** They stay on the appliance and
-are removed only by the ordinary retention period below, measured from the day each was delivered.
-
----
-
-### The queue, retention and recovery (while reporting is enabled)
-
-The remainder of this section applies to an appliance running in full reporting mode. On a licensing-only
-appliance the queue is static: nothing is added to it and nothing is sent from it.
-
-> **No Hotel Admin screen.** The former **Network → Cloud connection** page now redirects to **System →
-> Appliance & licence**, which does not show the queue. The retention setting and the recovery action below
-> are still served by the Edge API (`/edge/v1/cloud-sync-settings`, `/edge/v1/cloud-sync-recovery`) but have
-> no screen; the default retention (30 days) applies.
-
-The appliance keeps working when the cloud is unreachable. Everything it reports upward — usage totals,
-health, alerts — is written to a local queue first and sent later. **No guest is affected by this queue**:
-sign-in, speed and the PMS all run locally.
-
-**The queue accounts for every record**: delivered, waiting, given up on, and the total.
-
-**Why a queue is not draining is reported as a fact, not guessed from its size.** The four states are different
-problems with different owners:
-
-* **No connection to the cloud** — the appliance cannot reach it. Records are safe and go out when it returns.
-* **The cloud is not listening** — the appliance reaches the cloud and nothing there is consuming this
-  appliance's reports. **Cloud-side; the hotel network is not the cause.**
-* **The cloud refused the records** — it answered and declined. Retrying will not help; how this appliance is
-  registered needs looking at.
-* **Sending** — the queue is draining, oldest first. A large queue that is moving is progress, not a fault.
-
-**Keep delivered records for (days)** — default **30**, allowed 1–365. It removes records that have **already
-been delivered**. Records still waiting, and records the appliance gave up on, are **never** removed by it: a
-queue that cannot be delivered is not made to look empty by deleting it.
-
-**Recover these records** appears when the appliance has given up on some. Retries are finite, and a record
-that exhausts them is set aside and will not be sent again on its own. Recovery returns a bounded batch to the
-queue, oldest first; nothing is deleted or altered, and the cloud records each record once however many times
-it arrives. It needs a typed reason, is recorded with the operator's name, and may need running more than once.
+**History.** A telemetry link (usage, health and service-health reports, remote session revocation, remote PMS
+operations, a command channel and an update agent over a message bus) was built and verified, switched off by
+the Product-Owner decision of 2026-09-13, and removed from the appliance on 2026-09-27 (appliance migration
+0093 dropped its settings, queue and ledgers with their rows). The former **Network → Cloud connection** page
+redirects to **System → Appliance & licence**.
 
 ---
 
@@ -963,11 +913,16 @@ renewal issued while the box is offline still applies cleanly when it reconnects
 
 **Replace** (swap hardware, keep the site): Central → the old appliance →
 **Advanced → Mark for replacement** (reason + step-up) opens a **72-hour
-window**. The new box registers itself and is activated **at the same site**;
-the **old box keeps its license until the replacement is activated**, then the
-old one is retired automatically (license revoked, credentials revoked, signed
-terminal assignment). If the window elapses, a security alert asks for an
-operator decision. Use this for RMA / hardware swaps.
+window**. The new box registers itself and is activated **for the same customer
+and site**; the **old box keeps its license until the replacement is
+activated**. Then the old one's license is revoked and it is retired through the
+same **acknowledged two-phase retirement** as **Retire** (§25): a signed
+terminal assignment is issued, its credentials stay valid until it collects the
+assignment and acknowledges, and only then are they revoked. If it never
+acknowledges (a dead box), the retirement shows as not confirmed and an
+**emergency** retire finishes it. If the window elapses before the new box is
+activated, a security alert asks for an operator decision. Use this for RMA /
+hardware swaps.
 
 **WAN-MAC rebind** (same box, WAN NIC changed): a WAN-MAC-only mismatch is
 **soft** — the license stays in force, Hotel Admin shows *The internet (WAN)
@@ -984,15 +939,21 @@ re-issues a corrected hardware-bound license with the same terms.
 
 ## 24. Factory reset
 
-- Factory reset is a **local appliance action**, not a Central action. It wipes the
-  box's identity, license and config.
+- Factory reset is a **local appliance action**, not a Central action: the
+  factory-clean install ([DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md](DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md)).
+  It wipes the box's identity, license, data and config.
 - Central authority is **not** deleted by a factory reset. If you are permanently
   retiring the box, **Retire** it in Central (§25) so its bound license is
   revoked.
 - After a factory reset the box has a new identity key. It registers again as
-  **Waiting for activation** if its previous appliance is waiting or retired;
-  while that previous appliance is still activated, registration is refused with
-  a *hardware already in use* security alert until you retire it.
+  **Waiting for activation** if its previous appliance is waiting or retired —
+  on that same Central record (same serial), the old key being recorded as
+  retired; while that previous appliance is still activated, registration is
+  refused with a *hardware already in use* security alert until you retire it.
+  A retired identity key itself can never register again (`403 identity_retired`).
+- Factory reset is also the **only** way back for an appliance that shows
+  *Removed from OneGate Central* (§26), and the required step when an appliance
+  changes customer (§25).
 
 ---
 
@@ -1005,12 +966,17 @@ changes the appliance's lifecycle. Choose by intent:
 
 | Action | Reversible? | What it does |
 |---|---|---|
-| **Move** | — | Re-assigns an activated appliance to another site (new signed assignment). Moving to **another customer** revokes its license and the appliance purges the previous customer's local data (below); set a new license afterwards. |
-| **Retire** | ❌ Terminal | Typed serial. Two-phase: a **signed terminal assignment** is delivered (*Retiring*), the appliance acknowledges, then its credentials are revoked (*Retired*). If no acknowledgement arrives within policy, the retirement is flagged *unconfirmed* with a security alert (credentials are **not** revoked). **Emergency** (lost, stolen or dead box) revokes credentials at once without waiting. |
+| **Move** | — | Re-assigns an activated appliance to another site **of the same customer** (new signed assignment). Its license is re-issued for the new site with the **same terms** in the same transaction. **Fails closed:** if licensing is unavailable on Central, or the license cannot be read, nothing changes (`503`); a license already past its end date must be renewed first (`409`). A move to another customer is refused (`409 cross_customer_move`). |
+| **Retire** | ❌ Terminal | Typed serial. The license is revoked at once. Two-phase: a **signed terminal assignment** is delivered (*Retiring*), the appliance acknowledges (retrying until Central confirms), then its credentials are revoked (*Retired*). If no acknowledgement arrives within 10 minutes, the retirement is flagged *unconfirmed* with a security alert (credentials are **not** revoked). **Emergency** (lost, stolen or dead box, or *retire it now without waiting*) revokes credentials at once without waiting. |
 | **Delete record** | ❌ Permanent | Only for a *Waiting for activation* or *Retired* appliance. Typed serial + reason. Removes the record; audit history is kept. |
 
 There is no "deactivate": an activated appliance whose service should pause has
 its **license suspended** instead.
+
+**Changing an appliance's customer** is never a move: **Retire** it → have it
+**factory-reset** on site (§24; new identity key) → it registers again as
+*Waiting for activation* → **Activate** it for the new customer. The old
+customer's local data leaves with the factory reset, not with an in-place purge.
 
 ### Cross-customer transition & secure data purge
 
@@ -1022,7 +988,10 @@ moves to a **different Customer** — a genuine reassignment, or a Customer that
 ownership transfer — that previous customer's data must never remain readable
 under the new owner.
 
-The appliance enforces this automatically, comparing **immutable tenant UUIDs**
+Central never sends a cross-customer assignment (moves stay within the customer,
+and a new customer means a factory-clean box), so the purge below is a
+**defence-in-depth guard**, not an operator workflow. The appliance enforces it
+automatically, comparing **immutable tenant UUIDs**
 (never names/slugs):
 
 - **Same-customer** changes (a move to another site of the same customer, same
@@ -1032,8 +1001,7 @@ The appliance enforces this automatically, comparing **immutable tenant UUIDs**
   appliance **securely purges every previous-tenant row and cached secret** in one
   transaction *before it authorizes any guest*: it repoints the live guest
   networks (VLAN/DHCP/portal stay up) to the new owner, deletes all foreign-tenant
-  rows across every tenant-owned table + the local tenant/site mirror, drops
-  pending outbox events queued under the old identity, flushes runtime guest
+  rows across every tenant-owned table + the local tenant/site mirror, flushes runtime guest
   authorization (nftables), and writes an **audited transition record**
   (`appliance.tenant_transition_purge`) with the purged counts.
 - **Fail-closed:** if the purge cannot complete, the appliance authorizes **no**
@@ -1065,8 +1033,17 @@ are never a delete blocker.
 Notes verified in code:
 - An **appliance delete** is allowed only for a *Waiting for activation* or
   *Retired* appliance; the safety is that state + the typed serial + password
-  step-up. An appliance deleted at Central that is still running finds out on
-  its next hello, clears its identity and registers again as waiting.
+  step-up. A **retired** appliance's identity key is recorded when its record is
+  deleted and can never register again.
+- **What a running appliance does when its record is deleted** (it finds out on
+  its next hello, within 5 minutes): one that **never held a customer** clears its
+  identity and registers again as waiting. One that **has held a customer** (a
+  retired appliance, for example) removes its license and client certificate,
+  keeps its identity and data, records the fact durably
+  (`/etc/stayconnect/removed-from-central.json`) and **never registers again**.
+  It admits no new guests (guests already online are not disconnected), refuses
+  license and activation files, and Hotel Admin shows *Removed from OneGate
+  Central*. Only a factory-clean install (§24) and a new activation bring it back.
 - A **guest network** (on the appliance) cannot be deleted while enabled or with
   active sessions.
 
@@ -1097,13 +1074,11 @@ Notes verified in code:
   confirm backups are current across the fleet.
 - For disaster recovery of an appliance, prefer **Mark for replacement** (§23) —
   it preserves the site binding and hands over the license cleanly.
-- **Three `public` tables are created by `scd` at first use, not by any
-  migration** — `edge_executed_commands`, `edge_installed_updates` and
-  `edge_offline_packages`. They are in any dump taken from a running appliance,
-  but a database rebuilt from migrations alone will not have them, and Gate P's
-  grants fail without them. See
-  [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md) §"Three public tables no
-  migration creates".
+- `edge_offline_packages` (the offline-activation single-use ledger) is created
+  by appliance migration 0048. The command-channel and update-agent ledgers
+  (`edge_executed_commands`, `edge_installed_updates`) and the telemetry queue
+  (`sync_outbox`, `sync_checkpoints`) are dropped by migration 0093; see
+  [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md).
 
 ### Verifying an appliance after a reboot or a restore
 
@@ -1131,7 +1106,8 @@ appliance needs a human to come back, the run fails rather than hiding it.
 - **Every** privileged action in Central and on the appliance is written to an
   **audit log** with actor, action, target and reason. Delete/rotate/restart
   actions require a reason that is recorded.
-- Central receives **no telemetry** from appliances (CLAUDE.md §0E): its
+- Central receives **no telemetry** from appliances — the appliance has no
+  telemetry subsystem (CLAUDE.md §0E): its
   **Overview** and **Appliances** pages show activation, connection (from the
   last authenticated appliance call) and license state only. Appliance service
   health, sessions and usage are watched in each appliance's Hotel Admin.
@@ -1147,6 +1123,9 @@ appliance needs a human to come back, the run fails rather than hiding it.
 |---|---|---|
 | Appliance never appears in Central | No WAN/internet, or `SCD_AUTO_REGISTER=false` | Fix WAN (§5) and use **Check now** in Hotel Admin → Appliance & licence; or use offline activation (§34) |
 | Registration refused (403) + security alert | Clone/hardware-reuse protection | Retire the old appliance (§25), then retry |
+| Registration refused `403 identity_retired` | This identity key was retired | Factory-reset the box (§24); it registers with a new key |
+| Hotel Admin shows *Removed from OneGate Central* | Central deleted the appliance after it had held a customer | Factory-clean install (§24), then activate it again (§26) |
+| Room sign-in attempts show *Licence refused new guests* / *Licensed capacity full* | The licence, not the guest: room sign-in answers to the same licence gate and capacity as every method | Check the license state; wait for a slot or raise capacity (§10) |
 | Stuck at Waiting for activation | Not activated yet | Activate it (§7) |
 | Stuck activating / no license | CSR/license not yet pulled, or Central briefly unreachable | Wait; check Diagnostics; confirm Central reachability |
 | Guests denied, License shows Expired | Past valid-until + grace | Renew the license (§20) |
@@ -1195,6 +1174,8 @@ appliance needs a human to come back, the run fails rather than hiding it.
 | Renew a license before expiry | Central → the appliance → License → Renew or change (§20) |
 | Raise/lower concurrent capacity | Central → the appliance → License → Renew or change (§10, §20) |
 | Add/replace an appliance | Central → Advanced → Mark for replacement (§23) |
+| Move an appliance to another site of the same customer | Central → the appliance → Installed at → Move (§25) |
+| Give an appliance to another customer | Retire → factory-reset → Activate (§25) |
 | Rebind after a NIC swap | Central → Advanced → Rebind WAN MAC (§23) |
 | Rotate a cert | Hotel Admin → TLS certificate (§27) |
 | Issue voucher batches | Hotel Admin → Voucher batches (§15) |
@@ -1232,7 +1213,8 @@ risk, but should not be shown to operators as the primary term.
 
 **Retired terms — do not present as current:** Plan, Subscription, Commercial
 plan, Trial, plan limits, Enrollment token / bootstrap token, Onboarding page,
-Customer context, Deactivate, Decommission (as an operator action). The signed
+Customer context, Deactivate, Decommission (as an operator action),
+cross-customer move, cloud reporting / telemetry. The signed
 appliance license is the only entitlement.
 
 ---
