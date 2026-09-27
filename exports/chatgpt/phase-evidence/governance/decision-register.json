@@ -698,6 +698,21 @@
       ],
       "does_not_authorize": "Go-Live; any new PRE-LIVE, Central or other runtime deployment as part of the migration; product functionality changes; destructive or historical data mutation; a database migration; PMS configuration, posting or traffic; financial or payment-provider activity; networking or topology change; Root-CA or trust change; the merge of PR #190; changing the required approval count from 0.",
       "implementation": "Ruleset master-protected-delivery requires only po-merge-authorization (GitHub Actions app 15368), keeping PR-only, no force push, no deletion, merge commits only, conversation resolution, strict, 0 approvals and no bypass actors. .github/workflows/po-merge-authorization.yml + tools/po_merge_authorization.py decide it. The four gate workflows are workflow_dispatch only and run by tools/full-check.py. The nightly orchestrator and its tooling are removed; it was first disabled in GitHub. Authoritative text: docs/PO_LED_DELIVERY_MODEL.md and CLAUDE.md section 0F. Recorded by T0196."
+    },
+    {
+      "id": "D43",
+      "title": "PRE-LIVE GUEST ACCESS FOR PRODUCT OWNER TESTING (2026-09-26). D41's Guest-activation deferral is lifted for controlled Product Owner testing on PRE-LIVE 172.21.60.25 only, with full PRE-LIVE engineering authority to complete the Guest Access capability end to end: authentication, package eligibility and free acquisition, entitlement, device authorization, session activation, network enforcement and real internet, for every enabled sign-in method. Real hotel guests are NOT served and Go-Live is NOT authorized: D41 continues to govern real Guest activation and pilot use.",
+      "decided_on": "2026-09-26",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-09-26",
+      "authorization_evidence": "Product-Owner decisions of 2026-09-26 'COMPLETE PRE-LIVE GUEST ACCESS ACTIVATION FOR TESTING' and 'FULL PRE-LIVE ENGINEERING AUTHORITY', and the merge instruction 'Approved and merge' for PR #192.",
+      "supersedes": [
+        "D41 in part: the deferral no longer prevents Guest Access on PRE-LIVE for Product Owner testing. Real Guest activation and pilot use remain deferred by D41."
+      ],
+      "does_not_authorize": "Go-Live; serving real hotel guests; deployment to any other environment; PMS financial posting; payment-provider traffic; settlement, reversal or financial egress; Root-CA or trust change; contact with the retired development reference appliance.",
+      "implementation": "PR #192 (T0197): Phase-2 guest portal flags on PRE-LIVE; the package-list NULL-currency fix; success only after enforcement; Hotel Admin sign-in method switches enforced by scd; devices join live access within the plan's device limit (contract B3, 6.2-6.3); a redeemed voucher rejoins only its own live entitlement; PMS offers exclude packages a stay has taken; activation waits for enforcement. Proven live by scripts/guest-access-e2e-test.sh (53/53)."
     }
   ]
 }

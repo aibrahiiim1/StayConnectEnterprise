@@ -140,3 +140,22 @@ func TestConsumePinnedRejectsWrongPins(t *testing.T) {
 		return err
 	})
 }
+
+// A redeemed card may sign a device in again only while its own entitlement is ACTIVE; nothing else rejoins.
+func TestVoucherRejoinable(t *testing.T) {
+	for _, c := range []struct {
+		state string
+		live  bool
+		want  bool
+	}{
+		{"REDEEMED", true, true},
+		{"REDEEMED", false, false},
+		{"UNUSED", true, false},
+		{"REVOKED", true, false},
+		{"REDEMPTION_EXPIRED", true, false},
+	} {
+		if got := voucherRejoinable(c.state, c.live); got != c.want {
+			t.Errorf("voucherRejoinable(%s, live=%v) = %v, want %v", c.state, c.live, got, c.want)
+		}
+	}
+}

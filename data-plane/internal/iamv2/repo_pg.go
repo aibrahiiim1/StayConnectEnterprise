@@ -40,18 +40,32 @@ type pgTx struct{ tx pgx.Tx }
 func (t *pgTx) ResolveVoucherByHMAC(ctx context.Context, tenantID, siteID string, codeHMAC []byte, now time.Time) (string, bool, error) {
 	var id, state string
 	var vf, vu *time.Time
+	var live bool
 	err := t.tx.QueryRow(ctx,
-		`SELECT id::text, state, redemption_valid_from, redemption_valid_until
-		   FROM iam_v2.vouchers
-		  WHERE tenant_id=$1 AND site_id=$2 AND code_hmac=$3`,
-		tenantID, siteID, codeHMAC).Scan(&id, &state, &vf, &vu)
+		`SELECT v.id::text, v.state, v.redemption_valid_from, v.redemption_valid_until,
+		        EXISTS (SELECT 1 FROM iam_v2.entitlements e
+		                 WHERE e.tenant_id = v.tenant_id AND e.site_id = v.site_id AND e.voucher_id = v.id
+		                   AND e.status = 'ACTIVE' AND (e.window_ends_at IS NULL OR e.window_ends_at > now()))
+		   FROM iam_v2.vouchers v
+		  WHERE v.tenant_id=$1 AND v.site_id=$2 AND v.code_hmac=$3`,
+		tenantID, siteID, codeHMAC).Scan(&id, &state, &vf, &vu, &live)
 	if err == pgx.ErrNoRows {
 		return "", false, nil
 	}
 	if err != nil {
 		return "", false, err
 	}
-	return id, voucherRedeemable(state, vf, vu, now), nil
+	return id, voucherRedeemable(state, vf, vu, now) || voucherRejoinable(state, live), nil
+}
+
+// voucherRejoinable: a REDEEMED card whose own entitlement is still ACTIVE may sign a device in again -- to
+// rejoin THAT entitlement, within its device limit, never to purchase. Single use holds where it matters:
+// the grant kernel refuses any second redemption (VOUCHER_NOT_REDEEMABLE), so the card still yields exactly
+// one entitlement and no fresh quota. Without this a guest who disconnected, or whose phone changed its
+// address, could never get back online on access they still hold. Contract section 6.3: same-device
+// reconnect replaces its own session; other devices take the entitlement's remaining slots.
+func voucherRejoinable(state string, liveEntitlement bool) bool {
+	return state == "REDEEMED" && liveEntitlement
 }
 
 // voucherRedeemable implements the Phase 1B credential-validity rule for a voucher (pure; unit-tested).

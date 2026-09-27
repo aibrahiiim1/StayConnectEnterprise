@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
+	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
 )
 
 // THE REGRESSION FOR THE AUTHORITY DEFECT.
@@ -38,6 +40,11 @@ func authoritySrv(t *testing.T, cfg iamv2.Config) *server {
 		iamv2Cfg: cfg,
 		tenID:    "11111111-1111-4111-8111-111111111111",
 		siteID:   "22222222-2222-4222-8222-222222222222",
+		// Hotel Admin has both methods switched on; this test is about which authority serves them.
+		methodSwitches: func(context.Context) (*tenantcfg.AuthMethods, error) {
+			on := &tenantcfg.AuthMethod{Enabled: true}
+			return &tenantcfg.AuthMethods{Voucher: on, GuestAccount: on}, nil
+		},
 		// vou, sess, db, nft, shp, met all left nil on purpose: the enabled path must not touch them.
 	}
 }

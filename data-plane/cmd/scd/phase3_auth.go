@@ -312,6 +312,13 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	at.GuestNetworkID, at.GuestNetworkName = dev.GuestNetwork, dev.GuestNetworkName
 	at.DeviceIP, at.DeviceMAC = dev.IP.String(), signinattempt.NormalizeMAC(dev.MAC)
+	// Room sign-in switched off in Hotel Admin is refused here as well as hidden on the portal. It answers as
+	// the service not being available -- which it is not -- and looks up no room.
+	if !p.srv.guestMethodEnabled(ctx, guestMethodPMS) {
+		at.Result = signinattempt.ServiceUnavailable
+		notVerified(w, at.Result, "pms_method_disabled")
+		return
+	}
 
 	room := normalizeRoom(req.Room)
 	last := normalizeName(req.LastName)
@@ -915,11 +922,29 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, staygrant.ErrAlreadyEntitled) {
 			grantResult = signinattempt.StayNotEligible
 		}
+		// A full device limit is not a wrong room or a fault: the guest's details were right and the stay's
+		// access is fine, it simply has no free device slot. It gets its own sentence so they know to
+		// disconnect another device, while the attempt record keeps the closed result set.
+		if strings.Contains(err.Error(), "MAX_DEVICES_REACHED") {
+			slog.Info("phase3 auth: device limit reached for the stay's entitlement", "detail", err.Error())
+			writeJSONScd(w, http.StatusOK, phase3Response{Outcome: outcomeNotVerified, FailureClass: "DEVICE_LIMIT"})
+			return
+		}
 		notVerified(w, grantResult, "grant: "+err.Error())
 		return
 	}
 
-	sessionID, err := p.openSessionTx(ctx, tx, granted.EntitlementID, dev)
+	// A device that joined a stay it already has an open session on (it signed in again while online) keeps
+	// that session rather than opening a second one for itself.
+	var sessionID string
+	if granted.Joined {
+		_ = tx.QueryRow(ctx, `SELECT id::text FROM iam_v2.sessions
+			WHERE entitlement_id=$1 AND device_id=$2 AND ended IS NULL AND state IN ('active','PENDING_ENFORCEMENT')
+			LIMIT 1`, granted.EntitlementID, dev.DeviceID).Scan(&sessionID)
+	}
+	if sessionID == "" {
+		sessionID, err = p.openSessionTx(ctx, tx, granted.EntitlementID, dev)
+	}
 	if err != nil {
 		notVerified(w, signinattempt.ServiceUnavailable, "session: "+err.Error())
 		return

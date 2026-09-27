@@ -1,0 +1,42 @@
+{
+  "transition_id": "T0197",
+  "seq": 197,
+  "timestamp": "2026-09-27T06:38:23+03:00",
+  "timestamp_derivation": "Written after the Product Owner's merge approval and before the commit that introduces this receipt.",
+  "record_type": "PRELIVE_GUEST_ACCESS",
+  "authorisation": "Product-Owner decisions of 2026-09-26 (D43) and the merge instruction 'Approved and merge' for PR #192.",
+  "decision": "D43",
+  "root_causes_fixed": [
+    "Phase-2 guest portal flags absent for scd and portald on PRE-LIVE (config).",
+    "Package list always empty: the system emergency-grace package has a NULL currency and failed the list scan for every guest.",
+    "Success-page panel claimed 'Package active' before activation; confirm now activates and answers only once enforced.",
+    "Hotel Admin sign-in method switches were enforced only by the portal UI; scd now refuses a disabled method (METHOD_DISABLED).",
+    "Every sign-in bought again, superseding the entitlement and knocking other devices offline; devices now join live access within the plan's device limit (contract B3, 6.2-6.3), a redeemed voucher rejoins only its own live entitlement, and another device of a stay joins the stay's entitlement.",
+    "portald timed activation out at 5 s against scd's 8 s enforcement wait; activation now allows 12 s (raised by review).",
+    "PMS room sign-in offered a package the stay had already taken (purchase_once_per_stay); the offer set now excludes it."
+  ],
+  "verification": "Go tests (portald, scd, iamv2, staygrant, portaldesign), DB-backed commerce tests on disposable PG16, Playwright guest-portal 6/6, Hotel Admin vitest 534/534, and live scripts/guest-access-e2e-test.sh 53/53 on PRE-LIVE with test state reset afterwards.",
+  "deployment_provenance": "scd 13c43c1e (this PR). portald and Hotel Admin 7ba41e18, deployed by the concurrent UI-audit session from prelive/ui-audit-on-guest-access (this PR's content plus PR #193's). Read back from the installed artifacts; see current_state_facts.deployed_runtime_services and hotel_admin_runtime_identity.",
+  "concurrent_work": "PR #193 (UI audit fixes) is open and unmerged; it touches no governance record, and a test merge of it with this PR is conflict-free with portald's tests (incl. e2e fixture freshness) passing on the combined tree.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0196: Phase 7 accepted and closed under the Product-Owner-led delivery model D42; Guest activation deferred by D41 everywhere, PRE-LIVE included."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. Guest Access is enabled on PRE-LIVE for Product Owner testing only (D43); real Guest activation stays deferred by D41. No migration, no schema change, no PMS posting, payment or financial traffic, no other environment. PRE-LIVE remains PRE-LIVE."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "33bc78ce8b9609b6af89ad7c22b2218e0944da1d",
+  "base_note": "Master after the merge of PR #191 (33bc78ce).",
+  "head": "13c43c1e",
+  "head_note": "PR #192's last content commit.",
+  "previous_delivery": "T0196",
+  "go_live": "NOT authorised. Real Guest activation remains DEFERRED by D41; PRE-LIVE testing only under D43."
+}

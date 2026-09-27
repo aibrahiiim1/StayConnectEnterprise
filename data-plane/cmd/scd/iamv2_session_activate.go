@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
 type activateReq struct {
@@ -39,6 +40,9 @@ type activateReq struct {
 	DeviceID      string `json:"device_id"`
 	IP            string `json:"ip"`
 	MAC           string `json:"mac"`
+	// AuthContextID is this device's own fresh sign-in. It is what lets a device OTHER than the purchaser join
+	// the entitlement: see "joining" below.
+	AuthContextID string `json:"auth_context_id,omitempty"`
 }
 
 // activateIAMv2Session turns an entitlement into a session, idempotently.
@@ -121,8 +125,39 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 			}
 			return err
 		}
+		// JOINING. A device other than the purchaser may take one of the entitlement's device slots (contract
+		// 6.3) only on the strength of ITS OWN sign-in: an unconsumed, unexpired auth context issued to this
+		// very device on this network, for the same subject the entitlement belongs to. That context is spent
+		// here, in this transaction, so one sign-in admits one device once. The body's device id alone still
+		// admits nothing -- the adversarial finding above stands.
 		if acquiringDevice != req.DeviceID {
-			return errDeviceNotOnEntitlement
+			if req.AuthContextID == "" {
+				return errDeviceNotOnEntitlement
+			}
+			// The auth_context family is written only inside its controlled operation (a database trigger
+			// refuses anything else), exactly as authctx does when it consumes a PMS context.
+			if err := writerguard.Open(ctx, tx, writerguard.CapAuthContext); err != nil {
+				return err
+			}
+			var joined string
+			err := tx.QueryRow(ctx, `
+			    UPDATE iam_v2.auth_contexts ac SET consumed_at = now()
+			      FROM iam_v2.entitlements e
+			     WHERE ac.id = $1 AND e.id = $2
+			       AND ac.tenant_id = $3 AND ac.site_id = $4
+			       AND e.tenant_id = ac.tenant_id AND e.site_id = ac.site_id
+			       AND ac.device_id = $5 AND ac.guest_network_id = $6
+			       AND ac.consumed_at IS NULL AND ac.expires_at > now()
+			       AND (e.voucher_id = ac.voucher_id OR e.guest_account_id = ac.guest_account_id
+			            OR e.guest_principal_id = ac.guest_principal_id)
+			    RETURNING ac.id::text`,
+				req.AuthContextID, req.EntitlementID, s.tenID, s.siteID, req.DeviceID, nc.NetworkID).Scan(&joined)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return errDeviceNotOnEntitlement
+			}
+			if err != nil {
+				return err
+			}
 		}
 
 		// ...AND THE REST OF THE IDENTITY MUST COHERE.
