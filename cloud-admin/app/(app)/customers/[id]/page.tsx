@@ -9,7 +9,7 @@ import {
 } from "@/lib/api";
 import { Card, CardBody } from "@/components/ui/card";
 import { Button, LinkButton } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/input";
+import { Field, Input } from "@/components/ui/input";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
@@ -25,7 +25,7 @@ import { ApplianceTable, sortAppliances } from "@/components/appliance-table";
 import { LicenseTable } from "@/components/license-table";
 import { UsersManager } from "@/components/users-manager";
 import { AuditLog } from "@/components/audit-log";
-import { browserTimezone } from "@/components/placement-fields";
+import { TimezoneSelect, browserTimezone } from "@/components/placement-fields";
 import { CUSTOMER_USER_ROLES, usePermissions } from "@/lib/permissions";
 import { useSession } from "@/lib/session";
 import { useQueryState } from "@/lib/use-query-state";
@@ -157,7 +157,7 @@ function CustomerView({ id }: { id: string }) {
         <TabPanel idBase={idBase} value={tab} className="pt-5">
           {tab === "summary" && <Summary c={c} onTab={(t) => setQ({ tab: t })} />}
           {tab === "sites" && <Sites customerId={c.id} canManage={can["sites.manage"]} onChanged={load} />}
-          {tab === "appliances" && <CustomerAppliances customerId={c.id} />}
+          {tab === "appliances" && <CustomerAppliances customerId={c.id} canActivate={can["appliances.activate"]} />}
           {tab === "licenses" && <CustomerLicenses customerId={c.id} />}
           {tab === "users" && (
             <Card>
@@ -453,22 +453,7 @@ function Sites({ customerId, canManage, onChanged }: { customerId: string; canMa
   );
 }
 
-function TimezoneSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  let zones: string[] = [];
-  try {
-    const f = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf;
-    zones = f ? f("timeZone") : [];
-  } catch { /* older browser: free text below */ }
-  if (zones.length === 0) return <Input value={value} onChange={(e) => onChange(e.target.value)} />;
-  return (
-    <Select value={value} onChange={(e) => onChange(e.target.value)}>
-      {!zones.includes(value) && <option value={value}>{value}</option>}
-      {zones.map((z) => <option key={z} value={z}>{z}</option>)}
-    </Select>
-  );
-}
-
-function CustomerAppliances({ customerId }: { customerId: string }) {
+function CustomerAppliances({ customerId, canActivate }: { customerId: string; canActivate: boolean }) {
   const [rows, setRows] = useState<ApplianceRow[] | null>(null);
   const [err, setErr] = useState<unknown>(null);
   useEffect(() => {
@@ -486,7 +471,7 @@ function CustomerAppliances({ customerId }: { customerId: string }) {
           icon={<Server />}
           title="No appliances yet"
           hint="An appliance joins this customer when it is activated."
-          action={<LinkButton href="/appliances?activation=waiting" variant="secondary">Appliances waiting for activation</LinkButton>}
+          action={canActivate ? <LinkButton href="/appliances?activation=waiting" variant="secondary">Appliances waiting for activation</LinkButton> : undefined}
         />
       ) : (
         <ApplianceTable rows={rows} showCustomer={false} />

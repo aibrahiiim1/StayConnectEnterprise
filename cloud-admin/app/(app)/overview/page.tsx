@@ -166,7 +166,7 @@ export default function OverviewPage() {
             </Card>
           </section>
 
-          <section aria-label="Fleet summary" className="flex flex-wrap gap-x-8 gap-y-2 px-1 text-sm text-muted-foreground">
+          <section aria-label="Totals" className="flex flex-wrap gap-x-8 gap-y-2 px-1 text-sm text-muted-foreground">
             <Link href="/customers" className="rounded hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
               <span className="text-headline tabular text-foreground">{data.customers.toLocaleString()}</span>{" "}
               {data.customers === 1 ? "customer" : "customers"}

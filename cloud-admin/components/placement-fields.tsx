@@ -6,7 +6,7 @@ import { Field, Input, Select } from "@/components/ui/input";
 
 const NEW = "__new";
 
-/** Where an appliance goes: an existing customer and site, or (when allowed) new ones created in the same step. */
+/** Where a waiting appliance goes on activation: an existing customer and site, or new ones created in the same step. */
 export type Placement = {
   customerId: string;       // "" | id | NEW
   newCustomerName: string;
@@ -35,8 +35,8 @@ export function emptyPlacement(customerId = "", siteId = ""): Placement {
   };
 }
 
-export const isNewCustomer = (p: Placement) => p.customerId === NEW;
-export const isNewSite = (p: Placement) => p.siteId === NEW || p.customerId === NEW;
+const isNewCustomer = (p: Placement) => p.customerId === NEW;
+const isNewSite = (p: Placement) => p.siteId === NEW || p.customerId === NEW;
 
 export function placementProblem(p: Placement): string | null {
   if (!p.customerId) return "Choose a customer.";
@@ -72,19 +72,22 @@ function timezones(): string[] {
   }
 }
 
-export function PlacementFields({
-  value,
-  onChange,
-  allowNew = true,
-}: {
-  value: Placement;
-  onChange: (next: Placement) => void;
-  /** Offer "New customer…" / "New site…" (Activate). Move takes existing ones only. */
-  allowNew?: boolean;
-}) {
+/** A site's time zone: the browser's list when it has one, free text on an older browser. */
+export function TimezoneSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const zones = useMemo(timezones, []);
+  if (zones.length === 0) return <Input value={value} onChange={(e) => onChange(e.target.value)} />;
+  return (
+    <Select value={value} onChange={(e) => onChange(e.target.value)}>
+      {!zones.includes(value) && <option value={value}>{value}</option>}
+      {zones.map((z) => <option key={z} value={z}>{z}</option>)}
+    </Select>
+  );
+}
+
+/** Activate's customer and site. Move stays within the customer and picks its site itself (appliance-dialogs.tsx). */
+export function PlacementFields({ value, onChange }: { value: Placement; onChange: (next: Placement) => void }) {
   const [customers, setCustomers] = useState<Customer[] | null>(null);
   const [sites, setSites] = useState<Site[] | null>(null);
-  const zones = useMemo(timezones, []);
   const set = (patch: Partial<Placement>) => onChange({ ...value, ...patch });
 
   useEffect(() => {
@@ -117,7 +120,7 @@ export function PlacementFields({
           {(customers ?? []).map((c) => (
             <option key={c.id} value={c.id}>{c.name}</option>
           ))}
-          {allowNew && <option value={NEW}>New customer…</option>}
+          <option value={NEW}>New customer…</option>
         </Select>
       </Field>
 
@@ -126,7 +129,7 @@ export function PlacementFields({
           <Input value={value.newCustomerName} onChange={(e) => set({ newCustomerName: e.target.value })} autoComplete="off" />
         </Field>
       ) : (
-        <Field label="Site" required hint={value.customerId && sites?.length === 0 && !allowNew ? "This customer has no active site." : undefined}>
+        <Field label="Site" required>
           <Select
             value={value.siteId}
             disabled={!value.customerId || sites === null}
@@ -136,7 +139,7 @@ export function PlacementFields({
             {(sites ?? []).map((s) => (
               <option key={s.id} value={s.id}>{s.name}</option>
             ))}
-            {allowNew && value.customerId && <option value={NEW}>New site…</option>}
+            {value.customerId && <option value={NEW}>New site…</option>}
           </Select>
         </Field>
       )}
@@ -147,14 +150,7 @@ export function PlacementFields({
             <Input value={value.newSiteName} onChange={(e) => set({ newSiteName: e.target.value })} autoComplete="off" />
           </Field>
           <Field label="Time zone" required>
-            {zones.length > 0 ? (
-              <Select value={value.newSiteTimezone} onChange={(e) => set({ newSiteTimezone: e.target.value })}>
-                {!zones.includes(value.newSiteTimezone) && <option value={value.newSiteTimezone}>{value.newSiteTimezone}</option>}
-                {zones.map((z) => <option key={z} value={z}>{z}</option>)}
-              </Select>
-            ) : (
-              <Input value={value.newSiteTimezone} onChange={(e) => set({ newSiteTimezone: e.target.value })} />
-            )}
+            <TimezoneSelect value={value.newSiteTimezone} onChange={(v) => set({ newSiteTimezone: v })} />
           </Field>
           <Field label="Country" hint="Two letters, such as EG. Optional.">
             <Input
