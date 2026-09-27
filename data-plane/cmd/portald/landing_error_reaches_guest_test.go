@@ -61,7 +61,7 @@ func TestEveryRefusalLandingHandlesActuallyReachesTheGuest(t *testing.T) {
 	// guest did something and needs to know what happened.
 	for _, msg := range []string{
 		"Please enter a voucher code.",
-		"Your device isn't on the guest network.",
+		"Your device isn't connected to this Wi-Fi network.",
 		"Unable to detect your device address.",
 		"Internet packages are not available right now. Please contact the site team for assistance.",
 		"Please sign in again.",
@@ -72,7 +72,7 @@ func TestEveryRefusalLandingHandlesActuallyReachesTheGuest(t *testing.T) {
 			rec := httptest.NewRecorder()
 			h.landing(rec, httptest.NewRequest(http.MethodPost, "/auth/voucher", nil), msg)
 			// Compared against the ESCAPED form, because that is what being rendered correctly looks like.
-			// "Your device isn't on the guest network." reaches the page as `isn&#39;t`, which a browser
+			// "Your device isn't connected to this Wi-Fi network." reaches the page as `isn&#39;t`, which a browser
 			// shows as the apostrophe the guest expects. Searching for the raw string failed this one
 			// message while the product was right -- a test that mistakes correct escaping for a missing
 			// message would push somebody to remove the escaping to make it pass.

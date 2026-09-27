@@ -107,7 +107,7 @@ func (h *handler) authOTPVerify(w http.ResponseWriter, r *http.Request) {
 	}
 	mac, ok := h.arpCache(ip)
 	if !ok {
-		jsonErr(w, 400, "device not on guest network")
+		jsonErr(w, 400, "device not on this Wi-Fi network")
 		return
 	}
 	body, _ := json.Marshal(map[string]string{

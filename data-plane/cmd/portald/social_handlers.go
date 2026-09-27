@@ -38,7 +38,7 @@ func (h *handler) socialStart(w http.ResponseWriter, r *http.Request) {
 	}
 	mac, ok := h.arpCache(ip)
 	if !ok {
-		fail(400, "err.device.network", "device not on guest network")
+		fail(400, "err.device.network", "device not on this Wi-Fi network")
 		return
 	}
 

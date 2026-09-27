@@ -107,7 +107,7 @@ func (h *handler) tryIAMv2Auth(w http.ResponseWriter, r *http.Request, payload [
 				h.landing(w, r, "This voucher has reached its device limit. Disconnect another device and try again.")
 			}
 		case activateNoDevice:
-			h.landing(w, r, "Your device isn't on the guest network.")
+			h.landing(w, r, "Your device isn't connected to this Wi-Fi network.")
 		case activateCapacity:
 			h.landing(w, r, guestCapacityMessage)
 		case activateLicense:
@@ -224,7 +224,7 @@ func (h *handler) acquirePackage(w http.ResponseWriter, r *http.Request) {
 	switch failure {
 	case "":
 	case activateNoDevice:
-		h.landing(w, r, "Your device isn't on the guest network.")
+		h.landing(w, r, "Your device isn't connected to this Wi-Fi network.")
 		return
 	case activateDeviceLimit:
 		h.landing(w, r, "This account has reached its device limit. Disconnect another device and try again.")

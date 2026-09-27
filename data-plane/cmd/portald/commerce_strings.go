@@ -225,7 +225,7 @@ var commerceStrings = map[string]map[string]string{
 		"cx.end.GRACE_AFTER_CHECKOUT":           "вскоре после выезда",
 		"cx.end.EARLIEST_OF_FIXED_AND_CHECKOUT": "в установленную дату или при выезде, что наступит раньше",
 		"cx.end.REST_OF_STAY":                   "в конце проживания",
-		"cx.end.other":                          "по правилам площадки",
+		"cx.end.other":                          "по правилам объекта",
 		"cx.select":                             "Выбрать",
 		"cx.confirm.title":                      "Подтвердите пакет",
 		"cx.free":                               "бесплатно",
