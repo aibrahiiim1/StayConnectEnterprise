@@ -131,3 +131,37 @@ describe("Client Portal → Sign-in methods keeps only the Room sign-in switch",
     await waitFor(() => expect(put).toHaveBeenCalledWith("/auth-methods", { pms: { enabled: true, mode: "room_lastname" } }));
   });
 });
+
+// THE READINESS WARNING READS edged's REAL RESPONSE SHAPE. GET /pms-interfaces answers { interfaces: [...] }; the
+// check once read `.data`, saw no interface, and told the operator a healthy, connected PMS was "not working".
+describe("Room sign-in readiness reads edged's /pms-interfaces shape", () => {
+  const IFACE = { id: "ddff5d07-f588-4f1f-8133-a0f393524476", display_label: "Protel", lifecycle_state: "ACTIVE" };
+  function readiness(ready: boolean) {
+    g.mockImplementation((path: string) => {
+      if (path === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
+      if (path === "/auth-methods") return Promise.resolve({ pms: { enabled: true, mode: "room_any" } });
+      if (path === "/pms-interfaces") return Promise.resolve({ interfaces: [IFACE] });
+      if (path === "/pms-routing") return Promise.resolve({ routes: [
+        { guest_network_id: "n1", guest_network_name: "Lobby", routing_mode: "SINGLE_INTERFACE", pms_interface_id: IFACE.id },
+      ] });
+      if (path === `/pms-interfaces/${IFACE.id}/health`) return Promise.resolve({ health: {
+        pms_interface_id: IFACE.id, room_auth_ready: ready, room_auth_reason: ready ? undefined : "FEED_SILENT",
+      } });
+      return Promise.resolve(list([]));
+    });
+  }
+
+  it("a connected, ready PMS is not reported as an outage", async () => {
+    readiness(true);
+    render(<RoomSignInPage />);
+    expect(await screen.findByRole("heading", { name: "Room sign-in" })).toBeInTheDocument();
+    await waitFor(() => expect(g).toHaveBeenCalledWith(`/pms-interfaces/${IFACE.id}/health`));
+    expect(screen.queryByText(/room sign-in is not working/i)).not.toBeInTheDocument();
+  });
+
+  it("a PMS that is not ready is still reported", async () => {
+    readiness(false);
+    render(<RoomSignInPage />);
+    expect(await screen.findByText(/room sign-in is not working at the moment/i)).toBeInTheDocument();
+  });
+});

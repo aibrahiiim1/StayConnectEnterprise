@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
-import { api, ListResp, PmsInterface, PmsInterfaceHealth, PmsGuestNetworkRoute } from "@/lib/api";
+import { api, PmsInterface, PmsInterfaceHealth, PmsGuestNetworkRoute } from "@/lib/api";
 import { roomSignInReadiness, type RoomSignInReadiness } from "@/lib/pms-availability";
 import { Callout } from "@/components/ui/error-banner";
 
@@ -35,10 +35,12 @@ export function useRoomSignInReadiness(): { readiness: RoomSignInReadiness; relo
   const reload = useCallback(async () => {
     try {
       const [list, routing] = await Promise.all([
-        api.get<ListResp<PmsInterface>>("/pms-interfaces"),
+        api.get<{ interfaces?: PmsInterface[] }>("/pms-interfaces"),
         api.get<{ routes: PmsGuestNetworkRoute[] }>("/pms-routing"),
       ]);
-      const all = list.data ?? [];
+      // edged answers { interfaces: [...] } (resources_phase3_interfaces.go), as every other PMS screen reads it.
+      // Reading `.data` here saw no interface at all, so a healthy, connected PMS was reported as "not working".
+      const all = list.interfaces ?? [];
       // Health is read for ACTIVE interfaces only: the others cannot serve a guest whatever their axes say,
       // and asking is a request per interface.
       const healths = await Promise.all(
