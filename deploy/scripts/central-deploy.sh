@@ -208,7 +208,10 @@ run install -d -m 0700 "$CENTRAL_DB_BACKUPS"
 DUMP="$CENTRAL_DB_BACKUPS/central-$STAMP-pre-${COMMIT:0:12}.dump"
 if [ "$DRY_RUN" = 1 ]; then say "DRY-RUN would pg_dump -Fc to $DUMP"
 else
-  docker exec "$CENTRAL_PG_CONTAINER" pg_dump -U "$CENTRAL_DB_USER" -d "$CENTRAL_DB" -Fc > "$DUMP.tmp"
+  # pg_dump always warns about TimescaleDB's circular catalog FKs (harmless for a full dump); its stderr is
+  # kept and shown only if the dump fails.
+  docker exec "$CENTRAL_PG_CONTAINER" pg_dump -U "$CENTRAL_DB_USER" -d "$CENTRAL_DB" -Fc > "$DUMP.tmp" 2> "$WORK/pg_dump.err" \
+    || { cat "$WORK/pg_dump.err" >&2; rm -f "$DUMP.tmp"; die "pg_dump failed — nothing was changed"; }
   docker exec -i "$CENTRAL_PG_CONTAINER" pg_restore -l < "$DUMP.tmp" >/dev/null || die "the backup just taken is not a readable archive"
   chmod 0600 "$DUMP.tmp"; mv -f "$DUMP.tmp" "$DUMP"
   say "backup $DUMP ($(du -h "$DUMP" | cut -f1))"

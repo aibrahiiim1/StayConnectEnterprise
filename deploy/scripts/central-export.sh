@@ -119,7 +119,9 @@ if [ "$FINAL" = 1 ]; then
   systemctl disable stayconnect-ctrlapi stayconnect-cloud-admin >/dev/null 2>&1 || true
   say "FINAL: ctrlapi and the console are stopped and disabled on $HOST"
 fi
-docker exec "$CENTRAL_PG_CONTAINER" pg_dump -U "$CENTRAL_DB_USER" -d "$CENTRAL_DB" -Fc > "$B/db/$CENTRAL_DB.dump"
+# pg_dump always warns about TimescaleDB's circular catalog FKs (harmless for a full dump); shown only on failure.
+docker exec "$CENTRAL_PG_CONTAINER" pg_dump -U "$CENTRAL_DB_USER" -d "$CENTRAL_DB" -Fc > "$B/db/$CENTRAL_DB.dump" 2> "$STAGE/pg_dump.err" \
+  || { cat "$STAGE/pg_dump.err" >&2; die "pg_dump failed"; }
 docker exec -i "$CENTRAL_PG_CONTAINER" pg_restore -l < "$B/db/$CENTRAL_DB.dump" >/dev/null || die "the dump is not a readable archive"
 pg_rowcounts > "$B/db/rowcounts.tsv"
 HYPER="$(pg_hypertable_count)"
