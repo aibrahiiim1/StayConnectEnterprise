@@ -24,7 +24,12 @@
 | Appliance CA | offline root → online intermediate (`CTRLAPI_INTERMEDIATE_CA_KEY`) | Issues appliance client certificates; runtime uses only the intermediate. |
 
 There is **no message bus**: ctrlapi opens no NATS connection and consumes no
-telemetry. Everything an appliance needs from Central is HTTPS.
+telemetry, and the appliance has no client for one. Everything an appliance
+needs from Central is HTTPS. The host is installed and upgraded by
+`deploy/scripts/central-install.sh` (backing services in
+`deploy/compose/central-infra.yml`, units `stayconnect-ctrlapi`,
+`stayconnect-cloud-admin`, `stayconnect-central-backup.timer`); the runbook is
+[DEPLOYMENT_CLOUD.md](DEPLOYMENT_CLOUD.md).
 
 Host commands (`ctrlapi <cmd>`): `serve` (default), `seed-admin`,
 `gen-vendor-key`, `gen-assignment-key`, `gen-registry-key`, and
@@ -39,7 +44,8 @@ The Central DB holds exactly the licensing, activation and fleet-status domain:
 |---|---|
 | `tenants` | customers (API name `customer_id`) |
 | `sites` | properties per customer |
-| `appliances` | inventory: serial, hardware fingerprint, identity public key, WAN/LAN MAC, `lifecycle_state` (`pending_approval`, `assigned`, `revoked`, `decommissioned` — migration 0046), `last_seen_at`, `activated_at`, replacement fields |
+| `appliances` | inventory: serial, hardware fingerprint, identity public key, WAN/LAN MAC, `lifecycle_state` (`pending_approval`, `assigned`, `revoked`, `decommissioned` — migration 0046), `registered_at` (renamed from `enrolled_at` by 0047), `last_seen_at`, `activated_at`, replacement fields |
+| `retired_appliance_identities` | identity keys of retired appliances (migration 0047); registration and offline import refuse them (`identity_retired`), so a retired box must be factory-reset before it can be activated again |
 | `appliance_assignments`, `appliance_signed_assignments`, `appliance_assignment_history`, `appliance_assignment_fetch_log` | the signed customer/site binding and its history (fetch log pruned after 30 days) |
 | `assignment_signing_keys`, `assignment_registry` | assignment keys (active / verify_only / revoked) and the signed registry |
 | `appliance_certificates`, `appliance_certificate_requests`, `appliance_certificate_events`, `appliance_certificate_revocations`, `appliance_ca_versions` | appliance PKI |
@@ -49,12 +55,16 @@ The Central DB holds exactly the licensing, activation and fleet-status domain:
 | `licenses` | signed licence envelopes + queryable projection; **one current (`active`/`suspended`) licence per appliance**, enforced by a partial unique index |
 | `operators`, `operator_roles` | Central sign-ins (platform Team and customer users) |
 | `audit_log` (hypertable) | every Central write |
-| schema `legacy_archive`: `plans`, `plan_limits`, `plan_limit_history`, `subscription_events` | retired commercial history, kept for the record; nothing reads it (migration 0046) |
+
 
 Guest-domain data (guests, sessions, vouchers, PMS, payments, OTP, portal, …)
 is **edge-owned** and does not exist on Central: the empty legacy tables were
 dropped by migration 0046, and the fleet telemetry tables by migration 0045.
-Full matrix: [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md).
+Migration 0047 dropped the `legacy_archive` schema with everything in it (the
+retired commercial history 0046 had moved there and an older guest-history
+archive) and the columns nothing read any more (operator SSO, tenant sign-in
+methods and metadata, the licence table's plan/features/limits copies,
+site-scoped operator roles). Full matrix: [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md).
 
 ## 3. API surface
 
@@ -86,9 +96,18 @@ Central derives every appliance's **activation**, **connection** and
 send no usage, health or heartbeat telemetry (CLAUDE.md §0E).
 
 A background loop (every minute) flags retirements not acknowledged within
-policy (`terminal_delivery_failed` + a security alert; credentials are **not**
-revoked), raises an alert when a replacement window elapses, and hourly prunes
-assignment-fetch log rows older than 30 days.
+10 minutes (`terminal_delivery_failed` + a security alert; credentials are
+**not** revoked), raises an alert when a replacement window (72 hours) elapses,
+and hourly prunes assignment-fetch log rows older than 30 days.
+
+Retirement — by **Retire** or by completing a hardware **replacement** — is
+always the acknowledged two-phase terminal delivery
+(`internal/api/terminal_delivery.go`): the licence is revoked, a signed terminal
+assignment is issued, and the appliance's credentials are revoked only after its
+signed acknowledgement or on an emergency retire. A **move** stays within the
+customer (`409 cross_customer_move` otherwise) and re-issues the licence for the
+new site with the same terms in the same transaction, failing closed
+(`503 licensing_unavailable`) when that is not possible.
 
 ## 5. Licensing issuance flow (`internal/licensing`)
 

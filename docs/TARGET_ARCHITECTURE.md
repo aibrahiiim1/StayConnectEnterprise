@@ -28,7 +28,7 @@ Everything a guest or a hotel operator touches runs **on the appliance against a
 site-local database**. The cloud (Central) keeps only licensing, activation and
 fleet status: who the customers are, which sites and appliances exist, whether
 each appliance is activated and connected, and its signed licence (CLAUDE.md
-§0E). It receives no telemetry. The appliance opens **outbound HTTPS
+§0E). The appliance has no telemetry subsystem at all. The appliance opens **outbound HTTPS
 connections only** — nothing in the cloud ever needs to reach into a hotel
 network.
 
@@ -72,7 +72,8 @@ network.
 Terminology rule used everywhere: **GuestAccessPlan** = the edge
 `ticket_templates` table (what a hotel sells/grants a guest). The cloud-side
 **CommercialPlan** (`plans`) is retired — the signed appliance licence is the
-only entitlement, and the old tables sit in schema `legacy_archive`. Plain
+only entitlement; the old tables were archived by Central migration 0046 and
+dropped with the `legacy_archive` schema by migration 0047. Plain
 "Plan" is banned in code, UI and docs.
 
 ## 4. Component diagram (one site)
@@ -95,7 +96,7 @@ only entitlement, and the old tables sit in schema `legacy_archive`. Plain
  │                                                  │                 │
  │   local Postgres `stayconnect_site` ◀────────────┼──── scd ──┐     │
  │   (guests, sessions, vouchers, GuestAccessPlans, │    ▲      │     │
- │    PMS config, payments, audit, sync_outbox,     │  acctd  nft/tc  │
+ │    PMS config, payments, audit,                  │  acctd  nft/tc  │
  │    tenant_effective_limits ← signed license)     │           │     │
  │                                                  │           │     │
  │   local PMS (FIAS TCP / Mews / Apaleo REST) ◀── scd          │     │
@@ -118,9 +119,15 @@ Key invariants:
   Ed25519 vendor-signed license offline and mirrors its limits into the local
   `tenant_effective_limits` table, so existing data-plane limit queries keep
   working unchanged. See [LICENSING_AND_ENTITLEMENTS.md](LICENSING_AND_ENTITLEMENTS.md).
-- **No telemetry.** Edge→cloud traffic is only registration, CSR, hello and
-  assignment acknowledgement (CLAUDE.md §0E). The telemetry outbox design is
-  recorded in [SYNC_PROTOCOL.md](SYNC_PROTOCOL.md) (historical; switched off).
+- **No telemetry.** Edge→cloud traffic is only registration, CSR, licence
+  fetch, hello, assignment acknowledgement and offline-package reconciliation
+  (CLAUDE.md §0E). The telemetry subsystem was removed from the appliance on
+  2026-09-27 (appliance migration 0093); its historical design is in
+  [SYNC_PROTOCOL.md](SYNC_PROTOCOL.md).
+- **Moves stay within the customer.** A new customer means retire →
+  factory-clean install → registration → activation; an appliance Central
+  deletes after it held a customer never re-registers
+  ([CENTRAL_CONTROL_PLANE.md §4](CENTRAL_CONTROL_PLANE.md#4-lifecycle)).
 - **Guest PII never reaches the cloud.**
 
 ## 5. API namespaces
@@ -135,8 +142,9 @@ Key invariants:
 
 **Support status (truthful):** **single-appliance local-first / offline operation is current and
 supported.** **HA failover under the final two-NIC architecture is NOT yet designed, implemented,
-or accepted.** The VRRP (keepalived) + conntrackd + NATS nft-set replication + Postgres streaming
-replication ideas below are **design intent only**; the earlier design assumed a **dedicated third
+or accepted.** The VRRP (keepalived) + conntrackd + nft-set replication + Postgres streaming
+replication ideas below are **design intent only** (the earlier NATS-based nft-set replication was
+removed from scd with the rest of its message-bus transport); the earlier design assumed a **dedicated third
 HA-sync NIC**, which the approved **two-NIC (WAN+LAN)** rule removes, so the synchronization
 **transport is an OPEN architecture decision**. **Do not claim any WAN/LAN HA failover, conntrack
 replication, nft replication, or Postgres streaming replication is available** — none is

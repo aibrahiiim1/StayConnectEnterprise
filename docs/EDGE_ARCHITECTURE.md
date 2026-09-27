@@ -17,7 +17,7 @@
 All four read/write only the local DB, and each takes its tenant/site from the
 **verified** signed assignment (no environment fallback in a production build).
 The single cloud-touching component is the Central agent inside scd (outbound
-HTTPS only; no NATS connection is opened — CLAUDE.md §0E).
+HTTPS only; the appliance has no message-bus client — CLAUDE.md §0E).
 
 ## 2. Site-local database (`stayconnect_site`)
 
@@ -36,7 +36,7 @@ by changing only their DSN and `sitemigrate` copies rows 1:1.
 | Providers & payments | `notification_providers`, `social_oauth_providers`, `stripe_accounts`, `payments`, `stripe_events` |
 | Compliance | `audit_log` (local; hotel actions stay at the hotel) |
 | Entitlements bridge | `tenant_effective_limits` — a **plain table** (the cloud version is a view) rewritten by scd/edged from the verified signed license. Existing limit queries (`session.CheckConcurrency`, provisioning caps) work unchanged; source of truth is the license file, never a cloud DB |
-| Sync & ops | `sync_outbox` (seq identity, attempts, next_attempt_at, dead, last_error), `sync_checkpoints` (named jsonb checkpoints), `backup_records` |
+| Ops | `backup_records`, `edge_offline_packages` (single-use ledger of imported offline activation packages, reconciled with Central), `appliance_service_health` (local service health, read by Hotel Admin). The former telemetry queue (`sync_outbox`, `sync_checkpoints`) and the command/update ledgers were dropped by migration 0093 |
 
 `accounting_records` and `audit_log` become hypertables when TimescaleDB is
 installed (pilot), plain indexed tables otherwise.
@@ -187,22 +187,35 @@ appliance-initiated HTTPS, signed with the appliance's Ed25519 identity key
   `MarkCloudValidated`. Revocations arrive embedded in the response. The
   licence (including its hardware binding) is re-evaluated locally every minute
   and at boot.
-- **Hello**: `GET /v1/appliance/hello` at boot and every 5 minutes; if Central
-  no longer knows the appliance, it clears its identity and registers again.
+- **Hello**: `GET /v1/appliance/hello` at boot and every 5 minutes. If Central
+  twice answers that it no longer knows the appliance: one that **never held a
+  customer** clears its identity and registers again as waiting; one that **has
+  held a customer** (a granting or terminal assignment on disk, or tenant data in
+  the site DB) removes its licence and client certificate, keeps its identity and
+  data, writes `/etc/stayconnect/removed-from-central.json` and never registers
+  again — the status reads `activation: retired`, `details.reason:
+  removed_from_central`, and only a factory-clean install brings it back
+  (`cmd/scd/removed_from_central.go`).
+- **Terminal acknowledgement and offline reconcile**: the signed ack of a
+  terminal (retirement) assignment and `POST /v1/appliance/offline-reconcile`
+  for a consumed offline package are retried until Central confirms
+  (`cmd/scd/central_retry.go`); neither is on a guest path.
 
-The telemetry outbox (`sync_outbox`) is static: no producer writes to it and
-nothing drains it; retention still prunes records delivered before the
-switch-off. The historical design is in [SYNC_PROTOCOL.md](SYNC_PROTOCOL.md).
+There is nothing else: no telemetry outbox or producer, no remote command
+channel, no software-update agent and no cloud-mode setting. That subsystem was
+removed on 2026-09-27 (appliance migration 0093); its historical design is in
+[SYNC_PROTOCOL.md](SYNC_PROTOCOL.md).
 
 ## 7. HA pair specifics
 
-Data path HA is unchanged from phase 5.5 (keepalived VRRP on the guest VIP,
-conntrackd, nft `auth_ipv4` replication over `nft.<siteID>`, boot reconcile from
-`sessions`). New: the site DB runs on the primary with **streaming replication**
-to the secondary; edged and scd on the secondary point at the local replica and
-promote it on failover. Split-brain risk and the recommended cloud witness are
-documented in [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md) §6 — a known
-limitation, witness not yet implemented.
+**Not implemented.** HA failover under the two-NIC (WAN+LAN) architecture is
+not designed, implemented or accepted, and its synchronisation transport is an
+open decision ([TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md) §6). The earlier
+design — keepalived VRRP, conntrackd, nft `auth_ipv4` replication over a message
+bus and site-DB streaming replication — is design history only: the message-bus
+replication was removed from scd with the rest of the NATS transport, and scd's
+nft wrapper is local-only. Boot reconcile of `auth_ipv4` from `sessions` is
+current single-appliance behaviour.
 
 ## 8. Phase 19 — Networking
 

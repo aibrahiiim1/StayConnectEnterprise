@@ -34,7 +34,7 @@ synchronization transport is an **OPEN architecture decision** (see §7 and
 | Unit | Component | Notes |
 |---|---|---|
 | `postgresql` | local Postgres 16 (+TimescaleDB where available) | database `stayconnect_site`, site-only credentials; loopback |
-| `stayconnect-scd` | session controller **+ Central agent** (token-less registration, assignment, certificate, licence fetch, hello — [EDGE_ARCHITECTURE.md](EDGE_ARCHITECTURE.md) §6) | root (CAP_NET_ADMIN); `SCD_DB_URL` → site DSN; `SCD_CTRLAPI_BASE` / `SCD_MTLS_BASE` from `deploy/config/central-endpoint.env` (`https://sc-central.echofusion.com`, mTLS `:9443`). NATS settings are not used: in licensing-only mode the transport is never opened (CLAUDE.md §0E) |
+| `stayconnect-scd` | session controller **+ Central agent** (token-less registration, assignment, certificate, licence fetch, hello — [EDGE_ARCHITECTURE.md](EDGE_ARCHITECTURE.md) §6) | root (CAP_NET_ADMIN); `SCD_DB_URL` → site DSN; `SCD_CTRLAPI_BASE` / `SCD_MTLS_BASE` from `deploy/config/central-endpoint.env` (`https://sc-central.echofusion.com`, mTLS `:9443`). scd has no message-bus client and no telemetry, command or update settings (`SCD_NATS_URL`, `SCD_NATS_MTLS_URL`, `SCD_COMMAND_PUB`, `SCD_UPDATE_PUB` are removed — CLAUDE.md §0E). `SCD_REMOVED_MARKER` (default `/etc/stayconnect/removed-from-central.json`) is the removed-from-Central marker |
 | `stayconnect-portald` | captive portal | user `stayconnect`, guest iface :8380/:8343 |
 | `stayconnect-acctd` | accounting/quotas | root (tc); site DSN |
 | `stayconnect-edged` | Hotel Admin API `/edge/v1` + serves `hotel-admin/` | loopback listener, fronted by Caddy on mgmt; site DSN; reads license store |
@@ -43,7 +43,12 @@ synchronization transport is an **OPEN architecture decision** (see §7 and
 | `stayconnect-caddy` | TLS for Hotel Admin on the **mgmt IP only** | internal CA (`local_certs`) unless the site has real names |
 | backup agent (timer) | nightly `pg_dump` → `backup_records` | [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md) §1 |
 | monitoring | scd/edged Prometheus endpoints, loopback | scraped locally; nothing is sent to Central as telemetry |
-| update agent | Roadmap — update orchestration not yet implemented | until then: staged binary rollout via ops procedure |
+| software updates | no on-appliance update agent | staged binary rollout via the deployment procedure |
+
+`deploy/scripts/install-service-units.sh` installs the appliance units from `deploy/systemd/` and **skips
+the OneGate Central units** that share that directory (`stayconnect-ctrlapi`, `stayconnect-cloud-admin`,
+`stayconnect-central-backup`); Central's own installer is `deploy/scripts/central-install.sh`
+([DEPLOYMENT_CLOUD.md](DEPLOYMENT_CLOUD.md)).
 
 On-disk state that must survive reinstalls: `/etc/stayconnect/identity/`
 (Ed25519 keypair), `/etc/stayconnect/license/` (current.json, state.json,
@@ -117,7 +122,9 @@ WiFi ([OFFLINE_OPERATION.md](OFFLINE_OPERATION.md)).
 > implemented. HA overall remains a documented, not-yet-implemented limitation.
 
 Second appliance: same stack; keepalived VRRP on the guest VIP (10.20.0.1),
-conntrackd connection-tracking sync, nft `auth_ipv4` replication via `nft.<siteID>`.
+conntrackd connection-tracking sync, nft `auth_ipv4` replication (the earlier message-bus
+replication over `nft.<siteID>` was removed with scd's NATS transport; a new transport is part of
+the OPEN decision).
 Site DB: primary runs Postgres with **streaming replication** to the secondary; failover
 promotes the replica (VRRP notify hook), edged/scd on the survivor keep their loopback DSN.
 Both nodes appear in the license's `appliance_ids` and each keeps its own cloud
