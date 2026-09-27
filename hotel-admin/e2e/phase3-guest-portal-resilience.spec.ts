@@ -279,8 +279,10 @@ test("the choice step is announced as a labelled group and the error as a live r
 
   await page.goto("http://localhost/portal");
   const err = page.locator("#pms-err");
+  // role="alert" IS the live region (implicitly aria-live="assertive"). The portal UI audit (4f8f596c) removed
+  // an explicit aria-live="polite" that contradicted it, so what must hold is that nothing switches it off.
   await expect(err).toHaveAttribute("role", "alert");
-  await expect(err).toHaveAttribute("aria-live", "polite");
+  await expect(err).not.toHaveAttribute("aria-live", "off");
 
   await submitStay(page, "412", "Okonkwo");
   const group = page.locator("#pms-choices");
