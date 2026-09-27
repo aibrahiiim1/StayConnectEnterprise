@@ -160,13 +160,13 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
           api.post<unknown>(`/cloud/v1/appliances/${a.id}/offline-license`, { valid_hours: OFFLINE_VALID_HOURS }),
         );
         saveFile(`license-${a.serial}.json`, res);
-        toast.success("License file downloaded", "Upload it in Hotel Admin under Appliance & licence.");
+        toast.success("License file downloaded", "Upload it in the Admin Console under Appliance & licence.");
       } else {
         const res = await withStepUp(() =>
           api.post<unknown>(`/cloud/v1/appliances/${a.id}/offline-activation-package`, { valid_hours: OFFLINE_VALID_HOURS }),
         );
         saveFile(`activation-package-${a.serial}.json`, res);
-        toast.success("Activation package downloaded", "Upload it in Hotel Admin under Appliance & licence. Valid for 7 days.");
+        toast.success("Activation package downloaded", "Upload it in the Admin Console under Appliance & licence. Valid for 7 days.");
       }
     } catch (e) {
       toast.error("Download failed", e instanceof Error ? e.message : String(e));
@@ -178,7 +178,7 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
   const licenseAction = (verb: "suspend" | "resume" | "revoke"): ReasonAction => ({
     suspend: {
       title: "Suspend license",
-      description: "Guest access on this appliance stops until the license is resumed.",
+      description: "Client access on this appliance stops until the license is resumed.",
       confirmLabel: "Suspend license",
       danger: true,
       url: `/cloud/v1/licenses/${lic.id}/suspend`,
@@ -186,7 +186,7 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
     },
     resume: {
       title: "Resume license",
-      description: "Guest access is restored on the appliance's next contact.",
+      description: "Client access is restored on the appliance's next contact.",
       confirmLabel: "Resume license",
       url: `/cloud/v1/licenses/${lic.id}/resume`,
       done: "License resumed",
@@ -199,7 +199,7 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
       typed: true,
       url: `/cloud/v1/licenses/${lic.id}/revoke`,
       done: "License revoked",
-      consequences: ["Guest access on this appliance stops.", "This license cannot be resumed."],
+      consequences: ["Client access on this appliance stops.", "This license cannot be resumed."],
     },
   })[verb];
 
@@ -288,7 +288,7 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
           {canManage && (
             <CardFooter>
               <span className="me-auto text-caption text-muted-foreground">
-                No internet at the site? Download the activation package and upload it in the appliance&apos;s Hotel Admin.
+                No internet at the site? Download the activation package and upload it in the appliance&apos;s Admin Console.
               </span>
               <Button variant="secondary" size="sm" disabled={fileBusy} onClick={() => download("package")}>
                 <Download /> Activation package
@@ -385,7 +385,7 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
               <CardBody>
                 {hasLicense ? (
                   <dl className="grid gap-4 sm:grid-cols-3">
-                    <Fact label="Guests online at once">
+                    <Fact label="Clients online at once">
                       <span className="tabular">{(lic.max_concurrent_online_guests ?? current?.max_concurrent_online_guests)?.toLocaleString() ?? "—"}</span>
                     </Fact>
                     <Fact label="Valid until">
@@ -402,7 +402,7 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
                 ) : (
                   <p className="text-sm text-muted-foreground">
                     {licenseInfo("none").explain}
-                    {a.activation === "activated" && " Guests cannot get online until it has one."}
+                    {a.activation === "activated" && " Clients cannot get online until it has one."}
                   </p>
                 )}
               </CardBody>
@@ -439,7 +439,7 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
               <Table aria-label="License history">
                 <THead>
                   <TR>
-                    <TH>Version</TH><TH>State</TH><TH className="hidden sm:table-cell">Guests</TH>
+                    <TH>Version</TH><TH>State</TH><TH className="hidden sm:table-cell">Clients</TH>
                     <TH>Valid until</TH><TH className="hidden md:table-cell">Issued</TH>
                   </TR>
                 </THead>
@@ -559,7 +559,7 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
           emergency
             ? "Its license and credentials are revoked now, without waiting for the appliance to confirm."
             : "Central signs its retirement; the appliance confirms on its next contact, normally within a minute. It shows Retiring until then, and its credentials stay valid until it confirms.",
-          "It stops serving guests and can no longer connect to Central.",
+          "It stops serving clients and can no longer connect to Central.",
           "It cannot be undone. Only its record can then be deleted.",
         ]}
         confirmText={a.serial}

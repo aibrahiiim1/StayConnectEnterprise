@@ -1,15 +1,15 @@
 # OneGate design system
 
-One visual language for the three OneGate front-ends: the **guest portal** (portald), **Hotel Admin**
-(the console on each appliance) and **Central** (the vendor console). Hotel Admin and Central are separate
+One visual language for the three OneGate front-ends: the **Client Portal** (formerly Guest Portal; portald), **Admin Console**
+(formerly Hotel Admin; the console on each appliance) and **Central** (the vendor console). Admin Console and Central are separate
 products with separate logins; they share every token and component and differ only in their accent colour
 and their product line under the OneGate mark.
 
 | Front-end | Where the system lives |
 |---|---|
-| Hotel Admin | `hotel-admin/app/tokens.css` (generated), `hotel-admin/app/globals.css`, `hotel-admin/tailwind.config.ts`, `hotel-admin/components/ui/*`, `hotel-admin/components/brand.tsx` |
+| Admin Console | `hotel-admin/app/tokens.css` (generated), `hotel-admin/app/globals.css`, `hotel-admin/tailwind.config.ts`, `hotel-admin/components/ui/*`, `hotel-admin/components/brand.tsx` |
 | Central | `cloud-admin/app/tokens.css` (generated), `cloud-admin/app/globals.css`, `cloud-admin/tailwind.config.ts`, `cloud-admin/components/ui/*`, `cloud-admin/components/brand.tsx` |
-| Guest portal | `data-plane/cmd/portald/templates.go` (inline CSS: the portal cannot load a stylesheet or font from anywhere but the appliance) |
+| Client Portal | `data-plane/cmd/portald/templates.go` (inline CSS: the portal cannot load a stylesheet or font from anywhere but the appliance) |
 
 **The token values have one source:** [`tokens.css`](tokens.css). Run `node tools/sync-design-tokens.mjs`
 after editing it; each console has a unit test (`test/design-tokens-sync.test.ts`) that fails when its copy
@@ -18,13 +18,13 @@ drifts, and one that checks the text contrast of every token pair in both themes
 ## Principles
 
 1. **Clarity over decoration.** Operators use these screens at a front desk, often mid-conversation with a
-   guest. Every screen answers one question first; decoration never competes with state.
+   client. Every screen answers one question first; decoration never competes with state.
 2. **One primary action per screen.** Brand colour is the logo, the single main action, and the active
    navigation item. If a second thing wants to be brand-coloured it is wrong.
 3. **Colour carries state, never decoration** — and never *only* colour: every badge has its word.
 4. **Flat where the eye scans.** Lists and queues are square and shadowless; depth comes from hairlines and
    tonal layers. Elevation is reserved for things that float (menus, dialogs, sheets) or respond (hover).
-5. **Say it in the hotel's words.** The glossary in the redesign handoff is binding: *Customer*, *Site*,
+5. **Say it in the site's words.** The glossary in the redesign handoff is binding: *Customer*, *Site*,
    *Appliance*, *Guest network*, *Internet package*, *Service plan*, *Stay*, *Operator*, *Password
    confirmation*… Internal words (tenant, VLAN as a label, mirror, step-up, FIAS) are never the main label.
 6. **Nothing silently changes behaviour.** The design system presents behaviour; it never decides it.
@@ -52,16 +52,16 @@ Tailwind as `hsl(var(--role) / <alpha>)`. A theme is a set of values; no compone
 | `success` / `warning` / `destructive` / `info` | owned green, waiting amber, danger red, info blue | state only, each with a `-subtle` fill and a `-subtle-foreground` text |
 
 Central sets `data-product="central"` on `<html>`, which swaps only the accent to **teal** (`#0e7c86`), so
-the vendor console can never be mistaken for a hotel's appliance.
+the vendor console can never be mistaken for a site's appliance.
 
 Both consoles ship **Light, Dark and System** themes from the same tokens (`.dark` redefines the values).
-The guest portal is light only and takes each hotel's brand colour from Portal settings.
+The Client Portal is light only and takes each site's brand colour from Portal settings.
 
 ## Typography
 
 One family: **Inter** (variable), self-hosted in each console via `@fontsource-variable/inter` — the
-appliance may have no route to a font CDN. The guest portal uses the platform system font stack (no font
-download before a guest is online).
+appliance may have no route to a font CDN. The Client Portal uses the platform system font stack (no font
+download before a client is online).
 
 | Tailwind class | Size / weight / line | Use |
 |---|---|---|
@@ -102,9 +102,9 @@ surface.
 **Lucide** (`lucide-react`) in both consoles, 16px in controls and navigation, 20px in page-header tiles,
 1.5–2px stroke, `currentColor`. Each navigation destination has a distinct icon. Icons never carry meaning
 alone: a status icon always has its word beside it. Directional icons (chevrons, arrows) are mirrored under
-`dir="rtl"`. The guest portal uses a handful of inline SVG icons (no icon font).
+`dir="rtl"`. The Client Portal uses a handful of inline SVG icons (no icon font).
 
-## Components (Hotel Admin `components/ui/*`, mirrored in Central)
+## Components (Admin Console `components/ui/*`, mirrored in Central)
 
 | Component | File | States it covers |
 |---|---|---|
@@ -125,7 +125,7 @@ alone: a status icon always has its word beside it. Directional icons (chevrons,
 | `ErrorBanner`, `Callout` | `error-banner.tsx` | info, success, warning, danger; trace id |
 | Charts: `AreaChart`, `ColumnChart`, `BarList`, `SplitBar`, `Heatmap`, `Sparkline`, `Meter` | `chart.tsx`, `misc.tsx` | both themes |
 | **Patterns** — `OneTimeReveal`, `PendingChangeBanner`, `LiveStatus`, `ReadOnlyNotice`, `NotAvailable`, `ConsequenceList`, `SettingField`, `CopyButton` | `patterns.tsx` | see below |
-| `SurfaceNotEnabled` | `components/surface-not-enabled.tsx` | "Not enabled on this appliance" (guest internet unaffected) |
+| `SurfaceNotEnabled` | `components/surface-not-enabled.tsx` | "Not enabled on this appliance" (client internet unaffected) |
 
 ## Patterns (the states every screen must account for)
 
@@ -141,7 +141,7 @@ alone: a status icon always has its word beside it. Directional icons (chevrons,
 | Disabled | control at 50% with the reason in a tooltip or hint |
 | Read-only | inputs disabled, actions hidden, one `ReadOnlyNotice` line under the header |
 | Permission restricted | the menu item is hidden; a block the role may not see renders `NotAvailable` with the reason |
-| Feature not enabled | `SurfaceNotEnabled` — "Not enabled on this appliance", guest internet unaffected |
+| Feature not enabled | `SurfaceNotEnabled` — "Not enabled on this appliance", client internet unaffected |
 | Destructive confirmation | `ConfirmDialog` with `consequences`, `requireReason`, `requirePassword`, `confirmText` (typed) and `confirmVariant="danger"` |
 | One-time reveal | `OneTimeReveal`: modal, "Shown once" warning, large mono value, Copy, explicit "I have it" |
 | Apply → confirm → rollback | `PendingChangeBanner` with a live countdown, Keep / Roll back, health results beneath |
@@ -155,8 +155,8 @@ one-time secret again.
 - **App shell** (both consoles): inverse sidebar (16rem; collapses to a 3.75rem icon rail on desktop,
   remembered per device; a slide-in drawer below 1024px), a 56px sticky top bar with the breadcrumb
   "Group / Page", status pill and theme switch, and a content pane that owns the page gutter.
-- **Hotel Admin** navigation: 8 groups — Overview · Internet offering · Guests · Property management system ·
-  Charges · Guest portal · Networking · System. Menu items are hidden when the role cannot read them or the
+- **Admin Console** navigation: 8 groups — Overview · Internet offering · Clients · Property management system ·
+  Charges · Client Portal · Networking · System. Menu items are hidden when the role cannot read them or the
   appliance does not serve them. The page title always equals the menu label.
 - **Central** navigation: five destinations — Overview · Customers · Appliances · Licenses · System (Security
   alerts, Trust & keys, Audit log, Team, Backup health as a secondary bar). There is no customer selector: a
@@ -165,24 +165,24 @@ one-time secret again.
 - **Breakpoints**: phone < 640px (single column, tables hide secondary columns, sheets full width),
   tablet 640–1023px (drawer navigation), laptop ≥ 1024px (sidebar), wide ≥ 1536px.
 - **RTL-ready**: logical spacing (`ps-*`, `pe-*`, `start-*`), mirrored directional icons. The consoles are
-  English-only today; the guest portal is fully RTL in Arabic.
+  English-only today; the Client Portal is fully RTL in Arabic.
 
 ## Accessibility (WCAG 2.1 AA)
 
 4.5:1 text contrast in both themes (tested), 3:1 control boundaries, visible focus everywhere, full
 keyboard use (Radix dialogs trap focus and close on Esc; tabs move with arrow keys), form errors announced
-through `aria-describedby`/`aria-live`, 44px touch targets in the guest portal, and no information by
+through `aria-describedby`/`aria-live`, 44px touch targets in the Client Portal, and no information by
 colour alone.
 
-## Guest portal
+## Client Portal
 
 The portal is server-rendered HTML from portald with one inline stylesheet and a few lines of inline
-script — no external font, CDN, framework or analytics, because the guest has no internet yet and the page
+script — no external font, CDN, framework or analytics, because the client has no internet yet and the page
 opens in a captive-portal mini-browser. Its default look uses the same palette, radius scale and type
-roles as the consoles, expressed as CSS custom properties that each hotel's Portal settings override
+roles as the consoles, expressed as CSS custom properties that each site's Portal settings override
 (brand colour, button shade, text colour, radius, typeface, layout template, density, panel position,
 hero height, surface, photo darkening). Six layout templates (Classic, Split, Immersive, Header bar,
-Resort, Kiosk) are variations of one token set, so each stays coherent under any hotel's colour and photo.
+Resort, Kiosk) are variations of one token set, so each stays coherent under any site's colour and photo.
 Every page — sign-in, package choice, "You're online", errors — is branded and translated in the six
 built-in languages, and fully mirrored in Arabic.
 
@@ -191,12 +191,12 @@ built-in languages, and fully mirrored in Arabic.
 - **Info stays blue.** The brand book defines `info` as `#245d92`, close to the brand blue. It is kept as
   the brand defines it; `info` is therefore never used without its word or icon, never on a button and never
   inside the active navigation item (whose tint it resembles).
-- **"Licence" in Hotel Admin, "License" in Central.** Each console uses the spelling of its own menu in the
-  redesign handoff (Hotel Admin: *Appliance & licence*; Central: *Licenses*), which also matches the words the
-  appliance's own services send to Hotel Admin.
+- **"Licence" in the Admin Console, "License" in Central.** Each console uses the spelling of its own menu in the
+  redesign handoff (Admin Console: *Appliance & licence*; Central: *Licenses*), which also matches the words the
+  appliance's own services send to the Admin Console.
 - **Central shows licensing only.** Appliances report nothing but licensing to Central, so Central's screens
-  show licenses, sites and appliances and never guest activity; a screen that would need telemetry is not
+  show licenses, sites and appliances and never client activity; a screen that would need telemetry is not
   built rather than shown empty.
 - **Controls mirror the server.** Each console hides an action its server refuses for the signed-in role
-  (Hotel Admin: `lib/roles.ts`; Central: `lib/permissions.ts`, which cites the ctrlapi rule for every entry).
+  (Admin Console: `lib/roles.ts`; Central: `lib/permissions.ts`, which cites the ctrlapi rule for every entry).
   The UI never widens or narrows what the server allows.

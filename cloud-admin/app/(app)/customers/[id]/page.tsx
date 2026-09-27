@@ -331,7 +331,7 @@ function Sites({ customerId, canManage, onChanged }: { customerId: string; canMa
   return (
     <Card>
       <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-        <span className="text-sm text-muted-foreground">A site is one physical property, such as a hotel.</span>
+        <span className="text-sm text-muted-foreground">A site is one physical location, such as a hotel, office or campus.</span>
         {canManage && (
           <Button size="sm" onClick={() => open(null)}><Plus /> New site</Button>
         )}

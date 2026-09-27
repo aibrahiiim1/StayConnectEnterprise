@@ -57,7 +57,7 @@ function LoginInner() {
             Customers, sites and appliances: activate each appliance and manage its license for its lifetime.
           </p>
           <p className="text-sm leading-relaxed text-sidebar-muted">
-            Central is used for licensing only. Each hotel&apos;s network and guests are run from Hotel Admin on its
+            Central is used for licensing only. Each site&apos;s network and clients are run from the Admin Console on its
             own appliance.
           </p>
         </div>
@@ -112,8 +112,8 @@ function LoginInner() {
             <div className="mt-6 flex gap-2.5 rounded-lg border border-border bg-card px-3.5 py-3 text-caption leading-relaxed text-muted-foreground">
               <ShieldCheck className="mt-0.5 size-4 shrink-0" aria-hidden />
               <p>
-                A Central account signs in to this console only. It opens nothing on a hotel&apos;s appliance, and a
-                Hotel Admin account does not work here.
+                A Central account signs in to this console only. It opens nothing on a site&apos;s appliance, and an
+                Admin Console account does not work here.
               </p>
             </div>
 

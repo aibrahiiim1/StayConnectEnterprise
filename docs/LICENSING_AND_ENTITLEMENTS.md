@@ -114,17 +114,17 @@ re-checked on every evaluation, including at boot; a mismatch is a hard reject
 and a notice asks for a rebind in Central.
 
 - **Active** — within validity. Everything entitled works.
-- **GracePeriod** — `valid_until` passed, within grace. Guest functionality
-  unchanged; Hotel Admin shows a prominent renewal warning. Exists so a renewal
-  issued while the appliance was offline never interrupts a hotel.
+- **GracePeriod** — `valid_until` passed, within grace. Client functionality
+  unchanged; the Admin Console (formerly Hotel Admin) shows a prominent renewal warning. Exists so a renewal
+  issued while the appliance was offline never interrupts a site.
 - **Restricted** (legacy schema 1/2 only) — grace exhausted (until
-  `valid_until + 2×grace`). Existing sessions continue; basic guest logins
-  still work; entitlement-gated features turn off; creating guest access
+  `valid_until + 2×grace`). Existing sessions continue; basic client logins
+  still work; entitlement-gated features turn off; creating client access
   plans/voucher batches is blocked.
-- **Expired** — beyond `valid_until + grace` (legacy: `+2×grace`). New guest
+- **Expired** — beyond `valid_until + grace` (legacy: `+2×grace`). New client
   sessions refused (portal shows a service notice); existing sessions run to
-  their natural end; Hotel Admin stays available.
-- **Suspended** — issuer set `status: suspended` (billing hold). New guest
+  their natural end; Admin Console stays available.
+- **Suspended** — issuer set `status: suspended` (billing hold). New client
   sessions refused, effective immediately on receipt; existing sessions run to
   their natural end.
 - **Revoked** — an authenticated revocation notice names this `license_id`.
@@ -132,15 +132,15 @@ and a notice asks for a rebind in Central.
   Strongest state; never entered by time alone.
 - **Unlicensed** — no valid signed licence installed (factory-clean, waiting
   for activation, missing or invalid). A production appliance fails closed:
-  no new guest sessions.
+  no new client sessions.
 - **CloudStale** — a **warning flag, not a state**: trips when the last
   successful cloud validation (license fetch) is older than
-  `offline_grace_days`. It never degrades guest function while the document
+  `offline_grace_days`. It never degrades client function while the document
   itself is valid.
 
 ## 5. Behavior per state
 
-| State | New guest sessions | Existing sessions | Provisioning (plans/batches) | Entitled features (paid WiFi, SMS OTP, social…) | Hotel Admin |
+| State | New client sessions | Existing sessions | Provisioning (plans/batches) | Entitled features (paid WiFi, SMS OTP, social…) | Admin Console |
 |---|---|---|---|---|---|
 | Active | yes | run | yes | per document | full |
 | GracePeriod | yes | run | yes | per document | full + renewal banner |
@@ -151,18 +151,18 @@ and a notice asks for a rebind in Central.
 | Unlicensed | **no** | — | no | off | full, *No licence yet* |
 
 The invariant encoded in `license/doc.go`: *existing sessions always run to
-their natural end* in every state, and DHCP, DNS, the portal and Hotel Admin
+their natural end* in every state, and DHCP, DNS, the portal and the Admin Console
 keep running — only **new** authorization is refused
 (`State.AllowsNewSessions`).
 
 `FeatureEnabled(state, entitled)`: a feature works iff it is entitled in the
 document **and** the state is Active/GracePeriod.
 
-**One gate, one capacity, every Guest Access method.** Voucher, guest account,
+**One gate, one capacity, every Client Access method.** Voucher, client account,
 OTP, social login and **PMS room sign-in** all pass the same licence refusal
 (`cmd/scd` `licenseRefusal`: removed from Central, tenant transition pending,
 no licence, a state that does not allow new sessions, or the method's feature
-not entitled) before anything about the guest is looked at, and every new guest
+not entitled) before anything about the client is looked at, and every new client
 session takes a slot from the same atomic, appliance-scoped reservation of
 `max_concurrent_online_guests` (`reserveLicensedSlot`, counted inside the
 session-opening transaction). For room sign-in that includes a second device
@@ -170,7 +170,7 @@ joining the stay and a device rejoining after its session ended; a device that
 signs in again while its session is still open keeps it and takes no slot. A
 room sign-in refused by the licence is recorded as `LICENSE_REFUSED` or
 `LICENSE_CAPACITY_REACHED` in `iam_v2.sign_in_attempts` (appliance migration
-0092) and shown on Hotel Admin's **Guest sign-in attempts**; the guest sees the
+0092) and shown on the Admin Console's **Client sign-in attempts**; the client sees the
 same refusal the other methods give.
 
 ## 6. Offline grace in practice
@@ -194,7 +194,7 @@ offline for the year. Grace only matters when validity lapses while offline:
 - **Clock rollback:** the store persists a **high-water mark** of the highest
   wall-clock time observed. If the clock is set back by more than the 48h
   tolerance, evaluation uses the high-water time instead and flags
-  `clock_rollback` in the evaluation (surfaced in Hotel Admin).
+  `clock_rollback` in the evaluation (surfaced in the Admin Console).
   Winding the clock back cannot resurrect an expiring license.
 - Files (`current.json`, `state.json`, `revoked.json`) are written 0600 with
   atomic tmp+rename in a 0700 directory (default `/etc/stayconnect/license`).
@@ -211,8 +211,8 @@ offline for the year. Grace only matters when validity lapses while offline:
   JWT, ≤60s lifetime; over mTLS once it holds a certificate) →
   `{license_id, envelope, revoked[], server_time}`. Manual path for offline
   sites: **Offline license file** (`POST
-  /cloud/v1/appliances/{id}/offline-license`) in Central, uploaded in Hotel
-  Admin (`POST /edge/v1/license`).
+  /cloud/v1/appliances/{id}/offline-license`) in Central, uploaded in Admin
+  Console (`POST /edge/v1/license`).
 - **Revoke:** `POST /cloud/v1/licenses/{id}/revoke` sets the cloud row
   `revoked`; the edge learns via the `revoked[]` list on its next fetch and
   records the id in its local revocation store — `revoked.json` persists

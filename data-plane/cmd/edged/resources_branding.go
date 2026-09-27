@@ -198,7 +198,7 @@ func validateDesign(d map[string]any) error {
 	for _, e := range errs {
 		if e.Field == "custom_css" || e.Field == "custom_html" {
 			msg += ". This page collects room numbers and voucher codes, so executable or re-targeting content " +
-				"in it could steal a guest's credentials — styling and markup only"
+				"in it could steal a client's credentials — styling and markup only"
 			break
 		}
 	}
@@ -579,7 +579,7 @@ func (s *server) previewPortal(w http.ResponseWriter, req *http.Request) {
 		// Said plainly: the preview is a convenience and its absence must not read as "your settings are
 		// broken". It is the PORTAL that is not answering.
 		jsonErr(w, http.StatusServiceUnavailable, "portal_unreachable",
-			"the guest portal service is not answering on this appliance, so a live preview cannot be shown. "+
+			"the Client Portal service is not answering on this appliance, so a live preview cannot be shown. "+
 				"Your settings are unaffected.")
 		return
 	}
@@ -587,7 +587,7 @@ func (s *server) previewPortal(w http.ResponseWriter, req *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	if err != nil || resp.StatusCode != http.StatusOK {
 		jsonErr(w, http.StatusServiceUnavailable, "portal_unreachable",
-			"the guest portal service did not return its sign-in page, so a live preview cannot be shown.")
+			"the Client Portal service did not return its sign-in page, so a live preview cannot be shown.")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"html": string(body)})
@@ -616,7 +616,7 @@ func (s *server) portalLanguages(w http.ResponseWriter, req *http.Request) {
 		// Named for what it is. "Failed to load languages" would send an operator looking at their own
 		// settings; it is the PORTAL service that is not answering.
 		jsonErr(w, http.StatusServiceUnavailable, "portal_unreachable",
-			"the guest portal service is not answering on this appliance, so its built-in wording cannot be "+
+			"the Client Portal service is not answering on this appliance, so its built-in wording cannot be "+
 				"shown. Your settings are unaffected.")
 		return
 	}
@@ -624,7 +624,7 @@ func (s *server) portalLanguages(w http.ResponseWriter, req *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	if err != nil || resp.StatusCode != http.StatusOK {
 		jsonErr(w, http.StatusServiceUnavailable, "portal_unreachable",
-			"the guest portal service did not return its built-in wording.")
+			"the Client Portal service did not return its built-in wording.")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

@@ -1,8 +1,8 @@
-# OneGate Hotel Admin — Page-by-Page Reference
+# OneGate Admin Console — Page-by-Page Reference
 
-**OneGate Hotel Admin** is the console that runs on the appliance in the hotel. Hotel staff use it for
+**OneGate Admin Console** (formerly Hotel Admin) is the console that runs on the appliance at the site. Site staff use it for
 everything day to day: guest networks, sign-in methods, vouchers, internet packages, the PMS, sessions and
-reports. It is reached over HTTPS on the hotel's management network and keeps working when OneGate Central
+reports. It is reached over HTTPS on the site's management network and keeps working when OneGate Central
 cannot be reached. Operator accounts are local to the appliance: they are not OneGate cloud accounts and do
 not work at any other property.
 
@@ -16,12 +16,12 @@ states) is defined once in the [OneGate design system](../../design-system/READM
 
 ## Things that apply to every page
 
-- **Sign-in.** The login page is titled *OneGate Hotel Admin*: **Email or username**, **Password**,
+- **Sign-in.** The login page is titled *OneGate Admin Console*: **Email or username**, **Password**,
   **Sign in**. There is no single sign-on, no multi-factor step and no "forgot password"; an operator with
   the Site admin role changes passwords under **System → Operators**. The session is re-checked every
   30 seconds; if it has ended you are returned to the login page.
 - **The sidebar and "Find a screen…".** The menu has eight groups: **Overview · Internet offering ·
-  Guests · Property management system · Charges · Guest portal · Networking · System**. At the top is a
+  Clients · Property management system · Charges · Client Portal · Networking · System** (*Clients* and *Client Portal* were formerly *Guests* and *Guest portal*; Client Portal was formerly Guest Portal). At the top is a
   **Find a screen…** filter (press `/` from anywhere outside a text field) that matches page names, group
   names and everyday words ("wifi speed", "room sign in"). The button beside the OneGate mark collapses the
   sidebar to an icon rail and expands it again; collapsed, every icon shows its name as a tooltip, and the
@@ -38,9 +38,9 @@ states) is defined once in the [OneGate design system](../../design-system/READM
   refused. The appliance enforces the same rules on every request. The role for each page is listed below;
   a summary table is at the end of this document.
 - **"Not enabled on this appliance".** Some features are switched on per appliance (for example Charges,
-  Post-stay access, Online-time budgets or Guest devices). A switched-off feature is left out of the menu;
+  Post-stay access, Online-time budgets or Client devices). A switched-off feature is left out of the menu;
   if you open it by address, the page says **"Not enabled on this appliance"**, explains that this is a
-  configuration and not a fault, and states that guest internet, sign-in, the PMS connection, sessions and
+  configuration and not a fault, and states that client internet, sign-in, the PMS connection, sessions and
   accounting are unaffected. Turning a feature on is a deployment decision for Semantics support, not an
   operator setting.
 - **Blocks you may not see.** Where part of a page is not available to your role or not reported by the
@@ -58,7 +58,7 @@ states) is defined once in the [OneGate design system](../../design-system/READM
 
   No action uses a browser pop-up. Add and edit forms open in dialogs or side sheets over the list, so you
   keep your place; nothing is saved until you press the confirming button.
-- **One-time reveals.** A new guest-account password, a reset post-stay PIN and a newly issued batch of
+- **One-time reveals.** A new client-account password, a reset post-stay PIN and a newly issued batch of
   voucher codes are shown **once**, in a window with a *"Shown once. It cannot be looked up again"* warning,
   a large value, **Copy**, and an acknowledgement button (such as **I have it**). Closing it is final.
   Voucher codes are the one exception that can be read again later — only with a reason and password
@@ -70,12 +70,12 @@ states) is defined once in the [OneGate design system](../../design-system/READM
 - **Secrets are never shown back.** API keys, client secrets, PMS credentials and tokens are write-only:
   a form shows whether one is stored, never its value.
 - **"PMS offline" does not mean guests are cut off.** The appliance keeps its own copy of the in-house guest
-  list, so room sign-in, vouchers, guest accounts and sessions in progress continue while the PMS link is
+  list, so room sign-in, vouchers, client accounts and sessions in progress continue while the PMS link is
   down. What is lost is news: a guest who checked in during the outage cannot sign in by room number until
   the link is back.
-- **Licence state.** When the appliance's licence is expired, suspended, revoked or missing, new guest
+- **Licence state.** When the appliance's licence is expired, suspended, revoked or missing, new client
   sign-ins are refused — by every method, room sign-in included — and some creation actions are blocked for
-  every role; existing guest sessions are not dropped. The licence also caps how many guests may be online at
+  every role; existing client sessions are not dropped. The licence also caps how many clients may be online at
   once, again across every method: a room guest's second device takes a place just like a voucher guest.
   **System → Appliance & licence** says why.
 
@@ -87,7 +87,7 @@ Voucher operator, Payments operator, Site viewer.
 ## OVERVIEW
 
 ### Overview — `/dashboard`
-The shift view: does anything need attention, how busy is the property, and are the PMS, networks and
+The shift view: does anything need attention, how busy is the site, and are the PMS, networks and
 appliance healthy.
 
 - **Header:** the time range (**24h / 7 days / 30 days**), **Updated x ago** and **Refresh**. The page
@@ -95,11 +95,11 @@ appliance healthy.
 - **Needs attention** — a callout listing each problem with a link to the page that fixes it, or *"All
   systems normal — nothing needs attention right now."* A separate **For information** callout carries
   notes that need no action.
-- **Headline tiles** (each opens the related page): **Guests online** (one room, account or voucher is one
-  guest; the device count is underneath), **Sign-ins**, **Data used** (down/up split) and **Room sign-in**
+- **Headline tiles** (each opens the related page): **Clients online** (one room, account or voucher is one
+  client; the device count is underneath), **Sign-ins**, **Data used** (down/up split) and **Room sign-in**
   (*Ready*, *x of y ready* or *Not in use*).
 - **Charts and cards:** Internet traffic; Connected devices (peak and average); Sign-in outcomes (by method,
-  room-check success and failure reasons); When guests sign in; Packages in use; Property management system
+  room-check success and failure reasons); When clients sign in; Packages in use; Property management system
   (per connection, occupancy and — where Charges is enabled — room charges); Guest networks (address pool
   use, devices, traffic); Services; Addresses and names (DHCP and DNS); Appliance (license, versions,
   WAN/LAN, uptime, CPU, memory, disk).
@@ -111,31 +111,31 @@ appliance healthy.
 ## INTERNET OFFERING
 
 A **service plan** is the technical recipe (speed, devices, data, time). An **internet package** is what a
-guest is offered: it uses one service plan and adds who gets it and for how long. **Vouchers** are printed
+client is offered: it uses one service plan and adds who gets it and for how long. **Vouchers** are printed
 cards that hand out a package. **Checkout grace** is what a guest keeps for a short time after checkout.
 
 ### Internet packages — `/internet-packages`
-What guests are offered on the portal, and what those packages are doing for guests right now.
+What clients are offered on the portal, and what those packages are doing for clients right now.
 
-- **Tabs:** **Packages** and **Guest activity**.
-- **Packages tab:** tiles *Offered to guests*, *Disabled*, *Guests on a package now*, *Service plans*; a
+- **Tabs:** **Packages** and **Client activity**.
+- **Packages tab:** tiles *Offered to clients*, *Disabled*, *Clients on a package now*, *Service plans*; a
   warning when two packages overlap by stay length; filter (All / Active / Disabled) and search. Table:
-  Package, Status (*Not configured*, *Active*, *Disabled*), Price, Speed, Data, Time, Devices, Guests now.
+  Package, Status (*Not configured*, *Active*, *Disabled*), Price, Speed, Data, Time, Devices, Clients now.
   Clicking a package opens a side sheet with what it gives, its saved versions and a support reference.
-- **Add package / Edit** (large dialog): Name (what the guest sees), Short code (fixed once created),
+- **Add package / Edit** (large dialog): Name (what the client sees), Short code (fixed once created),
   Service plan (required, with a summary of what it gives), **How long access lasts**, **Data allowance**
   (the service plan's allowance or an amount per night of the stay, with minimum/maximum), **Who this package is
   offered to** (conditions; empty means everyone who signs in), and advanced options (offer from/until,
-  speed steps). Saving records a new permanent version; guests already online keep the terms they connected
-  under. Packages are free to the guest.
-- **Disable** ("Stop offering it") — **reason + password confirmation**. Guests stop being offered it at
+  speed steps). Saving records a new permanent version; clients already online keep the terms they connected
+  under. Packages are free to the client.
+- **Disable** ("Stop offering it") — **reason + password confirmation**. Clients stop being offered it at
   once; anyone online keeps their access; it can be enabled again at any time. **Enable** needs no dialog.
 - **Delete** (from the side sheet) — first checks whether anything still refers to the package. If so, the
   dialog explains *why it can't be deleted* and offers **Disable instead**. If not, it asks for a **reason
   (at least 4 characters) + password confirmation** and removes the package and its saved versions
   permanently.
-- **Guest activity tab:** who got access and how — period (including a custom From/To), package, how it was
-  given, status and room/reservation search; tiles, a table (When, Package, Guest, How it was given,
+- **Client activity tab:** who got access and how — period (including a custom From/To), package, how it was
+  given, status and room/reservation search; tiles, a table (When, Package, Client, How it was given,
   Status, …) 25 rows per page, and a detail sheet with *What happened* and *The grant*. Read-only.
 - **Who can change it:** Site admin. **Read-only:** Site viewer. Other roles do not see this page.
 
@@ -149,30 +149,30 @@ The technical service that packages hand out.
   unlimited), Devices at once, **When the device limit is reached** (*Refuse the new device*, *Disconnect
   the oldest device*, *Ask an operator to approve*), Total time allowance (hours or days), Data allowance
   (GB), Disconnect after inactivity (minutes), Maximum single session (hours), **How the speed is shared**
-  (per device or shared across the guest's devices) and **How time is counted** (currently only *Validity
+  (per device or shared across the client's devices) and **How time is counted** (currently only *Validity
   window — time runs from purchase*). Saving creates a new version.
 - **After saving:** an **"Apply these settings to packages?"** card lists the packages using the service plan with a
-  checkbox each; **Apply to selected packages** or **Not now**. Only future guests are affected; nobody's
+  checkbox each; **Apply to selected packages** or **Not now**. Only future clients are affected; nobody's
   access changes mid-session. The same card is offered later for packages still on older settings.
 - **Delete** — **reason + password confirmation**; refused, with the reason, while a package still uses the
   service plan.
 - **Who can change it:** Site admin. **Read-only:** Site viewer.
 
 ### Checkout grace — `/checkout-grace`
-Keeps a guest online for a short, capped time after checkout so leaving the hotel does not cut them off.
+Keeps a guest online for a short, capped time after checkout so leaving the site does not cut them off.
 
 - **Shows:** tiles *Policy in force*, *Published version*, *Last changed*, *Emergency fallback used*; any
-  warnings; **what a departing guest receives** in plain words (grace time, speeds, data, devices, who
+  warnings; **what a departing client receives** in plain words (grace time, speeds, data, devices, who
   qualifies); and the policy history (each version opens with who published it, when and why).
 - **Edit policy / Create hotel policy** (side sheet, two steps): **Terms** — grace time, download/upload
-  speed, data allowance (MB), device handling and limit, stay rules after checkout, with a live *"Guest will
+  speed, data allowance (MB), device handling and limit, stay rules after checkout, with a live *"Client will
   receive…"* sentence — then **Review**: every change shown old → new, a **reason** (chosen from a list) and
   **password confirmation**. Publishing creates a new version.
 - **Who can change it:** Site admin, Hotel IT manager. **Read-only:** Front office, Guest relations, Site
   viewer.
 
 ### Vouchers — `/vouchers`
-Printed cards a guest redeems for internet access. Showing or exporting a code needs your password and is
+Printed cards a client redeems for internet access. Showing or exporting a code needs your password and is
 recorded.
 
 - **Header:** **Code format** (for roles that can see it) and **Issue vouchers**.
@@ -208,7 +208,7 @@ recorded.
 
 ---
 
-## GUESTS
+## CLIENTS
 
 ### Stays — `/stays`
 What the PMS reports about who is in house and which internet package each room has. Read-only: stays are
@@ -224,14 +224,14 @@ changed in the PMS.
   and Network routing.
 - **Who can see it:** Site admin, Hotel IT manager, Front office, Guest relations, Site viewer. No actions.
 
-### Guest accounts — `/guest-accounts`
-A username and password a guest can sign in with, instead of a room number or voucher. Which package the
-guest may take is decided by the rules on Internet packages.
+### Client accounts — `/guest-accounts`
+A username and password a client can sign in with, instead of a room number or voucher. Which package the
+client may take is decided by the rules on Internet packages.
 
 - **Shows:** tiles *Accounts*, *Able to sign in*, *Devices online*, *Locked out*; the switch **Offer
   username-and-password sign-in** on the portal; search; table Account, Devices (active of max, *At the
   limit*), Status, Valid until, Last sign-in, Sign-ins.
-- **Add account:** Username (what the guest types; one character is allowed), Name (staff reference only),
+- **Add account:** Username (what the client types; one character is allowed), Name (staff reference only),
   Password (typed, with show/hide and a soft warning for short passwords, or generated), Valid from, Valid
   until, Notes.
 - **Row actions:** **Edit**, **Password** (type or generate a new one; optionally *Disconnect this account's
@@ -244,18 +244,18 @@ guest may take is decided by the rules on Internet packages.
   **Read-only:** Site viewer.
 
 ### Active sessions — `/sessions`
-Which devices are online, whose they are, and disconnecting one. A session is one device; a guest may have
+Which devices are online, whose they are, and disconnecting one. A session is one device; a client may have
 several.
 
 - **Shows:** **Online now / Recent** switch; live status, refreshed every 10 seconds while *Online now*;
-  tiles *Devices online*, *Guests online*, *Rooms online*, *Data in this list*; search (room, name, username,
-  IP, MAC) and a filter by how the guest signed in. Rows lead with the guest, then how they signed in, the
+  tiles *Devices online*, *Clients online*, *Rooms online*, *Data in this list*; search (room, name, username,
+  IP, MAC) and a filter by how the client signed in. Rows lead with the client, then how they signed in, the
   internet package, allowance used (data and time meters where the service plan sets a limit), network and device,
   data down/up and status (with the end reason for ended sessions).
 - **Detail dialog:** usage, when access ends, package and service plan, network, IP and MAC, and for a room
   sign-in the room and a link to the stay.
-- **Disconnect** — a confirmation dialog that names the guest and how many of their other devices stay
-  online. The guest can sign in again.
+- **Disconnect** — a confirmation dialog that names the client and how many of their other devices stay
+  online. The client can sign in again.
 - **Who can change it:** Site admin, Hotel IT manager, Front office, Guest relations. **Read-only:** Voucher
   operator, Payments operator, Site viewer.
 
@@ -270,12 +270,12 @@ behind them.
 - **Who can see it:** Site admin, Hotel IT manager, Front office, Guest relations, Payments operator, Site
   viewer.
 
-### Guest devices — `/guest-device-self-service`
-Whether a signed-in guest may remove one of their own devices that is not connected, to free its place for
+### Client devices — `/guest-device-self-service`
+Whether a signed-in client may remove one of their own devices that is not connected, to free its place for
 another, from the portal's *"You're online"* page.
 
-- **Shows:** two tiles kept separate — **This property offers it** (On/Off) and **Available in this
-  release** (Yes/Not yet) — and a sentence explaining what guests can do with that combination.
+- **Shows:** two tiles kept separate — **This site offers it** (On/Off) and **Available in this
+  release** (Yes/Not yet) — and a sentence explaining what clients can do with that combination.
 - **Switch on / Switch off** — an inline confirmation with an **optional reason**.
 - **Who can change it:** Site admin, Hotel IT manager. **Read-only:** Front office, Guest relations,
   Payments operator, Site viewer. May be *Not enabled on this appliance*.
@@ -285,7 +285,7 @@ For packages sold as an amount of connected time: how much time is left. Time co
 device is connected, but the end date applies regardless.
 
 - **Shows:** tiles *Budgets in use*, *Devices connected on them*, *Ended*; table Time left, of budget, Ends
-  on, Devices, State. No guest identity is shown. Read-only.
+  on, Devices, State. No client identity is shown. Read-only.
 - **Who can see it:** the roles that can see Active sessions. Usually *Not enabled on this appliance*.
 
 ### Post-stay access — `/post-stay`
@@ -295,7 +295,7 @@ room.
 - **Shows:** tiles *Can reconnect now*, *Active, not usable*, *Ended by staff*; table Room, Reservation, Stay,
   State, PIN, Valid until. A row opens its details.
 - **Reset PIN** — **reason (at least 4 characters) + password confirmation**, then a **one-time reveal**:
-  *"New PIN — shown once"* with **I have given it to the guest**. The PIN is not stored in readable form.
+  *"New PIN — shown once"* with **I have given it to the client**. The PIN is not stored in readable form.
 - **End access** — **reason + typed `REVOKE` + password confirmation**. Permanent for that stay; no
   replacement PIN is issued.
 - **Who can change it:** Site admin, Hotel IT manager, Front office, Guest relations. **Read-only:** Site
@@ -305,7 +305,7 @@ room.
 
 ## PROPERTY MANAGEMENT SYSTEM
 
-The PMS is the hotel's reservation system. The appliance keeps a local copy of who is in house (the guest
+The PMS is the site's reservation system. The appliance keeps a local copy of who is in house (the guest
 list) so room sign-in keeps working when the PMS link drops.
 
 ### PMS connection — `/pms-interfaces`
@@ -356,7 +356,7 @@ against.
 - **Shows:** a *Why this matters* note (a network pointed at the wrong PMS produces no error — guests simply
   cannot sign in); **Networks that can offer room sign-in** (network, the connection it is checked against,
   and scope: that one PMS or *Every active PMS*); **Networks with no PMS** (a legitimate setup, because
-  vouchers and guest accounts do not use the PMS).
+  vouchers and client accounts do not use the PMS).
 - **Change / Point at a PMS** — a dialog to choose the connection and scope. **Remove mapping** — a
   confirmation dialog.
 - **Who can change it:** Site admin only. **Read-only:** Hotel IT manager, Front office, Guest relations,
@@ -371,36 +371,36 @@ it. Answers "has Wi-Fi seen that check-in yet?"
   (including the PMS's own message identifier to quote to the PMS vendor). Read-only.
 - **Who can see it:** Site admin, Hotel IT manager, Front office, Guest relations, Site viewer.
 
-### Guest sign-in checks — `/pms-resolutions`
-Recent room sign-in checks against the PMS and why they were refused. Deliberately names no guest.
+### Client sign-in checks — `/pms-resolutions`
+Recent room sign-in checks against the PMS and why they were refused. Deliberately names no client.
 
-- **Shows:** live status; tiles *Checks recorded*, *Let online*, *Refused*, *Networks involved*; **Why guests
+- **Shows:** live status; tiles *Checks recorded*, *Let online*, *Refused*, *Networks involved*; **Why clients
   were refused** (each outcome with what it means and what to do); **By Wi-Fi network**, which calls out the
   pattern where one network fails while others work; **Recent attempts** (newest first, up to 200:
   time, network, result). Read-only.
 - **Who can see it:** Site admin, Hotel IT manager, Site viewer.
 
-### Guest sign-in attempts — `/guest-signin-attempts`
-The desk's "why can't this guest get online?" tool, and releasing a device that has been asked to wait
+### Client sign-in attempts — `/guest-signin-attempts`
+The desk's "why can't this client get online?" tool, and releasing a device that has been asked to wait
 after too many wrong tries.
 
 - **Sign-in attempts tab:** tiles *Attempts*, *Did not connect*, *Details did not match*, *System-side
   failures*; search, room, result, credential type and period (24 hours to 30 days); table When, Room,
   Network, Result, Why, Entered as, Guest-list age, Device (up to 200 rows). **Details** shows the
-  diagnostics and — only for roles allowed to see guest credentials — *what was entered, and what would have
+  diagnostics and — only for roles allowed to see client credentials — *what was entered, and what would have
   been accepted*. Other roles see an explanation instead. Two results come from the licence rather than the
-  guest: *Licence refused new guests* (the licence did not admit anyone new at that moment) and *Licensed
-  capacity full* (the guest's details were right, but the appliance was at its licensed number of guests
+  client: *Licence refused new clients* (the licence did not admit anyone new at that moment) and *Licensed
+  capacity full* (the client's details were right, but the appliance was at its licensed number of clients
   online).
 - **Active restrictions tab:** devices currently asked to wait, with the last room typed (marked
   unverified), failures and a live countdown. **Release** — **reason required** (at least 3 characters), no
-  password; the dialog states that **releasing does not sign the guest in**.
+  password; the dialog states that **releasing does not sign the client in**.
 - **Who can do what:**
   - See the attempts list: Site admin, Hotel IT manager, Front office, Guest relations, Site viewer.
-  - See what the guest typed: Site admin, Hotel IT manager, Front office, Guest relations (not Site viewer).
+  - See what the client typed: Site admin, Hotel IT manager, Front office, Guest relations (not Site viewer).
   - Release a restriction: Site admin, Hotel IT manager, Front office, Guest relations. **Read-only:** Site
     viewer.
-  - The thresholds themselves are set on **Guest portal → Sign-in methods**.
+  - The thresholds themselves are set on **Client Portal → Sign-in methods**.
 
 ### Duplicate sources — `/pms-source-conflicts`
 Two PMS connections claiming the same rooms. Until one is given authority, guests in the contested rooms
@@ -442,7 +442,7 @@ established (from a list), why, the evidence source and a reference to it (never
 **password confirmation**.
 
 ### Settlements — `/financial-settlements`
-Whether a guest was actually charged, and what has been given back. Status filter (Required, In progress,
+Whether a client was actually charged, and what has been given back. Status filter (Required, In progress,
 Settled, Manual review, Failed, Partially reversed, Reversed) and the payment history of each. Read-only;
 there is no refund button.
 
@@ -455,31 +455,31 @@ is safe to resume. Every decision needs **password confirmation** (a password fi
 
 ---
 
-## GUEST PORTAL
+## CLIENT PORTAL
 
-These pages control what guests see on the sign-in page — see [guest-portal.md](guest-portal.md).
+These pages control what clients see on the sign-in page — see [guest-portal.md](guest-portal.md).
 
 ### Sign-in methods — `/sign-in-methods`
-How guests prove who they are on the portal. Each switch applies immediately; turning a method off does not
-disconnect guests already online.
+How clients prove who they are on the portal. Each switch applies immediately; turning a method off does not
+disconnect clients already online.
 
-- **Method cards, each with an on/off switch:** **Voucher code**; **Guest account**; **Room sign-in (from
+- **Method cards, each with an on/off switch:** **Voucher code**; **Client account**; **Room sign-in (from
   the PMS)** — with a warning when room sign-in is not working, and the **Room sign-in mode**: what the guest
   types besides the room number (*Any of the three (recommended)*, *Last name (surname)*, *First name*,
   *Reservation number*) and a link to Network routing; **Email code** and **SMS code** (*Not available* until
   a sender exists and is switched on under Email & SMS); **Social login** (a checkbox per configured
   provider).
-- **Guest sign-in protection:** *Maximum failed attempts*, *Observation window*, *Wait after too many
+- **Client sign-in protection:** *Maximum failed attempts*, *Observation window*, *Wait after too many
   attempts* — each with its default and allowed range — the last change (who, when, from → to), **Save** and
   **Discard**.
 - Which methods can be offered is also limited by the license.
 - **Who can change it:**
   - Methods: Site admin, Hotel IT manager. **Read-only:** Front office, Guest relations, Site viewer.
   - Protection thresholds: Site admin, Hotel IT manager. The desk (Front office, Guest relations) and Site
-    viewer see them read-only; the desk releases single devices on Guest sign-in attempts instead.
+    viewer see them read-only; the desk releases single devices on Client sign-in attempts instead.
 
 ### Portal settings — `/portal-branding`
-The designer for the guest sign-in page, with a live preview. One **Save changes**; guests see the result as
+The designer for the client sign-in page, with a live preview. One **Save changes**; clients see the result as
 soon as it is saved.
 
 - **Header:** *Unsaved changes* / *All changes saved*, **Discard**, **Save changes**. A strip shows the
@@ -498,14 +498,14 @@ soon as it is saved.
     language**.
   - **Advanced HTML & CSS** — custom CSS and HTML (64 KB each) with live checks and **Use the cleaned
     version**; scripts are refused.
-  - **History** — every save, *Guests see this* on the current one, and **Restore** — **password
+  - **History** — every save, *Clients see this* on the current one, and **Restore** — **password
     confirmation**.
 - Saving a change to custom CSS or HTML asks for **password confirmation**; ordinary edits (name, colours,
   text) do not.
 - **Who can change it:** Site admin, Hotel IT manager. **Read-only:** Site viewer.
 
 ### Allowed sites — `/walled-garden`
-Addresses a guest device may reach before it has signed in. Keep it to what the sign-in page itself needs.
+Addresses a client device may reach before it has signed in. Keep it to what the sign-in page itself needs.
 
 - **Table:** Type (Domain name, Single address, Address range), Address, Ports (every port if empty), Why,
   Added. **Allow a site** dialog: type, address, ports (comma separated), why it is needed. **Remove** — a
@@ -514,7 +514,7 @@ Addresses a guest device may reach before it has signed in. Keep it to what the 
   viewer.
 
 ### Social login — `/social-providers`
-Lets guests sign in with an account they already have (Google, Apple, Facebook, Microsoft).
+Lets clients sign in with an account they already have (Google, Apple, Facebook, Microsoft).
 
 - **Table:** Provider, Client ID, Redirect URI, Last used, Offered. **Add / Edit** dialog: provider (fixed
   once created), name on the portal, Client ID, Client secret (write-only), Redirect URI, scopes, **Offer
@@ -535,16 +535,16 @@ cannot be used.
 
 ## NETWORKING
 
-A wrong network change could cut off the admin or every guest, so network changes are staged, validated,
+A wrong network change could cut off the admin or every client, so network changes are staged, validated,
 applied, and then must be **confirmed before a countdown ends or they roll back automatically**. The
-appliance does not broadcast Wi-Fi: each guest network is a VLAN the hotel's wireless controller maps an
+appliance does not broadcast Wi-Fi: each guest network is a VLAN the site's wireless controller maps an
 SSID to.
 
 **Who can change it (all Networking pages):** Site admin, Hotel IT manager. **Read-only:** Site viewer.
 Other roles do not see this group.
 
 ### Guest networks — `/network`
-The Wi-Fi networks guests join, each with its own addresses and sign-in page.
+The Wi-Fi networks clients join, each with its own addresses and sign-in page.
 
 - **Header:** **Validate**, **Apply changes**, **New guest network**.
 - **Pending banner** after Apply: *"Revision #N — confirm or it rolls back automatically"* with the
@@ -552,7 +552,7 @@ The Wi-Fi networks guests join, each with its own addresses and sign-in page.
   now**.
 - **Table:** Name, SSID label, Type (VLAN n / untagged), Parent interface, Gateway, Subnet, DHCP, Pool,
   Portal (*Sign-in page* / *Open*), Status, Clients. **Edit** opens the network; **Disable** (enabled
-  networks) and **Delete** (disabled networks) are confirmation dialogs that explain nothing reaches guests
+  networks) and **Delete** (disabled networks) are confirmation dialogs that explain nothing reaches clients
   until the change is applied.
 - Applying, keeping and rolling back guest-network changes do **not** ask for a password.
 
@@ -567,7 +567,7 @@ isolation settings are editable (*"Saved — not applied yet"* until applied on 
 network's **DHCP reservations** (add, edit, remove — each in a dialog).
 
 ### DHCP & leases — `/network/dhcp`
-Which guest devices hold an address now, and which always get the same one. Tabs **Active leases** and
+Which client devices hold an address now, and which always get the same one. Tabs **Active leases** and
 **Reservations** (across all networks): **New reservation**, edit, and **Remove** — a confirmation dialog.
 
 ### WAN / LAN settings — `/network/system`
@@ -593,7 +593,7 @@ validation issues, apply events and health checks; a pending one can be kept or 
 Nothing is ever deleted.
 
 ### TLS certificate — `/network/certificate`
-The HTTPS certificate Hotel Admin itself is served with. Renewal is automatic.
+The HTTPS certificate the Admin Console itself is served with. Renewal is automatic.
 
 - **Shows:** a status badge (Healthy, Renewal due, Warning, Critical, Expired, with days left), the
   certificate details, and any renewal error or configuration mismatch.
@@ -628,7 +628,7 @@ Every change made to this appliance, by staff and by the system itself, written 
 edited or removed.
 
 - **Filters:** search, period (last 24 hours, 7 days, 30 days, everything), and chips **Everything**,
-  **Security** (with a count), and categories *Sign-in & access, Guest portal, Internet offering, Property
+  **Security** (with a count), and categories *Sign-in & access, Client Portal, Internet offering, Property
   management system, Networks, Licence & cloud, Backups, Diagnostics*.
 - **List:** a plain-language title, category and security badges, who, when and from which address; expand
   for the recorded details. Up to 500 entries.
@@ -637,12 +637,12 @@ edited or removed.
 
 ### Appliance & licence — `/appliance`
 Whether this appliance is activated, what its licence allows, and whether OneGate Central is reachable. One
-page, fed by one appliance status (contract: [CENTRAL_CONTROL_PLANE.md §8](../CENTRAL_CONTROL_PLANE.md#8-hotel-admin--central)).
+page, fed by one appliance status (contract: [CENTRAL_CONTROL_PLANE.md §8](../CENTRAL_CONTROL_PLANE.md#8-admin-console--central)).
 It refreshes by itself (every 15 seconds, every 5 while activating) and has **Check now**, which makes the
 appliance register if needed and fetch its activation and licence from Central immediately.
 
-- **Problems, in words** — banners for a licence in its grace period; expired, suspended or revoked (*new guest
-  sign-ins are refused; guests already online are not disconnected; the sign-in page, DHCP, DNS and this admin
+- **Problems, in words** — banners for a licence in its grace period; expired, suspended or revoked (*new client
+  sign-ins are refused; clients already online are not disconnected; the sign-in page, DHCP, DNS and this admin
   keep working*); a licence for a different appliance; a changed WAN network adapter; licensed capacity
   reached; an activation the appliance cannot verify; a blocked attempt to switch off licence enforcement.
 - **Status card**, three parts:
@@ -650,14 +650,14 @@ appliance register if needed and fetch its activation and licence from Central i
     activation* (with the copyable **Serial number** to give your OneGate vendor; nothing needs to be typed
     here), *Finishing activation…*, *Activated* (licensed to customer · site), *Retired*, or *Removed from
     OneGate Central* — Central deleted this appliance after it had served a customer: it keeps its data, admits
-    no new guests (guests already online are not disconnected), refuses licence and activation files and never
+    no new clients (clients already online are not disconnected), refuses licence and activation files and never
     registers again by itself. To use it again, it must be factory-reset and activated by your OneGate vendor.
   - **Licence** — *No licence yet*, *Active*, *Expires soon*, *Grace period*, *Expired*, *Suspended*, *Revoked*
-    or *Wrong appliance*, with the end date and days left, and **Guests online, all guest networks** against
+    or *Wrong appliance*, with the end date and days left, and **Clients online, all guest networks** against
     the licensed maximum with a meter.
   - **OneGate Central** — *Connected*, *Temporarily unreachable* or *Not configured*, **Last answered** and
     **Last problem**. Losing Central changes only this part; the licence keeps being checked on the appliance
-    and guests are unaffected.
+    and clients are unaffected.
 - **Files from your OneGate vendor** — shown for an appliance that is not activated or cannot reach Central:
   **Offline activation** (**Download activation request** while the appliance has never reached Central, then
   **Upload activation package**) and **Upload licence file** (renewals normally arrive by themselves; the
@@ -669,9 +669,9 @@ appliance register if needed and fetch its activation and licence from Central i
   token or code: an appliance registers itself.
 
 ### Backups — `/backups`
-A complete copy of the property's data, taken nightly and on demand.
+A complete copy of the site's data, taken nightly and on demand.
 
-- **Recovery readiness:** whether the property can be recovered from its latest backup; **Verify it**; **Back
+- **Recovery readiness:** whether the site can be recovered from its latest backup; **Verify it**; **Back
   up now** — **password confirmation**.
 - **Available backups:** date, Verified / Not checked, size; **Verify** (or Re-verify), **Download**, and
   **Restore** (verified backups only).
@@ -683,7 +683,7 @@ A complete copy of the property's data, taken nightly and on demand.
   viewer. (Download is offered to every role that can see the page.)
 
 ### Operators — `/operators`
-Hotel staff accounts for this appliance.
+Site staff accounts for this appliance.
 
 - **Table:** operator (with a *you* marker), role badges (remove with ×; add with **+ role**), status (*Can
   sign in* / *Disabled*). **Change password** (typed twice, at least 10 characters) and **Disable**.
@@ -709,19 +709,19 @@ W = can change, R = read-only, — = not shown. The appliance enforces these on 
 | Vouchers (show / export codes) | W | — | W | W | W | — | — |
 | Vouchers (code format, keys) | W | W | R | R | R | — | R |
 | Stays | R | R | R | R | — | — | R |
-| Guest accounts | W | W | W | W | W | — | R |
+| Client accounts | W | W | W | W | W | — | R |
 | Active sessions | W | W | W | W | R | R | R |
 | Usage explorer | R | R | R | R | — | R | R |
-| Guest devices | W | W | R | R | — | R | R |
+| Client devices | W | W | R | R | — | R | R |
 | Online-time budgets | R | R | R | R | R | R | R |
 | Post-stay access | W | W | W | W | — | — | R |
 | PMS connection | W | W | R | R | — | — | R |
 | Network routing | W | R | R | R | — | — | R |
 | PMS activity, Duplicate sources | R | R | R | R | — | — | R |
-| Guest sign-in checks | R | R | — | — | — | — | R |
-| Guest sign-in attempts (list) | R | R | R | R | — | — | R |
-| Guest sign-in attempts (what was typed) | R | R | R | R | — | — | — |
-| Guest sign-in attempts (release) | W | W | W | W | — | — | R |
+| Client sign-in checks | R | R | — | — | — | — | R |
+| Client sign-in attempts (list) | R | R | R | R | — | — | R |
+| Client sign-in attempts (what was typed) | R | R | R | R | — | — | — |
+| Client sign-in attempts (release) | W | W | W | W | — | — | R |
 | Cross-PMS transfer | W | W | W | W | — | — | R |
 | Charges (all four pages) | W | R | R | — | — | W | R |
 | Sign-in methods | W | W | R | R | — | — | R |
@@ -750,14 +750,14 @@ W = can change, R = read-only, — = not shown. The appliance enforces these on 
 | Change the voucher code format | Vouchers → Code security | Reason |
 | Retire a code key | Vouchers → Code security | Reason + password |
 | Issue vouchers | Vouchers | One-time reveal of the codes (no password) |
-| Create an account / set a password | Guest accounts | One-time reveal of the password |
+| Create an account / set a password | Client accounts | One-time reveal of the password |
 | Reset a post-stay PIN | Post-stay access | Reason + password, then one-time reveal |
 | End post-stay access | Post-stay access | Reason + type `REVOKE` + password |
 | Put a PMS configuration live | PMS connection | Reason (from a list) + password |
 | Store or replace a PMS credential | PMS connection | Password |
 | Activate / pause / wind down a PMS connection | PMS connection | Reason (from a list) + password |
 | Refresh the guest list | PMS connection | Reason (from a list) + password |
-| Release a sign-in restriction | Guest sign-in attempts | Reason (no password) |
+| Release a sign-in restriction | Client sign-in attempts | Reason (no password) |
 | Transfer access between PMSs | Cross-PMS transfer | Reason + password |
 | Record a charge decision / recovery decision | Manual review, Recovery | Password (plus the decision's own fields) |
 | Save custom CSS or HTML / restore a portal save | Portal settings | Password |

@@ -162,7 +162,7 @@ export function PlacementFields({
 
       {newSite && (
         <>
-          <Field label="New site's name" required hint="One physical property, such as a hotel.">
+          <Field label="New site's name" required hint="One physical location, such as a hotel, office or campus.">
             <Input value={value.newSiteName} onChange={(e) => set({ newSiteName: e.target.value })} autoComplete="off" />
           </Field>
           <Field label="Time zone" required>

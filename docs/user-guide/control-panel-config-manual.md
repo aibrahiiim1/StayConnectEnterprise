@@ -19,8 +19,8 @@ dialog, so steps 1 and 2 are optional.
 
 ## 1. Create a Customer
 
-A **customer** is the organisation that owns hotels (a hotel group, brand or
-property owner).
+A **customer** is the organisation that owns sites (a hotel group, company, brand or
+other owner).
 
 1. Go to **Customers** (`/customers`).
 2. Click **New customer**, enter the **Name**, click **Create customer**.
@@ -35,10 +35,10 @@ The customer page opens. Its tabs are **Summary · Sites · Appliances · Licens
 
 ## 2. Create a Site
 
-A **Site** is **one physical property** — a single hotel or resort — that
+A **Site** is **one physical location** — a single hotel, resort, office or campus — that
 belongs to exactly one Customer and can contain one or more Appliances.
 Buildings, floors, SSIDs and guest networks are configured on the appliance in
-Hotel Admin; they are **not** Sites. A hotel with two buildings on one uplink is
+Admin Console (formerly Hotel Admin); they are **not** Sites. A site with two buildings on one uplink is
 still one Site.
 
 1. Open the customer (**Customers** → the customer) and select the **Sites** tab.
@@ -55,20 +55,20 @@ Use this when the appliance is installed, powered and has internet to Central.
 
 1. Power the appliance on. It **registers itself** with Central — no token,
    nothing to type on the appliance — and keeps retrying until Central answers.
-   Its Hotel Admin shows **Waiting for activation** and its serial number.
+   Its Admin Console shows **Waiting for activation** and its serial number.
 2. In Central, go to **Appliances** (`/appliances`). Appliances **waiting for
    activation** are at the top (or use the **Waiting** filter; the Overview's
    *Needs attention* list links to them too). Match the **serial**.
 3. Open it and click **Activate**:
    - **Where it is installed** — **Customer** (existing, or **New customer…**)
      and **Site** (existing, or a new one with its time zone).
-   - **License** — **Guests online at once** (e.g. `500`; the limit covers the
+   - **License** — **Clients online at once** (e.g. `500`; the limit covers the
      whole appliance, across all guest networks), **Valid for** (a number of
      days, or **Until a date**), and **Grace period (days)** (how long it keeps
      working after the end date).
 4. Confirm. The appliance shows **Activating**; within about a minute of its
    next contact it collects its signed assignment, certificate and licence and
-   shows **Activated**. Hotel Admin shows *Activated* and the licence too
+   shows **Activated**. Admin Console shows *Activated* and the licence too
    (**Check now** there makes it contact Central immediately).
 
 **What "Activate" does** in one step: assigns the appliance to the customer and
@@ -77,14 +77,14 @@ you set. The certificate is issued automatically when the appliance asks for it.
 
 ### Offline activation (appliance with no route to Central)
 
-1. In the appliance's Hotel Admin, **Appliance & licence → Files from your
+1. In the appliance's Admin Console, **Appliance & licence → Files from your
    OneGate vendor → Offline activation**: **Download activation request** (shown
    while the appliance has never reached Central).
 2. In Central, **Appliances → Import activation request**: upload that file.
    The appliance appears as **Waiting for activation**; activate it as above.
 3. On the appliance's page (now **Activating**), click **Activation package**
    and carry the file back (valid 7 days).
-4. In Hotel Admin, **Upload activation package** in the same place.
+4. In the Admin Console, **Upload activation package** in the same place.
 
 There are no enrollment tokens and no manual appliance creation.
 
@@ -92,20 +92,20 @@ There are no enrollment tokens and no manual appliance creation.
 
 ## 4. Manage the Licence
 
-A licence binds to **one appliance** and sets: guests online at once, the
+A licence binds to **one appliance** and sets: clients online at once, the
 validity window and the grace period. Activation issues the first one. Every
 licence action is on the appliance's page (**Appliances** → the appliance, or
 **Licenses** → select a row), in the **License** card:
 
-- **Renew or change** (or **Issue license** when there is none) — guests online
+- **Renew or change** (or **Issue license** when there is none) — clients online
   at once, valid for / until, grace period, reason. Always a **new signed
   version** that replaces the current one; the old version shows as *Replaced*
   in **License history**.
-- **Suspend** — the licence is paused and guest access on the appliance stops
+- **Suspend** — the licence is paused and client access on the appliance stops
   until **Resume**.
 - **Revoke** — permanent; set a new licence to restore service.
-- **Offline license file** — the signed, appliance-bound file, to upload in Hotel
-  Admin (**Appliance & licence → Files from your OneGate vendor → Upload licence
+- **Offline license file** — the signed, appliance-bound file, to upload in Admin
+  Console (**Appliance & licence → Files from your OneGate vendor → Upload licence
   file**) when the appliance cannot reach Central.
 
 Suspending or revoking a licence never cuts the appliance off from Central: it
@@ -147,8 +147,8 @@ All on the appliance's page:
   appliance: type the serial and a reason. Audit history is kept. A retired
   appliance's identity is remembered and can never register again: the box must
   be factory-reset first. An appliance that held a customer and whose record is
-  deleted shows *Removed from OneGate Central* in its Hotel Admin and stops
-  admitting new guests until it is factory-reset and activated again.
+  deleted shows *Removed from OneGate Central* in its Admin Console and stops
+  admitting new clients until it is factory-reset and activated again.
 
 ---
 
@@ -182,5 +182,5 @@ If a delete is refused, the dialog lists exactly what remains.
 | Confirm Central's backups are healthy | System → Backup health | read only |
 | Review who changed what | System → Audit log, or the customer → Activity | filter by customer, action, date |
 
-A hotel's own networks, guests, sessions and appliance health are not managed in
-Central; they are in **OneGate Hotel Admin** on the appliance.
+A site's own networks, clients, sessions and appliance health are not managed in
+Central; they are in **OneGate Admin Console** on the appliance.

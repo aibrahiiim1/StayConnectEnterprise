@@ -540,7 +540,7 @@ type attentionInput struct {
 
 var serviceLabels = map[string]string{
 	"scd": "Session controller", "edged": "Admin service", "netd": "Network controller",
-	"portald": "Guest portal", "acctd": "Usage accounting", "hotel-admin": "Admin web app",
+	"portald": "Client Portal", "acctd": "Usage accounting", "hotel-admin": "Admin web app",
 	"caddy": "Web front end", "kea": "DHCP server", "unbound": "DNS resolver", "postgres": "Site database",
 }
 
@@ -570,7 +570,7 @@ func deriveAttention(in attentionInput) []attentionItem {
 		if label == "" {
 			label = "PMS connection"
 		}
-		detail := "Guests cannot sign in with their room number on this connection until it is ready."
+		detail := "Clients cannot sign in with their room number on this connection until it is ready."
 		if p.Reason != "" {
 			detail += " Reason: " + strings.ToLower(strings.ReplaceAll(p.Reason, "_", " ")) + "."
 		}
@@ -643,12 +643,12 @@ func deriveAttention(in attentionInput) []attentionItem {
 		case !in.LicenseInstalled || in.LicenseState == "none":
 			add(attentionItem{ID: "license-missing", Severity: "warn",
 				Title:  "This appliance is not activated yet",
-				Detail: "Guests cannot sign in until it is activated and licensed.",
+				Detail: "Clients cannot sign in until it is activated and licensed.",
 				Href:   "/appliance", Action: "Open appliance"})
 		case in.LicenseState == "wrong_hardware":
 			add(attentionItem{ID: "license-wrong-hardware", Severity: "err",
 				Title:  "The installed licence belongs to a different appliance",
-				Detail: "New guests cannot sign in. Ask your OneGate vendor for a licence for this appliance.",
+				Detail: "New clients cannot sign in. Ask your OneGate vendor for a licence for this appliance.",
 				Href:   "/appliance", Action: "Open licence"})
 		case in.LicenseState == "expiring":
 			add(attentionItem{ID: "license-expiring", Severity: "warn",
@@ -663,12 +663,12 @@ func deriveAttention(in attentionInput) []attentionItem {
 		case in.LicenseState == "suspended":
 			add(attentionItem{ID: "license-suspended", Severity: "err",
 				Title:  "The licence is suspended",
-				Detail: "New guests cannot sign in.",
+				Detail: "New clients cannot sign in.",
 				Href:   "/appliance", Action: "Open licence"})
 		case in.LicenseState == "expired" || in.LicenseState == "revoked":
 			add(attentionItem{ID: "license-" + in.LicenseState, Severity: "err",
 				Title:  "The licence is " + in.LicenseState,
-				Detail: "New guests cannot sign in.",
+				Detail: "New clients cannot sign in.",
 				Href:   "/appliance", Action: "Open licence"})
 		}
 	}

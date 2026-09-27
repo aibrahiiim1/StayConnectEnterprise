@@ -2,7 +2,7 @@
 
 > **Audience:** an IT engineer who is new to StayConnect and has no knowledge of
 > how the product was built. If you read this document top to bottom you can take a
-> hotel from an unpacked appliance to live, licensed guest WiFi, and run it day-2.
+> site from an unpacked appliance to live, licensed guest WiFi, and run it day-2.
 >
 > **This is the recommended starting point.** For screen-by-screen reference and
 > shorter step lists, see the companion documents linked in
@@ -25,17 +25,17 @@
 7. [Activation: customer, site, license terms, one step](#7-activation-customer-site-license-terms-one-step)
 8. [Convergence: how the appliance becomes Active](#8-convergence-how-the-appliance-becomes-active)
 9. [The license model (states & enforcement)](#9-the-license-model-states--enforcement)
-10. [Concurrent online guest capacity](#10-concurrent-online-guest-capacity)
+10. [Concurrent online client capacity](#10-concurrent-online-client-capacity)
 11. [Guest networks / VLANs](#11-guest-networks--vlans)
 12. [Worked examples: VLAN 100 & VLAN 200](#12-worked-examples-vlan-100--vlan-200)
 13. [DHCP, DNS, NAT & the captive portal](#13-dhcp-dns-nat--the-captive-portal)
-13a. [Guest portal settings](#13a-guest-portal-settings)
-14. [Guest authentication methods](#14-guest-authentication-methods)
-14a. [Guest sign-in protection (configurable)](#14a-guest-sign-in-protection-configurable)
+13a. [Client Portal settings](#13a-client-portal-settings)
+14. [Client authentication methods](#14-client-authentication-methods)
+14a. [Client sign-in protection (configurable)](#14a-client-sign-in-protection-configurable)
 15. [Access plans & vouchers](#15-access-plans--vouchers)
 16. [Integrations: PMS, OTP, Social, Payments](#16-integrations-pms-otp-social-payments)
 17. [Walled garden](#17-walled-garden)
-18. [Guest zero-to-internet acceptance test](#18-guest-zero-to-internet-acceptance-test)
+18. [Client zero-to-internet acceptance test](#18-client-zero-to-internet-acceptance-test)
 19. [License lifecycle behavior (Active → Grace → Expired → Suspended → Revoked)](#19-license-lifecycle-behavior)
 20. [License renewal & anti-replay](#20-license-renewal--anti-replay)
 21. [Reboot & service recovery](#21-reboot--service-recovery)
@@ -61,18 +61,18 @@ StayConnect has two tiers:
 
 - **Central Control Plane** ("Cloud Admin", **Control Panel**) — a multi-tenant
   web app (`cloud-admin`, Next.js) backed by a Go API (`ctrlapi`/control-plane).
-  You manage every hotel's customers, sites, appliance activation and
+  You manage every site's customers, sites, appliance activation and
   **licenses** here. Central is **licensing, activation and fleet status only**
   — the binding description is [CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md).
 - **Appliance** (the on-site gateway) — a hardened box running Go daemons and an
-  on-box web app called **Hotel Admin** (`hotel-admin`, Next.js). The daemons:
+  on-box web app called **Admin Console** (formerly Hotel Admin; `hotel-admin`, Next.js). The daemons:
   - `scd` — supervisor / guest-authorization / license state.
-  - `edged` — the Edge API behind Hotel Admin (guest networks, DHCP, integrations,
+  - `edged` — the Edge API behind the Admin Console (guest networks, DHCP, integrations,
     and the appliance's Central status).
   - `netd` — applies WAN/LAN/VLAN/nftables changes with an auto-rollback watchdog.
   - `portald` — serves the captive portal (`:8380` HTTP, `:8343` HTTPS).
   - `acctd` — traffic accounting & shaping.
-  - Plus `caddy` (TLS reverse proxy for Hotel Admin), `kea` (DHCP), `unbound` (DNS).
+  - Plus `caddy` (TLS reverse proxy for the Admin Console), `kea` (DHCP), `unbound` (DNS).
 
 The appliance **does not broadcast WiFi**. Your wireless controller / APs
 broadcast SSIDs and tag them onto VLANs; the appliance is the gateway, DHCP
@@ -86,7 +86,7 @@ generates itself on first boot; Central never learns the private key.
 
 ## 2. Central vs Appliance — who does what
 
-| Responsibility | Central (Control Panel) | Appliance (Hotel Admin) |
+| Responsibility | Central (Control Panel) | Appliance (Admin Console) |
 |---|---|---|
 | Create customers, sites | ✅ | — |
 | Activate an appliance, issue/renew/revoke its **license** | ✅ | — (shows state; can import an offline license file) |
@@ -98,8 +98,8 @@ generates itself on first boot; Central never learns the private key.
 | WAN / LAN IP configuration | — | ✅ |
 | Enforce concurrent-guest capacity & license state | — | ✅ (locally, offline-safe) |
 
-**Rule of thumb:** Central decides *whether and how much* a hotel may serve (the
-license). The appliance decides *how the hotel network actually works* and
+**Rule of thumb:** Central decides *whether and how much* a site may serve (the
+license). The appliance decides *how the site network actually works* and
 enforces the license locally, even if Central is unreachable.
 
 ### Ownership hierarchy (how everything is organized)
@@ -108,10 +108,10 @@ enforces the license locally, even if Central is unreachable.
 Platform  →  Customer  →  Site  →  Appliance  →  Guest Networks / VLANs
 ```
 
-- **Customer** = the hotel group / company / owner (a tenant). A Customer owns
+- **Customer** = the organisation that owns the sites: a hotel group, company or other owner (a tenant). A Customer owns
   one or more Sites.
-- **Site** = **one physical property** (a single hotel/resort/deployment
-  location). A Site belongs to exactly one Customer and contains one or more
+- **Site** = **one physical location** (a single hotel, resort, office, campus or other
+  deployment location). A Site belongs to exactly one Customer and contains one or more
   Appliances. Buildings, floors, wings, SSIDs and guest VLANs are **not** Sites —
   they are configured on the appliance.
 - **Appliance** = the on-site gateway. It belongs to exactly one Site at a time
@@ -132,7 +132,7 @@ see only their customer (enforced server-side). See the
 
 ## 3. The one official onboarding workflow
 
-This is the **only** normal way to bring a hotel online. Use it every time.
+This is the **only** normal way to bring a site online. Use it every time.
 
 1. **Install the appliance** at the site and cable WAN + LAN.
 2. **Configure WAN** only if the site does not provide DHCP on the WAN uplink
@@ -141,19 +141,19 @@ This is the **only** normal way to bring a hotel online. Use it every time.
    **Waiting for activation** (no token, no manual steps).
 4. Open it and click **Activate**; **create or select the Customer**.
 5. **Create or select the Site**.
-6. Set **Guests online at once** (the licensed capacity).
+6. Set **Clients online at once** (the licensed capacity).
 7. Set **License Validity** (a number of days, or an end date).
-8. Set **Grace Period** (days the hotel keeps serving after expiry).
+8. Set **Grace Period** (days the site keeps serving after expiry).
 9. Confirm — one step signs the assignment and issues the signed license.
 10. **Wait for automatic convergence** — the appliance collects its assignment,
     certificate and license itself; Central shows **Activating**, then
     **Activated**.
 11. **Verify** in Central (Appliances → **Activated**, license **Active**) and on
-    the box (Hotel Admin → **Appliance & licence**: *Activated*, licence
+    the box (Admin Console → **Appliance & licence**: *Activated*, licence
     *Active*).
 12. On the appliance, **configure Guest Networks / VLANs**.
 13. **Configure authentication methods** (voucher / OTP / PMS / social / payment).
-14. **Perform a real guest acceptance test** (connect a device, reach the portal,
+14. **Perform a real client acceptance test** (connect a device, reach the portal,
     authenticate, reach the internet).
 15. **Go live.**
 
@@ -181,7 +181,7 @@ This is the **only** normal way to bring a hotel online. Use it every time.
 
 ## 5. WAN / LAN connectivity
 
-WAN/LAN is configured **on the appliance** in Hotel Admin → **WAN / LAN settings**
+WAN/LAN is configured **on the appliance** in the Admin Console → **WAN / LAN settings**
 (`/network/system`). You normally only touch this if the WAN is static or the base
 bridge gateway must change.
 
@@ -191,7 +191,7 @@ bridge gateway must change.
 > Example: `CHR` → VLAN 90 → `ens192.90` → bridge `br-g90` → gateway `10.20.0.1/22`
 > → DHCP pool `10.20.0.100–10.20.3.250`. The legacy base bridge is shown under an
 > **Advanced · Base LAN / Legacy Bridge** section with a *Legacy* badge; its DHCP
-> showing **off** there is normal when guests are served by Guest Networks.
+> showing **off** there is normal when clients are served by Guest Networks.
 
 1. Review the **WAN / Management** status card and the **Guest Networks** pointer.
 2. Under **Change configuration**:
@@ -215,10 +215,10 @@ The same apply-and-confirm safety wraps guest-network changes (§11).
   (proving possession of its identity key) to Central's public, token-less
   `POST /v1/appliances/register`. This is trust-on-first-use. Until Central
   answers it retries in the background (30 s, backing off to every 5 minutes),
-  and **Check now** in Hotel Admin retries immediately.
+  and **Check now** in the Admin Console retries immediately.
 - Central creates the appliance record in state **`pending_approval`**
   (internal `lifecycle_state`), which Central shows as activation
-  **"Waiting for activation"**. Hotel Admin shows the same word; before the
+  **"Waiting for activation"**. Admin Console shows the same word; before the
   first successful registration it shows *Not registered yet*.
 - **Clone / hardware-reuse protection:** if a known identity key appears from
   different hardware, or a serial reappears with a new key while an active record
@@ -237,10 +237,10 @@ and click **Activate**. The dialog asks for exactly what the license needs:
 
 - **Customer** — select, or **New customer…**.
 - **Site** — select, or create one (a site belongs to a customer).
-- **Guests online at once** — the licensed capacity (`0` = unlimited; use it
+- **Clients online at once** — the licensed capacity (`0` = unlimited; use it
   only where intended).
 - **Valid for** — a number of days, or an end date.
-- **Grace Period (days)** — how long the hotel keeps serving guests after the
+- **Grace Period (days)** — how long the site keeps serving clients after the
   license expires.
 
 Confirming performs, server-side in one transaction (platform admin + password
@@ -271,14 +271,14 @@ over its authenticated channel:
 3. It fetches its **signed license** from Central (`GET /v1/appliance/license`)
    — every minute until it holds a usable license, then every 6 hours, and at
    once on **Check now**.
-4. Once the valid license is installed, Central shows **Activated** and Hotel
-   Admin → **Appliance & licence** shows *Activated* and licence *Active*.
+4. Once the valid license is installed, Central shows **Activated** and Admin
+   Console → **Appliance & licence** shows *Activated* and licence *Active*.
 
 Convergence is normally seconds-to-a-minute. If Central is briefly unreachable
 during this window, the box keeps retrying; fetch failures are non-fatal.
 
 **Verify:** Central shows the appliance **Activated** with license **Active**;
-Hotel Admin → **Appliance & licence** shows the licence **Active**, **Guests
+Admin Console → **Appliance & licence** shows the licence **Active**, **Clients
 online, all guest networks** against the licensed maximum, and **Valid until**.
 
 ---
@@ -288,7 +288,7 @@ online, all guest networks** against the licensed maximum, and **Valid until**.
 The license is a **signed document bound to one appliance** (identity key
 fingerprint + appliance id + serial + hardware fingerprint + WAN MAC). It carries:
 
-- **max concurrent online guests** (the capacity),
+- **max concurrent online clients** (the capacity),
 - **validity window** (valid-from / valid-until),
 - **grace period** (days),
 - **features** (PMS, paid WiFi, SMS/email OTP, social login, HA, white-label) —
@@ -298,9 +298,9 @@ fingerprint + appliance id + serial + hardware fingerprint + WAN MAC). It carrie
 
 The appliance evaluates state locally against the signed document and the local
 clock, every minute and at boot, and re-checks the hardware binding on every
-evaluation. States and what they do to **new** guest logins:
+evaluation. States and what they do to **new** client logins:
 
-| State | New guest logins | Existing sessions | DHCP/DNS/portal/Hotel-Admin |
+| State | New client logins | Existing sessions | DHCP/DNS/portal/Hotel-Admin |
 |---|---|---|---|
 | **Active** | Allowed, up to capacity | Keep running | Up |
 | **GracePeriod** (expired but within grace) | **Still allowed**, with renewal warning | Keep running | Up |
@@ -312,45 +312,45 @@ evaluation. States and what they do to **new** guest logins:
 
 Key guarantees:
 
-- **A state change never drops existing guest sessions** — only *new*
+- **A state change never drops existing client sessions** — only *new*
   authorization is refused.
-- **DHCP, DNS, captive portal and Hotel Admin always keep running**, regardless of
+- **DHCP, DNS, captive portal and the Admin Console always keep running**, regardless of
   license state, so staff never lose control of the box.
 - **Production appliances fail closed:** with no valid license the state is
   `unlicensed` and capacity is 0. (Only development builds run permissively.)
 
 ---
 
-## 10. Concurrent online guest capacity
+## 10. Concurrent online client capacity
 
 - The cap is **per-appliance, appliance-wide across ALL its guest VLANs** — it is
-  **not** per-VLAN and **not** per-tenant. Two guests on VLAN 100 and three on
+  **not** per-VLAN and **not** per-tenant. Two clients on VLAN 100 and three on
   VLAN 200 count as five against one capacity number.
 - It is enforced **locally** on the appliance inside the same transaction that
-  creates a guest session (a per-appliance lock + a live count of active
+  creates a client session (a per-appliance lock + a live count of active
   sessions). Central is never consulted, so enforcement works offline.
-- **Every Guest Access method shares it**: voucher, guest account, OTP, social
+- **Every Client Access method shares it**: voucher, client account, OTP, social
   login and **PMS room sign-in**. A room guest's first device, a second device
   joining the same stay, and a device rejoining after its session ended each
   take a slot; a device signing in again while its session is still open keeps
-  that session and takes none. A refused room sign-in is recorded on **Guest
+  that session and takes none. A refused room sign-in is recorded on **Client
   sign-in attempts** as *Licensed capacity full* (`LICENSE_CAPACITY_REACHED`);
-  one the licence did not admit at all, as *Licence refused new guests*
+  one the licence did not admit at all, as *Licence refused new clients*
   (`LICENSE_REFUSED`).
 - `0` means **unlimited** (older licenses may carry `-1`, also unlimited).
-- **At capacity**, a new guest login is refused with HTTP 403
+- **At capacity**, a new client login is refused with HTTP 403
   `{"error":"LICENSE_CAPACITY_REACHED","limit":N,"current":M}` and **nothing is
-  provisioned** for that guest (no firewall/shaping/accounting/session rows). A
+  provisioned** for that client (no firewall/shaping/accounting/session rows). A
   slot frees when an existing session ends.
 
 To raise capacity, **renew/re-issue the license** in Central with a higher
-Max Concurrent Online Guests (§20).
+Max Concurrent Online Clients (§20).
 
 ---
 
 ## 11. Guest networks / VLANs
 
-Create guest networks in Hotel Admin → **Guest networks** (`/network`) →
+Create guest networks in the Admin Console → **Guest networks** (`/network`) →
 **New guest network**. The 7-step wizard:
 
 1. **Identity** — Name, Description, **SSID label** (a label only — the appliance
@@ -359,7 +359,7 @@ Create guest networks in Hotel Admin → **Guest networks** (`/network`) →
    Tick **VLAN tagged (802.1Q)** and set the **VLAN id** (1–4094) for a tagged
    network.
 3. **Subnet & gateway** — Subnet CIDR and Gateway IP. The appliance owns the
-   gateway; guests use it as gateway **and** DNS.
+   gateway; clients use it as gateway **and** DNS.
 4. **DHCP & DNS** — DHCP pool ranges; DNS mode (**appliance** resolver or
    **custom servers**); domain name; lease default/min/max.
 5. **Captive portal** — toggle Captive portal, Internet access, **NAT
@@ -399,20 +399,20 @@ Reference hardware: **WAN = `ens160`**, **guest trunk = `ens192`**.
 Steps: create two guest networks on parent **`ens192`**, VLAN tagged, ids **100**
 and **200**, with the subnets/gateways above; give each its own DHCP pool; enable
 captive portal + NAT on both; apply + confirm each. On your wireless controller,
-map SSID "Hotel Guest" → VLAN 100 and SSID "Conference" → VLAN 200. Set branding
+map SSID "Guest Wi-Fi" → VLAN 100 and SSID "Conference" → VLAN 200. Set branding
 per network in Portal settings.
 
 ### Example B — two VLANs sharing one portal/experience
 
 Create VLAN 100 and VLAN 200 exactly as above but give them the **same** portal
-settings and the **same** enabled auth methods. Guests on either VLAN see an
+settings and the **same** enabled auth methods. Clients on either VLAN see an
 identical login page. This is common when you segment traffic (e.g. floors or
-buildings) for routing/DHCP reasons but want one guest experience.
+buildings) for routing/DHCP reasons but want one client experience.
 
 ### Capacity across VLANs
 
-In **both** examples the **licensed Max Concurrent Online Guests is a single
-appliance-wide number**. If the license allows 300 concurrent guests, that 300 is
+In **both** examples the **licensed Max Concurrent Online Clients is a single
+appliance-wide number**. If the license allows 300 concurrent clients, that 300 is
 shared across VLAN 100 **and** VLAN 200 (and any legacy `br-lan`), not 300 each.
 
 ---
@@ -426,28 +426,28 @@ shared across VLAN 100 **and** VLAN 200 (and any legacy `br-lan`), not 300 each.
   the only reliable cross-OS auto-pop mechanism.
 - **DNS** is served by `unbound`, either as the appliance resolver or forwarding
   to custom servers per network.
-- **NAT (masquerade)** is per-network — enable it so guests reach the internet via
-  the WAN. **Client isolation** (per-network) stops guests talking to each other.
+- **NAT (masquerade)** is per-network — enable it so clients reach the internet via
+  the WAN. **Client isolation** (per-network) stops clients talking to each other.
 - The **captive portal** (`portald`) listens on `:8380` (HTTP) and `:8343`
   (HTTPS) and is reached at the network's gateway IP.
 
-### 13a. Guest portal settings
+### 13a. Client Portal settings
 
-**Hotel Admin → Guest portal → Portal settings.** How the sign-in page looks and
+**Admin Console → Client Portal → Portal settings.** (Client Portal was formerly Guest Portal.) How the sign-in page looks and
 reads. There is one portal and one current configuration for it: change
-something, watch the preview, press **Save changes**, and guests see it. There is
+something, watch the preview, press **Save changes**, and clients see it. There is
 no draft to promote, no version to pick and no publish step.
 
 | Section | What it holds |
 |---|---|
 | **General** | Hotel name, welcome line, help line, terms-of-use link. |
 | **Branding** | Logo, background photograph, brand colour, button shade, text colour, corner radius, typeface. |
-| **Languages** | Which languages guests are offered, and the wording in each. |
+| **Languages** | Which languages clients are offered, and the wording in each. |
 | **Advanced** | Custom CSS and a custom HTML fragment. |
 
 **Images live on the appliance.** Upload a PNG, JPEG, WebP or GIF up to 8 MB; it
 is stored locally and served from the same origin as the sign-in page, which is
-what makes it load for a guest who has no internet yet. The file type is decided
+what makes it load for a client who has no internet yet. The file type is decided
 by inspecting the bytes, not the filename. **SVG is refused** — it is a document
 format that can carry script, and this page collects room numbers and voucher
 codes.
@@ -466,19 +466,19 @@ Mobile widths — not a drawing of it that could drift.
 | **Custom CSS or custom HTML**, including clearing them | **Password step-up required.** |
 
 The reason is the boundary, not the screen. Those two fields are the only ones
-that can put executable-shaped content on a page where guests type their surname
+that can put executable-shaped content on a page where clients type their surname
 and voucher codes; every other field is constrained on the appliance to a colour,
 a length, a font stack, a bounded string, or an appliance path / https URL /
 inline image, so a save that leaves the Advanced fields untouched cannot
 introduce executable content at all. Requiring a password to correct a typo in
-the hotel's name was ceremony that taught operators to type it without reading.
+the site's name was ceremony that taught operators to type it without reading.
 
 What is unchanged: the operator still needs the portal-branding write
 permission, every save is audited with who made it, and a design containing a
 script tag, an inline event handler, a frame, an extra form or `@import` is
 **refused outright** rather than quietly cleaned up.
 
-#### Languages, and how a guest gets theirs
+#### Languages, and how a client gets theirs
 
 Six languages ship complete with the product — **English, Arabic, Italian,
 French, Russian, German** — so offering one costs a tick, not an afternoon of
@@ -487,10 +487,10 @@ translation. Two separate things, deliberately:
 - **Guest languages** — which of them appear in the portal's selector. English is
   always available and is what anything missing falls back to.
 - **Wording** — one language at a time, every field already showing the real text
-  a guest reads. Type over a string to change it for your property; press its
+  a client reads. Type over a string to change it for your site; press its
   reset button, or type the original back, and the customisation is removed
   rather than stored. **Only strings you actually changed are kept**, so improved
-  wording reaches your guests without you re-entering anything.
+  wording reaches your clients without you re-entering anything.
 
 A language you add yourself is not shipped with the product, so you supply its
 wording; anything left empty shows English, and the screen says how many strings
@@ -498,33 +498,33 @@ that is.
 
 **Arabic is laid out right to left** on the portal and in the editor.
 
-**A guest's language is chosen automatically**, in this order:
+**A client's language is chosen automatically**, in this order:
 
-1. what that guest chose on this device before, if they chose;
-2. otherwise their device's own ordered language list, first entry the hotel
+1. what that client chose on this device before, if they chose;
+2. otherwise their device's own ordered language list, first entry the site
    offers — `ar-EG` matches Arabic, `de-AT` matches German, and a phone set to
-   Japanese then Italian gets Italian at a hotel offering Italian;
+   Japanese then Italian gets Italian at a site offering Italian;
 3. otherwise English.
 
-A guest's own choice always outranks detection and survives being bounced back
+A client's own choice always outranks detection and survives being bounced back
 to the portal. Detection never records a preference, so it cannot be mistaken
-for a choice later. If you switch a language off after a guest chose it,
+for a choice later. If you switch a language off after a client chose it,
 detection simply runs again for them.
 
 ---
 
-## 14. Guest authentication methods
+## 14. Client authentication methods
 
-Guests can authenticate by:
+Clients can authenticate by:
 
 - **Voucher** — a printed/emailed code (needs Access plans + Voucher batches, §15).
-- **Username & Password (Guest Accounts)** — a named account with a password,
+- **Username & Password (Client Accounts)** — a named account with a password,
   bound to an Access plan (§15). Basic-access like vouchers (no license feature
-  gate). Managed on **Hotel Admin → Guest accounts**; the portal tab is shown only
+  gate). Managed on the **Admin Console → Client accounts**; the portal tab is shown only
   when you enable it there. Passwords are stored hashed (argon2id) and are
   write-only.
 - **OTP** — email or SMS one-time code (needs a Notifications provider, §16).
-- **PMS** — room number + name checked against the hotel PMS (needs a PMS
+- **PMS** — room number + name checked against the site PMS (needs a PMS
   provider, §16). Subject to the same licence gate and concurrent-guest
   capacity as every other method (§10).
 - **Social login** — Google/Apple/Facebook/Microsoft (needs a Social provider).
@@ -541,11 +541,11 @@ login via the **Walled garden** (§17).
 
 ---
 
-## 14a. Guest sign-in protection (configurable)
+## 14a. Client sign-in protection (configurable)
 
 Repeated incorrect room sign-ins from the **same device** cause that device to be asked to wait before it can
 try again. It is always on — there is no switch — and the three numbers that decide how strict it is are
-editable in **Hotel Admin → Sign-in methods → Guest sign-in protection**.
+editable in the **Admin Console → Sign-in methods → Client sign-in protection**.
 
 | Setting | Unit | Default | Allowed | What it does |
 |---|---|---|---|---|
@@ -554,14 +554,14 @@ editable in **Hotel Admin → Sign-in methods → Guest sign-in protection**.
 | Wait after too many attempts | seconds | **60** | 30–3600 | How long the device is asked to wait. Attempts made during the wait do not extend it. |
 
 **Scope is the device, on its site and guest network.** Not the room — restricting a room number would lock
-out the guest who actually lives there while whoever chose that number simply moves to the next one. Not the
+out the client who actually lives there while whoever chose that number simply moves to the next one. Not the
 address — a guest network NATs, so an address is a floor. The hardware address used is the one the appliance
 reads from its own neighbour table, never a value the browser sends, so refreshing the page, reopening the
 portal, clearing cookies or typing a different room does not reset anything.
 
 *Honest limit:* a MAC address is not unspoofable. Someone on the guest VLAN who changes their device address
-gets a fresh counter. What the control buys is that casual enumeration stops being free, that no guest is ever
-restricted by another guest's behaviour, and that every restriction is attributable and releasable by a named
+gets a fresh counter. What the control buys is that casual enumeration stops being free, that no client is ever
+restricted by another client's behaviour, and that every restriction is attributable and releasable by a named
 member of staff.
 
 **What counts, and what does not.** Only an incorrect credential counts:
@@ -571,23 +571,23 @@ member of staff.
 
 Nothing else does. A stale or unreachable PMS mirror, a routing or interface failure, an internal error, a
 malformed submission, an ambiguous room, a stay outside its eligibility window and an attempt already refused
-for waiting all leave the counter untouched — a property whose PMS feed is down must not lock out its own
-guests on top of it. A **successful** sign-in clears that device's counter immediately.
+for waiting all leave the counter untouched — a site whose PMS feed is down must not lock out its own
+clients on top of it. A **successful** sign-in clears that device's counter immediately.
 
-**What the guest sees.** *"Too many attempts. Please wait N seconds and try again."* — counting down from the
+**What the client sees.** *"Too many attempts. Please wait N seconds and try again."* — counting down from the
 server's own expiry. A browser that ignores the countdown gains nothing: the appliance refuses the next
 submission itself.
 
-**Existing sessions are never disconnected.** A guest already online stays online.
+**Existing sessions are never disconnected.** A client already online stays online.
 
-**Ending a wait early.** **Hotel Admin → Guest sign-in attempts → Active restrictions** lists every device
+**Ending a wait early.** **Admin Console → Client sign-in attempts → Active restrictions** lists every device
 currently waiting, with its guest network, the last room it typed (shown as *unverified input* — it is what
 somebody typed, not where anyone is staying), the failure count, when the wait started and ends, a link to
 that device's sign-in attempts, and a **Release** action.
 
-Release needs the *Release guest sign-in restriction* permission and a short reason; who released it, which
+Release needs the *Release client sign-in restriction* permission and a short reason; who released it, which
 device, when and why are recorded. **Releasing allows another attempt — it does not sign anybody in.** The
-guest still has to enter details the property accepts.
+client still has to enter details the site accepts.
 
 **Who can do what** (see [ROLE_AND_SCOPE_MATRIX.md](ROLE_AND_SCOPE_MATRIX.md) §3):
 
@@ -599,7 +599,7 @@ guest still has to enter details the property accepts.
 | Guest relations operator | no (read-only) | yes |
 | Site viewer | no | no |
 
-The desk releases and does not re-tune, deliberately: turning "five" into "twenty" for the whole property
+The desk releases and does not re-tune, deliberately: turning "five" into "twenty" for the whole site
 must not be the quickest way to help one person.
 
 **Changes take effect immediately**, on the next sign-in attempt — no restart, rebuild or deployment. They
@@ -611,7 +611,7 @@ operator, the previous values and the new values.
 
 ### PMS configuration: Current configuration and History
 
-**Hotel Admin → Property management system → PMS connection.**
+**Admin Console → Property management system → PMS connection.**
 
 The connection screen shows the **current configuration** only — the version in force, what it is set to, and
 when and by whom it was saved. Previous versions are behind a **History** button, and putting an older one
@@ -626,9 +626,9 @@ The word *Revision* is internal. Operators see **Version**, **Current configurat
 **History**; the database and the API are unchanged.
 
 **Connection recovery settings apply to this connection only.** They are stored per PMS interface, so a
-property running two connections tunes each on its own terms -- a link behind a flaky VPN can be given
+site running two connections tunes each on its own terms -- a link behind a flaky VPN can be given
 patient backoff without slowing down a healthy one. Changing one connection's values leaves every other
-connection at the property exactly as it was, and each keeps its own change history.
+connection at the site exactly as it was, and each keeps its own change history.
 
 Where a version's origin cannot be read at all -- as opposed to never having been recorded -- History says
 so explicitly and names it as a fault to report. The configuration itself is still shown: losing the audit
@@ -636,10 +636,10 @@ trail never costs an operator the ability to see what the connection is set to.
 
 ## 14b. Unresolved departures (PMS reconciliation)
 
-**Hotel Admin → Property management system → PMS connection → Advanced diagnostics → Unresolved departures.**
+**Admin Console → Property management system → PMS connection → Advanced diagnostics → Unresolved departures.**
 
 > **Not a routine screen, and deliberately not in the menu.** Reconciliation runs by itself after every
-> complete guest list and this page carries no action. A property where the integration is healthy never
+> complete guest list and this page carries no action. A site where the integration is healthy never
 > needs to open it. When something genuinely needs investigating, the PMS connection page says so — under
 > *Needs investigation* — and links straight here. Roster reconciliation sits beside it, under the same
 > Advanced diagnostics heading.
@@ -668,13 +668,13 @@ shown beside it — that number is a fact about the feed and is not hidden.
 could not place is resolved by the PMS sending one it *can* place — typically once somebody corrects the
 record there. Two deliberate invariants make that the only route: a PMS event is one-way (once it reaches a
 terminal state its result is frozen), and a checkout boundary must be an *applied* departure event. The PMS
-is the source of truth for whether a guest has left, and the appliance asserting it from a re-reading of an
+is the source of truth for whether a client has left, and the appliance asserting it from a re-reading of an
 old message would be claiming to know something it does not.
 
 The list is the value: 397 distinct departures instead of 12,271 rows, each labelled with the evidence it is
 waiting for, so the desk knows which rooms to ask the PMS about.
 
-**Three rules this screen will not break**, because breaking any of them disconnects a resident guest:
+**Three rules this screen will not break**, because breaking any of them disconnects a resident client:
 
 * a **planned departure date is not a checkout** — "Past their departure date" is its own tab and closes nothing;
 * **two stays in one room are not a duplicate** — shared occupancy is ordinary;
@@ -689,8 +689,8 @@ The engine enforces the third one itself: a departure whose matching stay arrive
 
 **The appliance uses OneGate Central for its identity, activation and licence only** (CLAUDE.md §0E). There is
 no reporting link to switch on: the appliance has no telemetry queue, no usage or health producer, no message
-bus client, no remote command channel and no software-update agent. Hotel Admin's **System → Appliance &
-licence** shows activation, licence and whether Central is reachable; the hotel's operations are watched on
+bus client, no remote command channel and no software-update agent. The Admin Console's **System → Appliance &
+licence** shows activation, licence and whether Central is reachable; the site's operations are watched on
 the appliance itself.
 
 **Everything the appliance exchanges with Central** — all of it HTTPS to Central's API:
@@ -707,8 +707,8 @@ the appliance itself.
 **No guest identity, stay, session, usage or log content appears in any of them.**
 
 **Nothing local depends on Central.** The PMS connection, mirrored stays, guest sign-in and its attempt
-records, packages, allowances, sessions, accounting, enforcement and every Hotel Admin screen run on this
-appliance. A guest does not need Central to get online, and the offline licence and grace rules apply.
+records, packages, allowances, sessions, accounting, enforcement and every Admin Console screen run on this
+appliance. A client does not need Central to get online, and the offline licence and grace rules apply.
 
 **History.** A telemetry link (usage, health and service-health reports, remote session revocation, remote PMS
 operations, a command channel and an update agent over a message bus) was built and verified, switched off by
@@ -720,18 +720,18 @@ redirects to **System → Appliance & licence**.
 
 ## 15. Access plans & vouchers
 
-**Access plan** (Hotel Admin → **Guest access plans** → **New plan**): Code, Name,
+**Access plan** (Admin Console → **Client access plans** → **New plan**): Code, Name,
 Description, **Duration (s)** (blank = unlimited time), **Data cap (bytes)** (blank
 = unlimited), **Down/Up kbps**, **Max devices**, **Price (cents)**, **Currency**.
 
 > "Max devices" on an access plan is a **per-credential device limit** — the
-> concurrent devices allowed on one voucher or one guest account — a different
+> concurrent devices allowed on one voucher or one client account — a different
 > concept from the license's appliance-wide concurrent-guest capacity (§10). Both
 > are enforced on **every** login, atomically and concurrency-safe: a device
 > rejected for either reason gets `MAX_DEVICES_REACHED` / `LICENSE_CAPACITY_REACHED`
 > and no session/nft/shaping/accounting/voucher-activation is created. A reconnect
 > from a device already signed in on the same credential does **not** consume a
-> second slot; disconnect/expiry/reap frees the slot. Guest Access Plans are the
+> second slot; disconnect/expiry/reap frees the slot. Client Access Plans are the
 > per-guest tiers here — not the retired commercial *License Plans*.
 
 **Voucher batch** (**Voucher batches** → **New batch**): choose an active **Plan**,
@@ -743,7 +743,7 @@ a **Count** (1–10000), a **Label**, and the **code generation options**:
 - **Optional prefix** (A–Z/0–9, e.g. `PARTY`) — **additional** to the random
   portion.
 - **Exclude ambiguous characters** (on by default): drops `0/O`, `1/I/L`, `5/S`.
-  (`I, L, O, U` are *always* excluded so a code matches exactly what the guest
+  (`I, L, O, U` are *always* excluded so a code matches exactly what the client
   types.) Codes use secure random generation and are globally unique; a batch too
   large for the chosen space is rejected rather than weakening randomness.
 
@@ -760,7 +760,7 @@ a **Count** (1–10000), a **Label**, and the **code generation options**:
 > cap the voucher shows **Exhausted** (reason: data). Consumed time and data are
 > **derived** from the durable window and a live sum of session bytes — never
 > accrued on session close — so usage is counted exactly once and a duplicate or
-> retried close can't double-charge. (Guest **accounts** are reusable credentials
+> retried close can't double-charge. (Client **accounts** are reusable credentials
 > by design — each login gets the plan duration afresh.)
 
 Then **view the codes** (search/filter, copy, print, **download CSV**), open a
@@ -773,8 +773,8 @@ vouchers can't be changed. The code, usage history and audit trail are preserved
 each change records previous plan, new plan, operator and reason. Legacy (12-char)
 batches keep working unchanged.
 
-**Guest accounts** (**Guest accounts** → **New account**): **username** (1–64;
-one letter/digit allowed; case-**insensitive**, unique per property), **password**
+**Client accounts** (**Client accounts** → **New account**): **username** (1–64;
+one letter/digit allowed; case-**insensitive**, unique per site), **password**
 (1–128, case-**sensitive**; short is allowed with a non-blocking weak-password
 warning), an active **Plan** (dropdown showing duration/speed/max-devices), and
 optional display name / valid-from / valid-until / notes. The password can be typed
@@ -815,14 +815,14 @@ provisioning — if the license is Expired/Suspended/Revoked/Unlicensed you'll g
 
 ## 17. Walled garden
 
-Hotel Admin → **Walled garden** → **New rule**: Kind (domain/ip/cidr), Value,
+Admin Console → **Walled garden** → **New rule**: Kind (domain/ip/cidr), Value,
 Ports (comma; blank = all), Description. Add the hosts your portal, payment
-callbacks and OAuth redirects need so guests can reach them **before**
+callbacks and OAuth redirects need so clients can reach them **before**
 authenticating. Keep the list small.
 
 ---
 
-## 18. Guest zero-to-internet acceptance test
+## 18. Client zero-to-internet acceptance test
 
 Do this before go-live, on a real device, per guest VLAN:
 
@@ -833,7 +833,7 @@ Do this before go-live, on a real device, per guest VLAN:
    redirected to `http://{gateway}:8380`).
 4. Authenticate with a real method (voucher/OTP/PMS/social/payment).
 5. Confirm the device **reaches the internet** afterwards.
-6. Confirm the session appears in Hotel Admin → **Sessions**.
+6. Confirm the session appears in the Admin Console → **Sessions**.
 7. Confirm the **concurrent count** increments (License page / dashboard).
 
 If capacity is reached during testing you'll see `LICENSE_CAPACITY_REACHED` —
@@ -846,7 +846,7 @@ that's expected behavior, not a fault.
 See the table in §9 for the enforcement matrix. Timeline of a normal license:
 
 - **Active** from valid-from until valid-until.
-- At **valid-until** it enters **GracePeriod** for `grace_period_days` — guests
+- At **valid-until** it enters **GracePeriod** for `grace_period_days` — clients
   keep working, staff see renewal warnings.
 - After **valid-until + grace**, it becomes **Expired** — new logins refused,
   existing sessions drain, the box stays up.
@@ -874,7 +874,7 @@ See the table in §9 for the enforcement matrix. Timeline of a normal license:
   - **Clock-rollback protection** via a persisted high-water mark (48h tolerance).
   - Rejections surface as `LICENSE_ROLLBACK_REJECTED`.
 
-This means you cannot "downgrade" a hotel by replaying an old license file, and a
+This means you cannot "downgrade" a site by replaying an old license file, and a
 renewal issued while the box is offline still applies cleanly when it reconnects.
 
 ---
@@ -882,7 +882,7 @@ renewal issued while the box is offline still applies cleanly when it reconnects
 ## 21. Reboot & service recovery
 
 - The appliance daemons are supervised. On crash/reboot they self-heal with an
-  adaptive backoff; Hotel Admin → **Diagnostics** (`/health`) shows each service's
+  adaptive backoff; Admin Console → **Diagnostics** (`/health`) shows each service's
   health, restart counts, backoff and recovery history.
 - License state and anti-replay high-water marks are persisted, so a reboot does
   not change licensing.
@@ -894,14 +894,14 @@ renewal issued while the box is offline still applies cleanly when it reconnects
 
 ## 22. Central outage behavior (offline operation)
 
-- **Guests keep working.** Guest authorization and the capacity gate evaluate
+- **Clients keep working.** Client authorization and the capacity gate evaluate
   entirely against the on-disk signed license and the local clock — nothing in the
-  guest path calls Central.
+  client path calls Central.
 - License fetch/refresh failures are **non-fatal** ("offline-safe"); they only
-  affect renewal freshness. Hotel Admin → **Appliance & licence** shows OneGate
+  affect renewal freshness. Admin Console → **Appliance & licence** shows OneGate
   Central as *Temporarily unreachable* with the last answer and last problem — a
   warning, not a license state change.
-- DHCP, DNS, portal and Hotel Admin are local and unaffected.
+- DHCP, DNS, portal and the Admin Console are local and unaffected.
 - Time-based transitions (Active → Grace → Expired) still occur offline via the
   local ticker, honoring the grace window.
 - For fully offline sites, an **offline activation file** can be imported on the
@@ -925,13 +925,13 @@ activated, a security alert asks for an operator decision. Use this for RMA /
 hardware swaps.
 
 **WAN-MAC rebind** (same box, WAN NIC changed): a WAN-MAC-only mismatch is
-**soft** — the license stays in force, Hotel Admin shows *The internet (WAN)
+**soft** — the license stays in force, Admin Console shows *The internet (WAN)
 network adapter has changed*, and a security alert is raised. Resolve it in
 Central → appliance → **Advanced → Rebind WAN MAC** (reason + step-up), which
 re-issues a corrected hardware-bound license with the same terms.
 
 > A mismatch of **identity key / appliance id / serial / hardware fingerprint** is
-> a **hard** reject — the license is refused and the box will not serve guests.
+> a **hard** reject — the license is refused and the box will not serve clients.
 > That indicates the license and hardware genuinely don't match (wrong file, or a
 > cloned box), not a simple NIC change.
 
@@ -999,19 +999,19 @@ automatically, comparing **immutable tenant UUIDs**
   valid).
 - **Cross-customer** transition (different tenant UUID) → on the next boot the
   appliance **securely purges every previous-tenant row and cached secret** in one
-  transaction *before it authorizes any guest*: it repoints the live guest
+  transaction *before it authorizes any client*: it repoints the live guest
   networks (VLAN/DHCP/portal stay up) to the new owner, deletes all foreign-tenant
-  rows across every tenant-owned table + the local tenant/site mirror, flushes runtime guest
+  rows across every tenant-owned table + the local tenant/site mirror, flushes runtime client
   authorization (nftables), and writes an **audited transition record**
   (`appliance.tenant_transition_purge`) with the purged counts.
 - **Fail-closed:** if the purge cannot complete, the appliance authorizes **no**
-  guests (`tenant_transition_pending`) until it succeeds — a partial cleanup can
+  clients (`tenant_transition_pending`) until it succeeds — a partial cleanup can
   never expose one customer's data to another. The purge is idempotent, so a
   retry (or reboot) completes safely.
 
 Preserved across a transition: appliance/system/network/bootstrap state (WAN/mgmt,
 identity, certs, guest-network topology) and the immutable security **audit
-history**. Guest-facing data and secrets are not.
+history**. Client-facing data and secrets are not.
 
 ---
 
@@ -1041,8 +1041,8 @@ Notes verified in code:
   retired appliance, for example) removes its license and client certificate,
   keeps its identity and data, records the fact durably
   (`/etc/stayconnect/removed-from-central.json`) and **never registers again**.
-  It admits no new guests (guests already online are not disconnected), refuses
-  license and activation files, and Hotel Admin shows *Removed from OneGate
+  It admits no new clients (clients already online are not disconnected), refuses
+  license and activation files, and the Admin Console shows *Removed from OneGate
   Central*. Only a factory-clean install (§24) and a new activation bring it back.
 - A **guest network** (on the appliance) cannot be deleted while enabled or with
   active sessions.
@@ -1059,7 +1059,7 @@ Notes verified in code:
   certificates and expiry, the assignment signing keys and the key registry
   (read-only; a key's state is changed with the host command
   `ctrlapi assignment-key verify-only|revoke`). On the box,
-  the Hotel Admin **TLS certificate** page auto-renews the on-box cert (45-day
+  the Admin Console **TLS certificate** page auto-renews the on-box cert (45-day
   window / on IP change / SAN drift); **Rotate** forces a fresh cert (reason +
   password; you never upload a key).
 
@@ -1110,7 +1110,7 @@ appliance needs a human to come back, the run fails rather than hiding it.
   telemetry subsystem (CLAUDE.md §0E): its
   **Overview** and **Appliances** pages show activation, connection (from the
   last authenticated appliance call) and license state only. Appliance service
-  health, sessions and usage are watched in each appliance's Hotel Admin.
+  health, sessions and usage are watched in each appliance's Admin Console.
 - Central's audit log is **System → Audit log** (filter by customer, action,
   date) and each customer's **Activity** tab. Legacy `subscription.*` action
   names may appear on **historical** rows; nothing writes them any more.
@@ -1121,36 +1121,36 @@ appliance needs a human to come back, the run fails rather than hiding it.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Appliance never appears in Central | No WAN/internet, or `SCD_AUTO_REGISTER=false` | Fix WAN (§5) and use **Check now** in Hotel Admin → Appliance & licence; or use offline activation (§34) |
+| Appliance never appears in Central | No WAN/internet, or `SCD_AUTO_REGISTER=false` | Fix WAN (§5) and use **Check now** in the Admin Console → Appliance & licence; or use offline activation (§34) |
 | Registration refused (403) + security alert | Clone/hardware-reuse protection | Retire the old appliance (§25), then retry |
 | Registration refused `403 identity_retired` | This identity key was retired | Factory-reset the box (§24); it registers with a new key |
-| Hotel Admin shows *Removed from OneGate Central* | Central deleted the appliance after it had held a customer | Factory-clean install (§24), then activate it again (§26) |
-| Room sign-in attempts show *Licence refused new guests* / *Licensed capacity full* | The licence, not the guest: room sign-in answers to the same licence gate and capacity as every method | Check the license state; wait for a slot or raise capacity (§10) |
+| Admin Console shows *Removed from OneGate Central* | Central deleted the appliance after it had held a customer | Factory-clean install (§24), then activate it again (§26) |
+| Room sign-in attempts show *Licence refused new clients* / *Licensed capacity full* | The licence, not the guest: room sign-in answers to the same licence gate and capacity as every method | Check the license state; wait for a slot or raise capacity (§10) |
 | Stuck at Waiting for activation | Not activated yet | Activate it (§7) |
 | Stuck activating / no license | CSR/license not yet pulled, or Central briefly unreachable | Wait; check Diagnostics; confirm Central reachability |
-| Guests denied, License shows Expired | Past valid-until + grace | Renew the license (§20) |
-| Guests denied, `LICENSE_CAPACITY_REACHED` | At appliance-wide concurrent capacity | Wait for a slot, or raise Max Concurrent Online Guests (§20) |
-| Guest denied, `MAX_DEVICES_REACHED` | The voucher/account is at its **plan max devices** | Disconnect a device (Hotel Admin → Guest accounts / Sessions), raise the plan's Max devices, or use another credential |
+| Clients denied, License shows Expired | Past valid-until + grace | Renew the license (§20) |
+| Clients denied, `LICENSE_CAPACITY_REACHED` | At appliance-wide concurrent capacity | Wait for a slot, or raise Max Concurrent Online Clients (§20) |
+| Client denied, `MAX_DEVICES_REACHED` | The voucher/account is at its **plan max devices** | Disconnect a device (Admin Console → Client accounts / Sessions), raise the plan's Max devices, or use another credential |
 | A device's reconnect seems to "use up" a slot | It doesn't — same credential + same device reuses its slot | Confirm the extra slot is a *different* device (MAC); check active devices on the account/voucher Details |
-| Guest login says "Invalid username or password" for a known-good account | Disabled, outside valid-from/until, or locked after failed attempts | Check enabled + validity; reset the password (clears the lockout); short-wait if throttled |
-| Guest login says "Too many attempts" | Brute-force throttle tripped (username+IP/device or endpoint-wide) | Wait ~1 minute and retry |
-| Lost a guest password | Passwords are shown once and never stored in plaintext | Set a new password (Guest accounts → Password); it's shown once again |
+| Client login says "Invalid username or password" for a known-good account | Disabled, outside valid-from/until, or locked after failed attempts | Check enabled + validity; reset the password (clears the lockout); short-wait if throttled |
+| Client login says "Too many attempts" | Brute-force throttle tripped (username+IP/device or endpoint-wide) | Wait ~1 minute and retry |
+| Lost a client password | Passwords are shown once and never stored in plaintext | Set a new password (Client accounts → Password); it's shown once again |
 | Can't change a voucher's plan | Voucher is revoked/expired/exhausted, or has a live session | Only unused/idle vouchers can be repointed; disconnect the session first |
-| Guest keeps re-using an "expired" voucher for more time | Voucher duration is a **validity window** from first use; it doesn't reset | Expected: once the window closes the voucher shows **Expired** and re-login is refused; a reconnect only gets the remaining window. Issue a new voucher for more access |
-| A voucher expired "too fast" with two devices | The window is wall-clock from first activation, **not** per-device | By design — a second device shares the same window, it doesn't add time. Give each guest their own voucher, or use a longer plan |
-| Guests denied, state Unlicensed | No valid license (fail-closed) | Activate / import license (§7, §34) |
+| Client keeps re-using an "expired" voucher for more time | Voucher duration is a **validity window** from first use; it doesn't reset | Expected: once the window closes the voucher shows **Expired** and re-login is refused; a reconnect only gets the remaining window. Issue a new voucher for more access |
+| A voucher expired "too fast" with two devices | The window is wall-clock from first activation, **not** per-device | By design — a second device shares the same window, it doesn't add time. Give each client their own voucher, or use a longer plan |
+| Clients denied, state Unlicensed | No valid license (fail-closed) | Activate / import license (§7, §34) |
 | Can't create plans/vouchers/accounts | License not Active | Renew/activate |
 | Portal doesn't auto-pop | DHCP option 114 / walled garden | Verify network settings and walled garden (§13, §17) |
 | Locked out after a WAN/LAN change | Confirmation window elapsed | It auto-rolled-back; reconnect to the old IP (§5) |
-| OneGate Central *Temporarily unreachable* | Central unreachable | Informational only; guests keep working (§22) |
+| OneGate Central *Temporarily unreachable* | Central unreachable | Informational only; clients keep working (§22) |
 | WAN-MAC mismatch warning | WAN NIC changed | Rebind WAN MAC (§23) |
 
 ---
 
 ## 31. Go-live checklist
 
-- [ ] Appliance **Activated** (Central shows Activated, license Active; Hotel
-      Admin → Appliance & licence shows licence **Active**, the correct guest
+- [ ] Appliance **Activated** (Central shows Activated, license Active; Admin
+      Console → Appliance & licence shows licence **Active**, the correct client
       maximum and **Valid until**).
 - [ ] WAN/LAN correct and confirmed (no pending rollback).
 - [ ] Guest network(s) / VLAN(s) created, applied and confirmed.
@@ -1160,7 +1160,7 @@ appliance needs a human to come back, the run fails rather than hiding it.
 - [ ] Auth method(s) configured and tested; integrations healthy.
 - [ ] Walled garden covers portal/payment/OAuth hosts.
 - [ ] Access plans + voucher batches ready (if using vouchers).
-- [ ] **Real guest acceptance test passed** on each VLAN (§18).
+- [ ] **Real client acceptance test passed** on each VLAN (§18).
 - [ ] Branding correct per network.
 - [ ] Operators created with least-privilege roles.
 
@@ -1177,11 +1177,11 @@ appliance needs a human to come back, the run fails rather than hiding it.
 | Move an appliance to another site of the same customer | Central → the appliance → Installed at → Move (§25) |
 | Give an appliance to another customer | Retire → factory-reset → Activate (§25) |
 | Rebind after a NIC swap | Central → Advanced → Rebind WAN MAC (§23) |
-| Rotate a cert | Hotel Admin → TLS certificate (§27) |
-| Issue voucher batches | Hotel Admin → Voucher batches (§15) |
-| Add a guest VLAN | Hotel Admin → Guest networks (§11) |
+| Rotate a cert | Admin Console → TLS certificate (§27) |
+| Issue voucher batches | Admin Console → Voucher batches (§15) |
+| Add a guest VLAN | Admin Console → Guest networks (§11) |
 | Check backups | Central → System → Backup health (§28) |
-| Review audit log | Central → System → Audit log / Hotel Admin → Activity (§29) |
+| Review audit log | Central → System → Audit log / Admin Console → Activity (§29) |
 | Retire hardware | Central → Retire appliance, then Delete record (§25, §26) |
 
 ---
@@ -1195,19 +1195,22 @@ risk, but should not be shown to operators as the primary term.
 | Concept | Canonical operator term | Internal / technical name(s) |
 |---|---|---|
 | Paying organization | **Customer** | tenant, `tenant_id` (API: `customer_id`) |
-| Physical property | **Site** | site |
+| Physical location | **Site** | site |
+| Wi-Fi end user | **Client** | guest (`guests`, `guest_*`, `/guest-*`) |
+| On-appliance console | **Admin Console** | `hotel-admin` |
+| Captive sign-in page | **Client Portal** | portald |
 | On-site gateway | **Appliance** | appliance |
 | Bring an appliance online (normal) | **Activate / Activation** (zero-touch) | register, `pending_approval → assigned` |
 | Install without internet | **Offline activation** | activation request / activation package |
 | Take an appliance out of service | **Retire** | revoked / decommissioned, terminal assignment |
 | The entitlement | **Signed appliance license** | license (NOT plan/subscription) |
 | License states | **Active / GracePeriod / Expired / Suspended / Revoked / Unlicensed** | `Restricted` = legacy pre-v3 only |
-| Capacity | **Max concurrent online guests** (appliance-wide) | `max_concurrent_online_guests` |
+| Capacity | **Max concurrent online clients** (appliance-wide) | `max_concurrent_online_guests` |
 | Per-voucher device limit | **Max devices** (on an access plan) | plan max devices |
 | Limit-exceeded error | **License limit reached** | `limit_exceeded` |
-| Live guest count | **Online guests / Active sessions** | `current_online_guests` |
-| Appliance↔Central link | Central: **Connected / Recently seen / Offline / Never connected**; Hotel Admin: **Connected / Temporarily unreachable / Not configured** | `connection`, `central.state` |
-| Guest pricing/policy product | **Access plan** | guest access plan |
+| Live client count | **Online clients / Active sessions** | `current_online_guests` |
+| Appliance↔Central link | Central: **Connected / Recently seen / Offline / Never connected**; Admin Console: **Connected / Temporarily unreachable / Not configured** | `connection`, `central.state` |
+| Client pricing/policy product | **Access plan** | guest access plan (`GuestAccessPlan`) |
 | Pre-login allowlist | **Walled garden** | walled garden |
 | Portal | **Captive portal / Landing page** | portald |
 
@@ -1224,18 +1227,18 @@ appliance license is the only entitlement.
 Not the normal install path. Use it only for a site with no route to Central
 (or with `SCD_AUTO_REGISTER=false`). There are no enrollment tokens.
 
-1. Hotel Admin → **System → Appliance & licence → Files from your OneGate vendor
+1. Admin Console → **System → Appliance & licence → Files from your OneGate vendor
    → Offline activation** → **Download activation request** (offered while the
    appliance has never reached Central) and send it to your vendor.
 2. Central → **Appliances → Import activation request**. The appliance appears
    as **Waiting for activation**; **Activate** it as in §7.
 3. On its page (now *Activating*) → **Activation package** (signed assignment +
    CA + license; valid 7 days) and return the file to the site.
-4. Hotel Admin → same place → **Upload activation package**. The box verifies
+4. Admin Console → same place → **Upload activation package**. The box verifies
    every signature and the hardware binding before accepting it.
 
 Later renewals for an offline site: Central → the appliance → **License →
-Offline license file**; Hotel Admin → **Upload licence file**.
+Offline license file**; Admin Console → **Upload licence file**.
 
 Offline activation converges to the same **Activated** state and the same
 license model as zero-touch; only the transport differs.
