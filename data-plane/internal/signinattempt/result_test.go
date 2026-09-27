@@ -14,7 +14,7 @@ func TestEveryResultHasALabelAndAGuestClass(t *testing.T) {
 			t.Errorf("%s falls back to its raw code; an operator would read the enum", r)
 		}
 		switch r.GuestClass() {
-		case GuestSuccess, GuestCredential, GuestTechnical, GuestRateLimited:
+		case GuestSuccess, GuestCredential, GuestTechnical, GuestRateLimited, GuestLicense, GuestCapacity:
 		default:
 			t.Errorf("%s maps to an unknown guest class %q", r, r.GuestClass())
 		}

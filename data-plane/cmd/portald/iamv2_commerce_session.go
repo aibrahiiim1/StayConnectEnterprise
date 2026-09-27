@@ -108,6 +108,10 @@ func (h *handler) tryIAMv2Auth(w http.ResponseWriter, r *http.Request, payload [
 			}
 		case activateNoDevice:
 			h.landing(w, r, "Your device isn't on the guest network.")
+		case activateCapacity:
+			h.landing(w, r, guestCapacityMessage)
+		case activateLicense:
+			h.landing(w, r, guestLicenseRefusedMessage)
 		case activateNotEnforced:
 			h.landing(w, r, "We could not bring your device online. Please try again in a moment.")
 		default:
@@ -225,6 +229,12 @@ func (h *handler) acquirePackage(w http.ResponseWriter, r *http.Request) {
 	case activateDeviceLimit:
 		h.landing(w, r, "This account has reached its device limit. Disconnect another device and try again.")
 		return
+	case activateCapacity:
+		h.landing(w, r, guestCapacityMessage)
+		return
+	case activateLicense:
+		h.landing(w, r, guestLicenseRefusedMessage)
+		return
 	case activateNotEnforced:
 		h.landing(w, r, "We could not bring your device online. Please try again in a moment.")
 		return
@@ -262,6 +272,11 @@ const activateClientTimeout = 12 * time.Second
 const (
 	activateNoDevice    = "NO_DEVICE"
 	activateDeviceLimit = "MAX_DEVICES_REACHED"
+	// activateCapacity and activateLicense are the appliance's licence refusing the session: at its licensed
+	// number of guests online, or not admitting new guests at all. They read as the same sentences the
+	// sign-in forms and the room sign-in use for the same conditions.
+	activateCapacity    = "LICENSE_CAPACITY_REACHED"
+	activateLicense     = "LICENSE_REFUSED"
 	activateNotEnforced = "NOT_ENFORCED"
 	activateFailed      = "ACTIVATE_FAILED"
 )
@@ -311,8 +326,14 @@ func (h *handler) activateEnforced(r *http.Request, sess commerceSession, entitl
 	var act map[string]any
 	_ = json.Unmarshal(b, &act)
 	if resp.StatusCode != http.StatusOK {
-		if act != nil && act["error"] == "MAX_DEVICES_REACHED" {
+		code, _ := act["error"].(string)
+		switch {
+		case code == "MAX_DEVICES_REACHED":
 			return "", activateDeviceLimit
+		case code == "LICENSE_CAPACITY_REACHED":
+			return "", activateCapacity
+		case isLicenceRefusal(code):
+			return "", activateLicense
 		}
 		return "", activateFailed
 	}

@@ -26,29 +26,31 @@ import (
 	lic "github.com/stayconnect/enterprise/license"
 )
 
-// licenseGate blocks a guest auth request when the license state refuses new
-// sessions, or when the method's commercial feature is not entitled.
-// feature == "" means "basic access" (voucher) — allowed in every state that
-// permits new sessions. Returns true when the request may proceed.
-func (s *server) licenseGate(w http.ResponseWriter, feature string) bool {
+// licenseRefusal is the ONE decision every guest sign-in method takes before it may admit anybody: whether
+// the cross-tenant transition guard, the local licence state and (for a method that is a commercial feature)
+// the feature entitlement permit a new guest. It returns nil when the request may proceed, otherwise the
+// refusal body -- the same codes whichever method refused, so operators and the portal read one vocabulary.
+// feature == "" means "basic access" (voucher): allowed in every state that permits new sessions.
+//
+// It decides only. licenseGate writes the refusal in the JSON shape the voucher, account, OTP and social
+// routes answer with; the PMS room sign-in (phase3_auth.go) answers in its own uniform envelope and records
+// the refusal as a sign-in attempt, but it asks this same function, so the methods cannot disagree about who
+// is refused.
+func (s *server) licenseRefusal(feature string) map[string]any {
 	// Fail CLOSED while a cross-tenant data transition is incomplete: never
 	// authorize a guest until the previous tenant's local data has been fully
 	// purged, so one customer's data can never be exposed under another's ownership.
 	if s.tenantBlocked.Load() {
-		writeJSON(w, http.StatusForbidden, map[string]any{
+		return map[string]any{
 			"error":   "tenant_transition_pending",
 			"message": "This appliance is completing a customer transition; guest access is temporarily unavailable.",
-		})
-		return false
+		}
 	}
 	if s.lic == nil {
 		// Fail CLOSED: a missing license manager is a startup/config fault, never
 		// a reason to authorize a guest. (In practice s.lic is always set before
 		// the listener starts; this is defence in depth.)
-		writeJSON(w, http.StatusForbidden, map[string]any{
-			"error": "unlicensed", "license_state": string(lic.StateUnlicensed),
-		})
-		return false
+		return map[string]any{"error": "unlicensed", "license_state": string(lic.StateUnlicensed)}
 	}
 	if !s.lic.AllowsNewSessions() {
 		st := string(s.lic.State())
@@ -56,18 +58,23 @@ func (s *server) licenseGate(w http.ResponseWriter, feature string) bool {
 		if st == string(lic.StateUnlicensed) {
 			errCode = "unlicensed"
 		}
-		writeJSON(w, http.StatusForbidden, map[string]any{
-			"error":         errCode,
-			"license_state": st,
-		})
-		return false
+		return map[string]any{"error": errCode, "license_state": st}
 	}
 	if feature != "" && !s.lic.FeatureEnabled(feature) {
-		writeJSON(w, http.StatusForbidden, map[string]any{
+		return map[string]any{
 			"error":         "feature_not_licensed",
 			"feature":       feature,
 			"license_state": string(s.lic.State()),
-		})
+		}
+	}
+	return nil
+}
+
+// licenseGate blocks a guest auth request that licenseRefusal refuses, answering 403 with the refusal body.
+// Returns true when the request may proceed.
+func (s *server) licenseGate(w http.ResponseWriter, feature string) bool {
+	if body := s.licenseRefusal(feature); body != nil {
+		writeJSON(w, http.StatusForbidden, body)
 		return false
 	}
 	return true

@@ -142,7 +142,7 @@ func newProdAuthFixture(t *testing.T) *authFixture {
 	}
 
 	f.appliance = mustUUID(t, p)
-	f.srv = &server{db: p, tenID: f.tenant, siteID: f.site, applID: f.appliance, legacyBridge: "br-lan"}
+	f.srv = &server{db: p, tenID: f.tenant, siteID: f.site, applID: f.appliance, legacyBridge: "br-lan", lic: devLicence()}
 	f.p3 = newPhase3Auth(iamv2.PMSConfig{MasterEnabled: true, PMSAuthEnabled: true}, f.srv)
 	if f.p3 == nil {
 		t.Fatal("the Phase-3 auth arm was not constructed with the flags on")
@@ -176,7 +176,7 @@ func (f *authFixture) serviceRolePhase3(t *testing.T) *phase3Auth {
 	if who != "svc_scd" {
 		t.Fatalf("the pool runs as %q, not svc_scd; this test would prove nothing about the production role", who)
 	}
-	srv := &server{db: p, tenID: f.tenant, siteID: f.site, applID: f.appliance, legacyBridge: "br-lan"}
+	srv := &server{db: p, tenID: f.tenant, siteID: f.site, applID: f.appliance, legacyBridge: "br-lan", lic: devLicence()}
 	p3 := newPhase3Auth(iamv2.PMSConfig{MasterEnabled: true, PMSAuthEnabled: true}, srv)
 	if p3 == nil {
 		t.Fatal("the Phase-3 auth arm was not constructed with the flags on")

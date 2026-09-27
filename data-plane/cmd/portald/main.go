@@ -244,13 +244,13 @@ func (h *handler) authVoucher(w http.ResponseWriter, r *http.Request) {
 			Error string `json:"error"`
 		}
 		if json.Unmarshal(payload, &e) == nil && e.Error != "" {
-			switch e.Error {
-			case "MAX_DEVICES_REACHED":
+			switch {
+			case e.Error == "MAX_DEVICES_REACHED":
 				msg = "This voucher has reached its device limit. Disconnect another device and try again."
-			case "LICENSE_CAPACITY_REACHED":
-				msg = "The guest network is at capacity. Please try again shortly."
-			case "METHOD_DISABLED":
-				msg = "This sign-in method is not available. Please ask reception."
+			case e.Error == "LICENSE_CAPACITY_REACHED":
+				msg = guestCapacityMessage
+			case e.Error == "METHOD_DISABLED" || isLicenceRefusal(e.Error):
+				msg = guestLicenseRefusedMessage
 			default:
 				msg = "Voucher " + e.Error + "."
 			}
@@ -313,15 +313,15 @@ func (h *handler) authCredentials(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.Unmarshal(payload, &e)
 		msg := "Invalid username or password."
-		switch e.Error {
-		case "LICENSE_CAPACITY_REACHED":
-			msg = "The guest network is at capacity. Please try again shortly."
-		case "MAX_DEVICES_REACHED":
+		switch {
+		case e.Error == "LICENSE_CAPACITY_REACHED":
+			msg = guestCapacityMessage
+		case e.Error == "MAX_DEVICES_REACHED":
 			msg = "This account has reached its device limit. Disconnect another device and try again."
-		case "TOO_MANY_ATTEMPTS":
+		case e.Error == "TOO_MANY_ATTEMPTS":
 			msg = "Too many attempts. Please wait a minute and try again."
-		case "METHOD_DISABLED":
-			msg = "This sign-in method is not available. Please ask reception."
+		case e.Error == "METHOD_DISABLED" || isLicenceRefusal(e.Error):
+			msg = guestLicenseRefusedMessage
 		}
 		h.landing(w, r, msg)
 		return

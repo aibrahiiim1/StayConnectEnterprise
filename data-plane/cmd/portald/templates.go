@@ -1203,6 +1203,9 @@ const landingHTML = `<!doctype html>
     ROOM_MESSAGES[BUILTIN.en['err.room.technical']] = 'err.room.technical';
     ROOM_MESSAGES[BUILTIN.en['err.wait']] = 'err.wait';
     ROOM_MESSAGES[BUILTIN.en['err.generic']] = 'err.generic';
+    ROOM_MESSAGES[BUILTIN.en['err.room.devices']] = 'err.room.devices';
+    ROOM_MESSAGES[BUILTIN.en['err.capacity']] = 'err.capacity';
+    ROOM_MESSAGES[BUILTIN.en['err.method.disabled']] = 'err.method.disabled';
     function phase3Message(j) {
       if (!(j && typeof j.message === 'string' && j.message)) return PHASE3_FAIL();
       const m = j.message;

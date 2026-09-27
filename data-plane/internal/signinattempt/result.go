@@ -59,6 +59,15 @@ const (
 	// details were right; the sign-in could not be completed. See GuestClass for the one place this feature
 	// accepts a narrow, documented distinguishability rather than telling a correct guest they are wrong.
 	VerifiedNoEligiblePackage Result = "VERIFIED_NO_ELIGIBLE_PACKAGE"
+	// LicenseRefused — the appliance's licence does not permit a new guest right now: no valid licence, an
+	// expired or suspended one, the PMS feature not entitled, or a cross-tenant transition still pending. It is
+	// the same decision (cmd/scd licenseRefusal) that refuses a voucher, an account, an OTP or a social sign-in,
+	// and like theirs it is taken before anything about the guest is looked at.
+	LicenseRefused Result = "LICENSE_REFUSED"
+	// LicenseCapacityReached — the guest PROVED WHO THEY ARE and the stay has access, but admitting this device
+	// would take the appliance past the concurrent-online-guest cap in its signed licence. The same atomic
+	// reservation (reserveLicensedSlot) refuses the other methods with LICENSE_CAPACITY_REACHED.
+	LicenseCapacityReached Result = "LICENSE_CAPACITY_REACHED"
 )
 
 // AllResults is every Result, in the order an operator filter should offer them. Tests use it to prove no
@@ -66,7 +75,7 @@ const (
 var AllResults = []Result{
 	Verified, CredentialMismatch, RoomNotInMirror, StayNotEligible, AmbiguousRoomCandidates,
 	MirrorStaleOrMissingChange, RateLimited, RoutingOrInterfaceFailure, ServiceUnavailable,
-	SpentRequestID, MalformedSubmission, VerifiedNoEligiblePackage,
+	SpentRequestID, MalformedSubmission, VerifiedNoEligiblePackage, LicenseRefused, LicenseCapacityReached,
 }
 
 // MatchedField names the accepted value that verified the guest, for a VERIFIED attempt.
@@ -87,6 +96,12 @@ const (
 	GuestCredential  GuestClass = "CREDENTIAL"
 	GuestTechnical   GuestClass = "TECHNICAL"
 	GuestRateLimited GuestClass = "RATE_LIMITED"
+	// GuestLicense and GuestCapacity are the two licence refusals every guest sign-in method shares. Both are
+	// facts about the WHOLE APPLIANCE at this moment -- true for every guest, whatever they typed -- so telling
+	// the guest which one it was discloses nothing about any room (the rule below). They exist so a guest at
+	// the room sign-in reads the same sentence a voucher or account guest reads for the same condition.
+	GuestLicense  GuestClass = "LICENSE"
+	GuestCapacity GuestClass = "CAPACITY"
 )
 
 // GuestClass maps an exact Result to the class of message the guest may be shown.
@@ -134,6 +149,10 @@ func (r Result) GuestClass() GuestClass {
 	case MirrorStaleOrMissingChange, RoutingOrInterfaceFailure, ServiceUnavailable, SpentRequestID,
 		VerifiedNoEligiblePackage:
 		return GuestTechnical
+	case LicenseRefused:
+		return GuestLicense
+	case LicenseCapacityReached:
+		return GuestCapacity
 	default:
 		// An unrecognised Result is treated as a system condition rather than as the guest's fault. Telling
 		// someone their details are wrong on the strength of a code we do not recognise is the one answer that
@@ -163,6 +182,8 @@ var labels = map[Result]string{
 	SpentRequestID:             "Request ID already used by a refused attempt",
 	MalformedSubmission:        "Submission could not be read",
 	VerifiedNoEligiblePackage:  "Verified, but no package is available to this stay",
+	LicenseRefused:             "The appliance licence does not permit new guests",
+	LicenseCapacityReached:     "Verified, but the licensed guest capacity is full",
 }
 
 // Label returns the operator-facing plain-language reason. An unknown code returns itself rather than an

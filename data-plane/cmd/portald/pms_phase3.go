@@ -57,12 +57,36 @@ const (
 // guestRoomDeviceLimitMessage names no room, stay or system: it tells the guest the one thing they can act on.
 const guestRoomDeviceLimitMessage = "This room has reached its device limit. Disconnect another device and try again."
 
+// guestCapacityMessage and guestLicenseRefusedMessage are the SAME sentences the voucher and account sign-in
+// show for the same two conditions (main.go, iamv2_commerce_session.go), so a guest reads one answer whichever
+// way they signed in.
+const (
+	guestCapacityMessage       = "The guest network is at capacity. Please try again shortly."
+	guestLicenseRefusedMessage = "This sign-in method is not available. Please ask reception."
+)
+
+// isLicenceRefusal reports whether scd refused a sign-in because of the appliance's licence (cmd/scd
+// licenseRefusal) rather than anything about the guest. These are the codes every method shares; each is
+// shown to the guest as guestLicenseRefusedMessage.
+func isLicenceRefusal(code string) bool {
+	switch code {
+	case "unlicensed", "license_expired", "feature_not_licensed", "tenant_transition_pending":
+		return true
+	}
+	return false
+}
+
 var guestAuthMessages = map[string]string{
 	"CREDENTIAL": guestAuthMessage,
 	"TECHNICAL":  guestAuthTechnicalMessage,
 	"POST_STAY":  guestPostStayMessage,
 	// DEVICE_LIMIT: the stay's access is fine and has no free device slot.
 	"DEVICE_LIMIT": guestRoomDeviceLimitMessage,
+	// LICENSE and CAPACITY are the two licence refusals every guest method shares, and they read exactly as a
+	// voucher or account guest reads them: the appliance's licence does not admit a new guest, or it is at its
+	// licensed number of guests online. Both are facts about the whole property, never about a room.
+	"LICENSE":  guestLicenseRefusedMessage,
+	"CAPACITY": guestCapacityMessage,
 	// RATE_LIMITED is deliberately absent: it is the one class whose sentence carries a NUMBER, so it is
 	// produced by guestAuthRateLimitedMessage below rather than looked up. leaksDetail knows about both.
 }
