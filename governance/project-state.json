@@ -1215,25 +1215,25 @@
     "session_start_check": "None owed by the delivery model. Nothing runs unattended under D42, so there is no nightly verdict to read at session start (tools/nightly-status.py was removed by T0196). A session starts from the state of its own delivery branch and pull request.",
     "central_console_runtime_identity": {
       "_note": "What Central (172.21.96.196) serves as its operator console, read back from /opt/stayconnect/central/DEPLOYED.json and the installed release.",
-      "source_commit": "abda23d1f3a3dd5d68130d08fbe356097a78e782",
+      "source_commit": "e176e0eaf5cdbe9a5469a51babed32324d53d145",
       "source_state": "clean",
-      "build_id": "JUXAiMXfW6SxEGRIeQkjD",
-      "release": "/opt/stayconnect/releases/cloud-admin/20260927T150257Z",
-      "artifact_sha256": "release onegate-central-abda23d1f3a3.tar.gz sha256 6d6ca1e2fe6457f91453bb77a1c094b7e9afd7be483a356e881030b0cff8d072",
-      "previous_release": "none on this host (first install); the former host kept its own releases",
-      "deployed_at": "2026-09-27T15:06Z UTC by central-install.sh --mode restore. Central moved to 172.21.96.196 on 2026-09-27 (central-export.sh --final on 150.0.0.252, central-install.sh --mode restore on the new host, release onegate-central-abda23d1f3a3). Every key, certificate and the licence database were carried over; the identity is unchanged: vendor 2fbdfcbde209ebb5, assignment 027a2c97f6c8fcdb, registry root 84655767f9834fa2, appliance Root CA D2:60:C6:EE:21:EB:D7:79:… .",
+      "build_id": "78j-ZxAlRmkKtd0AgIMuC",
+      "release": "/opt/stayconnect/releases/cloud-admin/20260927T151634Z",
+      "artifact_sha256": "release onegate-central-e176e0eaf5cd.tar.gz (central-build.sh), deployed with central-deploy.sh",
+      "previous_release": "/opt/stayconnect/releases/cloud-admin/20260927T150257Z (abda23d1, the restore install; the rollback target)",
+      "deployed_at": "2026-09-27T15:16Z UTC by central-deploy.sh, after a proven rollback to abda23d1 and redeploy. Central moved to 172.21.96.196 on 2026-09-27 (central-export.sh --final on 150.0.0.252, central-install.sh --mode restore on the new host, release onegate-central-abda23d1f3a3). Every key, certificate and the licence database were carried over; the identity is unchanged: vendor 2fbdfcbde209ebb5, assignment 027a2c97f6c8fcdb, registry root 84655767f9834fa2, appliance Root CA D2:60:C6:EE:21:EB:D7:79:… .",
       "verified": "Chrome, https://172.21.96.196 with the carried platform admin: five destinations, no customer selector, nine screens without a page error or API 5xx, PRE-LIVE shown activated/connected/licensed, phone width without overflow. Installer smoke PASS; central-preflight.sh READY."
     },
     "prelive_guest_access_testing": "ENABLED on PRE-LIVE 172.21.60.25 for Product Owner testing (D43, T0197, 2026-09-26). STAYCONNECT_PHASE2_MASTER=1 and STAYCONNECT_PHASE2_PORTAL=1 in /etc/stayconnect/scd.env and portald.env; rollback copies *.bak-pre-guest-activation-20260926T193029Z (the portald.env copy removed by the retention sweep was reconstructed exactly as *-reconstructed). Live proof 2026-09-26: scripts/guest-access-e2e-test.sh 53/53 -- captive before sign-in, enforced (nft phase3_auth_ipv4) and online (generate_204 = 204, ICMP 1.1.1.1) after activation for all three methods, device limits, joining, reconnect, termination and backend-enforced method switches, with pms_postings, posting_outbox and payment_transactions unchanged. Test state reset afterwards.",
     "central_ctrlapi_runtime_identity": {
       "_note": "The Central API binary on 172.21.96.196, read back from the host.",
-      "sha256": "22e080f7cd3bb1ad7818b08caf3107afc0332c9e36b8de5ea071382c4508545a",
-      "source_commit": "abda23d1f3a3dd5d68130d08fbe356097a78e782",
+      "sha256": "ffa2a25ef8f2f6b049eb272aa59bf8eaf26acd8634b4642d80b2053d1dfcbe57",
+      "source_commit": "e176e0eaf5cdbe9a5469a51babed32324d53d145",
       "vcs_modified": false,
       "schema": "Central migrations 0001-0048, restored from the former host's final export and verified (central-migrate.sh verify).",
       "verified": "PRE-LIVE connected (hello, assignment over mTLS :9443, signed registry v68 from the carried root, licence refresh); licence version 3 issued with the carried vendor key and installed by the appliance; restore drill of the daily backup matched every table's row count; backup-health: newest dump, no failures, rollback path valid.",
-      "rollback": "Former host 150.0.0.252 holds the pre-move state, but the new Central has issued licence version 3 since; going back means exporting this host and restoring it there (DEPLOYMENT_CLOUD.md §6), not re-enabling the old services. Local dumps: /opt/stayconnect/backups/db on this host.",
-      "deployed_at": "2026-09-27T15:06Z UTC."
+      "rollback": "central-deploy.sh rollback (proven 2026-09-27: back to abda23d1 with smoke PASS, then redeployed). Pre-deploy dumps in /opt/stayconnect/backups/db. The former host 150.0.0.252 is not a rollback target: the new Central has issued licence version 3.",
+      "deployed_at": "2026-09-27T15:16Z UTC by central-deploy.sh."
     },
     "central_host": {
       "_note": "Where OneGate Central runs. Appliances reach it by name; the address is a property of the host, the name is a property of the fleet.",
