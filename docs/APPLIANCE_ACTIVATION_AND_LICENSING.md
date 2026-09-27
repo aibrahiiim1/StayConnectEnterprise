@@ -1,37 +1,40 @@
 # Appliance activation and licensing — operator guide
 
 There are exactly **two** ways to activate a StayConnect appliance: **Online** and **Offline**. Everything
-else you may have read about — claiming, signed assignment, certificates, mTLS, convergence — still happens,
-but it happens by itself and lives under **Advanced / Diagnostics**. You do not drive it.
+else — registration, signed assignment, certificates, mTLS, convergence — happens by itself; its details sit
+under the collapsed **Technical details** on Hotel Admin's **System → Appliance & licence** page and under
+**Advanced** on the appliance's page in Central. You do not drive it. The Central side is specified in
+[CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md).
 
 ---
 
 ## Online — the normal path
 
 Nothing is typed on the appliance. A factory-clean appliance with a route to the control panel registers
-itself and waits.
+itself — token-less, signed with its own identity key — and keeps retrying (30 s, backing off to 5 minutes)
+until Central answers.
 
-**On the appliance (Hotel Admin → Setup / Activation):** confirm the path is set to **Online** and note the
-**serial** shown on screen. That is all.
+**On the appliance (Hotel Admin → System → Appliance & licence):** it shows *Waiting for activation* and the
+**serial number**. That is all. (*Not registered yet* means Central has not answered yet; **Check now**
+retries immediately.)
 
-**In the control panel (Onboarding):**
+**In the control panel (Appliances):**
 
-1. **Pending activation** — press **Refresh** and select the appliance. Check the **serial** and **WAN MAC**
-   against the box in front of you before continuing.
-2. **Customer** — pick an existing one or create it.
+1. The appliance is listed first as **Waiting for activation**. Open it and check the **serial** (and, under
+   **Advanced**, the WAN MAC) against the box in front of you before continuing.
+2. Press **Activate**. **Customer** — pick an existing one or create it.
 3. **Site** — pick an existing one or create it. This is the site the appliance is bound to.
-4. **Max concurrent online guests** — the licensed ceiling. `0` is unlimited. It is **appliance-wide across
-   all guest VLANs**, and it is enforced per appliance, so this is the real limit for this box.
-5. **Valid until** — leave empty for 365 days.
-6. **Grace period (days)** — after expiry guests keep working, with warnings.
-7. **Confirm your password**, then press **Activate** once.
+4. **Guests online at once** — the licensed ceiling. `0` is unlimited. It is **appliance-wide across all guest
+   VLANs**, and it is enforced per appliance, so this is the real limit for this box.
+5. **Valid for** — a number of days, or an end date.
+6. **Grace period (days)** — after the end date guests keep working, with warnings.
+7. Confirm (re-enter your password if asked).
 
-The appliance follows along on its own: *Detected → Activating → Converging → Active*. Hotel Admin ends at
-**This appliance is connected**, bound to your site.
+Central shows **Activating** until the appliance has collected its assignment, certificate and licence
+(normally within a minute), then **Activated**. Hotel Admin follows on its own: *Finishing activation…*, then
+**Activated** with your customer and site, licence **Active**.
 
-> **Enrollment tokens are not part of this.** They are a recovery lever — a box that cannot self-register, or
-> one being deliberately re-attached — and they live under **Advanced / recovery** on the appliance and under
-> **Appliances** in the control panel.
+There are no enrollment tokens.
 
 ---
 
@@ -41,9 +44,9 @@ The appliance follows along on its own: *Detected → Activating → Converging 
 
 For an appliance that is **already activated**:
 
-1. **Control panel → Commercial → Licenses** — find the licence, press **Renew** to issue the new version,
-   then press **Download for offline**. You get one signed file.
-2. **Hotel Admin → Setup / Activation → Licence** — upload that file.
+1. **Control panel → the appliance's page → License** — **Renew or change** to issue the new version, then
+   **Offline license file**. You get one signed file.
+2. **Hotel Admin → System → Appliance & licence → Files from your OneGate vendor → Upload licence file.**
 
 The appliance checks the vendor signature, that the file is bound to *this* appliance, that it has not
 expired, and that it has not been used before. A licence **older** than the one installed is refused, so a
@@ -113,16 +116,16 @@ removable media — and a plaintext one is just the signing key lying somewhere 
 
 For an appliance that has **never** been activated and has no route to the control panel.
 
-1. **Hotel Admin → Setup / Activation → Offline → Download activation request.**
-   The appliance creates its own identity and writes a request describing itself: serial, hardware evidence
-   and the **public** half of a keypair it just generated. The private half never leaves the appliance. The
-   request is signed with it, which is what proves the box asking is the box that holds the key.
-2. **Control panel → Onboarding → Offline activation → import the request.**
-   This registers the appliance as **Pending** and nothing more. It carries no authority over customer or
-   site. Select it under *Pending activation*, choose **Customer**, **Site** and licence terms, and press
-   **Activate** exactly as you would online — then press **Activation package** on its row to download one
-   file.
-3. **Hotel Admin → upload the activation package.** Done.
+1. **Hotel Admin → System → Appliance & licence → Files from your OneGate vendor → Offline activation →
+   Download activation request.**
+   The appliance writes a request describing itself: serial, hardware evidence and the **public** half of
+   its identity keypair. The private half never leaves the appliance. The request is signed with it, which is
+   what proves the box asking is the box that holds the key.
+2. **Control panel → Appliances → Import activation request.**
+   This registers the appliance as **Waiting for activation** and nothing more. It carries no authority over
+   customer or site. Open it, press **Activate** and choose **Customer**, **Site** and licence terms exactly as
+   you would online — then press **Activation package** on its page to download one file.
+3. **Hotel Admin → same place → Upload activation package.** Done.
 
 The package carries everything first activation needs: the **signed assignment** (the only authority for
 tenant and site), the **trust material**, and the **signed licence**. It is bound to that exact request and
@@ -148,17 +151,26 @@ would be the replay the ledger exists to prevent, so generate a fresh one.
 
 ## What each state means
 
+Hotel Admin's one status card ([CENTRAL_CONTROL_PLANE.md §8](CENTRAL_CONTROL_PLANE.md#8-hotel-admin--central)):
+
 | Hotel Admin shows | Meaning |
 |---|---|
-| Awaiting activation | Registered or not yet registered; no customer or site |
-| Pending activation | The control panel can see it; an operator must press Activate |
-| Connected · bound to *site* | Assignment adopted, certificate issued, licence installed |
-| Licence: grace | Expired, still serving, with warnings |
-| Licence: expired / revoked | No new guest sessions |
+| Activation: Not registered yet | Central has not answered a registration yet; the appliance keeps retrying |
+| Activation: Waiting for activation | Central can see it; an operator must press Activate |
+| Activation: Finishing activation… | Activated in Central; collecting assignment, certificate and licence |
+| Activation: Activated | Assignment adopted and verified; bound to *customer · site* |
+| Activation: Retired | Retired in Central; credentials revoked |
+| Licence: Grace period | Ended, still serving, with warnings |
+| Licence: Expired / Suspended / Revoked / Wrong appliance | No new guest sessions |
+| OneGate Central: Connected / Temporarily unreachable / Not configured | Link to Central only; guests are unaffected by it |
 
-Tenant and site are **never** typed into the appliance. They arrive only through the signed assignment. An
-appliance with no assignment shows empty tenant-scoped screens (Guest accounts, Portal branding) and says so
-— that is the correct state, not a fault.
+Tenant and site are **never** typed into the appliance. They arrive only through the signed assignment, and
+every daemon takes them from the verified assignment — there is no environment-variable fallback in a
+production build. An appliance with no assignment shows empty tenant-scoped screens (Guest accounts, Portal
+branding) and says so — that is the correct state, not a fault.
+
+The licence's binding to this appliance (identity key, appliance id, serial, hardware fingerprint, WAN MAC) is
+checked on every evaluation — every minute and at boot — not only when a licence is installed.
 
 **DHCP shows `waiting`, not `failed`, until guest networking exists.** Kea binds the LAN bridge, which does
 not exist until an operator applies and confirms a guest network, so on a new appliance it is deliberately
@@ -202,6 +214,4 @@ not a kill switch.
 
 ## Control panel sign-in
 
-Sign-in is email and password. The **organisation slug** field is only used to look up single sign-on
-providers; it is not your hotel, site or appliance, and email sign-in ignores it. It is hidden behind **Use
-single sign-on instead** and no longer carries a default value.
+Sign-in is email and password only. There is no single sign-on.

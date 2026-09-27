@@ -143,7 +143,7 @@ Out of the daily workflow; platform roles only.
 
 ### Security alerts — `/system/security-alerts`
 Suspicious appliance registrations: *Known appliance on different hardware* (e.g. a cloned disk), *Hardware
-already in use*, *WAN MAC does not match its license*. An open alert blocks activation of that appliance.
+already in use*, *WAN MAC does not match its license*. A clone or reused-hardware registration is refused, so that box never appears as waiting.
 
 - **Shows:** Open / Closed / All, search, and When, What, Appliance, From address, Details, Status.
 - **Actions:** **Investigate**, **Acknowledge**, **Resolve** and **False positive** (each of these two asks for

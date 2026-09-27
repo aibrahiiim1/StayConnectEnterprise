@@ -56,7 +56,7 @@ On the appliance's page, **License → Renew or change**: guests online at once,
 
 - **Overview** — fleet counts and everything that needs attention (waiting, licences expiring/in grace/expired/suspended, appliances offline, open security alerts, unconfirmed retirements).
 - **Appliances** — connection state and last contact of every appliance.
-- **System → Security alerts** — cloned or reused hardware, WAN MAC mismatches; activation is blocked while an alert is open.
+- **System → Security alerts** — cloned or reused hardware, WAN MAC mismatches, unconfirmed retirements; a refused registration never appears as waiting.
 - **System → Trust & keys** — certificate expiry and the state of the signing keys.
 - **System → Backup health** — Central's own backup and rollback storage.
 

@@ -28,8 +28,8 @@ an unpacked appliance to live, licensed guest WiFi and covers day-2 operations.
   convergence, the license model & states, concurrent capacity, guest VLANs (with
   worked VLAN 100 / VLAN 200 examples), DHCP/DNS/NAT/portal, auth methods, access
   plans & vouchers, integrations, renewal & anti-replay, recovery, Central-outage
-  behavior, replacement & rebind, factory reset, deactivate/revoke/decommission/
-  delete, safe-deletion order, security/certs, backup, audit, troubleshooting, and
+  behavior, replacement & rebind, factory reset, move/retire/delete,
+  safe-deletion order, security/certs, backup, audit, troubleshooting, and
   go-live / day-2 checklists.
 
 ## 3. Control Panel (Central) — configuration manual

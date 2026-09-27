@@ -2,15 +2,16 @@
 
 > The signed entitlement model implemented in `license/` (shared Go module),
 > issued by `control-plane/internal/licensing`, stored in the cloud `licenses`
-> table (migration 0019), verified and enforced entirely offline on the
-> appliance.
+> table, verified and enforced entirely offline on the appliance. How an operator
+> issues, renews, suspends and revokes a licence in Central is in
+> [CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md) §4 and §6.
 
 ## 1. Model
 
 The cloud signs an entitlement **Document** with the vendor's Ed25519 private
 key (`CTRLAPI_VENDOR_KEY`, cloud-only). Appliances hold **only public keys**
 and validate entitlements with zero cloud round-trips. The document is
-delivered on enrollment and on every renewal/change; the appliance persists
+delivered on activation and on every renewal/change; the appliance persists
 the latest copy under `/etc/stayconnect/license/` and evaluates its
 operational state locally. Entitlement truth is the file — never a database
 query against the cloud.
@@ -30,39 +31,49 @@ so no JSON canonicalization is needed.
 }
 ```
 
-Decoded Document (schema_version 1):
+Decoded Document, as Central issues it today (schema_version 3):
 
 ```json
 {
   "license_id": "0c9f6d4e-8a21-4d3b-9f1e-5b7c2a9e4d10",
   "tenant_id": "d2a7c1e4-...-tenant-uuid",
   "site_id": "f81b3a6c-...-site-uuid",
-  "appliance_ids": ["a1...", "a2..."],
-  "commercial_plan_code": "pro-yearly",
+  "appliance_ids": ["a1..."],
+  "commercial_plan_code": "direct",
   "status": "active",
-  "issued_at": "2026-07-11T10:00:00Z",
-  "valid_until": "2027-07-11T10:00:00Z",
+  "issued_at": "2026-09-27T10:00:00Z",
+  "valid_until": "2027-09-27T23:59:59Z",
   "offline_grace_days": 30,
   "features": {
     "pms": true, "paid_wifi": true, "sms_otp": true, "email_otp": true,
-    "social_login": true, "ha": false, "white_label": false
+    "social_login": true, "ha": true, "white_label": true
   },
-  "limits": {
-    "max_appliances_for_site": 2,
-    "max_concurrent_guest_sessions": 500,
-    "max_local_operators": 25,
-    "max_guest_access_plans": 100,
-    "accounting_retention_days": 90,
-    "audit_retention_days": 365
-  },
-  "schema_version": 1
+  "limits": { "max_concurrent_guest_sessions": 500 },
+  "appliance_id": "a1...",
+  "appliance_serial": "SC-...",
+  "hardware_fingerprint": "...",
+  "identity_key_fingerprint": "...",
+  "wan_mac": "00:50:56:...",
+  "valid_from": "2026-09-27T10:00:00Z",
+  "signer_key_id": "1a2b3c4d5e6f7a8b",
+  "max_concurrent_online_guests": 500,
+  "grace_period_days": 30,
+  "license_version": 4,
+  "supersedes_license_id": "…previous license id…",
+  "schema_version": 3
 }
 ```
 
-Field notes: `status` ∈ {`active`, `suspended`} (issuer-declared);
-limits use `0` = unlimited (issuance converts the plan system's `-1`/missing);
-`offline_grace_days` must be 0–365; verifiers reject unknown `schema_version`
-rather than misreading fields.
+Field notes: `status` ∈ {`active`, `suspended`} (issuer-declared).
+`max_concurrent_online_guests` is the capacity, `0` = unlimited; the legacy
+`limits` block mirrors it so pre-v3 appliances enforce the same cap. Every
+licence Central issues carries **all** features — the only commercial controls
+are the hardware/identity binding, the capacity and the validity window.
+`commercial_plan_code` is always `direct`: plans and subscriptions no longer
+exist, and the field stays only because the signed format carries it.
+`license_version` is monotonic per appliance. Verifiers reject unknown
+`schema_version` rather than misreading fields; schema 1 and 2 documents still
+verify.
 
 ## 3. Signing, verification, keys
 
@@ -80,36 +91,49 @@ rather than misreading fields.
 
 ## 4. State machine
 
-Evaluated locally from document time (`grace` = `offline_grace_days`):
+Evaluated locally from document time, every minute and at boot. For schema 3
+(`grace` = `grace_period_days`):
 
 ```
-issued_at ──────────────── valid_until ──── +grace ──── +2×grace ────▶ time
-│           Active            │ GracePeriod │ Restricted │   Expired
+valid_from ─────────────── valid_until ──── +grace ────▶ time
+│           Active            │ GracePeriod │   Expired
 └─ overridden at any point by:  Suspended (doc status = suspended)
-                                Revoked   (revocation notice names license_id)
+                                Revoked   (revocation list names license_id)
 ```
+
+Before `valid_from` the state is Expired. **Legacy (schema 1/2) documents only**
+keep the historical window `valid_until +grace → +2×grace` as **Restricted**,
+with `grace` = `offline_grace_days` when `grace_period_days` is absent.
+
+The binding (identity key, appliance id, serial, hardware fingerprint) is
+re-checked on every evaluation, including at boot; a mismatch is a hard reject
+(*wrong hardware*). A WAN-MAC-only mismatch is soft: the licence stays in force
+and a notice asks for a rebind in Central.
 
 - **Active** — within validity. Everything entitled works.
 - **GracePeriod** — `valid_until` passed, within grace. Guest functionality
   unchanged; Hotel Admin shows a prominent renewal warning. Exists so a renewal
   issued while the appliance was offline never interrupts a hotel.
-- **Restricted** — grace exhausted (until `valid_until + 2×grace`). Existing
-  sessions continue; basic guest logins (voucher/PMS/email OTP) still work;
-  entitlement-gated features (paid WiFi, SMS OTP, social) turn off; creating
-  GuestAccessPlans/voucher batches is blocked; admin is directed to the
-  license page.
-- **Expired** — beyond `+2×grace`. New guest sessions refused (portal shows a
-  service notice); existing sessions run to their natural end; Hotel Admin is
-  read-only plus license upload.
-- **Suspended** — issuer set `status: suspended` (billing hold). Enforcement
-  identical to Restricted, effective immediately on receipt.
+- **Restricted** (legacy schema 1/2 only) — grace exhausted (until
+  `valid_until + 2×grace`). Existing sessions continue; basic guest logins
+  still work; entitlement-gated features turn off; creating guest access
+  plans/voucher batches is blocked.
+- **Expired** — beyond `valid_until + grace` (legacy: `+2×grace`). New guest
+  sessions refused (portal shows a service notice); existing sessions run to
+  their natural end; Hotel Admin stays available.
+- **Suspended** — issuer set `status: suspended` (billing hold). New guest
+  sessions refused, effective immediately on receipt; existing sessions run to
+  their natural end.
 - **Revoked** — an authenticated revocation notice names this `license_id`.
   New sessions refused immediately; admin locked to the license page.
   Strongest state; never entered by time alone.
+- **Unlicensed** — no valid signed licence installed (factory-clean, waiting
+  for activation, missing or invalid). A production appliance fails closed:
+  no new guest sessions.
 - **CloudStale** — a **warning flag, not a state**: trips when the last
-  successful cloud validation (license fetch / ack) is older than
+  successful cloud validation (license fetch) is older than
   `offline_grace_days`. It never degrades guest function while the document
-  itself is valid — it only signals sync trouble in Hotel Admin and telemetry.
+  itself is valid.
 
 ## 5. Behavior per state
 
@@ -117,60 +141,70 @@ issued_at ──────────────── valid_until ───
 |---|---|---|---|---|---|
 | Active | yes | run | yes | per document | full |
 | GracePeriod | yes | run | yes | per document | full + renewal banner |
-| Restricted | yes (basic: voucher/PMS/email OTP) | run to natural end | **no** | **off** | full read, license-directed |
-| Suspended | yes (basic) | run to natural end | **no** | **off** | full read, license-directed |
-| Expired | **no** (portal service notice) | run to natural end | no | off | read-only + license upload |
-| Revoked | **no**, immediately | run to natural end | no | off | locked to license page |
+| Restricted (legacy only) | yes (basic) | run to natural end | **no** | **off** | full, licence banner |
+| Suspended | **no** | run to natural end | **no** | **off** | full, licence banner |
+| Expired | **no** (portal service notice) | run to natural end | no | off | full, licence banner |
+| Revoked | **no**, immediately | run to natural end | no | off | full, licence banner |
+| Unlicensed | **no** | — | no | off | full, *No licence yet* |
 
-Two invariants encoded in `license/doc.go`: *a billing dispute must not take a
-hotel's WiFi down* (Restricted/Suspended keep basic guest access), and
-*existing sessions always run to their natural end* in every state.
+The invariant encoded in `license/doc.go`: *existing sessions always run to
+their natural end* in every state, and DHCP, DNS, the portal and Hotel Admin
+keep running — only **new** authorization is refused
+(`State.AllowsNewSessions`).
 
 `FeatureEnabled(state, entitled)`: a feature works iff it is entitled in the
 document **and** the state is Active/GracePeriod.
 
 ## 6. Offline grace in practice
 
-`GET /v1/appliance/license` succeeding (or an explicit ack) calls
-`MarkCloudValidated`. If the cloud is unreachable, nothing changes until
-`valid_until` — an appliance with a 1-year license can run offline for the
-year. Grace only matters when validity lapses while offline; the recommended
-default (`offline_grace_days: 30`, issuance default) gives 30 days of full
-service + 30 days of restricted service before expiry. Worked example:
+`GET /v1/appliance/license` succeeding calls `MarkCloudValidated`. The
+appliance fetches every minute until it holds a usable licence, then every 6
+hours, and at once on **Check now**. If the cloud is unreachable, nothing
+changes until `valid_until` — an appliance with a 1-year license can run
+offline for the year. Grace only matters when validity lapses while offline:
+`grace_period_days` of full service, then Expired. Worked example:
 [OFFLINE_OPERATION.md](OFFLINE_OPERATION.md).
 
 ## 7. Rollback protections (`license/store.go`)
 
-- **License rollback:** installing a document whose `issued_at` is older than
-  the currently installed one fails with `ErrRollback` — an old, more generous
-  license cannot be replayed after a downgrade or revocation. `issued_at` is
-  monotonic per appliance (persisted in `state.json`).
+- **License rollback:** installing a document whose `license_version` is lower
+  than the highest accepted (or equal, under a different license id), whose
+  `issued_at` is older than the installed one, or whose id was revoked, fails
+  with `ErrRollback` (`LICENSE_ROLLBACK_REJECTED`) — an old, more generous
+  license cannot be replayed after a downgrade or revocation. The high-water
+  marks persist in `state.json`.
 - **Clock rollback:** the store persists a **high-water mark** of the highest
   wall-clock time observed. If the clock is set back by more than the 48h
   tolerance, evaluation uses the high-water time instead and flags
-  `clock_rollback` in the evaluation (surfaced in Hotel Admin and telemetry).
+  `clock_rollback` in the evaluation (surfaced in Hotel Admin).
   Winding the clock back cannot resurrect an expiring license.
 - Files (`current.json`, `state.json`, `revoked.json`) are written 0600 with
   atomic tmp+rename in a 0700 directory (default `/etc/stayconnect/license`).
 
 ## 8. Issuance, delivery, revocation
 
-- **Issue:** `POST /cloud/v1/licenses` (platform_admin) — projects the
-  tenant's active subscription + effective limits into a Document, signs,
-  supersedes the site's previous current license, persists envelope +
-  projection. 402 if no subscription. Flow diagram:
-  [CLOUD_ARCHITECTURE.md](CLOUD_ARCHITECTURE.md) §5.
+- **Issue / renew / change terms:** at activation (`POST
+  /cloud/v1/appliances/{id}/activate`), then `POST
+  /cloud/v1/appliances/{id}/license` (platform admin + step-up) — signs a new
+  Document bound to that appliance's registered hardware and identity, with a
+  higher `license_version`, superseding the appliance's current licence in the
+  same transaction. There is no plan or subscription input.
 - **Deliver:** appliance pulls `GET /v1/appliance/license` (Ed25519 appliance
-  JWT, ≤60s lifetime) → `{license_id, envelope, revoked[], server_time}`.
-  Manual path for offline sites: download the envelope in cloud-admin, upload
-  via Hotel Admin `POST /edge/v1/license`.
+  JWT, ≤60s lifetime; over mTLS once it holds a certificate) →
+  `{license_id, envelope, revoked[], server_time}`. Manual path for offline
+  sites: **Offline license file** (`POST
+  /cloud/v1/appliances/{id}/offline-license`) in Central, uploaded in Hotel
+  Admin (`POST /edge/v1/license`).
 - **Revoke:** `POST /cloud/v1/licenses/{id}/revoke` sets the cloud row
-  `revoked`; the edge learns via the `revoked[]` list on its next fetch (or a
-  pushed notice) and records the id in its local revocation store —
-  `revoked.json` persists across restarts and new-license installs.
-- **Suspend/resume:** re-issue with `status: suspended` (billing hold), then
-  re-issue `active` to restore — the issued_at monotonicity makes the ordering
-  unambiguous.
+  `revoked`; the edge learns via the `revoked[]` list on its next fetch and
+  records the id in its local revocation store — `revoked.json` persists
+  across restarts and new-license installs.
+- **Suspend/resume:** `POST /cloud/v1/licenses/{id}/suspend|resume` re-issues
+  with `status: suspended` (billing hold), then `active` — the version
+  monotonicity makes the ordering unambiguous.
+- Suspending or revoking a licence never changes the appliance's lifecycle in
+  Central: the appliance keeps its identity and keeps fetching, which is how
+  it receives the suspension and the revocation list.
 
 ## 9. Enforcement bridge on the edge
 
