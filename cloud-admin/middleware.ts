@@ -17,7 +17,7 @@ export function middleware(req: NextRequest) {
   }
   if (hasSession && isLogin) {
     const url = req.nextUrl.clone();
-    url.pathname = "/dashboard";
+    url.pathname = "/overview";
     url.search = "";
     return NextResponse.redirect(url);
   }

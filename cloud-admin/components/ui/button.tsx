@@ -1,5 +1,6 @@
 "use client";
 import * as React from "react";
+import Link from "next/link";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
@@ -62,3 +63,19 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
 });
 
 export { buttonVariants };
+
+/** A link that looks like a button: navigation keeps its link semantics (open in a new tab, the URL on hover). */
+export function LinkButton({
+  href,
+  variant,
+  size,
+  className,
+  children,
+  ...props
+}: Omit<React.ComponentProps<typeof Link>, "href"> & { href: string } & VariantProps<typeof buttonVariants>) {
+  return (
+    <Link href={href} className={cn(buttonVariants({ variant, size }), className)} {...props}>
+      {children}
+    </Link>
+  );
+}

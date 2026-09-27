@@ -68,3 +68,98 @@ export function Segmented<T extends string>({
     </div>
   );
 }
+
+/**
+ * TabList — the sections of one record (a customer's Sites, Appliances, Licenses…). WAI-ARIA tabs: one tab stop,
+ * arrow keys / Home / End move between tabs, and each tab controls a `TabPanel` with the matching id. The
+ * selected tab is owned by the caller, so it can live in the address (`?tab=sites`) and survive a reload.
+ */
+export function TabList<T extends string>({
+  value,
+  onChange,
+  tabs,
+  label,
+  idBase,
+  className,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  tabs: { value: T; label: React.ReactNode; count?: number }[];
+  label: string;
+  idBase: string;
+  className?: string;
+}) {
+  const refs = React.useRef<Record<string, HTMLButtonElement | null>>({});
+  function move(to: number) {
+    const t = tabs[(to + tabs.length) % tabs.length];
+    onChange(t.value);
+    refs.current[t.value]?.focus();
+  }
+  return (
+    <div
+      role="tablist"
+      aria-label={label}
+      className={cn("flex gap-1 overflow-x-auto border-b border-border", className)}
+      onKeyDown={(e) => {
+        const i = tabs.findIndex((t) => t.value === value);
+        if (e.key === "ArrowRight") { e.preventDefault(); move(i + 1); }
+        else if (e.key === "ArrowLeft") { e.preventDefault(); move(i - 1); }
+        else if (e.key === "Home") { e.preventDefault(); move(0); }
+        else if (e.key === "End") { e.preventDefault(); move(tabs.length - 1); }
+      }}
+    >
+      {tabs.map((t) => {
+        const active = t.value === value;
+        return (
+          <button
+            key={t.value}
+            ref={(el) => { refs.current[t.value] = el; }}
+            type="button"
+            role="tab"
+            id={`${idBase}-tab-${t.value}`}
+            aria-selected={active}
+            aria-controls={`${idBase}-panel-${t.value}`}
+            tabIndex={active ? 0 : -1}
+            onClick={() => onChange(t.value)}
+            className={cn(
+              "relative -mb-px inline-flex h-10 shrink-0 items-center gap-1.5 border-b-2 px-3 text-sm font-medium transition-colors",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+              active
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:border-border-strong hover:text-foreground",
+            )}
+          >
+            {t.label}
+            {typeof t.count === "number" && (
+              <span className="rounded-full bg-surface px-1.5 text-2xs tabular text-muted-foreground">{t.count}</span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export function TabPanel({
+  idBase,
+  value,
+  className,
+  children,
+}: {
+  idBase: string;
+  value: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      role="tabpanel"
+      id={`${idBase}-panel-${value}`}
+      aria-labelledby={`${idBase}-tab-${value}`}
+      tabIndex={0}
+      className={cn("focus-visible:outline-none", className)}
+    >
+      {children}
+    </div>
+  );
+}

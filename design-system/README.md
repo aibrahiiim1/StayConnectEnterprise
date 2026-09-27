@@ -158,8 +158,10 @@ one-time secret again.
 - **Hotel Admin** navigation: 8 groups — Overview · Internet offering · Guests · Property management system ·
   Charges · Guest portal · Networking · System. Menu items are hidden when the role cannot read them or the
   appliance does not serve them. The page title always equals the menu label.
-- **Central** navigation: Overview · Infrastructure · Commercial · Administration, with the Customer
-  context selector at the top for platform admins (a fixed "Your customer" label for tenant users).
+- **Central** navigation: five destinations — Overview · Customers · Appliances · Licenses · System (Security
+  alerts, Trust & keys, Audit log, Team, Backup health as a secondary bar). There is no customer selector: a
+  screen is fleet-wide or reached by drilling into a customer or appliance; a customer's own user sees only
+  their customer and no System (docs/CENTRAL_CONTROL_PLANE.md §2).
 - **Breakpoints**: phone < 640px (single column, tables hide secondary columns, sheets full width),
   tablet 640–1023px (drawer navigation), laptop ≥ 1024px (sidebar), wide ≥ 1536px.
 - **RTL-ready**: logical spacing (`ps-*`, `pe-*`, `start-*`), mirrored directional icons. The consoles are

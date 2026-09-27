@@ -2,10 +2,10 @@
 
 // THE SIDE SHEET.
 //
-// A dialog is right for a decision ("disable this package?"). It is wrong for a record: a voucher, a PMS
-// connection, a package's activity. Those want the list to stay visible behind them, so the operator can move
-// from one row to the next without losing their place — and they want the full viewport height, because a PMS
-// connection's diagnostics do not fit in a centred box.
+// A dialog is right for a decision ("suspend this license?"). It is wrong for reference text that
+// should sit beside the page: the tips behind a lightbulb. That wants the page to stay visible, so the operator
+// can read and act at once, and it wants the full viewport height, because an explanation does not
+// fit in a centred box.
 //
 // Built on the same Radix Dialog as `dialog.tsx`, so focus trapping, Escape, restoring focus to the row that
 // opened it and the inert background are correct rather than approximated. Below `sm` it becomes a full-width

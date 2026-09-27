@@ -2,13 +2,12 @@
 
 // DATA CONTROLS — the pieces every list screen was building for itself.
 //
-// Search boxes of three different heights, state filters as native <select>s on one screen and as buttons on the
-// next, "Load more" on vouchers and nothing on guest activity. These are the one version of each.
+// Search boxes of three different heights and state filters as native <select>s on one screen and as buttons on
+// the next. These are the one version of each.
 
 import * as React from "react";
-import { Check, ChevronLeft, ChevronRight, Search, X } from "lucide-react";
+import { Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Button } from "./button";
 
 /** A search field with a leading icon and a clear button. Debounces onChange by `delay` ms when given. */
 export function SearchInput({
@@ -130,107 +129,5 @@ export function FilterChips<T extends string>({
         );
       })}
     </div>
-  );
-}
-
-/** Pagination — "Showing 201–400 of 1,204" with previous/next. `total` may be unknown (null). */
-export function Pagination({
-  offset,
-  limit,
-  shown,
-  total,
-  onChange,
-  className,
-}: {
-  offset: number;
-  limit: number;
-  /** How many rows the current page actually holds. */
-  shown: number;
-  total?: number | null;
-  onChange: (offset: number) => void;
-  className?: string;
-}) {
-  const from = shown === 0 ? 0 : offset + 1;
-  const to = offset + shown;
-  const hasNext = total != null ? to < total : shown >= limit;
-  return (
-    <div className={cn("flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground", className)}>
-      <span className="tabular">
-        {shown === 0
-          ? "No rows"
-          : total != null
-            ? `Showing ${from.toLocaleString()}–${to.toLocaleString()} of ${total.toLocaleString()}`
-            : `Showing ${from.toLocaleString()}–${to.toLocaleString()}`}
-      </span>
-      <div className="flex items-center gap-1.5">
-        <Button
-          size="xs"
-          variant="secondary"
-          disabled={offset <= 0}
-          onClick={() => onChange(Math.max(0, offset - limit))}
-        >
-          <ChevronLeft /> Previous
-        </Button>
-        <Button size="xs" variant="secondary" disabled={!hasNext} onClick={() => onChange(offset + limit)}>
-          Next <ChevronRight />
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Stepper — the progress header of a multi-step flow (add a PMS connection, issue vouchers).
- * Steps before `current` are complete; the operator can click back to one, never forward past validation.
- */
-export function Stepper({
-  steps,
-  current,
-  onStep,
-  className,
-}: {
-  steps: string[];
-  current: number;
-  onStep?: (i: number) => void;
-  className?: string;
-}) {
-  return (
-    <ol className={cn("flex flex-wrap items-center gap-x-2 gap-y-2", className)}>
-      {steps.map((s, i) => {
-        const done = i < current;
-        const active = i === current;
-        const clickable = !!onStep && i < current;
-        // A step is a BUTTON only when it does something. The rest are text: a disabled button announces a
-        // control the operator can never use, and dims its label below legibility.
-        const Tag = clickable ? "button" : "span";
-        return (
-          <li key={s} className="flex items-center gap-2" aria-current={active ? "step" : undefined}>
-            <Tag
-              {...(clickable ? { type: "button" as const, onClick: () => onStep?.(i) } : null)}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-full text-xs font-medium",
-                clickable && "cursor-pointer hover:text-foreground",
-                active ? "text-foreground" : "text-muted-foreground",
-              )}
-            >
-              <span
-                className={cn(
-                  "inline-flex size-6 items-center justify-center rounded-full border text-2xs tabular",
-                  active && "border-primary bg-primary text-primary-foreground",
-                  done && "border-primary/40 bg-primary-subtle text-primary-subtle-foreground",
-                  !active && !done && "border-border bg-card",
-                )}
-                aria-hidden={done || undefined}
-              >
-                {done ? <Check className="size-3.5" /> : i + 1}
-              </span>
-              {done && <span className="sr-only">Completed: </span>}
-              {s}
-            </Tag>
-            {i < steps.length - 1 && <span className="h-px w-6 bg-border" aria-hidden />}
-          </li>
-        );
-      })}
-    </ol>
   );
 }

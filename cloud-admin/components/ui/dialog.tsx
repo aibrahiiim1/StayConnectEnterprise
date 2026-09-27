@@ -2,7 +2,7 @@
 
 // THE MODAL THE ADMIN DID NOT HAVE.
 //
-// Every edit in this product used to open a form INSIDE the page: "Add package" pushed a card above the table,
+// Every edit in this product used to open a form INSIDE the page: "New site" pushed a card above the table,
 // "Edit" pushed another one, and the list the operator was editing scrolled out of view underneath. On a long
 // screen the form could open entirely off-screen, so the click appeared to do nothing — and with two of them
 // open at once there was no way to tell which record a Save applied to.
@@ -49,7 +49,7 @@ export function DialogContent({
       />
       {/*
         The positioning is a CENTRED FLEX WRAPPER rather than the usual `top-1/2 -translate-y-1/2`, because
-        these dialogs hold real forms: a package editor is taller than a laptop viewport. A translated, fixed
+        these dialogs hold real forms: the activation form is taller than a small laptop viewport. A translated, fixed
         panel clips its own top and bottom with no way to reach them. This one is bounded to the viewport and
         scrolls INSIDE, so the header and footer stay put and the fields scroll between them.
       */}
@@ -206,7 +206,7 @@ export function DialogForm({
 /**
  * ConfirmDialog — replaces `window.confirm` and, more importantly, the `window.prompt` chains.
  *
- * Disabling a package asked for a reason with `window.prompt`, then asked for a password with a SECOND
+ * Suspending a license asked for a reason with `window.prompt`, then asked for a password with a SECOND
  * `window.prompt`. Cancelling the second left the operator with no idea whether the first had taken effect, the
  * password was typed into a field that shows its characters, and neither prompt could say what the action would
  * do. All three are properties of the browser dialog, not of the code using it.
@@ -371,50 +371,5 @@ export function ConfirmDialog({
         </Field>
       )}
     </DialogForm>
-  );
-}
-
-/**
- * DetailDialog — a read-only panel for "view this record".
- *
- * Several lists answer "tell me more about this row" by expanding an extra <tr> underneath it, which pushes
- * every following row down and cannot hold more than a few lines. This is the same information with room for it.
- */
-export function DetailDialog({
-  open,
-  onOpenChange,
-  title,
-  description,
-  size = "lg",
-  footer,
-  children,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  title: React.ReactNode;
-  description?: React.ReactNode;
-  size?: keyof typeof SIZES;
-  footer?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size={size}>
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          {description && <DialogDescription>{description}</DialogDescription>}
-        </DialogHeader>
-        <DialogBody className="space-y-5">{children}</DialogBody>
-        {footer ? (
-          <DialogFooter>{footer}</DialogFooter>
-        ) : (
-          <DialogFooter>
-            <Button variant="secondary" onClick={() => onOpenChange(false)}>
-              Close
-            </Button>
-          </DialogFooter>
-        )}
-      </DialogContent>
-    </Dialog>
   );
 }
