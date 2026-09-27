@@ -1,5 +1,12 @@
+# OneGate Central API (ctrlapi). Central only. Installed by deploy/scripts/central-install.sh; the binary is
+# replaced by deploy/scripts/central-deploy.sh (never by hand: it takes a DB backup and keeps a rollback copy).
+#
+#   :8080 (loopback)  /v1/auth, /cloud/v1, the appliance HTTPS protocol, /healthz /readyz, /metrics — behind Caddy
+#   :9443 (public)    the appliance mutual-TLS listener (CTRLAPI_MTLS_ADDR), client certificate required
 [Unit]
-Description=StayConnect Control Plane API (ctrlapi)
+Description=OneGate Central API (ctrlapi)
+# Postgres and Redis run in docker (deploy/compose/central-infra.yml, restart: unless-stopped). ctrlapi exits if
+# either is unreachable at start and systemd restarts it until they are.
 After=network-online.target docker.service
 Wants=network-online.target
 Requires=docker.service
@@ -17,24 +24,42 @@ EnvironmentFile=-/etc/stayconnect/central-endpoint.env
 ExecStart=/opt/stayconnect/bin/ctrlapi serve
 Restart=on-failure
 RestartSec=2
+# Root, because ctrlapi reads and WRITES trust material under /etc/stayconnect (see ReadWritePaths). The
+# service is otherwise fenced in below.
 User=root
 Group=root
 ProtectSystem=full
 # ProtectSystem=full MAKES /etc READ-ONLY, AND CENTRAL KEEPS ITS KEY MATERIAL THERE.
 #
 # ctrlapi does not only read /etc/stayconnect, it writes to it: the mTLS server certificate is rotated
-# before expiry (verify-before-switch, previous kept as .prev), and the per-purpose command/update signing
-# keys are created on first start if absent. Without this, every one of those writes fails with
-# "read-only file system".
+# before expiry (verify-before-switch, previous kept as .prev), and on a brand-new Central the first start
+# creates the appliance CA (root + intermediate) and moves the root key to /etc/stayconnect/pki-offline.
+# Without this, every one of those writes fails with "read-only file system".
 #
 # That failure was invisible. Certificate rotation happens once every couple of years, logs a warning, and
 # keeps serving the old certificate -- so the first symptom would have been an expired certificate and a
-# fleet unable to complete mTLS, years after the cause was introduced. It only surfaced now because adding
-# a name to the certificate made ctrlapi try to re-issue one on startup.
+# fleet unable to complete mTLS, years after the cause was introduced.
 #
 # Narrow on purpose: the rest of /etc stays read-only.
 ReadWritePaths=/etc/stayconnect
 NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# :9443 is unprivileged; ctrlapi needs no capability at all.
+CapabilityBoundingSet=
 
 [Install]
 WantedBy=multi-user.target
