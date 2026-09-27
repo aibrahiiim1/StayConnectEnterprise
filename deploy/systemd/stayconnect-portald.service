@@ -19,7 +19,7 @@ RestartSec=2
 # portald listens on *:8380 -- every guest VLAN -- and it used to run as User=stayconnect, the same account
 # as edged. That made it the most exposed process on the appliance and gave it edged's identity: it could
 # ptrace edged, and it could call every administrative route on /run/stayconnect/scd.sock directly,
-# including /v1/backup/restore, /v1/license/install, /v1/setup/enroll and the voucher code reveal. None of
+# including /v1/backup/restore, /v1/license/install, /v1/central/offline-package and the voucher code reveal. None of
 # those check an operator, because the operator authentication, permission check and password step-up all
 # live in edged, and nothing proved they had happened.
 #

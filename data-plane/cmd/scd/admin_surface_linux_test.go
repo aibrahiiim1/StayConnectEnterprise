@@ -122,7 +122,7 @@ func TestEdgedItselfIsStillAdmitted(t *testing.T) {
 // then the only thing holding it. stayconnect-hotel-admin.service was still running `/usr/bin/node
 // server.js` as User=stayconnect -- uid 998 on the appliance, exactly edged's -- with a group that opens
 // scd.sock. So the Node process rendering the admin web UI was admitted to /v1/backup/restore,
-// /v1/license/install and /v1/setup/enroll.
+// /v1/license/install and /v1/central/offline-package.
 //
 // It has its own account now, and this asserts the in-process half: sharing the account is not enough.
 func TestSharingEdgedsUIDIsNotEnough(t *testing.T) {

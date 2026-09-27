@@ -29,7 +29,7 @@ EnvironmentFile=-/etc/stayconnect/hotel-admin.env
 # This ran as User=stayconnect -- edged's account -- so `/usr/bin/node server.js`, the process that renders
 # the admin web UI, held edged's uid (998) and a primary group that opens /run/stayconnect/scd.sock. scd's
 # administrative gate was checking the uid, so it admitted this process to /v1/backup/restore,
-# /v1/license/install and /v1/setup/enroll with none of edged's operator authentication, permission check or
+# /v1/license/install and /v1/central/offline-package with none of edged's operator authentication, permission check or
 # step-up. Found by review, after portald had been separated for exactly the same reason.
 #
 # NO SupplementaryGroups, unlike portald. portald keeps the stayconnect group because guest authentication
