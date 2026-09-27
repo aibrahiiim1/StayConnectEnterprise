@@ -37,8 +37,9 @@ export const ACTIVATION: Record<Activation, StateInfo> = {
   retiring: {
     label: "Retiring",
     tone: "warn",
-    explain: "Retirement is signed; waiting for the appliance to confirm.",
+    explain: "Retirement is signed; waiting for the appliance to confirm. Its credentials stay valid until it does.",
   },
+  // A normal retirement (decommissioned) and an emergency one (revoked) both read as Retired.
   retired: {
     label: "Retired",
     tone: "default",
@@ -250,10 +251,18 @@ const ACTION_WORDS: Record<string, string> = {
   "appliance.registered": "Appliance registered",
   "appliance.activated": "Appliance activated",
   "appliance.moved": "Appliance moved",
+  "appliance.retire_started": "Retirement started",
   "appliance.retired": "Appliance retired",
+  "appliance.retired_emergency": "Appliance retired without waiting",
   "appliance.retire_acknowledged": "Retirement confirmed by the appliance",
+  "appliance.terminal_adopted": "Retirement confirmed by the appliance",
+  "appliance.terminal_delivery_failed": "Retirement not confirmed",
+  "appliance.credentials_revoked": "Credentials revoked",
   "appliance.deleted": "Appliance record deleted",
   "appliance.replace_marked": "Marked for replacement",
+  "appliance.replacement_started": "Marked for replacement",
+  "appliance.replacement_completed": "Replaced by a new appliance",
+  "appliance.replacement_window_expired": "Replacement not completed in time",
   "appliance.wan_mac_rebound": "WAN MAC rebound",
   "appliance.certificate_reissued": "Certificate reissued",
   "license.issued": "License issued",
@@ -264,6 +273,7 @@ const ACTION_WORDS: Record<string, string> = {
   "license.revoked": "License revoked",
   "customer.created": "Customer created",
   "customer.updated": "Customer renamed",
+  "customer.renamed": "Customer renamed",
   "customer.archived": "Customer archived",
   "customer.restored": "Customer restored",
   "customer.deleted": "Customer deleted",
@@ -282,8 +292,8 @@ export function actionWords(action: string): string {
 /** Tone of an audit action, from its verb. */
 export function actionTone(action: string): Tone {
   const verb = action.split(".").pop() ?? "";
-  if (/deleted|revoked|retired/.test(verb)) return "err";
-  if (/suspended|archived|disabled|moved|rebound|replace/.test(verb)) return "warn";
-  if (/created|issued|activated|renewed|resumed|restored/.test(verb)) return "ok";
+  if (/deleted|revoked|retired|failed/.test(verb)) return "err";
+  if (/suspended|archived|disabled|moved|rebound|replace|retire|expired/.test(verb)) return "warn";
+  if (/created|issued|activated|renewed|resumed|restored|adopted|acknowledged/.test(verb)) return "ok";
   return "default";
 }

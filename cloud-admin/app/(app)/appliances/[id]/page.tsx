@@ -17,9 +17,8 @@ import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { PageHeader, PageShell } from "@/components/ui/page";
 import { Skeleton, Switch } from "@/components/ui/misc";
-import { LiveStatus } from "@/components/ui/patterns";
+import { LiveStatus, NotAvailable } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
-import { NotAvailable } from "@/components/ui/patterns";
 import { DeleteDialog } from "@/components/delete-dialog";
 import { ActivateDialog, MoveDialog, SetLicenseDialog } from "@/components/appliance-dialogs";
 import { ActivationBadge, ConnectionBadge, Fact, LicenseBadge } from "@/components/status-badge";
@@ -205,6 +204,12 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
   })[verb];
 
   const activationText = activationInfo(a.activation);
+  // Two-phase retirement that the appliance never acknowledged: ctrlapi reports the delivery as failed (the same
+  // condition that raises the "retirement not confirmed" attention item). A deadline already past reads the same.
+  const unconfirmed =
+    a.activation === "retiring" &&
+    (a.retirement?.state === "terminal_delivery_failed" ||
+      (!!a.retirement?.deadline && Date.parse(a.retirement.deadline) < Date.now()));
 
   return (
     <PageShell>
@@ -279,17 +284,28 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
       )}
 
       {a.activation === "retiring" && (
-        <Callout tone="warning" title="Retiring">
-          Retirement is signed; waiting for the appliance to confirm
-          {a.retirement?.deadline ? <> (by {formatDateTime(a.retirement.deadline)})</> : null}.{" "}
+        <Callout tone="warning" title={unconfirmed ? "Retirement not confirmed" : "Retiring"}>
+          {unconfirmed ? (
+            <>The appliance did not confirm its retirement, so its credentials are still valid.</>
+          ) : (
+            <>
+              Retirement is signed; waiting for the appliance to confirm
+              {a.retirement?.deadline ? <> (by {formatDateTime(a.retirement.deadline)})</> : null}. Its credentials
+              stay valid until it does.
+            </>
+          )}{" "}
           {canManage && (
-            <Button
-              variant="link"
-              className="h-auto p-0 align-baseline"
-              onClick={() => { setEmergency(true); setActionErr(null); setDialog("retire"); }}
-            >
-              Retire now without waiting
-            </Button>
+            <>
+              If it is lost, dead or cannot reach Central,{" "}
+              <Button
+                variant="link"
+                className="h-auto p-0 align-baseline"
+                onClick={() => { setEmergency(true); setActionErr(null); setDialog("retire"); }}
+              >
+                retire it now without waiting
+              </Button>
+              .
+            </>
           )}
         </Callout>
       )}
@@ -312,9 +328,28 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
 
       {a.replacement?.pending && (
         <Callout tone="info" title="Marked for replacement">
-          Activating a new appliance at the same site retires this one
-          {a.replacement.deadline ? <> (before {formatDay(a.replacement.deadline)})</> : null}.
+          It keeps working until a new appliance is activated at the same site
+          {a.replacement.deadline ? <> (expected before {formatDay(a.replacement.deadline)})</> : null}. Then this one
+          starts retiring: it shows <strong>Retiring</strong> until it confirms, then <strong>Retired</strong>.
         </Callout>
+      )}
+      {a.replacement?.replaced_by && (
+        <p className="text-sm text-muted-foreground">
+          Replaced by{" "}
+          <Link href={`/appliances/${a.replacement.replaced_by}`} className="font-medium text-primary underline-offset-2 hover:underline">
+            its new appliance
+          </Link>
+          .
+        </p>
+      )}
+      {a.replacement?.replaces && (
+        <p className="text-sm text-muted-foreground">
+          Replaces{" "}
+          <Link href={`/appliances/${a.replacement.replaces}`} className="font-medium text-primary underline-offset-2 hover:underline">
+            the appliance previously at this site
+          </Link>
+          .
+        </p>
       )}
 
       <div className="grid gap-5 lg:grid-cols-3">
@@ -499,17 +534,17 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
       <ConfirmDialog
         open={dialog === "retire"}
         onOpenChange={(v) => { if (!v) setDialog(null); }}
-        title={`Retire ${a.serial}`}
-        description="The appliance stops serving guests and can no longer connect to Central."
+        title={a.activation === "retiring" ? `Retire ${a.serial} now` : `Retire ${a.serial}`}
+        description="Takes the appliance out of service for good. Either way it ends as Retired."
         confirmLabel={emergency ? "Retire now" : "Retire appliance"}
         confirmVariant="danger"
         busy={actionBusy}
         error={actionErr}
         consequences={[
-          "Its license and certificate stop working.",
           emergency
-            ? "It is retired immediately, without waiting for the appliance to confirm."
-            : "It is retired once the appliance confirms, normally within a minute.",
+            ? "Its license and credentials are revoked now, without waiting for the appliance to confirm."
+            : "Central signs its retirement; the appliance confirms on its next contact, normally within a minute. It shows Retiring until then, and its credentials stay valid until it confirms.",
+          "It stops serving guests and can no longer connect to Central.",
           "It cannot be undone. Only its record can then be deleted.",
         ]}
         confirmText={a.serial}
@@ -517,13 +552,16 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
         requireReason
         onConfirm={retire}
       >
-        <label className="flex items-start gap-3 text-sm">
-          <Switch checked={emergency} onCheckedChange={setEmergency} label="Emergency retire" />
-          <span>
-            <span className="font-medium">Emergency: don&apos;t wait for the appliance</span>
-            <span className="block text-caption text-muted-foreground">For a lost, stolen or dead appliance.</span>
-          </span>
-        </label>
+        {/* Already retiring: the only step left is not to wait. */}
+        {a.activation !== "retiring" && (
+          <label className="flex items-start gap-3 text-sm">
+            <Switch checked={emergency} onCheckedChange={setEmergency} label="Emergency retire" />
+            <span>
+              <span className="font-medium">Emergency: don&apos;t wait for the appliance</span>
+              <span className="block text-caption text-muted-foreground">For a lost, stolen or dead appliance.</span>
+            </span>
+          </label>
+        )}
       </ConfirmDialog>
 
       <ConfirmDialog
@@ -679,7 +717,7 @@ function Advanced({
               {!a.replacement?.pending && (
                 <Button variant="ghost" size="sm" onClick={() => onAction({
                   title: "Mark for replacement",
-                  description: "Activating a new appliance at the same site will retire this one and take over its place.",
+                  description: "Use it when new hardware takes this appliance's place. This one keeps working until the new appliance is activated at the same site; then it starts retiring and is retired once it confirms.",
                   confirmLabel: "Mark for replacement",
                   url: `/cloud/v1/appliances/${a.id}/replace`,
                   done: "Marked for replacement",

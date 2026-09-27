@@ -206,7 +206,7 @@ describe("License operations", () => {
     });
   });
 
-  it("Retire sends the typed serial and the emergency choice", async () => {
+  it("Retire explains the two phases and sends the typed serial and the emergency choice", async () => {
     const user = userEvent.setup();
     const { calls } = mockFetch([
       detail(appliance("activated")),
@@ -215,10 +215,151 @@ describe("License operations", () => {
     renderAs(PLATFORM_ME, <AppliancePage params={{ id: "a1" }} />);
     await user.click(await screen.findByRole("button", { name: /Retire appliance/ }));
     const dialog = await screen.findByRole("dialog", { name: "Retire OG-0001" });
+    expect(within(dialog).getByText(/shows Retiring until then/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Either way it ends as Retired/)).toBeInTheDocument();
     await user.type(within(dialog).getByLabelText(/Type the serial/), "OG-0001");
     await user.type(within(dialog).getByLabelText(/Reason/), "hotel closed");
     await user.click(within(dialog).getByRole("button", { name: "Retire appliance" }));
     await waitFor(() => expect(calls.some((c) => c.url.endsWith("/retire"))).toBe(true));
     expect(calls.find((c) => c.url.endsWith("/retire"))!.body).toEqual({ reason: "hotel closed", emergency: false, confirm_serial: "OG-0001" });
+  });
+});
+
+describe("Move — same customer only", () => {
+  const SITE_2 = { ...SITE, id: "s2", code: "north", name: "North Beach", appliances: 0 };
+  const SITE_ARCHIVED = { ...SITE, id: "s3", code: "old", name: "Old Wing", status: "archived", appliances: 0 };
+  const sites = { match: "/api/cloud/v1/customers/c1/sites", body: { items: [SITE, SITE_2, SITE_ARCHIVED] } };
+
+  async function openMove(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await screen.findByRole("button", { name: /Move/ }));
+    return screen.findByRole("dialog", { name: "Move OG-0001" });
+  }
+
+  it("offers only the customer's other active sites and posts the §6 body", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetch([
+      detail(appliance("activated")),
+      sites,
+      stepUp("POST", "/api/cloud/v1/appliances/a1/move"),
+      reauth,
+    ]);
+    renderAs(PLATFORM_ME, <AppliancePage params={{ id: "a1" }} />);
+    const dialog = await openMove(user);
+
+    // No customer picker, and no customer list is even fetched.
+    expect(within(dialog).queryByLabelText(/^Customer/)).not.toBeInTheDocument();
+    expect(calls.some((c) => c.url.startsWith("/api/cloud/v1/customers?"))).toBe(false);
+    expect(within(dialog).getByText("Semantics Hotels")).toBeInTheDocument();
+
+    const site = within(dialog).getByLabelText(/^New site/);
+    await waitFor(() => expect(within(site).getByRole("option", { name: "North Beach" })).toBeInTheDocument());
+    const offered = within(site).getAllByRole("option").map((o) => o.textContent);
+    expect(offered).toEqual(["Choose a site…", "North Beach"]); // not the current site, not the archived one
+
+    expect(within(dialog).getByText(/re-issued for the new site with the same terms/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/retire it, factory-reset it and activate it for that customer/)).toBeInTheDocument();
+
+    await user.selectOptions(site, "s2");
+    await user.type(within(dialog).getByLabelText(/^Reason/), "moved to the north building");
+    await user.click(within(dialog).getByRole("button", { name: "Move appliance" }));
+    await confirmPassword(user);
+
+    await waitFor(() => expect(calls.filter((c) => c.url === "/api/cloud/v1/appliances/a1/move")).toHaveLength(2));
+    expect(calls.filter((c) => c.url === "/api/cloud/v1/appliances/a1/move")[1].body).toEqual({
+      customer_id: "c1", site_id: "s2", reason: "moved to the north building",
+    });
+  });
+
+  it.each([
+    [409, "conflict", "an appliance cannot move to another customer; retire it and activate it for the new customer"],
+    [503, "licensing_unavailable", "the licence could not be re-issued, so the move was refused and nothing changed"],
+  ])("shows the server's own message on a %i", async (status, code, message) => {
+    const user = userEvent.setup();
+    mockFetch([
+      detail(appliance("activated")),
+      sites,
+      { method: "POST", match: "/api/cloud/v1/appliances/a1/move", status, body: { error: code, message } },
+    ]);
+    renderAs(PLATFORM_ME, <AppliancePage params={{ id: "a1" }} />);
+    const dialog = await openMove(user);
+    const site = within(dialog).getByLabelText(/^New site/);
+    await waitFor(() => expect(within(site).getByRole("option", { name: "North Beach" })).toBeInTheDocument());
+    await user.selectOptions(site, "s2");
+    await user.type(within(dialog).getByLabelText(/^Reason/), "reorganisation");
+    await user.click(within(dialog).getByRole("button", { name: "Move appliance" }));
+    expect(await within(dialog).findByText(message)).toBeInTheDocument();
+    // Still open, so the operator reads why.
+    expect(screen.getByRole("dialog", { name: "Move OG-0001" })).toBeInTheDocument();
+  });
+
+  it("with no other active site, says so and cannot submit", async () => {
+    const user = userEvent.setup();
+    mockFetch([detail(appliance("activated")), { match: "/api/cloud/v1/customers/c1/sites", body: { items: [SITE] } }]);
+    renderAs(PLATFORM_ME, <AppliancePage params={{ id: "a1" }} />);
+    const dialog = await openMove(user);
+    expect(await within(dialog).findByText(/has no other active site/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("link", { name: /Add one on its Sites tab/ })).toHaveAttribute("href", "/customers/c1?tab=sites");
+    expect(within(dialog).getByRole("button", { name: "Move appliance" })).toBeDisabled();
+  });
+});
+
+describe("Retirement and replacement", () => {
+  const future = new Date(Date.now() + 3_600_000).toISOString();
+
+  it("retiring: waiting for the appliance, credentials still valid, with the emergency way out", async () => {
+    mockFetch([detail(appliance("retiring", { retirement: { state: "terminal_pending_ack", deadline: future } }))]);
+    renderAs(PLATFORM_ME, <AppliancePage params={{ id: "a1" }} />);
+    expect(await screen.findByText(/waiting for the appliance to confirm \(by/)).toBeInTheDocument();
+    expect(screen.getByText(/stay valid until it does/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "retire it now without waiting" })).toBeInTheDocument();
+    expect(screen.queryByText("Retirement not confirmed")).not.toBeInTheDocument();
+  });
+
+  it("not confirmed: says so, and Retire now sends an emergency retirement", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetch([
+      detail(appliance("retiring", { retirement: { state: "terminal_delivery_failed", deadline: future } })),
+      { method: "POST", match: "/api/cloud/v1/appliances/a1/retire", body: { ok: true } },
+    ]);
+    renderAs(PLATFORM_ME, <AppliancePage params={{ id: "a1" }} />);
+    expect(await screen.findByText("Retirement not confirmed")).toBeInTheDocument();
+    expect(screen.getByText(/did not confirm its retirement, so its credentials are still valid/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "retire it now without waiting" }));
+    const dialog = await screen.findByRole("dialog", { name: "Retire OG-0001 now" });
+    // Already retiring: not waiting is the only choice left, so there is no switch to turn it off.
+    expect(within(dialog).queryByRole("switch")).not.toBeInTheDocument();
+    expect(within(dialog).getByText(/revoked now, without waiting/)).toBeInTheDocument();
+    await user.type(within(dialog).getByLabelText(/Type the serial/), "OG-0001");
+    await user.type(within(dialog).getByLabelText(/Reason/), "box is dead");
+    await user.click(within(dialog).getByRole("button", { name: "Retire now" }));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith("/retire"))).toBe(true));
+    expect(calls.find((c) => c.url.endsWith("/retire"))!.body).toEqual({ reason: "box is dead", emergency: true, confirm_serial: "OG-0001" });
+  });
+
+  it("marked for replacement: keeps working until the new one is activated, then retires once it confirms", async () => {
+    mockFetch([detail(appliance("activated", { replacement: { pending: true, deadline: future } }))]);
+    renderAs(PLATFORM_ME, <AppliancePage params={{ id: "a1" }} />);
+    expect(await screen.findByText("Marked for replacement")).toBeInTheDocument();
+    expect(screen.getByText(/It keeps working until a new appliance is activated at the same site/)).toBeInTheDocument();
+    expect(document.body.textContent).toMatch(/starts retiring: it shows Retiring until it confirms, then Retired/);
+    expect(document.body.textContent).not.toMatch(/instantly|immediately/i);
+  });
+
+  it("Mark for replacement describes the acknowledged retirement, not an instant cut-off", async () => {
+    const user = userEvent.setup();
+    mockFetch([detail(appliance("activated"))]);
+    renderAs(PLATFORM_ME, <AppliancePage params={{ id: "a1" }} />);
+    await screen.findByRole("heading", { name: "License" });
+    await user.click(screen.getByText("Advanced"));
+    await user.click(screen.getByRole("button", { name: /Mark for replacement/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Mark for replacement" });
+    expect(within(dialog).getByText(/keeps working until the new appliance is activated at the same site/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/retired once it confirms/)).toBeInTheDocument();
+  });
+
+  it("links a replaced appliance to its successor", async () => {
+    mockFetch([detail(appliance("retired", { replacement: { pending: false, replaced_by: "a2" } }))]);
+    renderAs(PLATFORM_ME, <AppliancePage params={{ id: "a1" }} />);
+    expect(await screen.findByRole("link", { name: "its new appliance" })).toHaveAttribute("href", "/appliances/a2");
   });
 });
