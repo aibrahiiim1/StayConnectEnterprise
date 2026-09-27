@@ -135,7 +135,7 @@ func TestActivityRowNeverFabricatesAnOffer(t *testing.T) {
 	y := activityRow{Source: "CHECKOUT_GRACE", EntitlementID: "e", StayID: "st 1", SystemPackage: true,
 		PackageCode: "__system_checkout_grace"}
 	finishActivityRow(&y, "ACTIVE")
-	if y.Status != "ACTIVE" || y.PackageName != "After check-out grace" {
+	if y.Status != "ACTIVE" || y.PackageName != "Grace Period" {
 		t.Fatalf("system grace row: %+v", y)
 	}
 	if y.UsageHref != "/usage?stay=st+1" {

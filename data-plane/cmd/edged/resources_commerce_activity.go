@@ -49,7 +49,7 @@ var activitySources = map[string]string{
 	"VOUCHER_REDEMPTION":   "Voucher",
 	"ACCOUNT_AUTO_GRANT":   "Client account",
 	"OTP_SOCIAL_DEFAULT":   "Email, phone or social sign-in",
-	"CHECKOUT_GRACE":       "After check-out grace",
+	"CHECKOUT_GRACE":       "Grace Period",
 	"EMERGENCY_GRACE":      "Emergency grace",
 	"POST_STAY_CONVERSION": "After-stay access",
 	"CROSS_PMS_TRANSFER":   "Moved between property systems",
@@ -436,7 +436,7 @@ func packageDisplayName(name, code string, system bool, trigger string) string {
 		case "EMERGENCY_GRACE":
 			return "Emergency grace"
 		default:
-			return "After check-out grace"
+			return "Grace Period"
 		}
 	}
 	return code

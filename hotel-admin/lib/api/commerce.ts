@@ -69,7 +69,7 @@ export const SOURCE_LABELS: Record<ActivitySource, string> = {
   VOUCHER_REDEMPTION: "Voucher",
   ACCOUNT_AUTO_GRANT: "Client account",
   OTP_SOCIAL_DEFAULT: "Email, phone or social sign-in",
-  CHECKOUT_GRACE: "After check-out grace",
+  CHECKOUT_GRACE: "Grace Period",
   EMERGENCY_GRACE: "Emergency grace",
   POST_STAY_CONVERSION: "After-stay access",
   CROSS_PMS_TRANSFER: "Moved between PMS connections",
