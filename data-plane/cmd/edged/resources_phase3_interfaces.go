@@ -1092,7 +1092,7 @@ func (s *server) setPMSRoute(w http.ResponseWriter, r *http.Request) {
 	var gnName string
 	if err := tx.QueryRow(ctx, `SELECT COALESCE(name,'') FROM public.guest_networks
 	     WHERE id=$1 AND tenant_id=$2 AND site_id=$3`, gnID, s.tenantID, s.siteID).Scan(&gnName); err != nil {
-		jsonErr(w, http.StatusNotFound, "not_found", "guest network not found at this site")
+		jsonErr(w, http.StatusNotFound, "not_found", "client network not found at this site")
 		return
 	}
 	var ifaceLabel, lifecycle string
@@ -1115,7 +1115,7 @@ func (s *server) setPMSRoute(w http.ResponseWriter, r *http.Request) {
 	// nothing. Refusing here turns a silent dead end into a message naming the missing step.
 	if !published {
 		jsonErr(w, http.StatusConflict, "validation",
-			"PMS interface has no published revision — publish one before routing a guest network to it")
+			"PMS interface has no published revision — publish one before routing a client network to it")
 		return
 	}
 

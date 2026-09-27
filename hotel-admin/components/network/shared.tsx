@@ -175,7 +175,7 @@ export function AddReservationDialog({
   async function submit() {
     const gid = networkId ?? f.guest_network_id;
     if (!gid || !f.mac.trim() || !f.reserved_ip.trim()) {
-      setErr(networkId ? "MAC and reserved IP are required." : "Guest network, MAC and reserved IP are required.");
+      setErr(networkId ? "MAC and reserved IP are required." : "Client network, MAC and reserved IP are required.");
       return;
     }
     setBusy(true); setErr(null);
@@ -203,9 +203,9 @@ export function AddReservationDialog({
       onSubmit={submit}
     >
       {!networkId && (
-        <Field label="Guest network" required>
+        <Field label="Client network" required>
           <Select value={f.guest_network_id} onChange={(e) => setF({ ...f, guest_network_id: e.target.value })}>
-            <option value="">Choose a guest network…</option>
+            <option value="">Choose a client network…</option>
             {(networks ?? []).map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
           </Select>
         </Field>
@@ -213,11 +213,11 @@ export function AddReservationDialog({
       <Field label="Device MAC address" required>
         <Input value={f.mac} onChange={(e) => setF({ ...f, mac: e.target.value })} placeholder="aa:bb:cc:dd:ee:ff" className="font-mono" autoComplete="off" />
       </Field>
-      <Field label="Reserved IP address" required hint="Must be inside the guest network's subnet.">
+      <Field label="Reserved IP address" required hint="Must be inside the client network's subnet.">
         <Input value={f.reserved_ip} onChange={(e) => setF({ ...f, reserved_ip: e.target.value })} placeholder="10.20.0.50" className="font-mono" autoComplete="off" />
       </Field>
       <Field label="Hostname" hint="Optional. A name that helps you recognise the device.">
-        <Input value={f.hostname} onChange={(e) => setF({ ...f, hostname: e.target.value })} placeholder="lobby-printer" />
+        <Input value={f.hostname} onChange={(e) => setF({ ...f, hostname: e.target.value })} placeholder="office-printer" />
       </Field>
       <SwitchRow label="Enabled" checked={f.enabled} onChange={(v) => setF({ ...f, enabled: v })} />
     </DialogForm>
@@ -268,7 +268,7 @@ export function EditReservationDialog({
       {r && (
         <>
           {networkName !== undefined && (
-            <Field label="Guest network"><Input value={networkName} disabled /></Field>
+            <Field label="Client network"><Input value={networkName} disabled /></Field>
           )}
           <Field label="Device MAC address" hint="The device cannot change. Remove the reservation and add a new one instead.">
             <Input value={r.mac} disabled className="font-mono" />

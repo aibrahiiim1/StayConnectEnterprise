@@ -350,8 +350,8 @@ func (s *server) keaStatus(ctx context.Context) (configured, healthy bool, detai
 		configured = id != ""
 	}
 	if !configured {
-		return false, false, "waiting for guest networking: Kea serves the LAN bridge, which exists only " +
-			"once a guest network has been applied and confirmed on this appliance"
+		return false, false, "waiting for client networking: Kea serves the LAN bridge, which exists only " +
+			"once a client network has been applied and confirmed on this appliance"
 	}
 	if s.kea.Healthy() {
 		return true, true, "Kea DHCP answering status-get on its control socket"

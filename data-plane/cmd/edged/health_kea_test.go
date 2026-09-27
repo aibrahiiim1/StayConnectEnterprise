@@ -51,7 +51,7 @@ func TestKeaApplicabilityFailsTowardsReporting(t *testing.T) {
 	}{
 		{
 			name:       "no guest network configured yet — not applicable",
-			view:       keaView{KeaConfigured: false, KeaDetail: "waiting for guest networking"},
+			view:       keaView{KeaConfigured: false, KeaDetail: "waiting for client networking"},
 			reachable:  true,
 			applicable: false,
 		},

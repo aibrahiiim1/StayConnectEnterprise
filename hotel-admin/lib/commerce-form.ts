@@ -229,7 +229,7 @@ export const RULE_TYPE_LABELS: Record<RuleType, string> = {
   SUBJECT_KIND: "Type of client credential",
   DATE_WINDOW: "Only between two dates",
   PRIOR_PURCHASE: "Whether they already had a package",
-  SITE_NETWORK: "Only on certain guest networks",
+  SITE_NETWORK: "Only on certain client networks",
   STAY_LENGTH: "How many nights they are staying",
   ROOM_TYPE: "Room type",
   RATE_PLAN: "Rate plan",

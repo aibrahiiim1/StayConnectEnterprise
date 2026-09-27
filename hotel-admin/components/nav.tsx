@@ -145,7 +145,7 @@ const SECTIONS: Section[] = [
   {
     title: "Networking",
     items: [
-      { href: "/network",             label: "Guest networks",     icon: Network,   resource: "network", keywords: "vlan ssid subnet bridge captive portal" },
+      { href: "/network",             label: "Client networks",     icon: Network,   resource: "network", keywords: "vlan ssid subnet bridge captive portal guest networks" },
       { href: "/network/dhcp",        label: "DHCP & leases",      icon: Wifi,      resource: "network", keywords: "ip address pool lease kea reservation" },
       { href: "/network/system",      label: "WAN / LAN settings", icon: Router,    resource: "network", keywords: "uplink gateway dns static management" },
       { href: "/network/revisions",   label: "Config history",     icon: History,   resource: "network", keywords: "rollback revision applied" },

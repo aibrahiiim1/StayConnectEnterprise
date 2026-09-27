@@ -195,8 +195,8 @@ export default function NetworkSettingsPage() {
         <>
           <HelpSection title="What this page covers">
             <p>
-              Only the appliance&rsquo;s WAN / management uplink and the legacy base bridge. Guest Wi-Fi is configured
-              under <strong>Guest networks</strong> (VLAN, gateway, sign-in page) and <strong>DHCP &amp; leases</strong>{" "}
+              Only the appliance&rsquo;s WAN / management uplink and the legacy base bridge. Client Wi-Fi is configured
+              under <strong>Client networks</strong> (VLAN, gateway, sign-in page) and <strong>DHCP &amp; leases</strong>{" "}
               (address pools, lease times, reservations).
             </p>
           </HelpSection>
@@ -212,8 +212,8 @@ export default function NetworkSettingsPage() {
           </HelpSection>
           <HelpSection title="Legacy base bridge">
             <p>
-              The appliance&rsquo;s original LAN bridge. Guest networks do not use it, so it is normal for its DHCP to be
-              off. DHCP has one source of truth, the guest network pages, and is not edited here.
+              The appliance&rsquo;s original LAN bridge. Client networks do not use it, so it is normal for its DHCP to be
+              off. DHCP has one source of truth, the client network pages, and is not edited here.
             </p>
           </HelpSection>
           <HelpSection title="Diagnostics">
@@ -335,14 +335,14 @@ export default function NetworkSettingsPage() {
         <Card>
           <CardHeader>
             <div className="space-y-1">
-              <CardTitle className="flex items-center gap-2"><Network className="size-4" aria-hidden /> Guest Wi-Fi is configured elsewhere</CardTitle>
+              <CardTitle className="flex items-center gap-2"><Network className="size-4" aria-hidden /> Client Wi-Fi is configured elsewhere</CardTitle>
               <CardDescription>This page covers only the uplink and the legacy base bridge.</CardDescription>
             </div>
           </CardHeader>
           <CardBody className="space-y-3 text-sm">
             <div className="grid gap-2">
               <Link href="/network" className="group flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2.5 hover:border-border-strong hover:bg-accent/50">
-                <span><span className="font-medium">Guest networks</span><span className="block text-caption text-muted-foreground">Create and edit guest networks, gateways and portal</span></span>
+                <span><span className="font-medium">Client networks</span><span className="block text-caption text-muted-foreground">Create and edit client networks, gateways and portal</span></span>
                 <ArrowRight className="size-4 shrink-0 text-muted-foreground rtl:rotate-180" aria-hidden />
               </Link>
               <Link href="/network/dhcp" className="group flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2.5 hover:border-border-strong hover:bg-accent/50">
@@ -364,8 +364,8 @@ export default function NetworkSettingsPage() {
         </summary>
         <div className="space-y-4 border-t border-border px-5 py-4">
           <p className="text-sm text-muted-foreground">
-            Not a guest network — clients are managed under{" "}
-            <Link href="/network" className="text-primary underline">Guest networks</Link>.
+            Not a client network — clients are managed under{" "}
+            <Link href="/network" className="text-primary underline">Client networks</Link>.
           </p>
           <KeyValueGrid
             columns={3}
@@ -377,7 +377,7 @@ export default function NetworkSettingsPage() {
               { label: "Bridge", value: mono(state.lan.bridge) },
               { label: "MAC address", value: mono(state.lan.mac) },
               // DHCP on the legacy bridge is informational, NOT a warning — guests use guest networks.
-              { label: "DHCP (this bridge)", value: <Badge tone="default">{state.lan.dhcp_enabled ? "Enabled" : "Off — clients use guest networks"}</Badge> },
+              { label: "DHCP (this bridge)", value: <Badge tone="default">{state.lan.dhcp_enabled ? "Enabled" : "Off — clients use client networks"}</Badge> },
               ...(state.lan.dhcp_enabled ? [
                 { label: "DHCP range", value: mono(`${state.lan.dhcp_start} – ${state.lan.dhcp_end}`) },
                 { label: "Lease time", value: `${state.lan.dhcp_lease_seconds}s` },

@@ -130,9 +130,9 @@ test("the template gallery shows the real page in each layout, and choosing one 
   await expect(thumb.locator("html")).toHaveAttribute("data-template", "split");
   await expect(thumb.locator(".sc-hero-name")).toHaveText("Semantics Demo Hotel");
 
-  await gallery.getByText("Resort", { exact: true }).click();
+  await gallery.getByText("Editorial", { exact: true }).click();
   await expect(preview(page).locator("html")).toHaveAttribute("data-template", "editorial");
-  // The Resort layout has a banner height; the other options follow the layout too.
+  // The Editorial layout has a banner height; the other options follow the layout too.
   await page.getByRole("radiogroup", { name: "Banner height" }).getByRole("radio", { name: "Tall" }).click();
   await expect(preview(page).locator("html")).toHaveAttribute("data-hero", "tall");
 

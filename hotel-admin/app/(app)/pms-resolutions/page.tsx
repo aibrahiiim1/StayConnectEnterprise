@@ -334,7 +334,7 @@ export default function PMSResolutionsPage() {
             <EmptyState
               icon={<ShieldCheck />}
               title="No guest has tried to sign in with a room number"
-              hint="Either nobody has tried yet, or no guest network is set up to offer room sign-in."
+              hint="Either nobody has tried yet, or no client network is set up to offer room sign-in."
             />
           ) : (
             <Table>
@@ -373,7 +373,7 @@ export default function PMSResolutionsPage() {
                           // check ran. It is a chip rather than raw text so it is clearly an identifier.
                           <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
                             Network no longer configured
-                            <MonoId value={r.guest_network_id} title="Guest network" />
+                            <MonoId value={r.guest_network_id} title="Client network" />
                           </span>
                         )}
                       </TD>

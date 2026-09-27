@@ -26,7 +26,7 @@ const STEPS = ["Identity", "Interface / VLAN", "Subnet & gateway", "DHCP & DNS",
 
 const STEP_HINT = [
   "What the network is called here, and the SSID your wireless controller broadcasts for it.",
-  "The port the guest traffic arrives on, and whether it is tagged with a VLAN.",
+  "The port the client traffic arrives on, and whether it is tagged with a VLAN.",
   "The address range clients get, and the gateway address the appliance takes on it.",
   "Which addresses are handed out, which DNS clients use, and for how long an address is kept.",
   "What clients see and can reach once they join.",
@@ -38,8 +38,8 @@ const STEP_HINT = [
 const SELECTABLE = new Set(["guest_access", "guest_trunk", "unused"]);
 
 const ROLE_LABEL: Record<string, string> = {
-  guest_access: "Guest access",
-  guest_trunk: "Guest trunk",
+  guest_access: "Client access",
+  guest_trunk: "Client trunk",
   unused: "Unused",
   management: "Management",
   wan: "Uplink (WAN)",
@@ -178,7 +178,7 @@ export default function NewGuestNetworkPage() {
         setBusy(false);
         return;
       }
-      const a = await api.post<ApplyResult>("/network/apply", { summary: `create guest network ${name}` });
+      const a = await api.post<ApplyResult>("/network/apply", { summary: `create client network ${name}` });
       setApplied(a);
       if (a.state === "pending_confirmation") void readDeadline(a.revision_id);
     } catch (e) { setErr(errMsg(e)); }
@@ -207,7 +207,7 @@ export default function NewGuestNetworkPage() {
 
   const backLink = (
     <Link href="/network" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "-ms-3 self-start")}>
-      <ArrowLeft /> Guest networks
+      <ArrowLeft /> Client networks
     </Link>
   );
 
@@ -215,7 +215,7 @@ export default function NewGuestNetworkPage() {
     return (
       <PageShell width="narrow">
         {backLink}
-        <PageHeader icon={<Network />} eyebrow="Networking" title="New guest network" />
+        <PageHeader icon={<Network />} eyebrow="Networking" title="New client network" />
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-72 w-full" />
       </PageShell>
@@ -226,10 +226,10 @@ export default function NewGuestNetworkPage() {
     return (
       <PageShell width="narrow">
         {backLink}
-        <PageHeader icon={<Network />} eyebrow="Networking" title="New guest network" />
+        <PageHeader icon={<Network />} eyebrow="Networking" title="New client network" />
         <NotAvailable
-          title="You cannot create guest networks"
-          reason="Your role can view guest networks but not change them. Ask a Site IT manager or site admin."
+          title="You cannot create client networks"
+          reason="Your role can view client networks but not change them. Ask a Site IT manager or site admin."
         />
       </PageShell>
     );
@@ -241,7 +241,7 @@ export default function NewGuestNetworkPage() {
       <PageHeader
         icon={<Network />}
         eyebrow="Networking"
-        title="New guest network"
+        title="New client network"
         description="Seven short steps; nothing reaches clients until the last one."
         help={
           <>
@@ -256,7 +256,7 @@ export default function NewGuestNetworkPage() {
             </HelpSection>
             <HelpSection title="Parent interface">
               <p>
-                Only ports set aside for guest traffic (guest access, guest trunk or unused) can carry a guest network.
+                Only ports set aside for client traffic (client access, client trunk or unused) can carry a client network.
                 The others are shown so you can see why they are not offered.
               </p>
             </HelpSection>
@@ -295,7 +295,7 @@ export default function NewGuestNetworkPage() {
           {step === 0 && (
             <>
               <Field label="Name" required>
-                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Guest Wi-Fi" autoFocus />
+                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Client Wi-Fi" autoFocus />
               </Field>
               <Field label="Description" hint="Optional. Shown under the name in the list.">
                 <Input value={description} onChange={(e) => setDescription(e.target.value)} />
@@ -304,7 +304,7 @@ export default function NewGuestNetworkPage() {
                 label="SSID label"
                 hint="For reference only. OneGate does not broadcast Wi-Fi — this label records which SSID your wireless controller maps to this network."
               >
-                <Input value={ssidLabel} onChange={(e) => setSsidLabel(e.target.value)} placeholder="Guest" />
+                <Input value={ssidLabel} onChange={(e) => setSsidLabel(e.target.value)} placeholder="Wi-Fi" />
               </Field>
             </>
           )}
@@ -348,7 +348,7 @@ export default function NewGuestNetworkPage() {
                           description={
                             <>
                               <span className="font-mono">{n.mac}</span> · MTU {n.mtu}
-                              {!selectable && " · Not available for guest networks"}
+                              {!selectable && " · Not available for client networks"}
                             </>
                           }
                         />
@@ -476,12 +476,12 @@ export default function NewGuestNetworkPage() {
             <div className="space-y-4">
               {!created && !applied && (
                 <p className="text-sm text-muted-foreground">
-                  Ready to create the guest network, validate the full configuration, then apply it. After applying you
+                  Ready to create the client network, validate the full configuration, then apply it. After applying you
                   have a short window to keep the change; if you do not, it rolls back automatically.
                 </p>
               )}
               {created && (
-                <Callout tone="success" title="Guest network created">
+                <Callout tone="success" title="Client network created">
                   <KeyValueGrid
                     className="mt-2"
                     items={[
@@ -499,7 +499,7 @@ export default function NewGuestNetworkPage() {
                     {created ? (
                       <Link href={`/network/${created.id}`} className="font-medium underline">its own page</Link>
                     ) : "its own page"}
-                    , then apply the changes from Guest networks.
+                    , then apply the changes from Client networks.
                   </p>
                 </Callout>
               )}
@@ -554,7 +554,7 @@ export default function NewGuestNetworkPage() {
             </>
           ) : applied.state !== "pending_confirmation" ? (
             <Link href="/network" className={cn(buttonVariants({ variant: "secondary" }), "ms-auto")}>
-              Back to guest networks
+              Back to client networks
             </Link>
           ) : (
             <span className="text-caption text-muted-foreground">Keep or roll back the change above.</span>

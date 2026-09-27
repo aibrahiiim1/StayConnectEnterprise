@@ -357,7 +357,7 @@ const REASONS: Record<string, string> = {
   samples_unreadable: "Traffic records could not be read.",
   sign_in_attempts_unreadable: "The room sign-in attempt log could not be read.",
   entitlements_unreadable: "Package records could not be read.",
-  guest_networks_unreadable: "Guest network configuration could not be read.",
+  guest_networks_unreadable: "Client network configuration could not be read.",
   network_controller_unreachable: "The network controller did not answer.",
   dhcp_leases_unreadable: "The DHCP server's leases could not be read.",
   no_health_records_yet: "The health monitor has not recorded any service yet.",

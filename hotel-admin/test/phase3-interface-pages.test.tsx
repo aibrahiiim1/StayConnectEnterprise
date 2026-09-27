@@ -277,7 +277,7 @@ describe("PMS interfaces page", () => {
     mockInterfacePage({ routes: [] });
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
     render(<Page />);
-    await openSheet("Guest networks");
+    await openSheet("Client networks");
     // configured but unreachable looks identical to healthy everywhere else on the page
     expect(await screen.findByText(/No Wi-Fi network points at this connection/)).toBeTruthy();
   });

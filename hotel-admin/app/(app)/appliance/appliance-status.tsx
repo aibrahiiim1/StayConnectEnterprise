@@ -407,7 +407,7 @@ export function ApplianceStatus() {
             {l.state !== "none" && (
               <div className="space-y-2">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <span className="text-muted-foreground">Clients online, all guest networks</span>
+                  <span className="text-muted-foreground">Clients online, all client networks</span>
                   <span className="text-metric tabular">
                     {current ?? "—"}
                     <span className="text-sm font-normal text-muted-foreground"> / {limited ? max : "Unlimited"}</span>

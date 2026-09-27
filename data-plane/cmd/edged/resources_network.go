@@ -201,7 +201,7 @@ func (s *server) getGuestNetwork(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	g, err := scanGuestNetwork(s.db.QueryRow(ctx, `SELECT `+gnCols+` FROM guest_networks WHERE id=$1`, id))
 	if isNoRows(err) {
-		jsonErr(w, http.StatusNotFound, "not_found", "guest network not found")
+		jsonErr(w, http.StatusNotFound, "not_found", "client network not found")
 		return
 	}
 	if err != nil {
@@ -350,7 +350,7 @@ func (s *server) updateGuestNetwork(w http.ResponseWriter, r *http.Request) {
 	if err := tx.QueryRow(ctx,
 		`SELECT network_type, parent_interface, vlan_id FROM guest_networks WHERE id=$1`, id).
 		Scan(&curType, &curParent, &curVLAN); err != nil {
-		jsonErr(w, http.StatusNotFound, "not_found", "guest network not found")
+		jsonErr(w, http.StatusNotFound, "not_found", "client network not found")
 		return
 	}
 	if immutable := immutableTopologyChange(in, curType, curParent, curVLAN); immutable != "" {
@@ -405,7 +405,7 @@ func (s *server) updateGuestNetwork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if tag.RowsAffected() == 0 {
-		jsonErr(w, http.StatusNotFound, "not_found", "guest network not found")
+		jsonErr(w, http.StatusNotFound, "not_found", "client network not found")
 		return
 	}
 	// replace pools if provided
@@ -452,7 +452,7 @@ func (s *server) deleteGuestNetwork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if tag.RowsAffected() == 0 {
-		jsonErr(w, http.StatusNotFound, "not_found", "guest network not found")
+		jsonErr(w, http.StatusNotFound, "not_found", "client network not found")
 		return
 	}
 	s.audit(r, "network.guest.deleted", "guest_network", id, nil)
@@ -478,7 +478,7 @@ func (s *server) guestNetworkStatus(w http.ResponseWriter, r *http.Request) {
 	var bridge string
 	var enabled bool
 	if err := s.db.QueryRow(ctx, `SELECT bridge_name, enabled FROM guest_networks WHERE id=$1`, id).Scan(&bridge, &enabled); err != nil {
-		jsonErr(w, http.StatusNotFound, "not_found", "guest network not found")
+		jsonErr(w, http.StatusNotFound, "not_found", "client network not found")
 		return
 	}
 	var active int
@@ -788,7 +788,7 @@ func pgErr(err error) string {
 	case strings.Contains(msg, "guest_networks_vlan_parent_uniq"):
 		return "that VLAN id is already used on this interface"
 	case strings.Contains(msg, "guest_networks_untagged_parent_uniq"):
-		return "that interface already has an untagged guest network"
+		return "that interface already has an untagged client network"
 	case strings.Contains(msg, "dhcp_reservations_guest_network_id_mac"):
 		return "a reservation for that MAC already exists on this network"
 	case strings.Contains(msg, "dhcp_reservations_guest_network_id_reserved_ip"):

@@ -125,7 +125,7 @@ export default function PMSRoutingPage() {
       <PageHeader
         eyebrow="Hotel"
         title="PMS routing"
-        description="Which PMS connection each guest network's room sign-ins are checked against."
+        description="Which PMS connection each client network's room sign-ins are checked against."
         help={
           <>
             <HelpSection title="What this page sets">
@@ -135,7 +135,7 @@ export default function PMSRoutingPage() {
                 and that is what this page sets.
               </p>
               <p>
-                Every row is one of this site&rsquo;s guest networks. The site itself is fixed when the
+                Every row is one of this site&rsquo;s client networks. The site itself is fixed when the
                 appliance is activated and cannot be chosen here — this page only decides which PMS connection each
                 network&rsquo;s room sign-ins are checked against.
               </p>
@@ -193,13 +193,13 @@ export default function PMSRoutingPage() {
             <EmptyState
               icon={<Router />}
               title="No network is pointed at a PMS"
-              hint="Nobody at this site can sign in with a room number until at least one guest network is mapped."
+              hint="Nobody at this site can sign in with a room number until at least one client network is mapped."
             />
           ) : (
             <Table>
               <THead>
                 <TR>
-                  <TH>Guest network</TH>
+                  <TH>Client network</TH>
                   <TH>Checked against</TH>
                   <TH>
                     <span className="inline-flex items-center gap-1">
@@ -291,14 +291,14 @@ export default function PMSRoutingPage() {
           ) : unmapped.length === 0 ? (
             <EmptyState
               icon={<Network />}
-              title="Every guest network is pointed at a PMS"
+              title="Every client network is pointed at a PMS"
               hint="Nothing to do here."
             />
           ) : (
             <Table>
               <THead>
                 <TR>
-                  <TH>Guest network</TH>
+                  <TH>Client network</TH>
                   <TH />
                 </TR>
               </THead>
