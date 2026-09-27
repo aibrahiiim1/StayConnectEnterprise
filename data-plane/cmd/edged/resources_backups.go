@@ -565,7 +565,7 @@ func (s *server) restoreDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 	}
 	if !s.reauth(r, in.Password) {
 		jsonErr(w, http.StatusUnauthorized, "reauth_required",
-			"confirm your password. Restoring replaces this property's data with the contents of the backup.")
+			"confirm your password. Restoring replaces this site's data with the contents of the backup.")
 		return
 	}
 

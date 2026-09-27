@@ -62,15 +62,15 @@ function LoginInner() {
           <span className="inline-flex items-center rounded-xl bg-white px-5 py-3 shadow-control ring-1 ring-black/5">
             <OneGateWordmark className="text-[2.25rem]" />
           </span>
-          <span className="text-nano uppercase tracking-[0.14em] text-sidebar-muted">Hotel Admin</span>
+          <span className="text-nano uppercase tracking-[0.14em] text-sidebar-muted">Admin Console</span>
         </div>
         <div className="relative z-10 max-w-md space-y-4">
           <div className="text-micro uppercase tracking-[0.14em] text-sidebar-active">On-appliance console</div>
           <p className="text-[1.75rem] font-bold leading-tight tracking-[-0.02em] text-white">
-            Guest Wi-Fi for this property: who is online, how they got there, and whether everything is healthy.
+            Guest Wi-Fi for this site: who is online, how they got there, and whether everything is healthy.
           </p>
           <p className="text-sm leading-relaxed text-sidebar-muted">
-            Runs on the appliance in the hotel and keeps working when the internet link or OneGate Central is
+            Runs on the appliance at the site and keeps working when the internet link or OneGate Central is
             unreachable.
           </p>
         </div>
@@ -93,9 +93,9 @@ function LoginInner() {
                 {/* The wordmark above already says OneGate; the heading's accessible name keeps the full product
                     name for assistive technology and for anything that finds the page by it. */}
                 <h1 className="text-title">
-                  <span className="sr-only">OneGate </span>Hotel Admin
+                  <span className="sr-only">OneGate </span>Admin Console
                 </h1>
-                <p className="text-sm text-muted-foreground">Sign in with your account for this property.</p>
+                <p className="text-sm text-muted-foreground">Sign in with your account for this site.</p>
               </div>
             </div>
 
@@ -131,7 +131,7 @@ function LoginInner() {
               <ShieldCheck className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
               <p>
                 This account is managed on this appliance. It is not a OneGate cloud account and does not work at
-                any other property.
+                any other site.
               </p>
             </div>
           </div>

@@ -47,7 +47,7 @@ import (
 var activitySources = map[string]string{
 	"GUEST_SELECTION":      "Chosen on the portal",
 	"VOUCHER_REDEMPTION":   "Voucher",
-	"ACCOUNT_AUTO_GRANT":   "Guest account",
+	"ACCOUNT_AUTO_GRANT":   "Client account",
 	"OTP_SOCIAL_DEFAULT":   "Email, phone or social sign-in",
 	"CHECKOUT_GRACE":       "After check-out grace",
 	"EMERGENCY_GRACE":      "Emergency grace",
@@ -565,21 +565,21 @@ func decodeActivityRankings(byPkg, bySrc []byte) ([]activityPackageCount, []acti
 func (s *server) getCommercialPackageDeletability(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if !uuidRe.MatchString(id) {
-		jsonErr(w, http.StatusNotFound, "not_found", "no such package at this property")
+		jsonErr(w, http.StatusNotFound, "not_found", "no such package at this site")
 		return
 	}
 	d, disabled, err := s.commerce.PackageDeletability(r.Context(), s.tenantID, s.siteID, id)
-	writeDeletability(w, d, disabled, err, "no such package at this property")
+	writeDeletability(w, d, disabled, err, "no such package at this site")
 }
 
 func (s *server) getServicePlanDeletability(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if !uuidRe.MatchString(id) {
-		jsonErr(w, http.StatusNotFound, "not_found", "no such service plan at this property")
+		jsonErr(w, http.StatusNotFound, "not_found", "no such service plan at this site")
 		return
 	}
 	d, disabled, err := s.commerce.PlanDeletability(r.Context(), s.tenantID, s.siteID, id)
-	writeDeletability(w, d, disabled, err, "no such service plan at this property")
+	writeDeletability(w, d, disabled, err, "no such service plan at this site")
 }
 
 func writeDeletability(w http.ResponseWriter, d iamv2.Deletability, disabled bool, err error, notFound string) {
@@ -621,7 +621,7 @@ func (s *server) deleteCatalogueItem(w http.ResponseWriter, r *http.Request, pkg
 	}
 	id := chi.URLParam(r, "id")
 	if !uuidRe.MatchString(id) {
-		jsonErr(w, http.StatusNotFound, "not_found", "no such "+noun+" at this property")
+		jsonErr(w, http.StatusNotFound, "not_found", "no such "+noun+" at this site")
 		return
 	}
 	var in struct {
@@ -659,7 +659,7 @@ func (s *server) deleteCatalogueItem(w http.ResponseWriter, r *http.Request, pkg
 			"deletability": d,
 		})
 	case errors.Is(err, iamv2.ErrCommerceNotFound):
-		jsonErr(w, http.StatusNotFound, "not_found", "no such "+noun+" at this property")
+		jsonErr(w, http.StatusNotFound, "not_found", "no such "+noun+" at this site")
 	case errors.Is(err, iamv2.ErrCatalogueDeleteNeedsReason):
 		jsonErr(w, http.StatusBadRequest, "reason_required", "a bounded reason (4-500 characters) is required")
 	case errors.Is(err, iamv2.ErrCatalogueDeleteUnavailable):

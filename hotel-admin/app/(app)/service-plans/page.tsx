@@ -198,7 +198,7 @@ export default function ServicePlansPage() {
           standing: false,
         });
       } else {
-        setNotice("Changes saved. Existing guest access is unchanged; the new settings apply to future grants.");
+        setNotice("Changes saved. Existing client access is unchanged; the new settings apply to future grants.");
       }
       setPrefill(null); await load();
     } catch (e) { setFormErr(e); }
@@ -252,15 +252,15 @@ export default function ServicePlansPage() {
           <>
             <HelpSection title="What a service plan is">
               <p>
-                A service plan is the technical service a guest receives: how fast it is, how many devices it
+                A service plan is the technical service a client receives: how fast it is, how many devices it
                 covers, and how much data and time it includes. Each internet package hands out one plan.
               </p>
-              <p>A plan reaches guests only through the packages that hand it out.</p>
+              <p>A plan reaches clients only through the packages that hand it out.</p>
             </HelpSection>
             <HelpSection title="Saved versions">
               <p>
-                Every saved change is kept permanently. A guest keeps the terms that applied when they connected.
-                When a plan changes, you choose which packages give the new settings to future guests.
+                Every saved change is kept permanently. A client keeps the terms that applied when they connected.
+                When a plan changes, you choose which packages give the new settings to future clients.
               </p>
             </HelpSection>
             <HelpSection title="How the speed is shared">
@@ -284,12 +284,12 @@ export default function ServicePlansPage() {
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard label="Service plans" value={rows ? stats.all : "—"} icon={<Layers />} />
           <StatCard label="Used by active packages" value={rows ? stats.used : "—"} icon={<Gauge />} tone="ok"
-            hint="Plans that guests can currently receive" />
+            hint="Plans that clients can currently receive" />
           <StatCard label="Packages on older settings" value={rows ? stats.stale : "—"} icon={<AlertTriangle />}
             tone={stats.stale > 0 ? "warn" : "default"}
             hint={stats.stale > 0 ? "Apply current settings from the plan" : "Every package is up to date"} />
           <StatCard label="Not used by any package" value={rows ? stats.unused : "—"} icon={<CircleSlash />}
-            hint="These reach no guest until a package uses them" />
+            hint="These reach no client until a package uses them" />
         </div>
       )}
 
@@ -302,16 +302,16 @@ export default function ServicePlansPage() {
             <p className="mb-3 text-sm text-muted" data-testid="repin-intro">
               {repin.standing ? (
                 <>
-                  These packages still give guests older settings than <strong>{repin.planLabel}</strong> has
-                  now. Choose which of them should use the current settings for <strong>future</strong> guests.
+                  These packages still give clients older settings than <strong>{repin.planLabel}</strong> has
+                  now. Choose which of them should use the current settings for <strong>future</strong> clients.
                 </>
               ) : (
                 <>
                   The new settings for <strong>{repin.planLabel}</strong> are saved. Choose which packages
-                  should give them to <strong>future</strong> guests.
+                  should give them to <strong>future</strong> clients.
                 </>
               )}{" "}
-              Guests already connected are not affected either way, and any package you leave unticked keeps
+              Clients already connected are not affected either way, and any package you leave unticked keeps
               the settings it has now.
             </p>
             <div className="mb-4 space-y-2">
@@ -332,7 +332,7 @@ export default function ServicePlansPage() {
                 setRepin(null);
                 setNotice(wasStanding
                   ? "Nothing was changed. Those packages keep the settings they have now."
-                  : "Changes saved. No packages were updated, so guests continue to receive the settings they do now.");
+                  : "Changes saved. No packages were updated, so clients continue to receive the settings they do now.");
               }}>Not now</Button>
             </div>
           </CardBody>
@@ -370,7 +370,7 @@ export default function ServicePlansPage() {
               <EmptyState
                 icon={<Gauge />}
                 title="No service plans yet"
-                hint="A service plan defines the speed, device count and allowances a guest receives. Create one, then attach it to an internet package."
+                hint="A service plan defines the speed, device count and allowances a client receives. Create one, then attach it to an internet package."
                 action={writable ? <Button onClick={() => startNew()}><Plus /> Add the first plan</Button> : undefined} />
             ) : shown.length === 0 ? (
               <EmptyState icon={<Gauge />} title="No plan matches" hint="Clear the search or choose another filter." />
@@ -461,20 +461,20 @@ export default function ServicePlansPage() {
                   {stale.length > 0 && (
                     <Callout tone="warning" title="Some packages still give older settings">
                       {stale.length} package{stale.length === 1 ? "" : "s"} using this plan still
-                      {stale.length === 1 ? " gives" : " give"} guests an earlier version of it.
+                      {stale.length === 1 ? " gives" : " give"} clients an earlier version of it.
                     </Callout>
                   )}
                   {!p.enabled && (
                     <Callout tone="neutral" title="Marked inactive in its records">
-                      This mark does not change what guests receive: any active package using this plan still hands
-                      it out. To stop guests receiving it, disable or edit those packages.
+                      This mark does not change what clients receive: any active package using this plan still hands
+                      it out. To stop clients receiving it, disable or edit those packages.
                     </Callout>
                   )}
                   <SheetSection title="What it grants">
                     <KeyValueGrid items={[
                       { label: "Speed", value: `${formatSpeed(p.down_kbps)} down · ${formatSpeed(p.up_kbps)} up` },
                       { label: "Speed sharing", value: p.speed_allocation === "SHARED"
-                        ? "Shared by the guest's devices" : "Full speed on every device" },
+                        ? "Shared by the client's devices" : "Full speed on every device" },
                       { label: "Devices at once", value: formatDevices(p.max_concurrent_devices),
                         hint: DEVICE_LIMIT_POLICIES[p.device_limit_policy ?? ""] },
                       { label: "Time allowance", value: formatDuration(p.time_quota_seconds),
@@ -558,7 +558,7 @@ export default function ServicePlansPage() {
                 under it keeps its terms. Saying so prevents the assumption that this edits the plan in place. */}
             <DialogDescription>
               {prefill
-                ? "Saving records these as the plan's current settings. Guests already connected keep the terms they were given, and packages using this plan are only updated if you choose them afterwards."
+                ? "Saving records these as the plan's current settings. Clients already connected keep the terms they were given, and packages using this plan are only updated if you choose them afterwards."
                 : "This creates the plan and its first settings."}
             </DialogDescription>
           </DialogHeader>
@@ -645,7 +645,7 @@ export default function ServicePlansPage() {
                 <Label htmlFor="plan-sharing">How the speed is shared</Label>
                 <Select id="plan-sharing" name="speed_allocation" defaultValue={prefill?.speed_allocation ?? "PER_DEVICE"}>
                   <option value="PER_DEVICE">Per device — every device gets the full speed</option>
-                  <option value="SHARED">Shared — all the guest&rsquo;s devices share the speed</option>
+                  <option value="SHARED">Shared — all the client&rsquo;s devices share the speed</option>
                 </Select>
                 <Hint>Shared needs a download and upload speed to share.</Hint>
               </div>

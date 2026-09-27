@@ -116,7 +116,7 @@ export default function DashboardPage() {
   const historical = snap?.pms.historical_exceptions ?? 0;
   if (historical > 0) {
     notes.push({
-      text: `${fmtInt(historical)} historical PMS exception${historical === 1 ? "" : "s"} — a departure recorded before this appliance had the full guest list. Guests are unaffected and nothing here needs doing.`,
+      text: `${fmtInt(historical)} historical PMS exception${historical === 1 ? "" : "s"} — a departure recorded before this appliance had the full guest list. Clients are unaffected and nothing here needs doing.`,
       href: "/roster-reconciliation",
     });
   }
@@ -133,23 +133,23 @@ export default function DashboardPage() {
         icon={<LayoutDashboard />}
         eyebrow={context ?? "Overview"}
         title="Overview"
-        description={`Guests, traffic, sign-ins and the health of this appliance over ${rangeLong}${snap?.timezone ? `, in the appliance's local time (${snap.timezone})` : ""}.`}
+        description={`Clients, traffic, sign-ins and the health of this appliance over ${rangeLong}${snap?.timezone ? `, in the appliance's local time (${snap.timezone})` : ""}.`}
         help={
           <>
             <HelpSection title="Reading the overview">
               <p>The page answers, top to bottom, the questions a shift asks:</p>
               <HelpList items={[
                 <><strong>Does anything need me?</strong> A &ldquo;Needs attention&rdquo; list appears only when something does; otherwise one calm line.</>,
-                <><strong>How busy, how much?</strong> Guests online, sign-ins, data used and room sign-in readiness, each with its trend over the range.</>,
+                <><strong>How busy, how much?</strong> Clients online, sign-ins, data used and room sign-in readiness, each with its trend over the range.</>,
                 <><strong>The shape of the range.</strong> Traffic and devices connected at once.</>,
-                <><strong>Is anyone failing to get in?</strong> Sign-in outcomes, and when guests sign in.</>,
+                <><strong>Is anyone failing to get in?</strong> Sign-in outcomes, and when clients sign in.</>,
                 <><strong>Packages and the PMS</strong>, the guest networks, and the appliance itself.</>,
               ]} />
             </HelpSection>
-            <HelpSection title="Guests and devices">
+            <HelpSection title="Clients and devices">
               <p>
-                A guest is one room, account or voucher &mdash; whatever the internet was granted to. One guest with
-                a phone and a laptop is one guest and two devices.
+                A client is one room, account or voucher &mdash; whatever the internet was granted to. One client with
+                a phone and a laptop is one client and two devices.
               </p>
             </HelpSection>
             <HelpSection title="What is not drawn">
@@ -233,7 +233,7 @@ export default function DashboardPage() {
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard
-              label="Guests online"
+              label="Clients online"
               value={g.available ? fmtInt(g.guests_online) : "—"}
               icon={<Users />}
               tone="primary"
@@ -241,8 +241,8 @@ export default function DashboardPage() {
               hint={g.available ? `${fmtInt(g.devices_online)} device${g.devices_online === 1 ? "" : "s"} connected now` : reasonText(g.reason)}
               explain={
                 <Explain>
-                  A <strong>guest</strong> is one room, account or voucher — whatever the internet was granted to.
-                  One guest with a phone and a laptop is one guest and two devices. The trend line is the most
+                  A <strong>client</strong> is one room, account or voucher — whatever the internet was granted to.
+                  One client with a phone and a laptop is one client and two devices. The trend line is the most
                   devices online at once in each interval.
                 </Explain>
               }
@@ -257,7 +257,7 @@ export default function DashboardPage() {
               hint={g.available ? `${fmtInt(g.unique_devices)} different devices over ${rangeLong}` : reasonText(g.reason)}
               explain={
                 <Explain>
-                  Every time a device is put online it starts a session, so a guest reconnecting after losing
+                  Every time a device is put online it starts a session, so a client reconnecting after losing
                   signal is counted again.
                 </Explain>
               }
@@ -295,7 +295,7 @@ export default function DashboardPage() {
               href="/pms-interfaces"
               hint={
                 !pms.available || pms.active_interfaces === 0
-                  ? "No PMS connection is in use. Guests sign in with vouchers or accounts."
+                  ? "No PMS connection is in use. Clients sign in with vouchers or accounts."
                   : so.available && so.total > 0
                     ? `${Math.round((so.verified / so.total) * 100)}% of ${fmtInt(so.total)} room checks verified`
                     : so.available

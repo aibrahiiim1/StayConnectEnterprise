@@ -161,7 +161,7 @@ export function guestReceivesSentence(t: GraceTerms): string {
   const dur = t.grace_duration_seconds ?? 0;
   const quota = t.grace_data_quota_bytes ?? 0;
   let s =
-    `A guest who still has internet access when they check out keeps it for ${fmtDurationLong(dur)} after ` +
+    `A client who still has internet access when they check out keeps it for ${fmtDurationLong(dur)} after ` +
     `checkout, at up to ${fmtSpeed(t.grace_down_kbps ?? 0)} down and ${fmtSpeed(t.grace_up_kbps ?? 0)} up, ` +
     (quota > 0 ? `with ${fmtData(quota)} of data.` : `with no data allowance.`);
   if (t.grace_device_limit_policy === "REJECT_NEW_DEVICE") {
@@ -229,9 +229,9 @@ export function changedTerms(prev: GraceTerms | null | undefined, next: GraceTer
 export const REASON_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
 
 export const REASON_CHOICES: { code: string; label: string }[] = [
-  { code: "INITIAL_SETUP", label: "Setting up the hotel's first policy" },
+  { code: "INITIAL_SETUP", label: "Setting up the site's first policy" },
   { code: "POLICY_CHANGE", label: "Planned policy change" },
-  { code: "GUEST_FEEDBACK", label: "Guest feedback" },
+  { code: "GUEST_FEEDBACK", label: "Client feedback" },
   { code: "OPERATIONAL", label: "Operational need" },
   { code: "CORRECTION", label: "Correcting a mistake" },
 ];
@@ -376,7 +376,7 @@ export function describePublishFailure(e: any): PublishFailure {
     case "actor_invalid":
       return {
         conflict: false,
-        message: "Your operator account is not allowed to publish for this hotel. Nothing was published.",
+        message: "Your operator account is not allowed to publish for this site. Nothing was published.",
       };
     case "package_invalid":
       return {
@@ -441,9 +441,9 @@ export function graceWarnings(
       tone: "warning",
       title: "Departing guests are on the emergency fallback",
       body:
-        "This hotel has not published a checkout grace policy, so guests who check out with active internet access " +
+        "This site has not published a checkout grace policy, so clients who check out with active internet access " +
         "receive the built-in emergency terms. Nobody is cut off, but these terms are a safe default, not a decision " +
-        "made for this hotel. Each use raises a critical alert.",
+        "made for this site. Each use raises a critical alert.",
     });
   }
 
@@ -457,7 +457,7 @@ export function graceWarnings(
         title: "The emergency fallback was used after this policy was published",
         body:
           `A guest checked out ${fmtWhen(lastUsed)} and received the emergency terms instead of version ` +
-          `${state.config_version}. That happens only when the hotel policy cannot be applied at checkout. ` +
+          `${state.config_version}. That happens only when the site policy cannot be applied at checkout. ` +
           "Check the critical alert for that checkout, then republish the policy.",
         href: "/operational-alerts",
       });

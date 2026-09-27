@@ -113,12 +113,12 @@ func checkAcctd(ctx context.Context, s *server) (bool, string, string) {
 func checkHotelAdmin(ctx context.Context, s *server) (bool, string, string) {
 	code, err := tcpGet(ctx, "http://127.0.0.1:3100/")
 	if err != nil {
-		return false, "Hotel Admin UI not responding: " + errShort(err), ""
+		return false, "Admin Console UI not responding: " + errShort(err), ""
 	}
 	if code >= 200 && code < 500 {
-		return true, fmt.Sprintf("Hotel Admin UI responding (http %d)", code), ""
+		return true, fmt.Sprintf("Admin Console UI responding (http %d)", code), ""
 	}
-	return false, fmt.Sprintf("Hotel Admin UI http %d", code), ""
+	return false, fmt.Sprintf("Admin Console UI http %d", code), ""
 }
 
 func checkCaddy(ctx context.Context, s *server) (bool, string, string) {

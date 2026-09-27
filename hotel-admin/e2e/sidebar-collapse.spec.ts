@@ -73,9 +73,9 @@ test("every icon-only item exposes its label on hover AND on keyboard focus", as
   await page.goto("/dashboard");
   await collapseBtn(page).click();
 
-  const link = page.getByRole("link", { name: "Guest sign-in checks" });
+  const link = page.getByRole("link", { name: "Client sign-in checks" });
   await link.hover();
-  await expect(page.getByRole("tooltip")).toContainText("Guest sign-in checks");
+  await expect(page.getByRole("tooltip")).toContainText("Client sign-in checks");
 
   // Keyboard focus, not just hover. A rail whose labels are mouse-only is not navigable.
   // The pointer leaves the rail first and the hover tooltip is gone before focusing: a keyboard user is not also
@@ -85,7 +85,7 @@ test("every icon-only item exposes its label on hover AND on keyboard focus", as
   await page.mouse.move(900, 400);
   await expect(page.getByRole("tooltip")).toHaveCount(0);
   await link.focus();
-  await expect(page.getByRole("tooltip")).toContainText("Guest sign-in checks");
+  await expect(page.getByRole("tooltip")).toContainText("Client sign-in checks");
 });
 
 test("the choice survives navigation, a reload, and a later session", async ({ page }) => {

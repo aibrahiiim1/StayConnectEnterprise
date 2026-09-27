@@ -173,7 +173,7 @@ export function PackageForm({
         {/* THE VISIBLE LABELS ARE THE NAMES. These controls used to carry aria-labels such as "code" and
             "service-plan" -- test hooks that overrode the words on screen, so a screen reader announced
             "service-plan, combo box". The hooks survive as data-testid; the names are the labels the operator reads. */}
-        <Field label="Name" hint="What the guest sees on the portal.">
+        <Field label="Name" hint="What the client sees on the portal.">
           <Input data-testid="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Free WiFi" />
         </Field>
         <Field
@@ -283,7 +283,7 @@ export function PackageForm({
               </div>
             )}
             <p className="text-xs text-muted-foreground">
-              Guests who did not sign in with their room are not offered this package.
+              Clients who did not sign in with their room are not offered this package.
             </p>
           </div>
         )}
@@ -314,7 +314,7 @@ export function PackageForm({
             {notice.kind === "PER_STAY_NIGHT_PLAN_HAS_NO_QUOTA" && (
               <p>
                 The selected service plan sets no data allowance of its own, so this package&rsquo;s{" "}
-                {notice.gbPerNight} GB per stay night is the guest&rsquo;s data allowance for this package.
+                {notice.gbPerNight} GB per stay night is the client&rsquo;s data allowance for this package.
               </p>
             )}
             {notice.kind === "PER_STAY_NIGHT_OVERRIDES_PLAN" && (
@@ -327,12 +327,12 @@ export function PackageForm({
                 </p>
                 {notice.exampleGB !== undefined && (
                   <p data-testid="allowance-example">
-                    For a stay of {notice.exampleNights} nights, the guest receives{" "}
+                    For a stay of {notice.exampleNights} nights, the client receives{" "}
                     <strong>{notice.exampleGB} GB</strong>.
                   </p>
                 )}
                 <p className="text-muted-foreground">
-                  For guests receiving this package, the stay-based allowance takes precedence over the
+                  For clients receiving this package, the stay-based allowance takes precedence over the
                   service plan allowance. The service plan itself is unchanged, and its {notice.planQuotaGB} GB
                   still applies to other packages that use the plan&rsquo;s own allowance.
                 </p>
@@ -355,7 +355,7 @@ export function PackageForm({
             guest there is no Stay to test, so the package is not offered to them at all. */}
         {rules.some((r) => isPMSRuleType(r.type)) && (
           <p className="text-xs text-muted mb-2" data-testid="pms-rule-note">
-            Conditions about the stay only apply to guests who signed in with their room. Guests using a
+            Conditions about the stay only apply to clients who signed in with their room. Clients using a
             voucher or an account are not offered this package while any of them is set.
           </p>
         )}
@@ -370,7 +370,7 @@ export function PackageForm({
               {SUPPORTED_RULE_TYPES.map((t) => <option key={t} value={t}>{RULE_TYPE_LABELS[t]}</option>)}
             </Select>
             {r.type === "AUTH_METHOD" && <Input data-testid={`rule-methods-${i}`} aria-label={`${n}: sign-in methods`} placeholder="account, voucher" value={r.methods} onChange={(e) => setRule(i, { methods: e.target.value })} />}
-            {r.type === "SUBJECT_KIND" && <Input data-testid={`rule-kinds-${i}`} aria-label={`${n}: guest kinds`} placeholder="ACCOUNT, VOUCHER" value={r.kinds} onChange={(e) => setRule(i, { kinds: e.target.value })} />}
+            {r.type === "SUBJECT_KIND" && <Input data-testid={`rule-kinds-${i}`} aria-label={`${n}: client kinds`} placeholder="ACCOUNT, VOUCHER" value={r.kinds} onChange={(e) => setRule(i, { kinds: e.target.value })} />}
             {r.type === "DATE_WINDOW" && <>
               <Input data-testid={`rule-from-${i}`} aria-label={`${n}: from`} type="datetime-local" value={r.from} onChange={(e) => setRule(i, { from: e.target.value })} />
               <Input data-testid={`rule-until-${i}`} aria-label={`${n}: until`} type="datetime-local" value={r.until} onChange={(e) => setRule(i, { until: e.target.value })} />
@@ -436,7 +436,7 @@ export function PackageForm({
                 </div>
               ))}
               <p className="text-xs text-muted-foreground">
-                Leave a single step with no speeds unless you need different speeds for different guests.
+                Leave a single step with no speeds unless you need different speeds for different clients.
               </p>
             </div>
           </div>
@@ -444,7 +444,7 @@ export function PackageForm({
       </div>
 
       <div className="text-xs text-muted-foreground">
-        This package is <strong>free to the guest</strong>.
+        This package is <strong>free to the client</strong>.
       </div>
 
       <div className="flex gap-2">

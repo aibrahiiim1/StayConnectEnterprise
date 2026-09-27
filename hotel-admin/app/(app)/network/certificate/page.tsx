@@ -113,12 +113,12 @@ export default function CertificatePage() {
         icon={<Lock />}
         eyebrow="Networking"
         title="TLS certificate"
-        description="The HTTPS certificate Hotel Admin itself is served with."
+        description="The HTTPS certificate Admin Console itself is served with."
         help={
           <>
             <HelpSection title="What this certificate is">
               <p>
-                The certificate your browser sees when it opens Hotel Admin. It covers the appliance&rsquo;s host name and
+                The certificate your browser sees when it opens Admin Console. It covers the appliance&rsquo;s host name and
                 its management IP address.
               </p>
             </HelpSection>
@@ -243,7 +243,7 @@ export default function CertificatePage() {
         open={rotating}
         onOpenChange={(v) => { if (!v) setRotating(false); }}
         title="Rotate the TLS certificate?"
-        description="A new certificate is issued for Hotel Admin. You cannot upload a key."
+        description="A new certificate is issued for Admin Console. You cannot upload a key."
         consequences={[
           "The new certificate goes through the safe lifecycle: validate, swap, reload, health check.",
           "If the health check fails, the previous certificate is put back automatically.",

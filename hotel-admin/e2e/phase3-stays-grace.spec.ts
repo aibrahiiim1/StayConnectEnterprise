@@ -222,7 +222,7 @@ test("an operator acknowledges an operational alert", async ({ page }) => {
 // The checkout grace journey: open the editor sheet, set terms, review old → new, choose a reason, confirm the
 // password, publish. The operator authors the POLICY; the system derives the package.
 async function openGraceEditor(page: Page) {
-  await page.getByRole("button", { name: /^(Edit policy|Create hotel policy)$/ }).first().click();
+  await page.getByRole("button", { name: /^(Edit policy|Create site policy)$/ }).first().click();
   await expect(page.getByRole("dialog")).toBeVisible();
 }
 
@@ -301,7 +301,7 @@ test("a site with no published policy starts from defaults rather than an error"
   // A STARTING POINT WITH A WAY OUT OF IT: it names what is actually in force and offers the action that
   // leaves it, instead of sending the operator to the commercial catalog.
   await expect(page.getByText(/Departing guests are on the emergency fallback/)).toBeVisible();
-  await expect(page.getByRole("button", { name: /Create hotel policy/ }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: /Create site policy/ }).first()).toBeVisible();
   await expect(page.getByText(/commercial catalog/i)).toHaveCount(0);
   await expect(page.getByText(/could not be loaded/)).toHaveCount(0);
 });

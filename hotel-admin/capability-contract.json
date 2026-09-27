@@ -79,12 +79,12 @@
         "surface": "pms-events"
       },
       {
-        "label": "Guest sign-in checks",
+        "label": "Client sign-in checks",
         "route": "/pms-resolutions",
         "surface": "pms-resolutions"
       },
       {
-        "label": "Guest sign-in attempts",
+        "label": "Client sign-in attempts",
         "route": "/guest-signin-attempts",
         "surface": "guest-signin-attempts"
       },
@@ -99,7 +99,7 @@
         "surface": "operational-alerts"
       },
       {
-        "label": "Guest accounts",
+        "label": "Client accounts",
         "route": "/guest-accounts",
         "surface": "guest-accounts"
       },

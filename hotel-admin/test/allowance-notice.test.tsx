@@ -65,7 +65,7 @@ describe("the data-allowance precedence notice", () => {
     perNight("1", "3", "20");
     // 8 nights x 1 GB = 8 GB, above the 3 GB floor and below the 20 GB ceiling.
     expect(screen.getByTestId("allowance-example").textContent)
-      .toMatch(new RegExp(`For a stay of ${NOTICE_EXAMPLE_NIGHTS} nights, the guest receives\\s*8 GB`));
+      .toMatch(new RegExp(`For a stay of ${NOTICE_EXAMPLE_NIGHTS} nights, the client receives\\s*8 GB`));
   });
 
   it("FIXED says plainly that the plan's allowance is what applies", () => {
@@ -87,10 +87,10 @@ describe("the data-allowance precedence notice", () => {
     const n = notice()!;
     expect(n.textContent).toMatch(/sets no data allowance of its own/i);
     expect(n.textContent).toContain("2 GB per stay night");
-    // SCOPED TO DATA, DELIBERATELY. "the only allowance a guest receives" read as though it also covered the
+    // SCOPED TO DATA, DELIBERATELY. "the only allowance a client receives" read as though it also covered the
     // time, session and device limits the plan still imposes -- it does not; it is the DATA allowance only.
     expect(n.textContent).toMatch(/data allowance for this package/i);
-    expect(n.textContent).not.toMatch(/only allowance a guest receives/i);
+    expect(n.textContent).not.toMatch(/only allowance a client receives/i);
     expect(n.textContent).not.toMatch(/precedence|takes precedence|instead of/i);
     // ...and it must not invent a plan quota figure.
     expect(n.textContent).not.toMatch(/Service plan allowance:/i);

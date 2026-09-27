@@ -403,7 +403,7 @@ function FormatDialog({
           </div>
           {unchanged && <Callout tone="neutral">This is the current format. Choose something different to change it.</Callout>}
           <Field label="Reason for the change" error={reasonErr ?? undefined} hint="Recorded in the format history." required>
-            <Input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} placeholder="Guests find mixed codes hard to type" />
+            <Input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} placeholder="Clients find mixed codes hard to type" />
           </Field>
         </>
       )}

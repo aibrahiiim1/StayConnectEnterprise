@@ -99,7 +99,7 @@ describe("a destination that is not enabled explains itself", () => {
     expect(screen.getByText("Not enabled on this appliance")).toBeTruthy();
     expect(screen.getByText(/configuration of the appliance, not a fault/)).toBeTruthy();
     // The question behind every unexpected screen in an admin.
-    expect(screen.getByText(/Guest internet, sign-in, the PMS connection, sessions and accounting are unaffected/)).toBeTruthy();
+    expect(screen.getByText(/Client internet, sign-in, the PMS connection, sessions and accounting are unaffected/)).toBeTruthy();
     // And a way out, rather than a dead end.
     expect(screen.getByRole("link", { name: /Back to the dashboard/ })).toBeTruthy();
   });

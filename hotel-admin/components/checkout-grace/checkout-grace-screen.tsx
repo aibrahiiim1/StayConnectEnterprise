@@ -102,7 +102,7 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
   const lastUsed = state?.emergency_history?.last_at;
   const supported = state?.supported_device_policies?.length ? state.supported_device_policies : ["REJECT_NEW_DEVICE"];
 
-  const editLabel = published ? "Edit policy" : "Create hotel policy";
+  const editLabel = published ? "Edit policy" : "Create site policy";
 
   async function onPublished(newVersion: number) {
     setEditing(false);
@@ -123,28 +123,28 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
           <>
             <HelpSection title="What checkout grace does">
               <p>
-                Keeps a guest online for a short, capped period after they check out, so leaving the hotel does not
+                Keeps a client online for a short, capped period after they check out, so leaving the site does not
                 cut them off mid-journey.
               </p>
             </HelpSection>
             <HelpSection title="Who qualifies">
               <p>
-                Every guest who still has active internet access when they check out qualifies &mdash; free, paid
-                or included with the room. A guest with no active access at checkout gets no grace. Each stay
+                Every client who still has active internet access when they check out qualifies &mdash; free, paid
+                or included with the room. A client with no active access at checkout gets no grace. Each stay
                 receives grace once.
               </p>
             </HelpSection>
-            <HelpSection title="When no hotel policy is published">
+            <HelpSection title="When no site policy is published">
               <p>
                 &ldquo;Nothing published&rdquo; is not &ldquo;nothing happening&rdquo;: departing guests still get
-                the built-in emergency terms, a safe default that was not chosen for this hotel. Each use of it
+                the built-in emergency terms, a safe default that was not chosen for this site. Each use of it
                 raises a critical alert.
               </p>
             </HelpSection>
             <HelpSection title="Versions and history">
               <HelpList items={[
                 "Every published version is kept, newest first. The record is append-only: publishing never rewrites what an earlier version promised.",
-                "A change applies to future checkouts only. A guest already in grace keeps the exact terms they were given at checkout.",
+                "A change applies to future checkouts only. A client already in grace keeps the exact terms they were given at checkout.",
                 "Each version records who published it and why.",
               ]} />
             </HelpSection>
@@ -189,7 +189,7 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
         <>
           {justPublished !== null && (
             <Callout tone="success" title={`Version ${justPublished} published`}>
-              It is now in force for future checkouts. Guests already in grace keep the terms they were given.
+              It is now in force for future checkouts. Clients already in grace keep the terms they were given.
             </Callout>
           )}
 
@@ -197,16 +197,16 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <StatCard
               label="Policy in force"
-              value={isEmergency ? "Emergency fallback" : "Hotel policy"}
+              value={isEmergency ? "Emergency fallback" : "Site policy"}
               tone={isEmergency ? "warn" : "ok"}
               icon={isEmergency ? <AlertTriangle /> : <ShieldCheck />}
-              hint={isEmergency ? "Built-in safe default — not chosen for this hotel" : "Terms this hotel published"}
+              hint={isEmergency ? "Built-in safe default — not chosen for this site" : "Terms this site published"}
             />
             <StatCard
               label="Published version"
               value={published ? `v${version}` : "None"}
               icon={<Gauge />}
-              hint={published ? "Applies to every checkout from now on" : "No hotel policy published yet"}
+              hint={published ? "Applies to every checkout from now on" : "No site policy published yet"}
             />
             <StatCard
               label="Last changed"
@@ -276,8 +276,8 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
                   <CardTitle>What a departing guest receives</CardTitle>
                   <CardDescription>
                     {isEmergency
-                      ? "The built-in emergency terms, because no hotel policy is published."
-                      : `Hotel policy version ${version}.`}
+                      ? "The built-in emergency terms, because no site policy is published."
+                      : `Site policy version ${version}.`}
                   </CardDescription>
                 </div>
                 {isEmergency ? (
@@ -286,7 +286,7 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
                   </Badge>
                 ) : (
                   <Badge tone="ok" dot>
-                    Hotel policy · v{version}
+                    Site policy · v{version}
                   </Badge>
                 )}
               </CardHeader>
@@ -311,7 +311,7 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
                     items={[
                       {
                         label: "Who qualifies",
-                        value: "Guests who still have active internet access when they check out",
+                        value: "Clients who still have active internet access when they check out",
                         hint: "Free, paid or included with the room alike. No active access at checkout means no grace. Once per stay.",
                       },
                       {
@@ -332,19 +332,19 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
                         value: effective.eligibility_window_seconds
                           ? fmtDuration(effective.eligibility_window_seconds)
                           : "Not part of the emergency terms",
-                        hint: "How long after checkout the stay still counts for stay-based package rules. It never removes grace from a guest who qualifies.",
+                        hint: "How long after checkout the stay still counts for stay-based package rules. It never removes grace from a client who qualifies.",
                       },
                       {
                         label: "Delivered as",
                         value: isEmergency
-                          ? "Built-in emergency terms (no hotel package)"
+                          ? "Built-in emergency terms (no site package)"
                           : "Checkout grace package — free, built automatically from this policy",
                         hint: isEmergency ? undefined : "No payment is taken and the package is not offered for sale.",
                       },
                       {
                         label: "Changes apply to",
                         value: "Future checkouts only",
-                        hint: "A guest already in grace keeps the exact terms they were given at checkout.",
+                        hint: "A client already in grace keeps the exact terms they were given at checkout.",
                       },
                     ]}
                   />
@@ -378,13 +378,13 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
                   title="No version published yet"
                   hint={
                     canWrite
-                      ? "Create the hotel's policy to replace the emergency fallback. Each version you publish is recorded here with who published it and why."
-                      : "When a manager publishes the hotel's policy, each version is recorded here."
+                      ? "Create the site's policy to replace the emergency fallback. Each version you publish is recorded here with who published it and why."
+                      : "When a manager publishes the site's policy, each version is recorded here."
                   }
                   action={
                     canWrite && !published ? (
                       <Button variant="secondary" onClick={() => setEditing(true)}>
-                        <Plus /> Create hotel policy
+                        <Plus /> Create site policy
                       </Button>
                     ) : undefined
                   }

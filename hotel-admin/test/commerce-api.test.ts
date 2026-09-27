@@ -45,7 +45,7 @@ describe("the words", () => {
   it("names status, who and why-it-ended without identifiers", () => {
     expect(statusWords("NOT_GRANTED").label).toBe("No access given");
     expect(whoWords({ room: "4202", sign_in_kind: "STAY" })).toBe("Room 4202");
-    expect(whoWords({ sign_in_kind: "VOUCHER" })).toBe("A voucher guest");
+    expect(whoWords({ sign_in_kind: "VOUCHER" })).toBe("A voucher client");
     expect(endReasonText("DATA")).toBe("Data allowance used up");
     expect(endReasonText(null)).toBeNull();
   });

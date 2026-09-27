@@ -32,7 +32,7 @@ describe("an operator action sends what the endpoint requires", () => {
   it("asks for the password rather than failing the click", () => {
     // The endpoint is unchanged and still enforces. What changed is that the screen takes part: Back up now
     // opens a confirmation that requires the password (a masked field inside ConfirmDialog) and hands it on.
-    const dialog = SRC.slice(SRC.indexOf('title="Back up this property now?"'));
+    const dialog = SRC.slice(SRC.indexOf('title="Back up this site now?"'));
     const block = dialog.slice(0, dialog.indexOf("/>"));
     expect(block).toContain("requirePassword");
     expect(block).toContain("onConfirm={backupNow}");

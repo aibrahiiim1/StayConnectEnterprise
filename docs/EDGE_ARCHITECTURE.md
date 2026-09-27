@@ -1,6 +1,6 @@
 # Edge Appliance Architecture
 
-> Everything that runs at the hotel. The appliance is self-sufficient: guests
+> Everything that runs at the site. The appliance is self-sufficient: clients
 > authenticate, browse, get shaped and accounted against a **site-local
 > database**, with the cloud completely optional at runtime.
 > Cloud counterpart: [CLOUD_ARCHITECTURE.md](CLOUD_ARCHITECTURE.md).
@@ -12,7 +12,7 @@
 | `scd` | Unix socket `/run/stayconnect/scd.sock` (+ loopback `/metrics`) | Session controller: owns nft `auth_ipv4` set, tc classes, sessions table; validates vouchers/OTP/social/PMS; PMS provider registry; reaper. **Also hosts the Central agent**: token-less registration, signed assignment poll, certificate, licence fetch, hello (§6) |
 | `portald` | `:8380` HTTP / `:8343` HTTPS on the guest interface | Captive portal front end; no DB, no business logic — proxies to scd over the socket |
 | `acctd` | none (1s tick) | tc byte-counter snapshots → `accounting_records`, quota enforcement via scd |
-| `edged` | loopback, fronted by Caddy on the **management IP** | The Hotel Admin API (`/edge/v1`): local operator auth, guest-domain CRUD, Central/licence status, reports, backups. Serves the `hotel-admin/` UI bundle |
+| `edged` | loopback, fronted by Caddy on the **management IP** | The Admin Console (formerly Hotel Admin) API (`/edge/v1`): local operator auth, guest-domain CRUD, Central/licence status, reports, backups. Serves the `hotel-admin/` UI bundle |
 
 All four read/write only the local DB, and each takes its tenant/site from the
 **verified** signed assignment (no environment fallback in a production build).
@@ -21,7 +21,7 @@ HTTPS only; the appliance has no message-bus client — CLAUDE.md §0E).
 
 ## 2. Site-local database (`stayconnect_site`)
 
-One hotel = one isolated Postgres database, schema
+One site = one isolated Postgres database, schema
 `data-plane/migrations/0001_edge_init.up.sql` — intentionally shape-compatible
 with the guest-domain subset of the central schema so scd/portald/acctd cut over
 by changing only their DSN and `sitemigrate` copies rows 1:1.
@@ -30,13 +30,13 @@ by changing only their DSN and `sitemigrate` copies rows 1:1.
 |---|---|
 | Site identity & portal config | `tenants` (exactly ONE row: auth_methods, `branding` jsonb), `sites` (one row), `appliances` (this site's box/pair) |
 | Local operators | `operators`, `operator_roles` — the seven site roles: `site_admin`, `hotel_it_manager`, `front_office_operator`, `guest_relations_operator`, `voucher_operator`, `payments_operator`, `site_viewer` (see [ROLE_AND_SCOPE_MATRIX.md](ROLE_AND_SCOPE_MATRIX.md)) |
-| Guest access | `ticket_templates` (**GuestAccessPlan**), `voucher_batches`, `vouchers`, `guests`, `sessions`, `accounting_records`, `auth_otps`, `social_oauth_states` |
+| Client access | `ticket_templates` (**GuestAccessPlan**), `voucher_batches`, `vouchers`, `guests`, `sessions`, `accounting_records`, `auth_otps`, `social_oauth_states` |
 | PMS | `pms_providers`, `pms_attempts` |
 | Policy | `walled_garden_rules` |
 | Providers & payments | `notification_providers`, `social_oauth_providers`, `stripe_accounts`, `payments`, `stripe_events` |
-| Compliance | `audit_log` (local; hotel actions stay at the hotel) |
+| Compliance | `audit_log` (local; site actions stay at the site) |
 | Entitlements bridge | `tenant_effective_limits` — a **plain table** (the cloud version is a view) rewritten by scd/edged from the verified signed license. Existing limit queries (`session.CheckConcurrency`, provisioning caps) work unchanged; source of truth is the license file, never a cloud DB |
-| Ops | `backup_records`, `edge_offline_packages` (single-use ledger of imported offline activation packages, reconciled with Central), `appliance_service_health` (local service health, read by Hotel Admin). The former telemetry queue (`sync_outbox`, `sync_checkpoints`) and the command/update ledgers were dropped by migration 0093 |
+| Ops | `backup_records`, `edge_offline_packages` (single-use ledger of imported offline activation packages, reconciled with Central), `appliance_service_health` (local service health, read by the Admin Console). The former telemetry queue (`sync_outbox`, `sync_checkpoints`) and the command/update ledgers were dropped by migration 0093 |
 
 `accounting_records` and `audit_log` become hypertables when TimescaleDB is
 installed (pilot), plain indexed tables otherwise.
@@ -51,9 +51,9 @@ Provisioning writes are additionally gated by license state
 | Resource | Routes | Purpose |
 |---|---|---|
 | health | `GET /edge/v1/health` | daemon + DB + license-state summary |
-| central | `GET /edge/v1/central/status` (activation, licence, Central connection, technical details — [CENTRAL_CONTROL_PLANE.md §8](CENTRAL_CONTROL_PLANE.md#8-hotel-admin--central)), `POST /edge/v1/central/refresh` (Check now), `GET /edge/v1/central/offline-request`, `POST /edge/v1/central/offline-package` | Appliance & licence page |
+| central | `GET /edge/v1/central/status` (activation, licence, Central connection, technical details — [CENTRAL_CONTROL_PLANE.md §8](CENTRAL_CONTROL_PLANE.md#8-admin-console--central)), `POST /edge/v1/central/refresh` (Check now), `GET /edge/v1/central/offline-request`, `POST /edge/v1/central/offline-package` | Appliance & licence page |
 | license | `POST /edge/v1/license` (licence file upload — offline renewal path) | Appliance & licence page |
-| operators | CRUD + set-password/roles | local hotel staff |
+| operators | CRUD + set-password/roles | local site staff |
 | guest-access-plans | CRUD (`ticket_templates`) | duration/caps/bandwidth/price |
 | voucher-batches | list/create/detail/codes/CSV/revoke | |
 | vouchers | get/revoke | |
@@ -74,7 +74,7 @@ Provisioning writes are additionally gated by license state
 
 | Interface | Example | Carries |
 |---|---|---|
-| **Management** | `172.21.15.30/24` on the hotel's IT/management VLAN | Hotel Admin (`https://172.21.15.30` via Caddy), SSH, outbound HTTPS to Central, monitoring |
+| **Management** | `172.21.15.30/24` on the site's IT/management VLAN | Admin Console (`https://172.21.15.30` via Caddy), SSH, outbound HTTPS to Central, monitoring |
 | **Guest gateway** | `10.20.0.1/24` on the guest bridge | Kea DHCP (+ RFC 8910 option 114 → `http://10.20.0.1:8380/`), Unbound DNS, nftables captive DNAT :80→8380/:443→8343, portald, tc shaping, masquerade to uplink |
 | **HA sync** (optional) | dedicated link/VLAN between the pair | VRRP adverts, conntrackd FTFW, Postgres streaming replication |
 
@@ -92,10 +92,10 @@ Caddy on the appliance is the only TLS terminator:
 | vhost / bind | Upstream | Rule |
 |---|---|---|
 | `https://<mgmt-ip>` (e.g. `https://172.21.15.30`) | hotel-admin UI + `/edge/v1` → edged | **Management interface only.** Never bound to the WAN/uplink or the guest bridge. Internal CA (`local_certs`) until sites have real names |
-| guest portal | portald `:8380/:8343` | Guest interface only; portal HTTP stays direct-to-portald for RFC 8910 (no HTTPS redirect on the captive path) |
+| Client Portal (formerly Guest Portal) | portald `:8380/:8343` | Guest interface only; portal HTTP stays direct-to-portald for RFC 8910 (no HTTPS redirect on the captive path) |
 
-Hotel Admin is therefore reachable exclusively from the hotel's management
-network — not from guest devices and not from the internet. Central operators
+Admin Console is therefore reachable exclusively from the site's management
+network — not from client devices and not from the internet. Central operators
 see only activation, connection and licence state; there is no telemetry and no
 direct connection to the appliance.
 
@@ -103,19 +103,19 @@ direct connection to the appliance.
 
 **This is an authoritative operating rule. Read it before opening an incident about a disconnected PMS.**
 
-StayConnect is **local-first**. The appliance authenticates guests, enforces entitlements and runs sessions
+StayConnect is **local-first**. The appliance authenticates clients, enforces entitlements and runs sessions
 from its own site database. The PMS link is how the guest list gets there; it is **not** a dependency of
-serving guests.
+serving clients.
 
 On PRE-LIVE the Product Owner **deliberately stops the PMS connection**, because that interface is shared with
 another system. A `DISCONNECTED` transport or a `DIAL_FAILED` error on its own is therefore an **expected
-condition**, and on its own it means nothing about whether guests can get online.
+condition**, and on its own it means nothing about whether clients can get online.
 
 ### What keeps working while the transport is offline
 
 - **Room sign-in for every stay already published into the local mirror.** The resolver reads the mirror, not
   the PMS.
-- Free and manual packages, vouchers and guest accounts.
+- Free and manual packages, vouchers and client accounts.
 - Entitlement enforcement, shaping and accounting.
 - Every existing session.
 
@@ -158,15 +158,15 @@ false alarm:
 1. **PMS transport** — online or offline.
 2. **Local mirror** — present and usable, or not.
 3. **Mirror age** — when the guest list was last completely synced.
-4. **Actual guest-sign-in impairment** — whether a guest can get online right now.
+4. **Actual client-sign-in impairment** — whether a client can get online right now.
 
 Preferred wording:
 
-> PMS is currently offline. Guest sign-in continues from the local guest list last updated at *[time]*. New PMS
+> PMS is currently offline. Client sign-in continues from the local guest list last updated at *[time]*. New PMS
 > changes will appear after reconnection.
 
 **Do not classify the system as globally impaired while the local mirror remains usable.** "PMS disconnected"
-and "guests cannot get online" are different statements, and only the second is an incident.
+and "clients cannot get online" are different statements, and only the second is an incident.
 
 ## 6. Central agent (inside scd)
 
@@ -199,7 +199,7 @@ appliance-initiated HTTPS, signed with the appliance's Ed25519 identity key
 - **Terminal acknowledgement and offline reconcile**: the signed ack of a
   terminal (retirement) assignment and `POST /v1/appliance/offline-reconcile`
   for a consumed offline package are retried until Central confirms
-  (`cmd/scd/central_retry.go`); neither is on a guest path.
+  (`cmd/scd/central_retry.go`); neither is on a client path.
 
 There is nothing else: no telemetry outbox or producer, no remote command
 channel, no software-update agent and no cloud-mode setting. That subsystem was

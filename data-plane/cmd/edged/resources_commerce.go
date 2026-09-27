@@ -643,7 +643,7 @@ func (s *server) listGuestActivity(w http.ResponseWriter, r *http.Request) {
 		 LIMIT `+strconv.Itoa(limit), s.tenantID, s.siteID)
 	if err != nil {
 		slog.Error("guest activity read failed", "err", err)
-		jsonErr(w, http.StatusInternalServerError, "internal", "guest activity could not be read")
+		jsonErr(w, http.StatusInternalServerError, "internal", "client activity could not be read")
 		return
 	}
 	defer rows.Close()
@@ -658,7 +658,7 @@ func (s *server) listGuestActivity(w http.ResponseWriter, r *http.Request) {
 			&x.Package, &x.PackageType, &x.PriceMinor, &x.Currency,
 			&state, &x.Trigger, &x.ServicePlan, &x.QuotaBytes, &x.EntitlementID); err != nil {
 			slog.Error("guest activity scan failed", "err", err)
-			jsonErr(w, http.StatusInternalServerError, "internal", "guest activity could not be read")
+			jsonErr(w, http.StatusInternalServerError, "internal", "client activity could not be read")
 			return
 		}
 		// OfferedAt is left EMPTY. offer_quotes records when an offer expires and when it was consumed, and no
@@ -679,7 +679,7 @@ func (s *server) listGuestActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := rows.Err(); err != nil {
 		slog.Error("guest activity read failed", "err", err)
-		jsonErr(w, http.StatusInternalServerError, "internal", "guest activity could not be read")
+		jsonErr(w, http.StatusInternalServerError, "internal", "client activity could not be read")
 		return
 	}
 	writeList(w, out)

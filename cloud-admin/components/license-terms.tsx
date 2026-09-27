@@ -26,7 +26,7 @@ const whole = (s: string) => /^\d+$/.test(s.trim());
 
 /** The first thing wrong with the draft, in words, or null. */
 export function termsProblem(d: TermsDraft, today: Date = new Date()): string | null {
-  if (!whole(d.maxGuests) || Number(d.maxGuests) < 1) return "Enter how many guests may be online at once (1 or more).";
+  if (!whole(d.maxGuests) || Number(d.maxGuests) < 1) return "Enter how many clients may be online at once (1 or more).";
   if (d.validMode === "days") {
     if (!whole(d.validDays) || Number(d.validDays) < 1) return "Enter how many days the license is valid (1 or more).";
   } else {
@@ -61,7 +61,7 @@ export function LicenseTermsFields({
   const set = (patch: Partial<TermsDraft>) => onChange({ ...value, ...patch });
   return (
     <div className="grid gap-4 sm:grid-cols-2">
-      <Field label="Guests online at once" required hint="The most guest devices that may be online at the same time.">
+      <Field label="Clients online at once" required hint="The most client devices that may be online at the same time.">
         <Input
           inputMode="numeric"
           value={value.maxGuests}

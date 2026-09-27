@@ -75,7 +75,7 @@ describe("InternetPackagesPage — packages", () => {
     g.mockRejectedValue(new ApiError(503, { error: "phase2_disabled" }));
     render(<InternetPackagesPage />);
     expect(await screen.findByText(/not switched on/i)).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: /guest activity/i })).toBeNull();
+    expect(screen.queryByRole("tab", { name: /client activity/i })).toBeNull();
   });
 
   it("shows what each package GIVES, and Add asks for a service plan by name", async () => {
@@ -339,7 +339,7 @@ const SUMMARY = {
 
 async function openActivity() {
   render(<InternetPackagesPage />);
-  await userEvent.click(await screen.findByRole("tab", { name: /guest activity/i }));
+  await userEvent.click(await screen.findByRole("tab", { name: /client activity/i }));
 }
 
 describe("InternetPackagesPage — guest activity", () => {
@@ -349,7 +349,7 @@ describe("InternetPackagesPage — guest activity", () => {
 
     expect(await screen.findByText("Room 4202")).toBeInTheDocument();
     // A voucher grant (no quote at all) is listed — the old view could not show it.
-    expect(screen.getByText("A voucher guest")).toBeInTheDocument();
+    expect(screen.getByText("A voucher client")).toBeInTheDocument();
     expect(screen.getAllByText("Voucher").length).toBeGreaterThan(0);
     expect(screen.getAllByText("In use").length).toBeGreaterThan(1); // the status chip and the row badge
     // Summary: guests on a package now, data used, top package, breakdown by source.

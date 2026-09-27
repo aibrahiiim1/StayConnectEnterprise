@@ -1,22 +1,22 @@
 # Customer Operator (Tenant Operator) — User Guide
 
-You handle day-to-day Wi-Fi operations for your hotel group. That work happens on each hotel's appliance in **OneGate Hotel Admin**, with an operator account created for you on that appliance (usually the **Front office operator** or **Hotel IT manager** role).
+You handle day-to-day Wi-Fi operations for your organisation. That work happens on each site's appliance in **OneGate Admin Console** (formerly Hotel Admin), with an operator account created for you on that appliance (usually the **Front office operator** or **Site IT manager** role).
 
 **The *Customer operator* role grants nothing in OneGate Central** ([CENTRAL_CONTROL_PLANE.md §7](../CENTRAL_CONTROL_PLANE.md#7-roles)). Central is for licensing, activation and fleet status; if you need to see your appliances' licences there, ask your customer admin for a **Viewer** login. You **cannot** add or remove staff, change licences, or change sites — your customer admin (or the OneGate platform admin, for licences) does it.
 
 ## Your daily workflow
 
-Most days you'll touch three Hotel Admin pages:
+Most days you'll touch three Admin Console pages:
 
 1. **Overview** — quick check that everything is healthy.
-2. **Active sessions** and **Guest sign-in attempts** — handle guest complaints in real time.
+2. **Active sessions** and **Client sign-in attempts** — handle client complaints in real time.
 3. **Vouchers** — issue more cards when reception runs low.
 
 Everything else is set up once and left alone.
 
 ## Vouchers
 
-**Hotel Admin → Internet offering → Vouchers**
+**Admin Console → Internet offering → Vouchers**
 
 The most common task. Reception hands out printed cards; when they run low you issue another batch.
 
@@ -31,25 +31,25 @@ The most common task. Reception hands out printed cards; when they run low you i
 3. The codes are shown **once**: **Copy all**, **Download CSV**, or **Print cards** (set the heading printed on each card first).
 4. Hand the cards to reception.
 
-### When a guest reports their card doesn't work
+### When a client reports their card doesn't work
 
 1. Open **Vouchers** → search by the last characters of the code.
 2. Check the status: *Available*, *Not yet valid*, *Expired never used*, *Used* or *Cancelled*; the card's history shows what happened.
-3. If the card is spent, hand the guest a fresh card.
+3. If the card is spent, hand the client a fresh card.
 4. If a stack of cards is lost or stolen, open the batch (**Batches → View cards**) and **Cancel card** on each unused card (reason + your password). There is no whole-batch cancel.
 
 Reading a full code again (**Show full code**) asks for a reason and your password, and is recorded.
 
-## Guest sessions
+## Client sessions
 
-**Hotel Admin → Guests → Active sessions**
+**Admin Console → Clients → Active sessions**
 
-The "who is online right now" view. Search by room, name, username, IP or MAC, or filter by how the guest signed in. It refreshes every 10 seconds.
+The "who is online right now" view. Search by room, name, username, IP or MAC, or filter by how the client signed in. It refreshes every 10 seconds.
 
 ### Typical requests from reception
 
 - **"Guest in 214 says their Wi-Fi is gone"** → find their session → if it has ended, the status gives the reason (time or data used up, checked out, idle…); if it's there, check the allowance meters.
-- **"Guest can't sign in with their room number"** → **Guest sign-in attempts**: read **Why**, and **Release** the device if it has been asked to wait (releasing lets it try again; it does not sign the guest in).
+- **"Guest can't sign in with their room number"** → **Client sign-in attempts**: read **Why**, and **Release** the device if it has been asked to wait (releasing lets it try again; it does not sign the guest in).
 - **"Guest checked out but still connected"** → **Disconnect**. (Checkout normally ends room access automatically, after any checkout grace.)
 - **"Something weird is happening on room 310"** → click the session → see MAC, IP, package and data. **Usage explorer** shows the room's full history.
 
@@ -61,65 +61,65 @@ The "who is online right now" view. Search by room, name, username, IP or MAC, o
 
 ## Walled garden
 
-**Hotel Admin → Guest portal → Allowed sites**
+**Admin Console → Client Portal → Allowed sites**
 
-Addresses guests can reach before signing in. Usually set up once by the hotel's Site admin or Hotel IT manager, who can add entries when a sign-in method needs a new address. Add entries sparingly — every entry is reachable without signing in.
+Addresses clients can reach before signing in. Usually set up once by the site's Site admin or Site IT manager, who can add entries when a sign-in method needs a new address. Add entries sparingly — every entry is reachable without signing in.
 
-**To add an entry** (Site admin or Hotel IT manager): **Allow a site** → type (domain name, single address or address range), address, optional ports, why it is needed.
+**To add an entry** (Site admin or Site IT manager): **Allow a site** → type (domain name, single address or address range), address, optional ports, why it is needed.
 
 ## Portal settings
 
-**Hotel Admin → Guest portal → Portal settings**
+**Admin Console → Client Portal → Portal settings**
 
-The look and wording of the guest sign-in page: layout template, logo and photographs, colours, hotel name, welcome and help lines, terms link, and the wording in each language. You might update it when:
+The look and wording of the client sign-in page: layout template, logo and photographs, colours, site name, welcome and help lines, terms link, and the wording in each language. You might update it when:
 
-- The hotel rebrands (new logo, new colours).
+- The site rebrands (new logo, new colours).
 - Legal asks you to change the terms link.
 - You want to change the welcome or help line.
 
-Check the live preview (desktop, tablet, mobile) before you **Save changes** — guests see it immediately. Changing it needs the Site admin or Hotel IT manager role.
+Check the live preview (desktop, tablet, mobile) before you **Save changes** — clients see it immediately. Changing it needs the Site admin or Site IT manager role.
 
 ## PMS connection
 
-**Hotel Admin → Property management system → PMS connection**
+**Admin Console → Property management system → PMS connection**
 
-Usually set up once by the Hotel IT manager. With a desk role you can **view** the connection's state and whether room sign-in is working.
+Usually set up once by the Site IT manager. With a desk role you can **view** the connection's state and whether room sign-in is working.
 
 If it shows room sign-in not working or many recent failures, it's usually:
 
 - The PMS is down or in maintenance → wait / check with PMS support.
-- The PMS credential changed → ask the Hotel IT manager to replace it.
+- The PMS credential changed → ask the Site IT manager to replace it.
 - A guest network points at the wrong PMS → **Network routing** (Site admin).
 
-You cannot edit the connection from a desk role — that's the Hotel IT manager's job, and for good reason.
+You cannot edit the connection from a desk role — that's the Site IT manager's job, and for good reason.
 
 ## Email & SMS and Social login
 
-**View only** from desk roles in most cases. If you need a new sender or provider, ask the Hotel IT manager.
+**View only** from desk roles in most cases. If you need a new sender or provider, ask the Site IT manager.
 
 ## Charges
 
-**Hotel Admin → Charges**
+**Admin Console → Charges**
 
 Selling internet is not switched on today, so these pages are usually quiet or *Not enabled on this appliance*. Decisions about room charges belong to the Payments operator and Site admin; there is no refund button by design.
 
 ## Dashboard
 
-**Hotel Admin → Overview**
+**Admin Console → Overview**
 
 The morning check:
 
 1. **Needs attention** — anything listed? Each line links to the page that fixes it.
-2. **Guests online** — roughly matches your occupancy?
+2. **Clients online** — roughly matches your occupancy?
 3. **Room sign-in** — *Ready*? And **Sign-in outcomes** — a spike in refusals suggests a PMS or routing problem.
 4. **Services** and the health pill in the top bar — all healthy?
 
 ## What you cannot do
 
-- Create / remove operators (including yourself). Ask your customer admin (Central users) or the appliance's Site admin (Hotel Admin operators).
+- Create / remove operators (including yourself). Ask your customer admin (Central users) or the appliance's Site admin (Admin Console operators).
 - Change licences. Ask your platform admin contact.
 - Create, change or delete sites. Ask your customer admin.
-- Change PMS, email/SMS or social-login credentials from a desk role. Ask the Hotel IT manager.
+- Change PMS, email/SMS or social-login credentials from a desk role. Ask the Site IT manager.
 
 ## When to escalate to your customer admin
 

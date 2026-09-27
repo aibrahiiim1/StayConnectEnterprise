@@ -2,7 +2,7 @@
 
 There are exactly **two** ways to activate a StayConnect appliance: **Online** and **Offline**. Everything
 else — registration, signed assignment, certificates, mTLS, convergence — happens by itself; its details sit
-under the collapsed **Technical details** on Hotel Admin's **System → Appliance & licence** page and under
+under the collapsed **Technical details** on the **System → Appliance & licence** page of the Admin Console (formerly Hotel Admin) and under
 **Advanced** on the appliance's page in Central. You do not drive it. The Central side is specified in
 [CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md).
 
@@ -14,7 +14,7 @@ Nothing is typed on the appliance. A factory-clean appliance with a route to the
 itself — token-less, signed with its own identity key — and keeps retrying (30 s, backing off to 5 minutes)
 until Central answers.
 
-**On the appliance (Hotel Admin → System → Appliance & licence):** it shows *Waiting for activation* and the
+**On the appliance (Admin Console → System → Appliance & licence):** it shows *Waiting for activation* and the
 **serial number**. That is all. (*Not registered yet* means Central has not answered yet; **Check now**
 retries immediately.)
 
@@ -24,14 +24,14 @@ retries immediately.)
    **Advanced**, the WAN MAC) against the box in front of you before continuing.
 2. Press **Activate**. **Customer** — pick an existing one or create it.
 3. **Site** — pick an existing one or create it. This is the site the appliance is bound to.
-4. **Guests online at once** — the licensed ceiling. `0` is unlimited. It is **appliance-wide across all guest
+4. **Clients online at once** — the licensed ceiling. `0` is unlimited. It is **appliance-wide across all guest
    VLANs**, and it is enforced per appliance, so this is the real limit for this box.
 5. **Valid for** — a number of days, or an end date.
-6. **Grace period (days)** — after the end date guests keep working, with warnings.
+6. **Grace period (days)** — after the end date clients keep working, with warnings.
 7. Confirm (re-enter your password if asked).
 
 Central shows **Activating** until the appliance has collected its assignment, certificate and licence
-(normally within a minute), then **Activated**. Hotel Admin follows on its own: *Finishing activation…*, then
+(normally within a minute), then **Activated**. Admin Console follows on its own: *Finishing activation…*, then
 **Activated** with your customer and site, licence **Active**.
 
 There are no enrollment tokens.
@@ -46,7 +46,7 @@ For an appliance that is **already activated**:
 
 1. **Control panel → the appliance's page → License** — **Renew or change** to issue the new version, then
    **Offline license file**. You get one signed file.
-2. **Hotel Admin → System → Appliance & licence → Files from your OneGate vendor → Upload licence file.**
+2. **Admin Console → System → Appliance & licence → Files from your OneGate vendor → Upload licence file.**
 
 The appliance checks the vendor signature, that the file is bound to *this* appliance, that it has not
 expired, and that it has not been used before. A licence **older** than the one installed is refused, so a
@@ -110,13 +110,13 @@ to it exist until someone visits them.
 `backup` refuses to write a plaintext copy. An escrow copy travels — to a safe, to another site, onto
 removable media — and a plaintext one is just the signing key lying somewhere nobody is watching.
 
-`central-preflight.sh` checks all of this on a host before anyone drives to a hotel.
+`central-preflight.sh` checks all of this on a host before anyone drives to a site.
 
 ### First activation — three steps
 
 For an appliance that has **never** been activated and has no route to the control panel.
 
-1. **Hotel Admin → System → Appliance & licence → Files from your OneGate vendor → Offline activation →
+1. **Admin Console → System → Appliance & licence → Files from your OneGate vendor → Offline activation →
    Download activation request.**
    The appliance writes a request describing itself: serial, hardware evidence and the **public** half of
    its identity keypair. The private half never leaves the appliance. The request is signed with it, which is
@@ -125,7 +125,7 @@ For an appliance that has **never** been activated and has no route to the contr
    This registers the appliance as **Waiting for activation** and nothing more. It carries no authority over
    customer or site. Open it, press **Activate** and choose **Customer**, **Site** and licence terms exactly as
    you would online — then press **Activation package** on its page to download one file.
-3. **Hotel Admin → same place → Upload activation package.** Done.
+3. **Admin Console → same place → Upload activation package.** Done.
 
 The package carries everything first activation needs: the **signed assignment** (the only authority for
 tenant and site), the **trust material**, and the **signed licence**. It is bound to that exact request and
@@ -151,19 +151,19 @@ would be the replay the ledger exists to prevent, so generate a fresh one.
 
 ## What each state means
 
-Hotel Admin's one status card ([CENTRAL_CONTROL_PLANE.md §8](CENTRAL_CONTROL_PLANE.md#8-hotel-admin--central)):
+The Admin Console's one status card ([CENTRAL_CONTROL_PLANE.md §8](CENTRAL_CONTROL_PLANE.md#8-admin-console--central)):
 
-| Hotel Admin shows | Meaning |
+| Admin Console shows | Meaning |
 |---|---|
 | Activation: Not registered yet | Central has not answered a registration yet; the appliance keeps retrying |
 | Activation: Waiting for activation | Central can see it; an operator must press Activate |
 | Activation: Finishing activation… | Activated in Central; collecting assignment, certificate and licence |
 | Activation: Activated | Assignment adopted and verified; bound to *customer · site* |
-| Activation: Retired | Retired in Central; credentials revoked; no new guests |
-| Activation: Removed from OneGate Central | Central deleted this appliance after it had held a customer (`details.reason` `removed_from_central`). It keeps its identity and data, admits no new guests (guests online are not disconnected), refuses licence and activation files (`409 removed_from_central`) and never registers again — the durable marker `/etc/stayconnect/removed-from-central.json` survives restarts. Only a factory-clean install and a new activation bring it back |
+| Activation: Retired | Retired in Central; credentials revoked; no new clients |
+| Activation: Removed from OneGate Central | Central deleted this appliance after it had held a customer (`details.reason` `removed_from_central`). It keeps its identity and data, admits no new clients (clients online are not disconnected), refuses licence and activation files (`409 removed_from_central`) and never registers again — the durable marker `/etc/stayconnect/removed-from-central.json` survives restarts. Only a factory-clean install and a new activation bring it back |
 | Licence: Grace period | Ended, still serving, with warnings |
-| Licence: Expired / Suspended / Revoked / Wrong appliance | No new guest sessions |
-| OneGate Central: Connected / Temporarily unreachable / Not configured | Link to Central only; guests are unaffected by it |
+| Licence: Expired / Suspended / Revoked / Wrong appliance | No new client sessions |
+| OneGate Central: Connected / Temporarily unreachable / Not configured | Link to Central only; clients are unaffected by it |
 
 **A deleted record.** Every 5 minutes (and at boot) the appliance asks Central `hello`. When Central twice
 answers that it does not know the appliance, an appliance that **never held a customer** clears its identity
@@ -173,13 +173,13 @@ in-place path to a different customer: changing customer is retire → factory-c
 activation ([CENTRAL_CONTROL_PLANE.md §4](CENTRAL_CONTROL_PLANE.md#4-lifecycle)).
 
 **Retirement is acknowledged.** When Central retires the appliance (Retire, or completion of a hardware
-replacement) it signs a terminal assignment; the appliance adopts it, stops admitting guests and sends a signed
+replacement) it signs a terminal assignment; the appliance adopts it, stops admitting clients and sends a signed
 acknowledgement, which it retries until Central confirms. Only then does Central revoke its credentials. The
 offline-package reconciliation is likewise retried until Central confirms.
 
 Tenant and site are **never** typed into the appliance. They arrive only through the signed assignment, and
 every daemon takes them from the verified assignment — there is no environment-variable fallback in a
-production build. An appliance with no assignment shows empty tenant-scoped screens (Guest accounts, Portal
+production build. An appliance with no assignment shows empty tenant-scoped screens (Client accounts, Portal
 branding) and says so — that is the correct state, not a fault.
 
 The licence's binding to this appliance (identity key, appliance id, serial, hardware fingerprint, WAN MAC) is
@@ -213,15 +213,15 @@ packages that name an endpoint nobody operates. Activation packages carry the en
 appliance learns where to reconcile without anyone typing an address into it.
 
 **Always outbound, always appliance-initiated.** The appliance dials Central over the WAN. Central never
-dials in: no port-forward, no inbound rule, no route into the hotel LAN. Nothing about a hotel's network has
+dials in: no port-forward, no inbound rule, no route into the site LAN. Nothing about a site's network has
 to be exposed for the fleet to work.
 
 **The appliance API is a separate surface from the human admin UI.** They can be secured independently — the
 admin UI can later require MFA, VPN or Zero-Trust without any of that becoming a runtime dependency of a
-hotel's connectivity.
+site's connectivity.
 
-**Local-first.** Once activated with a valid signed licence, losing Central changes nothing that a guest or
-the hotel can see: Hotel Admin, guest networking, local authentication, PMS operation and existing sessions
+**Local-first.** Once activated with a valid signed licence, losing Central changes nothing that a client or
+the site can see: Admin Console, guest networking, local authentication, PMS operation and existing sessions
 all continue. The licence carries an offline grace period, and the assignment's expiry is a refresh horizon,
 not a kill switch.
 

@@ -69,7 +69,7 @@ describe("online-time budgets", () => {
   it("says plainly when no package uses a budget, rather than showing an empty table", async () => {
     rows([]);
     render(<AggregateTimeView />);
-    expect(await screen.findByTestId("empty")).toHaveTextContent(/No package on this property uses/i);
+    expect(await screen.findByTestId("empty")).toHaveTextContent(/No package on this site uses/i);
   });
 
   it("exposes no guest identity", async () => {

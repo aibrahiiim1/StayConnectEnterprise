@@ -102,6 +102,6 @@ export function repinOutcomeMessage(n: number): string {
   if (n === 0) {
     return "Nothing was changed. Those packages keep the settings they have now.";
   }
-  return `${n} package${n === 1 ? "" : "s"} updated. Existing guest access is unchanged; the new settings ` +
+  return `${n} package${n === 1 ? "" : "s"} updated. Existing client access is unchanged; the new settings ` +
     "apply to future grants.";
 }

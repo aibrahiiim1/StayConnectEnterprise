@@ -53,7 +53,7 @@ describe("saveOutcomeMessage", () => {
     const msg = saveOutcomeMessage(decideSave({
       pinnedPlanRevisionID: "r", selected: gold, currentPlanID: "plan-gold",
     }));
-    expect(msg).toContain("Existing guest access is unchanged");
+    expect(msg).toContain("Existing client access is unchanged");
     expect(msg).toContain("future grants");
   });
 

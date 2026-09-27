@@ -72,7 +72,7 @@ async function installBackend(page: Page) {
   });
 }
 
-const preview = (page: Page) => page.frameLocator('iframe[title^="Guest portal"]');
+const preview = (page: Page) => page.frameLocator('iframe[title^="Client Portal"]');
 const saved = (page: Page) => expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
 
 test.beforeEach(() => {
@@ -110,7 +110,7 @@ test("the preview renders the real guest portal, at every size", async ({ page }
 
   // A change in the form reaches the preview without a save.
   await page.getByRole("tab", { name: /Content/ }).click();
-  await page.getByLabel("Hotel name", { exact: true }).fill("Blue Bay Resort");
+  await page.getByLabel("Site name", { exact: true }).fill("Blue Bay Resort");
   await expect(frame.locator("#brand-name")).toHaveText("Blue Bay Resort");
 
   for (const size of ["Tablet", "Mobile"]) {
@@ -209,17 +209,17 @@ test("languages are chosen for guests, and their wording edited one at a time", 
   await page.goto("/portal-branding");
   await page.getByRole("tab", { name: /^Languages/ }).click();
 
-  await expect(page.getByLabel("Offer العربية to guests")).toBeVisible();
-  await expect(page.getByLabel("Offer English to guests")).toBeDisabled();
+  await expect(page.getByLabel("Offer العربية to clients")).toBeVisible();
+  await expect(page.getByLabel("Offer English to clients")).toBeDisabled();
   // Turning one off removes it from what a guest is offered, which the preview's own selector shows.
-  await page.getByLabel("Offer Русский to guests").uncheck();
+  await page.getByLabel("Offer Русский to clients").uncheck();
 
   await page.getByRole("tab", { name: /Sign-in page text/ }).click();
   await page.getByRole("tab", { name: /Italiano/ }).click();
   // Fifty-one strings are grouped by where they appear on the page; a shipped language opens on the first
   // group. The group's <summary>, not the field labelled "Guest Login" that lives inside Navigation -- the
   // string and the group share a name, which is correct for an operator and ambiguous for a text locator.
-  await page.locator("summary").filter({ hasText: "Guest Login" }).click();
+  await page.locator("summary").filter({ hasText: "Client Login" }).click();
   // AND THE FIELD HOLDS THE REAL ITALIAN, which is the whole point: an empty box with English behind it is
   // what made selecting a language look like it had done nothing.
   const shipped = shippedWording().strings.it["pms.room"];

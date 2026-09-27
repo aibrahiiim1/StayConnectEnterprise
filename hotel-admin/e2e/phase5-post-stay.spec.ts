@@ -140,7 +140,7 @@ test.describe("the post-stay identity screen", () => {
     expect(mutations[0].body.password).toBe("operator-pw");
 
     // Dismissing the panel loses the PIN — there is no control anywhere that brings it back.
-    await page.getByRole("button", { name: /given it to the guest/i }).click();
+    await page.getByRole("button", { name: /given it to the client/i }).click();
     await expect(page.getByText("K7M4RTQX")).toHaveCount(0);
     await expect(page.getByRole("button", { name: /show pin/i })).toHaveCount(0);
   });

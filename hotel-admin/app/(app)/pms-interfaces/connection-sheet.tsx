@@ -291,7 +291,7 @@ function OverviewTab({
           <li><Link href="/stay-events" className="font-medium underline underline-offset-2">Stay events</Link>
             <p className="text-xs text-muted-foreground">Every check-in, move and check-out received.</p></li>
           <li><Link href="/roster-reconciliation" className="font-medium underline underline-offset-2">Roster reconciliation</Link>
-            <p className="text-xs text-muted-foreground">How the guest list is kept identical to the hotel&rsquo;s.</p></li>
+            <p className="text-xs text-muted-foreground">How the guest list is kept identical to the PMS&rsquo;s.</p></li>
           <li><Link href="/pms-reconciliation" className="font-medium underline underline-offset-2">Unresolved departures</Link>
             <p className="text-xs text-muted-foreground">Messages that could not be matched to a stay.</p></li>
           <li><Link href="/pms-source-conflicts" className="font-medium underline underline-offset-2">Source conflicts</Link>
@@ -349,7 +349,7 @@ function PublishDialog({
       title={target ? `Put version ${target.revision_no} live?` : ""}
       description={
         iface.lifecycle_state === "ACTIVE"
-          ? "From this moment the connection uses these settings and reconnects with them. Guests keep being verified against the guest list already loaded while it does."
+          ? "From this moment the connection uses these settings and reconnects with them. Clients keep being verified against the guest list already loaded while it does."
           : "This becomes the configuration the connection uses. It does not activate the connection — that is a separate step."
       }
       confirmLabel="Put live"
@@ -440,7 +440,7 @@ function ConfigurationTab({
       </SheetSection>
 
       {drafts.length > 0 && (
-        <SheetSection title="Drafts" description="Saved but not live. Nothing changes for guests until one is put live.">
+        <SheetSection title="Drafts" description="Saved but not live. Nothing changes for clients until one is put live.">
           <div className="space-y-3">
             {drafts.map((d) => (
               <div key={d.id} className="space-y-3 rounded-lg border border-dashed border-border p-4">
@@ -515,7 +515,7 @@ function RevisionDialog({
       onOpenChange={onOpenChange}
       size="lg"
       title={from ? "Edit configuration" : "Configure this connection"}
-      description="Saved as a new draft version. Nothing changes for guests until you put it live, which is a separate confirmed step."
+      description="Saved as a new draft version. Nothing changes for clients until you put it live, which is a separate confirmed step."
       submitLabel="Save as draft"
       busy={busy}
       error={pmsErrorText(err)}
@@ -621,7 +621,7 @@ const CONN_FIELDS: {
   {
     key: "backoff_min_ms", label: "Shortest wait before retrying", unit: "milliseconds",
     what: "After the PMS link drops, how soon the first reconnection attempt happens. Each further attempt waits a little longer, up to the maximum below.",
-    when: "Raise it if the hotel's PMS complains about repeated connections during its nightly restart.",
+    when: "Raise it if the site's PMS complains about repeated connections during its nightly restart.",
   },
   {
     key: "backoff_max_ms", label: "Longest wait before retrying", unit: "milliseconds",
@@ -635,12 +635,12 @@ const CONN_FIELDS: {
   },
   {
     key: "link_down_alert_seconds", label: "Report the link as down after", unit: "seconds",
-    what: "How long the link may stay down before it is reported. Nothing stops when the link drops — guests keep signing in from the last good guest list.",
+    what: "How long the link may stay down before it is reported. Nothing stops when the link drops — clients keep signing in from the last good guest list.",
     when: "Lower it to hear about an outage sooner; raise it if nightly maintenance produces an alert nobody acts on.",
   },
   {
     key: "blocked_after_refusals", label: "Report reconciliation as blocked after", unit: "consecutive runs",
-    what: "Reconciliation declines to act on an incomplete or contradictory guest list, which protects guests. After this many refusals in a row it is reported.",
+    what: "Reconciliation declines to act on an incomplete or contradictory guest list, which protects clients. After this many refusals in a row it is reported.",
     when: "Lower it to hear about a degrading feed sooner.",
   },
 ];
@@ -686,7 +686,7 @@ function ConnectionRecovery({ id, writable }: { id: string; writable: boolean })
           <HelpSection>
             <p>
               The link reconnects by itself and retries for as long as it takes. These bound how fast it retries and
-              how long a problem may last before it is reported. Most properties never change them.
+              how long a problem may last before it is reported. Most sites never change them.
             </p>
           </HelpSection>
           {CONN_FIELDS.map((f) => (
@@ -701,7 +701,7 @@ function ConnectionRecovery({ id, writable }: { id: string; writable: boolean })
       <ErrorBanner err={pmsErrorText(err)} />
       <p className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
         <strong className="text-foreground">These apply to this connection only.</strong> Another PMS connection at
-        this property keeps its own values and is unaffected by anything changed here.
+        this site keeps its own values and is unaffected by anything changed here.
       </p>
       <div className="grid gap-3 lg:grid-cols-2">
         {CONN_FIELDS.map((f) => (
@@ -832,14 +832,14 @@ function NetworksTab({ routes }: { routes: PmsGuestNetworkRoute[] | null }) {
   return (
     <SheetSection
       title="Guest networks using this connection"
-      description="A guest is only checked against this PMS if they are on one of these networks."
+      description="A client is only checked against this PMS if they are on one of these networks."
       actions={<Link href="/pms-routing" className="text-sm font-medium underline underline-offset-2">Change routing</Link>}
     >
       {routes === null ? (
         <Skeleton className="h-16 w-full" />
       ) : routes.length === 0 ? (
         <Callout tone="warning" title="No Wi-Fi network points at this connection">
-          It may be configured and connected, but no guest is ever checked against it. Point at least one guest
+          It may be configured and connected, but no client is ever checked against it. Point at least one guest
           network at it on{" "}
           <Link href="/pms-routing" className="underline underline-offset-2">Network routing</Link>.
         </Callout>
@@ -934,12 +934,12 @@ function lifecycleMoves(iface: PmsConnection, providerName: string): LifecycleMo
   const activate: LifecycleMove = {
     to: "ACTIVE", label: iface.lifecycle_state === "DRAINING" ? "Activate again" : "Activate", variant: "primary",
     title: "Activate this connection?",
-    description: `The appliance connects to ${providerName} with the live configuration${iface.current_revision_no ? ` (version ${iface.current_revision_no})` : ""} and loads the guest list. Guests on the networks that use this connection can then sign in with their room number. Nothing is written to the PMS.`,
+    description: `The appliance connects to ${providerName} with the live configuration${iface.current_revision_no ? ` (version ${iface.current_revision_no})` : ""} and loads the guest list. Clients on the networks that use this connection can then sign in with their room number. Nothing is written to the PMS.`,
   };
   const pause: LifecycleMove = {
     to: "AUTH_DISABLED", label: "Pause room sign-in", variant: "danger",
     title: "Pause room sign-in through this connection?",
-    description: "The appliance stops using this connection and stops connecting to the PMS. Guests on the networks that use it can no longer sign in with their room number. Guests already online stay online, recorded stays are kept, and vouchers and guest accounts keep working. You can activate it again at any time.",
+    description: "The appliance stops using this connection and stops connecting to the PMS. Clients on the networks that use it can no longer sign in with their room number. Clients already online stay online, recorded stays are kept, and vouchers and client accounts keep working. You can activate it again at any time.",
   };
   const drain: LifecycleMove = {
     to: "DRAINING", label: "Wind down", variant: "secondary",
@@ -1125,7 +1125,7 @@ function TestConnectionButton({
         open={open}
         onOpenChange={setOpen}
         title={revision ? `Test version ${revision.revision_no}?` : "Test the connection?"}
-        description={`The appliance signs in to ${provider.label} with ${revision ? `draft version ${revision.revision_no}` : "the live configuration"} and reads a small sample of reservations. Nothing is written to the PMS and nothing changes for guests.`}
+        description={`The appliance signs in to ${provider.label} with ${revision ? `draft version ${revision.revision_no}` : "the live configuration"} and reads a small sample of reservations. Nothing is written to the PMS and nothing changes for clients.`}
         confirmLabel="Run test"
         busy={busy}
         error={pmsErrorText(err)}

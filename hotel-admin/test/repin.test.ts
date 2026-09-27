@@ -125,7 +125,7 @@ describe("repinPayload", () => {
 describe("repinOutcomeMessage", () => {
   it("says existing guests are unaffected when packages were updated", () => {
     expect(repinOutcomeMessage(2)).toContain("2 packages updated");
-    expect(repinOutcomeMessage(2)).toContain("Existing guest access is unchanged");
+    expect(repinOutcomeMessage(2)).toContain("Existing client access is unchanged");
     expect(repinOutcomeMessage(1)).toContain("1 package updated");
   });
 

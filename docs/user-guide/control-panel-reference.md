@@ -3,8 +3,8 @@
 **OneGate Central** (also called the Control Panel or Cloud Admin) is the vendor's console in the cloud. It
 answers five questions: *who is the customer, which site and appliance, is it activated, what does its licence
 allow, and is it healthy right now.* **Central is used for licensing, activation and fleet status only.** It
-never configures a hotel's guest networks, sign-in methods, packages or guests, and it cannot control an
-appliance remotely — those are run from **OneGate Hotel Admin** on each appliance (see
+never configures a site's guest networks, sign-in methods, packages or clients, and it cannot control an
+appliance remotely — those are run from **OneGate Admin Console** (formerly Hotel Admin) on each appliance (see
 [hotel-admin-reference.md](hotel-admin-reference.md)).
 
 The binding description of Central — states, lifecycle, API and roles — is
@@ -19,7 +19,7 @@ console's words for buttons and labels.
 ## Things that apply to every page
 
 - **Sign-in.** The login page is titled *OneGate Central*: email and password only. A Central login opens
-  nothing on an appliance, and a Hotel Admin login does not work here. If the session has ended you are returned
+  nothing on an appliance, and an Admin Console login does not work here. If the session has ended you are returned
   to the login page.
 - **The sidebar.** Five items: **Overview · Customers · Appliances · Licenses · System**. The button beside the
   OneGate mark collapses it to an icon rail and expands it again; the choice is remembered in that browser. On a
@@ -48,7 +48,7 @@ console's words for buttons and labels.
 | | Values |
 |---|---|
 | **Activation** | *Waiting for activation* (registered itself, needs an operator) · *Activating* (activated here; the appliance collects its certificate and licence on its next contact, normally within a minute) · *Activated* · *Retiring* (retirement signed, waiting for the appliance to confirm) · *Retired* (credentials dead; only the record remains) |
-| **Connection** | *Connected* (contacted Central in the last 5 minutes) · *Recently seen* (last 24 hours) · *Offline* (more than a day; guests are not affected) · *Never connected* |
+| **Connection** | *Connected* (contacted Central in the last 5 minutes) · *Recently seen* (last 24 hours) · *Offline* (more than a day; clients are not affected) · *Never connected* |
 | **License** | *No license* · *Active* · *Expiring* (30 days or fewer left) · *In grace period* (past its end date, still working until the grace days end) · *Expired* · *Suspended* · *Revoked* · *Replaced* (an older version in the licence history) |
 
 Central computes these; the console never works a state out for itself.
@@ -67,7 +67,7 @@ state; every number is a link to the list filtered to it.
 
 ## Customers — `/customers`
 
-The organisations that own hotels.
+The organisations that own sites.
 
 - **Shows:** Active / Archived / All, search, and the table Customer, Sites, Appliances, Active licenses, Needs
   attention.
@@ -79,7 +79,7 @@ Header actions: **Rename**, **Archive** / **Restore**, **Delete** (typed name + 
 customer still has sites or appliances). Tabs:
 
 - **Summary** — sites, appliances, active licences, what needs attention, customer since, status.
-- **Sites** — a site is one physical property. **New site**: Name, Time zone, Country (optional), Short code
+- **Sites** — a site is one physical location. **New site**: Name, Time zone, Country (optional), Short code
   (optional). Row actions **Edit**, **Archive** / **Restore**, **Delete** (typed confirmation + reason).
   Buildings, floors, SSIDs and guest networks are configured on the appliance, not here.
 - **Appliances** — this customer's appliances (same columns as the Appliances page).
@@ -97,7 +97,7 @@ Every appliance across customers. Appliances **waiting for activation** are list
   serial or hostname, Connection, License, Customer and Site.
 - **Table:** serial and hostname, customer and site, activation, connection, licence and last contact.
 - **Import activation request** — for an appliance without internet: upload the activation-request file saved
-  in its Hotel Admin (*Appliance & licence → Files from your OneGate vendor → Download activation request*). It then appears as *Waiting for activation*.
+  in its Admin Console (*Appliance & licence → Files from your OneGate vendor → Download activation request*). It then appears as *Waiting for activation*.
 - There is no manual "new appliance" and no enrollment token: appliances arrive by registering themselves (or by
   an imported activation request).
 
@@ -107,12 +107,12 @@ Everything about one appliance and every lifecycle action on it (all platform-ad
 
 - **Status** — activation, with the action that fits it:
   - *Waiting for activation* → **Activate**: *Where it is installed* (Customer — existing or **New customer…**;
-    Site — existing or new, with time zone) and *License* (**Guests online at once**, **Valid for** a number of
+    Site — existing or new, with time zone) and *License* (**Clients online at once**, **Valid for** a number of
     days or **Until a date**, **Grace period (days)**). One step signs the assignment and issues the licence.
   - *Activating* → **Activation package** (offline sites): the signed file (assignment + CA + licence) to upload
-    in the appliance's Hotel Admin. Valid for 7 days.
+    in the appliance's Admin Console. Valid for 7 days.
   - *Retiring* / *Retired* / *Marked for replacement* → what is happening and what is left to do.
-- **License** — current terms (guests online at once, valid until, grace period), **Issue license** or **Renew
+- **License** — current terms (clients online at once, valid until, grace period), **Issue license** or **Renew
   or change** (always a new signed version that replaces the current one), **Suspend** / **Resume**,
   **Revoke** (permanent; set a new licence to restore service) and **Offline license file**. **License
   history** lists every version. Suspending or revoking a licence does not cut the appliance off from Central.

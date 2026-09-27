@@ -57,7 +57,7 @@ export const isShippedLanguage = (code: string) => SHIPPED_LANGUAGES.some((l) =>
 
 /** The guest-facing strings, grouped the way they appear on the page rather than as one long list. */
 export const PORTAL_STRINGS: { group: string; key: string; english: string }[] = [
-  { group: "Navigation", key: "tab.guest", english: "Guest Login" },
+  { group: "Navigation", key: "tab.guest", english: "Client Login" },
   { group: "Navigation", key: "tab.account", english: "Account Login" },
   { group: "Navigation", key: "alt.title", english: "Or sign in with" },
   { group: "Navigation", key: "method.pms", english: "Room" },
@@ -68,14 +68,14 @@ export const PORTAL_STRINGS: { group: string; key: string; english: string }[] =
   { group: "Navigation", key: "method.sms", english: "Phone" },
   { group: "Navigation", key: "method.social", english: "Social" },
 
-  { group: "Guest Login", key: "pms.room", english: "Room Number" },
-  { group: "Guest Login", key: "pms.secondary", english: "Password" },
-  { group: "Guest Login", key: "pms.prompt.lastname", english: "Last name on the reservation" },
-  { group: "Guest Login", key: "pms.prompt.firstname", english: "First name on the reservation" },
-  { group: "Guest Login", key: "pms.prompt.reservation", english: "Reservation / confirmation number" },
-  { group: "Guest Login", key: "pms.prompt.any", english: "First name, last name, or reservation number" },
-  { group: "Guest Login", key: "pms.prompt.either", english: "Last name OR reservation number" },
-  { group: "Guest Login", key: "pms.choose", english: "Choose your internet package" },
+  { group: "Client Login", key: "pms.room", english: "Room Number" },
+  { group: "Client Login", key: "pms.secondary", english: "Password" },
+  { group: "Client Login", key: "pms.prompt.lastname", english: "Last name on the reservation" },
+  { group: "Client Login", key: "pms.prompt.firstname", english: "First name on the reservation" },
+  { group: "Client Login", key: "pms.prompt.reservation", english: "Reservation / confirmation number" },
+  { group: "Client Login", key: "pms.prompt.any", english: "First name, last name, or reservation number" },
+  { group: "Client Login", key: "pms.prompt.either", english: "Last name OR reservation number" },
+  { group: "Client Login", key: "pms.choose", english: "Choose your internet package" },
 
   { group: "Account Login", key: "account.personal", english: "Use Personal Account" },
   { group: "Account Login", key: "voucher.label", english: "Voucher Code" },

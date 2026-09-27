@@ -88,7 +88,7 @@ export function TrafficCard({ snap }: { snap: OverviewSnapshot | null }) {
   return (
     <BlockCard
       title="Internet traffic"
-      description={`Measured from usage records, ${snap ? rangeWords[snap.range] : ""}. Download is what guests pulled from the internet.`}
+      description={`Measured from usage records, ${snap ? rangeWords[snap.range] : ""}. Download is what clients pulled from the internet.`}
       href="/usage"
       linkLabel="Usage"
     >
@@ -168,7 +168,7 @@ export function SignInOutcomesCard({ snap }: { snap: OverviewSnapshot | null }) 
   return (
     <BlockCard
       title="Sign-in outcomes"
-      description={snap ? `Successful sign-ins by method, and room sign-in checks, ${rangeWords[snap.range]}. No guest is named.` : undefined}
+      description={snap ? `Successful sign-ins by method, and room sign-in checks, ${rangeWords[snap.range]}. No client is named.` : undefined}
       href="/guest-signin-attempts"
       linkLabel="Attempts"
     >
@@ -245,7 +245,7 @@ export function SignInPatternCard({ snap }: { snap: OverviewSnapshot | null }) {
   const hourly = snap?.range === "24h";
   return (
     <BlockCard
-      title="When guests sign in"
+      title="When clients sign in"
       description={hourly ? "Sign-ins per hour, by method." : "Sign-ins by day of week and hour, in the appliance's local time."}
     >
       {!snap || !g ? (
@@ -279,7 +279,7 @@ export function PackagesCard({ snap }: { snap: OverviewSnapshot | null }) {
   const p = snap?.packages;
   const t = snap?.traffic;
   return (
-    <BlockCard title="Packages in use" description="What guests are on right now, and what was given out." href="/internet-packages" linkLabel="Packages">
+    <BlockCard title="Packages in use" description="What clients are on right now, and what was given out." href="/internet-packages" linkLabel="Packages">
       {!snap || !p ? (
         <Skeleton className="h-48" />
       ) : !p.available ? (
@@ -289,7 +289,7 @@ export function PackagesCard({ snap }: { snap: OverviewSnapshot | null }) {
           <section className="space-y-2">
             <h3 className="text-xs font-medium text-muted-foreground">Active now</h3>
             {p.active_now.length === 0 ? (
-              <EmptyState className="py-6" icon={<Package />} title="No active packages" hint="No guest currently holds an internet package." />
+              <EmptyState className="py-6" icon={<Package />} title="No active packages" hint="No client currently holds an internet package." />
             ) : (
               <BarList items={p.active_now.map((r) => ({ key: r.package_id || "none", name: r.name || "Without a package", hint: r.code && r.code !== r.name ? r.code : undefined, value: r.count }))} />
             )}
@@ -339,7 +339,7 @@ export function PmsCard({ snap, canCharges }: { snap: OverviewSnapshot | null; c
   return (
     <BlockCard
       title="Property management system"
-      description="Whether a guest can sign in with their room number and name."
+      description="Whether a client can sign in with their room number and name."
       href="/pms-interfaces"
       linkLabel="PMS connection"
     >
@@ -350,7 +350,7 @@ export function PmsCard({ snap, canCharges }: { snap: OverviewSnapshot | null; c
           className="py-8"
           icon={<Hotel />}
           title="No PMS connection is configured"
-          hint="Guests can still sign in with vouchers or guest accounts. Room sign-in needs a PMS."
+          hint="Clients can still sign in with vouchers or client accounts. Room sign-in needs a PMS."
           action={<Link href="/pms-interfaces" className={buttonVariants({ variant: "secondary", size: "sm" })}>Set one up</Link>}
         />
       ) : (
@@ -549,7 +549,7 @@ export function DhcpDnsCard({ snap }: { snap: OverviewSnapshot | null }) {
   const d = snap?.dhcp;
   const dns = snap?.dns;
   return (
-    <BlockCard title="Addresses and names" description="The DHCP server and the DNS resolver guests use." href="/network/dhcp" linkLabel="DHCP">
+    <BlockCard title="Addresses and names" description="The DHCP server and the DNS resolver clients use." href="/network/dhcp" linkLabel="DHCP">
       {!snap || !d || !dns ? (
         <Skeleton className="h-48" />
       ) : (

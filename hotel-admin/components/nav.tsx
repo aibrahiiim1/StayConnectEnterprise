@@ -90,15 +90,15 @@ const SECTIONS: Section[] = [
     ],
   },
   {
-    title: "Guests",
+    title: "Clients",
     items: [
-      { href: "/stays",          label: "Stays",           icon: BedDouble,    resource: "pms-stays", keywords: "rooms reservations in house occupancy guest list" },
-      { href: "/guest-accounts", label: "Guest accounts",  icon: KeyRound, resource: "guest-accounts", keywords: "username password login credentials voucher" },
-      { href: "/sessions",       label: "Active sessions", icon: Monitor,  resource: "sessions", keywords: "online now devices connected who is on wifi disconnect" },
-      { href: "/usage",          label: "Usage explorer",  icon: ChartColumn, resource: "usage", keywords: "data used quota dispute how much room device mac gigabytes consumption investigate" },
-      { href: "/guest-device-self-service", label: "Guest devices", icon: Smartphone, resource: "guest-device-self-service", keywords: "phone laptop remove device" },
-      { href: "/online-time",    label: "Online-time budgets", icon: Hourglass, resource: "sessions", capability: "sessions.aggregate-time", keywords: "time remaining allowance hours" },
-      { href: "/post-stay",      label: "Post-stay access", icon: CalendarClock, resource: "post-stay-profiles", keywords: "after departure loyalty" },
+      { href: "/stays",          label: "Stays",           icon: BedDouble,    resource: "pms-stays", keywords: "rooms reservations in house occupancy guest list guests" },
+      { href: "/guest-accounts", label: "Client accounts",  icon: KeyRound, resource: "guest-accounts", keywords: "username password login credentials voucher guest accounts" },
+      { href: "/sessions",       label: "Active sessions", icon: Monitor,  resource: "sessions", keywords: "online now devices connected who is on wifi disconnect guests" },
+      { href: "/usage",          label: "Usage explorer",  icon: ChartColumn, resource: "usage", keywords: "data used quota dispute how much room device mac gigabytes consumption investigate guests" },
+      { href: "/guest-device-self-service", label: "Client devices", icon: Smartphone, resource: "guest-device-self-service", keywords: "phone laptop remove device guest devices" },
+      { href: "/online-time",    label: "Online-time budgets", icon: Hourglass, resource: "sessions", capability: "sessions.aggregate-time", keywords: "time remaining allowance hours guests" },
+      { href: "/post-stay",      label: "Post-stay access", icon: CalendarClock, resource: "post-stay-profiles", keywords: "after departure loyalty guests" },
     ],
   },
   {
@@ -116,8 +116,8 @@ const SECTIONS: Section[] = [
       { href: "/pms-interfaces",       label: "PMS connection",       icon: Plug,  resource: "pms-interfaces", keywords: "protel fias connect sync resync opera status" },
       { href: "/pms-routing",          label: "Network routing",      icon: Route, resource: "pms-routing", keywords: "which pms per network vlan mapping" },
       { href: "/stay-events",          label: "PMS activity",         icon: Inbox,   resource: "pms-events", keywords: "feed messages check in out log" },
-      { href: "/pms-resolutions",      label: "Guest sign-in checks", icon: ShieldCheck,   resource: "pms-resolutions", keywords: "room verification failures evidence" },
-    { href: "/guest-signin-attempts", label: "Guest sign-in attempts", icon: UserX, resource: "guest-signin-attempts", keywords: "attempt failed reason room typed credential mismatch why cannot connect" },
+      { href: "/pms-resolutions",      label: "Client sign-in checks", icon: ShieldCheck,   resource: "pms-resolutions", keywords: "room verification failures evidence guest sign-in checks" },
+    { href: "/guest-signin-attempts", label: "Client sign-in attempts", icon: UserX, resource: "guest-signin-attempts", keywords: "attempt failed reason room typed credential mismatch why cannot connect guest sign-in attempts" },
       // RECONCILIATION IS NOT DAY-TO-DAY WORK, so it is not day-to-day navigation.
       //
       // Both reconciliation screens are diagnostics. Neither has an action on it, both describe machinery
@@ -139,15 +139,15 @@ const SECTIONS: Section[] = [
     ],
   },
   {
-    title: "Guest portal",
+    title: "Client Portal",
     items: [
       // Sign-in methods leads the group: which ways a guest may prove who they are is the first thing an
       // operator sets up on the portal, and it was previously not settable anywhere in the product.
-      { href: "/sign-in-methods",  label: "Sign-in methods", icon: LogIn,    resource: "auth-methods", keywords: "room number voucher otp sms email social" },
-      { href: "/portal-branding",  label: "Portal settings", icon: Paintbrush, resource: "portal-branding", keywords: "branding logo background colours terms languages translations" },
-      { href: "/walled-garden",    label: "Allowed sites", icon: Globe,     resource: "walled-garden", keywords: "whitelist domains before login" },
-      { href: "/social-providers", label: "Social login",  icon: AtSign,   resource: "social-providers", keywords: "google apple facebook microsoft oauth" },
-      { href: "/notifications",    label: "Email & SMS",   icon: MessageSquare,       resource: "notification-providers", keywords: "sendgrid twilio ses otp delivery" },
+      { href: "/sign-in-methods",  label: "Sign-in methods", icon: LogIn,    resource: "auth-methods", keywords: "room number voucher otp sms email social guest portal" },
+      { href: "/portal-branding",  label: "Portal settings", icon: Paintbrush, resource: "portal-branding", keywords: "branding logo background colours terms languages translations guest portal" },
+      { href: "/walled-garden",    label: "Allowed sites", icon: Globe,     resource: "walled-garden", keywords: "whitelist domains before login guest portal" },
+      { href: "/social-providers", label: "Social login",  icon: AtSign,   resource: "social-providers", keywords: "google apple facebook microsoft oauth guest portal" },
+      { href: "/notifications",    label: "Email & SMS",   icon: MessageSquare,       resource: "notification-providers", keywords: "sendgrid twilio ses otp delivery guest portal" },
     ],
   },
   {
@@ -332,7 +332,7 @@ export function Nav({
       >
         {/* The mark is drawn rather than loaded: one fewer asset to ship to an appliance, and it inherits the
             brand token so it is never out of step with the rest of the product. */}
-        <OneGateLockup product="Hotel Admin" collapsed={collapsed} inverse className={collapsed ? undefined : "flex-1"} />
+        <OneGateLockup product="Admin Console" collapsed={collapsed} inverse className={collapsed ? undefined : "flex-1"} />
         {onToggleCollapsed && (
           // ONE control, and its accessible name states what activating it will DO, which is what a screen
           // reader user needs — not what the current state is. aria-expanded carries the state.

@@ -140,7 +140,7 @@ describe("Guest networks", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Disable Guest WiFi" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Take Guest WiFi offline?")).toBeTruthy();
-    expect(within(dialog).getByText(/Nothing happens to guests until you apply/)).toBeTruthy();
+    expect(within(dialog).getByText(/Nothing happens to clients until you apply/)).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: "Take offline" }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("/network/guest-networks/net-1/disable"));
   });

@@ -32,14 +32,14 @@ export function SurfaceNotEnabled({ label }: { label: string }) {
                 <HelpTip title={label}>
                   <HelpSection title="Why this screen is empty">
                     <p>
-                      The feature exists in OneGate but is not switched on for this property, so there is nothing
-                      here to show or to fix. None of guest internet, sign-in, the PMS connection, sessions or
+                      The feature exists in OneGate but is not switched on for this site, so there is nothing
+                      here to show or to fix. None of client internet, sign-in, the PMS connection, sessions or
                       accounting depends on this screen.
                     </p>
                   </HelpSection>
                   <HelpSection title="Turning it on">
                     <p>
-                      If this property should have it, ask Semantics support to enable it. It is a deployment decision
+                      If this site should have it, ask Semantics support to enable it. It is a deployment decision
                       rather than something an operator can turn on.
                     </p>
                   </HelpSection>
@@ -47,7 +47,7 @@ export function SurfaceNotEnabled({ label }: { label: string }) {
               </div>
               <p className="text-sm font-medium">Not enabled on this appliance</p>
               <p className="text-sm text-muted-foreground">
-                This is a configuration of the appliance, not a fault. Guest internet, sign-in, the PMS connection,
+                This is a configuration of the appliance, not a fault. Client internet, sign-in, the PMS connection,
                 sessions and accounting are unaffected.
               </p>
             </div>

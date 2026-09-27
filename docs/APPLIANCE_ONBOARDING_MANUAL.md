@@ -1,6 +1,6 @@
 # Appliance Onboarding Manual (UI-only)
 
-The complete production process to bring a new hotel online. It uses **only** two
+The complete production process to bring a new site online. It uses **only** two
 web consoles — no CLI, SQL, SSH, environment editing, certificate copying, or
 UUIDs. Both consoles refresh themselves.
 
@@ -17,9 +17,9 @@ UUIDs. Both consoles refresh themselves.
 | Console | URL | Login |
 |---------|-----|-------|
 | **OneGate Central** (Control Panel) | `https://sc-central.echofusion.com` | your Central operator account |
-| **Appliance Hotel Admin** | `https://hotel.stayconnect.local` or the appliance's management IP | your Hotel-IT operator |
+| **Appliance Admin Console** (formerly Hotel Admin) | `https://hotel.stayconnect.local` or the appliance's management IP | your Hotel-IT operator |
 
-The Hotel Admin is reachable on the **management network only** (guests are firewalled
+The Admin Console is reachable on the **management network only** (clients are firewalled
 off). If your workstation can't resolve `hotel.stayconnect.local`, use the appliance's
 management IP.
 
@@ -30,18 +30,18 @@ management IP.
    switch carrying your guest VLANs. Power on.
 2. On first boot the box generates its own identity, detects its hardware, and — if
    it has internet — **registers itself with Central automatically**, retrying until
-   Central answers. There is nothing to type on the appliance. Hotel Admin →
+   Central answers. There is nothing to type on the appliance. Admin Console →
    **System → Appliance & licence** shows *Waiting for activation* and the serial
    number.
 
-## B. Central — activate the hotel (one step)
+## B. Central — activate the site (one step)
 3. **Appliances** → the appliance is listed first as **Waiting for activation**
    (match the serial). Open it and click **Activate**:
    - **Customer** — select, or **New customer…**.
-   - **Site** — select, or create it (one site = one physical property).
-   - **Guests online at once** (the licensed capacity, appliance-wide).
+   - **Site** — select, or create it (one site = one physical location).
+   - **Clients online at once** (the licensed capacity, appliance-wide).
    - **Valid for** (days, or an end date).
-   - **Grace Period** (days the hotel keeps serving after expiry).
+   - **Grace Period** (days the site keeps serving after expiry).
 4. Confirming signs the assignment and issues the hardware-bound signed license in
    one transaction; the certificate is issued when the appliance asks for it. There
    is **no plan or subscription step** — the signed appliance license is the
@@ -53,26 +53,26 @@ management IP.
    **Activated**, normally within a minute.
 
 ## D. Confirm
-- **Hotel Admin → System → Appliance & licence:** Activation **Activated** (customer
+- **Admin Console → System → Appliance & licence:** Activation **Activated** (customer
   and site shown by name), Licence **Active**, OneGate Central **Connected**.
 - **Central → Appliances:** **Activated**, connection **Connected**, license
   **Active** with the capacity and validity you set.
 
 Every action on either console shows success/failure clearly, is idempotent
 (re-clicking creates no duplicate), requires password step-up where defined, and
-writes audit evidence. **Check now** in Hotel Admin makes the appliance contact
+writes audit evidence. **Check now** in the Admin Console makes the appliance contact
 Central immediately.
 
 ---
 
 ## Appendix — offline activation (no internet at the site)
 
-1. **Hotel Admin → System → Appliance & licence → Files from your OneGate vendor →
+1. **Admin Console → System → Appliance & licence → Files from your OneGate vendor →
    Offline activation → Download activation request.**
 2. **Central → Appliances → Import activation request** → the appliance appears as
    *Waiting for activation* → **Activate** it as in section B → **Activation
    package** on its page (valid 7 days).
-3. **Hotel Admin → same place → Upload activation package.** The appliance verifies
+3. **Admin Console → same place → Upload activation package.** The appliance verifies
    every signature and its hardware binding before accepting it.
 
 There are no enrollment tokens.
@@ -89,7 +89,7 @@ There are no enrollment tokens.
 - **Another customer:** not a move. **Retire** it in Central, factory-reset it on site
   ([DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md](DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md)), then activate it
   for the new customer when it shows *Waiting for activation* again.
-- If Hotel Admin shows **Removed from OneGate Central**, the appliance's record was deleted in Central after
+- If Admin Console shows **Removed from OneGate Central**, the appliance's record was deleted in Central after
   it had served a customer; only a factory-clean install and a new activation bring it back.
 
 ---

@@ -6,7 +6,7 @@
   (hotel-admin/app/tokens.css, cloud-admin/app/tokens.css); a unit test in each console fails if a copy
   drifts. The guest portal cannot import a stylesheet (it is served by portald with no external resources),
   so its default look mirrors these values in data-plane/cmd/portald/templates.go — see
-  design-system/README.md, "Guest portal".
+  design-system/README.md, "Client Portal".
 
   Every colour is an HSL triple behind a ROLE name, consumed as `hsl(var(--role) / <alpha>)` by Tailwind.
   A theme is a set of token values and nothing else: no component names a colour.

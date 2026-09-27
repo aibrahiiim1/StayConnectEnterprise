@@ -17,7 +17,7 @@ describe("PageHeader help", () => {
         description="Short line."
         help={
           <HelpSection title="What a service plan is">
-            <p>A plan reaches guests only through the packages that hand it out.</p>
+            <p>A plan reaches clients only through the packages that hand it out.</p>
           </HelpSection>
         }
       />,
@@ -26,12 +26,12 @@ describe("PageHeader help", () => {
     const button = screen.getByRole("button", { name: "Tips: Service plans" });
     expect(button).toBeInTheDocument();
     // Closed until asked for.
-    expect(screen.queryByText(/reaches guests only through the packages/i)).toBeNull();
+    expect(screen.queryByText(/reaches clients only through the packages/i)).toBeNull();
 
     await user.click(button);
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("What a service plan is")).toBeInTheDocument();
-    expect(within(dialog).getByText(/reaches guests only through the packages/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/reaches clients only through the packages/i)).toBeInTheDocument();
   });
 
   it("shows no lightbulb when a page has no help", () => {
