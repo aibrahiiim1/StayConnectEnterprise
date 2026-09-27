@@ -11,7 +11,6 @@ Linux-based inline gateway appliance + cloud control plane — an enterprise alt
 | `hotel-admin`   | OneGate Hotel Admin — the Next.js console served by each appliance   |
 | `cloud-admin`   | OneGate Central — the vendor's Next.js licensing console              |
 | `design-system` | The OneGate design system: canonical tokens and the component and pattern guide shared by all three front-ends |
-| `web-admin`     | The pre-split admin UI (legacy, out of scope for the OneGate front-ends) |
 | `deploy`        | docker-compose stacks, nftables templates, appliance image pipeline  |
 | `docs`          | Architecture, data model, API specs                                  |
 | `scripts`       | Dev helpers                                                          |

@@ -60,7 +60,7 @@ If you add a site that does need its own log file, create it first with
 |-----------------------|-----------------------------------|
 | `portal.example.com`  | `127.0.0.1:8380` (portald)        |
 | `api.example.com`     | `127.0.0.1:8080` (ctrlapi)        |
-| `admin.example.com`   | `127.0.0.1:3000` (web-admin)      |
+| `admin.example.com`   | `127.0.0.1:3000` (cloud-admin)    |
 
 Every response carries:
 - `Strict-Transport-Security: max-age=31536000; includeSubDomains`
@@ -81,7 +81,7 @@ HTTP → HTTPS is automatic (Caddy's default redirect).
    `:80`; `:443` is the whole point).
 3. A real email address in the Caddyfile global block (used by Let's
    Encrypt for renewal warnings).
-4. portald/ctrlapi/web-admin running and bound to `127.0.0.1` — NEVER
+4. portald/ctrlapi/cloud-admin running and bound to `127.0.0.1` — NEVER
    expose their raw ports to the internet.
 
 ## Install
@@ -145,15 +145,9 @@ public URLs updated:
    and add your admin hostname to `CTRLAPI_ALLOW_ORIGINS`. The cookie
    must be secure-flagged once it travels over real HTTPS or browsers
    will refuse it.
-2. **web-admin**: no change needed — it already uses relative URLs and
-   honours `X-Forwarded-*`.
-3. **Google OAuth**: in the Google Cloud console, update the authorised
-   redirect URI of each `social_oauth_providers` row to
-   `https://portal.example.com/auth/social/callback`.
-4. **Stripe**: in the Stripe dashboard, set the webhook endpoint to
-   `https://api.example.com/v1/webhooks/stripe/{tenant_id}` (one per
-   tenant). The webhook_secret stays identical; only the URL changes.
-5. **scd**: no change needed — the appliance's RPC path is still NATS.
+2. **cloud-admin**: no change needed — it uses relative URLs and honours `X-Forwarded-*`.
+3. **Google sign-in for guests**: the authorised redirect URI of the hotel's social sign-in provider (configured
+   on the appliance in Hotel Admin) must be `https://portal.example.com/auth/social/callback`.
 
 ## Dev-mode: `tls internal`
 
