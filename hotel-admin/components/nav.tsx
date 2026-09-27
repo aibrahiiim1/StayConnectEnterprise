@@ -99,6 +99,18 @@ const SECTIONS: Section[] = [
     ],
   },
   {
+    title: "Client Portal",
+    items: [
+      // Sign-in methods leads the group: which ways a guest may prove who they are is the first thing an
+      // operator sets up on the portal, and it was previously not settable anywhere in the product.
+      { href: "/sign-in-methods",  label: "Sign-in methods", icon: LogIn,    resource: "auth-methods", keywords: "room number voucher otp sms email social guest portal" },
+      { href: "/portal-branding",  label: "Portal settings", icon: Paintbrush, resource: "portal-branding", keywords: "branding logo background colours terms languages translations guest portal" },
+      { href: "/walled-garden",    label: "Allowed sites", icon: Globe,     resource: "walled-garden", keywords: "whitelist domains before login guest portal" },
+      { href: "/social-providers", label: "Social login",  icon: AtSign,   resource: "social-providers", keywords: "google apple facebook microsoft oauth guest portal" },
+      { href: "/notifications",    label: "Email & SMS",   icon: MessageSquare,       resource: "notification-providers", keywords: "sendgrid twilio ses otp delivery guest portal" },
+    ],
+  },
+  {
     // THE HOTEL MODULE: every screen whose meaning depends on hospitality or a PMS, in one place
     // (docs/PRODUCT_TERMINOLOGY.md). It replaces the former "Property management system" and "Charges"
     // sections; those words stay in the keywords so the filter still finds them.
@@ -128,18 +140,6 @@ const SECTIONS: Section[] = [
       // them worth looking at.
       { href: "/pms-source-conflicts", label: "Duplicate sources",    icon: Layers, resource: "pms-source-conflicts", keywords: "conflict two interfaces same room hotel" },
       { href: "/stay-transfers",       label: "Cross-PMS transfer",   icon: ArrowLeftRight,   resource: "stay-transfers", keywords: "move stay between systems hotel" },
-    ],
-  },
-  {
-    title: "Client Portal",
-    items: [
-      // Sign-in methods leads the group: which ways a guest may prove who they are is the first thing an
-      // operator sets up on the portal, and it was previously not settable anywhere in the product.
-      { href: "/sign-in-methods",  label: "Sign-in methods", icon: LogIn,    resource: "auth-methods", keywords: "room number voucher otp sms email social guest portal" },
-      { href: "/portal-branding",  label: "Portal settings", icon: Paintbrush, resource: "portal-branding", keywords: "branding logo background colours terms languages translations guest portal" },
-      { href: "/walled-garden",    label: "Allowed sites", icon: Globe,     resource: "walled-garden", keywords: "whitelist domains before login guest portal" },
-      { href: "/social-providers", label: "Social login",  icon: AtSign,   resource: "social-providers", keywords: "google apple facebook microsoft oauth guest portal" },
-      { href: "/notifications",    label: "Email & SMS",   icon: MessageSquare,       resource: "notification-providers", keywords: "sendgrid twilio ses otp delivery guest portal" },
     ],
   },
   {
