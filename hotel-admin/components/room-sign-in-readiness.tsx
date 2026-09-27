@@ -79,7 +79,7 @@ export function RoomSignInReadinessCallout({ readiness }: { readiness: RoomSignI
       tone="warning"
       title={readiness.state === "down"
         ? "Room sign-in is not working at the moment"
-        : "Room sign-in is not working on some guest networks"}
+        : "Room sign-in is not working on some client networks"}
     >
       {readiness.state === "down" ? (
         <p>

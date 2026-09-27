@@ -245,12 +245,15 @@ export default function SessionsPage() {
             </Explain>
           }
         />
-        <StatCard
-          label="Rooms online"
-          value={rows ? summary.rooms.toLocaleString() : "—"}
-          icon={<Hotel />}
-          hint="Distinct rooms signed in with a room number"
-        />
+        {/* Rooms are a Hotel idea: the tile appears only when somebody is actually signed in with a room. */}
+        {rows && summary.rooms > 0 && (
+          <StatCard
+            label="Rooms online"
+            value={summary.rooms.toLocaleString()}
+            icon={<Hotel />}
+            hint="Distinct rooms signed in with a room number"
+          />
+        )}
         <StatCard
           label="Data in this list"
           value={rows ? formatBytes(summary.bytes) : "—"}
