@@ -5,8 +5,9 @@
 //	auto-signed -> ACTIVATED -> mTLS hello + certificate-only assignment -> licence suspend/resume/set/
 //	expiry/grace (appliance never cut off) -> rebind keeps terms -> offline files -> roles -> move (same
 //	customer only; licence carried with the same terms) -> retire (normal + emergency) -> delete -> a
-//	retired identity cannot register again -> replacement retires the old box through its signed ack;
-//	plus replay/body-tamper rejection, step-up, audit, /metrics.
+//	retired identity cannot register again -> replacement retires the old box through its signed ack ->
+//	an appliance reporting holds_customer_id (identity reset without factory reset) activates only for that
+//	customer, online and offline; plus replay/body-tamper rejection, step-up, audit, /metrics.
 //
 // It creates its own fixtures (serials ACC-*, customers "Acceptance *") and needs:
 //
@@ -83,6 +84,7 @@ type appliance struct {
 	tlsPriv ed25519.PrivateKey
 	certPEM string
 	caPEM   string
+	holds   string // holds_customer_id it reports: the customer whose data it still holds ("" = none)
 }
 
 func main() {
@@ -349,6 +351,79 @@ func main() {
 		}
 	}
 
+	// ---------------- an appliance that still holds a customer's data (identity reset, no factory reset) ----------------
+	// It registers with a new key but reports holds_customer_id inside its signed body. Central keeps it
+	// WAITING, shows whose data it holds, and activates it for that customer or not at all.
+	code, body = do(op, "POST", "/cloud/v1/customers", jb(map[string]any{"name": "Acceptance Other " + run}))
+	custY := field(body, "id")
+	check((code == 200 || code == 201) && custY != "", "a second customer exists (HTTP %d)", code)
+	a5 := newAppliance("ACC-A5-" + run)
+	a5.holds = custID
+	code, _ = a5.register()
+	row = get(op, "/cloud/v1/appliances/"+a5.id)
+	check(code == 200 && field(row, "activation") == "waiting", "an identity-reset appliance registers as WAITING (HTTP %d)", code)
+	custName := field(get(op, "/cloud/v1/customers/"+custID), "name")
+	check(field(row, "holds_customer_id") == custID && custName != "" && field(row, "holds_customer_name") == custName,
+		"its row names the customer whose data it still holds (%s / %s)", field(row, "holds_customer_id"), field(row, "holds_customer_name"))
+	// The field is inside the signed body: stripping it from a request signed with it is refused.
+	signedBody := a5.registerBody()
+	tok5 := claimsToken(a5.priv, applianceauth.KeyID(a5.priv.Public().(ed25519.PublicKey)), "POST", "/v1/appliances/register", signedBody)
+	a5.holds = ""
+	code, _ = rawSignedBody("POST", "/v1/appliances/register", tok5, a5.registerBody())
+	check(code == 401, "holds_customer_id cannot be stripped from a signed registration (HTTP %d)", code)
+	check(field(get(op, "/cloud/v1/appliances/"+a5.id), "holds_customer_id") == custID, "and the stored value is unchanged")
+	a5.holds = custID
+	code, body = do(op, "POST", "/cloud/v1/appliances/"+a5.id+"/activate", activateBody(custY, "", "", "Other site "+run))
+	check(code == 409 && field(body, "error") == "holds_other_customer_data" &&
+		field(body, "message") == "This appliance still holds another customer's data. Factory-reset it before activating it for a different customer.",
+		"activating it for ANOTHER customer is refused with an operator sentence (HTTP %d %s)", code, trunc(body))
+	code, body = do(op, "POST", "/cloud/v1/appliances/"+a5.id+"/activate", activateBody("", "Acceptance Inline "+run, "", "Inline "+run))
+	check(code == 409 && field(body, "error") == "holds_other_customer_data", "or for a customer created inline (HTTP %d)", code)
+	check(field(get(op, "/cloud/v1/appliances/"+a5.id), "activation") == "waiting" &&
+		!strings.Contains(get(op, "/cloud/v1/customers?q=Acceptance+Inline+"+run), "Acceptance Inline "+run),
+		"a refused activation changed nothing (still WAITING, no inline customer created)")
+	// A customer deleted from Central is still another customer's data.
+	a6 := newAppliance("ACC-A6-" + run)
+	a6.holds = "00000000-0000-4000-8000-00000000dead"
+	a6.register()
+	row = get(op, "/cloud/v1/appliances/"+a6.id)
+	check(field(row, "holds_customer_id") == a6.holds && field(row, "holds_customer_name") == "",
+		"an appliance can hold a customer Central no longer knows (name is null)")
+	code, body = do(op, "POST", "/cloud/v1/appliances/"+a6.id+"/activate", activateBody(custID, "", annex, ""))
+	check(code == 409 && field(body, "error") == "holds_other_customer_data", "and it is refused for any existing customer (HTTP %d)", code)
+	// Registering again replaces the value; after a real factory reset the appliance reports none.
+	a6.holds = ""
+	code, _ = a6.register()
+	check(code == 200 && field(get(op, "/cloud/v1/appliances/"+a6.id), "holds_customer_id") == "",
+		"a registration without holds_customer_id clears it (HTTP %d)", code)
+	code, _ = do(op, "POST", "/cloud/v1/appliances/"+a6.id+"/activate", activateBody(custY, "", "", "Y main "+run))
+	check(code == 200, "an appliance holding nothing activates for any customer (HTTP %d)", code)
+	// Same customer: legitimate breakglass recovery.
+	code, body = do(op, "POST", "/cloud/v1/appliances/"+a5.id+"/activate", activateBody(custID, "", annex, ""))
+	check(code == 200 && field(body, "customer_id") == custID, "the appliance activates for the customer whose data it holds (HTTP %d %s)", code, trunc(body))
+
+	// Offline: the activation request carries the same signed field and the import applies the same rule.
+	a7 := newAppliance("ACC-A7-" + run)
+	req7 := &activation.Request{SchemaVersion: activation.SchemaVersion, RequestID: "req7-" + run, Serial: a7.serial,
+		PublicKey: b64(a7.priv.Public().(ed25519.PublicKey)), WANMAC: "02:00:00:00:07:01", CreatedAt: time.Now().Unix(),
+		Nonce: "n7-" + run, HoldsCustomerID: custID}
+	activation.SignRequest(a7.priv, req7)
+	tampered := *req7
+	tampered.HoldsCustomerID = ""
+	code, _ = do(op, "POST", "/cloud/v1/offline-activation/requests", jb(tampered))
+	if code == 503 {
+		ok("offline holds_customer_id: vendor key not configured on this ctrlapi (503) — skipped")
+	} else {
+		check(code == 400, "an activation request whose holds_customer_id was stripped is refused (HTTP %d)", code)
+		code, body = do(op, "POST", "/cloud/v1/offline-activation/requests", jb(req7))
+		a7.id = field(body, "id")
+		check(code == 200 && field(body, "holds_customer_id") == custID, "an imported request records the customer it holds (HTTP %d)", code)
+		code, body = do(op, "POST", "/cloud/v1/appliances/"+a7.id+"/activate", activateBody(custY, "", "", "Y offline "+run))
+		check(code == 409 && field(body, "error") == "holds_other_customer_data", "and it cannot be activated for another customer (HTTP %d)", code)
+		code, _ = do(op, "POST", "/cloud/v1/appliances/"+a7.id+"/activate", activateBody(custID, "", annex, ""))
+		check(code == 200, "but can for the customer it holds (HTTP %d)", code)
+	}
+
 	// ---------------- system ----------------
 	check(strings.Contains(get(op, "/cloud/v1/trust"), `"assignment_keys"`), "trust & keys")
 	check(strings.Contains(get(op, "/cloud/v1/audit?action=appliance.activated"), "appliance.activated"), "platform audit filters by action")
@@ -441,10 +516,18 @@ func newKey() ed25519.PrivateKey { _, p, _ := ed25519.GenerateKey(rand.Reader); 
 
 func newAppliance(serial string) *appliance { return &appliance{serial: serial, priv: newKey()} }
 
-func (a *appliance) registerWith(signer ed25519.PrivateKey) (int, string) {
+func (a *appliance) registerBody() []byte {
 	pub := a.priv.Public().(ed25519.PublicKey)
-	body := jb(map[string]any{"serial": a.serial, "wan_mac": "02:00:00:aa:bb:01", "lan_mac": "02:00:00:aa:bb:02",
-		"hardware_fingerprint": "HWF-" + a.serial, "hostname": "acc", "model": "acceptance", "public_key": b64(pub)})
+	m := map[string]any{"serial": a.serial, "wan_mac": "02:00:00:aa:bb:01", "lan_mac": "02:00:00:aa:bb:02",
+		"hardware_fingerprint": "HWF-" + a.serial, "hostname": "acc", "model": "acceptance", "public_key": b64(pub)}
+	if a.holds != "" {
+		m["holds_customer_id"] = a.holds
+	}
+	return jb(m)
+}
+
+func (a *appliance) registerWith(signer ed25519.PrivateKey) (int, string) {
+	body := a.registerBody()
 	spub := signer.Public().(ed25519.PublicKey)
 	tok := claimsToken(signer, applianceauth.KeyID(spub), "POST", "/v1/appliances/register", body)
 	return rawSignedBody("POST", "/v1/appliances/register", tok, body)
