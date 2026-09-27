@@ -33,9 +33,12 @@ Derived labels follow the same rule: *Client accounts*, *Client devices*, *Clien
 name `Visitor pass`, a network `Client Wi-Fi`), never rooms, stays or hotel names. Hotel screens may use hotel
 examples.
 
-**Usage explorer** answers by **access source** — the thing that granted access, which is exactly one of: a
-**client account**, a **voucher**, an **email, phone or social sign-in**, or a **Hotel room/stay** (the
-entitlement's subject, `ent_one_subject`). Room and stay detail appears only for a Hotel room/stay source.
+**Usage explorer** answers by **access source** — the thing that granted access, which is the entitlement's
+subject (`ent_one_subject`): a **client account**, a **voucher**, a **Hotel room/stay**, or an email, phone or
+social sign-in. The first three are listed and searchable under *By access source*; room and stay detail
+appears only for a Hotel room/stay source. Email, phone and social sign-ins are **not** listed there, because
+their identities live in `guest_principals`/`guest_principal_identities`, which the Admin Console's API is
+deliberately not granted to read; their devices still appear under *By device*.
 
 **The Overview card** that reports PMS state is named **Property Management System**: it is the PMS, not the
 whole Hotel module.

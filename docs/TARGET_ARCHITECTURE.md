@@ -66,8 +66,8 @@ network.
 | Product | Runs | Serves | Data |
 |---|---|---|---|
 | **Cloud / Central** (`control-plane/` = ctrlapi + `cloud-admin/` UI) | StayConnect's infrastructure, served centrally | Platform operators and customer users: customers, sites, appliance activation and lifecycle, license issuance/suspension/revocation, fleet status | Cloud Postgres — no guest PII |
-| **Edge Appliance** (`data-plane/` = scd, portald, acctd, edged) | On-prem at each hotel, inline on the guest network | Guests (captive portal) and the Hotel Admin API | Site-local Postgres `stayconnect_site` — the entire guest domain |
-| **Hotel Admin** (`hotel-admin/` UI) | Served from the appliance itself via Caddy on the **management IP** (e.g. `https://172.21.15.30`) | Hotel staff: guest access plans, vouchers, sessions, PMS, walled garden, payments, local operators, backups | Talks only to the local `/edge/v1` API — works with the cloud down |
+| **Edge Appliance** (`data-plane/` = scd, portald, acctd, edged) | On-prem at each hotel, inline on the guest network | Guests (captive portal) and the Admin Console API | Site-local Postgres `stayconnect_site` — the entire guest domain |
+| **Admin Console** (`hotel-admin/` UI) | Served from the appliance itself via Caddy on the **management IP** (e.g. `https://172.21.15.30`) | Hotel staff: guest access plans, vouchers, sessions, PMS, walled garden, payments, local operators, backups | Talks only to the local `/edge/v1` API — works with the cloud down |
 
 Terminology rule used everywhere: **GuestAccessPlan** = the edge
 `ticket_templates` table (what a hotel sells/grants a guest). The cloud-side
@@ -168,7 +168,7 @@ serves appliances for licensing only, CLAUDE.md §0E).
 - **Production:** cloud and appliances are physically separate
   ([DEPLOYMENT_CLOUD.md](DEPLOYMENT_CLOUD.md), [DEPLOYMENT_APPLIANCE.md](DEPLOYMENT_APPLIANCE.md)).
   Each appliance has **exactly two physical NICs**: a **WAN interface that is also the
-  management interface** (Hotel Admin, SSH, outbound HTTPS to Central) and a **LAN guest-gateway
+  management interface** (Admin Console, SSH, outbound HTTPS to Central) and a **LAN guest-gateway
   interface** (captive network + guest VLAN trunk). There is **no separate management NIC** and
   **no approved dedicated HA-sync NIC** — the HA-sync transport under two NICs is an **OPEN
   architecture decision** (§6).

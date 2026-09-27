@@ -85,7 +85,7 @@ After apply (`phase = health`), netd runs the checks in
 
 | Check | Verifies |
 |---|---|
-| `mgmt_reachable` | the management interface/route is still up and Hotel Admin is reachable — **the connectivity-protection check on every apply** |
+| `mgmt_reachable` | the management interface/route is still up and Admin Console is reachable — **the connectivity-protection check on every apply** |
 | `gateway_up` | each new/changed guest gateway address is present and the bridge is up |
 | `kea_running` | Kea answers `status-get` after `config-set` |
 | `portal_listen` | portald is listening on the gateway `:8380`/`:8343` |
@@ -110,7 +110,7 @@ Even when every health check passes, the revision enters
   `rolled_back`. The appliance returns to the last known-good state on its own.
 
 This is the same "commit-confirmed" safety used by carrier routers: a change you
-can't confirm is a change that undoes itself. The Hotel Admin UI shows a live
+can't confirm is a change that undoes itself. The Admin Console UI shows a live
 countdown and a big **Confirm** button after apply.
 
 ## 7. Manual rollback

@@ -53,7 +53,7 @@ the cloud dedupes on `(appliance_id, seq)`. The drain loop in scd:
    increment `attempts`, set `next_attempt_at = now() + backoff`.
 4. **Backoff**: exponential, `min(2^attempts × 5s, 15min)`, with jitter. After
    the retry budget (attempts ≥ 20 ≈ several hours at cap) the row is flagged
-   `dead=true` for operator attention — dead rows are visible in Hotel Admin
+   `dead=true` for operator attention — dead rows are visible in Admin Console
    and in the `sync` telemetry kind, and can be re-queued manually.
 5. Sent rows are pruned after a retention window; `sync_checkpoints` records
    the last drained seq (`last_drain`) and last successful license fetch
@@ -145,7 +145,7 @@ publishes a change event after PMS provider mutations; scd (queue group
 `scd-reload-pms`) reloads its provider registry from the **local** DB. The
 event is a hint, not data — the 10-minute safety reload loop guarantees
 eventual consistency if the event is missed. Post-cutover, PMS mutations happen
-in Hotel Admin directly against the site DB, and this subject is only used for
+in Admin Console directly against the site DB, and this subject is only used for
 cloud-initiated config scenarios. Additional push kinds (walled garden,
 branding) follow the same pattern when needed.
 

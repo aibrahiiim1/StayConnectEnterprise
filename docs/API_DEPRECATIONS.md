@@ -40,7 +40,7 @@ Nothing else is mounted (`control-plane/internal/http/router.go`):
 | `GET /v1/version`, `/cloud/v1/version` | `GET /readyz` reports the version |
 
 The legacy `web-admin` console was removed; the Central console is `cloud-admin`,
-and Hotel Admin is `hotel-admin` on each appliance.
+and Admin Console is `hotel-admin` on each appliance.
 
 ## 3. Removed from the appliance (edged `/edge/v1`, scd socket)
 
@@ -51,9 +51,9 @@ and Hotel Admin is `hotel-admin` on each appliance.
 | `/edge/v1/network/cloud*`, `/edge/v1/network/setup/*` | `GET /edge/v1/central/status` |
 | scd socket `/v1/setup/*` (incl. `/v1/setup/enroll`) | scd socket `/v1/central/status`, `/v1/central/refresh`, `/v1/central/offline-request`, `/v1/central/offline-package`, `/v1/license/install` |
 | `GET/PUT /edge/v1/cloud-sync-settings`, `GET/POST /edge/v1/cloud-sync-recovery` (delivered-record retention and recovery of the telemetry queue) and their role permissions | Removed with the telemetry subsystem (2026-09-27, appliance migration 0093). Nothing replaces them: there is no queue |
-| `sync_outbox` figures in edged `GET /edge/v1/health`, and edged's `service_health` telemetry producer | Removed; local service health is still recorded in `appliance_service_health` and shown in Hotel Admin |
+| `sync_outbox` figures in edged `GET /edge/v1/health`, and edged's `service_health` telemetry producer | Removed; local service health is still recorded in `appliance_service_health` and shown in Admin Console |
 | scd socket `GET /v1/admin/outbox/stats` | Removed with the outbox |
-| scd NATS subjects: RPC dispatcher and heartbeat, remote guest-session revoke, remote PMS test / cache / health, tenant PMS config broadcast, nft set replication (`nft.<siteID>`), the signed command channel and the software-update agent; env `SCD_NATS_URL`, `SCD_NATS_MTLS_URL`, `SCD_COMMAND_PUB`, `SCD_UPDATE_PUB` | Removed — the appliance has no message-bus client (CLAUDE.md §0E). Session revoke, PMS operations and configuration are local, in Hotel Admin |
+| scd NATS subjects: RPC dispatcher and heartbeat, remote guest-session revoke, remote PMS test / cache / health, tenant PMS config broadcast, nft set replication (`nft.<siteID>`), the signed command channel and the software-update agent; env `SCD_NATS_URL`, `SCD_NATS_MTLS_URL`, `SCD_COMMAND_PUB`, `SCD_UPDATE_PUB` | Removed — the appliance has no message-bus client (CLAUDE.md §0E). Session revoke, PMS operations and configuration are local, in Admin Console |
 
 `POST /edge/v1/license` (licence file upload) stays. While the appliance is *Removed from OneGate Central* it
 answers `409 removed_from_central`, as do `POST /edge/v1/central/offline-package` and the scd install routes.
@@ -67,5 +67,5 @@ Both consoles answer old page addresses with a permanent redirect (308):
   `/security` → `/system/security-alerts`; `/certificates`, `/assignment-keys` → `/system/trust`;
   `/backup-health` → `/system/backup-health`; `/audit` → `/system/audit`; `/commercial`, `/subscription` →
   `/licenses`.
-- **Hotel Admin** (`hotel-admin/next.config.mjs`): `/license`, `/network/cloud`, `/setup/enrollment` →
+- **Admin Console** (`hotel-admin/next.config.mjs`): `/license`, `/network/cloud`, `/setup/enrollment` →
   `/appliance`.

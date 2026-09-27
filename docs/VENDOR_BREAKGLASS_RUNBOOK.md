@@ -17,7 +17,7 @@ command below.
 
 ## Central status via the unix socket (support fallback)
 
-Only when Hotel Admin is unavailable. Enrollment tokens no longer exist: the appliance
+Only when Admin Console is unavailable. Enrollment tokens no longer exist: the appliance
 registers itself. Runs as root on the appliance:
 ```
 curl --unix-socket /run/stayconnect/scd.sock http://localhost/v1/central/status        # activation, licence, Central link
@@ -25,7 +25,7 @@ curl --unix-socket /run/stayconnect/scd.sock -X POST http://localhost/v1/central
 ```
 The socket path only skips the browser; activation itself still happens in Central.
 
-## Provision / reset a Hotel Admin operator
+## Provision / reset a Admin Console operator
 
 ```
 /opt/stayconnect/bin/edged seed-admin --email <user> --password <pass> [--allow-weak]
@@ -36,7 +36,7 @@ deliberate per-appliance provisioning action, never a shipped default.
 ## Reset the appliance identity/activation state (same customer only)
 
 Wipes identity + credentials; **preserves** WAN/LAN + guest config, trust anchors,
-Central URL and the Hotel Admin operator — and therefore the current customer's
+Central URL and the Admin Console operator — and therefore the current customer's
 local data. It is **not** a factory reset:
 
 - **The box stays pinned to its customer.** After the reset scd generates a new
@@ -54,7 +54,7 @@ local data. It is **not** a factory reset:
   only supported way to leave a customer.
 - If the site database holds **more than one** customer (an interrupted
   cross-customer transition) or cannot be read, scd does not register at all and
-  Hotel Admin shows the reason as the last Central error; only a factory-clean
+  Admin Console shows the reason as the last Central error; only a factory-clean
   install resolves the first case.
 - **It does not clear the *Removed from OneGate Central* state**, and must not be
   made to: leave `/etc/stayconnect/removed-from-central.json` in place. While it
@@ -84,6 +84,6 @@ unavailable — and never delete a `retired_appliance_identities` row to let a b
 
 ## Certificate lifecycle (support)
 
-The Hotel Admin TLS cert self-manages (`docs/HOTEL_ADMIN_CERT_LIFECYCLE.md`). Manual
+The Admin Console TLS cert self-manages (`docs/HOTEL_ADMIN_CERT_LIFECYCLE.md`). Manual
 mint/renew helper (support only): `/etc/caddy/hotel-admin/mint-cert.sh`, then
 `systemctl reload stayconnect-caddy`.

@@ -73,7 +73,7 @@ definition is needed — the name is used directly.
 
 When the hotel runs its own DHCP server ([EXTERNAL_DHCP_MODE.md](EXTERNAL_DHCP_MODE.md)),
 StayConnect does not serve the subnet — but the captive portal still needs
-option 114 pointed at the StayConnect gateway. The Hotel Admin external-DHCP
+option 114 pointed at the StayConnect gateway. The Admin Console external-DHCP
 checklist shows the admin the exact values to set on **their** server:
 
 | Setting | Value |

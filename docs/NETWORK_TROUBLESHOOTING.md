@@ -14,7 +14,7 @@ what's actually running (`nft list ruleset`, `ip -br addr`, Kea `status-get`).
 
 | Check | How | Fix |
 |---|---|---|
-| Is the network `dhcp_mode = local`? | Hotel Admin, or `guest_networks.dhcp_mode` | `external`/`disabled` means Kea won't serve it — see [EXTERNAL_DHCP_MODE.md](EXTERNAL_DHCP_MODE.md) |
+| Is the network `dhcp_mode = local`? | Admin Console, or `guest_networks.dhcp_mode` | `external`/`disabled` means Kea won't serve it — see [EXTERNAL_DHCP_MODE.md](EXTERNAL_DHCP_MODE.md) |
 | Does the subnet have a pool? | `dhcp_pools` for the network; validator raises `no_pool` | add a pool inside the subnet, excluding gateway/network/broadcast |
 | Is Kea running & bound to the bridge? | `kea` `status-get`; `interfaces-config.interfaces` should list `br-g<vlan>/<gateway>` | if not bound, re-apply; check the bridge exists (`ip -br link`) |
 | Is the bridge up with the gateway IP? | `ip -br addr show br-g20` → `10.20.0.1/22` | if missing, netplan wasn't applied — re-apply the revision |
@@ -83,7 +83,7 @@ If cross-network traffic is getting through:
 
 Management/WAN are protected and never in the applied set, and every apply
 health-checks `mgmt_reachable` with a 120 s auto-rollback — so a guest-network
-change should not lock you out. If you are still locked out of Hotel Admin:
+change should not lock you out. If you are still locked out of Admin Console:
 
 1. **Wait for the watchdog.** If an apply is `pending_confirmation`, it
    auto-reverts at `confirm_deadline` (≤ 120 s) and management returns.

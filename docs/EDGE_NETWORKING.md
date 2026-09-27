@@ -34,7 +34,7 @@ Every mutation to the guest-network intent is captured and applied as a numbered
 
 | Role | Meaning | Editable in this release |
 |---|---|---|
-| `management` | Hotel Admin / SSH / sync interface | **protected** (read-only, guarded) |
+| `management` | Admin Console / SSH / sync interface | **protected** (read-only, guarded) |
 | `wan` | internet uplink; masquerade egress | **protected** (read-only, guarded) |
 | `guest_access` | untagged client access port (single client LAN); Admin Console label *Client access* | yes |
 | `guest_trunk` | 802.1Q trunk carrying tagged client VLANs from the WLAN controller; Admin Console label *Client trunk* | yes |
@@ -55,7 +55,7 @@ adds one new privileged surface:
 
 - **`netd`** listens only on the Unix socket `/run/stayconnect/netd.sock` (root,
   group `stayconnect`, mode 0660). Never on a TCP port.
-- **`edged`** (unprivileged, the Hotel Admin API) proxies the operator's
+- **`edged`** (unprivileged, the Admin Console API) proxies the operator's
   `/edge/v1/network/*` calls to netd over that socket — exactly the `scdClient`
   Unix-socket proxy pattern edged already uses for live session control.
 - netd owns render → validate → snapshot → apply → health-check → confirm/rollback.
@@ -86,7 +86,7 @@ untagged, 10.10.0.0/24), marked already-active, so nothing re-applies.
 ### Component diagram
 
 ```
- operator (Hotel Admin UI, mgmt IP)
+ operator (Admin Console UI, mgmt IP)
         │ HTTPS (Caddy, mgmt only)
         ▼
    edged  ──proxy──▶  netd  (/run/stayconnect/netd.sock, root)
