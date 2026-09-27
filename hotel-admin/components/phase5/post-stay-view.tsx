@@ -164,22 +164,22 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
   return (
     <PageShell>
       <PageHeader
-        eyebrow="Guests"
+        eyebrow="Clients"
         title="Post-stay access"
         icon={<CalendarClock />}
-        description="Reset a lost post-stay PIN, or end a guest's post-stay access."
+        description="Reset a lost post-stay PIN, or end a client's post-stay access."
         help={
           <>
             <HelpSection title="What post-stay access is">
               <p>
-                After checkout a guest can reconnect with a PIN for a limited time. A PIN belongs to one stay, never
+                After checkout a client can reconnect with a PIN for a limited time. A PIN belongs to one stay, never
                 to a room: when the room is re-let, the previous PIN stops working on its own.
               </p>
             </HelpSection>
             <HelpSection title="Two different actions">
               <HelpList items={[
-                <><strong>Reset PIN</strong> gives the guest a new PIN. They keep their post-stay access; only the secret changes. Use it when a guest lost the PIN or never received it.</>,
-                <><strong>End access</strong> ends post-stay access for that stay. It cannot be undone, and the guest gets a new post-stay PIN only after a new stay.</>,
+                <><strong>Reset PIN</strong> gives the client a new PIN. They keep their post-stay access; only the secret changes. Use it when a client lost the PIN or never received it.</>,
+                <><strong>End access</strong> ends post-stay access for that stay. It cannot be undone, and the client gets a new post-stay PIN only after a new stay.</>,
               ]} />
             </HelpSection>
             <HelpSection title="Why there is no &ldquo;show PIN&rdquo;">
@@ -320,7 +320,7 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
         description={
           dialog?.kind === "revoke"
             ? `Room ${dialog.row.normalized_room_number ?? "—"} · reservation ${dialog.row.external_reservation_id}`
-            : "A new PIN replaces the old one immediately. The guest keeps their post-stay access; only the secret changes. The new PIN is shown once, on this screen."
+            : "A new PIN replaces the old one immediately. The client keeps their post-stay access; only the secret changes. The new PIN is shown once, on this screen."
         }
         size="sm"
         submitLabel={dialog?.kind === "revoke" ? "End access permanently" : "Reset PIN"}
@@ -336,7 +336,7 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
             items={[
               `Post-stay access ends for this stay (episode ${dialog.row.origin_lifecycle_version}).`,
               "This stay gets no replacement PIN.",
-              "If the guest only lost their PIN, reset it instead.",
+              "If the client only lost their PIN, reset it instead.",
             ]}
           />
         )}
@@ -345,7 +345,7 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
             value={reason}
             maxLength={500}
             onChange={(e) => setReason(e.target.value)}
-            placeholder={dialog?.kind === "reset" ? "Guest lost the printout" : "Guest asked us to end it"}
+            placeholder={dialog?.kind === "reset" ? "Client lost the printout" : "Client asked us to end it"}
           />
         </Field>
         {dialog?.kind === "revoke" && (
@@ -373,17 +373,17 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
       <OneTimeReveal
         open={revealed !== null}
         title="New PIN — shown once"
-        description="Give this to the guest now. It is not stored and cannot be shown again."
+        description="Give this to the client now. It is not stored and cannot be shown again."
         value={revealed?.pin ?? ""}
         valueLabel="Post-stay PIN"
-        acknowledgeLabel="I have given it to the guest"
+        acknowledgeLabel="I have given it to the client"
         onAcknowledge={() => setRevealed(null)}
       >
         {revealed?.validUntil && (
           <p className="text-sm text-muted-foreground">Valid until {formatDate(revealed.validUntil)}.</p>
         )}
         <p className="text-caption text-muted-foreground">
-          If it is lost before it reaches the guest, reset again — the guest keeps their access either way.
+          If it is lost before it reaches the client, reset again — the client keeps their access either way.
         </p>
       </OneTimeReveal>
     </PageShell>

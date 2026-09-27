@@ -29,7 +29,7 @@ export function describeDatabase(ok: boolean): Explained {
     : {
         headline: "Unreachable",
         summary:
-          "The appliance cannot reach its own database. Guest sign-in and this admin both depend on it, so " +
+          "The appliance cannot reach its own database. Client sign-in and this admin both depend on it, so " +
           "treat this as the first thing to fix.",
         tone: "err",
       };
@@ -44,13 +44,13 @@ export function describeSessionController(ok: boolean): Explained {
     ? {
         headline: "Running",
         summary:
-          "The service that puts guest devices online and enforces speed and data limits is answering.",
+          "The service that puts client devices online and enforces speed and data limits is answering.",
         tone: "ok",
       }
     : {
         headline: "Not answering",
         summary:
-          "The service that puts guest devices online is not answering. New guests cannot be connected and " +
+          "The service that puts client devices online is not answering. New clients cannot be connected and " +
           "limits are not being enforced until it recovers.",
         tone: "err",
       };
@@ -73,7 +73,7 @@ export function describeLicense(state: string | null | undefined): Explained {
       return {
         headline: "Not activated",
         summary:
-          "No licence is installed yet, so guests cannot sign in. Activate this appliance on Appliance & licence.",
+          "No licence is installed yet, so clients cannot sign in. Activate this appliance on Appliance & licence.",
         tone: "warn",
       };
     case "active":
@@ -81,7 +81,7 @@ export function describeLicense(state: string | null | undefined): Explained {
     case "expiring":
       return {
         headline: "Expires soon",
-        summary: "The licence ends within 30 days. Ask your OneGate vendor to renew it; guests are not affected yet.",
+        summary: "The licence ends within 30 days. Ask your OneGate vendor to renew it; clients are not affected yet.",
         tone: "warn",
       };
     case "grace":
@@ -91,7 +91,7 @@ export function describeLicense(state: string | null | undefined): Explained {
         headline: "Grace period",
         summary:
           "The licence end date has passed and the appliance is running on its renewal grace period. " +
-          "Guests keep signing in exactly as before. When the grace period ends, new sign-ins stop; " +
+          "Clients keep signing in exactly as before. When the grace period ends, new sign-ins stop; " +
           "sessions already in progress are not cut off. Appliance & licence shows the exact end date.",
         tone: "warn",
       };
@@ -99,7 +99,7 @@ export function describeLicense(state: string | null | undefined): Explained {
       return {
         headline: "Suspended",
         summary:
-          "Your OneGate vendor has suspended the licence. New guest sign-ins are refused; guests already online " +
+          "Your OneGate vendor has suspended the licence. New client sign-ins are refused; clients already online " +
           "are not disconnected.",
         tone: "err",
       };
@@ -107,15 +107,15 @@ export function describeLicense(state: string | null | undefined): Explained {
       return {
         headline: "Expired",
         summary:
-          "The licence end date and its grace period have both passed. New guest sign-ins are now refused; " +
-          "guests already online are not disconnected. Renew to restore service.",
+          "The licence end date and its grace period have both passed. New client sign-ins are now refused; " +
+          "clients already online are not disconnected. Renew to restore service.",
         tone: "err",
       };
     case "revoked":
       return {
         headline: "Revoked",
         summary:
-          "Your OneGate vendor has revoked this licence. New guest sign-ins are refused; guests already online " +
+          "Your OneGate vendor has revoked this licence. New client sign-ins are refused; clients already online " +
           "are not disconnected.",
         tone: "err",
       };
@@ -123,7 +123,7 @@ export function describeLicense(state: string | null | undefined): Explained {
       return {
         headline: "Wrong appliance",
         summary:
-          "The installed licence was issued for a different appliance, so new guest sign-ins are refused. Ask your " +
+          "The installed licence was issued for a different appliance, so new client sign-ins are refused. Ask your " +
           "OneGate vendor for a licence for this appliance's serial number.",
         tone: "err",
       };
@@ -151,7 +151,7 @@ export function describePmsReadiness(args: {
       summary:
         `The PMS is connected and its guest list is loaded` +
         (typeof inHouse === "number" ? ` (${num(inHouse)} in house)` : "") +
-        ". Guests can sign in with their room number and name.",
+        ". Clients can sign in with their room number and name.",
       tone: "ok",
     };
   }
@@ -160,7 +160,7 @@ export function describePmsReadiness(args: {
       headline: "PMS not connected",
       summary:
         "The appliance is not connected to the property management system, so nobody can sign in with a room " +
-        "number. Vouchers and guest accounts still work.",
+        "number. Vouchers and client accounts still work.",
       tone: "err",
     };
   }
@@ -176,7 +176,7 @@ export function describePmsReadiness(args: {
   return {
     headline: "Room sign-in unavailable",
     summary:
-      "The PMS connection is up but not ready to verify guests yet. Open PMS connection to see which of the " +
+      "The PMS connection is up but not ready to verify clients yet. Open PMS connection to see which of the " +
       "checks is failing.",
     tone: "warn",
   };

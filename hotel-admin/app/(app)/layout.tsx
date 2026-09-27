@@ -185,7 +185,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     <span className="hidden text-xs text-muted-foreground/50 sm:inline" aria-hidden>/</span>
                   </>
                 )}
-                <span className="truncate text-sm font-semibold">{here.label ?? "Hotel Admin"}</span>
+                <span className="truncate text-sm font-semibold">{here.label ?? "Admin Console"}</span>
               </nav>
             </div>
 

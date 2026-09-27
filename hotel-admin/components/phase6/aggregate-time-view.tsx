@@ -84,7 +84,7 @@ export function AggregateTimeView() {
   return (
     <PageShell>
       <PageHeader
-        eyebrow="Guests"
+        eyebrow="Clients"
         title="Online-time budgets"
         icon={<Hourglass />}
         description="Packages sold as an amount of connected time. Check both the time left and the end date."
@@ -104,10 +104,10 @@ export function AggregateTimeView() {
                 "Its validity period ends.",
               ]} />
             </HelpSection>
-            <HelpSection title="The same numbers the guest sees">
+            <HelpSection title="The same numbers the client sees">
               <p>
-                The time left shown here comes from the same record as the guest&rsquo;s own page, so the desk and
-                the guest&rsquo;s phone agree.
+                The time left shown here comes from the same record as the client&rsquo;s own page, so the desk and
+                the client&rsquo;s phone agree.
               </p>
             </HelpSection>
           </>
@@ -131,7 +131,7 @@ export function AggregateTimeView() {
           <div data-testid="empty">
             <EmptyState
               icon={<Hourglass />}
-              title="No package on this property uses an online-time budget"
+              title="No package on this site uses an online-time budget"
               hint="Packages measured in connected time appear here while they are in use."
             />
           </div>

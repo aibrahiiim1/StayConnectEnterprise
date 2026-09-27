@@ -130,20 +130,20 @@ export default function PMSRoutingPage() {
           <>
             <HelpSection title="What this page sets">
               <p>
-                When a guest signs in with their room number, the appliance has to know which property management
+                When a client signs in with their room number, the appliance has to know which property management
                 system to check that room against. It decides from the Wi-Fi network the device is connected to —
                 and that is what this page sets.
               </p>
               <p>
-                Every row is one of this property&rsquo;s guest networks. The property itself is fixed when the
+                Every row is one of this site&rsquo;s guest networks. The site itself is fixed when the
                 appliance is activated and cannot be chosen here — this page only decides which PMS connection each
                 network&rsquo;s room sign-ins are checked against.
               </p>
             </HelpSection>
             <HelpSection title="Why this matters">
               <p>
-                Getting this wrong does not produce an error anywhere. The guest is checked against a different
-                property&rsquo;s guest list, no matching room is found, and they simply cannot get online — while
+                Getting this wrong does not produce an error anywhere. The client is checked against a different
+                PMS&rsquo;s guest list, no matching room is found, and they simply cannot get online — while
                 the PMS connection, the networks and the packages all report healthy. If room sign-in fails on one
                 Wi-Fi network but works on another, this is the first page to check.
               </p>
@@ -155,8 +155,8 @@ export default function PMSRoutingPage() {
             <HelpSection title="Scope">
               <HelpList
                 items={[
-                  <><strong>This one PMS</strong> checks the room against the single named connection — the normal choice for a property with one PMS.</>,
-                  <><strong>Every active PMS</strong> tries all of them, which only makes sense where one appliance serves several properties.</>,
+                  <><strong>This one PMS</strong> checks the room against the single named connection — the normal choice for a site with one PMS.</>,
+                  <><strong>Every active PMS</strong> tries all of them, which only makes sense where one appliance serves several sites.</>,
                 ]}
               />
             </HelpSection>
@@ -193,7 +193,7 @@ export default function PMSRoutingPage() {
             <EmptyState
               icon={<Router />}
               title="No network is pointed at a PMS"
-              hint="Nobody at this property can sign in with a room number until at least one guest network is mapped."
+              hint="Nobody at this site can sign in with a room number until at least one guest network is mapped."
             />
           ) : (
             <Table>
@@ -206,8 +206,8 @@ export default function PMSRoutingPage() {
                       Scope
                       <Explain>
                         <strong>This one PMS</strong> checks the room against the single named connection — the
-                        normal choice for a property with one PMS. <strong>Every active PMS</strong> tries all of
-                        them, which only makes sense where one appliance serves several properties.
+                        normal choice for a site with one PMS. <strong>Every active PMS</strong> tries all of
+                        them, which only makes sense where one appliance serves several sites.
                       </Explain>
                     </span>
                   </TH>
@@ -281,7 +281,7 @@ export default function PMSRoutingPage() {
           <div>
             <CardTitle>Networks with no PMS</CardTitle>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Room sign-in is not offered on these. Vouchers and guest accounts still work.
+              Room sign-in is not offered on these. Vouchers and client accounts still work.
             </p>
           </div>
         </CardHeader>
@@ -308,7 +308,7 @@ export default function PMSRoutingPage() {
                     <TD>
                       <div className="font-medium">{u.guest_network_name || "Unnamed network"}</div>
                       <div className="text-xs text-muted-foreground">
-                        A guest on this network who types a room number will not be recognised.
+                        A client on this network who types a room number will not be recognised.
                       </div>
                     </TD>
                     <TD className="text-right">
@@ -353,7 +353,7 @@ export default function PMSRoutingPage() {
         title="Stop offering room sign-in on this network?"
         description={
           clearing
-            ? `Guests on ${clearing.guest_network_name || "this network"} will no longer be able to sign in with their room number and name. Vouchers and guest accounts are unaffected, and nothing already online is disconnected.`
+            ? `Clients on ${clearing.guest_network_name || "this network"} will no longer be able to sign in with their room number and name. Vouchers and client accounts are unaffected, and nothing already online is disconnected.`
             : undefined
         }
         confirmLabel="Remove mapping"
@@ -393,7 +393,7 @@ function RouteDialog({
       open={open}
       onOpenChange={(v) => !v && onClose()}
       title={network?.current ? `Change the PMS for ${network.name}` : `Point ${network?.name ?? "this network"} at a PMS`}
-      description="Guests on this network will have their room number checked against the connection you choose."
+      description="Clients on this network will have their room number checked against the connection you choose."
       submitLabel="Save mapping"
       busy={busy}
       error={error}
@@ -420,7 +420,7 @@ function RouteDialog({
         hint={
           mode === "MAPPED"
             ? "The room is checked against this connection only. This is what a single-property appliance wants."
-            : "The room is tried against every PMS connection that is in use. Only correct where one appliance serves more than one property."
+            : "The room is tried against every PMS connection that is in use. Only correct where one appliance serves more than one site."
         }
       >
         <Select value={mode} onChange={(e) => setMode(e.target.value)}>

@@ -140,6 +140,6 @@ export const DEVICE_LIMIT_POLICIES: Record<string, string> = {
 
 /** Time-accounting modes → operator wording, with the distinction that actually matters spelled out. */
 export const TIME_ACCOUNTING_MODES: Record<string, string> = {
-  VALIDITY_WINDOW: "Validity window — time runs from purchase, whether or not the guest is online",
-  ACTIVE_USAGE: "Active usage — time is consumed only while the guest is connected",
+  VALIDITY_WINDOW: "Validity window — time runs from purchase, whether or not the client is online",
+  ACTIVE_USAGE: "Active usage — time is consumed only while the client is connected",
 };

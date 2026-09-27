@@ -153,7 +153,7 @@ export function ActivityTab({ guard, setErr }: TabProps) {
       <ErrorBanner err={loadErr} />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Guests on a package now" value={s ? s.active_now.toLocaleString() : "—"} icon={<Users />} tone="ok"
+        <StatCard label="Clients on a package now" value={s ? s.active_now.toLocaleString() : "—"} icon={<Users />} tone="ok"
           hint="Right now, across every package" />
         <StatCard label="Access started in this period" value={s ? s.started_in_range.toLocaleString() : "—"}
           icon={<PackageCheck />} tone="primary"
@@ -189,7 +189,7 @@ export function ActivityTab({ guard, setErr }: TabProps) {
           <CardHeader>
             <div>
               <CardTitle>How access was given</CardTitle>
-              <CardDescription>Portal choices, vouchers, guest accounts, grace periods and staff grants.</CardDescription>
+              <CardDescription>Portal choices, vouchers, client accounts, grace periods and staff grants.</CardDescription>
             </div>
           </CardHeader>
           <CardBody>
@@ -218,11 +218,11 @@ export function ActivityTab({ guard, setErr }: TabProps) {
             <SkeletonRows rows={6} cols={6} />
           ) : rows.length === 0 ? (
             <EmptyState icon={<Activity />} title="Nothing in this period"
-              hint="Widen the period or clear a filter. Grants appear here as guests are given internet access — by the portal, a voucher, a guest account, a grace period or staff." />
+              hint="Widen the period or clear a filter. Grants appear here as clients are given internet access — by the portal, a voucher, a client account, a grace period or staff." />
           ) : (
             <Table>
               <THead><TR>
-                <TH>When</TH><TH>Package</TH><TH>Guest</TH><TH>How it was given</TH><TH>Status</TH>
+                <TH>When</TH><TH>Package</TH><TH>Client</TH><TH>How it was given</TH><TH>Status</TH>
                 <TH className="text-right">Data used</TH><TH className="text-right">Devices</TH>
               </TR></THead>
               <TBody>
@@ -293,7 +293,7 @@ function ActivityRecord({ r }: { r: ActivityRow }) {
     <>
       <SheetHeader
         icon={<PackageCheck />}
-        eyebrow="Guest activity"
+        eyebrow="Client activity"
         title={r.package_name}
         description={`${whoWords(r)}${r.room && r.pms_interface ? ` · ${r.pms_interface}` : ""}`}
         badges={<>

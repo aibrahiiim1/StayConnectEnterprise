@@ -56,23 +56,23 @@ describe("the two controls are never conflated", () => {
     setting(true, false);
     render(<GuestDeviceSelfServiceView canAct />);
     const effect = await screen.findByTestId("effect");
-    expect(effect).toHaveTextContent(/Guests cannot use device self-service yet/i);
+    expect(effect).toHaveTextContent(/Clients cannot use device self-service yet/i);
     expect(effect).toHaveTextContent(/Saving this setting does not install it/i);
   });
 
   it("only claims guests can use it when BOTH are true", async () => {
     for (const [on, gate, expected] of [
-      [false, false, /Guests cannot use device self-service:/i],
-      [true, false, /Guests cannot use device self-service yet/i],
-      [false, true, /because this property has it switched off/i],
-      [true, true, /Guests can use device self-service on this property now/i],
+      [false, false, /Clients cannot use device self-service:/i],
+      [true, false, /Clients cannot use device self-service yet/i],
+      [false, true, /because this site has it switched off/i],
+      [true, true, /Clients can use device self-service on this site now/i],
     ] as const) {
       setting(on, gate);
       const { unmount } = render(<GuestDeviceSelfServiceView canAct />);
       const effect = await screen.findByTestId("effect");
       expect(effect).toHaveTextContent(expected);
       if (!(on && gate)) {
-        expect(effect).not.toHaveTextContent(/Guests can use device self-service on this property now/i);
+        expect(effect).not.toHaveTextContent(/Clients can use device self-service on this site now/i);
       }
       unmount();
     }
@@ -134,13 +134,13 @@ describe("changing the setting", () => {
 
     await user.click(await screen.findByRole("button", { name: /switch on/i }));
     // A confirmation step, so the switch is not a single stray click on a guest-facing capability.
-    expect(screen.getByText(/Offer guest device self-service at this property\?/i)).toBeInTheDocument();
+    expect(screen.getByText(/Offer client device self-service at this site\?/i)).toBeInTheDocument();
     await user.type(screen.getByPlaceholderText(/why are you making this change/i), "guests asked");
     await user.click(screen.getByRole("button", { name: "Switch on" }));
 
     await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
     expect(put).toHaveBeenCalledWith("/guest-device-self-service/", { enabled: true, reason: "guests asked" });
-    expect(await screen.findByRole("status")).toHaveTextContent(/now offers guest device self-service/i);
+    expect(await screen.findByRole("status")).toHaveTextContent(/now offers client device self-service/i);
   });
 
   it("sends no identity of any kind — the server derives all four", async () => {

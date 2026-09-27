@@ -191,7 +191,7 @@ describe("the overview", () => {
     render(<DashboardPage />);
     const note = await screen.findByTestId("not-recorded");
     expect(note).toHaveTextContent("failed voucher sign-ins");
-    expect(note).toHaveTextContent("failed guest-account sign-ins");
+    expect(note).toHaveTextContent("failed client-account sign-ins");
     expect(note).toHaveTextContent("failed one-time-code sign-ins");
     expect(screen.getByText(/Query and cache statistics are not collected/)).toBeInTheDocument();
   });

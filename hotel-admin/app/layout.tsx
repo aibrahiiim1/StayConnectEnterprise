@@ -5,8 +5,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { SIDEBAR_INIT_SCRIPT } from "@/lib/sidebar-state";
 
 export const metadata: Metadata = {
-  title: "OneGate Hotel Admin",
-  description: "On-appliance hotel management",
+  title: "OneGate Admin Console",
+  description: "On-appliance Wi-Fi management",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

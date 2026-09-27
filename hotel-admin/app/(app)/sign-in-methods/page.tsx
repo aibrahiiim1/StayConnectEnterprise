@@ -72,7 +72,7 @@ const PMS_MODES: { value: string; label: string; hint: string }[] = [
     label: "Any of the three (recommended)",
     hint:
       "Room number plus one box that accepts the first name, the surname, or the reservation number. " +
-      "The guest is not asked which one they are entering. If the value matches more than one guest in " +
+      "The client is not asked which one they are entering. If the value matches more than one guest in " +
       "that room, sign-in is refused rather than guessing between them.",
   },
   { value: "room_lastname", label: "Last name (surname)", hint: "Room number plus the surname on the reservation." },
@@ -158,7 +158,7 @@ export default function SignInMethodsPage() {
     try {
       const updated = await api.put<AuthMethods>("/auth-methods", patch);
       setCfg(updated ?? {});
-      toast.success(`${label} saved`, "Guests see the change the next time the sign-in page loads.");
+      toast.success(`${label} saved`, "Clients see the change the next time the sign-in page loads.");
     } catch (e) {
       setErr(e);
       await load(); // never leave a toggle showing a state the server did not accept
@@ -177,29 +177,29 @@ export default function SignInMethodsPage() {
   const header = (
     <PageHeader
       icon={<LogIn />}
-      eyebrow="Guest portal"
+      eyebrow="Client Portal"
       title="Sign-in methods"
-      description="Each switch applies immediately. Turning a method off does not disconnect guests already online."
+      description="Each switch applies immediately. Turning a method off does not disconnect clients already online."
       help={
         <>
           <HelpSection title="What this page sets">
             <p>
-              How guests prove who they are on the portal. Each switch applies immediately — the next guest to open
-              the sign-in page sees it. Turning a method off does not disconnect guests already online.
+              How clients prove who they are on the portal. Each switch applies immediately — the next client to open
+              the sign-in page sees it. Turning a method off does not disconnect clients already online.
             </p>
           </HelpSection>
           <HelpSection title="The methods">
             <HelpList
               items={[
-                <><strong>Voucher code</strong> — the guest types a code from a printed or emailed voucher. Vouchers are managed under Vouchers.</>,
-                <><strong>Guest account</strong> — a username and password issued to the guest, managed under Guest accounts.</>,
-                <><strong>Room sign-in</strong> — the guest enters their room number and one detail from their booking. OneGate checks it against the property management system for the network they are on; the guest never chooses a system, and no booking details are shown back to them. Which system a network uses is set in Network routing.</>,
-                <><strong>Email code</strong> and <strong>SMS code</strong> — the guest receives a one-time code. Each is available only once a sender exists and is switched on under Email &amp; SMS.</>,
-                <><strong>Social login</strong> — the guest signs in with an existing account such as Google. Each provider is offered individually, because each needs its own credentials; providers are set up under Social login.</>,
+                <><strong>Voucher code</strong> — the client types a code from a printed or emailed voucher. Vouchers are managed under Vouchers.</>,
+                <><strong>Client account</strong> — a username and password issued to the client, managed under Client accounts.</>,
+                <><strong>Room sign-in</strong> — the client enters their room number and one detail from their booking. OneGate checks it against the property management system for the network they are on; the client never chooses a system, and no booking details are shown back to them. Which system a network uses is set in Network routing.</>,
+                <><strong>Email code</strong> and <strong>SMS code</strong> — the client receives a one-time code. Each is available only once a sender exists and is switched on under Email &amp; SMS.</>,
+                <><strong>Social login</strong> — the client signs in with an existing account such as Google. Each provider is offered individually, because each needs its own credentials; providers are set up under Social login.</>,
               ]}
             />
           </HelpSection>
-          <HelpSection title="Guest sign-in protection">
+          <HelpSection title="Client sign-in protection">
             <p>
               After too many incorrect sign-in details from the same device, that device is asked to wait before it
               can try again. The card at the bottom decides how strict that is; it is always on.
@@ -239,7 +239,7 @@ export default function SignInMethodsPage() {
         <MethodCard
           icon={<Ticket />}
           title="Voucher code"
-          description="The guest types a code from a printed or emailed voucher."
+          description="The client types a code from a printed or emailed voucher."
           enabled={!!cfg.voucher?.enabled}
           busy={busy === "Voucher"}
           writable={writable}
@@ -250,14 +250,14 @@ export default function SignInMethodsPage() {
 
         <MethodCard
           icon={<KeyRound />}
-          title="Guest account"
-          description="A username and password issued to the guest, managed under Guest accounts."
+          title="Client account"
+          description="A username and password issued to the client, managed under Client accounts."
           enabled={!!cfg.guest_account?.enabled}
-          busy={busy === "Guest account"}
+          busy={busy === "Client account"}
           writable={writable}
-          onToggle={(v) => save({ guest_account: { ...(cfg.guest_account ?? {}), enabled: v } }, "Guest account")}
+          onToggle={(v) => save({ guest_account: { ...(cfg.guest_account ?? {}), enabled: v } }, "Client account")}
           manageHref="/guest-accounts"
-          manageLabel="Guest accounts"
+          manageLabel="Client accounts"
         />
 
         {/* Room sign-in spans the row: it carries the readiness warning and the "what the guest types" choice. */}
@@ -278,7 +278,7 @@ export default function SignInMethodsPage() {
           </CardHeader>
           <CardBody className="space-y-4">
             <p className="max-w-2xl text-sm text-muted-foreground">
-              The guest enters their room number and one detail from their booking.
+              The client enters their room number and one detail from their booking.
             </p>
 
             {pms.enabled && (pmsReadiness.state === "down" || pmsReadiness.state === "partial") && (
@@ -299,7 +299,7 @@ export default function SignInMethodsPage() {
               >
                 {pmsReadiness.state === "down" ? (
                   <p>
-                    {capitalise(pmsReadiness.reason)}. Guests cannot sign in with their room number until the
+                    {capitalise(pmsReadiness.reason)}. Clients cannot sign in with their room number until the
                     property management system is connected to OneGate again; they can still use any other
                     method switched on here. Nothing here needs changing — this setting is kept as it is and
                     starts working again on its own once the connection returns.
@@ -307,7 +307,7 @@ export default function SignInMethodsPage() {
                 ) : (
                   <>
                     <p>
-                      Guests on the networks below cannot sign in with their room number. Everywhere else is
+                      Clients on the networks below cannot sign in with their room number. Everywhere else is
                       working normally. Nothing here needs changing — each one starts working again on its own
                       once its property management system is connected.
                     </p>
@@ -338,7 +338,7 @@ export default function SignInMethodsPage() {
               <div className="border-t border-border pt-4">
               <fieldset className="space-y-3">
                 <legend className="mb-3 text-label">
-                  What the guest types, besides the room number
+                  What the client types, besides the room number
                 </legend>
                 {modeIsLegacy && (
                   // Shown rather than silently migrated: changing what a stored configuration does is the
@@ -364,7 +364,7 @@ export default function SignInMethodsPage() {
                   ))}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Which property management system a guest is checked against is decided by their network, in{" "}
+                  Which property management system a client is checked against is decided by their network, in{" "}
                   <Link href="/pms-routing" className="text-primary underline underline-offset-2 hover:decoration-2">Network routing</Link>.
                 </p>
               </fieldset>
@@ -376,7 +376,7 @@ export default function SignInMethodsPage() {
         <MethodCard
           icon={<Mail />}
           title="Email code"
-          description="The guest receives a one-time code by email."
+          description="The client receives a one-time code by email."
           enabled={!!cfg.email?.enabled}
           busy={busy === "Email code"}
           writable={writable}
@@ -390,7 +390,7 @@ export default function SignInMethodsPage() {
         <MethodCard
           icon={<MessageSquare />}
           title="SMS code"
-          description="The guest receives a one-time code by text message."
+          description="The client receives a one-time code by text message."
           enabled={!!cfg.sms?.enabled}
           busy={busy === "SMS code"}
           writable={writable}
@@ -406,7 +406,7 @@ export default function SignInMethodsPage() {
             <div className="min-w-0 space-y-1">
               <CardTitle className="flex items-center gap-2 [&_svg]:size-4"><Users aria-hidden /> Social login</CardTitle>
               <CardDescription>
-                The guest signs in with an existing account such as Google.
+                The client signs in with an existing account such as Google.
               </CardDescription>
             </div>
           </CardHeader>

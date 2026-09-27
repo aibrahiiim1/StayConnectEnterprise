@@ -160,7 +160,7 @@ export default function PMSReconciliationPage() {
               <p>
                 <strong>By the PMS, not from here.</strong> This screen is read-only: there is no action on it. A
                 departure the appliance could not place is answered when the PMS sends one it can — that is why
-                there is no button on this page. The property&apos;s lever is the PMS record itself.
+                there is no button on this page. The site&apos;s lever is the PMS record itself.
               </p>
               <p>
                 This screen does not close a stay because a planned departure date has passed, does not treat two

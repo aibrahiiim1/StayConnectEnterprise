@@ -144,7 +144,7 @@ describe("financial recovery", () => {
       "/financial-ops/recovery/zero-attempt": NO_ZERO,
     });
     render(<FinancialRecoveryView />);
-    expect(await screen.findByText(/Guest internet access is unaffected/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Client internet access is unaffected/i)).toBeInTheDocument();
   });
 
   it("refuses to submit a decision the operator has not actually made", async () => {

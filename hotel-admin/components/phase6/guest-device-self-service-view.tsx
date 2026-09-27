@@ -112,8 +112,8 @@ export function GuestDeviceSelfServiceView({ canAct, rolesKnown = true }: { canA
       if (res.changed) {
         toast.success(
           next
-            ? "Saved. This property now offers guest device self-service."
-            : "Saved. This property no longer offers guest device self-service.",
+            ? "Saved. This site now offers client device self-service."
+            : "Saved. This site no longer offers client device self-service.",
         );
       } else {
         toast.toast({ tone: "info", title: "No change — the setting was already in that state." });
@@ -129,26 +129,26 @@ export function GuestDeviceSelfServiceView({ canAct, rolesKnown = true }: { canA
 
   const header = (
     <PageHeader
-      eyebrow="Guests"
-      title="Guest devices"
+      eyebrow="Clients"
+      title="Client devices"
       icon={<Smartphone />}
-      description="Whether guests may remove their own offline devices."
+      description="Whether clients may remove their own offline devices."
       help={
         <>
-          <HelpSection title="What this setting offers guests">
+          <HelpSection title="What this setting offers clients">
             <p>
-              Whether a signed-in guest may remove one of their own devices that is not connected, to free its place
-              for another. A device that is online is never removable, and a guest only ever sees their own devices.
+              Whether a signed-in client may remove one of their own devices that is not connected, to free its place
+              for another. A device that is online is never removable, and a client only ever sees their own devices.
             </p>
           </HelpSection>
           <HelpSection title="Two separate states">
             <p>
-              <strong>This property offers it</strong> is your setting, stored on this appliance. It applies as soon
+              <strong>This site offers it</strong> is your setting, stored on this appliance. It applies as soon
               as it is saved and keeps working if the connection to OneGate Central is unavailable.
             </p>
             <p>
-              <strong>Available in this release</strong> is whether the guest feature is included in the software
-              running on this appliance. This is not a hotel setting and is not changed from this screen. Guests can
+              <strong>Available in this release</strong> is whether the client feature is included in the software
+              running on this appliance. This is not a site setting and is not changed from this screen. Clients can
               use device self-service only when both are on.
             </p>
           </HelpSection>
@@ -183,7 +183,7 @@ export function GuestDeviceSelfServiceView({ canAct, rolesKnown = true }: { canA
       {rolesKnown && !canAct && (
         <ReadOnlyNotice>
           <span data-testid="readonly-note">
-            Your role can see this setting but not change it. Ask a site administrator or the hotel IT manager.
+            Your role can see this setting but not change it. Ask a site administrator or the site IT manager.
           </span>
         </ReadOnlyNotice>
       )}
@@ -193,7 +193,7 @@ export function GuestDeviceSelfServiceView({ canAct, rolesKnown = true }: { canA
       {/* THE TWO STATES, SIDE BY SIDE AND NEVER MERGED INTO ONE INDICATOR. */}
       <div className="grid gap-4 sm:grid-cols-2">
         <StateTile
-          label="This property offers it"
+          label="This site offers it"
           value={on ? "On" : "Off"}
           on={on}
           testId="setting-state"
@@ -217,11 +217,11 @@ export function GuestDeviceSelfServiceView({ canAct, rolesKnown = true }: { canA
         <Callout tone="neutral" icon={deployed && on ? <CheckCircle2 className="text-success" /> : <CircleSlash />}>
           {deployed
             ? on
-              ? "Guests can use device self-service on this property now."
-              : "Guests cannot use device self-service here, because this property has it switched off."
+              ? "Clients can use device self-service on this site now."
+              : "Clients cannot use device self-service here, because this site has it switched off."
             : on
-              ? "Guests cannot use device self-service yet: it is switched on for this property, and it is not included in the software running on this appliance. Saving this setting does not install it."
-              : "Guests cannot use device self-service: it is not included in the software running on this appliance, and this property has it switched off."}
+              ? "Clients cannot use device self-service yet: it is switched on for this site, and it is not included in the software running on this appliance. Saving this setting does not install it."
+              : "Clients cannot use device self-service: it is not included in the software running on this appliance, and this site has it switched off."}
         </Callout>
       </div>
 
@@ -230,7 +230,7 @@ export function GuestDeviceSelfServiceView({ canAct, rolesKnown = true }: { canA
           {pending === null ? (
             <CardBody className="flex flex-wrap items-center justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-emphasis">Offer device self-service at this property</div>
+                <div className="text-emphasis">Offer device self-service at this site</div>
                 <p className="text-caption text-muted-foreground">
                   Currently {on ? "on" : "off"}. You will be asked to confirm, with an optional reason.
                 </p>
@@ -249,13 +249,13 @@ export function GuestDeviceSelfServiceView({ canAct, rolesKnown = true }: { canA
               <CardBody className="space-y-3">
                 <div className="text-emphasis">
                   {pending
-                    ? "Offer guest device self-service at this property?"
-                    : "Stop offering guest device self-service at this property?"}
+                    ? "Offer client device self-service at this site?"
+                    : "Stop offering client device self-service at this site?"}
                 </div>
                 <p className="text-sm text-muted-foreground">
                   {pending
-                    ? "Guests will be able to remove their own devices that are not connected. Devices that are online stay put."
-                    : "Guests will no longer see or be able to remove their devices. Nothing already connected is disconnected by this change."}
+                    ? "Clients will be able to remove their own devices that are not connected. Devices that are online stay put."
+                    : "Clients will no longer see or be able to remove their devices. Nothing already connected is disconnected by this change."}
                 </p>
                 <Field label="Reason (optional)" hint="Recorded in the change history.">
                   <Input

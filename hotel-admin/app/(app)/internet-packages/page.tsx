@@ -54,13 +54,13 @@ export default function InternetPackagesPage() {
         icon={<Package />}
         eyebrow="Internet offering"
         title="Internet packages"
-        description="What guests are offered, and how it is being used."
+        description="What clients are offered, and how it is being used."
         help={
           <>
             <HelpSection title="Two views">
               <HelpList items={[
-                <><strong>Packages</strong> is the catalogue: what each package gives, how many guests are on it now, and Add, Edit, Disable or Delete from the package&rsquo;s record.</>,
-                <><strong>Guest activity</strong> is every grant in a period &mdash; from the portal, a voucher, a guest account, a grace period or staff &mdash; with what it used.</>,
+                <><strong>Packages</strong> is the catalogue: what each package gives, how many clients are on it now, and Add, Edit, Disable or Delete from the package&rsquo;s record.</>,
+                <><strong>Client activity</strong> is every grant in a period &mdash; from the portal, a voucher, a client account, a grace period or staff &mdash; with what it used.</>,
               ]} />
             </HelpSection>
             <HelpSection title="Packages and service plans">
@@ -68,18 +68,18 @@ export default function InternetPackagesPage() {
                 A service plan defines the speed, allowances and device limit a package hands out. Speed, data,
                 time and device limits are changed on Service plans; a package shows them as context for the choice.
               </p>
-              <p>Each saved change to a package is kept permanently. A guest keeps the terms that applied when they connected.</p>
+              <p>Each saved change to a package is kept permanently. A client keeps the terms that applied when they connected.</p>
             </HelpSection>
             <HelpSection title="Data allowance per stay night">
               <p>
-                The allowance is worked out once, when the guest is given the package, and does not change
-                afterwards if their stay is extended or shortened. Guests who did not sign in with their room
+                The allowance is worked out once, when the client is given the package, and does not change
+                afterwards if their stay is extended or shortened. Clients who did not sign in with their room
                 are not offered such a package, because their stay length is not known.
               </p>
             </HelpSection>
             <HelpSection title="Price">
               <p>
-                Selling packages to guests is not enabled on this appliance, so there is no price to set; a
+                Selling packages to clients is not enabled on this appliance, so there is no price to set; a
                 package is granted rather than sold.
               </p>
             </HelpSection>
@@ -106,7 +106,7 @@ export default function InternetPackagesPage() {
         <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
           <TabsList>
             <TabsTrigger value="packages">Packages</TabsTrigger>
-            <TabsTrigger value="activity">Guest activity</TabsTrigger>
+            <TabsTrigger value="activity">Client activity</TabsTrigger>
           </TabsList>
           <ErrorBanner err={err} className="mt-4" />
           <TabsContent value="packages" className="mt-4">

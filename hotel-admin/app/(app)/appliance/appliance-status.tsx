@@ -102,7 +102,7 @@ export function activationWords(st: CentralStatus): { title: string; tone: Tone;
           body: (
             <>
               This appliance was removed from OneGate Central. To use it again, factory-reset it and have your vendor
-              activate it. Guests already online are not disconnected; nobody new can sign in. The factory-clean
+              activate it. Clients already online are not disconnected; nobody new can sign in. The factory-clean
               procedure is described in <strong>Factory-clean install and disaster recovery</strong> (ask your
               OneGate vendor).
             </>
@@ -112,7 +112,7 @@ export function activationWords(st: CentralStatus): { title: string; tone: Tone;
       return {
         title: "Retired",
         tone: "err",
-        body: "This appliance was retired in OneGate Central and no longer signs guests in. Contact your OneGate vendor.",
+        body: "This appliance was retired in OneGate Central and no longer signs clients in. Contact your OneGate vendor.",
       };
     default:
       return { title: String(st.activation), tone: "default", body: null };
@@ -123,13 +123,13 @@ export function licenceWords(l: CentralStatus["license"]): { title: string; tone
   const until = l.valid_until ? licenceDay(l.valid_until) : "";
   switch (l.state) {
     case "none":
-      return { title: "No licence yet", tone: "warn", line: "Guests cannot sign in until this appliance is activated and licensed." };
+      return { title: "No licence yet", tone: "warn", line: "Clients cannot sign in until this appliance is activated and licensed." };
     case "active":
       return { title: "Active", tone: "ok", line: until ? `Valid until ${until}${l.days_left != null ? ` · ${daysWord(l.days_left)} left` : ""}.` : "Valid." };
     case "expiring":
       return { title: "Expires soon", tone: "warn", line: `Valid until ${until} · ${daysWord(l.days_left)} left.` };
     case "grace":
-      return { title: "Grace period", tone: "warn", line: `Ended ${until}. Guests keep signing in until ${licenceDay(l.grace_ends_at)}.` };
+      return { title: "Grace period", tone: "warn", line: `Ended ${until}. Clients keep signing in until ${licenceDay(l.grace_ends_at)}.` };
     case "expired":
       return { title: "Expired", tone: "err", line: until ? `Ended ${until}.` : "The licence has ended." };
     case "suspended":
@@ -151,7 +151,7 @@ export function centralWords(c: CentralStatus["central"]): { title: string; tone
       return {
         title: "Temporarily unreachable",
         tone: "warn",
-        line: "Guests are not affected: this appliance signs guests in by itself. Licence renewals wait until the connection returns.",
+        line: "Clients are not affected: this appliance signs clients in by itself. Licence renewals wait until the connection returns.",
       };
     case "not_configured":
       return { title: "Not configured", tone: "default", line: "No OneGate Central address is set on this appliance." };
@@ -340,31 +340,31 @@ export function ApplianceStatus() {
       {/* ---- PROBLEMS, in words, with what to do ---- */}
       {d.permissive_blocked && (
         <Callout tone="danger" title="A blocked attempt to switch off licence enforcement">
-          This appliance refused to run without a licence ({d.permissive_blocked}). Guests still need a real licence.
+          This appliance refused to run without a licence ({d.permissive_blocked}). Clients still need a real licence.
           The attempt was recorded in Activity.
         </Callout>
       )}
       {d.assignment_status === "unverifiable" && (
         <Callout tone="danger" title="This appliance holds an activation it cannot verify">
-          It is ignoring it, and signs no guests in until a valid activation arrives. Contact your OneGate vendor.
+          It is ignoring it, and signs no clients in until a valid activation arrives. Contact your OneGate vendor.
         </Callout>
       )}
       {l.state === "grace" && (
         <Callout tone="warning" title="The licence is in its grace period">
-          It ended {licenceDay(l.valid_until)}. Guests keep signing in until <strong>{licenceDay(l.grace_ends_at)}</strong>
+          It ended {licenceDay(l.valid_until)}. Clients keep signing in until <strong>{licenceDay(l.grace_ends_at)}</strong>
           {l.days_left != null ? <> ({daysWord(l.days_left)} left)</> : null}. Ask your OneGate vendor to renew it; the
           renewal arrives by itself.
         </Callout>
       )}
       {(l.state === "expired" || l.state === "suspended" || l.state === "revoked") && (
         <Callout tone="danger" title={`The licence is ${l.state}`}>
-          New guest sign-ins are refused; guests already online are not disconnected. The sign-in page, DHCP, DNS and
+          New client sign-ins are refused; clients already online are not disconnected. The sign-in page, DHCP, DNS and
           this admin keep working. Contact your OneGate vendor{l.state === "expired" ? " to renew it" : ""}.
         </Callout>
       )}
       {l.state === "wrong_hardware" && (
         <Callout tone="danger" title="The licence belongs to a different appliance">
-          New guest sign-ins are refused. Ask your OneGate vendor for a licence for serial number{" "}
+          New client sign-ins are refused. Ask your OneGate vendor for a licence for serial number{" "}
           <strong>{st.serial || "—"}</strong>, then upload it below.
         </Callout>
       )}
@@ -376,7 +376,7 @@ export function ApplianceStatus() {
       )}
       {limited && current != null && current >= max! && (
         <Callout tone="warning" title="Licensed capacity reached">
-          {current} of {max} guests are online. New guests cannot sign in until someone goes offline; guests already
+          {current} of {max} clients are online. New clients cannot sign in until someone goes offline; clients already
           online are not affected.
         </Callout>
       )}
@@ -407,7 +407,7 @@ export function ApplianceStatus() {
             {l.state !== "none" && (
               <div className="space-y-2">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <span className="text-muted-foreground">Guests online, all guest networks</span>
+                  <span className="text-muted-foreground">Clients online, all guest networks</span>
                   <span className="text-metric tabular">
                     {current ?? "—"}
                     <span className="text-sm font-normal text-muted-foreground"> / {limited ? max : "Unlimited"}</span>

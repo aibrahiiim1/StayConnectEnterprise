@@ -222,7 +222,7 @@ export default function HealthPage() {
             <HelpSection title="Actions">
               <HelpList
                 items={[
-                  <><strong>Logs</strong> — recent log lines, sanitised by the appliance (secrets and guest details removed). Every role that can open this page can read them.</>,
+                  <><strong>Logs</strong> — recent log lines, sanitised by the appliance (secrets and client details removed). Every role that can open this page can read them.</>,
                   <><strong>Recheck</strong> — runs the service&rsquo;s health check again now.</>,
                   <><strong>Restart</strong> — stops and starts the service. It asks for a reason and your password, says what it will interrupt, and is recorded against your account.</>,
                 ]}
@@ -449,7 +449,7 @@ export default function HealthPage() {
 
                 <SheetSection
                   title="Recent logs"
-                  description="Sanitised: secrets and guest details are removed by the appliance."
+                  description="Sanitised: secrets and client details are removed by the appliance."
                   actions={
                     <Button
                       size="xs"
@@ -526,16 +526,16 @@ export default function HealthPage() {
 // choosing whether to drop every guest, or to stop new devices getting an address for a few seconds. An
 // unrecognised service falls back to the generic warning rather than claiming something specific.
 const RESTART_IMPACT: Record<string, string> = {
-  scd: "Every guest currently online is disconnected and has to reconnect. Enforcement of speed and data limits stops until it comes back.",
-  edged: "This admin interface goes away for a few seconds and you may have to sign in again. Guests are not affected.",
-  netd: "Network configuration changes cannot be applied while it is down. Guests already online stay online.",
-  portald: "The guest sign-in page stops loading, so nobody new can sign in. Guests already online stay online.",
+  scd: "Every client currently online is disconnected and has to reconnect. Enforcement of speed and data limits stops until it comes back.",
+  edged: "This admin interface goes away for a few seconds and you may have to sign in again. Clients are not affected.",
+  netd: "Network configuration changes cannot be applied while it is down. Clients already online stay online.",
+  portald: "The client sign-in page stops loading, so nobody new can sign in. Clients already online stay online.",
   acctd: "Usage measurement pauses, so data and time allowances stop being counted for a few seconds.",
-  "hotel-admin": "This admin interface reloads. Guests are not affected.",
-  caddy: "Both the admin interface and the guest portal are briefly unreachable. Guests already online stay online.",
-  kea: "New devices cannot get an IP address until it returns, so new guests cannot connect. Existing devices keep their lease.",
-  unbound: "Name lookups stop for guests, which looks to them like the internet is down, until it returns.",
-  postgres: "Everything stops: guest sign-in, this admin and the PMS connection all depend on the database.",
+  "hotel-admin": "This admin interface reloads. Clients are not affected.",
+  caddy: "Both the admin interface and the Client Portal are briefly unreachable. Clients already online stay online.",
+  kea: "New devices cannot get an IP address until it returns, so new clients cannot connect. Existing devices keep their lease.",
+  unbound: "Name lookups stop for clients, which looks to them like the internet is down, until it returns.",
+  postgres: "Everything stops: client sign-in, this admin and the PMS connection all depend on the database.",
 };
 const GENERIC_RESTART_IMPACT =
   "The service will be stopped and started again. Anything depending on it is interrupted until it returns.";

@@ -163,7 +163,7 @@ export default function OperatorsPage() {
           <>
             <HelpSection title="Local accounts">
               <p>
-                Operators are local to this property. They are not cloud accounts and do not exist on any other site.
+                Operators are local to this site. They are not cloud accounts and do not exist on any other site.
               </p>
             </HelpSection>
             <HelpSection title="Roles">
@@ -320,7 +320,7 @@ export default function OperatorsPage() {
       >
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Email or username" required>
-            <Input value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="ops@hotel.com" />
+            <Input value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="ops@example.com" />
           </Field>
           <Field label="Name" hint="Shown instead of the email where there is room for it.">
             <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Optional" />

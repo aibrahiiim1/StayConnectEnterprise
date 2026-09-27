@@ -186,12 +186,12 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
         eyebrow="Property management system"
         title="Cross-PMS transfer"
         icon={<ArrowLeftRight />}
-        description="Move a guest's live access from a stay on one PMS to a stay on another."
+        description="Move a client's live access from a stay on one PMS to a stay on another."
         help={
           <>
             <HelpSection title="When to use a transfer">
               <p>
-                Move a guest&rsquo;s live access from a stay on one PMS to a stay on another — for example, a guest
+                Move a client&rsquo;s live access from a stay on one PMS to a stay on another — for example, a guest
                 moved to the sister property.
               </p>
               <p>
@@ -204,7 +204,7 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
                 items={[
                   <>Enter the stay reference on the PMS the guest is leaving and the one on the PMS they are moving to, then preview.</>,
                   <>The preview shows the devices and live sessions that will move. Nothing moves until you confirm with a reason and your password.</>,
-                  <>The guest stays connected: no sign-out, no signing in again.</>,
+                  <>The client stays connected: no sign-out, no signing in again.</>,
                 ]}
               />
             </HelpSection>
@@ -225,7 +225,7 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
         <Card>
           <CardHeader>
             <div className="space-y-1">
-              <CardTitle>Transfer a guest</CardTitle>
+              <CardTitle>Transfer a client</CardTitle>
               <CardDescription>
                 Enter both stays, then preview. Nothing moves until you confirm with a reason and your password.
               </CardDescription>
@@ -282,7 +282,7 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
                   ]}
                 />
                 <p className="text-sm text-muted-foreground">
-                  The guest stays connected: no sign-out, no signing in again. Access on the origin stay ends when this
+                  The client stays connected: no sign-out, no signing in again. Access on the origin stay ends when this
                   completes and is not returned automatically if the guest goes back.
                 </p>
               </div>
@@ -380,7 +380,7 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
       <DialogForm
         open={confirming && preview !== null}
         onOpenChange={(v) => { if (!v) closeConfirm(); }}
-        title="Transfer this guest's access?"
+        title="Transfer this client's access?"
         description={
           preview
             ? `Room ${preview.from_room || "—"} (reservation ${preview.from_external_reservation_id}) to room ${preview.to_room || "—"} (reservation ${preview.to_external_reservation_id}).`

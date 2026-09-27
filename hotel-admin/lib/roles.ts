@@ -19,9 +19,9 @@ export type SiteRole = (typeof SITE_ROLES)[number];
 
 export const ROLE_LABELS: Record<SiteRole, string> = {
   site_admin: "Site admin",
-  hotel_it_manager: "Hotel IT manager",
+  hotel_it_manager: "Site IT manager",
   front_office_operator: "Front office operator",
-  guest_relations_operator: "Guest relations operator",
+  guest_relations_operator: "Client relations operator",
   voucher_operator: "Voucher operator",
   payments_operator: "Payments operator",
   site_viewer: "Site viewer",

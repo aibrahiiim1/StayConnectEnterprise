@@ -169,8 +169,8 @@ export function AddConnectionWizard({
           <DialogTitle>{done ? "Connection created" : "Add a PMS connection"}</DialogTitle>
           <DialogDescription>
             {done
-              ? "One more step before guests can use it: publish its configuration and activate it."
-              : "Connect the appliance to the hotel's property management system so guests can sign in with their room number."}
+              ? "One more step before clients can use it: publish its configuration and activate it."
+              : "Connect the appliance to the site's property management system so clients can sign in with their room number."}
           </DialogDescription>
           {!done && <Stepper className="pt-3" steps={steps} current={step} onStep={progress.revisionId ? undefined : (i) => !busy && setStep(i)} />}
         </DialogHeader>
@@ -256,7 +256,7 @@ export function AddConnectionWizard({
                         <li>Read-only — OneGate never writes to the PMS.</li>
                         <li>No credential required — the link needs none.</li>
                         <li>
-                          Charging a room through the PMS stays off until the property&rsquo;s folio behaviour has
+                          Charging a room through the PMS stays off until the PMS&rsquo;s folio behaviour has
                           been determined.
                         </li>
                       </ul>

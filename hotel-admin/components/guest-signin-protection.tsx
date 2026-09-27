@@ -112,12 +112,12 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
       <CardHeader className="items-start">
         <div className="min-w-0 space-y-1">
           <CardTitle className="flex flex-wrap items-center gap-2">
-            <ShieldAlert className="size-4 text-muted-foreground" aria-hidden /> Guest sign-in protection
-            <HelpTip title="Guest sign-in protection">
+            <ShieldAlert className="size-4 text-muted-foreground" aria-hidden /> Client sign-in protection
+            <HelpTip title="Client sign-in protection">
               <HelpSection>
                 <p>
                   After too many incorrect sign-in details from the <strong>same device</strong>, that device is
-                  asked to wait before it can try again. It protects guests from someone working through room
+                  asked to wait before it can try again. It protects clients from someone working through room
                   numbers, and it is always on — these settings decide how strict it is, not whether it runs.
                 </p>
               </HelpSection>
@@ -181,7 +181,7 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
         </div>
 
         {/* SAID PLAINLY, BECAUSE IT IS THE ONE THING AN OPERATOR WILL EXPECT TO WORK THE OTHER WAY. Somebody
-            shortening the wait to help a guest who is waiting right now would otherwise watch nothing happen
+            shortening the wait to help a client who is waiting right now would otherwise watch nothing happen
             and assume the setting is broken. */}
         <div className="space-y-1 rounded-md border border-border bg-surface px-3.5 py-3 text-sm text-muted-foreground">
           <p>
@@ -189,7 +189,7 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
             was given — shortening the wait here does not end a wait already running.
           </p>
           <p>
-            To let one guest try again now, use <strong>Release</strong> on the Active restrictions tab of Guest
+            To let one client try again now, use <strong>Release</strong> on the Active restrictions tab of Client
             sign-in attempts. Releasing allows another attempt; it does not sign anyone in.
           </p>
         </div>

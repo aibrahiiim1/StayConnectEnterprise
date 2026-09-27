@@ -36,7 +36,7 @@ import { LiveStatus, refreshingClass } from "@/components/ui/patterns";
 
 const REFUSAL_MEANING: Record<string, string> = {
   REFUSED_ROSTER_INCOMPLETE:
-    "The latest sweep did not name the whole property, so it is a partial answer. A partial answer must never be read as “the guests it missed have left”.",
+    "The latest sweep did not name the whole site, so it is a partial answer. A partial answer must never be read as “the guests it missed have left”.",
   REFUSED_GENERATION_NOT_LATEST:
     "A newer roster exists. Acting on a superseded one would close guests who have arrived since it was taken.",
   REFUSED_GENERATION_UNPUBLISHED:
@@ -44,7 +44,7 @@ const REFUSAL_MEANING: Record<string, string> = {
   REFUSED_LINK_NOT_HEALTHY:
     "The PMS link is faulted or resyncing. The connector is saying it no longer trusts its own picture, which is not a moment to act on it.",
   REFUSED_SCOPE_MISMATCH:
-    "The interface does not belong to this property. Nothing was read or changed.",
+    "The interface does not belong to this site. Nothing was read or changed.",
   REFUSED_ROSTER_TOO_SMALL:
     "The roster is below the configured floor — a backstop against an obviously broken response.",
   REFUSED_CAP_EXCEEDED:
@@ -96,14 +96,14 @@ export default function RosterReconciliationPage() {
         eyebrow="Property management system"
         title="Roster reconciliation"
         icon={<ListChecks />}
-        description="Keeps this appliance's guest list identical to the hotel's, automatically."
+        description="Keeps this appliance's guest list identical to the PMS's, automatically."
         help={
           <>
             <HelpSection title="What reconciliation does">
               <p>
-                The hotel&rsquo;s PMS sends this appliance a full list of who is in the building, many times a day.
+                The site&rsquo;s PMS sends this appliance a full list of who is in the building, many times a day.
                 Reconciliation compares that list with the guest list this appliance is using and closes any stay
-                the hotel no longer has — which is how somebody who checked out stops being able to sign in.
+                the PMS no longer has — which is how somebody who checked out stops being able to sign in.
               </p>
             </HelpSection>
             <HelpSection title="This happens on its own">
@@ -113,14 +113,14 @@ export default function RosterReconciliationPage() {
                 PMS connection, under Advanced configuration.
               </p>
               <p>
-                Guests are never affected while it waits: if the PMS list is incomplete or the link is down, the
+                Clients are never affected while it waits: if the PMS list is incomplete or the link is down, the
                 appliance keeps using the last good list rather than guessing, and says so under Needs attention.
               </p>
             </HelpSection>
             <HelpSection title="Reading the figures">
               <HelpList
                 items={[
-                  <><strong>Rooms named by this sweep</strong> — how much of the property the PMS roster covered. An incomplete sweep makes the run refuse.</>,
+                  <><strong>Rooms named by this sweep</strong> — how much of the site the PMS roster covered. An incomplete sweep makes the run refuse.</>,
                   <><strong>Held back — PMS spoke since</strong> — stays absent from the roster that are not closed, because the PMS has said something about them after the snapshot. Arrivals and changes after the snapshot are never closed.</>,
                   <><strong>Every run, including the refusals</strong> — a run is recorded each time the PMS publishes a complete guest list.</>,
                 ]}
@@ -163,7 +163,7 @@ export default function RosterReconciliationPage() {
                     </span>
                   )}
                   <Badge tone={b.guests_affected ? "err" : "ok"}>
-                    {b.guests_affected ? "guests affected" : "guests not affected"}
+                    {b.guests_affected ? "clients affected" : "clients not affected"}
                   </Badge>
                 </div>
                 <p className="mt-2 text-sm text-warning-subtle-foreground">{b.detail}</p>
@@ -184,20 +184,20 @@ export default function RosterReconciliationPage() {
               <HelpTip title="Historical exception">
                 <HelpSection title="What this is">
                   <p>
-                    When this appliance was first connected it joined a hotel that was already running, and its
+                    When this appliance was first connected it joined a site that was already running, and its
                     first roster sweeps did not yet cover every room. A guest checked out during that window, so
                     the PMS announced a departure for a stay this appliance had never been told about.
                   </p>
                   <p>
-                    Nobody is affected. No guest is online because of it, no stay is held open by it, and it will
-                    not grow — the connector has covered the whole property on every sweep since.
+                    Nobody is affected. No client is online because of it, no stay is held open by it, and it will
+                    not grow — the connector has covered the whole site on every sweep since.
                   </p>
                 </HelpSection>
                 <HelpSection title="What to do about it">
                   <p>
                     It stays on this list because closing it locally would mean inventing the arrival that was
                     never received, and this system does not invent guest records. There are exactly two ways it
-                    ends: ask the hotel&rsquo;s PMS whether that reservation existed, or decide to leave it as a
+                    ends: ask the site&rsquo;s PMS whether that reservation existed, or decide to leave it as a
                     known gap from the appliance&rsquo;s first days. Either is a legitimate answer; doing nothing
                     is also safe.
                   </p>
@@ -215,7 +215,7 @@ export default function RosterReconciliationPage() {
                       recorded {formatDate(b.since)}
                     </span>
                   )}
-                  <Badge tone="ok">guests not affected</Badge>
+                  <Badge tone="ok">clients not affected</Badge>
                 </div>
                 <p className="mt-2 text-sm">{b.detail}</p>
               </div>
@@ -231,7 +231,7 @@ export default function RosterReconciliationPage() {
           label="Rooms named by this sweep"
           value={p ? `${p.rooms_enumerated} of ${p.rooms_expected}` : "—"}
           tone={p ? (complete ? "ok" : "warn") : "default"}
-          hint={complete ? "The sweep covered the property" : "Incomplete — the run will refuse"}
+          hint={complete ? "The sweep covered the site" : "Incomplete — the run will refuse"}
         />
         <StatCard label="Occupied per the PMS" value={p?.roster_size ?? "—"} hint={`Guest-list refresh #${state?.generation ?? "—"}`} />
         <StatCard label="In house per this appliance" value={p?.mirror_in_house ?? "—"} />

@@ -167,7 +167,7 @@ describe("ServicePlansPage — stale package pin", () => {
 
     await waitFor(() => expect(screen.getByRole("status").textContent).toContain("1 package updated"));
     const msg = screen.getByRole("status").textContent ?? "";
-    expect(msg).toContain("Existing guest access is unchanged");
+    expect(msg).toContain("Existing client access is unchanged");
     expect(msg.toLowerCase()).not.toContain("revision");
   });
 
@@ -317,7 +317,7 @@ describe("ServicePlansPage — add, record and delete", () => {
     expect(screen.queryByRole("button", { name: /^(disable|enable)$/i })).toBeNull();
     fireEvent.click(screen.getByText("OneDay", { selector: "button" }));
     const sheet = await screen.findByRole("dialog");
-    expect(within(sheet).getByText(/does not change what guests receive/i)).toBeInTheDocument();
+    expect(within(sheet).getByText(/does not change what clients receive/i)).toBeInTheDocument();
   });
 
   it("the plan record lists the packages using it and its saved versions", async () => {

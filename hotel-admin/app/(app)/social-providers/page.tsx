@@ -147,9 +147,9 @@ export default function SocialProvidersPage() {
     <PageShell>
       <PageHeader
         icon={<AtSign />}
-        eyebrow="Guest portal"
+        eyebrow="Client Portal"
         title="Social login"
-        description="Let guests sign in with an account they already have."
+        description="Let clients sign in with an account they already have."
         help={
           <>
             <HelpSection title="What a provider entry is">
@@ -164,7 +164,7 @@ export default function SocialProvidersPage() {
                   <>The <strong>client secret</strong> is stored write-only and is never shown again. When editing, leave it blank to keep the one already stored.</>,
                   <>The <strong>redirect URI</strong> must match the one registered with the provider exactly.</>,
                   <>The provider of an entry cannot be changed; remove it and add it again instead.</>,
-                  <>Whether guests are actually offered a provider is switched on in <strong>Sign-in methods</strong>.</>,
+                  <>Whether clients are actually offered a provider is switched on in <strong>Sign-in methods</strong>.</>,
                 ]}
               />
             </HelpSection>
@@ -184,7 +184,7 @@ export default function SocialProvidersPage() {
             <EmptyState
               icon={<KeyRound />}
               title="No social login is configured"
-              hint="Guests can still sign in with a room number, a voucher or an account."
+              hint="Clients can still sign in with a room number, a voucher or an account."
               action={writable ? <Button onClick={openNew}><Plus /> Add a provider</Button> : undefined}
             />
           ) : (
@@ -281,7 +281,7 @@ export default function SocialProvidersPage() {
           <div>
             <div className="text-sm font-medium">Offer this on the sign-in page</div>
             <div className="text-xs text-muted-foreground">
-              Turn it off to finish setting it up without guests seeing it.
+              Turn it off to finish setting it up without clients seeing it.
             </div>
           </div>
           <Switch checked={f.enabled} onCheckedChange={(v) => set("enabled", v)} label="Offer this provider" />
@@ -294,7 +294,7 @@ export default function SocialProvidersPage() {
         title="Remove this social login?"
         description={
           deleting
-            ? `Guests will no longer be offered ${deleting.display_name || PROVIDER_LABELS[deleting.provider] || deleting.provider} on the sign-in page. The stored client secret is deleted with it, so re-adding means registering it again.`
+            ? `Clients will no longer be offered ${deleting.display_name || PROVIDER_LABELS[deleting.provider] || deleting.provider} on the sign-in page. The stored client secret is deleted with it, so re-adding means registering it again.`
             : undefined
         }
         confirmLabel="Remove"

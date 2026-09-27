@@ -201,7 +201,7 @@ export function PackagesTab({
     setBusy(true); setErr(null); setNotice(null);
     try {
       await api.post(`/commercial-packages/${p.package_id}/active`, { active: true });
-      const msg = `${p.name || p.code} is being offered to guests again.`;
+      const msg = `${p.name || p.code} is being offered to clients again.`;
       setNotice(msg); toast.success("Package enabled", msg);
       await load();
     } catch (e) { if (!guard(e)) setErr((e as Error)?.message ?? "Could not update this package"); }
@@ -213,7 +213,7 @@ export function PackagesTab({
     setBusy(true); setActionErr(null); setNotice(null);
     try {
       await api.post(`/commercial-packages/${disabling.package_id}/active`, { active: false, reason, password });
-      const msg = `${disabling.name || disabling.code} is no longer offered to guests. Anyone already online keeps what they have.`;
+      const msg = `${disabling.name || disabling.code} is no longer offered to clients. Anyone already online keeps what they have.`;
       setNotice(msg); toast.success("Package disabled", msg);
       setDisabling(null);
       await load();
@@ -226,11 +226,11 @@ export function PackagesTab({
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Offered to guests" value={rows ? counts.active : "—"} icon={<CheckCircle2 />} tone="ok"
+        <StatCard label="Offered to clients" value={rows ? counts.active : "—"} icon={<CheckCircle2 />} tone="ok"
           hint={rows ? `${counts.all} package${counts.all === 1 ? "" : "s"} in total` : undefined} />
         <StatCard label="Disabled" value={rows ? counts.disabled : "—"} icon={<Ban />}
           hint="Kept with their history, not offered" />
-        <StatCard label="Guests on a package now" value={activeNow ?? "—"} icon={<Users />} tone="info"
+        <StatCard label="Clients on a package now" value={activeNow ?? "—"} icon={<Users />} tone="info"
           hint={activeNow === null ? "Could not be counted right now" : "Across every package"} />
         <StatCard label="Service plans" value={plans.length} icon={<Gauge />} href="/service-plans"
           hint="The speed and allowances packages hand out" />
@@ -271,7 +271,7 @@ export function PackagesTab({
             <SkeletonRows rows={4} cols={7} />
           ) : rows.length === 0 ? (
             <EmptyState icon={<Package />} title="No internet packages yet"
-              hint="Until a package exists, a verified guest has nothing to be given and cannot get online."
+              hint="Until a package exists, a verified client has nothing to be given and cannot get online."
               action={writable ? <Button onClick={() => { setFormErr(null); setAdding(true); }}><Plus /> Add the first package</Button> : undefined} />
           ) : shown.length === 0 ? (
             <EmptyState icon={<Package />} title="No package matches"
@@ -280,7 +280,7 @@ export function PackagesTab({
             <Table>
               <THead><TR>
                 <TH>Package</TH><TH>Status</TH><TH>Price</TH><TH>Speed</TH><TH>Data</TH><TH>Time</TH>
-                <TH>Devices</TH><TH>Guests now</TH><TH><span className="sr-only">Actions</span></TH>
+                <TH>Devices</TH><TH>Clients now</TH><TH><span className="sr-only">Actions</span></TH>
               </TR></THead>
               <TBody>
                 {shown.map((p) => (
@@ -351,9 +351,9 @@ export function PackagesTab({
                   badges={<>
                     {/* A package with no published configuration cannot be offered, whatever its active flag says. */}
                     {!p.current_revision_id ? (
-                      <Badge tone="warn" dot>Not configured — not offered to guests</Badge>
+                      <Badge tone="warn" dot>Not configured — not offered to clients</Badge>
                     ) : p.active ? (
-                      <Badge tone="ok" dot>Offered to guests</Badge>
+                      <Badge tone="ok" dot>Offered to clients</Badge>
                     ) : (
                       <Badge dot>Disabled</Badge>
                     )}
@@ -365,7 +365,7 @@ export function PackagesTab({
                     { label: "Price", value: priceText(p.price_minor, p.currency, p.currency_exponent) },
                     { label: "Download", value: formatSpeed(p.down_kbps) },
                     { label: "Data", value: formatData(p.data_quota_bytes) },
-                    { label: "Guests now", value: activeBy ? (activeBy[p.package_id] ?? 0) : "—" },
+                    { label: "Clients now", value: activeBy ? (activeBy[p.package_id] ?? 0) : "—" },
                   ]} />
 
                   {p.plan_has_newer_revision && (
@@ -385,7 +385,7 @@ export function PackagesTab({
                       { label: "Devices", value: formatDevices(p.max_concurrent_devices),
                         hint: DEVICE_LIMIT_POLICIES[p.device_limit_policy ?? ""] },
                       { label: "Speed sharing", value: p.speed_allocation === "SHARED"
-                        ? "Shared by the guest's devices" : "Full speed on every device" },
+                        ? "Shared by the client's devices" : "Full speed on every device" },
                       { label: "Offered from", value: p.visible_from ? formatDate(p.visible_from) : "Always" },
                       { label: "Offered until", value: p.visible_until ? formatDate(p.visible_until) : "No end date" },
                     ]} />
@@ -438,7 +438,7 @@ export function PackagesTab({
         <DialogContent size="xl">
           <DialogHeader>
             <DialogTitle>Add an internet package</DialogTitle>
-            <DialogDescription>What the guest is offered on the portal, and the service plan it hands out.</DialogDescription>
+            <DialogDescription>What the client is offered on the portal, and the service plan it hands out.</DialogDescription>
           </DialogHeader>
           <DialogBody className="space-y-4">
             <ErrorBanner err={formErr} />
@@ -452,7 +452,7 @@ export function PackagesTab({
           <DialogHeader>
             <DialogTitle>{editing ? `Edit ${editing.name || editing.code}` : "Edit package"}</DialogTitle>
             <DialogDescription>
-              Saving records a new permanent version of this package. Guests already online keep the terms they
+              Saving records a new permanent version of this package. Clients already online keep the terms they
               connected under.
             </DialogDescription>
           </DialogHeader>
@@ -470,7 +470,7 @@ export function PackagesTab({
         open={disabling !== null}
         onOpenChange={(v) => !v && setDisabling(null)}
         title={`Stop offering ${disabling?.name || disabling?.code || "this package"}?`}
-        description="Guests will stop being offered it immediately. Anyone already online keeps the access they were given, its history is kept, and it can be switched back on at any time."
+        description="Clients will stop being offered it immediately. Anyone already online keeps the access they were given, its history is kept, and it can be switched back on at any time."
         confirmLabel="Stop offering it"
         confirmVariant="danger"
         busy={busy}

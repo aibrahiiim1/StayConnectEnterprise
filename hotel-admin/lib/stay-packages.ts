@@ -89,7 +89,7 @@ export type AllocationForm = {
 };
 
 export const ALLOCATION_MODE_LABELS: Record<AllocationMode, string> = {
-  FIXED: "The service plan's allowance, the same for every guest",
+  FIXED: "The service plan's allowance, the same for every client",
   PER_STAY_NIGHT: "An allowance per night of the stay",
 };
 

@@ -13,7 +13,7 @@ describe("the service descriptions say what STOPS, not what the process is calle
     expect(describeDatabase(true).tone).toBe("ok");
     const down = describeDatabase(false);
     expect(down.tone).toBe("err");
-    expect(down.summary).toMatch(/guest sign-in/i);
+    expect(down.summary).toMatch(/client sign-in/i);
   });
 
   it("describes the session controller by its effect, never by its process name", () => {
@@ -77,7 +77,7 @@ describe("describePmsReadiness states the consequence for the guest", () => {
     // The front desk must not start handing out workarounds for capabilities that are unaffected.
     const r = describePmsReadiness({ transport: "DISCONNECTED", roomAuthReady: false });
     expect(r.tone).toBe("err");
-    expect(r.summary).toMatch(/vouchers and guest accounts still work/i);
+    expect(r.summary).toMatch(/vouchers and client accounts still work/i);
   });
 
   it("reports a refresh in progress as temporary rather than broken", () => {

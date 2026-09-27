@@ -380,8 +380,8 @@ export function reasonText(reason?: string): string {
 const METHODS: Record<string, string> = {
   PMS: "Room number",
   VOUCHER: "Voucher",
-  ACCOUNT: "Guest account",
-  PRINCIPAL: "Returning guest",
+  ACCOUNT: "Client account",
+  PRINCIPAL: "Returning client",
   UNKNOWN: "Not recorded",
 };
 export const methodLabel = (m: string) => METHODS[m] ?? m.charAt(0) + m.slice(1).toLowerCase().replace(/_/g, " ");
@@ -399,14 +399,14 @@ const RESULTS: Record<string, string> = {
   SERVICE_UNAVAILABLE: "Service unavailable",
   SPENT_REQUEST_ID: "Repeated submission",
   MALFORMED_SUBMISSION: "Incomplete form",
-  LICENSE_REFUSED: "Licence does not admit new guests",
-  LICENSE_CAPACITY_REACHED: "Licensed guest capacity full",
+  LICENSE_REFUSED: "Licence does not admit new clients",
+  LICENSE_CAPACITY_REACHED: "Licensed client capacity full",
 };
 export const resultLabel = (r: string) => RESULTS[r] ?? r.replace(/_/g, " ").toLowerCase();
 
 const NOT_RECORDED: Record<string, string> = {
   "VOUCHER failures": "failed voucher sign-ins",
-  "ACCOUNT failures": "failed guest-account sign-ins",
+  "ACCOUNT failures": "failed client-account sign-ins",
   "OTP failures": "failed one-time-code sign-ins",
 };
 export const notRecordedLabel = (s: string) => NOT_RECORDED[s] ?? s.toLowerCase();

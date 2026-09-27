@@ -175,7 +175,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
             <p>
               After a database restore, money movement for this site is held until the money that was in flight
               before the restore has been reconciled. Nothing is replayed: after a restore, a correct retry is how a
-              guest gets charged twice. Guest internet access is unaffected throughout.
+              client gets charged twice. Client internet access is unaffected throughout.
             </p>
           </HelpSection>
           <HelpSection title="How to work through it">
@@ -249,13 +249,13 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
             <Badge tone="err" dot>Financial recovery</Badge>
             <p>
               Money movement is held for this site. Nothing has been replayed and nothing will be: after a
-              restore, a correct retry is how a guest gets charged twice.
+              restore, a correct retry is how a client gets charged twice.
             </p>
             <p className="tabular">
               Epoch {status.Epoch} · {status.Reason.replace(/_/g, " ").toLowerCase()} ·{" "}
               <strong>{status.HeldOpen}</strong> of {status.HeldTotal} items still to reconcile.
             </p>
-            <p className="text-muted-foreground">Guest internet access is unaffected and continues to work.</p>
+            <p className="text-muted-foreground">Client internet access is unaffected and continues to work.</p>
           </div>
         </div>
       </section>

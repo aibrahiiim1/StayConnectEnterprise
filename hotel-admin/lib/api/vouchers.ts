@@ -148,11 +148,11 @@ export const STATUS_TONE: Record<EffectiveStatus, "ok" | "info" | "warn" | "neut
 };
 
 export const STATUS_EXPLAIN: Record<EffectiveStatus, string> = {
-  available: "Printed, not used, and inside its validity window: a guest can sign in with it now.",
+  available: "Printed, not used, and inside its validity window: a client can sign in with it now.",
   not_yet_valid: "Printed and not used, but its validity window has not opened yet. Sign-in refuses it until then.",
   expired:
-    "Never used, and its valid-until has passed. Expiry is enforced when a guest tries to sign in, so the card is refused there; the stored record still says unused.",
-  redeemed: "A guest has signed in with this card. Ending that guest's access is done from their session, not here.",
+    "Never used, and its valid-until has passed. Expiry is enforced when a client tries to sign in, so the card is refused there; the stored record still says unused.",
+  redeemed: "A client has signed in with this card. Ending that client's access is done from their session, not here.",
   cancelled: "Cancelled by an operator before it was used. It no longer grants access.",
 };
 

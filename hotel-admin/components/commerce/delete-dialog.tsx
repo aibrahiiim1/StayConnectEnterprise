@@ -102,7 +102,7 @@ export function DeleteDialog({
             {answer && deletable && (
               <>
                 <Callout tone="warning" title="This cannot be undone">
-                  The {noun} and all of its saved versions are removed. No guest, purchase, voucher or report
+                  The {noun} and all of its saved versions are removed. No client, purchase, voucher or report
                   refers to it, so no history is lost.
                 </Callout>
                 {onDelete ? (
@@ -138,8 +138,8 @@ export function DeleteDialog({
                 {plain.map((r) => <p key={r.code} className="text-sm">{r.message}</p>)}
                 <Callout tone="info" title="Why it can't be deleted">
                   {kind === "package"
-                    ? "Those records must keep pointing at the exact package they were made under. Disable it instead — a disabled package is no longer offered to guests and keeps its history."
-                    : "Those records must keep pointing at the exact plan they were made under. A plan stops reaching guests when no active package uses it — disable or edit those packages instead."}
+                    ? "Those records must keep pointing at the exact package they were made under. Disable it instead — a disabled package is no longer offered to clients and keeps its history."
+                    : "Those records must keep pointing at the exact plan they were made under. A plan stops reaching clients when no active package uses it — disable or edit those packages instead."}
                 </Callout>
               </>
             )}

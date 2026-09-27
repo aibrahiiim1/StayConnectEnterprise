@@ -104,7 +104,7 @@ export default function NetworkPage() {
       setConfirming(null);
       toast.success(
         kind === "disable" ? `${net.name} is staged to go offline` : `${net.name} is staged for deletion`,
-        "Nothing changes for guests until you apply the changes.",
+        "Nothing changes for clients until you apply the changes.",
       );
       reload();
     }
@@ -173,7 +173,7 @@ export default function NetworkPage() {
         icon={<Network />}
         eyebrow="Networking"
         title="Guest networks"
-        description="The Wi-Fi networks guests join."
+        description="The Wi-Fi networks clients join."
         help={
           <>
             <HelpSection title="What a guest network is">
@@ -182,7 +182,7 @@ export default function NetworkPage() {
                 sign-in page.
               </p>
             </HelpSection>
-            <HelpSection title="How changes reach guests">
+            <HelpSection title="How changes reach clients">
               <HelpList
                 items={[
                   <>Creating, editing, disabling or deleting a network only <strong>stages</strong> the change.</>,
@@ -270,7 +270,7 @@ export default function NetworkPage() {
           <EmptyState
             icon={<Network />}
             title="No guest networks yet"
-            hint="Create a guest network to give guests Wi-Fi with a sign-in page, addresses and internet access."
+            hint="Create a guest network to give clients Wi-Fi with a sign-in page, addresses and internet access."
             action={writable ? newButton : undefined}
           />
         ) : (
@@ -358,7 +358,7 @@ export default function NetworkPage() {
             ? `Delete the network ${confirming.net.name}?`
             : `Take ${confirming?.net.name ?? ""} offline?`
         }
-        description="This only stages the change. Nothing happens to guests until you apply the changes on this screen."
+        description="This only stages the change. Nothing happens to clients until you apply the changes on this screen."
         consequences={
           confirming?.kind === "delete"
             ? [
@@ -368,7 +368,7 @@ export default function NetworkPage() {
               ]
             : [
                 "The network is marked disabled in the staged configuration.",
-                "Guests on it stay connected until you apply the change; after that, nobody can join it.",
+                "Clients on it stay connected until you apply the change; after that, nobody can join it.",
               ]
         }
         confirmLabel={confirming?.kind === "delete" ? "Delete network" : "Take offline"}

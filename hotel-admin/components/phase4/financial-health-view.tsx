@@ -115,7 +115,7 @@ export function FinancialHealthView() {
               <HelpList
                 items={[
                   <><strong>PMS posting</strong> — internet charges posted to a guest&rsquo;s room bill in the property management system.</>,
-                  <><strong>Online payment</strong> — payments a guest makes on the portal, and how each one settled.</>,
+                  <><strong>Online payment</strong> — payments a client makes on the portal, and how each one settled.</>,
                   <><strong>Configuration</strong> — the payment account and provider egress. Provider and merchant account are resolved from site configuration, never chosen per transaction.</>,
                 ]}
               />
@@ -126,9 +126,9 @@ export function FinancialHealthView() {
                 whether the money moved. It is decided on <strong>Manual review</strong>.
               </p>
             </HelpSection>
-            <HelpSection title="No guest detail here">
+            <HelpSection title="No client detail here">
               <p>
-                Nothing on this screen identifies a guest, a folio, a card or a provider transaction. The detail lives
+                Nothing on this screen identifies a client, a folio, a card or a provider transaction. The detail lives
                 behind Manual review, where every decision is audited.
               </p>
             </HelpSection>
@@ -211,7 +211,7 @@ export function FinancialHealthView() {
             <StatCard label="Oldest unreviewed" value={ageText(health.review_oldest_age_seconds)} icon={<Hourglass />} />
           </Rail>
 
-          <Rail title="Online payment" description="Payments a guest makes on the portal, and how each one settled.">
+          <Rail title="Online payment" description="Payments a client makes on the portal, and how each one settled.">
             <StatCard label="Created" value={health.payments_created} />
             <StatCard label="Pending" value={health.payments_pending} />
             <StatCard

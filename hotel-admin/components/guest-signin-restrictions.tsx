@@ -101,7 +101,7 @@ export function ActiveRestrictions({
     try {
       await api.post(`/guest-signin-restrictions/${target.id}/release`, { reason: reason.trim() });
       toast.success(
-        "Wait ended — the guest is not signed in",
+        "Wait ended — the client is not signed in",
         `${target.device_mac} may try to sign in again. It has not been given access.`,
       );
       setTarget(null);
@@ -238,11 +238,11 @@ export function ActiveRestrictions({
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
                 maxLength={200}
-                placeholder="e.g. guest at the desk, identity confirmed from their passport"
+                placeholder="e.g. client at the desk, identity confirmed from their passport"
               />
             </Field>
-            <Callout tone="warning" title="Releasing does not sign the guest in">
-              The guest still has to enter details the property accepts. If they do not know them, the answer is
+            <Callout tone="warning" title="Releasing does not sign the client in">
+              The client still has to enter details the site accepts. If they do not know them, the answer is
               the PMS record — not this button.
             </Callout>
           </>
