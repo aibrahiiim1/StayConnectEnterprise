@@ -4,6 +4,12 @@
 BEGIN;
 CREATE TABLE IF NOT EXISTS public.tenants (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid());
+-- The hotel's guest sign-in method switches (Hotel Admin > Sign-in methods). scd reads them on every guest
+-- sign-in and refuses a switched-off method before anything else, so a harness without the column refused
+-- every room sign-in as "unreadable switches" and none of the room sign-in suites tested what they claim.
+-- Same column, type, default and nullability migration 0001 creates on a real appliance.
+ALTER TABLE public.tenants ADD COLUMN IF NOT EXISTS auth_methods jsonb
+  DEFAULT '{"voucher": {"enabled": true, "template_id": null}}'::jsonb NOT NULL;
 CREATE TABLE IF NOT EXISTS public.sites (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL REFERENCES public.tenants(id),
@@ -100,6 +106,13 @@ ALTER TABLE public.operators ADD COLUMN IF NOT EXISTS password_hash text;
 ALTER TABLE public.operators ADD COLUMN IF NOT EXISTS status text DEFAULT 'active';
 ALTER TABLE public.operators ADD COLUMN IF NOT EXISTS site_id uuid;
 ALTER TABLE public.operators ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
+-- The offline-activation single-use ledger, exactly as migration 0048 declares it. scd reads and stamps it
+-- when it reconciles consumed offline packages with Central.
+CREATE TABLE IF NOT EXISTS public.edge_offline_packages (
+  package_id    uuid PRIMARY KEY,
+  nonce         text UNIQUE,
+  consumed_at   timestamptz NOT NULL DEFAULT now(),
+  reconciled_at timestamptz);
 INSERT INTO public.appliances(id, tenant_id, site_id, serial, name) VALUES
   ('44444444-4444-4444-4444-444444444444','11111111-1111-1111-1111-111111111111',
    '22222222-2222-2222-2222-222222222222','APP-FIXTURE-0001','fixture-appliance')
