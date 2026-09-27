@@ -48,7 +48,7 @@ type Row = {
 /** The prefix that selects a category server-side. One clause instead of enumerating every code. */
 const CATEGORY_PREFIX: Record<AuditCategory, string[]> = {
   "Sign-in & access": ["operator", "session", "guest_signin", "auth_methods"],
-  "Guest portal": ["branding", "portal_asset"],
+  "Client Portal": ["branding", "portal_asset"],
   "Internet offering": ["commercial_package", "service_plan", "checkout_grace"],
   "Property management system": ["pms_"],
   "Networks": ["network"],
@@ -183,7 +183,7 @@ export default function ActivityPage() {
               <HelpList
                 items={[
                   "Search matches what happened, who, a source address or an id.",
-                  <>The <strong>Security</strong> filter shows events such as a guest&rsquo;s typed credentials being viewed, a backup leaving the appliance, or a refused unlicensed-mode attempt.</>,
+                  <>The <strong>Security</strong> filter shows events such as a client&rsquo;s typed credentials being viewed, a backup leaving the appliance, or a refused unlicensed-mode attempt.</>,
                   `Each request reads up to ${LIMIT} entries for the chosen period. Choose a shorter period or a category to see more.`,
                 ]}
               />

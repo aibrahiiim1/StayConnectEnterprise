@@ -111,8 +111,8 @@ test.describe("guest sign-in protection settings", () => {
     await installBackend(page, []);
     await page.goto("/sign-in-methods");
 
-    const card = page.locator("div").filter({ hasText: /guest sign-in protection/i }).first();
-    await expect(page.getByText(/guest sign-in protection/i).first()).toBeVisible();
+    const card = page.locator("div").filter({ hasText: /client sign-in protection/i }).first();
+    await expect(page.getByText(/client sign-in protection/i).first()).toBeVisible();
 
     // Each value is a labelled setting with its unit printed beside the field, not only in the help text.
     await expect(page.getByLabel(/maximum failed attempts/i)).toBeVisible();
@@ -189,7 +189,7 @@ test.describe("the active restrictions tab", () => {
     await page.getByRole("button", { name: /^release$/i }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByText(/it is not being given access/i)).toBeVisible();
-    await expect(dialog.getByText(/releasing does not sign the guest in/i)).toBeVisible();
+    await expect(dialog.getByText(/releasing does not sign the client in/i)).toBeVisible();
     await expect(dialog.getByText(/unverified — what was typed/i)).toBeVisible();
 
     const submit = dialog.getByRole("button", { name: "Release", exact: true });

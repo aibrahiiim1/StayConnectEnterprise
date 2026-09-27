@@ -77,7 +77,7 @@ describe("Diagnostics", () => {
 
     const dialog = await screen.findByRole("dialog");
     // The per-service impact is the decision the operator is making.
-    expect(within(dialog).getByText(/Every guest currently online is disconnected/)).toBeTruthy();
+    expect(within(dialog).getByText(/Every client currently online is disconnected/)).toBeTruthy();
     const confirm = within(dialog).getByRole("button", { name: "Restart now" }) as HTMLButtonElement;
     expect(confirm.disabled).toBe(true);
 
@@ -164,7 +164,7 @@ describe("Backups", () => {
     render(<Page />);
     expect(await screen.findByRole("button", { name: "Restore db-20260921T095526Z.sql.gz" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Restore db-20260920T095526Z.sql.gz" })).toBeNull();
-    expect(screen.getByText("This property can be recovered from its latest backup")).toBeTruthy();
+    expect(screen.getByText("This site can be recovered from its latest backup")).toBeTruthy();
   });
 
   it("restore requires the backup's name typed out and a password, and sends both", async () => {
@@ -274,7 +274,7 @@ describe("Appliance & licence", () => {
     const Page = (await import("@/app/(app)/appliance/page")).default;
     render(<Page />);
     expect(screen.getByRole("heading", { level: 1, name: "Appliance & licence" })).toBeTruthy();
-    expect(await screen.findByText(/guests already online are not disconnected/)).toBeTruthy();
+    expect(await screen.findByText(/clients already online are not disconnected/)).toBeTruthy();
     expect(screen.getByText(/85% of the licensed capacity · nearly full/)).toBeTruthy();
     expect(screen.getByRole("button", { name: /Upload licence file/ })).toBeTruthy();
     const text = document.body.textContent ?? "";

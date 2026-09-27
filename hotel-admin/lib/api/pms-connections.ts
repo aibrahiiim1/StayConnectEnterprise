@@ -114,14 +114,14 @@ export const PROTEL_FALLBACK: PmsProvider = {
   integration: "FIAS interface",
   transport: "SOCKET",
   verification: "LIVE_PROVIDER_VERIFIED",
-  verification_note: "Connected to a live Protel system at a property.",
+  verification_note: "Connected to a live Protel system at a site.",
   credential: { mode: "NONE", fields: [] },
   fields: PROTEL_FIELDS,
   capabilities: { full_resync: true, live_events: true, test_connection: false, arrivals: true, departures: true },
   setup_steps: [
-    "Ask the property's Protel administrator to enable a FIAS interface for OneGate.",
+    "Ask the site's Protel administrator to enable a FIAS interface for OneGate.",
     "Note the address and port the FIAS interface listens on.",
-    "Make sure the appliance can reach that address on the hotel network.",
+    "Make sure the appliance can reach that address on the site network.",
   ],
 };
 
@@ -370,7 +370,7 @@ export const ROOM_AUTH_WORDS: Record<string, string> = {
   INTERFACE_NOT_ACTIVE: "This connection is not active — activate it to serve room sign-in.",
   NO_PUBLISHED_REVISION: "No configuration has been put live for this connection.",
   CONTINUITY_GAP: "Updates from the PMS were missed, so the guest list cannot be trusted until a full refresh.",
-  CONTINUITY_NOT_ESTABLISHED: "No updates have been received yet, so there is nothing to verify guests against.",
+  CONTINUITY_NOT_ESTABLISHED: "No updates have been received yet, so there is nothing to verify clients against.",
   NOT_IN_SYNC: "The guest list is not up to date. A full refresh will fix it.",
   FEED_SILENT: "The PMS has gone quiet for longer than this connection allows.",
   REVISION_NOT_PINNED: "The live configuration changed and the connection has not picked it up yet.",
@@ -404,7 +404,7 @@ export const LIFECYCLE_REASONS = [
   { value: "PMS_MAINTENANCE", label: "PMS maintenance" },
   { value: "TROUBLESHOOTING", label: "Troubleshooting" },
   { value: "PREPARING_REPLACEMENT", label: "Preparing to replace this connection" },
-  { value: "OPERATOR_REQUEST", label: "Requested by hotel management" },
+  { value: "OPERATOR_REQUEST", label: "Requested by site management" },
 ];
 
 export const SECRET_REASONS = [

@@ -96,7 +96,7 @@ describe("checkout grace states what is actually in force", () => {
     // The emergency warning, as a distinct status tone and in words.
     const attention = screen.getByLabelText("Needs attention");
     expect(within(attention).getByText(/Departing guests are on the emergency fallback/i)).toBeTruthy();
-    expect(within(attention).getByText(/not a decision made for this hotel/i)).toBeTruthy();
+    expect(within(attention).getByText(/not a decision made for this site/i)).toBeTruthy();
     expect(screen.getAllByText("Emergency fallback").length).toBeGreaterThan(0);
 
     // The real terms, not a shrug.
@@ -148,7 +148,7 @@ describe("checkout grace states what is actually in force", () => {
     );
     await renderScreen();
 
-    expect(screen.getByText("Hotel policy · v4")).toBeTruthy();
+    expect(screen.getByText("Site policy · v4")).toBeTruthy();
     expect(screen.queryByText(/Departing guests are on the emergency fallback/i)).toBeNull();
     expect(screen.getByText("by Dana Whitfield")).toBeTruthy();
 
@@ -253,7 +253,7 @@ describe("checkout grace states what is actually in force", () => {
     mockGrace({ published: false, config_version: 0, effective: emergency, emergency_history: { count: 0 } });
     await renderScreen(false);
     // The editor is not offered at all to a role the server would refuse.
-    expect(screen.queryByRole("button", { name: /Create hotel policy|Edit policy/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Create site policy|Edit policy/i })).toBeNull();
     expect(screen.getByText(/can view this policy but not change it/i)).toBeTruthy();
   });
 

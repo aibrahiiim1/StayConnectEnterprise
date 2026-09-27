@@ -70,7 +70,7 @@ export const PORTAL_TEMPLATES: PortalTemplate[] = [
     options: ["density", "heading_font"] },
   { id: "editorial", name: "Resort", description: "A tall banner with your welcome as the headline, the sign-in card overlapping it, your content below.",
     options: ["hero", "overlay", "hero_height", "density", "heading_font"] },
-  { id: "kiosk", name: "Kiosk", description: "No imagery and large controls, for a lobby tablet or a guest in a hurry.",
+  { id: "kiosk", name: "Kiosk", description: "No imagery and large controls, for a lobby tablet or a client in a hurry.",
     options: ["density"] },
 ];
 

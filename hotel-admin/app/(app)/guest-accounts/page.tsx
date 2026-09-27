@@ -246,18 +246,18 @@ export default function GuestAccountsPage() {
   return (
     <PageShell width="wide">
       <PageHeader
-        eyebrow="Guests"
-        title="Guest accounts"
+        eyebrow="Clients"
+        title="Client accounts"
         icon={<KeyRound />}
-        description="Usernames and passwords guests can sign in with."
+        description="Usernames and passwords clients can sign in with."
         help={
           <>
-            <HelpSection title="What a guest account is">
+            <HelpSection title="What a client account is">
               <p>
-                A username and password a guest can sign in with, instead of a room number or a voucher.
+                A username and password a client can sign in with, instead of a room number or a voucher.
               </p>
             </HelpSection>
-            <HelpSection title="What a guest can take">
+            <HelpSection title="What a client can take">
               <p>
                 Decided by the eligibility rules on each internet package, not by anything stored on the account.
                 The licence capacity is appliance-wide.
@@ -265,7 +265,7 @@ export default function GuestAccountsPage() {
             </HelpSection>
             <HelpSection title="Good to know">
               <HelpList items={[
-                "Accounts can only be used while username-and-password sign-in is offered on the guest portal.",
+                "Accounts can only be used while username-and-password sign-in is offered on the Client Portal.",
                 "A password is shown once, when it is set. It cannot be looked up again; if it is lost, set a new one.",
                 "An account is locked out after too many failed sign-in attempts.",
                 "Disable an account to stop it being used for now; that can be reversed. Deleting cannot.",
@@ -311,13 +311,13 @@ export default function GuestAccountsPage() {
           <div className="min-w-0 space-y-1">
             <div className="flex flex-wrap items-center gap-2">
               <label htmlFor="portal-offer" className="text-emphasis">
-                Offer username-and-password sign-in on the guest portal
+                Offer username-and-password sign-in on the Client Portal
               </label>
               <Badge tone={portalOn ? "ok" : "neutral"} dot>{portalOn ? "Shown on the portal" : "Hidden"}</Badge>
             </div>
             <p className="text-caption text-muted-foreground">
               {portalOn
-                ? "Guests see a Username & Password tab and can sign in with these accounts."
+                ? "Clients see a Username & Password tab and can sign in with these accounts."
                 : "The tab is hidden, so these accounts cannot be used even though they exist."}
             </p>
           </div>
@@ -351,14 +351,14 @@ export default function GuestAccountsPage() {
             value={q}
             onChange={setQ}
             placeholder="Search username or name…"
-            label="Search guest accounts"
+            label="Search client accounts"
           />
         </CardBody>
         {loadFailed ? (
           // A failed load is not an empty list and not a slow one. Saying so, and offering the one action
           // that can help, beats a spinner that will never finish.
           <EmptyState
-            title="Could not load guest accounts"
+            title="Could not load client accounts"
             hint="The appliance did not answer. Nothing has been changed."
             action={<Button onClick={() => void load()}>Try again</Button>}
           />
@@ -367,8 +367,8 @@ export default function GuestAccountsPage() {
         ) : filtered.length === 0 ? (
           <EmptyState
             icon={<KeyRound />}
-            title={q ? "No account matches that search" : "No guest accounts"}
-            hint={q ? undefined : mayWrite ? "Create one to let a guest sign in with a username and password." : undefined}
+            title={q ? "No account matches that search" : "No client accounts"}
+            hint={q ? undefined : mayWrite ? "Create one to let a client sign in with a username and password." : undefined}
             action={
               q ? <Button variant="secondary" onClick={() => setQ("")}>Clear search</Button>
                 : mayWrite ? <Button onClick={openNew}><Plus /> Add the first account</Button> : undefined
@@ -456,9 +456,9 @@ export default function GuestAccountsPage() {
       <Dialog open={showNew} onOpenChange={(v) => !v && !busy && setShowNew(false)}>
         <DialogContent size="lg">
           <DialogHeader>
-            <DialogTitle>Add a guest account</DialogTitle>
+            <DialogTitle>Add a client account</DialogTitle>
             <DialogDescription>
-              The guest signs in with this username and password. The password is shown once, after you save.
+              The client signs in with this username and password. The password is shown once, after you save.
             </DialogDescription>
           </DialogHeader>
           <DialogBody>
@@ -520,7 +520,7 @@ export default function GuestAccountsPage() {
       <ConfirmDialog
         open={deleting !== null}
         onOpenChange={(v) => !v && setDeleting(null)}
-        title="Delete this guest account?"
+        title="Delete this client account?"
         description={
           deleting
             ? `"${deleting.username}" will be removed permanently and anyone using it will be disconnected.`
@@ -558,11 +558,11 @@ function AccountForm({ account, onSubmit, busy, withPassword, onCancel }: {
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Username" required hint="What the guest types. Short is fine — even a single character.">
+        <Field label="Username" required hint="What the client types. Short is fine — even a single character.">
           <Input name="username" required minLength={1} maxLength={64} defaultValue={account?.username} placeholder="room101" />
         </Field>
-        <Field label="Name" hint="For your own reference; the guest never sees it.">
-          <Input name="display_name" defaultValue={account?.display_name ?? ""} placeholder="Room 101 guest" />
+        <Field label="Name" hint="For your own reference; the client never sees it.">
+          <Input name="display_name" defaultValue={account?.display_name ?? ""} placeholder="Meeting room 3" />
         </Field>
       </div>
 
@@ -632,7 +632,7 @@ function AccountForm({ account, onSubmit, busy, withPassword, onCancel }: {
         that is now true instead. One line, visible while the form is filled: it answers "where do I pick the plan?".
       */}
       <p className="text-caption text-muted-foreground">
-        What this guest can take is decided by the eligibility rules on each internet package.
+        What this client can take is decided by the eligibility rules on each internet package.
       </p>
       <div className="flex justify-end gap-2 border-t border-border pt-4">
         {onCancel && <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>}

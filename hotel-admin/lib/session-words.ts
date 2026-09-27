@@ -21,7 +21,7 @@ const KIND_LABELS: Record<string, string> = {
   room: "Room",
   account: "Account",
   voucher: "Voucher",
-  guest: "Guest sign-in",
+  guest: "Client sign-in",
 };
 
 /**
@@ -51,7 +51,7 @@ export function identifySession(s: Session): SessionIdentity {
   }
   if (kind === "account") {
     return {
-      title: s.subject_label ?? "Guest account",
+      title: s.subject_label ?? "Client account",
       subtitle: s.subject_name ?? undefined,
       kind, kindLabel, anonymous: false,
     };
@@ -73,7 +73,7 @@ export function identifySession(s: Session): SessionIdentity {
   }
   if (kind === "guest") {
     return {
-      title: "Guest sign-in",
+      title: "Client sign-in",
       subtitle: s.credential_method ? methodLabel(s.credential_method) : "Email, phone or social login",
       kind, kindLabel, anonymous: false,
     };
@@ -132,7 +132,7 @@ export function endReasonWords(reason?: string | null): string | undefined {
     REVOKED: "Access revoked",
     SUPERSEDED: "Replaced by a newer session",
     DEVICE_LIMIT: "Made room for another device",
-    LOGOUT: "Guest signed out",
+    LOGOUT: "Client signed out",
   };
   return map[reason] ?? reason.replace(/_/g, " ").toLowerCase();
 }

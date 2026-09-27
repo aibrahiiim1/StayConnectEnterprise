@@ -179,7 +179,7 @@ test.describe("Phase 4 financial operator surface", () => {
     await expect(page.getByRole("main").getByText("FINANCIAL RECOVERY")).toHaveCount(1);
     await expect(page.getByRole("navigation").getByRole("link", { name: /^recovery$/i })).toHaveCount(1);
     await expect(page.getByText(/2 items still to reconcile/i)).toBeVisible();
-    await expect(page.getByText(/guest internet access is unaffected/i)).toBeVisible();
+    await expect(page.getByText(/client internet access is unaffected/i)).toBeVisible();
 
     await page.getByLabel(/your password/i).fill("hunter2");
     await page.getByLabel(/conclusion for this payment/i).selectOption("CONFIRMED_NOT_COMPLETED");

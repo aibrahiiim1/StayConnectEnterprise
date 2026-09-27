@@ -45,7 +45,7 @@ import { LiveStatus, NotAvailable, refreshingClass } from "@/components/ui/patte
 // from the same Go map the codes are declared in, so a new result cannot appear on this screen as a raw
 // enum because somebody forgot to update a second list in the browser.
 const RESULT_WORDS: Record<string, { tone: "ok" | "warn" | "err" | "info" | "neutral"; meaning: string }> = {
-  VERIFIED: { tone: "ok", meaning: "The guest proved who they are and was offered access." },
+  VERIFIED: { tone: "ok", meaning: "The client proved who they are and was offered access." },
   CREDENTIAL_MISMATCH: {
     tone: "warn",
     meaning:
@@ -65,7 +65,7 @@ const RESULT_WORDS: Record<string, { tone: "ok" | "warn" | "err" | "info" | "neu
   },
   MIRROR_STALE_OR_MISSING_CHANGE: {
     tone: "err",
-    meaning: "The appliance's guest list could not authorise anybody at that moment — this affected every guest, not just this one.",
+    meaning: "The appliance's guest list could not authorise anybody at that moment — this affected every client, not just this one.",
   },
   RATE_LIMITED: { tone: "info", meaning: "Refused before any details were evaluated: too many recent attempts." },
   ROUTING_OR_INTERFACE_FAILURE: {
@@ -75,22 +75,22 @@ const RESULT_WORDS: Record<string, { tone: "ok" | "warn" | "err" | "info" | "neu
   SERVICE_UNAVAILABLE: { tone: "err", meaning: "An internal failure. The details were never compared." },
   SPENT_REQUEST_ID: {
     tone: "err",
-    meaning: "The client re-used a request id that had already been refused. This is a stale portal build, not a guest error.",
+    meaning: "The portal page re-used a request id that had already been refused. This is a stale portal build, not a client error.",
   },
   MALFORMED_SUBMISSION: { tone: "neutral", meaning: "The submission could not be read: a missing room, no value, or an unusable device." },
   VERIFIED_NO_ELIGIBLE_PACKAGE: {
     tone: "err",
-    meaning: "The guest's details were RIGHT. The property had no package to offer that stay — this is a configuration problem, not theirs.",
+    meaning: "The client's details were RIGHT. The site had no package to offer that stay — this is a configuration problem, not theirs.",
   },
   LICENSE_REFUSED: {
     tone: "err",
     meaning:
-      "The appliance's licence did not admit a new guest at that moment (missing, expired or suspended, or room sign-in not included). Every sign-in method was refused the same way.",
+      "The appliance's licence did not admit a new client at that moment (missing, expired or suspended, or room sign-in not included). Every sign-in method was refused the same way.",
   },
   LICENSE_CAPACITY_REACHED: {
     tone: "warn",
     meaning:
-      "The guest's details were right, but the appliance was already at the number of guests online its licence allows. The same limit applies to every sign-in method.",
+      "The client's details were right, but the appliance was already at the number of clients online its licence allows. The same limit applies to every sign-in method.",
   },
 };
 
@@ -108,7 +108,7 @@ const RESULT_FILTER_LABELS: Record<string, string> = {
   SPENT_REQUEST_ID: "Stale sign-in page",
   MALFORMED_SUBMISSION: "Unreadable submission",
   VERIFIED_NO_ELIGIBLE_PACKAGE: "Right details, no package to offer",
-  LICENSE_REFUSED: "Licence refused new guests",
+  LICENSE_REFUSED: "Licence refused new clients",
   LICENSE_CAPACITY_REACHED: "Licensed capacity full",
 };
 
@@ -274,12 +274,12 @@ export default function GuestSignInAttemptsPage() {
         <StatCard label="Details did not match" value={rows === null ? "—" : counts.mismatch}
           hint="wrong value, or a room the guest list does not hold" />
         <StatCard label="System-side failures" value={rows === null ? "—" : counts.systemic}
-          tone={counts.systemic ? "err" : "default"} hint="nothing the guest typed could have helped" />
+          tone={counts.systemic ? "err" : "default"} hint="nothing the client typed could have helped" />
       </div>
 
       {counts.systemic > 0 && (
-        <Callout tone="warning" title={`${counts.systemic} attempt${counts.systemic === 1 ? "" : "s"} failed for reasons no guest could fix`}>
-          These were refused because the guest list was out of date, the network routing, or an internal fault. Guests saw &ldquo;we are unable to verify your
+        <Callout tone="warning" title={`${counts.systemic} attempt${counts.systemic === 1 ? "" : "s"} failed for reasons no client could fix`}>
+          These were refused because the guest list was out of date, the network routing, or an internal fault. Clients saw &ldquo;we are unable to verify your
           stay right now&rdquo;, not a request to re-check their details.
         </Callout>
       )}
@@ -373,23 +373,23 @@ export default function GuestSignInAttemptsPage() {
     <PageShell>
       <PageHeader
         eyebrow="Property management system"
-        title="Guest sign-in attempts"
+        title="Client sign-in attempts"
         icon={<UserX />}
         description="Every Connect submission and why it succeeded or failed."
         help={
           <>
             <HelpSection title="What this page is for">
               <p>
-                The desk&rsquo;s &ldquo;why can&rsquo;t this guest get online?&rdquo; tool: every Connect
-                submission, why it succeeded or failed, and — for roles allowed to see guest credentials — what the
-                guest entered beside what would have been accepted. Attempts are kept for 30 days.
+                The desk&rsquo;s &ldquo;why can&rsquo;t this client get online?&rdquo; tool: every Connect
+                submission, why it succeeded or failed, and — for roles allowed to see client credentials — what the
+                client entered beside what would have been accepted. Attempts are kept for 30 days.
               </p>
             </HelpSection>
             <HelpSection title="Reading the figures">
               <HelpList
                 items={[
                   <><strong>Details did not match</strong> — a wrong value, or a room the guest list does not hold.</>,
-                  <><strong>System-side failures</strong> — refused because the guest list was out of date, the network routing, or an internal fault. Nothing the guest typed could have helped, and the guest saw &ldquo;we are unable to verify your stay right now&rdquo;.</>,
+                  <><strong>System-side failures</strong> — refused because the guest list was out of date, the network routing, or an internal fault. Nothing the client typed could have helped, and the client saw &ldquo;we are unable to verify your stay right now&rdquo;.</>,
                   <><strong>Guest-list age</strong> — how old the appliance&rsquo;s copy of the guest list was when the attempt was checked.</>,
                 ]}
               />
@@ -411,7 +411,7 @@ export default function GuestSignInAttemptsPage() {
 
       {maySeeRestrictions ? (
         <Tabs value={tab} onValueChange={(v) => setTab(v as "attempts" | "restrictions")}>
-          <TabsList aria-label="Guest sign-in">
+          <TabsList aria-label="Client sign-in">
             <TabsTrigger value="attempts">Sign-in attempts</TabsTrigger>
             <TabsTrigger value="restrictions">Active restrictions</TabsTrigger>
           </TabsList>
@@ -441,18 +441,18 @@ export default function GuestSignInAttemptsPage() {
             {!maySeeCredentials ? (
               <NotAvailable
                 icon={<ShieldAlert />}
-                title="You do not have permission to see what the guest typed"
+                title="You do not have permission to see what the client typed"
                 reason={
                   <>
-                    What was entered and what would have been accepted are guest credentials. Only roles allowed to
-                    see guest sign-in details can view them; your role is not one of them, and
+                    What was entered and what would have been accepted are client credentials. Only roles allowed to
+                    see client sign-in details can view them; your role is not one of them, and
                     the appliance does not send them without it. Everything else about this attempt is below.
                   </>
                 }
               />
             ) : !detail.credentials_available ? (
               <Callout tone="neutral" title="No values were recorded for this attempt">
-                This attempt was recorded while the appliance&rsquo;s sealing key was unavailable, so what the guest
+                This attempt was recorded while the appliance&rsquo;s sealing key was unavailable, so what the client
                 entered was never stored. Everything else below is unaffected.
               </Callout>
             ) : credsErr ? (

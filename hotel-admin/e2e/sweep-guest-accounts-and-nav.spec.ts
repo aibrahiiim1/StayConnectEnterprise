@@ -98,7 +98,7 @@ test("a failed load says so, offers a retry, and does not claim to still be chec
   });
 
   await page.goto("/guest-accounts");
-  await expect(page.getByText(/Could not load guest accounts/i)).toBeVisible();
+  await expect(page.getByText(/Could not load client accounts/i)).toBeVisible();
   await expect(page.getByText("Loading…"), "a failed load must not also claim to be loading").toHaveCount(0);
 
   // The form must still be usable and must still imply no plan prerequisite. The "checking how this site
@@ -121,7 +121,7 @@ test("a failed load says so, offers a retry, and does not claim to still be chec
   fail = false;
   await page.getByRole("button", { name: /try again/i }).click();
   await expect(page.getByText("devguest2")).toBeVisible();
-  await expect(page.getByText(/Could not load guest accounts/i)).toHaveCount(0);
+  await expect(page.getByText(/Could not load client accounts/i)).toHaveCount(0);
   await expect(page.getByText(/list failed/i), "the previous error must not linger").toHaveCount(0);
 });
 

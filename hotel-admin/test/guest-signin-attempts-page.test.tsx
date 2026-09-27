@@ -132,7 +132,7 @@ describe("guest sign-in attempts", () => {
     await user.click(await screen.findByRole("button", { name: "Details" }));
 
     expect(await screen.findByText(/do not have permission/i)).toBeTruthy();
-    expect(screen.getByText(/allowed to see guest sign-in details/)).toBeTruthy();
+    expect(screen.getByText(/allowed to see client sign-in details/)).toBeTruthy();
     for (const secret of ["Nottheguest", "MARIA DEL CARMEN", "OKONKWO", "RES-4001"]) {
       expect(screen.queryByText(secret)).toBeNull();
     }

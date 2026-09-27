@@ -86,7 +86,7 @@ function setField(label: string | RegExp, value: string) {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
 }
 
-function openEditor(name: RegExp = /Create hotel policy|Edit policy/) {
+function openEditor(name: RegExp = /Create site policy|Edit policy/) {
   // The header action; the empty history may offer a second "Create" button, so take the first.
   fireEvent.click(screen.getAllByRole("button", { name })[0]);
 }
@@ -107,7 +107,7 @@ describe("an operator authors the hotel's checkout grace policy", () => {
     await renderScreen();
     expect(screen.queryByText(/commercial catalog/i)).toBeNull();
     expect(screen.queryByLabelText(/Grace package/i)).toBeNull();
-    expect(screen.getAllByRole("button", { name: /Create hotel policy/i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: /Create site policy/i }).length).toBeGreaterThan(0);
   });
 
   it("publishes the typed policy itself — no package, correct units, the version the operator read", async () => {
@@ -335,7 +335,7 @@ describe("an operator authors the hotel's checkout grace policy", () => {
     const list = screen.getByLabelText("Checkout grace policy history");
     expect(within(list).getByText("Version 2")).toBeTruthy();
     expect(within(list).getByText("Version 1")).toBeTruthy();
-    expect(within(list).getByText(/Guest feedback/)).toBeTruthy();
+    expect(within(list).getByText(/Client feedback/)).toBeTruthy();
     // An unknown code is humanised, not shown raw.
     expect(within(list).getByText(/Shorter grace/)).toBeTruthy();
 

@@ -219,14 +219,14 @@ export function buildPublishPayload(s: PublishFormState): { payload?: PublishPay
 // the person reading the screen sees. Kept beside the enums so a new value cannot be added without the
 // label question being asked.
 export const END_MODE_LABELS: Record<EndMode, string> = {
-  MANUAL_END: "Until the guest disconnects or an operator ends it",
-  VALIDITY_WINDOW: "For a fixed length of time after the guest connects",
+  MANUAL_END: "Until the client disconnects or an operator ends it",
+  VALIDITY_WINDOW: "For a fixed length of time after the client connects",
   FIXED_AT: "Until a specific date and time",
 };
 
 export const RULE_TYPE_LABELS: Record<RuleType, string> = {
-  AUTH_METHOD: "How the guest signed in",
-  SUBJECT_KIND: "Type of guest credential",
+  AUTH_METHOD: "How the client signed in",
+  SUBJECT_KIND: "Type of client credential",
   DATE_WINDOW: "Only between two dates",
   PRIOR_PURCHASE: "Whether they already had a package",
   SITE_NETWORK: "Only on certain guest networks",

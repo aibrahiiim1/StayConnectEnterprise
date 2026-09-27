@@ -67,12 +67,12 @@ export type ActivitySource =
 export const SOURCE_LABELS: Record<ActivitySource, string> = {
   GUEST_SELECTION: "Chosen on the portal",
   VOUCHER_REDEMPTION: "Voucher",
-  ACCOUNT_AUTO_GRANT: "Guest account",
+  ACCOUNT_AUTO_GRANT: "Client account",
   OTP_SOCIAL_DEFAULT: "Email, phone or social sign-in",
   CHECKOUT_GRACE: "After check-out grace",
   EMERGENCY_GRACE: "Emergency grace",
   POST_STAY_CONVERSION: "After-stay access",
-  CROSS_PMS_TRANSFER: "Moved between property systems",
+  CROSS_PMS_TRANSFER: "Moved between PMS connections",
   ADMIN_GRANT: "Granted by staff",
   RENEWAL: "Renewal",
 };
@@ -164,11 +164,11 @@ export function statusWords(status: string): { label: string; tone: "ok" | "warn
 export function whoWords(r: Pick<ActivityRow, "room" | "pms_interface" | "sign_in_kind">): string {
   if (r.room) return `Room ${r.room}`;
   switch (r.sign_in_kind) {
-    case "GUEST_ACCOUNT": return "A guest-account guest";
-    case "VOUCHER": return "A voucher guest";
+    case "GUEST_ACCOUNT": return "A client account";
+    case "VOUCHER": return "A voucher client";
     case "SIGN_IN": return "An email, phone or social sign-in";
     case "STAY": return "A stay with no room recorded";
-    default: return "A guest";
+    default: return "A client";
   }
 }
 

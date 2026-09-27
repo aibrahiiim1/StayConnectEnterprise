@@ -161,14 +161,14 @@ export default function NotificationsPage() {
     <PageShell>
       <PageHeader
         icon={<MessageSquare />}
-        eyebrow="Guest portal"
+        eyebrow="Client Portal"
         title="Email & SMS"
         description="Without a working sender, sign-in methods that need a code cannot be used."
         help={
           <>
             <HelpSection title="What a sender does">
               <p>
-                How the appliance delivers one-time sign-in codes to guests, by email or text message. Without a
+                How the appliance delivers one-time sign-in codes to clients, by email or text message. Without a
                 working sender, any sign-in method that needs a code cannot be used. Room numbers, vouchers and
                 accounts do not need one.
               </p>
@@ -179,7 +179,7 @@ export default function NotificationsPage() {
                   <>Credentials come from the sending service&apos;s own console.</>,
                   <>The key is stored write-only and is never shown again. When editing, leave it blank to keep the one already stored.</>,
                   <>The channel and service of a sender cannot be changed; remove it and add it again instead.</>,
-                  <>Whether guests are offered email or SMS codes is switched on in <strong>Sign-in methods</strong>.</>,
+                  <>Whether clients are offered email or SMS codes is switched on in <strong>Sign-in methods</strong>.</>,
                 ]}
               />
             </HelpSection>
@@ -199,7 +199,7 @@ export default function NotificationsPage() {
             <EmptyState
               icon={<Send />}
               title="No sender is configured"
-              hint="Guests cannot be sent an emailed or texted code until one is. Room numbers, vouchers and accounts do not need this."
+              hint="Clients cannot be sent an emailed or texted code until one is. Room numbers, vouchers and accounts do not need this."
               action={writable ? <Button onClick={openNew}><Plus /> Add a sender</Button> : undefined}
             />
           ) : (
@@ -311,16 +311,16 @@ export default function NotificationsPage() {
           </Field>
           {f.channel === "email" && (
             <>
-              <Field label="From address" hint="Guests see this as the sender.">
+              <Field label="From address" hint="Clients see this as the sender.">
                 <Input
                   type="email"
                   value={f.from_address}
                   onChange={(e) => set("from_address", e.target.value)}
-                  placeholder="noreply@hotel.com"
+                  placeholder="noreply@example.com"
                 />
               </Field>
               <Field label="From name">
-                <Input value={f.from_name} onChange={(e) => set("from_name", e.target.value)} placeholder="Hotel Wi-Fi" />
+                <Input value={f.from_name} onChange={(e) => set("from_name", e.target.value)} placeholder="Guest Wi-Fi" />
               </Field>
             </>
           )}
@@ -329,7 +329,7 @@ export default function NotificationsPage() {
           <div>
             <div className="text-sm font-medium">Use this sender</div>
             <div className="text-xs text-muted-foreground">
-              Turn it off to finish configuring it before any guest code goes through it.
+              Turn it off to finish configuring it before any client code goes through it.
             </div>
           </div>
           <Switch checked={f.enabled} onCheckedChange={(v) => set("enabled", v)} label="Use this sender" />
@@ -342,7 +342,7 @@ export default function NotificationsPage() {
         title="Remove this sender?"
         description={
           deleting
-            ? `Codes will no longer be sent by ${deleting.display_name || (deleting.channel === "email" ? "email" : "text message")}. Any sign-in method that depends on it will stop working for guests until another sender is configured.`
+            ? `Codes will no longer be sent by ${deleting.display_name || (deleting.channel === "email" ? "email" : "text message")}. Any sign-in method that depends on it will stop working for clients until another sender is configured.`
             : undefined
         }
         confirmLabel="Remove"

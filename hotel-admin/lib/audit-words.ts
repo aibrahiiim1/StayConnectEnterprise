@@ -27,7 +27,7 @@ export type AuditWords = {
 
 export type AuditCategory =
   | "Sign-in & access"
-  | "Guest portal"
+  | "Client Portal"
   | "Internet offering"
   | "Property management system"
   | "Networks"
@@ -36,36 +36,36 @@ export type AuditCategory =
   | "Diagnostics";
 
 export const AUDIT_CATEGORIES: AuditCategory[] = [
-  "Sign-in & access", "Guest portal", "Internet offering", "Property management system",
+  "Sign-in & access", "Client Portal", "Internet offering", "Property management system",
   "Networks", "Licence & cloud", "Backups", "Diagnostics",
 ];
 
 const WORDS: Record<string, AuditWords> = {
   // ---- sign-in & access ---------------------------------------------------------------------------------
-  "operator.login": { title: "Signed in to Hotel Admin", category: "Sign-in & access", severity: "notice" },
+  "operator.login": { title: "Signed in to Admin Console", category: "Sign-in & access", severity: "notice" },
   "session.disconnected": {
-    title: "Disconnected a guest device", category: "Sign-in & access", severity: "change",
-    note: "A member of staff ended a guest's internet session from Active sessions.",
+    title: "Disconnected a client device", category: "Sign-in & access", severity: "change",
+    note: "A member of staff ended a client's internet session from Active sessions.",
   },
   "guest_signin_attempt.credentials_viewed": {
-    title: "Viewed what a guest typed at sign-in", category: "Sign-in & access", severity: "security",
-    note: "The details a guest entered are only revealed on request, and every reveal is recorded here.",
+    title: "Viewed what a client typed at sign-in", category: "Sign-in & access", severity: "security",
+    note: "The details a client entered are only revealed on request, and every reveal is recorded here.",
   },
   "guest_signin_restriction.release": {
     title: "Released a device from sign-in protection", category: "Sign-in & access", severity: "change",
     note: "A device that had been temporarily blocked after repeated failures was allowed to try again.",
   },
-  "auth_methods.updated": { title: "Changed how guests sign in", category: "Sign-in & access", severity: "change" },
+  "auth_methods.updated": { title: "Changed how clients sign in", category: "Sign-in & access", severity: "change" },
 
   // ---- guest portal -------------------------------------------------------------------------------------
-  "branding.published": { title: "Saved the guest portal settings", category: "Guest portal", severity: "change" },
+  "branding.published": { title: "Saved the Client Portal settings", category: "Client Portal", severity: "change" },
   "branding.draft_saved": {
-    title: "Edited the guest portal settings", category: "Guest portal", severity: "notice",
-    note: "Work in progress, kept so a closed tab does not lose it. Guests see nothing until it is saved.",
+    title: "Edited the Client Portal settings", category: "Client Portal", severity: "notice",
+    note: "Work in progress, kept so a closed tab does not lose it. Clients see nothing until it is saved.",
   },
-  "branding.rolled_back": { title: "Restored an earlier guest portal design", category: "Guest portal", severity: "change" },
-  "portal_asset.uploaded": { title: "Uploaded a portal image", category: "Guest portal", severity: "change" },
-  "portal_asset.deleted": { title: "Deleted a portal image", category: "Guest portal", severity: "change" },
+  "branding.rolled_back": { title: "Restored an earlier Client Portal design", category: "Client Portal", severity: "change" },
+  "portal_asset.uploaded": { title: "Uploaded a portal image", category: "Client Portal", severity: "change" },
+  "portal_asset.deleted": { title: "Deleted a portal image", category: "Client Portal", severity: "change" },
 
   // ---- internet offering --------------------------------------------------------------------------------
   "commercial_package.published": { title: "Published an internet package", category: "Internet offering", severity: "change" },
@@ -90,7 +90,7 @@ const WORDS: Record<string, AuditWords> = {
   },
   "pms_routing.set": {
     title: "Pointed a guest network at a PMS", category: "Property management system", severity: "change",
-    note: "Which property's guest list room sign-ins on that network are checked against.",
+    note: "Which PMS guest list room sign-ins on that network are checked against.",
   },
 
   // ---- networks ----------------------------------------------------------------------------------------
@@ -117,7 +117,7 @@ const WORDS: Record<string, AuditWords> = {
   "cloud.test_connection": { title: "Tested the OneGate connection", category: "Licence & cloud", severity: "notice" },
   "renewal_started": { title: "Certificate renewal started", category: "Licence & cloud", severity: "notice" },
   "renewal_succeeded": { title: "Certificate renewed", category: "Licence & cloud", severity: "notice" },
-  "hotel_admin_cert.check": { title: "Checked the Hotel Admin certificate", category: "Licence & cloud", severity: "notice" },
+  "hotel_admin_cert.check": { title: "Checked the Admin Console certificate", category: "Licence & cloud", severity: "notice" },
 
   // ---- backups -----------------------------------------------------------------------------------------
   "backup.created": { title: "Created a backup", category: "Backups", severity: "change" },
@@ -159,7 +159,7 @@ export function auditWords(action: string): AuditWords {
 function categoryFromPrefix(action: string): AuditCategory {
   const p = action.split(".")[0];
   switch (p) {
-    case "branding": case "portal_asset": return "Guest portal";
+    case "branding": case "portal_asset": return "Client Portal";
     case "commercial_package": case "service_plan": case "checkout_grace": return "Internet offering";
     case "pms_interface": case "pms_provider": case "pms_routing": case "pms_interface_revision":
       return "Property management system";

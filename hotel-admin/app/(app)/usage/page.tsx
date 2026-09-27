@@ -147,7 +147,7 @@ export default function UsageExplorerPage() {
   return (
     <PageShell>
       <PageHeader
-        eyebrow="Guests"
+        eyebrow="Clients"
         title="Usage explorer"
         icon={<Activity />}
         description="Trace a room's or a device's data use down to the recorded samples."

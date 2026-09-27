@@ -34,14 +34,14 @@ export default function ApplianceAndLicencePage() {
             <HelpSection title="What the licence limits">
               <HelpList
                 items={[
-                  "The number of guests online at the same time, across all guest networks.",
+                  "The number of clients online at the same time, across all guest networks.",
                   "The validity window, and the grace period after it ends.",
                 ]}
               />
             </HelpSection>
             <HelpSection title="When the licence is not in good standing">
               <p>
-                New guest sign-ins are refused; guests already online are <strong>not</strong> disconnected. DHCP,
+                New client sign-ins are refused; clients already online are <strong>not</strong> disconnected. DHCP,
                 DNS, the sign-in page and this admin stay available.
               </p>
             </HelpSection>
@@ -55,8 +55,8 @@ export default function ApplianceAndLicencePage() {
             </HelpSection>
             <HelpSection title="Connection to OneGate Central">
               <p>
-                OneGate Central is used for activation and licensing only. Guests are signed in by this appliance from
-                its own data, so when Central is unreachable guests are not affected — only licence renewals wait.
+                OneGate Central is used for activation and licensing only. Clients are signed in by this appliance from
+                its own data, so when Central is unreachable clients are not affected — only licence renewals wait.
                 <strong> Check now</strong> asks Central straight away and tests the connection.
               </p>
             </HelpSection>

@@ -120,13 +120,13 @@ export default function BackupsPage() {
         icon={<Archive />}
         eyebrow="System"
         title="Backups"
-        description="A complete copy of this property’s data, taken nightly and on demand."
+        description="A complete copy of this site’s data, taken nightly and on demand."
         help={
           <>
             <HelpSection title="Back up, verify, download, restore">
               <HelpList
                 items={[
-                  <><strong>Back up now</strong> writes a complete copy of this property&rsquo;s data to the appliance. It takes a moment and guests are not affected. A nightly job also takes one.</>,
+                  <><strong>Back up now</strong> writes a complete copy of this site&rsquo;s data to the appliance. It takes a moment and clients are not affected. A nightly job also takes one.</>,
                   <><strong>Verify</strong> proves a backup can actually be loaded back. Only a verified backup can be restored.</>,
                   <><strong>Download</strong> keeps a copy off the appliance. Every role that can open this page can download.</>,
                   <><strong>Restore</strong> replaces the current data with the backup. It asks for the backup&rsquo;s name typed out and your password.</>,
@@ -164,7 +164,7 @@ export default function BackupsPage() {
       {/* MAINTENANCE IS THE MOST IMPORTANT THING ON THE PAGE WHEN IT IS TRUE. */}
       {maint?.active && (
         <Callout tone="warning" icon={<Loader2 className="animate-spin motion-reduce:animate-none" />}
-          title="This appliance is not serving guests right now">
+          title="This appliance is not serving clients right now">
           {maint.reason}{maint.since ? ` · started ${formatDate(maint.since)}` : ""}
         </Callout>
       )}
@@ -201,9 +201,9 @@ export default function BackupsPage() {
                 <div className="min-w-0">
                   <p className="text-emphasis">
                     {!newest
-                      ? "There is no backup of this property yet"
+                      ? "There is no backup of this site yet"
                       : verifiedNewest
-                        ? "This property can be recovered from its latest backup"
+                        ? "This site can be recovered from its latest backup"
                         : "The latest backup has not been checked yet"}
                   </p>
                   <p className="text-sm text-muted-foreground">
@@ -315,8 +315,8 @@ export default function BackupsPage() {
       <ConfirmDialog
         open={backupOpen}
         onOpenChange={(v) => { if (!v) { setBackupOpen(false); setBackupErr(null); } }}
-        title="Back up this property now?"
-        description="A backup writes a complete copy of this property’s data to the appliance. It takes a moment and guests are not affected."
+        title="Back up this site now?"
+        description="A backup writes a complete copy of this site’s data to the appliance. It takes a moment and clients are not affected."
         confirmLabel="Back up now"
         busy={backupBusy}
         error={backupErr}
@@ -361,7 +361,7 @@ function LastRestoreCard({ result }: { result: RestoreResult }) {
       <CardBody className="space-y-3 text-sm">
         <p>
           {running
-            ? "The appliance is replacing the database. It stops serving guests until this finishes. Do not start another restore."
+            ? "The appliance is replacing the database. It stops serving clients until this finishes. Do not start another restore."
             : result.summary}
         </p>
         <p className="text-caption text-muted-foreground">
@@ -445,10 +445,10 @@ function RestoreDialog({ backup, onClose, onDone }: {
       onConfirm={({ password }) => go({ password, confirm: backup.name })}
     >
       <ConsequenceList
-        title="This property’s current data will be replaced"
+        title="This site’s current data will be replaced"
         items={[
-          <>Everything recorded since {taken} — stays, sessions, guest accounts, settings and the activity trail — is replaced by what the backup contains.</>,
-          <>The appliance stops serving guests and staff while it works, usually for several minutes.</>,
+          <>Everything recorded since {taken} — stays, sessions, client accounts, settings and the activity trail — is replaced by what the backup contains.</>,
+          <>The appliance stops serving clients and staff while it works, usually for several minutes.</>,
         ]}
       />
 
@@ -468,7 +468,7 @@ function RestoreDialog({ backup, onClose, onDone }: {
         <div className="mb-1.5 text-label">What the appliance will do</div>
         <ol className="list-decimal space-y-1 ps-5 text-sm text-muted-foreground">
           <li>Take a fresh safety copy of the current data first.</li>
-          <li>Stop serving guests and staff while it works.</li>
+          <li>Stop serving clients and staff while it works.</li>
           <li>Load the backup into a separate database — if it will not load, nothing is replaced.</li>
           <li>Swap the two, keeping the current database rather than deleting it.</li>
           <li>Check the restored database, and put the original back if the check fails.</li>

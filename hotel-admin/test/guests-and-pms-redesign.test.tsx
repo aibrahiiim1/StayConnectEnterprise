@@ -87,7 +87,7 @@ describe("Post-stay access", () => {
     expect(screen.getByTestId("one-time-value").textContent).toBe("482913");
     expect(screen.getByText(/Shown once\./)).toBeTruthy();
     // Acknowledging closes it for good: there is no way to show it again.
-    await user.click(screen.getByRole("button", { name: "I have given it to the guest" }));
+    await user.click(screen.getByRole("button", { name: "I have given it to the client" }));
     await waitFor(() => expect(screen.queryByTestId("one-time-value")).toBeNull());
     expect(screen.queryByRole("button", { name: /show pin/i })).toBeNull();
   });
@@ -284,7 +284,7 @@ describe("Active restrictions", () => {
 
     await user.click(await screen.findByRole("button", { name: "Release" }));
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText("Releasing does not sign the guest in")).toBeTruthy();
+    expect(within(dialog).getByText("Releasing does not sign the client in")).toBeTruthy();
     const submit = within(dialog).getByRole("button", { name: "Release" });
     expect(submit).toBeDisabled();
     await user.type(within(dialog).getByLabelText(/Reason/), "identity confirmed at the desk");

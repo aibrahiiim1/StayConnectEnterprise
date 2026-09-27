@@ -127,7 +127,7 @@ export function IssueDialog({
           <DialogDescription>
             {issued
               ? "These codes are shown once. Copy, download or print them now."
-              : "Print a batch of cards a guest redeems for internet access."}
+              : "Print a batch of cards a client redeems for internet access."}
           </DialogDescription>
           {!issued && <Stepper steps={STEPS} current={step} onStep={(i) => !busy && setStep(i)} className="pt-2" />}
         </DialogHeader>

@@ -113,14 +113,14 @@ export default function WalledGardenPage() {
     <PageShell>
       <PageHeader
         icon={<Globe />}
-        eyebrow="Guest portal"
+        eyebrow="Client Portal"
         title="Allowed sites"
         description="Addresses reachable before sign-in, without any authentication — keep the list to what the sign-in page needs."
         help={
           <>
             <HelpSection title="What an allowed site is">
               <p>
-                An address a guest&apos;s device may reach before it has signed in. Everything listed here is
+                An address a client&apos;s device may reach before it has signed in. Everything listed here is
                 reachable without any authentication at all, so keep it to what the sign-in page itself needs.
               </p>
               <HelpList
@@ -156,7 +156,7 @@ export default function WalledGardenPage() {
             <EmptyState
               icon={<Shield />}
               title="Nothing is allowed before sign-in"
-              hint="Add a rule to let captive-portal detection or a payment page load for a guest who has not signed in yet."
+              hint="Add a rule to let captive-portal detection or a payment page load for a client who has not signed in yet."
               action={writable ? <Button onClick={openNew}><Plus /> Add the first rule</Button> : undefined}
             />
           ) : (
@@ -241,7 +241,7 @@ export default function WalledGardenPage() {
         title="Remove this allowed site?"
         description={
           deleting
-            ? `Devices that have not signed in will no longer be able to reach ${deleting.value}. If the sign-in page depends on it, guests may be unable to get online at all.`
+            ? `Devices that have not signed in will no longer be able to reach ${deleting.value}. If the sign-in page depends on it, clients may be unable to get online at all.`
             : undefined
         }
         confirmLabel="Remove"

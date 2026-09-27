@@ -27,9 +27,9 @@ const STEPS = ["Identity", "Interface / VLAN", "Subnet & gateway", "DHCP & DNS",
 const STEP_HINT = [
   "What the network is called here, and the SSID your wireless controller broadcasts for it.",
   "The port the guest traffic arrives on, and whether it is tagged with a VLAN.",
-  "The address range guests get, and the gateway address the appliance takes on it.",
-  "Which addresses are handed out, which DNS guests use, and for how long an address is kept.",
-  "What guests see and can reach once they join.",
+  "The address range clients get, and the gateway address the appliance takes on it.",
+  "Which addresses are handed out, which DNS clients use, and for how long an address is kept.",
+  "What clients see and can reach once they join.",
   "Check everything before it is created.",
   "Create the network, validate the whole configuration, then apply it with an automatic rollback.",
 ];
@@ -229,7 +229,7 @@ export default function NewGuestNetworkPage() {
         <PageHeader icon={<Network />} eyebrow="Networking" title="New guest network" />
         <NotAvailable
           title="You cannot create guest networks"
-          reason="Your role can view guest networks but not change them. Ask a Hotel IT manager or site admin."
+          reason="Your role can view guest networks but not change them. Ask a Site IT manager or site admin."
         />
       </PageShell>
     );
@@ -242,7 +242,7 @@ export default function NewGuestNetworkPage() {
         icon={<Network />}
         eyebrow="Networking"
         title="New guest network"
-        description="Seven short steps; nothing reaches guests until the last one."
+        description="Seven short steps; nothing reaches clients until the last one."
         help={
           <>
             <HelpSection title="How the wizard works">
@@ -304,7 +304,7 @@ export default function NewGuestNetworkPage() {
                 label="SSID label"
                 hint="For reference only. OneGate does not broadcast Wi-Fi — this label records which SSID your wireless controller maps to this network."
               >
-                <Input value={ssidLabel} onChange={(e) => setSsidLabel(e.target.value)} placeholder="Hotel Guest" />
+                <Input value={ssidLabel} onChange={(e) => setSsidLabel(e.target.value)} placeholder="Guest" />
               </Field>
             </>
           )}
@@ -379,7 +379,7 @@ export default function NewGuestNetworkPage() {
               <Field
                 label="Gateway IP"
                 required
-                hint="The appliance owns this address on the network; guests use it as their default gateway and DNS."
+                hint="The appliance owns this address on the network; clients use it as their default gateway and DNS."
               >
                 <Input value={gatewayIp} onChange={(e) => setGatewayIp(e.target.value)} placeholder="10.20.0.1" className="font-mono" />
               </Field>
@@ -415,7 +415,7 @@ export default function NewGuestNetworkPage() {
                   <Plus /> Add pool
                 </Button>
               </fieldset>
-              <Field label="DNS for guests">
+              <Field label="DNS for clients">
                 <Select value={dnsMode} onChange={(e) => setDnsMode(e.target.value as "appliance" | "custom")}>
                   <option value="appliance">The appliance (resolve on the gateway)</option>
                   <option value="custom">Custom servers</option>
@@ -439,10 +439,10 @@ export default function NewGuestNetworkPage() {
 
           {step === 4 && (
             <div className="space-y-4">
-              <SwitchRow label="Captive portal" hint="Guests see the sign-in page before they get online." checked={captivePortal} onChange={setCaptivePortal} />
-              <SwitchRow label="Internet access" hint="Guests can reach the internet once signed in." checked={internetAccess} onChange={setInternetAccess} />
-              <SwitchRow label="NAT (masquerade)" hint="Guest traffic leaves through the appliance's own address." checked={nat} onChange={setNat} />
-              <SwitchRow label="Client isolation" hint="Guest devices cannot reach each other." checked={clientIsolation} onChange={setClientIsolation} />
+              <SwitchRow label="Captive portal" hint="Clients see the sign-in page before they get online." checked={captivePortal} onChange={setCaptivePortal} />
+              <SwitchRow label="Internet access" hint="Clients can reach the internet once signed in." checked={internetAccess} onChange={setInternetAccess} />
+              <SwitchRow label="NAT (masquerade)" hint="Client traffic leaves through the appliance's own address." checked={nat} onChange={setNat} />
+              <SwitchRow label="Client isolation" hint="Client devices cannot reach each other." checked={clientIsolation} onChange={setClientIsolation} />
             </div>
           )}
 

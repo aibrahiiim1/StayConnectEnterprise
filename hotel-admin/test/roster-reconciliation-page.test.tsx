@@ -118,7 +118,7 @@ describe("roster reconciliation offers no state-changing action", () => {
   it("shows the historical exception as an exception, and says guests are unaffected", async () => {
     await renderPage();
     await waitFor(() => expect(screen.getByText(/departure for unknown stay/i)).toBeTruthy());
-    expect(screen.getByText(/guests not affected/i)).toBeTruthy();
+    expect(screen.getByText(/clients not affected/i)).toBeTruthy();
     expect(screen.getAllByText(/HISTORICAL EXCEPTION/i).length).toBeGreaterThan(0);
   });
 

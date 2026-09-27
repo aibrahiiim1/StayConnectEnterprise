@@ -168,7 +168,7 @@ function VoucherDetail({
     if (e.activated_at)
       timeline.push({
         key: `used-${i}`,
-        title: "Used by a guest",
+        title: "Used by a client",
         when: <When iso={e.activated_at} />,
         body:
           e.status === "ACTIVE"
@@ -182,7 +182,7 @@ function VoucherDetail({
       });
   }
   if (current.state === "REDEEMED" && history && history.entitlements.every((e) => !e.activated_at)) {
-    timeline.push({ key: "used", title: "Used by a guest", body: "The time it was used is not recorded.", tone: "ok" });
+    timeline.push({ key: "used", title: "Used by a client", body: "The time it was used is not recorded.", tone: "ok" });
   }
   if (history?.cancelled) {
     timeline.push({
@@ -331,14 +331,14 @@ function VoucherDetail({
         error={err}
         requireReason
         reasonLabel="Reason (recorded)"
-        reasonPlaceholder="Guest at the desk, card unreadable"
+        reasonPlaceholder="Client at the desk, card unreadable"
         requirePassword
         onConfirm={reveal}
       >
         {spent && (
           <Callout tone="neutral">
             This card is {status === "redeemed" ? "already used" : status === "cancelled" ? "cancelled" : "expired"}, so its
-            code no longer lets anyone sign in. You can still view it, for example to answer a guest query; the view is
+            code no longer lets anyone sign in. You can still view it, for example to answer a client query; the view is
             recorded all the same.
           </Callout>
         )}
@@ -360,7 +360,7 @@ function VoucherDetail({
         onConfirm={cancel}
       >
         <p className="text-sm text-muted-foreground">
-          Nothing else changes: other cards in the batch keep working, and no guest who is already online is
+          Nothing else changes: other cards in the batch keep working, and no client who is already online is
           disconnected. A card that has already been used cannot be cancelled here.
         </p>
       </ConfirmDialog>

@@ -97,13 +97,13 @@ export default function DhcpPage() {
         icon={<Wifi />}
         eyebrow="Networking"
         title="DHCP & leases"
-        description="Guest devices holding an address now, and fixed reservations."
+        description="Client devices holding an address now, and fixed reservations."
         help={
           <>
             <HelpSection title="Active leases">
               <p>
-                Every guest device that has been handed an address by the appliance&rsquo;s DHCP server, with the time its
-                lease runs out. Leases appear once guests connect.
+                Every client device that has been handed an address by the appliance&rsquo;s DHCP server, with the time its
+                lease runs out. Leases appear once clients connect.
               </p>
             </HelpSection>
             <HelpSection title="Reservations">
@@ -149,7 +149,7 @@ export default function DhcpPage() {
             {leases === null ? (
               <SkeletonRows rows={5} cols={5} />
             ) : leases.length === 0 ? (
-              <EmptyState icon={<Wifi />} title="No active leases" hint="Leases appear here once guests connect and are given an address." />
+              <EmptyState icon={<Wifi />} title="No active leases" hint="Leases appear here once clients connect and are given an address." />
             ) : shownLeases.length === 0 ? (
               noMatch("leases")
             ) : (

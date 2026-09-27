@@ -66,7 +66,7 @@ describe("identifySession", () => {
 
   it("describes an email/social sign-in by the method, since no identity is readable", () => {
     const id = identifySession({ ...base, subject_kind: "guest", credential_method: "EMAIL_OTP" });
-    expect(id.title).toBe("Guest sign-in");
+    expect(id.title).toBe("Client sign-in");
     expect(id.subtitle).toBe("Emailed code");
   });
 

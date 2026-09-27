@@ -83,7 +83,7 @@ describe("activation states", () => {
     expect(region("Activation").getByText(/keeps trying by itself/)).toBeTruthy();
     expect(screen.getByRole("button", { name: /Download activation request/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Upload activation package/ })).toBeTruthy();
-    expect(region("OneGate Central").getByText(/Guests are not affected/)).toBeTruthy();
+    expect(region("OneGate Central").getByText(/Clients are not affected/)).toBeTruthy();
     expect(region("OneGate Central").getByText("Could not reach OneGate Central.")).toBeTruthy();
   });
 
@@ -98,7 +98,7 @@ describe("activation states", () => {
     expect(a.getByRole("button", { name: /Copy serial number/ })).toBeTruthy();
     // Registered appliances do not emit an offline request (the appliance refuses it); only the package upload.
     expect(screen.queryByRole("button", { name: /Download activation request/ })).toBeNull();
-    expect(region("Licence").getByText(/Guests cannot sign in until/)).toBeTruthy();
+    expect(region("Licence").getByText(/Clients cannot sign in until/)).toBeTruthy();
   });
 
   it("activating: says it is finishing", async () => {
@@ -120,7 +120,7 @@ describe("activation states", () => {
   it("retired: says it no longer signs guests in", async () => {
     serve(status({ activation: "retired" }));
     await renderPage();
-    expect(region("Activation").getByText(/no longer signs guests in/)).toBeTruthy();
+    expect(region("Activation").getByText(/no longer signs clients in/)).toBeTruthy();
   });
 
   it("removed from Central: says so plainly and points to a factory reset and a new activation", async () => {
@@ -129,7 +129,7 @@ describe("activation states", () => {
     const act = region("Activation");
     expect(act.getByText("Removed from OneGate Central")).toBeTruthy();
     expect(act.getByText(/This appliance was removed from OneGate Central\. To use it again, factory-reset it and have your vendor\s+activate it\./)).toBeTruthy();
-    expect(act.queryByText(/no longer signs guests in/)).toBeNull();
+    expect(act.queryByText(/no longer signs clients in/)).toBeNull();
   });
 
   it("an activation the appliance cannot verify is surfaced, not reported as a quiet wait", async () => {
@@ -143,7 +143,7 @@ describe("licence states", () => {
   const cases: [string, Status, RegExp, RegExp | null][] = [
     ["active", {}, /Valid until .* · 247 days left/, null],
     ["expiring", { state: "expiring", days_left: 12 }, /12 days left/, null],
-    ["grace", { state: "grace", days_left: 5 }, /Guests keep signing in until/, /grace period/],
+    ["grace", { state: "grace", days_left: 5 }, /Clients keep signing in until/, /grace period/],
     ["expired", { state: "expired", days_left: 0 }, /Ended/, /The licence is expired/],
     ["suspended", { state: "suspended" }, /Suspended by your OneGate vendor/, /The licence is suspended/],
     ["revoked", { state: "revoked" }, /Revoked by your OneGate vendor/, /The licence is revoked/],
@@ -161,7 +161,7 @@ describe("licence states", () => {
   it("problem banners say existing guests are not disconnected", async () => {
     serve(status({ license: { state: "expired" } }));
     await renderPage();
-    expect(screen.getByText(/guests already online are not disconnected/)).toBeTruthy();
+    expect(screen.getByText(/clients already online are not disconnected/)).toBeTruthy();
   });
 
   it("shows guest capacity and warns when it is reached", async () => {
@@ -189,7 +189,7 @@ describe("Central connection", () => {
     serve(status({ central: { state: "unreachable", last_error: "OneGate Central did not answer in time." } }));
     await renderPage();
     expect(region("OneGate Central").getByText("Temporarily unreachable", { selector: "span" })).toBeTruthy();
-    expect(region("OneGate Central").getByText(/Guests are not affected/)).toBeTruthy();
+    expect(region("OneGate Central").getByText(/Clients are not affected/)).toBeTruthy();
     expect(region("OneGate Central").getByText("OneGate Central did not answer in time.")).toBeTruthy();
     // Unreachable: offline files are offered even to an activated appliance.
     expect(screen.getByRole("button", { name: /Upload activation package/ })).toBeTruthy();

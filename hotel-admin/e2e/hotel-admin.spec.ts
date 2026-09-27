@@ -204,13 +204,13 @@ test("internet packages: guest activity rows are sanitized and carry no guest PI
     mutations,
   });
   await page.goto("/internet-packages");
-  await page.getByRole("tab", { name: /guest activity/i }).click();
+  await page.getByRole("tab", { name: /client activity/i }).click();
 
   // WHAT THE ROW SAYS, not which uuids produced it. Every grant is listed however it was given — the voucher
   // grant had no portal offer and the old offer-based view could not show it at all.
   await expect(page.getByText(/Room 101/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Free Internet Package" }).first()).toBeVisible();
-  await expect(page.getByText("A voucher guest")).toBeVisible();
+  await expect(page.getByText("A voucher client")).toBeVisible();
   await expect(page.getByText("In use").first()).toBeVisible();
 
   // The record opens in a sheet and links to THIS stay's usage, not the general usage page.

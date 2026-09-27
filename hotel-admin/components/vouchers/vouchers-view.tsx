@@ -229,7 +229,7 @@ export function VouchersView(props: {
         icon={<Ticket />}
         eyebrow="Internet offering"
         title="Vouchers"
-        description="Printed cards a guest redeems for internet access."
+        description="Printed cards a client redeems for internet access."
         help={
           <>
             <HelpSection title="Four jobs">
@@ -237,7 +237,7 @@ export function VouchersView(props: {
                 <><strong>Issue</strong> prints a batch. The codes appear once, in the issue dialog.</>,
                 <><strong>Show code</strong> recovers one code for a card already in circulation.</>,
                 <><strong>Export</strong> recovers a whole batch, with one record naming the size of the selection.</>,
-                <><strong>Cancel</strong> ends an unused card that has not expired. A used card cannot be cancelled: that guest already has access.</>,
+                <><strong>Cancel</strong> ends an unused card that has not expired. A used card cannot be cancelled: that client already has access.</>,
               ]} />
             </HelpSection>
             <HelpSection title="Showing and exporting codes">
@@ -249,7 +249,7 @@ export function VouchersView(props: {
             </HelpSection>
             <HelpSection title="Card status">
               <p>
-                Expiry is enforced when a guest signs in: a card past its valid-until is refused there, while its
+                Expiry is enforced when a client signs in: a card past its valid-until is refused there, while its
                 record still says unused. The statuses here show what each card is right now.
               </p>
             </HelpSection>
@@ -292,7 +292,7 @@ export function VouchersView(props: {
           label="Used"
           value={summary ? summary.redeemed.toLocaleString() : "—"}
           icon={<TicketCheck />}
-          hint="A guest signed in with them"
+          hint="A client signed in with them"
         />
         <StatCard
           label="Expired unused"
@@ -392,7 +392,7 @@ export function VouchersView(props: {
                   ]}
                 />
                 <Explain>
-                  Expiry is enforced when a guest signs in: a card past its valid-until is refused there, while its record
+                  Expiry is enforced when a client signs in: a card past its valid-until is refused there, while its record
                   still says unused. These statuses show what each card is right now.
                 </Explain>
               </div>
@@ -409,7 +409,7 @@ export function VouchersView(props: {
                   narrowed || status !== "all"
                     ? "Try another status, or clear the filters."
                     : canIssue
-                      ? "Issue a batch to print cards guests can use to sign in."
+                      ? "Issue a batch to print cards clients can use to sign in."
                       : "Cards appear here once someone issues a batch."
                 }
                 action={

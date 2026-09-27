@@ -364,7 +364,7 @@ export default function NetworkSettingsPage() {
         </summary>
         <div className="space-y-4 border-t border-border px-5 py-4">
           <p className="text-sm text-muted-foreground">
-            Not a guest network — guests are managed under{" "}
+            Not a guest network — clients are managed under{" "}
             <Link href="/network" className="text-primary underline">Guest networks</Link>.
           </p>
           <KeyValueGrid
@@ -377,7 +377,7 @@ export default function NetworkSettingsPage() {
               { label: "Bridge", value: mono(state.lan.bridge) },
               { label: "MAC address", value: mono(state.lan.mac) },
               // DHCP on the legacy bridge is informational, NOT a warning — guests use guest networks.
-              { label: "DHCP (this bridge)", value: <Badge tone="default">{state.lan.dhcp_enabled ? "Enabled" : "Off — guests use guest networks"}</Badge> },
+              { label: "DHCP (this bridge)", value: <Badge tone="default">{state.lan.dhcp_enabled ? "Enabled" : "Off — clients use guest networks"}</Badge> },
               ...(state.lan.dhcp_enabled ? [
                 { label: "DHCP range", value: mono(`${state.lan.dhcp_start} – ${state.lan.dhcp_end}`) },
                 { label: "Lease time", value: `${state.lan.dhcp_lease_seconds}s` },

@@ -28,7 +28,7 @@ export default async function globalSetup(config: FullConfig) {
         const body = await res.text();
         // The login page is the one surface every spec reaches first.
         if (body.includes("StayConnect") || body.includes("Sign in")) return;
-        lastProblem = `${target} answered ${res.status} but did not look like the Hotel Admin login page`;
+        lastProblem = `${target} answered ${res.status} but did not look like the Admin Console login page`;
       }
     } catch (err) {
       lastProblem = `${target} refused the connection (${(err as Error).message})`;

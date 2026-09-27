@@ -58,8 +58,8 @@ export function decideSave(args: {
 
 /** saveOutcomeMessage says the one thing that is easy to get wrong: existing guests keep what they have. */
 export function saveOutcomeMessage(d: SaveDecision): string {
-  const base = "Changes saved. Existing guest access is unchanged; the new settings apply to future grants.";
-  return d.planChanged ? `${base} Future guests will receive the selected service plan.` : base;
+  const base = "Changes saved. Existing client access is unchanged; the new settings apply to future grants.";
+  return d.planChanged ? `${base} Future clients will receive the selected service plan.` : base;
 }
 
 /** planSummary is how a plan is described wherever one is chosen — never a code or an id on its own. */

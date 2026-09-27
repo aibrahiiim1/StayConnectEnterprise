@@ -161,7 +161,7 @@ export default function EditGuestNetworkPage() {
           <>
             <HelpSection title="Saving is staging">
               <p>
-                <strong>Save changes</strong> stages the new settings. Guests keep the previous settings until you
+                <strong>Save changes</strong> stages the new settings. Clients keep the previous settings until you
                 validate and apply the changes from <strong>Guest networks</strong>.
               </p>
             </HelpSection>
@@ -194,7 +194,7 @@ export default function EditGuestNetworkPage() {
 
       {saved && (
         <Callout tone="success" title="Saved — not applied yet">
-          Guests are still on the previous settings.{" "}
+          Clients are still on the previous settings.{" "}
           <Link href="/network" className="font-medium underline">Go to Guest networks</Link> to validate and apply.
         </Callout>
       )}
@@ -298,7 +298,7 @@ export default function EditGuestNetworkPage() {
               <CardHeader><CardTitle>DNS &amp; leases</CardTitle></CardHeader>
               <CardBody className="space-y-4">
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <Field label="DNS for guests">
+                  <Field label="DNS for clients">
                     <Select value={dnsMode} onChange={(e) => setDnsMode(e.target.value)} disabled={ro}>
                       <option value="appliance">The appliance</option>
                       <option value="custom">Custom servers</option>
@@ -322,12 +322,12 @@ export default function EditGuestNetworkPage() {
             </Card>
 
             <Card>
-              <CardHeader><CardTitle>Guest access</CardTitle></CardHeader>
+              <CardHeader><CardTitle>Client access</CardTitle></CardHeader>
               <CardBody className="space-y-4">
-                <SwitchRow label="Captive portal" hint="Guests see the sign-in page before they get online." checked={captivePortal} onChange={setCaptivePortal} disabled={ro} />
-                <SwitchRow label="Internet access" hint="Guests can reach the internet once signed in." checked={internetAccess} onChange={setInternetAccess} disabled={ro} />
-                <SwitchRow label="NAT (masquerade)" hint="Guest traffic leaves through the appliance's own address." checked={nat} onChange={setNat} disabled={ro} />
-                <SwitchRow label="Client isolation" hint="Guest devices cannot reach each other." checked={clientIsolation} onChange={setClientIsolation} disabled={ro} />
+                <SwitchRow label="Captive portal" hint="Clients see the sign-in page before they get online." checked={captivePortal} onChange={setCaptivePortal} disabled={ro} />
+                <SwitchRow label="Internet access" hint="Clients can reach the internet once signed in." checked={internetAccess} onChange={setInternetAccess} disabled={ro} />
+                <SwitchRow label="NAT (masquerade)" hint="Client traffic leaves through the appliance's own address." checked={nat} onChange={setNat} disabled={ro} />
+                <SwitchRow label="Client isolation" hint="Client devices cannot reach each other." checked={clientIsolation} onChange={setClientIsolation} disabled={ro} />
               </CardBody>
               {writable && (
                 <CardFooter className="justify-end">

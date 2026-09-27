@@ -178,23 +178,23 @@ export default function SessionsPage() {
   return (
     <PageShell width="wide">
       <PageHeader
-        eyebrow="Guests"
+        eyebrow="Clients"
         title="Active sessions"
         icon={<Monitor />}
         description="Which devices are online, and whose they are."
         help={
           <>
-            <HelpSection title="Sessions, devices and guests">
+            <HelpSection title="Sessions, devices and clients">
               <p>
-                A session is one device; a guest may have several. A guest is counted by what the internet was
-                granted to &mdash; one room, account or voucher &mdash; so a family with four devices is one guest.
+                A session is one device; a client may have several. A client is counted by what the internet was
+                granted to &mdash; one room, account or voucher &mdash; so a family with four devices is one client.
               </p>
             </HelpSection>
             <HelpSection title="On this page">
               <HelpList items={[
                 <><strong>Online now</strong> refreshes every 10 seconds; <strong>Recent</strong> also includes sessions that have ended.</>,
-                "Search by room, name, username, IP or MAC, or filter by how the guest signed in.",
-                "Open a session for its details, or disconnect a device. A disconnected guest can sign in again.",
+                "Search by room, name, username, IP or MAC, or filter by how the client signed in.",
+                "Open a session for its details, or disconnect a device. A disconnected client can sign in again.",
               ]} />
             </HelpSection>
           </>
@@ -235,13 +235,13 @@ export default function SessionsPage() {
           tone="primary"
         />
         <StatCard
-          label="Guests online"
+          label="Clients online"
           value={rows ? summary.guests.toLocaleString() : "—"}
           icon={<Users />}
           explain={
             <Explain>
               Counted by what the internet was granted to — one room, account or voucher — so a family with four
-              devices is one guest.
+              devices is one client.
             </Explain>
           }
         />
@@ -273,7 +273,7 @@ export default function SessionsPage() {
               <Select
                 value={kind}
                 onChange={(e) => setKind(e.target.value)}
-                aria-label="Filter by how the guest signed in"
+                aria-label="Filter by how the client signed in"
                 className="w-full sm:w-52"
               >
                 <option value="">All sign-in types</option>
@@ -308,7 +308,7 @@ export default function SessionsPage() {
                 rows && rows.length > 0
                   ? "Try a different search, or clear the filters."
                   : tab === "active"
-                    ? "Connected guests appear here as soon as they sign in."
+                    ? "Connected clients appear here as soon as they sign in."
                     : undefined
               }
             />
@@ -316,7 +316,7 @@ export default function SessionsPage() {
             <Table>
               <THead>
                 <TR>
-                  <TH>Guest</TH>
+                  <TH>Client</TH>
                   <TH className="hidden md:table-cell">Signed in with</TH>
                   <TH className="hidden lg:table-cell">Package</TH>
                   <TH className="hidden xl:table-cell">Allowance used</TH>
@@ -396,7 +396,7 @@ export default function SessionsPage() {
                 { label: "Address", value: <span className="font-mono">{confirm.ip}</span> },
                 { label: "Network", value: confirm.guest_network_name ?? "—" },
                 {
-                  label: "Other devices on this guest",
+                  label: "Other devices on this client",
                   value:
                     typeof confirm.active_devices === "number" && confirm.active_devices > 1
                       ? `${confirm.active_devices - 1} will stay online`
@@ -456,7 +456,7 @@ const SessionRow = memo(function SessionRow({
             )}
             {id.anonymous && (
               <span className="block text-2xs text-muted-foreground">
-                No guest record on this session
+                No client record on this session
               </span>
             )}
           </span>
@@ -567,7 +567,7 @@ function SessionDetail({ s }: { s: Session }) {
         )}
         {typeof s.active_devices === "number" && (
           <span className="text-xs text-muted-foreground">
-            {s.active_devices} device{s.active_devices === 1 ? "" : "s"} online for this guest
+            {s.active_devices} device{s.active_devices === 1 ? "" : "s"} online for this client
             {typeof s.max_devices === "number" && s.max_devices > 0 && ` of ${s.max_devices} allowed`}
           </span>
         )}
