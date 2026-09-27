@@ -196,12 +196,12 @@ describe("the Hotel module in the navigation", () => {
   it("holds every hospitality destination in Hotel and none elsewhere", async () => {
     const { NAV_SECTION_OF } = await import("@/components/nav");
     const hotel = [
-      "/pms-interfaces", "/stays", "/stay-events", "/pms-resolutions", "/guest-signin-attempts", "/checkout-grace",
+      "/pms-interfaces", "/room-sign-in", "/stays", "/stay-events", "/pms-resolutions", "/guest-signin-attempts", "/checkout-grace",
       "/post-stay", "/financial-health", "/financial-review", "/financial-settlements", "/financial-recovery",
       "/pms-routing", "/pms-source-conflicts", "/stay-transfers",
     ];
     for (const href of hotel) expect(NAV_SECTION_OF[href], href).toBe("Hotel");
     const outside = Object.entries(NAV_SECTION_OF).filter(([, s]) => s !== "Hotel").map(([h]) => h);
-    expect(outside.filter((h) => /pms|stay|grace|financial|signin/.test(h))).toEqual([]);
+    expect(outside.filter((h) => /pms|stay|grace|financial|signin|room/.test(h))).toEqual([]);
   });
 });

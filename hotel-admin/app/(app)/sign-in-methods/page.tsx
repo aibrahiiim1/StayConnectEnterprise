@@ -25,16 +25,15 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { api, ListResp, PmsInterface, PmsInterfaceHealth, PmsGuestNetworkRoute, Whoami } from "@/lib/api";
+import { api, ListResp, Whoami } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
 import { GuestSignInProtectionCard } from "@/components/guest-signin-protection";
-import { roomSignInReadiness } from "@/lib/pms-availability";
+import { roomSignInImpaired, useRoomSignInReadiness } from "@/components/room-sign-in-readiness";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { ErrorBanner } from "@/components/ui/error-banner";
 import { PageHeader, PageShell } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
-import { OptionCard } from "@/components/ui/data";
 import { Skeleton, Switch } from "@/components/ui/misc";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
@@ -57,35 +56,11 @@ type AuthMethods = {
 type NotifyProvider = { channel: string; kind: string; enabled: boolean };
 type SocialProvider = { provider: string; enabled: boolean };
 
-// PMS verification values. Each maps to a wire mode the resolver genuinely matches against a field the PMS
-// populated — there is no fuzzy matching and nothing is inferred.
-//
-// "either" is absent on purpose. It is still honoured if already stored, but it means
-// last-name-or-reservation decided by a guess at the shape of what the guest typed, so a surname containing
-// a digit is submitted as a reservation number and fails. An operator picking a mode here chooses one
-// explicit identifier instead — or "Any of the three", which is not the same thing: the guest still fills in
-// ONE box, and the SERVER compares that value against all three fields rather than the browser guessing which
-// one was meant.
-const PMS_MODES: { value: string; label: string; hint: string }[] = [
-  {
-    value: "room_any",
-    label: "Any of the three (recommended)",
-    hint:
-      "Room number plus one box that accepts the first name, the surname, or the reservation number. " +
-      "The client is not asked which one they are entering. If the value matches more than one guest in " +
-      "that room, sign-in is refused rather than guessing between them.",
-  },
-  { value: "room_lastname", label: "Last name (surname)", hint: "Room number plus the surname on the reservation." },
-  { value: "room_firstname", label: "First name", hint: "Room number plus the first name on the reservation." },
-  { value: "room_reservation", label: "Reservation number", hint: "Room number plus the reservation / confirmation number." },
-];
-const LEGACY_EITHER = "either";
+// WHAT THE GUEST TYPES BESIDES THE ROOM NUMBER IS NOT SET HERE. It depends on the PMS stay record, so it is
+// configured in the Hotel module, on Room sign-in (/room-sign-in). This card keeps only the method switch, so
+// the choice of methods stays in one place and the credential choice in another, with no duplicated setting.
 
 const SOCIAL_LABELS: Record<string, string> = { google: "Google", apple: "Apple", facebook: "Facebook", microsoft: "Microsoft" };
-
-// The reasons read as sentence fragments so they can be listed after a network name; the single-outage copy
-// puts one at the start of a sentence instead.
-const capitalise = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
 export default function SignInMethodsPage() {
   const toast = useToast();
@@ -103,9 +78,9 @@ export default function SignInMethodsPage() {
   const [social, setSocial] = useState<SocialProvider[]>([]);
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [pmsIfaces, setPmsIfaces] = useState<PmsInterface[] | null>(null);
-  const [pmsHealth, setPmsHealth] = useState<PmsInterfaceHealth[] | null>(null);
-  const [pmsRoutes, setPmsRoutes] = useState<PmsGuestNetworkRoute[] | null>(null);
+  // Whether Room sign-in can serve a guest right now. Only a one-line warning is shown here — the detail is on
+  // Hotel → Room sign-in — but an operator switching the method on during an outage must not miss it.
+  const { readiness: pmsReadiness } = useRoomSignInReadiness();
 
   const load = useCallback(async () => {
     setErr(null);
@@ -125,29 +100,6 @@ export default function SignInMethodsPage() {
       const s = await api.get<ListResp<SocialProvider>>("/social-providers");
       setSocial(s.data ?? []);
     } catch { /* readiness unknown; rendered as such */ }
-    // Whether Room sign-in can actually serve a guest right now, which is not the same question as whether it
-    // is switched on. Guest authentication requires a live PMS feed, so an interface that is disconnected or
-    // still loading its guest list refuses every guest — with the uniform message, which looks exactly like a
-    // wrong surname. Without this the screen would show a correctly configured, enabled method while the front
-    // desk fields complaints.
-    try {
-      const [list, routing] = await Promise.all([
-        api.get<ListResp<PmsInterface>>("/pms-interfaces"),
-        api.get<{ routes: PmsGuestNetworkRoute[] }>("/pms-routing"),
-      ]);
-      const ifaces = list.data ?? [];
-      // Health is read for ACTIVE interfaces only: the others cannot serve a guest whatever their axes say,
-      // and asking is a request per interface.
-      const healths = await Promise.all(
-        ifaces.filter((i) => i.lifecycle_state === "ACTIVE").map((i) =>
-          api.get<{ health: PmsInterfaceHealth }>(`/pms-interfaces/${i.id}/health`)
-            .then((h) => h.health)
-            .catch(() => null)),
-      );
-      setPmsIfaces(ifaces);
-      setPmsHealth(healths.filter(Boolean) as PmsInterfaceHealth[]);
-      setPmsRoutes(routing.routes ?? []);
-    } catch { /* readiness unknown; the notice is simply not shown */ }
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -168,11 +120,6 @@ export default function SignInMethodsPage() {
   const emailReady = useMemo(() => notify.some((p) => p.channel === "email" && p.enabled), [notify]);
   const smsReady = useMemo(() => notify.some((p) => p.channel === "sms" && p.enabled), [notify]);
   const socialReady = useMemo(() => social.filter((p) => p.enabled).map((p) => p.provider), [social]);
-  // Declared with the other readiness values and ABOVE the loading early-return: a hook after a conditional
-  // return is called on some renders and not others, which React rejects outright.
-  const pmsReadiness = useMemo(
-    () => roomSignInReadiness(pmsIfaces, pmsHealth, pmsRoutes),
-    [pmsIfaces, pmsHealth, pmsRoutes]);
 
   const header = (
     <PageHeader
@@ -193,7 +140,7 @@ export default function SignInMethodsPage() {
               items={[
                 <><strong>Voucher code</strong> — the client types a code from a printed or emailed voucher. Vouchers are managed under Vouchers.</>,
                 <><strong>Client account</strong> — a username and password issued to the client, managed under Client accounts.</>,
-                <><strong>Room sign-in</strong> — the client enters their room number and one detail from their booking. OneGate checks it against the property management system for the network they are on; the client never chooses a system, and no booking details are shown back to them. Which system a network uses is set in PMS routing, under Hotel.</>,
+                <><strong>Room sign-in</strong> — the client enters their room number and one detail from their booking. OneGate checks it against the property management system for the network they are on; the client never chooses a system, and no booking details are shown back to them. Which detail is asked for is set in Room sign-in, and which system a network uses in PMS routing — both under Hotel.</>,
                 <><strong>Email code</strong> and <strong>SMS code</strong> — the client receives a one-time code. Each is available only once a sender exists and is switched on under Email &amp; SMS.</>,
                 <><strong>Social login</strong> — the client signs in with an existing account such as Google. Each provider is offered individually, because each needs its own credentials; providers are set up under Social login.</>,
               ]}
@@ -223,8 +170,6 @@ export default function SignInMethodsPage() {
   }
 
   const pms = cfg.pms ?? {};
-  const pmsMode = pms.mode || "room_lastname";
-  const modeIsLegacy = pmsMode === LEGACY_EITHER;
 
   return (
     <PageShell>
@@ -260,14 +205,10 @@ export default function SignInMethodsPage() {
           manageLabel="Client accounts"
         />
 
-        {/* Room sign-in spans the row: it carries the readiness warning and the "what the guest types" choice. */}
-        <Card className="md:col-span-2">
-          <CardHeader className="items-start">
-            <MethodTitle
-              icon={<Hotel />}
-              title="Room sign-in (from the PMS)"
-              enabled={!!pms.enabled}
-            />
+        {/* Room sign-in spans the row so the grid of single methods below it stays even. */}
+        <Card className="flex flex-col md:col-span-2">
+          <CardHeader className="items-start border-b-0 pb-2">
+            <MethodTitle icon={<Hotel />} title="Room sign-in" enabled={!!pms.enabled} />
             <MethodSwitch
               label="Room sign-in"
               enabled={!!pms.enabled}
@@ -276,100 +217,24 @@ export default function SignInMethodsPage() {
               onChange={(v) => save({ pms: { ...pms, enabled: v, mode: pms.mode || "room_lastname" } }, "Room sign-in")}
             />
           </CardHeader>
-          <CardBody className="space-y-4">
-            <p className="max-w-2xl text-sm text-muted-foreground">
-              The client enters their room number and one detail from their booking.
+          <CardBody className="flex flex-1 flex-col gap-2 pt-0">
+            <p className="text-sm text-muted-foreground">
+              The client enters their room number and one detail from their reservation, checked against the PMS.
             </p>
-
-            {pms.enabled && (pmsReadiness.state === "down" || pmsReadiness.state === "partial") && (
-              // WHY THIS IS SEPARATE FROM THE SWITCH. The method is switched on and correctly configured; what
-              // is missing is the live PMS feed it depends on, and there is nothing on this screen to fix. An
-              // operator otherwise sees a healthy-looking feature while guests are refused with the uniform
-              // failure message — which reads as a wrong surname, so the front desk starts re-checking spellings
-              // instead of the interface.
-              //
-              // PARTIAL IS ITS OWN CASE. When one guest network is affected and another is fine, "Room sign-in
-              // is not working" would be false for half the property, and staying silent would be false for the
-              // other half. The networks are named so the operator knows which guests are affected.
-              <Callout
-                tone="warning"
-                title={pmsReadiness.state === "down"
-                  ? "Room sign-in is not working at the moment"
-                  : "Room sign-in is not working on some guest networks"}
-              >
-                {pmsReadiness.state === "down" ? (
-                  <p>
-                    {capitalise(pmsReadiness.reason)}. Clients cannot sign in with their room number until the
-                    property management system is connected to OneGate again; they can still use any other
-                    method switched on here. Nothing here needs changing — this setting is kept as it is and
-                    starts working again on its own once the connection returns.
-                  </p>
-                ) : (
-                  <>
-                    <p>
-                      Clients on the networks below cannot sign in with their room number. Everywhere else is
-                      working normally. Nothing here needs changing — each one starts working again on its own
-                      once its property management system is connected.
-                    </p>
-                    <ul className="mt-1 list-disc space-y-0.5 ps-4">
-                      {pmsReadiness.affected.map((a) => (
-                        <li key={`${a.guestNetwork}-${a.pmsInterface}`}>
-                          <span className="font-medium">{a.guestNetwork}</span> (via {a.pmsInterface}) —{" "}
-                          {a.reason}
-                        </li>
-                      ))}
-                    </ul>
-                  </>
-                )}
-                {pmsReadiness.unchecked.length > 0 && (
-                  // Neutral, and never counted as an outage. A health read that failed is absence of evidence,
-                  // and one of those networks may be perfectly fine.
-                  <p className="mt-1">Readiness could not be checked for {pmsReadiness.unchecked.join(", ")}.</p>
-                )}
-                <p className="mt-1">
-                  <Link href="/pms-interfaces" className="inline-flex items-center gap-0.5 font-medium underline">
-                    Check the PMS connection <ArrowUpRight className="size-3.5" aria-hidden />
-                  </Link>
-                </p>
-              </Callout>
+            {pms.enabled && roomSignInImpaired(pmsReadiness) && (
+              // One line, not the full callout: which networks are affected and why is on the Hotel screen.
+              <p className="text-xs text-warning-subtle-foreground" role="status">
+                {pmsReadiness.state === "down"
+                  ? "Not working at the moment — the PMS is not available."
+                  : "Not working on some client networks — the PMS is not available for them."}
+              </p>
             )}
-
-            {pms.enabled && (
-              <div className="border-t border-border pt-4">
-              <fieldset className="space-y-3">
-                <legend className="mb-3 text-label">
-                  What the client types, besides the room number
-                </legend>
-                {modeIsLegacy && (
-                  // Shown rather than silently migrated: changing what a stored configuration does is the
-                  // operator's decision, not this screen's.
-                  <Callout tone="warning">
-                    This site currently uses an older setting that accepts a last name or a reservation number
-                    and guesses which one was typed, so some surnames are rejected. Choosing one of the
-                    options below replaces it.
-                  </Callout>
-                )}
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {PMS_MODES.map((m) => (
-                    <OptionCard
-                      key={m.value}
-                      name="pms-mode"
-                      value={m.value}
-                      checked={pmsMode === m.value}
-                      disabled={!writable || busy === "Room sign-in mode"}
-                      onChange={(v) => save({ pms: { ...pms, enabled: true, mode: v } }, "Room sign-in mode")}
-                      title={m.label}
-                      description={m.hint}
-                    />
-                  ))}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Which property management system a client is checked against is decided by their network, in{" "}
-                  <Link href="/pms-routing" className="text-primary underline underline-offset-2 hover:decoration-2">PMS routing</Link> (under Hotel).
-                </p>
-              </fieldset>
-              </div>
-            )}
+            <Link
+              href="/room-sign-in"
+              className="mt-auto inline-flex w-fit items-center gap-0.5 pt-1 text-xs text-primary underline-offset-4 hover:underline"
+            >
+              Room sign-in settings — under Hotel <ArrowUpRight className="size-3.5" aria-hidden />
+            </Link>
           </CardBody>
         </Card>
 
