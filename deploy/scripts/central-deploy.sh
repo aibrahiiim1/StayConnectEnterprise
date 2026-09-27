@@ -64,7 +64,9 @@ smoke() {
   case "$body" in *'"ready"'*) _pass "ctrlapi loopback /readyz: $body" ;; *) _fail "ctrlapi loopback /readyz: ${body:-no answer}" ;; esac
 
   body="$("${C[@]}" "$base/readyz" 2>&1 || true)"
-  if [ "$tls" = acme ] && ! printf '%s' "$body" | grep -q '"ready"'; then
+  # Output is captured and matched with here-strings, never piped into `grep -q`: under pipefail an early-exiting
+  # grep SIGPIPEs the writer and the pipeline reports failure on a MATCH.
+  if [ "$tls" = acme ] && ! grep -q '"ready"' <<<"$body"; then
     warn "public certificate not verifiable yet (ACME needs DNS pointing here); retrying without verification"
     C+=(-k); body="$("${C[@]}" "$base/readyz" 2>&1 || true)"
   fi
@@ -81,17 +83,22 @@ smoke() {
   fi
 
   body="$("${C[@]}" "$base/metrics" 2>/dev/null || true)"
-  if printf '%s' "$body" | grep -q '^# HELP'; then _fail "/metrics is reachable through Caddy — it must be loopback-only"
+  if grep -q '^# HELP' <<<"$body"; then _fail "/metrics is reachable through Caddy — it must be loopback-only"
   else _pass "/metrics not exposed through Caddy"; fi
   code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8080/metrics || true)"
   [ "$code" = 200 ] && _pass "/metrics answers on loopback for a local scraper" || warn "/metrics on loopback answered $code"
 
   local mport; mport="$(envfile_get "$CTRLAPI_ENV_PATH" CTRLAPI_MTLS_ADDR 2>/dev/null || echo :9443)"; mport="${mport##*:}"
-  if ss -ltnH 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$mport\$"; then
+  local listening tlsout
+  listening="$(ss -ltnH 2>/dev/null | awk '{print $4}' || true)"
+  if grep -qE "[:.]$mport\$" <<<"$listening"; then
     _pass "appliance mTLS listener on :$mport"
     if [ -s "$CENTRAL_CA_BUNDLE" ]; then
-      if openssl s_client -connect "127.0.0.1:$mport" -servername "$primary" -verify_hostname "$primary" \
-           -CAfile "$CENTRAL_CA_BUNDLE" </dev/null 2>/dev/null | grep -q 'Verify return code: 0'; then
+      # The handshake ends in "certificate required" (no client certificate here) — expected. What is checked
+      # is the SERVER certificate: it chains to the appliance CA and carries the appliance-facing name.
+      tlsout="$(openssl s_client -connect "127.0.0.1:$mport" -servername "$primary" -verify_hostname "$primary" \
+           -CAfile "$CENTRAL_CA_BUNDLE" </dev/null 2>/dev/null || true)"
+      if grep -q 'Verify return code: 0' <<<"$tlsout"; then
         _pass ":$mport certificate verifies for $primary against the appliance CA bundle"
       else
         _fail ":$mport certificate does not verify for $primary against $CENTRAL_CA_BUNDLE"

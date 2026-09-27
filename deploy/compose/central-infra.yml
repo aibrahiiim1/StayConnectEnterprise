@@ -49,7 +49,10 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U stayconnect -d stayconnect"]
+      # OVER TCP, deliberately. On first start the image runs its init scripts against a temporary server that
+      # listens on the unix socket only, then restarts it. A socket-based pg_isready reports "healthy" during
+      # that window and the first real query lands in the restart ("server closed the connection unexpectedly").
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U stayconnect -d stayconnect"]
       interval: 5s
       timeout: 3s
       retries: 20

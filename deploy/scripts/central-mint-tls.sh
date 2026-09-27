@@ -103,7 +103,7 @@ for e in "${extras[@]:-}"; do
     *) dns_names+=("$e") ;;
   esac
 done
-ip_names+=("127.0.0.1")
+case " ${ip_names[*]:-} " in *" 127.0.0.1 "*) ;; *) ip_names+=("127.0.0.1") ;; esac
 
 # Already covering everything? Then this is a no-op, and saying so beats re-issuing a certificate that every
 # appliance would have to re-validate for no reason.

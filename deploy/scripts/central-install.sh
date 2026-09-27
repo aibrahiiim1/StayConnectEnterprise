@@ -188,7 +188,7 @@ if getent passwd "$SC_RUN_USER" >/dev/null; then say "user $SC_RUN_USER exists"
 else run useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$SC_RUN_USER"; fi
 run install -d -m 0755 "$SC_OPT" "$SC_OPT/bin" "$SC_OPT/releases" "$CONSOLE_RELEASES" "$SC_OPT/releases/central" \
   "$CENTRAL_ROOT" "$CENTRAL_ROOT/compose" "$CENTRAL_PUBLIC_TRUST_DIR" "$SC_ETC" /var/log/stayconnect
-run install -d -m 0700 "$CENTRAL_SECRETS_DIR" "$CENTRAL_TLS_DIR" "$SC_ETC/pki" "$CENTRAL_DB_BACKUPS"
+run install -d -m 0700 "$CENTRAL_SECRETS_DIR" "$CENTRAL_TLS_DIR" "$SC_ETC/pki" "$SC_ETC/pki-offline" "$CENTRAL_DB_BACKUPS"
 if getent passwd caddy >/dev/null; then
   run install -d -o caddy -g caddy -m 0750 /var/log/caddy
   run install -d -o root -g caddy -m 0750 "$(dirname "$CADDY_TLS_CRT")"
@@ -438,7 +438,8 @@ else
   else run "$CTRLAPI_BIN_PATH" gen-registry-key --out "$KEY_REG" --pub-out "${KEY_REG%.key}.pub"; fi
   [ -z "$TLS_MODE" ] && TLS_MODE=internal
   if [ "$TLS_MODE" = internal ]; then run bash "$T/central-mint-tls.sh" --init-ca; fi
-  say "the appliance Root/Intermediate CA is created by ctrlapi on its first start (step 11)"
+  if [ "$n" = 3 ]; then say "appliance CA exists — kept (root $(cert_fpr "$PKI_ROOT_CRT" | cut -c1-23)…)"
+  else say "the appliance Root/Intermediate CA is created by ctrlapi on its first start (step 11)"; fi
 fi
 case "$TLS_MODE" in internal|acme) ;; *) die "--tls must be internal or acme" ;; esac
 [ "$TLS_MODE" = acme ] || [ "$DRY_RUN" = 1 ] || [ -s "$CENTRAL_TLS_DIR/ca.crt" ] || die "--tls internal but no Central TLS CA at $CENTRAL_TLS_DIR"
@@ -473,7 +474,7 @@ say "console origins: $ORIGINS"
 
 if [ -f "$CTRLAPI_ENV_PATH" ]; then
   say "$CTRLAPI_ENV_PATH exists — kept as is"
-  grep -q CHANGE_ME "$CTRLAPI_ENV_PATH" && die "$CTRLAPI_ENV_PATH still contains CHANGE_ME placeholders"
+  grep -qE "^[^#]*CHANGE_ME" "$CTRLAPI_ENV_PATH" && die "$CTRLAPI_ENV_PATH still contains CHANGE_ME placeholders"
 else
   DBPW="$(cat "$CENTRAL_SECRETS_DIR/db_password" 2>/dev/null || echo DRYRUN)"
   RDPW="$(cat "$CENTRAL_SECRETS_DIR/redis_password" 2>/dev/null || echo DRYRUN)"
@@ -527,7 +528,8 @@ run install -m 0755 "$REL/deploy/scripts/stayconnect-backup-cleanup.sh" "$SC_OPT
 [ -f "$SC_ETC/backup-retention.conf" ] || run install -m 0644 "$REL/deploy/scripts/backup-retention.conf" "$SC_ETC/backup-retention.conf"
 run systemctl daemon-reload
 # The apt package's own caddy.service would fight stayconnect-caddy for :443.
-if systemctl list-unit-files caddy.service >/dev/null 2>&1 && systemctl list-unit-files caddy.service | grep -q '^caddy.service'; then
+caddy_state="$(systemctl is-enabled caddy.service 2>/dev/null || true)"
+if [ -n "$caddy_state" ] && [ "$caddy_state" != masked ] && [ "$caddy_state" != not-found ]; then
   run systemctl disable --now caddy.service || true
   run systemctl mask caddy.service || true
 fi
@@ -576,7 +578,7 @@ else
     say "appliance CA unchanged by start-up"
   else
     for f in "$PKI_ROOT_CRT" "$PKI_INT_CRT" "$PKI_INT_KEY"; do [ -s "$f" ] || die "ctrlapi started but did not create $f"; done
-    say "appliance CA created: root $(cert_fpr "$PKI_ROOT_CRT" | cut -c1-23)…"
+    say "appliance CA present: root $(cert_fpr "$PKI_ROOT_CRT" | cut -c1-23)…"
   fi
   if [ ! -s "$CENTRAL_CA_BUNDLE" ]; then
     cat "$PKI_INT_CRT" "$PKI_ROOT_CRT" | write_file "$CENTRAL_CA_BUNDLE" 0644
@@ -624,7 +626,7 @@ step "13/14 console + Caddy + firewall"
 unit_restart_noblock stayconnect-cloud-admin
 if [ "$DRY_RUN" = 0 ]; then
   ok=0; for i in $(seq 1 45); do
-    if curl -fsS -o /dev/null --max-time 2 http://127.0.0.1:3000/login; then ok=1; break; fi; sleep 1; done
+    if curl -fsS -o /dev/null --max-time 2 http://127.0.0.1:3000/login 2>/dev/null; then ok=1; break; fi; sleep 1; done
   [ "$ok" = 1 ] || { journalctl -u stayconnect-cloud-admin -n 40 --no-pager >&2 || true; die "the console did not serve /login on :3000"; }
   say "console serving on 127.0.0.1:3000"
 fi

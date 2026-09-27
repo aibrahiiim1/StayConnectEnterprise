@@ -68,6 +68,7 @@ done
 
 # ---------------------------------------------------------------- the auth-callout service and its account
 step "services and accounts"
+accounts=""
 for u in stayconnect-nats-authz.service stayconnect-nats.service; do
   unit="/etc/systemd/system/$u"
   if [ -f "$unit" ] || systemctl list-unit-files "$u" 2>/dev/null | grep -q "^$u"; then
@@ -79,13 +80,11 @@ for u in stayconnect-nats-authz.service stayconnect-nats.service; do
       [ -f "$unit" ] && { files+=("$unit"); }
     fi
     case "$bin" in /opt/stayconnect/bin/*) [ -f "$bin" ] && { note "binary $bin"; files+=("$bin"); } ;; esac
-    if [ -n "$user" ] && [ "$user" != root ] && [ "$user" != stayconnect ] && getent passwd "$user" >/dev/null; then
-      note "account $user"
-      [ "$APPLY" = 1 ] && { userdel "$user" 2>/dev/null && say "     removed account $user" || warn "could not remove account $user"; }
-    fi
+    case "$user" in ""|root|stayconnect|caddy) ;; *) accounts="$accounts $user" ;; esac
   fi
 done
-for u in nats-authz stayconnect-nats-authz; do
+# The service's own account (from its unit, if the unit was still there) and the names it has been given.
+for u in $(printf '%s\n' $accounts nats-authz stayconnect-nats-authz | awk '!seen[$0]++'); do
   if getent passwd "$u" >/dev/null; then
     note "account $u"
     [ "$APPLY" = 1 ] && { userdel "$u" 2>/dev/null && say "     removed account $u" || warn "could not remove account $u"; }
@@ -102,7 +101,7 @@ for p in "$CENTRAL_ROOT/nats" "$CENTRAL_ROOT/nats-mtls" "$SC_ETC/nats-authz" \
   [ -e "$p" ] || continue
   case "$p" in "$SC_ETC/pki/nats-ca-bundle.crt") continue ;; esac   # handled below
   if printf '%s' "$p" | grep -qE "$PROTECTED_RE"; then warn "refusing protected path $p"; continue; fi
-  if [ "$p" = "$SC_ETC/assignment-trust.json" ] && [ -f "$CTRLAPI_ENV_PATH" ] && grep -q 'assignment-trust.json' "$CTRLAPI_ENV_PATH"; then
+  if [ "$p" = "$SC_ETC/assignment-trust.json" ] && [ -f "$CTRLAPI_ENV_PATH" ] && grep -qE '^[^#]*assignment-trust.json' "$CTRLAPI_ENV_PATH"; then
     warn "$p is still named in $CTRLAPI_ENV_PATH — kept"; continue
   fi
   note "$p"
@@ -134,7 +133,7 @@ if [ -f "$LEGACY" ]; then
     note "copy $LEGACY -> $CENTRAL_CA_BUNDLE (neutral name; content unchanged)"
     [ "$APPLY" = 1 ] && install -m 0644 "$LEGACY" "$CENTRAL_CA_BUNDLE"
   fi
-  if [ -f "$CTRLAPI_ENV_PATH" ] && grep -q 'nats-ca-bundle' "$CTRLAPI_ENV_PATH"; then
+  if [ -f "$CTRLAPI_ENV_PATH" ] && grep -qE '^[^#]*nats-ca-bundle' "$CTRLAPI_ENV_PATH"; then
     say "  $CTRLAPI_ENV_PATH still names nats-ca-bundle.crt. Point CTRLAPI_CA_BUNDLE at $CENTRAL_CA_BUNDLE and"
     say "  restart ctrlapi, then re-run with --remove-legacy-bundle."
   elif [ "$RM_LEGACY_BUNDLE" = 1 ]; then

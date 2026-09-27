@@ -104,8 +104,13 @@ run() {
 write_file() {
   local dest="$1" mode="$2" owner="${3:-root:root}" tmp
   if [ "$DRY_RUN" = 1 ]; then
-    say "DRY-RUN would write $dest (mode $mode, $owner):"
-    sed 's/^/        | /' | grep -viE 'password|secret|://[^:]*:[^@]*@' || true
+    case "$mode" in
+      0600|600|0400|400)   # a secret-bearing file: never echo its content, not even in a dry run
+        say "DRY-RUN would write $dest (mode $mode, $owner): $(wc -c | tr -d ' ') bytes, content withheld" ;;
+      *)
+        say "DRY-RUN would write $dest (mode $mode, $owner):"
+        sed 's/^/        | /' | grep -viE 'password|secret|://[^:]*:[^@]*@' || true ;;
+    esac
     return 0
   fi
   mkdir -p "$(dirname "$dest")"
@@ -285,7 +290,12 @@ pg_wait_healthy() { # pg_wait_healthy [seconds]
   for i in $(seq 1 "${1:-120}"); do
     s1="$(docker inspect -f '{{.State.Health.Status}}' "$CENTRAL_PG_CONTAINER" 2>/dev/null || echo missing)"
     s2="$(docker inspect -f '{{.State.Health.Status}}' "$CENTRAL_REDIS_CONTAINER" 2>/dev/null || echo missing)"
-    if [ "$s1" = healthy ] && [ "$s2" = healthy ]; then return 0; fi
+    # Healthy AND answering a real query twice, a few seconds apart: a first-start init cycle restarts the
+    # server once, and "healthy" alone has been observed inside that window.
+    if [ "$s1" = healthy ] && [ "$s2" = healthy ] && pg_q -c 'SELECT 1' >/dev/null 2>&1; then
+      sleep 3
+      pg_q -c 'SELECT 1' >/dev/null 2>&1 && return 0
+    fi
     sleep 1
   done
   die "infra not healthy after ${1:-120}s (pg=$s1 redis=$s2) — docker compose -p $CENTRAL_COMPOSE_PROJECT -f $CENTRAL_COMPOSE_FILE logs"
