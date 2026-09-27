@@ -54,6 +54,11 @@ type Request struct {
 	Model         string `json:"model"`
 	CreatedAt     int64  `json:"created_at"`
 	Nonce         string `json:"nonce"`
+	// HoldsCustomerID is the customer (tenant) whose data the appliance's local site database still holds;
+	// empty for a factory-clean appliance. Central refuses to activate the appliance for any other customer.
+	// It is signed when present and omitted from the signed bytes when empty, so a request from an appliance
+	// that predates the field verifies exactly as before.
+	HoldsCustomerID string `json:"holds_customer_id,omitempty"`
 	// Signature is made by the private half of PublicKey over requestSigningBytes. It proves the emitter
 	// holds the key it is asking to be bound to -- without it, anyone could submit someone else's hardware
 	// facts and receive a package bound to a key they control.
@@ -72,12 +77,14 @@ type requestSignView struct {
 	Model         string `json:"model"`
 	CreatedAt     int64  `json:"created_at"`
 	Nonce         string `json:"nonce"`
+	// omitempty keeps the signed bytes of a request without it identical to the pre-field format.
+	HoldsCustomerID string `json:"holds_customer_id,omitempty"`
 }
 
 func requestSigningBytes(r *Request) []byte {
 	b, _ := json.Marshal(requestSignView{
 		r.SchemaVersion, r.RequestID, r.Serial, r.PublicKey, r.WANMAC, r.LANMAC,
-		r.HardwareFpr, r.Hostname, r.Model, r.CreatedAt, r.Nonce,
+		r.HardwareFpr, r.Hostname, r.Model, r.CreatedAt, r.Nonce, r.HoldsCustomerID,
 	})
 	return b
 }

@@ -50,6 +50,11 @@ func (i *Identity) PrivateKey() ed25519.PrivateKey { return i.privKey }
 //	<Dir>/ed25519.key    — 64-byte raw Ed25519 private seed+public (Go's format)
 type Store struct {
 	Dir string
+	// HeldCustomer, when set, reports the customer (tenant) id whose data the appliance's local site database
+	// still holds ("" for a factory-clean appliance). Register sends it as holds_customer_id inside the signed
+	// body, so Central refuses to activate the appliance for any other customer. An error refuses the
+	// registration attempt: an appliance that cannot tell what it holds must not present itself as clean.
+	HeldCustomer func(context.Context) (string, error)
 }
 
 func (s *Store) idPath() string  { return filepath.Join(s.Dir, "identity.json") }
@@ -120,7 +125,7 @@ func (s *Store) Register(ctx context.Context, ctrlBase string, client HTTPDoer) 
 	pub := priv.Public().(ed25519.PublicKey)
 	pubB64 := base64.RawStdEncoding.EncodeToString(pub)
 	hw := detectHW()
-	body, _ := json.Marshal(map[string]string{
+	fields := map[string]string{
 		"serial":               hw.Serial,
 		"wan_mac":              hw.WANMAC,
 		"lan_mac":              hw.LANMAC,
@@ -128,7 +133,19 @@ func (s *Store) Register(ctx context.Context, ctrlBase string, client HTTPDoer) 
 		"hostname":             hw.Hostname,
 		"model":                hw.Model,
 		"public_key":           pubB64,
-	})
+	}
+	// HOLDS_CUSTOMER_ID. Optional, and inside the signed body (the request token carries the body's SHA-256),
+	// so it cannot be stripped or changed in transit. Omitted when the appliance holds no customer's data.
+	if s.HeldCustomer != nil {
+		held, err := s.HeldCustomer(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("registration refused locally: %w", err)
+		}
+		if held != "" {
+			fields["holds_customer_id"] = held
+		}
+	}
+	body, _ := json.Marshal(fields)
 	kid := applianceauth.KeyID(pub)
 	tok, err := applianceauth.SignRequest(priv, kid, http.MethodPost, "/v1/appliances/register", body)
 	if err != nil {

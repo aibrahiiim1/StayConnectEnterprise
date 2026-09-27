@@ -514,7 +514,18 @@ func main() {
 		slog.Warn("this appliance was removed from OneGate Central after holding a customer: it admits no new guests, "+
 			"does not register and does not contact Central until it is factory-reset", "since", removedRec.At)
 	}
-	idStore := &identity.Store{Dir: c.IdentityDir}
+	// The site database is opened before registration: a registration reports whose customer data it still
+	// holds (held_customer.go). pgxpool.New does not connect; the first query does.
+	pool, err := pgxpool.New(rootCtx, c.DBURL)
+	if err != nil {
+		slog.Error("db open", "err", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+	heldAssignmentDir := envOr("SCD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment")
+	idStore := &identity.Store{Dir: c.IdentityDir, HeldCustomer: func(ctx context.Context) (string, error) {
+		return heldCustomerID(ctx, pool, heldAssignmentDir)
+	}}
 	ident, err := idStore.LoadBound()
 	if err != nil {
 		slog.Error("identity: load failed", "err", err)
@@ -568,13 +579,6 @@ func main() {
 		c.ApplianceID = ""
 		slog.Warn("awaiting registration: this appliance has no registered identity yet")
 	}
-
-	pool, err := pgxpool.New(rootCtx, c.DBURL)
-	if err != nil {
-		slog.Error("db open", "err", err)
-		os.Exit(1)
-	}
-	defer pool.Close()
 
 	// Social provider registry. Default: in-process Stub for "google" so
 	// dev environments work without OAuth credentials. The loader then

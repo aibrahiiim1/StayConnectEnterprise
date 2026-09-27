@@ -83,12 +83,22 @@ func (s *server) setupActivationRequest(w http.ResponseWriter, r *http.Request) 
 		httpErr(w, http.StatusInternalServerError, "could not prepare an identity for this appliance")
 		return
 	}
+	// The request says whose customer data this appliance still holds, exactly as an online registration
+	// does (held_customer.go): Central will not activate it for anyone else.
+	held, err := heldCustomerID(r.Context(), s.db, envOr("SCD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment"))
+	if errors.Is(err, errHoldsSeveralCustomers) {
+		httpErr(w, http.StatusConflict, err.Error())
+		return
+	} else if err != nil {
+		httpErr(w, http.StatusServiceUnavailable, "could not read which customer's data this appliance holds; try again")
+		return
+	}
 	// Reuse an outstanding request rather than minting a new one on every click: a fresh nonce would
 	// silently invalidate the package the operator is already carrying back.
 	if raw, err := os.ReadFile(s.activationRequestPath()); err == nil {
 		var prev activation.Request
 		if json.Unmarshal(raw, &prev) == nil && activation.VerifyRequest(&prev) &&
-			prev.PublicKey == id.PublicKeyB64 {
+			prev.PublicKey == id.PublicKeyB64 && prev.HoldsCustomerID == held {
 			writeJSON(w, http.StatusOK, prev)
 			return
 		}
@@ -106,6 +116,8 @@ func (s *server) setupActivationRequest(w http.ResponseWriter, r *http.Request) 
 		Model:         hw.Model,
 		CreatedAt:     time.Now().Unix(),
 		Nonce:         offlineNonceHex(),
+
+		HoldsCustomerID: held,
 	}
 	activation.SignRequest(id.PrivateKey(), req)
 	b, _ := json.MarshalIndent(req, "", "  ")
