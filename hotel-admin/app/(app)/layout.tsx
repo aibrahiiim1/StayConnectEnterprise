@@ -8,20 +8,17 @@ import { Nav, NAV_ITEMS, NAV_SECTION_OF, activeNavHref } from "@/components/nav"
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ApplianceStatus } from "@/components/appliance-status";
 import { Skeleton } from "@/components/ui/misc";
-import { api, Whoami } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useSidebarCollapsed } from "@/lib/sidebar-state";
 import { useCapabilities, surfaceAvailable } from "@/lib/capabilities";
 import { SurfaceNotEnabled } from "@/components/surface-not-enabled";
 import { ToastProvider } from "@/components/ui/toast";
-import { usePoll } from "@/lib/use-poll";
-import { WhoamiProvider } from "@/lib/whoami-context";
+import { WhoamiProvider, useWhoamiSession } from "@/lib/whoami-context";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const mainRef = useRef<HTMLElement | null>(null);
-  const [me, setMe] = useState<Whoami | null>(null);
-  const [loading, setLoading] = useState(true);
   const [drawer, setDrawer] = useState(false);
   // Desktop only. The drawer below `lg` is a full-width overlay and never consults this.
   const { collapsed, toggle: toggleCollapsed } = useSidebarCollapsed();
@@ -61,28 +58,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     router.replace("/login");
   }, [router]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const m = await api.get<Whoami>("/auth/whoami");
-        if (!cancelled) setMe(m);
-      } catch {
-        if (!cancelled) await bounce();
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [bounce]);
-
-  // Re-validate periodically so a session that expires while the operator is
-  // watching a long-lived page (onboarding, sessions, dashboard) recovers to
-  // /login instead of every poll erroring on 401. Paused in a hidden tab, and
-  // checked at once when the tab comes back.
-  usePoll(() => {
-    api.get<Whoami>("/auth/whoami").catch(() => bounce());
-  }, 30_000, { enabled: me !== null });
+  // Who is signed in: asked once, then re-validated every 30 seconds (see useWhoamiSession). A failure bounces
+  // to /login; a success replaces the identity, so a role granted or revoked meanwhile reaches the nav and
+  // every role-gated page without a reload.
+  const { me, loading } = useWhoamiSession(bounce);
 
   // With the CONTENT as the scrolling element, the window no longer scrolls, so Next's scroll-to-top on
   // navigation has nothing to reset. Reset the content pane explicitly instead -- otherwise an operator who
