@@ -29,14 +29,14 @@ export type AuditCategory =
   | "Sign-in & access"
   | "Client Portal"
   | "Internet offering"
-  | "Property management system"
+  | "Hotel"
   | "Networks"
   | "Licence & cloud"
   | "Backups"
   | "Diagnostics";
 
 export const AUDIT_CATEGORIES: AuditCategory[] = [
-  "Sign-in & access", "Client Portal", "Internet offering", "Property management system",
+  "Sign-in & access", "Client Portal", "Internet offering", "Hotel",
   "Networks", "Licence & cloud", "Backups", "Diagnostics",
 ];
 
@@ -73,23 +73,23 @@ const WORDS: Record<string, AuditWords> = {
   "commercial_package.deactivated": { title: "Withdrew an internet package", category: "Internet offering", severity: "change" },
   "service_plan.published": { title: "Published a service plan", category: "Internet offering", severity: "change" },
   "checkout_grace.published": {
-    title: "Changed the checkout grace policy", category: "Internet offering", severity: "change",
+    title: "Changed the Grace Period policy", category: "Hotel", severity: "change",
     note: "How long a departing guest keeps internet after checking out.",
   },
 
-  // ---- PMS ---------------------------------------------------------------------------------------------
-  "pms_provider.created": { title: "Added a PMS provider", category: "Property management system", severity: "change" },
-  "pms_interface.created": { title: "Added a PMS connection", category: "Property management system", severity: "change" },
-  "pms_interface.lifecycle": { title: "Changed a PMS connection's state", category: "Property management system", severity: "change" },
+  // ---- hotel (PMS) ---------------------------------------------------------------------------------------------
+  "pms_provider.created": { title: "Added a PMS provider", category: "Hotel", severity: "change" },
+  "pms_interface.created": { title: "Added a PMS connection", category: "Hotel", severity: "change" },
+  "pms_interface.lifecycle": { title: "Changed a PMS connection's state", category: "Hotel", severity: "change" },
   "pms_interface_revision.authored": {
-    title: "Drafted PMS connection settings", category: "Property management system", severity: "notice",
+    title: "Drafted PMS connection settings", category: "Hotel", severity: "notice",
     note: "Drafted only. Nothing reached the PMS until the revision was published.",
   },
   "pms_interface.revision_published": {
-    title: "Published PMS connection settings", category: "Property management system", severity: "change",
+    title: "Published PMS connection settings", category: "Hotel", severity: "change",
   },
   "pms_routing.set": {
-    title: "Pointed a guest network at a PMS", category: "Property management system", severity: "change",
+    title: "Pointed a guest network at a PMS", category: "Hotel", severity: "change",
     note: "Which PMS guest list room sign-ins on that network are checked against.",
   },
 
@@ -160,9 +160,9 @@ function categoryFromPrefix(action: string): AuditCategory {
   const p = action.split(".")[0];
   switch (p) {
     case "branding": case "portal_asset": return "Client Portal";
-    case "commercial_package": case "service_plan": case "checkout_grace": return "Internet offering";
-    case "pms_interface": case "pms_provider": case "pms_routing": case "pms_interface_revision":
-      return "Property management system";
+    case "commercial_package": case "service_plan": return "Internet offering";
+    case "checkout_grace": case "pms_interface": case "pms_provider": case "pms_routing": case "pms_interface_revision":
+      return "Hotel";
     case "network": return "Networks";
     case "license": case "cloud": case "renewal_started": case "renewal_succeeded": case "hotel_admin_cert":
       return "Licence & cloud";

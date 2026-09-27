@@ -67,7 +67,7 @@ type Section = { title: string; items: Item[] };
 //
 // It is grouped by the job an operator is doing. The previous grouping had a 16-item "Integrations" section
 // holding the PMS, the financial screens, post-stay, notifications and social login at one flat level, and an
-// "Access" section that mixed what a guest can buy with who is currently online. Both are jobs; neither was
+// "Access" section that mixed what a client can buy with who is currently online. Both are jobs; neither was
 // findable.
 const SECTIONS: Section[] = [
   {
@@ -77,65 +77,57 @@ const SECTIONS: Section[] = [
     ],
   },
   {
-    // WHAT A GUEST CAN BE GIVEN, AND THE SERVICE BEHIND IT. These are one job in two steps — a Service plan
-    // defines the technical service (speed, devices, duration/quota); an Internet package is the guest-facing
+    // WHAT A CLIENT CAN BE GIVEN, AND THE SERVICE BEHIND IT. These are one job in two steps — a Service plan
+    // defines the technical service (speed, devices, duration/quota); an Internet package is the client-facing
     // offer that uses it — so they sit adjacent instead of being buried in one tabbed screen.
     title: "Internet offering",
     items: [
       { href: "/internet-packages", label: "Internet packages", icon: Package, resource: "commercial-packages", keywords: "offer tariff price free paid" },
       { href: "/service-plans",     label: "Service plans",     icon: Gauge,   resource: "commercial-packages", keywords: "speed bandwidth quota devices mbps" },
-      { href: "/checkout-grace",    label: "Checkout grace",    icon: DoorOpen,  resource: "checkout-grace", keywords: "after checkout late departure" },
-      // Vouchers sit with the offer rather than with the guest: a voucher IS an internet package, printed.
+      // Vouchers sit with the offer rather than with the client: a voucher IS an internet package, printed.
       { href: "/vouchers",          label: "Vouchers",          icon: Ticket,  resource: "vouchers", keywords: "code card print batch redeem scratch prepaid" },
     ],
   },
   {
     title: "Clients",
     items: [
-      { href: "/stays",          label: "Stays",           icon: BedDouble,    resource: "pms-stays", keywords: "rooms reservations in house occupancy guest list guests" },
       { href: "/guest-accounts", label: "Client accounts",  icon: KeyRound, resource: "guest-accounts", keywords: "username password login credentials voucher guest accounts" },
       { href: "/sessions",       label: "Active sessions", icon: Monitor,  resource: "sessions", keywords: "online now devices connected who is on wifi disconnect guests" },
       { href: "/usage",          label: "Usage explorer",  icon: ChartColumn, resource: "usage", keywords: "data used quota dispute how much room device mac gigabytes consumption investigate guests" },
       { href: "/guest-device-self-service", label: "Client devices", icon: Smartphone, resource: "guest-device-self-service", keywords: "phone laptop remove device guest devices" },
       { href: "/online-time",    label: "Online-time budgets", icon: Hourglass, resource: "sessions", capability: "sessions.aggregate-time", keywords: "time remaining allowance hours guests" },
-      { href: "/post-stay",      label: "Post-stay access", icon: CalendarClock, resource: "post-stay-profiles", keywords: "after departure loyalty guests" },
     ],
   },
   {
-    // THE PMS, AS ONE SUBJECT.
+    // THE HOTEL MODULE: every screen whose meaning depends on hospitality or a PMS, in one place
+    // (docs/PRODUCT_TERMINOLOGY.md). It replaces the former "Property management system" and "Charges"
+    // sections; those words stay in the keywords so the filter still finds them.
     //
     // "PMS providers" is GONE rather than hidden. It was a second, older configuration model for the same
     // property management system the PMS connection now owns, and offering an operator two ways to configure
-    // one PMS is worse than offering one imperfect way — whichever they fill in, they cannot tell whether it
-    // is the one the appliance actually dials.
+    // one PMS is worse than offering one imperfect way.
     //
     // Ordered connection-first: when guests cannot get online, "is the PMS connected" is the question and the
     // stays are the symptom.
-    title: "Property management system",
+    title: "Hotel",
     items: [
-      { href: "/pms-interfaces",       label: "PMS connection",       icon: Plug,  resource: "pms-interfaces", keywords: "protel fias connect sync resync opera status" },
-      { href: "/pms-routing",          label: "Network routing",      icon: Route, resource: "pms-routing", keywords: "which pms per network vlan mapping" },
-      { href: "/stay-events",          label: "PMS activity",         icon: Inbox,   resource: "pms-events", keywords: "feed messages check in out log" },
-      { href: "/pms-resolutions",      label: "Client sign-in checks", icon: ShieldCheck,   resource: "pms-resolutions", keywords: "room verification failures evidence guest sign-in checks" },
-    { href: "/guest-signin-attempts", label: "Client sign-in attempts", icon: UserX, resource: "guest-signin-attempts", keywords: "attempt failed reason room typed credential mismatch why cannot connect guest sign-in attempts" },
-      // RECONCILIATION IS NOT DAY-TO-DAY WORK, so it is not day-to-day navigation.
-      //
-      // Both reconciliation screens are diagnostics. Neither has an action on it, both describe machinery
-      // that runs by itself, and a reception desk that never opens them is a desk where everything is
-      // working. They stay routable and are reached from PMS connection under Advanced diagnostics, where
-      // somebody troubleshooting will look for them -- and the PMS connection page now says plainly when
-      // there is something in them worth looking at.
-      { href: "/pms-source-conflicts", label: "Duplicate sources",    icon: Layers, resource: "pms-source-conflicts", keywords: "conflict two interfaces same room" },
-      { href: "/stay-transfers",       label: "Cross-PMS transfer",   icon: ArrowLeftRight,   resource: "stay-transfers", keywords: "move stay between systems" },
-    ],
-  },
-  {
-    title: "Charges",
-    items: [
-      { href: "/financial-health",      label: "Charge health", icon: HeartPulse, resource: "financial-review", keywords: "posting queue outbox money" },
-      { href: "/financial-review",      label: "Manual review", icon: ClipboardCheck, resource: "financial-review", keywords: "failed posting decide" },
-      { href: "/financial-settlements", label: "Settlements",   icon: Receipt, resource: "financial-review", keywords: "payment room charge card" },
-      { href: "/financial-recovery",    label: "Recovery",      icon: LifeBuoy, resource: "financial-review", keywords: "held restore epoch" },
+      { href: "/pms-interfaces",       label: "PMS connection",       icon: Plug,  resource: "pms-interfaces", keywords: "protel fias connect sync resync opera status property management system hotel" },
+      { href: "/stays",                label: "Stays",                icon: BedDouble,    resource: "pms-stays", keywords: "rooms reservations in house occupancy guest list guests hotel" },
+      { href: "/stay-events",          label: "PMS activity",         icon: Inbox,   resource: "pms-events", keywords: "feed messages check in out log property management system hotel" },
+      { href: "/pms-resolutions",      label: "Guest sign-in checks", icon: ShieldCheck,   resource: "pms-resolutions", keywords: "room verification failures evidence client sign-in checks hotel" },
+      { href: "/guest-signin-attempts", label: "Guest sign-in attempts", icon: UserX, resource: "guest-signin-attempts", keywords: "attempt failed reason room typed credential mismatch why cannot connect client sign-in attempts hotel" },
+      { href: "/checkout-grace",       label: "Grace Period",         icon: DoorOpen,  resource: "checkout-grace", keywords: "checkout grace after checkout late departure hotel" },
+      { href: "/post-stay",            label: "Post-stay access",     icon: CalendarClock, resource: "post-stay-profiles", keywords: "after departure loyalty guests hotel" },
+      { href: "/financial-health",      label: "Charge health", icon: HeartPulse, resource: "financial-review", keywords: "charges posting queue outbox money hotel" },
+      { href: "/financial-review",      label: "Manual review", icon: ClipboardCheck, resource: "financial-review", keywords: "charges failed posting decide hotel" },
+      { href: "/financial-settlements", label: "Settlements",   icon: Receipt, resource: "financial-review", keywords: "charges payment room charge card hotel" },
+      { href: "/financial-recovery",    label: "Recovery",      icon: LifeBuoy, resource: "financial-review", keywords: "charges held restore epoch hotel" },
+      { href: "/pms-routing",          label: "PMS routing",          icon: Route, resource: "pms-routing", keywords: "network routing which pms per network vlan mapping hotel" },
+      // RECONCILIATION IS NOT DAY-TO-DAY WORK. Both reconciliation screens are diagnostics with no action on
+      // them; they close the section, and the PMS connection page says plainly when there is something in
+      // them worth looking at.
+      { href: "/pms-source-conflicts", label: "Duplicate sources",    icon: Layers, resource: "pms-source-conflicts", keywords: "conflict two interfaces same room hotel" },
+      { href: "/stay-transfers",       label: "Cross-PMS transfer",   icon: ArrowLeftRight,   resource: "stay-transfers", keywords: "move stay between systems hotel" },
     ],
   },
   {
@@ -229,7 +221,7 @@ export function Nav({
   onNavigate?: () => void;
   /**
    * Render as an icon rail. THE DRAWER NEVER PASSES THIS. Below `lg` the navigation is a full-width overlay
-   * with room for labels, and these labels ("Duplicate sources", "Checkout grace") are not guessable from an
+   * with room for labels, and these labels ("Duplicate sources", "Grace Period") are not guessable from an
    * icon — so the phone gets the labelled list, exactly as it did before.
    */
   collapsed?: boolean;
@@ -247,7 +239,7 @@ export function Nav({
 
   // A FILTER, NOT A SEARCH ENGINE. Thirty-four screens in eight groups is past the point where scanning is
   // reliable, and the operator who needs "the page with the resync button" should not have to remember that it
-  // lives under Property management system.
+  // lives under Hotel.
   // WHAT THIS APPLIANCE SERVES, not what the bundle was built with. See lib/capabilities.ts: these two
   // disagreed about eight destinations on PRE-LIVE, and the menu was the half that was wrong.
   const caps = useCapabilities();

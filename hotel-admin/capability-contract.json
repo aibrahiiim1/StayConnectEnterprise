@@ -54,7 +54,7 @@
         "surface": "commercial-packages"
       },
       {
-        "label": "Checkout grace",
+        "label": "Grace Period",
         "route": "/checkout-grace",
         "surface": "checkout-grace"
       },
@@ -69,7 +69,7 @@
         "surface": "pms-interfaces"
       },
       {
-        "label": "Network routing",
+        "label": "PMS routing",
         "route": "/pms-routing",
         "surface": "pms-routing"
       },
@@ -79,12 +79,12 @@
         "surface": "pms-events"
       },
       {
-        "label": "Client sign-in checks",
+        "label": "Guest sign-in checks",
         "route": "/pms-resolutions",
         "surface": "pms-resolutions"
       },
       {
-        "label": "Client sign-in attempts",
+        "label": "Guest sign-in attempts",
         "route": "/guest-signin-attempts",
         "surface": "guest-signin-attempts"
       },

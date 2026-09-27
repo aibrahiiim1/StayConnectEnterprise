@@ -142,7 +142,7 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
     <PageShell>
       <PageHeader
         icon={<ClipboardCheck />}
-        eyebrow="Charges"
+        eyebrow="Hotel"
         title="Manual review"
         description="Decide what happened to a room charge whose outcome is unknown."
         help={

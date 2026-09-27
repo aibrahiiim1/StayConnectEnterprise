@@ -60,7 +60,7 @@ export default function InternetPackagesPage() {
             <HelpSection title="Two views">
               <HelpList items={[
                 <><strong>Packages</strong> is the catalogue: what each package gives, how many clients are on it now, and Add, Edit, Disable or Delete from the package&rsquo;s record.</>,
-                <><strong>Client activity</strong> is every grant in a period &mdash; from the portal, a voucher, a client account, a grace period or staff &mdash; with what it used.</>,
+                <><strong>Client activity</strong> is every grant in a period &mdash; from the portal, a voucher, a client account, the Grace Period or staff &mdash; with what it used.</>,
               ]} />
             </HelpSection>
             <HelpSection title="Packages and service plans">

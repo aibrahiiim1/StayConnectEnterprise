@@ -123,14 +123,14 @@ export default function PMSRoutingPage() {
   return (
     <PageShell>
       <PageHeader
-        eyebrow="Property management system"
-        title="Network routing"
+        eyebrow="Hotel"
+        title="PMS routing"
         description="Which PMS connection each guest network's room sign-ins are checked against."
         help={
           <>
             <HelpSection title="What this page sets">
               <p>
-                When a client signs in with their room number, the appliance has to know which property management
+                When a guest signs in with their room number, the appliance has to know which property management
                 system to check that room against. It decides from the Wi-Fi network the device is connected to —
                 and that is what this page sets.
               </p>
@@ -142,7 +142,7 @@ export default function PMSRoutingPage() {
             </HelpSection>
             <HelpSection title="Why this matters">
               <p>
-                Getting this wrong does not produce an error anywhere. The client is checked against a different
+                Getting this wrong does not produce an error anywhere. The guest is checked against a different
                 PMS&rsquo;s guest list, no matching room is found, and they simply cannot get online — while
                 the PMS connection, the networks and the packages all report healthy. If room sign-in fails on one
                 Wi-Fi network but works on another, this is the first page to check.
@@ -308,7 +308,7 @@ export default function PMSRoutingPage() {
                     <TD>
                       <div className="font-medium">{u.guest_network_name || "Unnamed network"}</div>
                       <div className="text-xs text-muted-foreground">
-                        A client on this network who types a room number will not be recognised.
+                        A guest on this network who types a room number will not be recognised.
                       </div>
                     </TD>
                     <TD className="text-right">
@@ -353,7 +353,7 @@ export default function PMSRoutingPage() {
         title="Stop offering room sign-in on this network?"
         description={
           clearing
-            ? `Clients on ${clearing.guest_network_name || "this network"} will no longer be able to sign in with their room number and name. Vouchers and client accounts are unaffected, and nothing already online is disconnected.`
+            ? `Guests on ${clearing.guest_network_name || "this network"} will no longer be able to sign in with their room number and name. Vouchers and client accounts are unaffected, and nothing already online is disconnected.`
             : undefined
         }
         confirmLabel="Remove mapping"
@@ -393,7 +393,7 @@ function RouteDialog({
       open={open}
       onOpenChange={(v) => !v && onClose()}
       title={network?.current ? `Change the PMS for ${network.name}` : `Point ${network?.name ?? "this network"} at a PMS`}
-      description="Clients on this network will have their room number checked against the connection you choose."
+      description="Guests on this network will have their room number checked against the connection you choose."
       submitLabel="Save mapping"
       busy={busy}
       error={error}

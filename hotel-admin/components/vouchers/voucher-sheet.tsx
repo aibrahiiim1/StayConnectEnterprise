@@ -331,7 +331,7 @@ function VoucherDetail({
         error={err}
         requireReason
         reasonLabel="Reason (recorded)"
-        reasonPlaceholder="Client at the desk, card unreadable"
+        reasonPlaceholder="Client asked the site team, card unreadable"
         requirePassword
         onConfirm={reveal}
       >

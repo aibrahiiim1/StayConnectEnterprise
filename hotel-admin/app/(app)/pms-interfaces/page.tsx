@@ -145,21 +145,21 @@ export default function PMSInterfacesPage() {
     <PageShell width="wide">
       <PageHeader
         icon={<Hotel />}
-        eyebrow="Property management system"
+        eyebrow="Hotel"
         title="PMS connection"
         description="Links to the site's property management systems."
         help={
           <>
             <HelpSection title="What a PMS connection does">
               <p>
-                The links to the site&rsquo;s property management systems. They let a client get online with their
+                The links to the site&rsquo;s property management systems. They let a guest get online with their
                 room number and name, and they are where the appliance&rsquo;s copy of the guest list comes from.
               </p>
             </HelpSection>
             <HelpSection title="Reading this page">
               <HelpList
                 items={[
-                  <><strong>Room sign-in</strong> says whether clients can sign in with a room number right now, per guest network where the routing is known.</>,
+                  <><strong>Room sign-in</strong> says whether guests can sign in with a room number right now, per guest network where the routing is known.</>,
                   <><strong>Guests in house</strong> is the guest list mirrored from the PMS.</>,
                   <>Each card shows one connection: which system, whether it is on, which check room sign-in depends on is failing, which Wi-Fi networks use it and what configuration is live. Open a card for details.</>,
                   <>Connections that were started but never configured, or retired, are kept apart under <strong>Inactive / not configured</strong> so a half-finished setup is never read as a PMS link that is down.</>,
@@ -169,7 +169,7 @@ export default function PMSInterfacesPage() {
             <HelpSection title="Advanced diagnostics">
               <p>
                 The links at the bottom are for investigating the PMS integration. Normal operation needs none of
-                them — the cards already say whether clients can sign in and whether anything needs attention.
+                them — the cards already say whether guests can sign in and whether anything needs attention.
               </p>
               <HelpList
                 items={[
@@ -241,7 +241,7 @@ export default function PMSInterfacesPage() {
             <EmptyState
               icon={<Hotel />}
               title="No PMS connection yet"
-              hint="Without one, clients cannot sign in with a room number. Vouchers and client accounts still work. Add a connection to link the appliance to the site's property management system."
+              hint="Without one, guests cannot sign in with a room number. Vouchers and client accounts still work. Add a connection to link the appliance to the site's property management system."
               action={writable ? <Button onClick={() => setAdding(true)}><Plus /> Add connection</Button> : undefined}
             />
           </CardBody>
@@ -418,7 +418,7 @@ function RoomSignInStat({
     return (
       <StatCard label="Room sign-in" tone="ok" icon={<Hotel />}
         value={<Badge tone="ok" className="text-sm" dot>Working</Badge>}
-        hint={`Every guest network using a PMS can sign clients in${signIn.unchecked.length ? ` (${signIn.unchecked.length} not yet checked)` : ""}.`} />
+        hint={`Every guest network using a PMS can sign guests in${signIn.unchecked.length ? ` (${signIn.unchecked.length} not yet checked)` : ""}.`} />
     );
   }
   if (signIn.state === "partial" || signIn.state === "down") {
@@ -428,7 +428,7 @@ function RoomSignInStat({
         value={<Badge tone={signIn.state === "down" ? "err" : "warn"} className="text-sm" dot>
           {signIn.state === "down" ? "Not working" : "Partly working"}
         </Badge>}
-        hint={signIn.state === "down" ? `Clients cannot sign in with a room number: ${signIn.reason}.` : `Not working on: ${names}.`} />
+        hint={signIn.state === "down" ? `Guests cannot sign in with a room number: ${signIn.reason}.` : `Not working on: ${names}.`} />
     );
   }
   return (
@@ -436,6 +436,6 @@ function RoomSignInStat({
       value={<Badge tone={ready === activeCount ? "ok" : ready > 0 ? "warn" : "err"} className="text-sm" dot>
         {ready === activeCount ? "Working" : ready > 0 ? "Partly working" : "Not working"}
       </Badge>}
-      hint={`${ready} of ${activeCount} active connection${activeCount === 1 ? "" : "s"} can verify clients right now.`} />
+      hint={`${ready} of ${activeCount} active connection${activeCount === 1 ? "" : "s"} can verify guests right now.`} />
   );
 }

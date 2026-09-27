@@ -93,7 +93,7 @@ export default function RosterReconciliationPage() {
   return (
     <PageShell>
       <PageHeader
-        eyebrow="Property management system"
+        eyebrow="Hotel"
         title="Roster reconciliation"
         icon={<ListChecks />}
         description="Keeps this appliance's guest list identical to the PMS's, automatically."
@@ -113,7 +113,7 @@ export default function RosterReconciliationPage() {
                 PMS connection, under Advanced configuration.
               </p>
               <p>
-                Clients are never affected while it waits: if the PMS list is incomplete or the link is down, the
+                Guests are never affected while it waits: if the PMS list is incomplete or the link is down, the
                 appliance keeps using the last good list rather than guessing, and says so under Needs attention.
               </p>
             </HelpSection>
@@ -163,7 +163,7 @@ export default function RosterReconciliationPage() {
                     </span>
                   )}
                   <Badge tone={b.guests_affected ? "err" : "ok"}>
-                    {b.guests_affected ? "clients affected" : "clients not affected"}
+                    {b.guests_affected ? "guests affected" : "guests not affected"}
                   </Badge>
                 </div>
                 <p className="mt-2 text-sm text-warning-subtle-foreground">{b.detail}</p>
@@ -189,7 +189,7 @@ export default function RosterReconciliationPage() {
                     the PMS announced a departure for a stay this appliance had never been told about.
                   </p>
                   <p>
-                    Nobody is affected. No client is online because of it, no stay is held open by it, and it will
+                    Nobody is affected. No guest is online because of it, no stay is held open by it, and it will
                     not grow — the connector has covered the whole site on every sweep since.
                   </p>
                 </HelpSection>
@@ -215,7 +215,7 @@ export default function RosterReconciliationPage() {
                       recorded {formatDate(b.since)}
                     </span>
                   )}
-                  <Badge tone="ok">clients not affected</Badge>
+                  <Badge tone="ok">guests not affected</Badge>
                 </div>
                 <p className="mt-2 text-sm">{b.detail}</p>
               </div>

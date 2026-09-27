@@ -147,7 +147,7 @@ describe("a read-only role is offered no write control", () => {
   });
 });
 
-describe("every Charges screen has its menu label as its title", () => {
+describe("every Hotel charge screen has its menu label as its title", () => {
   const HEALTH = {
     outbox_queued: 0, outbox_in_flight: 0, outbox_held_recovery: 0, outbox_oldest_age_seconds: 0,
     postings_unknown: 0, review_queue_open: 0, review_oldest_age_seconds: 0,
@@ -174,7 +174,7 @@ describe("every Charges screen has its menu label as its title", () => {
     });
     render(el());
     expect(screen.getByRole("heading", { level: 1, name: title })).toBeInTheDocument();
-    expect(screen.getByText("Charges")).toBeInTheDocument();
+    expect(screen.getByText("Hotel")).toBeInTheDocument();
   });
 
   it("Settlements offers no refund button, even with a settled charge on screen", async () => {

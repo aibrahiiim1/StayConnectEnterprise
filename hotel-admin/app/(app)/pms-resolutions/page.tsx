@@ -44,19 +44,19 @@ import { ShieldCheck } from "lucide-react";
 const OUTCOMES: Record<string, { label: string; meaning: string; fix?: string; tone: "ok" | "warn" | "err" }> = {
   VERIFIED: {
     label: "Verified",
-    meaning: "The room number and name matched a guest who is checked in. The client was let online.",
+    meaning: "The room number and name matched a guest who is checked in. The guest was let online.",
     tone: "ok",
   },
   NO_MATCH: {
     label: "No matching room",
-    meaning: "Nothing in the guest list matched what the client typed.",
+    meaning: "Nothing in the guest list matched what the guest typed.",
     fix: "Usually a typo, or a guest whose check-in has not reached the appliance yet. Check PMS activity.",
     tone: "warn",
   },
   NAME_MISMATCH: {
     label: "Name did not match",
-    meaning: "The room exists and is occupied, but the surname the client typed does not match the one on the stay.",
-    fix: "Clients often give a first name, a spouse's name or a company name. The desk can confirm the name on the reservation.",
+    meaning: "The room exists and is occupied, but the surname the guest typed does not match the one on the stay.",
+    fix: "Guests often give a first name, a spouse's name or a company name. The desk can confirm the name on the reservation.",
     tone: "warn",
   },
   AMBIGUOUS: {
@@ -74,7 +74,7 @@ const OUTCOMES: Record<string, { label: string; meaning: string; fix?: string; t
   NOT_IN_HOUSE: {
     label: "Not checked in",
     meaning: "The room and name matched a stay that is not currently in house.",
-    fix: "A client trying to sign in before check-in or after check-out. Checkout grace and post-stay access cover the intended cases.",
+    fix: "A guest trying to sign in before check-in or after check-out. The Grace Period and post-stay access cover the intended cases.",
     tone: "warn",
   },
   STALE_OCCUPANCY: {
@@ -97,8 +97,8 @@ const OUTCOMES: Record<string, { label: string; meaning: string; fix?: string; t
   },
   NO_ROUTE: {
     label: "Network not pointed at a PMS",
-    meaning: "The client's Wi-Fi network is not mapped to any property management system, so there was nothing to check against.",
-    fix: "Set the mapping on Network routing.",
+    meaning: "The guest's Wi-Fi network is not mapped to any property management system, so there was nothing to check against.",
+    fix: "Set the mapping on PMS routing.",
     tone: "err",
   },
 };
@@ -177,8 +177,8 @@ export default function PMSResolutionsPage() {
   return (
     <PageShell width="wide">
       <PageHeader
-        eyebrow="Property management system"
-        title="Client sign-in checks"
+        eyebrow="Hotel"
+        title="Guest sign-in checks"
         icon={<ShieldCheck />}
         description="Recent room sign-in checks against the PMS and why they were refused."
         help={
@@ -186,15 +186,15 @@ export default function PMSResolutionsPage() {
             <HelpSection title="When to use this page">
               <p>
                 Recent room sign-in checks against the PMS and why they were refused. This is where to look when
-                clients say they cannot get online with their room number.
+                guests say they cannot get online with their room number.
               </p>
               <p>
                 Each refusal reason below says what it means and, where there is one, what to do about it. If
                 sign-in fails on one network and works on others, the network is usually pointed at the wrong
-                property management system, or at none — check <strong>Network routing</strong>.
+                property management system, or at none — check <strong>PMS routing</strong>.
               </p>
             </HelpSection>
-            <HelpSection title="No client is named on this page">
+            <HelpSection title="No guest is named on this page">
               <p>
                 Only the outcome and the network are recorded here. A list of who tried to sign in and failed would
                 let anyone with a read-only account work out who is staying at the site, so it is deliberately
@@ -261,7 +261,7 @@ export default function PMSResolutionsPage() {
       {summary && summary.total > 0 && (
         <div className="grid gap-4 lg:grid-cols-2">
           <Card>
-            <CardHeader><CardTitle>Why clients were refused</CardTitle></CardHeader>
+            <CardHeader><CardTitle>Why guests were refused</CardTitle></CardHeader>
             <CardBody className="space-y-4">
               <SplitBar
                 total={summary.total}
@@ -297,7 +297,7 @@ export default function PMSResolutionsPage() {
                 </p>
               </div>
               <Link href="/pms-routing" className="text-xs text-muted-foreground hover:text-foreground">
-                Network routing →
+                PMS routing →
               </Link>
             </CardHeader>
             <CardBody className="space-y-4">
@@ -333,7 +333,7 @@ export default function PMSResolutionsPage() {
           ) : rows.length === 0 ? (
             <EmptyState
               icon={<ShieldCheck />}
-              title="No client has tried to sign in with a room number"
+              title="No guest has tried to sign in with a room number"
               hint="Either nobody has tried yet, or no guest network is set up to offer room sign-in."
             />
           ) : (

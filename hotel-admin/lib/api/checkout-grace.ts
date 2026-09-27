@@ -1,4 +1,4 @@
-// Checkout grace — types, unit conversions and the plain-language rules the Hotel Admin screen is built from.
+// Grace Period (the post-checkout access grace) — types, unit conversions and the plain-language rules the Hotel Admin screen is built from.
 //
 // Everything here is pure so it can be tested without rendering. The server (edged `/checkout-grace`) stays the
 // authority: the bounds below mirror data-plane/internal/iamv2/grace_policy_publish.go and the `grace_bounds`
@@ -132,7 +132,7 @@ export const DEVICE_POLICY_TEXT: Record<string, { title: string; description: st
     title: "Keep connected devices, refuse new ones",
     description:
       "Every device that was online at checkout keeps access, even above the device limit. A device that was " +
-      "not connected at checkout cannot join during grace.",
+      "not connected at checkout cannot join during the Grace Period.",
   },
 };
 
@@ -161,7 +161,7 @@ export function guestReceivesSentence(t: GraceTerms): string {
   const dur = t.grace_duration_seconds ?? 0;
   const quota = t.grace_data_quota_bytes ?? 0;
   let s =
-    `A client who still has internet access when they check out keeps it for ${fmtDurationLong(dur)} after ` +
+    `A guest who still has internet access when they check out keeps it for ${fmtDurationLong(dur)} after ` +
     `checkout, at up to ${fmtSpeed(t.grace_down_kbps ?? 0)} down and ${fmtSpeed(t.grace_up_kbps ?? 0)} up, ` +
     (quota > 0 ? `with ${fmtData(quota)} of data.` : `with no data allowance.`);
   if (t.grace_device_limit_policy === "REJECT_NEW_DEVICE") {
@@ -231,7 +231,7 @@ export const REASON_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
 export const REASON_CHOICES: { code: string; label: string }[] = [
   { code: "INITIAL_SETUP", label: "Setting up the site's first policy" },
   { code: "POLICY_CHANGE", label: "Planned policy change" },
-  { code: "GUEST_FEEDBACK", label: "Client feedback" },
+  { code: "GUEST_FEEDBACK", label: "Guest feedback" },
   { code: "OPERATIONAL", label: "Operational need" },
   { code: "CORRECTION", label: "Correcting a mistake" },
 ];
@@ -405,7 +405,7 @@ export function describePublishFailure(e: any): PublishFailure {
       return { conflict: false, message: "The appliance refused these terms: " + serverMsg };
   }
   if (status === 401) return { conflict: false, field: "password", message: "Your password was not accepted. Nothing was published." };
-  if (status === 403) return { conflict: false, message: "Your role cannot publish the checkout grace policy." };
+  if (status === 403) return { conflict: false, message: "Your role cannot publish the Grace Period policy." };
   return { conflict: false, message: serverMsg ? `The policy was refused: ${serverMsg}` : "The policy was refused." };
 }
 
@@ -441,7 +441,7 @@ export function graceWarnings(
       tone: "warning",
       title: "Departing guests are on the emergency fallback",
       body:
-        "This site has not published a checkout grace policy, so clients who check out with active internet access " +
+        "This site has not published a Grace Period policy, so guests who check out with active internet access " +
         "receive the built-in emergency terms. Nobody is cut off, but these terms are a safe default, not a decision " +
         "made for this site. Each use raises a critical alert.",
     });
@@ -490,7 +490,7 @@ export function graceWarnings(
       id: "zero-terms",
       tone: "danger",
       title: e.duration_seconds <= 0 ? "Grace time is zero" : "Data allowance is zero",
-      body: "Departing guests would receive grace that ends immediately or carries no data. Publish corrected terms.",
+      body: "Departing guests would receive a Grace Period that ends immediately or carries no data. Publish corrected terms.",
     });
   }
   return out;

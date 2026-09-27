@@ -151,7 +151,7 @@ export default function StayEventsPage() {
   return (
     <PageShell width="wide">
       <PageHeader
-        eyebrow="Property management system"
+        eyebrow="Hotel"
         title="PMS activity"
         icon={<Inbox />}
         description="Messages from the PMS and whether the guest list was updated from them."

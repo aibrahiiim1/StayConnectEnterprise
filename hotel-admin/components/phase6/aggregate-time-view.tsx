@@ -106,7 +106,7 @@ export function AggregateTimeView() {
             </HelpSection>
             <HelpSection title="The same numbers the client sees">
               <p>
-                The time left shown here comes from the same record as the client&rsquo;s own page, so the desk and
+                The time left shown here comes from the same record as the client&rsquo;s own page, so the site team and
                 the client&rsquo;s phone agree.
               </p>
             </HelpSection>

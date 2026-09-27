@@ -121,7 +121,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <ToastProvider>
     <div className="flex h-screen overflow-hidden">
       {/* Below `lg` the column becomes a drawer instead of disappearing. A 64px-wide icon rail was the other
-          option and is worse here: these labels ("Duplicate sources", "Checkout grace") are not guessable
+          option and is worse here: these labels ("Duplicate sources", "Grace Period") are not guessable
           from an icon. */}
       <div className="hidden lg:block">
         <Nav

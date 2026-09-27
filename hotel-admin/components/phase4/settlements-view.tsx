@@ -95,14 +95,14 @@ export function SettlementsView() {
     <PageShell>
       <PageHeader
         icon={<Receipt />}
-        eyebrow="Charges"
+        eyebrow="Hotel"
         title="Settlements"
-        description="Whether a client was actually charged for internet, and what has been given back since."
+        description="Whether a guest was actually charged for internet, and what has been given back since."
         help={
           <>
             <HelpSection title="What a settlement is">
               <p>
-                A settlement records whether a client was actually charged for internet, and what has been given back
+                A settlement records whether a guest was actually charged for internet, and what has been given back
                 since. Open one to see the charge and everything that followed it.
               </p>
             </HelpSection>

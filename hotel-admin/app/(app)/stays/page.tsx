@@ -127,7 +127,7 @@ export default function StaysPage() {
   return (
     <PageShell width="wide">
       <PageHeader
-        eyebrow="Clients"
+        eyebrow="Hotel"
         title="Stays"
         description="Who the PMS reports in the building, and the internet each room has."
         help={
@@ -140,7 +140,7 @@ export default function StaysPage() {
             </HelpSection>
             <HelpSection title="Internet packages on a stay">
               <p>
-                A stay has a package once a client from that room has signed in and been given one &mdash; a package
+                A stay has a package once a guest from that room has signed in and been given one &mdash; a package
                 is granted at sign-in, not at check-in. A room with no package is not a fault: it usually means
                 nobody from it has connected yet.
               </p>
@@ -169,7 +169,7 @@ export default function StaysPage() {
           tone={inHouseNoInternet ? "warn" : "default"}
           explain={
             <Explain>
-              A stay has a package once a client from that room has signed in and been given one. A room with no
+              A stay has a package once a guest from that room has signed in and been given one. A room with no
               package is not a fault — it usually means nobody from it has connected yet.
             </Explain>
           }
@@ -190,11 +190,11 @@ export default function StaysPage() {
 
       {inHouseNoInternet && (
         <Callout tone="warning" title="No in-house room has an internet package">
-          The guest list has arrived, but nobody has been given internet. If clients are reporting that they cannot
+          The guest list has arrived, but nobody has been given internet. If guests are reporting that they cannot
           get online, check that a package applies to these stays on{" "}
           <Link href="/internet-packages" className="underline underline-offset-2">Internet packages</Link>, and
           that their Wi-Fi network is pointed at this PMS on{" "}
-          <Link href="/pms-routing" className="underline underline-offset-2">Network routing</Link>.
+          <Link href="/pms-routing" className="underline underline-offset-2">PMS routing</Link>.
         </Callout>
       )}
 
