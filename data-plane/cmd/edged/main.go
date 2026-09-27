@@ -330,8 +330,8 @@ func main() {
 	}
 
 	// Appliance Health Supervisor: observe/diagnose every critical service,
-	// persist the authoritative health model, track boot convergence and push
-	// sanitized telemetry. It never controls restarts (systemd + adaptive
+	// persist the authoritative health model and track boot convergence.
+	// It never controls restarts (systemd + adaptive
 	// startup backoff own recovery), so it cannot fight the service manager.
 	go s.healthMonitorLoop(rootCtx)
 
@@ -447,10 +447,6 @@ func main() {
 				// above, because reading a disagreement and acting on three hundred of them at once are
 				// different powers.
 				mountResource(r, s, "pms-roster-reconciliation", s.rosterReconciliationRoutes)
-				// Reporting to the cloud. Two keys again: setting how long delivered records are kept, and
-				// releasing records the appliance gave up on, are different powers.
-				mountResource(r, s, "cloud-sync-settings", s.cloudSyncSettingsRoutes)
-				mountResource(r, s, "cloud-sync-recovery", s.cloudSyncRecoveryRoutes)
 			}
 			// Phase 5 (DARK): the operator post-stay surface. Mounted only when the Phase-5 master flag
 			// AND its admin flag are both ON; while dark this path does not exist.

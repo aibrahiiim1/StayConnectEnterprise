@@ -62,8 +62,11 @@ func newProdAuthFixture(t *testing.T) *authFixture {
 	}
 
 	const seed = `WITH
-	  t AS (INSERT INTO public.tenants(id, slug, name)
-	        VALUES (gen_random_uuid(), 'prodpriv-' || $4::text, 'prodpriv fixture') RETURNING id),
+	  -- Room sign-in switched ON in the hotel's method settings: scd refuses a switched-off method before it
+	  -- looks up any room, so a fixture that leaves the column at its voucher-only default tests nothing here.
+	  t AS (INSERT INTO public.tenants(id, slug, name, auth_methods)
+	        VALUES (gen_random_uuid(), 'prodpriv-' || $4::text, 'prodpriv fixture',
+	                '{"voucher":{"enabled":true},"pms":{"enabled":true,"mode":"room_any"}}'::jsonb) RETURNING id),
 	  si AS (INSERT INTO public.sites(id,tenant_id,code,name)
 	         SELECT gen_random_uuid(), id, 'site-' || $4::text, 'prodpriv site' FROM t RETURNING id, tenant_id),
 	  gn AS (INSERT INTO public.guest_networks
@@ -176,7 +179,10 @@ func (f *authFixture) serviceRolePhase3(t *testing.T) *phase3Auth {
 	if who != "svc_scd" {
 		t.Fatalf("the pool runs as %q, not svc_scd; this test would prove nothing about the production role", who)
 	}
-	srv := &server{db: p, tenID: f.tenant, siteID: f.site, applID: f.appliance, legacyBridge: "br-lan", lic: devLicence()}
+	// A signed licence with a FINITE guest cap, so the grant's concurrent-guest reservation (advisory lock plus
+	// the appliance-scoped session count) actually runs as svc_scd rather than short-circuiting on "unlimited".
+	srv := &server{db: p, tenID: f.tenant, siteID: f.site, applID: f.appliance, legacyBridge: "br-lan",
+		lic: signedLicence(t, 1000, true, false)}
 	p3 := newPhase3Auth(iamv2.PMSConfig{MasterEnabled: true, PMSAuthEnabled: true}, srv)
 	if p3 == nil {
 		t.Fatal("the Phase-3 auth arm was not constructed with the flags on")

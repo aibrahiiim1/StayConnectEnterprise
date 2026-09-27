@@ -54,7 +54,7 @@ scd_code(){
 }
 
 # CONVERGENCE IS "SERVING", NOT "ACTIVE", and the difference is not pedantry: systemd reports a unit active as
-# soon as its process is exec'd, while scd binds its socket only after license, NATS and mTLS work. The first
+# soon as its process is exec'd, while scd binds its socket only after its licence and mTLS work. The first
 # version of this drill waited for `is-active` and then probed the route, got 000, and reported a failure --
 # on an appliance that was perfectly healthy and simply had not finished starting. 000 is silence. Silence is
 # neither "the route is absent" nor "the route is present"; it is the absence of an answer, and reading it as

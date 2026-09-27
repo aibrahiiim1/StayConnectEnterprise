@@ -17,10 +17,10 @@ import (
 // site_id FKs -> tenants/sites) are satisfied within a single transaction.
 //
 // DELIBERATELY EXCLUDED (classified NOT tenant-owned, so preserved):
-//   - appliance/system/network/sync tables: appliances, appliance_*, backup_records,
-//     dhcp_*, edge_*, network_*, schema_migrations, sync_checkpoints,
-//     network_interfaces, system_network_audit — device/bootstrap-owned; keep the
-//     box reachable and recoverable.
+//   - appliance/system/network tables: appliances, appliance_*, backup_records,
+//     dhcp_*, edge_*, network_*, schema_migrations, network_interfaces,
+//     system_network_audit — device/bootstrap-owned; keep the box reachable and
+//     recoverable.
 //   - guest_networks: network infrastructure. REPOINTED to the current owner (not
 //     deleted) so the live VLAN / DHCP / captive portal keep running.
 //   - audit_log: security/audit history class — retained (has no FK to the mirror);
@@ -63,8 +63,7 @@ func (s *server) hasForeignTenantData(ctx context.Context) (bool, error) {
 // ownership transfer — compared by UUID, never by name or slug), all such rows and
 // their cached secrets are securely purged in ONE transaction BEFORE guest
 // authorization resumes; the live guest networks are repointed to the new owner;
-// pending outbox events (queued under the previous identity, referencing purged
-// data) are dropped; an audited transition record is written; and stale runtime
+// an audited transition record is written; and stale runtime
 // guest authorization is flushed. Same-tenant deactivate/reactivate finds no
 // foreign data and preserves everything.
 //
@@ -164,15 +163,6 @@ func (s *server) reconcileTenantOwnership(ctx context.Context) error {
 		return fmt.Errorf("purge tenants mirror: %w", err)
 	} else if n := ct.RowsAffected(); n > 0 {
 		purged["tenants"] = n
-	}
-	// Pending outbox events were queued under the previous owner/identity and
-	// reference now-purged data; drop them. Fresh state re-syncs under the new
-	// identity. (sync_outbox is not tenant-keyed, so a full clear is correct on a
-	// confirmed cross-tenant transition.)
-	if ct, err := tx.Exec(ctx, `DELETE FROM sync_outbox`); err != nil {
-		return fmt.Errorf("purge sync_outbox: %w", err)
-	} else if n := ct.RowsAffected(); n > 0 {
-		purged["sync_outbox"] = n
 	}
 
 	// Controlled failure injection for acceptance testing: fail AFTER the deletes

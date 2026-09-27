@@ -247,10 +247,12 @@ for m in 0069_a_queue_that_gave_up_and_a_departure_nobody_could_place \
          0077_name_the_historical_exception_for_what_it_is \
          0078_an_accepted_startup_data_gap_is_a_decision_not_a_repair \
          0079_recovery_belongs_to_the_connection_not_the_building \
-         0092_a_room_guest_answers_to_the_same_licence; do
-  # 0092 is out of numeric sequence on purpose: cmd/scd's room sign-in now records LICENSE_REFUSED and
-  # LICENSE_CAPACITY_REACHED, which the 0067 result CHECK refuses until 0092 widens it. It depends on nothing
-  # after 0067.
+         0092_a_room_guest_answers_to_the_same_licence \
+         0093_the_appliance_reports_to_nobody; do
+  # 0092 and 0093 are out of numeric sequence on purpose. cmd/scd's room sign-in now records LICENSE_REFUSED
+  # and LICENSE_CAPACITY_REACHED, which the 0067 result CHECK refuses until 0092 widens it; 0093 removes what
+  # 0069 and 0071 created for the cloud telemetry subsystem, which no code here uses any more. Neither depends
+  # on anything after 0071.
   if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
        < "$ROOT/data-plane/migrations/$m.up.sql" >/dev/null 2>&1; then
     echo "$m FAILED TO APPLY -- deterministic, not a flake"

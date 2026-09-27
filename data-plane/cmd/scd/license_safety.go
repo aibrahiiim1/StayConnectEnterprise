@@ -47,10 +47,11 @@ func resolveLicenseRequired(envRequired bool) (required bool, devAttempt string)
 	return envRequired, ""
 }
 
-// reportPermissiveAttempt raises a local critical alert, writes an audit record
-// and enqueues sanitized Central security telemetry when a production appliance
-// rejects an attempt to enable permissive/dev licensing. Enforcement is NOT
-// weakened — the attempt was already refused (license stays required).
+// reportPermissiveAttempt raises a local critical alert and writes an audit record
+// when a production appliance rejects an attempt to enable permissive/dev
+// licensing. Enforcement is NOT weakened — the attempt was already refused
+// (license stays required). The alert is surfaced in Hotel Admin through the
+// licence status (permissiveBlocked).
 func (s *server) reportPermissiveAttempt(ctx context.Context, reason string) {
 	slog.Error("LICENSE SECURITY: rejected attempt to enable permissive/dev licensing on a production appliance",
 		"reason", reason, "build_profile", buildprofile.Name, "action", "enforcement kept ON")
@@ -62,20 +63,6 @@ func (s *server) reportPermissiveAttempt(ctx context.Context, reason string) {
 		    (tenant_id, actor_type, actor_id, action, target_type, target_id, payload)
 		    VALUES (NULLIF($1,'')::uuid, 'system', NULL, 'license.permissive_attempt_blocked', 'appliance', $2, $3)`,
 			s.tenID, s.applID, map[string]any{"reason": reason, "build_profile": buildprofile.Name})
-		cancel()
-	}
-
-	// Sanitized Central security telemetry (drains when connected; queues while
-	// offline). No secrets/PII — just the fact + reason.
-	if s.obx != nil {
-		octx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		_ = s.obx.Enqueue(octx, "security", map[string]any{
-			"kind":          "license_permissive_attempt_blocked",
-			"reason":        reason,
-			"build_profile": buildprofile.Name,
-			"severity":      "critical",
-			"at":            time.Now().UTC(),
-		})
 		cancel()
 	}
 }

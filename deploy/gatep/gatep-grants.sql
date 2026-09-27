@@ -79,8 +79,6 @@ GRANT SELECT,INSERT,UPDATE        ON public.social_oauth_states    TO svc_scd; -
 GRANT SELECT                      ON public.social_oauth_providers TO svc_scd;
 GRANT SELECT,UPDATE               ON public.pms_providers          TO svc_scd; -- provider read + status
 GRANT SELECT,INSERT               ON public.pms_attempts           TO svc_scd; -- per-room/IP lockout
-GRANT SELECT,INSERT,UPDATE,DELETE ON public.sync_outbox            TO svc_scd; -- outbox drain
-GRANT SELECT,INSERT,UPDATE        ON public.sync_checkpoints       TO svc_scd;
 GRANT SELECT,INSERT,UPDATE,DELETE ON public.tenants                TO svc_scd; -- local assignment provisioning
 GRANT SELECT,INSERT,UPDATE        ON public.tenant_effective_limits TO svc_scd;
 GRANT SELECT,UPDATE               ON public.guest_networks         TO svc_scd; -- IP->network + status
@@ -89,8 +87,6 @@ GRANT SELECT                      ON public.walled_garden_rules    TO svc_scd;
 GRANT INSERT                      ON public.audit_log              TO svc_scd; -- append-only
 GRANT SELECT,INSERT,UPDATE        ON public.appliances             TO svc_scd; -- enrollment/claim
 GRANT SELECT,INSERT,DELETE        ON public.sites                  TO svc_scd; -- local assignment provisioning
-GRANT SELECT,INSERT              ON public.edge_executed_commands  TO svc_scd; -- command channel
-GRANT SELECT,INSERT              ON public.edge_installed_updates  TO svc_scd; -- updates
 GRANT SELECT,INSERT,UPDATE       ON public.edge_offline_packages   TO svc_scd; -- offline pkgs
 GRANT SELECT,INSERT,UPDATE,DELETE ON public.auth_throttle_buckets   TO svc_scd; -- durable throttle (0007): read/increment/block/cleanup; no sequence (composite PK)
 GRANT SELECT                      ON public.otp_hmac_key_generations TO svc_scd; -- OTP gen metadata READ only (0008); creation/rotation are operational/migration-only
@@ -152,23 +148,10 @@ GRANT SELECT,INSERT,UPDATE        ON public.operators                  TO svc_ed
 GRANT SELECT,INSERT,UPDATE,DELETE ON public.pms_providers              TO svc_edged;
 GRANT SELECT,INSERT,UPDATE,DELETE ON public.social_oauth_providers     TO svc_edged;
 GRANT SELECT,INSERT,UPDATE,DELETE ON public.stripe_accounts            TO svc_edged;
--- edged ENQUEUES and never drains. It writes one kind of record (service_health) and reads the queue for the
--- health screen; the drain loop, the retry bookkeeping and the sent_at stamp all belong to scd. UPDATE was
--- granted here historically and was never used, and it is the one privilege that would let the admin API mark
--- an undelivered record as sent — the single way to make a backlog disappear without delivering it. Recovery,
--- which is a legitimate edged action, goes through public.sync_outbox_recover_exhausted so that clearing the
--- abandoned flag and recording who cleared it cannot be separated.
-GRANT SELECT,INSERT               ON public.sync_outbox                TO svc_edged;
-
--- iam_v2_owner owns the three SECURITY DEFINER functions that read, recover and prune the queue (0069).
--- A definer function runs with its OWNER's privileges, so the owner needs them on the table it touches;
--- this is that, and nothing wider. iam_v2_owner is a NOLOGIN owner role -- no service authenticates as it,
--- so this grants no runtime reach to anybody. It is written HERE rather than in the migration because only
--- the table's owner may grant on it, and a live-site migration is deliberately applied by a non-superuser
--- that does not own public.
-GRANT SELECT,UPDATE,DELETE        ON public.sync_outbox                TO iam_v2_owner;
-REVOKE UPDATE                     ON public.sync_outbox              FROM svc_edged;
-GRANT SELECT,INSERT               ON public.sync_checkpoints           TO svc_edged;
+-- THE CLOUD TELEMETRY QUEUE IS GONE (migration 0093). public.sync_outbox and public.sync_checkpoints, and
+-- the grants to svc_scd, svc_edged and iam_v2_owner that served them, were removed with it; so were svc_scd's
+-- grants on the command-channel and update-agent ledgers (edge_executed_commands, edge_installed_updates),
+-- whose writers no longer exist -- those two tables are kept as history and are written by nobody.
 GRANT SELECT,UPDATE               ON public.tenants                    TO svc_edged;
 GRANT SELECT,INSERT,UPDATE        ON public.tenant_effective_limits    TO svc_edged;
 GRANT SELECT,INSERT,DELETE        ON public.walled_garden_rules        TO svc_edged;
@@ -218,15 +201,15 @@ BEGIN
     SELECT g.rolname, s.relname AS seq
     FROM (VALUES
       ('svc_scd','auth_otps'),('svc_scd','social_oauth_states'),
-      ('svc_scd','sync_outbox'),('svc_scd','sync_checkpoints'),('svc_scd','pms_attempts'),('svc_scd','audit_log'),
+      ('svc_scd','pms_attempts'),('svc_scd','audit_log'),
       ('svc_scd','tenants'),('svc_scd','tenant_effective_limits'),('svc_scd','appliances'),('svc_scd','sites'),
-      ('svc_scd','edge_executed_commands'),('svc_scd','edge_installed_updates'),('svc_scd','edge_offline_packages'),
+      ('svc_scd','edge_offline_packages'),
       ('svc_edged','appliance_boot_convergence'),('svc_edged','appliance_recovery_events'),('svc_edged','appliance_service_health'),
       ('svc_edged','audit_log'),('svc_edged','dhcp_pools'),('svc_edged','dhcp_reservations'),
       ('svc_edged','guest_networks'),('svc_edged','network_interfaces'),('svc_edged','network_config_revisions'),
       ('svc_edged','network_apply_events'),('svc_edged','network_health_checks'),('svc_edged','notification_providers'),
       ('svc_edged','operator_roles'),('svc_edged','operators'),('svc_edged','pms_providers'),('svc_edged','social_oauth_providers'),
-      ('svc_edged','stripe_accounts'),('svc_edged','sync_outbox'),('svc_edged','sync_checkpoints'),('svc_edged','tenant_effective_limits'),
+      ('svc_edged','stripe_accounts'),('svc_edged','tenant_effective_limits'),
       ('svc_edged','walled_garden_rules'),
       ('svc_acctd','accounting_records'),
       ('svc_netd','network_config_revisions'),('svc_netd','network_apply_events'),('svc_netd','network_health_checks'),

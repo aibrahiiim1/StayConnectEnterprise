@@ -29,7 +29,7 @@ deploy/observability/
 ## Prerequisites
 
 1. The main stack (`deploy/compose/docker-compose.yml`) is running —
-   postgres, redis, nats.
+   postgres, redis.
 2. `ctrlapi` is running on `127.0.0.1:8080` with `/metrics` exposed.
 3. `scd` has `SCD_METRICS_ADDR=127.0.0.1:9101` set in `/etc/stayconnect/scd.env`
    so Prometheus can scrape it. (The existing unix-socket /metrics endpoint
@@ -177,8 +177,8 @@ paths.
   + put Prometheus's `alertmanagers` list behind all three.
 - **Long-term TSDB retention** — 30d on-disk; federate to Thanos /
   Mimir for multi-month storage.
-- **Postgres / Redis / NATS exporters** — not deployed here. Add
-  `postgres_exporter`, `redis_exporter`, `nats_exporter` to this
-  compose file if you need DB/cache/bus-internal metrics.
+- **Postgres / Redis exporters** — not deployed here. Add
+  `postgres_exporter`, `redis_exporter` to this compose file if you
+  need DB/cache-internal metrics.
 - **scd /metrics TCP binding is plaintext** — fine for localhost scrapes;
   put it behind an internal TLS proxy if Prometheus runs elsewhere.

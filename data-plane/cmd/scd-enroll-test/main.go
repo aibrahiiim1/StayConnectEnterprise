@@ -21,8 +21,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/nats-io/nats.go"
-
 	"github.com/stayconnect/enterprise/data-plane/internal/applianceauth"
 	"github.com/stayconnect/enterprise/data-plane/internal/identity"
 )
@@ -33,18 +31,6 @@ func fatal(msg string, args ...any) {
 }
 
 func main() {
-	// Early dispatch: NATS-only subcommands don't need an identity.
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "--nft-publish":
-			natsPublishNFT()
-			return
-		case "--nft-await":
-			natsAwaitNFT()
-			return
-		}
-	}
-
 	dir := os.Getenv("SCD_IDENTITY_DIR")
 	base := os.Getenv("SCD_CTRLAPI_BASE")
 	if dir == "" || base == "" {
@@ -98,92 +84,6 @@ func main() {
 		"public_key":   ident.PublicKeyB64,
 		"hello":        json.RawMessage(body),
 	})
-}
-
-// --nft-publish: impersonate a peer scd and publish an "add" op. Env:
-//
-//	NATS_URL    (default nats://127.0.0.1:4222)
-//	SITE_ID     required
-//	IP          required
-//	TTL_SECONDS default 600
-//	SENDER_ID   default "peer-test"
-func natsPublishNFT() {
-	url := envOr("NATS_URL", "nats://127.0.0.1:4222")
-	site := os.Getenv("SITE_ID")
-	ip := os.Getenv("IP")
-	if site == "" || ip == "" {
-		fatal("SITE_ID and IP required")
-	}
-	ttl := envOr("TTL_SECONDS", "600")
-	sender := envOr("SENDER_ID", "peer-test")
-	nc, err := nats.Connect(url)
-	if err != nil {
-		fatal("nats connect: %v", err)
-	}
-	defer nc.Drain()
-	body := fmt.Sprintf(`{"op":"add","ip":"%s","ttl_seconds":%s,"sender":"%s"}`, ip, ttl, sender)
-	if err := nc.Publish("nft."+site, []byte(body)); err != nil {
-		fatal("publish: %v", err)
-	}
-	// Flush so the message is in flight before we exit.
-	if err := nc.FlushTimeout(2 * time.Second); err != nil {
-		fatal("flush: %v", err)
-	}
-	fmt.Println("ok")
-}
-
-// --nft-await: subscribe to nft.{SITE_ID} and print up to N messages.
-// Used by tests to capture what scd publishes during an auth flow.
-//
-//	SITE_ID required
-//	WAIT_SECONDS default 5
-//	N default 1
-func natsAwaitNFT() {
-	url := envOr("NATS_URL", "nats://127.0.0.1:4222")
-	site := os.Getenv("SITE_ID")
-	if site == "" {
-		fatal("SITE_ID required")
-	}
-	wait := parseIntOr(os.Getenv("WAIT_SECONDS"), 5)
-	n := parseIntOr(os.Getenv("N"), 1)
-	nc, err := nats.Connect(url)
-	if err != nil {
-		fatal("nats connect: %v", err)
-	}
-	defer nc.Drain()
-	got := 0
-	done := make(chan struct{})
-	_, err = nc.Subscribe("nft."+site, func(m *nats.Msg) {
-		fmt.Println(string(m.Data))
-		got++
-		if got >= n {
-			close(done)
-		}
-	})
-	if err != nil {
-		fatal("subscribe: %v", err)
-	}
-	select {
-	case <-done:
-	case <-time.After(time.Duration(wait) * time.Second):
-	}
-	if got == 0 {
-		fatal("no messages within %ds", wait)
-	}
-}
-
-func envOr(k, d string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return d
-}
-func parseIntOr(s string, d int) int {
-	var n int
-	if _, err := fmt.Sscanf(s, "%d", &n); err != nil {
-		return d
-	}
-	return n
 }
 
 func callHello(ctx context.Context, base, jwt string) int {

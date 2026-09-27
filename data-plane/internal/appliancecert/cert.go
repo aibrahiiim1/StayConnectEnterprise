@@ -139,37 +139,6 @@ func (m *Manager) Transport() (*http.Client, string, bool) {
 	return m.client, m.mtlsBase, m.ready
 }
 
-// NATSTLSConfig builds a tls.Config presenting the appliance client cert +
-// mtls key and trusting the CA bundle — for connecting to Central NATS over
-// mTLS. Requires a cert to be installed (call Ensure first).
-func (m *Manager) NATSTLSConfig() (*tls.Config, error) {
-	if err := m.ensureMTLSKey(); err != nil {
-		return nil, err
-	}
-	certPEM, err := os.ReadFile(m.certPath())
-	if err != nil {
-		return nil, err
-	}
-	caPEM, err := os.ReadFile(m.caPath())
-	if err != nil {
-		return nil, err
-	}
-	keyDER, err := x509.MarshalPKCS8PrivateKey(m.mtlsPriv)
-	if err != nil {
-		return nil, err
-	}
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
-	pair, err := tls.X509KeyPair(certPEM, keyPEM)
-	if err != nil {
-		return nil, err
-	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(caPEM) {
-		return nil, errors.New("ca bundle parse failed")
-	}
-	return &tls.Config{Certificates: []tls.Certificate{pair}, RootCAs: pool, MinVersion: tls.VersionTLS12}, nil
-}
-
 // apiBase picks the mTLS transport once a cert is loaded, else the HTTPS
 // ingress (used for the very first bootstrap CSR before any cert exists).
 func (m *Manager) apiBase() (string, *http.Client) {
@@ -229,8 +198,8 @@ var (
 // Ensure loads an existing local certificate, or makes ONE bootstrap attempt if none is present.
 //
 // It no longer blocks for ten minutes waiting for issuance. Callers that need the certificate for the life
-// of the process use EnsureUntilInstalled; callers that only want it if it happens to be ready (the NATS
-// transport choice at startup) get a fast answer instead of a startup stall.
+// of the process use EnsureUntilInstalled; callers that only want it if it happens to be ready get a fast
+// answer instead of a startup stall.
 func (m *Manager) Ensure(ctx context.Context) error {
 	if err := m.ensureMTLSKey(); err != nil {
 		return err

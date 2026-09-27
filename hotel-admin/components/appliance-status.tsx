@@ -6,8 +6,7 @@
 // and the session controller being up, so an operator configuring packages while scd is down was working
 // against a surface that could not take effect, with no indication anywhere on the page.
 //
-// The pill is deliberately terse — a dot and a word — and the tooltip carries the detail, including the
-// outbox figures in sentences rather than as two bare integers.
+// The pill is deliberately terse — a dot and a word — and the tooltip carries the detail.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -15,7 +14,6 @@ import { api, EdgeHealth } from "@/lib/api";
 import { Tooltip } from "@/components/ui/tooltip";
 import { StatusDot } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { describeOutbox } from "@/lib/health-words";
 import { usePoll } from "@/lib/use-poll";
 
 export function ApplianceStatus({ className }: { className?: string }) {
@@ -49,9 +47,7 @@ export function ApplianceStatus({ className }: { className?: string }) {
   if (health && !health.db) down.push("Site database unreachable");
   if (health && !health.scd) down.push("Session controller unreachable");
 
-  const outbox = health?.sync_outbox;
-  const outboxWords = describeOutbox(outbox);
-  const degraded = health?.status === "degraded" || outboxWords.tone === "warn" || outboxWords.tone === "err";
+  const degraded = health?.status === "degraded";
 
   const tone = down.length > 0 ? "err" : degraded ? "warn" : "ok";
   const word = down.length > 0 ? "Attention" : degraded ? "Degraded" : "Healthy";
@@ -60,7 +56,6 @@ export function ApplianceStatus({ className }: { className?: string }) {
   // problem rather than only a colour.
   const worth: string[] = [];
   if (down.length === 0 && health?.status === "degraded") worth.push("The admin service reports itself degraded");
-  if (down.length === 0 && (outboxWords.tone === "warn" || outboxWords.tone === "err")) worth.push(outboxWords.headline);
 
   return (
     <Tooltip
@@ -91,7 +86,6 @@ export function ApplianceStatus({ className }: { className?: string }) {
               <div>Session controller: reachable</div>
             </div>
           )}
-          <div className="border-t border-border pt-1.5">{outboxWords.summary}</div>
           {health?.version && (
             <div className="text-muted-foreground">Admin service {health.version}</div>
           )}

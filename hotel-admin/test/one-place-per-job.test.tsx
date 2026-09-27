@@ -14,34 +14,22 @@ const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 describe("the dashboard states licensing once", () => {
   const src = read("app/(app)/dashboard/page.tsx");
 
-  it("does not list the cloud as a runtime dependency while it is licensing-only", () => {
-    // Central serves this property's LICENCE and nothing else, by decision. A row in "Services this
-    // appliance depends on" reported the health of something that does not run, and sat a few centimetres
-    // below an Appliance & licence card that had already answered the question. A dashboard earns attention
-    // by spending it only on what changed.
-    expect(src).toContain('outbox.headline !== "Licensing only"');
+  it("does not list the cloud as a runtime dependency", () => {
+    // Central serves this property's activation and LICENCE and nothing else. The appliance reports nothing
+    // to it (the cloud telemetry subsystem is removed), so there is no "reporting to the cloud" row to show,
+    // healthy or otherwise -- and nothing on the dashboard may suggest reconnecting one.
+    expect(src).not.toContain("Reporting to the OneGate cloud");
+    expect(src).not.toContain("sync_outbox");
+    expect(src).not.toContain("describeOutbox");
 
     // And the old explanatory box, which was honest but still permanent, must not come back.
     expect(src).not.toContain("Used for this appliance");
     expect(src).not.toMatch(/Operational reporting is intentionally\s*\n?\s*off/);
   });
 
-  it("still shows the cloud as a service when it IS a live dependency", () => {
-    // If the mode is ever something other than licensing-only, the cloud is a real runtime dependency and
-    // belongs in the list like any other.
-    expect(src).toContain('<ServiceRow title="Reporting to the OneGate cloud"');
-  });
-
   it("keeps the real runtime dependencies", () => {
     expect(src).toContain('<ServiceRow title="Site database"');
     expect(src).toContain('<ServiceRow title="Session controller"');
-  });
-
-  it("routes a genuine licensing problem through the attention list, not a permanent row", () => {
-    expect(src).toContain('attention.push({ text: outbox.summary');
-    // ...and never raises one for the licensing-only state, where the "repair" is the one thing that must
-    // not happen.
-    expect(src).toContain('health?.sync_outbox?.mode !== "LICENSING_ONLY"');
   });
 });
 

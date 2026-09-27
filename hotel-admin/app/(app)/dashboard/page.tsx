@@ -38,7 +38,7 @@ import { Sparkline } from "@/components/ui/chart";
 import { Segmented } from "@/components/ui/tabs";
 import { useCapabilities, surfaceAvailable } from "@/lib/capabilities";
 import { cn, formatBytes, formatRelative } from "@/lib/utils";
-import { describeOutbox, describeDatabase, describeSessionController, describeLicense } from "@/lib/health-words";
+import { describeDatabase, describeSessionController, describeLicense } from "@/lib/health-words";
 import { ArrowDownUp, CheckCircle2, Hotel, LayoutDashboard, LogIn, RefreshCw, Users } from "lucide-react";
 import {
   ApplianceCard, ConcurrencyCard, DhcpDnsCard, NetworksCard, PackagesCard, PmsCard, ServicesGrid, SignInOutcomesCard,
@@ -101,22 +101,16 @@ export default function DashboardPage() {
   }, []);
 
   const caps = useCapabilities();
-  const outbox = describeOutbox(health?.sync_outbox);
   const stale = !!snap && snap.range !== range;
   const rangeLong = OVERVIEW_RANGES.find((r) => r.value === range)?.long ?? "";
 
   // NEEDS ATTENTION. The server derives the operational items from the blocks this operator may read; the two
-  // runtime dependencies and the cloud queue come from /health, exactly as before.
+  // runtime dependencies come from /health, exactly as before.
   const attention: AttentionRow[] = (snap?.attention ?? []).map((a) => ({
     text: a.title, detail: a.detail, href: a.href, action: a.action, tone: a.severity,
   }));
   if (health && !health.db) attention.push({ text: describeDatabase(false).summary, href: "/health", tone: "err" });
   if (health && !health.scd) attention.push({ text: describeSessionController(false).summary, href: "/health", tone: "err" });
-  // A licensing-only appliance never raises a cloud item: that state is a decision, and the obvious "repair"
-  // is the one thing that must not happen.
-  if (outbox.tone === "err" && health?.sync_outbox?.mode !== "LICENSING_ONLY") {
-    attention.push({ text: outbox.summary, href: "/appliance", tone: "warn" });
-  }
   // Worth knowing, not worth doing: kept out of the attention list on purpose.
   const notes: { text: string; href: string }[] = [];
   const historical = snap?.pms.historical_exceptions ?? 0;
@@ -357,14 +351,6 @@ export default function DashboardPage() {
                 <>
                   <ServiceRow title="Site database" info={describeDatabase(!!health.db)} />
                   <ServiceRow title="Session controller" info={describeSessionController(!!health.scd)} />
-                  {/*
-                    THE CLOUD IS NOT A RUNTIME DEPENDENCY OF THIS SITE WHILE IT IS LICENSING-ONLY, SO IT IS NOT
-                    LISTED AS ONE. If the mode is ever something else, the cloud is a live dependency and comes
-                    back as an ordinary row.
-                  */}
-                  {outbox.headline !== "Licensing only" && (
-                    <ServiceRow title="Reporting to the OneGate cloud" info={outbox} href="/appliance" />
-                  )}
                 </>
               )}
             </CardBody>

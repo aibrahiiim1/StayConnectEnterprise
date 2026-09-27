@@ -120,7 +120,7 @@ function allUnavailable(): any {
   return s;
 }
 
-const HEALTH = { service: "edged", version: "0.1.0-edge", site_id: "s", status: "ok", db: true, scd: true, license_state: "active", license_installed: true, sync_outbox: { enabled: false, mode: "LICENSING_ONLY" } };
+const HEALTH = { service: "edged", version: "0.1.0-edge", site_id: "s", status: "ok", db: true, scd: true, license_state: "active", license_installed: true };
 
 function route(overview: (range: string) => any, health: any = HEALTH) {
   get.mockImplementation((path: string) => {

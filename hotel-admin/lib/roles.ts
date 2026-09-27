@@ -55,9 +55,6 @@ const MATRIX: Matrix = {
     // Roster reconciliation is a different power: it runs automatically, and this role owns the integration
     // it belongs to -- the reconnect bounds and the blocker thresholds are its settings to change.
     "pms-roster-reconciliation": "write",
-    // Reporting to the cloud is appliance infrastructure. Two keys: a retention period is a policy,
-    // releasing thousands of abandoned records onto the wire is an action with a far end.
-    "cloud-sync-settings": "write", "cloud-sync-recovery": "write",
     // Phase 3 (DARK): the IT manager owns the PMS integration — publishing the
     // checkout-grace policy and clearing alerts are manager actions; stays,
     // events and resolutions are read-only evidence.
@@ -149,10 +146,8 @@ const MATRIX: Matrix = {
     "guest-device-self-service": "read",
     "pms-stays": "read", "pms-events": "read", "pms-resolutions": "read", "checkout-grace": "read", "operational-alerts": "read",
     "pms-interfaces": "read", "pms-routing": "read", "pms-source-conflicts": "read",
-    // The reconciliation backlog and the cloud queue's history are evidence of the kind a viewer already
-    // reads — including the recovery log, which records what somebody did about it. Acts on neither.
+    // The reconciliation backlog is evidence of the kind a viewer already reads. Acts on none of it.
     "pms-reconciliation": "read",
-    "cloud-sync-settings": "read", "cloud-sync-recovery": "read",
     "commercial-packages": "read",
     "post-stay-profiles": "read", "stay-transfers": "read",
     "financial-review": "read", "financial-ops": "read",

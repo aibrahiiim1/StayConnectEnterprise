@@ -1,6 +1,6 @@
 # StayConnect — observability stack (phase 13).
 #
-# Run alongside the existing stayconnect-pg/redis/nats stack:
+# Run alongside the existing stayconnect-pg/redis stack:
 #   docker compose -f deploy/observability/docker-compose.yml up -d
 #
 # Both services use network_mode=host — they bind to 127.0.0.1 on the

@@ -7,7 +7,7 @@ package main
 //
 //   tenant / site   : s.tenantID / s.siteID — this process's own scope, from the signed local assignment.
 //   appliance       : s.applianceID() — this appliance's own identity, read from the signed identity file
-//                     the assignment agent maintains. edged already resolves it this way for telemetry, and
+//                     the assignment agent maintains. edged already resolves it this way elsewhere, and
 //                     reusing that source rather than adding a second one is the point: two sources of the
 //                     same identity are two things that can disagree.
 //   operator id     : sessFrom(ctx).OperatorID — the authenticated session, never a request field.

@@ -247,7 +247,7 @@ describe("vocabulary", () => {
       serve(st);
       await renderPage();
       const text = primaryText();
-      for (const word of ["CSR", "mTLS", "NATS", "assignment", "registry", "real-time", "Real-time", "fingerprint", "certificate"]) {
+      for (const word of ["CSR", "mTLS", "assignment", "registry", "real-time", "Real-time", "fingerprint", "certificate"]) {
         expect(text, `"${word}" appears outside Technical details`).not.toContain(word);
       }
       // ...and they are available for support.

@@ -7,9 +7,9 @@ import { cn } from "@/lib/utils";
 
 // THE PRODUCT IS FULL OF TERMS THAT NEED A SENTENCE.
 //
-// "Cloud sync outbox · 69,572 pending · 8,424 dead" was on the dashboard with nothing to say what an outbox is,
-// what pending means, or whether 8,424 dead is a catastrophe. The `title` attribute was the only explanation
-// mechanism available, and it is invisible on touch, unreadable by keyboard and unstyled.
+// Bare counters with internal names used to sit on the dashboard with nothing to say what they meant or whether
+// a large number was a catastrophe. The `title` attribute was the only explanation mechanism available, and it
+// is invisible on touch, unreadable by keyboard and unstyled.
 //
 // Radix Tooltip gives hover, focus AND keyboard access with the right ARIA wiring. `Explain` is the form used
 // throughout: a little question mark next to a number that nobody should have to guess at.

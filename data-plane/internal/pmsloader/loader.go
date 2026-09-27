@@ -1,7 +1,7 @@
 // Package pmsloader reads pms_providers rows from the control-plane DB and
 // turns them into configured, registered (and possibly started) provider
-// instances. scd calls Load on boot; Phase 5 will add a NATS-driven Reload
-// hook so admin UI changes apply without an scd restart.
+// instances. scd calls Load on boot and again on /v1/admin/pms/reload (Hotel Admin changes) and on a
+// periodic safety-net sweep, so admin UI changes apply without an scd restart.
 package pmsloader
 
 import (

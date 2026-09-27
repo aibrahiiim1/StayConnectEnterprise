@@ -362,8 +362,7 @@ func TestIntegration_Phase6_WorksWithCentralUnreachable(t *testing.T) {
 	deadURL := dead.URL
 	dead.Close()
 	t.Setenv("SCD_CTRLAPI_BASE", deadURL)
-	t.Setenv("SCD_NATS_URL", strings.Replace(deadURL, "http://", "nats://", 1))
-	t.Setenv("SCD_NATS_MTLS_URL", strings.Replace(deadURL, "http://", "tls://", 1))
+	t.Setenv("SCD_MTLS_BASE", strings.Replace(deadURL, "http://", "https://", 1))
 
 	e := newP6E2E(t)
 	srv := e.mount(t, true)

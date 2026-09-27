@@ -222,12 +222,6 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	out["license_installed"] = licState != nil && licState != "none"
 	out["activation"] = activation
 
-	if st, raw, err := s.scd.call(ctx, http.MethodGet, "/v1/admin/outbox/stats", nil); err == nil && st == 200 {
-		var ob map[string]any
-		if json.Unmarshal(raw, &ob) == nil {
-			out["sync_outbox"] = ob
-		}
-	}
 	code := http.StatusOK
 	if !dbOK {
 		code = http.StatusServiceUnavailable

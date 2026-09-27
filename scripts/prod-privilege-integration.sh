@@ -89,8 +89,7 @@ for m in 0056_materialization_readiness 0057_lock_auth_context_offer \
          0061_the_entitlement_records_what_it_spent \
          0062_the_crossing_sample_still_belongs_to_the_entitlement_that_spent_it \
          0063_scoped_reader_for_current_package_conditions \
-         0064_the_allowance_a_stay_earned_is_frozen_when_it_is_granted \
-         0071_central_serves_this_appliance_for_licensing_only; do
+         0064_the_allowance_a_stay_earned_is_frozen_when_it_is_granted; do
   f="$ROOT/data-plane/migrations/$m.up.sql"
   [ -f "$f" ] || continue
   psql_run < "$f" >"$OUT/$m.log" 2>&1 || { echo "  FAIL $m:"; tail -3 "$OUT/$m.log"; exit 1; }
@@ -194,19 +193,13 @@ assert_priv "PUBLIC cannot ask the gate" \
   "SELECT has_function_privilege('public','iam_v2.guest_signin_gate(uuid,uuid,macaddr)','EXECUTE')" f
 
 # ---------------------------------------------------------------------------------------------------------
-# CLOUD SYNC AND PMS RECONCILIATION (0069), against the REAL service roles after a Gate-P reconcile.
+# PMS RECONCILIATION (0069), against the REAL service roles after a Gate-P reconcile.
 #
-# Two audit trails are made mandatory BY PRIVILEGE here rather than by convention, and each has a specific
-# thing it prevents:
-#
-#   * no UPDATE on iam_v2.stay_events for svc_edged — a re-offer moves a departure's processing state back to
-#     PENDING, and the outcome of the engine reconsidering it can check a guest out and revoke their access.
-#     Direct UPDATE would let that happen with nothing recording that anybody decided it.
-#   * no UPDATE on public.sync_outbox for svc_edged — recovery clears the abandoned flag AND writes who
-#     released the records, in one call. Direct UPDATE would also permit marking undelivered records as sent,
-#     which is the one way to empty a backlog without delivering it.
+# No UPDATE on iam_v2.stay_events for svc_edged — a re-offer moves a departure's processing state back to
+# PENDING, and the outcome of the engine reconsidering it can check a guest out and revoke their access.
+# Direct UPDATE would let that happen with nothing recording that anybody decided it.
 # ---------------------------------------------------------------------------------------------------------
-echo "== cloud sync and PMS reconciliation: the privilege model (0069) =="
+echo "== PMS reconciliation: the privilege model (0069) =="
 assert_priv "svc_edged may read the reconciliation cases"   "SELECT has_table_privilege('svc_edged','iam_v2.pms_reconciliation_cases','SELECT')" t
 # THE RE-OFFER FUNCTION MUST NOT EXIST (0070). It shipped in 0069 and could never work: stay_events is
 # one-way and a checkout boundary must be an APPLIED GO event. It is asserted ABSENT rather than merely
@@ -219,50 +212,15 @@ assert_priv "and its log table is gone with it"   "SELECT to_regclass('iam_v2.st
 # it a layer earlier.
 assert_priv "svc_edged CANNOT move a PMS event's processing state directly"   "SELECT has_table_privilege('svc_edged','iam_v2.stay_events','UPDATE')" f
 
-assert_priv "svc_edged may read the retention setting"   "SELECT has_function_privilege('svc_edged','iam_v2.cloud_sync_settings_get(uuid,uuid)','EXECUTE')" t
-assert_priv "svc_edged may change retention through the audited function"   "SELECT has_function_privilege('svc_edged','iam_v2.cloud_sync_settings_set(uuid,uuid,integer,text,text)','EXECUTE')" t
-assert_priv "svc_edged CANNOT write the retention setting directly"   "SELECT has_table_privilege('svc_edged','iam_v2.site_cloud_sync_settings','UPDATE')" f
-assert_priv "svc_edged CANNOT write the retention change log directly"   "SELECT has_table_privilege('svc_edged','iam_v2.cloud_sync_settings_changes','INSERT')" f
-
-assert_priv "svc_edged may recover abandoned records through the audited function"   "SELECT has_function_privilege('svc_edged','iam_v2.sync_outbox_recover_exhausted(text,text,integer)','EXECUTE')" t
-assert_priv "svc_edged CANNOT write the recovery log directly"   "SELECT has_table_privilege('svc_edged','iam_v2.sync_outbox_recovery_log','INSERT')" f
-assert_priv "svc_edged CANNOT mark an undelivered record as sent"   "SELECT has_table_privilege('svc_edged','public.sync_outbox','UPDATE')" f
-
-# scd prunes DELIVERED records and does not recover abandoned ones. A daemon that could recover could do it
-# on a loop; releasing records back onto the wire is an operator decision with a far end that absorbs it.
-assert_priv "svc_scd may prune delivered records"   "SELECT has_function_privilege('svc_scd','iam_v2.sync_outbox_prune_delivered(integer)','EXECUTE')" t
-assert_priv "svc_scd CANNOT recover abandoned records"   "SELECT has_function_privilege('svc_scd','iam_v2.sync_outbox_recover_exhausted(text,text,integer)','EXECUTE')" f
-
-# THE CONSTRAINT THAT DECIDED WHERE 0069's QUEUE OBJECTS LIVE, asserted so it cannot be rediscovered on an
-# appliance at deploy time -- which is exactly how it WAS discovered.
-#
-# A live-site migration is applied by a least-privilege non-superuser; edge-migrate.sh refuses anything else.
-# That role is iam_v2_owner, and it holds no CREATE on schema public. A migration creating objects there
-# fails whole with "permission denied for schema public" -- and the runner's success check greps only for its
-# own pre-apply echo, so it reports EDGE_MIGRATE_OK for an apply that rolled back entirely.
-#
-# So the operator-facing queue objects live in iam_v2 where that role may create them, the queue TABLE stays
-# in public where 0001 put it, and the definer functions reach it on a grant Gate-P makes.
-assert_priv "iam_v2_owner CANNOT create in schema public (the constraint 0069 is shaped by)"   "SELECT has_schema_privilege('iam_v2_owner','public','CREATE')" f
-assert_priv "iam_v2_owner CAN read the queue it must account for"   "SELECT has_table_privilege('iam_v2_owner','public.sync_outbox','SELECT')" t
-assert_priv "iam_v2_owner CAN return abandoned records (definer runs as the owner)"   "SELECT has_table_privilege('iam_v2_owner','public.sync_outbox','UPDATE')" t
-assert_priv "iam_v2_owner CAN remove delivered records under retention"   "SELECT has_table_privilege('iam_v2_owner','public.sync_outbox','DELETE')" t
-assert_priv "the queue's operator functions live in iam_v2"   "SELECT count(*)=4 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname IN ('sync_outbox_recover_exhausted','sync_outbox_prune_delivered','sync_outbox_accounting','sync_outbox_recovery_log_append_only')" t
-assert_priv "and none was left behind in public"   "SELECT count(*)=0 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname LIKE 'sync_outbox!_%' ESCAPE '!'" t
-
-# CLOUD OPERATING MODE (0071). The decision is "Central serves this appliance for licensing only", and the
-# requirement is that it cannot silently reactivate. Two halves are asserted: nobody with a runtime role can
-# change the mode, and the daemon the mode governs cannot rewrite it.
-assert_priv "scd may READ the mode it is subject to"   "SELECT has_function_privilege('svc_scd','iam_v2.cloud_mode_get(uuid,uuid)','EXECUTE')" t
-assert_priv "scd CANNOT change the mode it is subject to"   "SELECT has_function_privilege('svc_scd','iam_v2.cloud_mode_set(uuid,uuid,text,text,text)','EXECUTE')" f
-assert_priv "scd CANNOT write the mode table directly"   "SELECT has_table_privilege('svc_scd','iam_v2.site_cloud_mode','UPDATE')" f
-assert_priv "edged may READ the mode, to show it"   "SELECT has_function_privilege('svc_edged','iam_v2.cloud_mode_get(uuid,uuid)','EXECUTE')" t
-assert_priv "edged CANNOT change it: this decision has no UI switch"   "SELECT has_function_privilege('svc_edged','iam_v2.cloud_mode_set(uuid,uuid,text,text,text)','EXECUTE')" f
-assert_priv "edged CANNOT write the mode change log directly"   "SELECT has_table_privilege('svc_edged','iam_v2.cloud_mode_changes','INSERT')" f
-assert_priv "PUBLIC holds nothing on the mode"   "SELECT has_table_privilege('public','iam_v2.site_cloud_mode','SELECT')" f
-
-assert_priv "PUBLIC holds nothing on the retention setting"   "SELECT has_table_privilege('public','iam_v2.site_cloud_sync_settings','SELECT')" f
-assert_priv "PUBLIC cannot recover the queue"   "SELECT has_function_privilege('public','iam_v2.sync_outbox_recover_exhausted(text,text,integer)','EXECUTE')" f
+# THE CLOUD TELEMETRY SUBSYSTEM IS GONE (0093). The queue, its settings, recovery and accounting operations
+# (0069) and the licensing-only cloud mode (0071) were removed with the code that used them; asserted ABSENT,
+# so a reconcile or a re-applied old migration that brought any of it back fails here.
+echo "== the cloud telemetry subsystem is absent (0093) =="
+for t in public.sync_outbox public.sync_checkpoints iam_v2.site_cloud_mode iam_v2.cloud_mode_changes \
+         iam_v2.site_cloud_sync_settings iam_v2.cloud_sync_settings_changes iam_v2.sync_outbox_recovery_log; do
+  assert_priv "$t does not exist"   "SELECT to_regclass('$t') IS NULL" t
+done
+assert_priv "no cloud-mode / cloud-sync / outbox function survives"   "SELECT count(*)=0 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname IN ('iam_v2','public') AND (p.proname LIKE 'cloud!_mode!_%' ESCAPE '!' OR p.proname LIKE 'cloud!_sync!_%' ESCAPE '!' OR p.proname LIKE 'sync!_outbox!_%' ESCAPE '!')" t
 
 [ "$fails" = "0" ] || { echo "  FAIL: $fails privilege assertion(s) — fix deploy/gatep, not this file"; exit 1; }
 

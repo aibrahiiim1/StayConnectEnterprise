@@ -7,7 +7,6 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
-	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -29,7 +28,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/nats-io/nats.go"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -37,7 +35,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/appliancecert"
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/data-plane/internal/buildprofile"
-	"github.com/stayconnect/enterprise/data-plane/internal/cloudmode"
 	"github.com/stayconnect/enterprise/data-plane/internal/hwid"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/identity"
@@ -47,7 +44,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/nft"
 	"github.com/stayconnect/enterprise/data-plane/internal/notifyloader"
 	"github.com/stayconnect/enterprise/data-plane/internal/otpkey"
-	"github.com/stayconnect/enterprise/data-plane/internal/outbox"
 	"github.com/stayconnect/enterprise/data-plane/internal/pms"
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsloader"
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
@@ -83,10 +79,6 @@ type cfg struct {
 	// way in (a site with no route to Central).
 	AutoRegister bool
 
-	// Phase 5.2 — remote transport. When set, scd subscribes to
-	// scd.{applianceID}.> and serves ctrlapi RPCs over NATS.
-	NATSURL string
-
 	// Phase 13 — optional TCP listener for /metrics. Empty = disabled.
 	MetricsAddr string
 
@@ -103,10 +95,6 @@ type cfg struct {
 	// mTLS cutover (signed-JWT over the HTTPS ingress remains).
 	CertDir  string
 	MTLSBase string
-	// NATSMTLSURL, when set, makes scd connect to Central NATS over mTLS (client
-	// cert, no username/password) instead of SCD_NATS_URL. Staged cutover: set
-	// this to the :4223 endpoint; SCD_NATS_URL remains as documented rollback.
-	NATSMTLSURL string
 
 	// Phase 1B dark-auth. All default OFF so a normal build is byte-for-byte legacy.
 	//   SecretsDir       — appliance-local key files (throttle.key, otp_hmac_<gen>.key)
@@ -136,23 +124,23 @@ func loadCfg() cfg {
 		Serial:       os.Getenv("SCD_SERIAL"),
 		AutoRegister: os.Getenv("SCD_AUTO_REGISTER") != "false",
 
-		NATSURL: os.Getenv("SCD_NATS_URL"),
-
 		MetricsAddr: os.Getenv("SCD_METRICS_ADDR"),
 
 		LicenseDir:      envOr("SCD_LICENSE_DIR", "/etc/stayconnect/license"),
 		VendorPub:       envOr("SCD_VENDOR_PUB", "/etc/stayconnect/vendor-license.pub"),
 		LicenseRequired: os.Getenv("SCD_LICENSE_REQUIRED") == "true",
 
-		CertDir:     envOr("SCD_CERT_DIR", "/etc/stayconnect/certs"),
-		MTLSBase:    os.Getenv("SCD_MTLS_BASE"),
-		NATSMTLSURL: os.Getenv("SCD_NATS_MTLS_URL"),
+		CertDir:  envOr("SCD_CERT_DIR", "/etc/stayconnect/certs"),
+		MTLSBase: os.Getenv("SCD_MTLS_BASE"),
 
 		SecretsDir:      envOr("SCD_SECRETS_DIR", "/etc/stayconnect/secrets"),
 		DurableThrottle: os.Getenv("SCD_DURABLE_THROTTLE") == "true",
 		OTPHMAC:         os.Getenv("SCD_OTP_HMAC") == "true",
 	}
 }
+
+// scdVersion is stamped into every signed control-plane request and reported on the appliance card.
+const scdVersion = "0.0.3-dev"
 
 func envOr(k, d string) string {
 	if v := os.Getenv(k); v != "" {
@@ -178,7 +166,7 @@ type server struct {
 	// methodSwitches reads Hotel Admin's guest sign-in method switches; nil means tenants.auth_methods via
 	// tenantcfg.Load. A test with no database supplies its own (guest_method_switch.go).
 	methodSwitches func(ctx context.Context) (*tenantcfg.AuthMethods, error)
-	nft            *nftSync // wraps nft.Client with NATS replication; API unchanged
+	nft            *localNFT
 	shp            *shape.Client
 	mail           mail.Mailer
 	sms            sms.Sender
@@ -240,23 +228,16 @@ type server struct {
 	tenantBlocked     atomic.Bool
 	tenantBlockReason string
 
-	// Cloud connection config surfaced (read-only, secrets masked) to the Hotel
-	// Admin Cloud Connection page via edged.
+	// The Central endpoint and this appliance's serial, surfaced read-only in the Hotel Admin appliance card.
 	ctrlBase string
-	natsURL  string
 	serial   string
 
 	// certMgr owns the mTLS client-certificate lifecycle (nil if disabled).
 	certMgr *appliancecert.Manager
-	// cloudMode is resolved once at boot and reported on the admin surface, so the screen and the socket
-	// cannot disagree about whether this appliance is allowed to talk to Central.
-	cloudMode cloudmode.Mode
 	// noMTLSLogged counts consecutive assignment polls skipped because the mTLS certificate is not ready.
 	// Only the assignment agent touches it, and only from its own goroutine, so it needs no lock. It
 	// exists to make "waiting for the certificate" visible without writing a line every 30 seconds.
 	noMTLSLogged int
-	// natsConn is the live NATS connection (nil if not connected).
-	natsConn *nats.Conn
 	// identityKeyFpr is the fingerprint of the identity-signing public key
 	// (distinct from the mTLS cert fingerprint) — shown under Technical details.
 	identityKeyFpr string
@@ -289,9 +270,8 @@ type server struct {
 
 	met *metrics.Registry // phase 7
 
-	// Edge-first refactor: signed-license manager and telemetry outbox.
+	// Edge-first refactor: signed-license manager.
 	lic *licstate.Manager
-	obx *outbox.Outbox
 
 	// permissiveBlocked is non-empty when a production appliance rejected an
 	// attempt to enable permissive/dev licensing (env var or dev-mode marker).
@@ -305,9 +285,9 @@ func (s *server) currentPMSReg() *pms.Registry {
 	return s.pmsReg
 }
 
-// pmsReloadSafetyLoop fires reloadPMS every 10 minutes regardless of NATS
-// activity. Cheap; the no-op case (no DB changes) just re-Configure()s the
-// same providers on a new generation.
+// pmsReloadSafetyLoop fires reloadPMS every 10 minutes (Hotel Admin changes also reload immediately through
+// /v1/admin/pms/reload). Cheap; the no-op case (no DB changes) just re-Configure()s the same providers on a
+// new generation.
 func (s *server) pmsReloadSafetyLoop(ctx context.Context) {
 	t := time.NewTicker(10 * time.Minute)
 	defer t.Stop()
@@ -617,7 +597,7 @@ func main() {
 	}
 
 	s := &server{
-		nft:          newNFTSync(nft.New(), nil, c.ApplianceID, c.SiteID),
+		nft:          newLocalNFT(nft.New()),
 		shp:          shape.New(),
 		mail:         mail.NewStub(c.MailLogPath),
 		sms:          sms.NewStub(c.SMSLogPath),
@@ -631,7 +611,6 @@ func main() {
 		applianceID:  c.ApplianceID,
 		applID:       c.ApplianceID,
 		ctrlBase:     c.CtrlAPIBase,
-		natsURL:      c.NATSURL,
 		serial:       c.Serial,
 		legacyBridge: envOr("SCD_LEGACY_BRIDGE", "br-lan"),
 		hw:           hwid.Detect(),
@@ -641,8 +620,7 @@ func main() {
 			"appliance_id": c.ApplianceID,
 		}),
 	}
-	// Hand the metric registry to subsystems that produce telemetry but
-	// were constructed before s existed (nft wrapper).
+	// Hand the metric registry to the nft wrapper, which was constructed before s existed.
 	s.nft.SetMetrics(s.met)
 
 	// Phase 1B dark-auth machinery (durable throttle, keyed-HMAC OTP ring, dark IAM-v2). Constructed
@@ -731,7 +709,7 @@ func main() {
 	s.permissiveBlocked = devAttempt
 	if devAttempt != "" {
 		// Rejected: enforcement stays ON (licRequired is already true). Raise a
-		// local critical alert + audit + sanitized Central telemetry.
+		// local critical alert + audit record.
 		s.reportPermissiveAttempt(rootCtx, devAttempt)
 	}
 	// Bind license verification to THIS box: identity key (primary anchor) +
@@ -853,7 +831,6 @@ func main() {
 	r.Post("/v1/license/install", s.licenseInstall)
 	r.Post("/v1/admin/pms/reload", s.pmsAdminReload)
 	r.Post("/v1/admin/walled-garden/reload", s.gardenReload)
-	r.Get("/v1/admin/outbox/stats", s.outboxStats)
 	// Hotel Admin TLS cert lifecycle: scd runs as root and drives the privileged
 	// manager here (edged is sandboxed with NoNewPrivileges and cannot). edged
 	// already enforced Hotel-IT permission + step-up before proxying to us.
@@ -997,10 +974,8 @@ func main() {
 	// Edge-first refactor: walled-garden rules from the (site) DB are now
 	// actually enforced — reconciled into the nft walled_garden_ip set.
 	go s.gardenReconcileLoop(rootCtx)
-	// Phase 5.7.B — periodic safety-net reload. Live config events arrive
-	// over NATS (5.3) and apply within ~ms, but a NATS reconnect storm or
-	// missed delivery can leave us stale. A 10-minute background sweep
-	// guarantees eventual consistency from the DB.
+	// Periodic safety-net reload: Hotel Admin changes reload immediately through /v1/admin/pms/reload, and a
+	// 10-minute background sweep guarantees eventual consistency from the DB if one was missed.
 	go s.pmsReloadSafetyLoop(rootCtx)
 
 	// Phase 1B — bounded-retention cleanup of durable throttle buckets (only when enabled).
@@ -1014,130 +989,6 @@ func main() {
 	// because nothing else writes the table.
 	if s.p3auth != nil && s.p3auth.attempts != nil {
 		go s.p3auth.attempts.RunPurge(rootCtx, time.Hour)
-	}
-
-	// LICENSING-ONLY IS DECIDED BEFORE ANY SOCKET IS OPENED.
-	//
-	// Product-Owner decision: Central serves this appliance for licensing only. Licence activation,
-	// retrieval, renewal and validation — and the appliance identity and certificate lifecycle they depend
-	// on — are HTTPS to ctrlapi, and are untouched below. Everything on the NATS transport is not licensing:
-	// the telemetry outbox, remote guest-session revocation, remote PMS test/cache/health, the tenant PMS
-	// config broadcast, the signed command channel and the software-update agent.
-	//
-	// The only licensing-SHAPED thing on that transport was license_ack, and it is a report ABOUT licensing
-	// rather than a licensing mechanism: Central accepts it as a telemetry kind and stores a row, nothing
-	// consumes it, and no licence operation depends on it. So the transport is not opened at all rather than
-	// opened and filtered — a connection that exists is a connection that can be subscribed to by the next
-	// person who adds a feature.
-	//
-	// STOPPING AT THE SOURCE IS THE REQUIREMENT. Not connecting means nothing is published, nothing is
-	// subscribed, no command or configuration arrives, and no queued record resumes on restart, because the
-	// drain worker that would send it never starts.
-	cloudMode := cloudmode.Resolve(rootCtx, pgxQuerier{pool}, c.TenantID, c.SiteID)
-	slog.Info("cloud mode resolved", "mode", string(cloudMode), "telemetry_allowed", cloudMode.TelemetryAllowed())
-	s.cloudMode = cloudMode
-
-	// Phase 5.2 — NATS RPC surface. When SCD_NATS_URL is set, subscribe to
-	// scd.{applianceID}.> so the control plane can drive admin calls without
-	// needing to share a filesystem with scd.
-	var natsConn *nats.Conn
-	// Decide the NATS transport: mTLS (:4223, client cert, no user/pass) when
-	// SCD_NATS_MTLS_URL is set AND a client cert is available; otherwise the
-	// legacy user/pass URL (rollback path).
-	natsURL := c.NATSURL
-	var natsTLS *tls.Config
-	if c.NATSMTLSURL != "" && ident != nil && c.MTLSBase != "" {
-		cm := appliancecert.New(c.CertDir, c.CtrlAPIBase, c.MTLSBase, ident.ApplianceID, ident.PrivateKey())
-		// Bounded: first issuance may await Platform approval and Ensure would
-		// otherwise block startup for up to 10 minutes on a freshly-enrolled
-		// appliance. Stay on the legacy transport if the cert isn't ready yet; the
-		// async certificate manager below obtains it and mTLS comes up on restart.
-		ectx, ecancel := context.WithTimeout(rootCtx, 5*time.Second)
-		err := cm.Ensure(ectx)
-		ecancel()
-		if err != nil {
-			slog.Warn("nats mTLS: cert not ready, staying on legacy NATS", "err", err)
-		} else if tc, err := cm.NATSTLSConfig(); err != nil {
-			slog.Warn("nats mTLS: tls config failed, staying on legacy NATS", "err", err)
-		} else {
-			natsURL, natsTLS = c.NATSMTLSURL, tc
-			s.certMgr = cm
-			slog.Info("nats transport: mTLS", "url", natsURL)
-		}
-	}
-	if !cloudMode.TelemetryAllowed() {
-		// Said once, plainly, so an operator reading the journal knows this is a decision and not a fault.
-		// The certificate manager below still runs: the certificate is licensing infrastructure, and it is
-		// what authenticates the licence calls whether or not any other transport exists.
-		slog.Info("licensing-only: not opening the cloud telemetry transport",
-			"suppressed", "telemetry publish, remote revoke, remote pms ops, tenant pms config broadcast, signed command channel, software-update agent")
-		natsURL = ""
-	}
-	if natsURL != "" && c.ApplianceID != "" {
-		nc, err := startNATSDispatcher(rootCtx, s, natsURL, c.ApplianceID, natsTLS)
-		if err != nil {
-			slog.Error("nats dispatcher: failed to start", "err", err)
-			// non-fatal — scd keeps serving over the unix socket for portald.
-		} else {
-			natsConn = nc
-			s.natsConn = nc
-			// Upgrade the nft wrapper so its Allow/Deny publish to peers,
-			// and subscribe to peer ops. Must happen AFTER the dispatcher
-			// connects so we share the same *nats.Conn.
-			s.nft = newNFTSync(s.nft.client, nc, c.ApplianceID, c.SiteID)
-			s.nft.SetMetrics(s.met) // re-attach (the new wrapper starts metric-blind)
-			if err := startNFTSyncSubscriber(rootCtx, s, nc, c.SiteID); err != nil {
-				slog.Warn("nft sync subscriber: failed", "err", err)
-			}
-			// Signed command channel (Phase 8): subscribe to this appliance's
-			// command subject over the mTLS transport.
-			if err := s.startCommandHandler(rootCtx, nc, c.ApplianceID, envOr("SCD_COMMAND_PUB", "/etc/stayconnect/command-signing.pub")); err != nil {
-				slog.Warn("command handler: failed", "err", err)
-			}
-			// Signed software-update agent (Phase 9).
-			if err := s.startUpdateAgent(rootCtx, nc, c.ApplianceID, envOr("SCD_UPDATE_PUB", "/etc/stayconnect/update-signing.pub")); err != nil {
-				slog.Warn("update agent: failed", "err", err)
-			}
-			// Boot reconcile of the legacy nft set and the legacy per-session shaping classes is REMOVED
-			// along with public.sessions. Phase-3 enforcement reconciles the authorization set from
-			// iam_v2.sessions in netd, and acctd re-asserts the accountable classes it owns; rebuilding
-			// them a second time from a different table is how two authorities come to disagree about
-			// who is on the network.
-		}
-	}
-
-	// Edge-first refactor: durable telemetry outbox. Enqueue works with or
-	// without NATS (rows wait locally through outages); the drainer only
-	// publishes when connected. Aggregated summaries only — no guest PII.
-	scdStarted := time.Now()
-	if c.ApplianceID != "" && cloudMode.TelemetryAllowed() {
-		// Tenant and site come along so retention can read the property's own setting. They may still be
-		// empty here (an appliance awaiting assignment); RetentionDays falls back to the approved default
-		// rather than skipping retention, because an unassigned appliance still fills a disk.
-		s.obx = &outbox.Outbox{DB: pool, NC: natsConn, ApplianceID: c.ApplianceID,
-			TenantID: c.TenantID, SiteID: c.SiteID}
-		s.obx.Start(rootCtx)
-		go s.telemetryLoop(rootCtx, scdStarted)
-		s.enqueueLicenseAck(rootCtx)
-	} else if c.ApplianceID != "" {
-		// s.obx STAYS NIL, and that is the enforcement rather than a filter.
-		//
-		// Every producer goes through it — telemetryLoop's usage and health, edged's service_health,
-		// enqueueLicenseAck — and every one of them returns early on a nil outbox. So no new operational
-		// record is created, the drain worker that would send an existing one never starts, and neither
-		// survives a restart, a reconnect or a deployment. The records already in public.sync_outbox are
-		// left exactly where they are: stopping a producer is not a retention policy, and deleting a
-		// property's history was not what was asked for.
-		slog.Info("licensing-only: telemetry outbox and its producers are not started",
-			"existing_records", "retained, not transmitted")
-		// Retention still runs, and deliberately on an Outbox that is NOT assigned to s.obx. Retention is
-		// local housekeeping — it removes records this appliance already delivered, from its own disk — and
-		// it opens no connection. Keeping it means a licensing-only appliance does not grow a queue for ever
-		// because it was told not to talk; keeping it OFF s.obx means the producers stay disabled, because
-		// what disables them is having no outbox to write to.
-		retentionOnly := &outbox.Outbox{DB: pool, ApplianceID: c.ApplianceID,
-			TenantID: c.TenantID, SiteID: c.SiteID}
-		retentionOnly.StartRetention(rootCtx)
 	}
 
 	// Signed hello against ctrlapi — on boot AND periodically. Besides smoke-
@@ -1208,11 +1059,8 @@ func main() {
 	// expiry. Runs alongside the signed-JWT layer (defence in depth); a failure
 	// here never affects local guest operation.
 	if ident != nil && c.CtrlAPIBase != "" && c.MTLSBase != "" {
-		certMgr := s.certMgr // reuse the one created for NATS mTLS if present
-		if certMgr == nil {
-			certMgr = appliancecert.New(c.CertDir, c.CtrlAPIBase, c.MTLSBase, ident.ApplianceID, ident.PrivateKey())
-			s.certMgr = certMgr
-		}
+		certMgr := appliancecert.New(c.CertDir, c.CtrlAPIBase, c.MTLSBase, ident.ApplianceID, ident.PrivateKey())
+		s.certMgr = certMgr
 		// Every bootstrap attempt tells us whether Central is answering -- including while the appliance waits
 		// for an operator to activate it (a pending certificate is a successful conversation).
 		certMgr.OnAttempt(func(err error) { central.record(err, time.Now()) })
@@ -1256,8 +1104,5 @@ func main() {
 	_ = srv.Shutdown(shutCtx)
 	if metricsSrv != nil {
 		_ = metricsSrv.Shutdown(shutCtx)
-	}
-	if natsConn != nil {
-		_ = natsConn.Drain()
 	}
 }

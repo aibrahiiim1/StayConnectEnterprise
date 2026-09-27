@@ -1,27 +1,22 @@
-// Edge-first refactor wiring: signed-license enforcement, walled-garden
-// reconciliation from the site-local DB into nftables, and the durable
-// telemetry outbox. Everything here works fully offline; the cloud only
-// supplies license renewals and receives aggregated telemetry.
+// Edge-first refactor wiring: signed-license enforcement and walled-garden
+// reconciliation from the site-local DB into nftables. Everything here works
+// fully offline; Central only issues and renews the licence.
 package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"os/exec"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/cloudmode"
 	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
 	"github.com/stayconnect/enterprise/data-plane/internal/nft"
-	"github.com/stayconnect/enterprise/data-plane/internal/outbox"
 	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
 	lic "github.com/stayconnect/enterprise/license"
 )
@@ -131,51 +126,6 @@ func (s *server) gardenReload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "reconciled", "elements": n})
-}
-
-func (s *server) outboxStats(w http.ResponseWriter, r *http.Request) {
-	if s.obx == nil {
-		// enabled:false has always meant "this appliance is not reporting upward". It now carries WHY,
-		// because "not in use" and "switched off by a decision" look identical to an operator and only one
-		// of them is something to investigate. The accounting still comes from the database: the records
-		// are retained, and a screen that hid them would be implying a deletion that did not happen.
-		out := map[string]any{"enabled": false, "mode": string(s.cloudMode)}
-		if s.cloudMode == cloudmode.LicensingOnly {
-			out["reason"] = "licensing_only"
-		}
-		if acct, err := (&outbox.Outbox{DB: s.db}).Account(r.Context()); err == nil {
-			out["delivered"] = acct.Delivered
-			out["pending"] = acct.Pending
-			out["dead"] = acct.Exhausted
-			out["total"] = acct.Total
-			out["bytes"] = acct.Bytes
-			out["balanced"] = acct.Balanced()
-			out["oldest_pending"] = acct.OldestPending
-			out["retention_days"] = (&outbox.Outbox{DB: s.db}).RetentionDays(r.Context(), s.tenID, s.siteID)
-		}
-		writeJSON(w, http.StatusOK, out)
-		return
-	}
-	acct, err := s.obx.Account(r.Context())
-	if err != nil {
-		httpErr(w, http.StatusInternalServerError, "stats failed")
-		return
-	}
-	out := s.obx.LastOutcome()
-	// pending/dead/oldest_pending keep their names and meaning so nothing reading this breaks. What is new
-	// is the rest: how many were DELIVERED (previously unknowable from here, which is why "is it draining?"
-	// had to be guessed from the pending count moving), how much disk the queue holds, whether the three
-	// buckets still account for every record, and what the last attempt actually learned.
-	writeJSON(w, http.StatusOK, map[string]any{
-		"enabled": true, "mode": string(s.cloudMode),
-		"pending": acct.Pending, "dead": acct.Exhausted, "oldest_pending": acct.OldestPending,
-		"delivered": acct.Delivered, "total": acct.Total, "bytes": acct.Bytes,
-		"oldest_exhausted": acct.OldestExhausted, "balanced": acct.Balanced(),
-		"retention_days": s.obx.RetentionDays(r.Context(), s.tenID, s.siteID),
-		"delivery": map[string]any{
-			"state": string(out.State), "at": out.At, "sent": out.Sent, "detail": out.Detail,
-		},
-	})
 }
 
 // ----- Hotel Admin TLS certificate lifecycle (root-privileged exec) ----------
@@ -306,120 +256,6 @@ func (s *server) gardenReconcileLoop(ctx context.Context) {
 				slog.Warn("walled-garden: reconcile failed", "err", err)
 			}
 		}
-	}
-}
-
-// ----- aggregated telemetry ---------------------------------------------------
-
-// telemetryLoop enqueues non-PII operational summaries into the outbox:
-// usage (session counts + byte totals) and health (disk, memory, uptime,
-// outbox depth, license state). Aggregates only — never per-guest rows.
-func (s *server) telemetryLoop(ctx context.Context, started time.Time) {
-	if s.obx == nil {
-		return
-	}
-	t := time.NewTicker(60 * time.Second)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			s.enqueueUsage(ctx)
-			s.enqueueHealth(ctx, started)
-		}
-	}
-}
-
-func (s *server) enqueueUsage(ctx context.Context) {
-	var active, today int64
-	var upToday, downToday int64
-	// Telemetry counts from the single session authority. Aggregates only -- no guest PII.
-	_ = s.db.QueryRow(ctx,
-		`SELECT count(*) FROM iam_v2.sessions WHERE tenant_id=$1 AND site_id=$2 AND state = 'active'`,
-		s.tenID, s.siteID).Scan(&active)
-	_ = s.db.QueryRow(ctx, `
-        SELECT count(*), COALESCE(sum(bytes_up),0), COALESCE(sum(bytes_down),0)
-          FROM iam_v2.sessions
-         WHERE tenant_id=$1 AND site_id=$2 AND started >= date_trunc('day', now())
-    `, s.tenID, s.siteID).Scan(&today, &upToday, &downToday)
-	err := s.obx.Enqueue(ctx, "usage", map[string]any{
-		"active_sessions":  active,
-		"sessions_today":   today,
-		"bytes_up_today":   upToday,
-		"bytes_down_today": downToday,
-	})
-	if err != nil {
-		slog.Debug("telemetry: usage enqueue failed", "err", err)
-	}
-}
-
-func (s *server) enqueueHealth(ctx context.Context, started time.Time) {
-	diskFree, diskTotal := diskStats("/var")
-	pending, dead, _, _ := s.obx.Stats(ctx)
-	licState := "unlicensed"
-	if s.lic != nil {
-		licState = string(s.lic.State())
-	}
-	payload := map[string]any{
-		"uptime_seconds":  int64(time.Since(started).Seconds()),
-		"disk_free_bytes": diskFree, "disk_total_bytes": diskTotal,
-		"outbox_pending": pending, "outbox_dead": dead,
-		"license_state": licState,
-		"version":       "0.0.3-dev",
-	}
-	if raw, err := os.ReadFile("/proc/loadavg"); err == nil {
-		payload["loadavg"] = string(raw[:min(len(raw), 14)])
-	}
-	// Sanitized Hotel Admin TLS certificate health (no key, no guest data) so the
-	// Central Fleet view can surface warning/critical/expired/renewal-failure.
-	if hc := hotelAdminCertHealth(); hc != nil {
-		payload["hotel_admin_cert"] = hc
-	}
-	if err := s.obx.Enqueue(ctx, "health", payload); err != nil {
-		slog.Debug("telemetry: health enqueue failed", "err", err)
-	}
-}
-
-// hotelAdminCertHealth reads the renewal manager's status file and returns ONLY
-// non-sensitive fields for Central telemetry. Never includes the private key.
-func hotelAdminCertHealth() map[string]any {
-	raw, err := os.ReadFile("/etc/caddy/hotel-admin/status.json")
-	if err != nil {
-		return nil
-	}
-	var st map[string]any
-	if json.Unmarshal(raw, &st) != nil {
-		return nil
-	}
-	pick := func(k string) any { return st[k] }
-	return map[string]any{
-		"serial":                  pick("serial"),
-		"fingerprint_sha256":      pick("fingerprint_sha256"),
-		"expires_at":              pick("expires_at"),
-		"days_remaining":          pick("days_remaining"),
-		"status_threshold":        pick("status_threshold"),
-		"san_config_match":        pick("san_config_match"),
-		"current_management_ip":   pick("current_management_ip"),
-		"last_renewal_result":     pick("last_renewal_result"),
-		"last_successful_renewal": pick("last_successful_renewal"),
-		"last_error":              pick("last_error"),
-	}
-}
-
-// enqueueLicenseAck reports the outcome of a license (re)load to the cloud.
-func (s *server) enqueueLicenseAck(ctx context.Context) {
-	if s.obx == nil || s.lic == nil {
-		return
-	}
-	ev, loaded := s.lic.Evaluation()
-	payload := map[string]any{"state": string(s.lic.State()), "installed": loaded}
-	if loaded {
-		payload["license_ref"] = ev.Doc.LicenseID
-		payload["valid_until"] = ev.Doc.ValidUntil
-	}
-	if err := s.obx.Enqueue(ctx, "license_ack", payload); err != nil {
-		slog.Debug("telemetry: license_ack enqueue failed", "err", err)
 	}
 }
 

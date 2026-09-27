@@ -24,9 +24,7 @@ import (
 // centralFacing lists the import paths that mean "this talks to something off the appliance". They are the
 // packages scd itself uses for exactly that, so the list is not hypothetical.
 var centralFacing = []string{
-	"internal/updates", "internal/assignment", "internal/commands",
-	"internal/applianceauth", "internal/appliancecert",
-	"nats-io", "internal/outbox",
+	"internal/assignment", "internal/applianceauth", "internal/appliancecert",
 }
 
 func importsOf(t *testing.T, path string) []string {
@@ -81,8 +79,8 @@ func TestDeviceSelfServicePackageHasNoNetworkDependencyAtAll(t *testing.T) {
 			switch {
 			case im == "net" || strings.HasPrefix(im, "net/"):
 				t.Errorf("%s imports %s; this package must reach nothing but the local pool", name, im)
-			case strings.Contains(im, "nats-io"), strings.Contains(im, "internal/updates"),
-				strings.Contains(im, "internal/assignment"), strings.Contains(im, "internal/outbox"):
+			case strings.Contains(im, "internal/assignment"), strings.Contains(im, "internal/applianceauth"),
+				strings.Contains(im, "internal/appliancecert"):
 				t.Errorf("%s imports %s; the setting and the release must not depend on Central", name, im)
 			}
 		}

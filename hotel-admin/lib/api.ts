@@ -3,7 +3,6 @@
 // connected to exactly one site DB) so no tenant_id/site_id params anywhere.
 // Cookies flow naturally same-origin; no credentials: 'include' needed.
 
-import type { OutboxFigures } from "@/lib/health-words";
 
 export class ApiError extends Error {
   status: number;
@@ -689,11 +688,9 @@ export type EdgeHealth = {
   license_state?: LicenseState | null;
   license_installed?: boolean;
   activation?: ActivationState | null;
-  sync_outbox?: OutboxFigures;
 };
 
-// ReportsSummary mirrors the aggregates edged computes from local data —
-// the same numbers scd pushes to the cloud as `usage` telemetry.
+// ReportsSummary mirrors the aggregates edged computes from local data.
 export type ReportsSummary = {
   active_sessions: number;
   sessions_today: number;
