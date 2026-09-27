@@ -1,6 +1,6 @@
 # Customer Operator (Tenant Operator) — User Guide
 
-You handle day-to-day Wi-Fi operations for your organisation. That work happens on each site's appliance in **OneGate Admin Console** (formerly Hotel Admin), with an operator account created for you on that appliance (usually the **Front office operator** or **Site IT manager** role).
+You handle day-to-day Wi-Fi operations for your organisation. That work happens on each site's appliance in **OneGate Admin Console** (formerly Hotel Admin), with an operator account created for you on that appliance (usually the **Client services operator** or **Site IT manager** role).
 
 **The *Customer operator* role grants nothing in OneGate Central** ([CENTRAL_CONTROL_PLANE.md §7](../CENTRAL_CONTROL_PLANE.md#7-roles)). Central is for licensing, activation and fleet status; if you need to see your appliances' licences there, ask your customer admin for a **Viewer** login. You **cannot** add or remove staff, change licences, or change sites — your customer admin (or the OneGate platform admin, for licences) does it.
 
@@ -9,8 +9,8 @@ You handle day-to-day Wi-Fi operations for your organisation. That work happens 
 Most days you'll touch three Admin Console pages:
 
 1. **Overview** — quick check that everything is healthy.
-2. **Active sessions** and **Client sign-in attempts** — handle client complaints in real time.
-3. **Vouchers** — issue more cards when reception runs low.
+2. **Active sessions** and **Hotel → Guest sign-in attempts** — handle client complaints in real time.
+3. **Vouchers** — issue more cards when the desk runs low.
 
 Everything else is set up once and left alone.
 
@@ -18,7 +18,7 @@ Everything else is set up once and left alone.
 
 **Admin Console → Internet offering → Vouchers**
 
-The most common task. Reception hands out printed cards; when they run low you issue another batch.
+The most common task. The desk hands out printed cards; when they run low you issue another batch.
 
 ### Issuing a batch
 
@@ -29,7 +29,7 @@ The most common task. Reception hands out printed cards; when they run low you i
    - **Note** — something you'll recognise later (e.g. "Conference desk, week 12").
 2. **Review** and issue.
 3. The codes are shown **once**: **Copy all**, **Download CSV**, or **Print cards** (set the heading printed on each card first).
-4. Hand the cards to reception.
+4. Hand the cards to the desk.
 
 ### When a client reports their card doesn't work
 
@@ -46,11 +46,11 @@ Reading a full code again (**Show full code**) asks for a reason and your passwo
 
 The "who is online right now" view. Search by room, name, username, IP or MAC, or filter by how the client signed in. It refreshes every 10 seconds.
 
-### Typical requests from reception
+### Typical requests from the desk
 
 - **"Guest in 214 says their Wi-Fi is gone"** → find their session → if it has ended, the status gives the reason (time or data used up, checked out, idle…); if it's there, check the allowance meters.
-- **"Guest can't sign in with their room number"** → **Client sign-in attempts**: read **Why**, and **Release** the device if it has been asked to wait (releasing lets it try again; it does not sign the guest in).
-- **"Guest checked out but still connected"** → **Disconnect**. (Checkout normally ends room access automatically, after any checkout grace.)
+- **"Guest can't sign in with their room number"** → **Hotel → Guest sign-in attempts**: read **Why**, and **Release** the device if it has been asked to wait (releasing lets it try again; it does not sign the guest in).
+- **"Guest checked out but still connected"** → **Disconnect**. (Checkout normally ends room access automatically, after any Grace Period — **Hotel → Grace Period**.)
 - **"Something weird is happening on room 310"** → click the session → see MAC, IP, package and data. **Usage explorer** shows the room's full history.
 
 ### Signs of abuse to watch for
@@ -81,7 +81,7 @@ Check the live preview (desktop, tablet, mobile) before you **Save changes** —
 
 ## PMS connection
 
-**Admin Console → Property management system → PMS connection**
+**Admin Console → Hotel → PMS connection**
 
 Usually set up once by the Site IT manager. With a desk role you can **view** the connection's state and whether room sign-in is working.
 
@@ -89,7 +89,7 @@ If it shows room sign-in not working or many recent failures, it's usually:
 
 - The PMS is down or in maintenance → wait / check with PMS support.
 - The PMS credential changed → ask the Site IT manager to replace it.
-- A guest network points at the wrong PMS → **Network routing** (Site admin).
+- A guest network points at the wrong PMS → **Hotel → PMS routing** (Site admin).
 
 You cannot edit the connection from a desk role — that's the Site IT manager's job, and for good reason.
 
@@ -99,7 +99,7 @@ You cannot edit the connection from a desk role — that's the Site IT manager's
 
 ## Charges
 
-**Admin Console → Charges**
+**Admin Console → Hotel → Charge health, Manual review, Settlements, Recovery**
 
 Selling internet is not switched on today, so these pages are usually quiet or *Not enabled on this appliance*. Decisions about room charges belong to the Payments operator and Site admin; there is no refund button by design.
 

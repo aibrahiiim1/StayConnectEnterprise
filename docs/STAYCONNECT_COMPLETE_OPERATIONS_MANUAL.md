@@ -580,7 +580,7 @@ submission itself.
 
 **Existing sessions are never disconnected.** A client already online stays online.
 
-**Ending a wait early.** **Admin Console → Client sign-in attempts → Active restrictions** lists every device
+**Ending a wait early.** **Admin Console → Hotel → Guest sign-in attempts → Active restrictions** lists every device
 currently waiting, with its guest network, the last room it typed (shown as *unverified input* — it is what
 somebody typed, not where anyone is staying), the failure count, when the wait started and ends, a link to
 that device's sign-in attempts, and a **Release** action.
@@ -595,7 +595,7 @@ client still has to enter details the site accepts.
 |---|---|---|
 | Site admin | yes | yes |
 | Site IT manager | yes | yes |
-| Front office operator | no (read-only) | yes |
+| Client services operator | no (read-only) | yes |
 | Client relations operator | no (read-only) | yes |
 | Site viewer | no | no |
 
@@ -611,7 +611,7 @@ operator, the previous values and the new values.
 
 ### PMS configuration: Current configuration and History
 
-**Admin Console → Property management system → PMS connection.**
+**Admin Console → Hotel → PMS connection.**
 
 The connection screen shows the **current configuration** only — the version in force, what it is set to, and
 when and by whom it was saved. Previous versions are behind a **History** button, and putting an older one
@@ -636,7 +636,7 @@ trail never costs an operator the ability to see what the connection is set to.
 
 ## 14b. Unresolved departures (PMS reconciliation)
 
-**Admin Console → Property management system → PMS connection → Advanced diagnostics → Unresolved departures.**
+**Admin Console → Hotel → PMS connection → Advanced diagnostics → Unresolved departures.**
 
 > **Not a routine screen, and deliberately not in the menu.** Reconciliation runs by itself after every
 > complete guest list and this page carries no action. A site where the integration is healthy never

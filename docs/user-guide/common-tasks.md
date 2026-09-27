@@ -49,15 +49,15 @@ If you need to read the full code on a card (e.g. a smudged card), open it and u
 
 ## Room sign-in failed
 
-1. **Admin Console → Property management system → PMS connection** → does room sign-in say it is working?
+1. **Admin Console → Hotel → PMS connection** → does room sign-in say it is working?
    - Not working → the PMS link or guest list is the problem. Open the connection for details; contact the PMS vendor if the PMS is unreachable.
-2. **Client sign-in attempts** → find the attempt by room and read **Why**. Roles allowed to see client credentials can open **Details** to compare what was entered with what would have been accepted.
+2. **Hotel → Guest sign-in attempts** → find the attempt by room and read **Why**. Roles allowed to see client credentials can open **Details** to compare what was entered with what would have been accepted.
    - Room number **exactly** as the PMS has it (some PMSes store "0214", some "214").
    - Name spelling — the guest should enter the full first name, family name, or reservation number, depending on the mode set under **Sign-in methods**.
    - **Why** says *Licence refused new clients* or *Licensed capacity full* → the client's details are not the problem: the appliance's licence did not admit a new client, or the appliance is at its licensed number of guests online (room guests, voucher and account guests all count, and each device of a room takes a place). Check **System → Appliance & licence**.
-3. **Client sign-in checks** → if every attempt on ONE guest network fails while others work, that network points at the wrong PMS or none: fix it under **Network routing**.
-4. **Too many attempts**: after too many wrong tries (by default 5 within 60 seconds) the device is asked to wait (by default 60 seconds) and sees a countdown. Reception can **Release** it on **Client sign-in attempts → Active restrictions** — this lets the device try again; it does not sign the client in.
-5. If all of the above check out and the PMS still rejects, the reservation may not be in the PMS correctly. Have reception check the PMS directly; **PMS activity** shows whether the check-in message ever arrived.
+3. **Hotel → Guest sign-in checks** → if every attempt on ONE guest network fails while others work, that network points at the wrong PMS or none: fix it under **Hotel → PMS routing**.
+4. **Too many attempts**: after too many wrong tries (by default 5 within 60 seconds) the device is asked to wait (by default 60 seconds) and sees a countdown. The desk (Client services or Client relations) can **Release** it on **Guest sign-in attempts → Active restrictions** — this lets the device try again; it does not sign the client in.
+5. If all of the above check out and the PMS still rejects, the reservation may not be in the PMS correctly. Have reception check the PMS directly; **Hotel → PMS activity** shows whether the check-in message ever arrived.
 
 ## Code not arriving
 
@@ -104,7 +104,7 @@ Escalate with specifics: which of the four steps above failed.
 
 ## Too many alerts
 
-Noisy alerts usually mean a policy or threshold needs tuning. Don't just acknowledge everything — figure out which alert is noisy. In the Admin Console, **System → Alerts** lists checkouts the checkout grace policy could not handle (tune it on **Checkout grace**); in Central, **System → Security alerts** must each be investigated: each records a registration Central refused or a binding that no longer matches.
+Noisy alerts usually mean a policy or threshold needs tuning. Don't just acknowledge everything — figure out which alert is noisy. In the Admin Console, **System → Alerts** lists checkouts the Grace Period policy could not handle (tune it on **Hotel → Grace Period**); in Central, **System → Security alerts** must each be investigated: each records a registration Central refused or a binding that no longer matches.
 
 ## Someone left the company and still has access
 
@@ -123,4 +123,4 @@ If they were a platform admin, contact Semantics operations directly — you can
 - **Central → System → Audit log** (platform staff; filter by customer, action such as `site.created` or `license.issued`, and date) or a customer's **Activity** tab — what changed in Central.
 - **Admin Console → System → Activity**, **Security** chip — sign-ins, code reveals and other security events on the appliance.
 - **Admin Console → Vouchers → Access log** — who has read voucher codes, and why.
-- **Admin Console → Client sign-in checks** — refusals by reason and by network; a spike hints at a broken PMS connection or routing.
+- **Admin Console → Hotel → Guest sign-in checks** — refusals by reason and by network; a spike hints at a broken PMS connection or routing.

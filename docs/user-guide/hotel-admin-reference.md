@@ -20,8 +20,11 @@ states) is defined once in the [OneGate design system](../../design-system/READM
   **Sign in**. There is no single sign-on, no multi-factor step and no "forgot password"; an operator with
   the Site admin role changes passwords under **System → Operators**. The session is re-checked every
   30 seconds; if it has ended you are returned to the login page.
-- **The sidebar and "Find a screen…".** The menu has eight groups: **Overview · Internet offering ·
-  Clients · Property management system · Charges · Client Portal · Networking · System** (*Clients* and *Client Portal* were formerly *Guests* and *Guest portal*; Client Portal was formerly Guest Portal). At the top is a
+- **The sidebar and "Find a screen…".** The menu has seven groups: **Overview · Internet offering ·
+  Clients · Client Portal · Hotel · Networking · System** (*Clients* and *Client Portal* were formerly *Guests* and
+  *Guest portal*; **Hotel** replaces the former *Property management system* and *Charges* groups and also holds
+  Stays, Grace Period and Post-stay access). Hospitality and PMS functions are grouped under Hotel; the rest
+  of the console is industry-neutral. At the top is a
   **Find a screen…** filter (press `/` from anywhere outside a text field) that matches page names, group
   names and everyday words ("wifi speed", "room sign in"). The button beside the OneGate mark collapses the
   sidebar to an icon rail and expands it again; collapsed, every icon shows its name as a tooltip, and the
@@ -37,8 +40,8 @@ states) is defined once in the [OneGate design system](../../design-system/READM
   change it."*) and the buttons that would change something are **not shown at all** rather than shown and
   refused. The appliance enforces the same rules on every request. The role for each page is listed below;
   a summary table is at the end of this document.
-- **"Not enabled on this appliance".** Some features are switched on per appliance (for example Charges,
-  Post-stay access, Online-time budgets or Client devices). A switched-off feature is left out of the menu;
+- **"Not enabled on this appliance".** Some features are switched on per appliance (for example the Hotel
+  charge pages, Post-stay access, Online-time budgets or Client devices). A switched-off feature is left out of the menu;
   if you open it by address, the page says **"Not enabled on this appliance"**, explains that this is a
   configuration and not a fault, and states that client internet, sign-in, the PMS connection, sessions and
   accounting are unaffected. Turning a feature on is a deployment decision for Semantics support, not an
@@ -79,7 +82,7 @@ states) is defined once in the [OneGate design system](../../design-system/READM
   once, again across every method: a room guest's second device takes a place just like a voucher guest.
   **System → Appliance & licence** says why.
 
-**Role names used below:** Site admin, Site IT manager, Front office operator, Client relations operator,
+**Role names used below:** Site admin, Site IT manager, Client services operator, Client relations operator,
 Voucher operator, Payments operator, Site viewer.
 
 ---
@@ -100,7 +103,7 @@ appliance healthy.
   (*Ready*, *x of y ready* or *Not in use*).
 - **Charts and cards:** Internet traffic; Connected devices (peak and average); Sign-in outcomes (by method,
   room-check success and failure reasons); When clients sign in; Packages in use; Property management system
-  (per connection, occupancy and — where Charges is enabled — room charges); Guest networks (address pool
+  (per connection, occupancy and — where charging is enabled — room charges); Guest networks (address pool
   use, devices, traffic); Services; Addresses and names (DHCP and DNS); Appliance (license, versions,
   WAN/LAN, uptime, CPU, memory, disk).
 - **Actions:** none besides refresh; the page is read-only.
@@ -112,7 +115,8 @@ appliance healthy.
 
 A **service plan** is the technical recipe (speed, devices, data, time). An **internet package** is what a
 client is offered: it uses one service plan and adds who gets it and for how long. **Vouchers** are printed
-cards that hand out a package. **Checkout grace** is what a guest keeps for a short time after checkout.
+cards that hand out a package. What a guest keeps for a short time after PMS checkout is the **Grace
+Period**, under **Hotel**.
 
 ### Internet packages — `/internet-packages`
 What clients are offered on the portal, and what those packages are doing for clients right now.
@@ -158,19 +162,6 @@ The technical service that packages hand out.
   service plan.
 - **Who can change it:** Site admin. **Read-only:** Site viewer.
 
-### Checkout grace — `/checkout-grace`
-Keeps a guest online for a short, capped time after checkout so leaving the site does not cut them off.
-
-- **Shows:** tiles *Policy in force*, *Published version*, *Last changed*, *Emergency fallback used*; any
-  warnings; **what a departing client receives** in plain words (grace time, speeds, data, devices, who
-  qualifies); and the policy history (each version opens with who published it, when and why).
-- **Edit policy / Create hotel policy** (side sheet, two steps): **Terms** — grace time, download/upload
-  speed, data allowance (MB), device handling and limit, stay rules after checkout, with a live *"Client will
-  receive…"* sentence — then **Review**: every change shown old → new, a **reason** (chosen from a list) and
-  **password confirmation**. Publishing creates a new version.
-- **Who can change it:** Site admin, Site IT manager. **Read-only:** Front office, Client relations, Site
-  viewer.
-
 ### Vouchers — `/vouchers`
 Printed cards a client redeems for internet access. Showing or exporting a code needs your password and is
 recorded.
@@ -200,8 +191,8 @@ recorded.
   batch only. **Code keys** (Site admin, Site IT manager): **Retire** a key — **reason + password
   confirmation**, cannot be undone; new batches use a fresh key and printed cards keep working.
 - **Who can change it:**
-  - Issue and cancel cards: Site admin, Site IT manager, Front office, Client relations, Voucher operator.
-  - Show and export codes, Access log: Site admin, Front office, Client relations, Voucher operator (**not**
+  - Issue and cancel cards: Site admin, Site IT manager, Client services, Client relations, Voucher operator.
+  - Show and export codes, Access log: Site admin, Client services, Client relations, Voucher operator (**not**
     the Site IT manager).
   - Change the code format and retire keys: Site admin, Site IT manager.
   - **Read-only** (cards only, never codes): Payments operator, Site viewer.
@@ -209,20 +200,6 @@ recorded.
 ---
 
 ## CLIENTS
-
-### Stays — `/stays`
-What the PMS reports about who is in house and which internet package each room has. Read-only: stays are
-changed in the PMS.
-
-- **Shows:** tiles *In-house stays*, *With an internet package*, *Devices online*, *Arriving*; search (room,
-  guest, reservation, package) and a status filter (In house by default). Table: Room, Guest, Stay, Status,
-  Internet package (package, speed, devices of the limit), Charges.
-- **View** opens the stay: *Internet for this room* (package, service plan, speed, devices online), arrival,
-  departure, charges to room, when the PMS last confirmed the stay, occupants, room type, rate plan, travel
-  agent and folios.
-- If the guest list has arrived and no in-house room has a package, a warning points to Internet packages
-  and Network routing.
-- **Who can see it:** Site admin, Site IT manager, Front office, Client relations, Site viewer. No actions.
 
 ### Client accounts — `/guest-accounts`
 A username and password a client can sign in with, instead of a room number or voucher. Which package the
@@ -240,7 +217,7 @@ client may take is decided by the rules on Internet packages.
 - **One-time reveal:** after creating an account or setting a password, *"Password for {username}"* is shown
   once with **Copy** and **I have it**. It cannot be looked up again. No reason or password confirmation is
   asked on this page.
-- **Who can change it:** Site admin, Site IT manager, Front office, Client relations, Voucher operator.
+- **Who can change it:** Site admin, Site IT manager, Client services, Client relations, Voucher operator.
   **Read-only:** Site viewer.
 
 ### Active sessions — `/sessions`
@@ -256,7 +233,7 @@ several.
   sign-in the room and a link to the stay.
 - **Disconnect** — a confirmation dialog that names the client and how many of their other devices stay
   online. The client can sign in again.
-- **Who can change it:** Site admin, Site IT manager, Front office, Client relations. **Read-only:** Voucher
+- **Who can change it:** Site admin, Site IT manager, Client services, Client relations. **Read-only:** Voucher
   operator, Payments operator, Site viewer.
 
 ### Usage explorer — `/usage`
@@ -267,7 +244,7 @@ behind them.
   and **By device** (look up a MAC address; a note reminds you that a device is not a person).
 - **Drill-down:** the stay's totals, the devices used, the sessions, and **Show evidence** to load the raw
   samples. Read-only.
-- **Who can see it:** Site admin, Site IT manager, Front office, Client relations, Payments operator, Site
+- **Who can see it:** Site admin, Site IT manager, Client services, Client relations, Payments operator, Site
   viewer.
 
 ### Client devices — `/guest-device-self-service`
@@ -277,7 +254,7 @@ another, from the portal's *"You're online"* page.
 - **Shows:** two tiles kept separate — **This site offers it** (On/Off) and **Available in this
   release** (Yes/Not yet) — and a sentence explaining what clients can do with that combination.
 - **Switch on / Switch off** — an inline confirmation with an **optional reason**.
-- **Who can change it:** Site admin, Site IT manager. **Read-only:** Front office, Client relations,
+- **Who can change it:** Site admin, Site IT manager. **Read-only:** Client services, Client relations,
   Payments operator, Site viewer. May be *Not enabled on this appliance*.
 
 ### Online-time budgets — `/online-time`
@@ -287,171 +264,6 @@ device is connected, but the end date applies regardless.
 - **Shows:** tiles *Budgets in use*, *Devices connected on them*, *Ended*; table Time left, of budget, Ends
   on, Devices, State. No client identity is shown. Read-only.
 - **Who can see it:** the roles that can see Active sessions. Usually *Not enabled on this appliance*.
-
-### Post-stay access — `/post-stay`
-After checkout a guest can reconnect with a PIN for a limited time. A PIN belongs to one stay, never to a
-room.
-
-- **Shows:** tiles *Can reconnect now*, *Active, not usable*, *Ended by staff*; table Room, Reservation, Stay,
-  State, PIN, Valid until. A row opens its details.
-- **Reset PIN** — **reason (at least 4 characters) + password confirmation**, then a **one-time reveal**:
-  *"New PIN — shown once"* with **I have given it to the client**. The PIN is not stored in readable form.
-- **End access** — **reason + typed `REVOKE` + password confirmation**. Permanent for that stay; no
-  replacement PIN is issued.
-- **Who can change it:** Site admin, Site IT manager, Front office, Client relations. **Read-only:** Site
-  viewer. May be *Not enabled on this appliance*.
-
----
-
-## PROPERTY MANAGEMENT SYSTEM
-
-The PMS is the site's reservation system. The appliance keeps a local copy of who is in house (the guest
-list) so room sign-in keeps working when the PMS link drops.
-
-### PMS connection — `/pms-interfaces`
-(In-page title *PMS connections*.) The links to the PMS: whether guests can sign in with their room number
-right now, and where the guest list comes from.
-
-- **Shows:** tiles *Connections*, *Room sign-in* (*Working*, *Partly working*, *Not working*, *Not in use*),
-  *Guests in house*, *Last heard from a PMS*. One card per connection with its state, the checks room
-  sign-in depends on, guest-list state and warnings such as messages needing a decision. The page refreshes
-  every 20 seconds (every 4 seconds while a guest-list refresh runs). An **Advanced diagnostics** section
-  links to *Roster reconciliation* and *Unresolved departures*, with a warning when there is something to
-  investigate.
-- **Add connection** (wizard): **Provider → Connection → Credentials** (only when the provider needs one) **→
-  Review**. The result is a saved draft; *"Publish and activate"* are separate steps, and both ask for your
-  password.
-- **Manage** opens a side sheet with tabs:
-  - **Overview** — the checks, guest list and backlog, links to investigate further.
-  - **Configuration** — the live version and drafts. **Put live** — **password confirmation** with a reason
-    chosen from a list. Also *Connection recovery* numbers with *Currently* and *Change it when* guidance,
-    saved with a reason.
-  - **Credentials** — whether one is stored; **Store / Replace credential** — **password confirmation**.
-    Nothing typed here is shown again.
-  - **Guest networks** using this connection.
-  - **History** — every version, with the option to put an earlier one back (the same **Put live** dialog).
-  - **Actions** — **Activate**, **Pause room sign-in**, **Wind down**: each a dialog stating the consequence,
-    with a **reason** (from a list) and **password confirmation**. **Test the connection** (reads a sample,
-    writes nothing). **Refresh the guest list now** — **password confirmation** and a reason from a list; the
-    current list stays in use until the new one is complete, and progress is shown in stages with the
-    record count (there is no percentage because the PMS does not say how many records will come).
-    Retiring a connection permanently is not offered here.
-- **Who can change it:** Site admin, Site IT manager. **Read-only:** Front office, Client relations, Site
-  viewer.
-
-Two diagnostic pages are reached from **Advanced diagnostics** and are not in the menu; both are read-only
-and have no buttons, on purpose:
-
-- **Unresolved departures** — `/pms-reconciliation`: departures that could not be matched to exactly one
-  stay, rooms with several stays, and stays past their departure date. The PMS resolves these, not this
-  screen. Visible to Site admin, Site IT manager, Front office, Client relations, Site viewer.
-- **Roster reconciliation** — `/roster-reconciliation`: the automatic process that keeps the guest list
-  identical to the PMS — what blocks it, what the next run will do, and past runs. Visible to Site admin,
-  Site IT manager, Front office.
-
-### Network routing — `/pms-routing`
-(In-page title *Which PMS each network checks*.) Which PMS each guest network's room sign-ins are checked
-against.
-
-- **Shows:** a *Why this matters* note (a network pointed at the wrong PMS produces no error — guests simply
-  cannot sign in); **Networks that can offer room sign-in** (network, the connection it is checked against,
-  and scope: that one PMS or *Every active PMS*); **Networks with no PMS** (a legitimate setup, because
-  vouchers and client accounts do not use the PMS).
-- **Change / Point at a PMS** — a dialog to choose the connection and scope. **Remove mapping** — a
-  confirmation dialog.
-- **Who can change it:** Site admin only. **Read-only:** Site IT manager, Front office, Client relations,
-  Site viewer.
-
-### PMS activity — `/stay-events`
-Every message the PMS sent (check-ins, check-outs, stay changes) and whether the guest list was updated from
-it. Answers "has Wi-Fi seen that check-in yet?"
-
-- **Shows:** live status; tiles *Last message*, *Applied*, *Needs a decision*, *Not matched to a stay*;
-  search and a filter by result; table About (room and guest), What happened, Result, times, and **Details**
-  (including the PMS's own message identifier to quote to the PMS vendor). Read-only.
-- **Who can see it:** Site admin, Site IT manager, Front office, Client relations, Site viewer.
-
-### Client sign-in checks — `/pms-resolutions`
-Recent room sign-in checks against the PMS and why they were refused. Deliberately names no client.
-
-- **Shows:** live status; tiles *Checks recorded*, *Let online*, *Refused*, *Networks involved*; **Why clients
-  were refused** (each outcome with what it means and what to do); **By Wi-Fi network**, which calls out the
-  pattern where one network fails while others work; **Recent attempts** (newest first, up to 200:
-  time, network, result). Read-only.
-- **Who can see it:** Site admin, Site IT manager, Site viewer.
-
-### Client sign-in attempts — `/guest-signin-attempts`
-The desk's "why can't this client get online?" tool, and releasing a device that has been asked to wait
-after too many wrong tries.
-
-- **Sign-in attempts tab:** tiles *Attempts*, *Did not connect*, *Details did not match*, *System-side
-  failures*; search, room, result, credential type and period (24 hours to 30 days); table When, Room,
-  Network, Result, Why, Entered as, Guest-list age, Device (up to 200 rows). **Details** shows the
-  diagnostics and — only for roles allowed to see client credentials — *what was entered, and what would have
-  been accepted*. Other roles see an explanation instead. Two results come from the licence rather than the
-  client: *Licence refused new clients* (the licence did not admit anyone new at that moment) and *Licensed
-  capacity full* (the client's details were right, but the appliance was at its licensed number of clients
-  online).
-- **Active restrictions tab:** devices currently asked to wait, with the last room typed (marked
-  unverified), failures and a live countdown. **Release** — **reason required** (at least 3 characters), no
-  password; the dialog states that **releasing does not sign the client in**.
-- **Who can do what:**
-  - See the attempts list: Site admin, Site IT manager, Front office, Client relations, Site viewer.
-  - See what the client typed: Site admin, Site IT manager, Front office, Client relations (not Site viewer).
-  - Release a restriction: Site admin, Site IT manager, Front office, Client relations. **Read-only:** Site
-    viewer.
-  - The thresholds themselves are set on **Client Portal → Sign-in methods**.
-
-### Duplicate sources — `/pms-source-conflicts`
-Two PMS connections claiming the same rooms. Until one is given authority, guests in the contested rooms
-cannot be verified.
-
-- **Shows:** Connection, Conflicts with, Severity, Resolution. Read-only.
-- **Who can see it:** Site admin, Site IT manager, Front office, Client relations, Site viewer.
-
-### Cross-PMS transfer — `/stay-transfers`
-Moves a guest's live access from a stay on one PMS to a stay on another (for example a guest moved to the
-sister property). Not for normal room moves.
-
-- **Transfer a guest:** From stay, To stay, **Preview** (what will move, or why it cannot), then **Transfer
-  access** — **reason (at least 4 characters) + password confirmation**.
-- **Also shows:** *Review signals* (ambiguous sign-ins in the last 7 days) and *Recorded transfers*.
-- **Who can change it:** Site admin, Site IT manager, Front office, Client relations. **Read-only:** Site
-  viewer.
-
----
-
-## CHARGES
-
-Posting internet charges to a guest's room bill in the PMS, and online payments. Selling internet is not
-switched on today, so these pages are usually quiet or *Not enabled on this appliance*. Every decision here
-is an audited statement about real money.
-
-**Who can change it (all four pages):** Site admin, Payments operator. **Read-only:** Site IT manager,
-Front office, Site viewer.
-
-### Charge health — `/financial-health`
-Whether money is moving and, if not, why: an overall status with reasons, tiles for **PMS posting** (queued,
-in flight, held, oldest waiting, unknown outcomes, review queue), **Online payment** (created, pending,
-unknown, settlements) and **Configuration**. Action: **Refresh** only.
-
-### Manual review — `/financial-review`
-Decide what happened to a room charge whose outcome is unknown. The queue opens into the evidence: what the
-charge was attached to, every attempt, decisions already recorded. **Record decision** — what you
-established (from a list), why, the evidence source and a reference to it (never the evidence itself), and
-**password confirmation**.
-
-### Settlements — `/financial-settlements`
-Whether a client was actually charged, and what has been given back. Status filter (Required, In progress,
-Settled, Manual review, Failed, Partially reversed, Reversed) and the payment history of each. Read-only;
-there is no refund button.
-
-### Recovery — `/financial-recovery`
-After a database restore, reconcile the money that was in flight before charging resumes. Nothing here
-re-sends anything by itself. When recovery is active: per held item, record what you established (already
-completed / never completed / abandon / escalate) with evidence; **Authorize one attempt** for a posting that
-must still go out (with a reason and evidence); finally **Release financial recovery** with a note on why it
-is safe to resume. Every decision needs **password confirmation** (a password field on the page).
 
 ---
 
@@ -466,7 +278,7 @@ disconnect clients already online.
 - **Method cards, each with an on/off switch:** **Voucher code**; **Client account**; **Room sign-in (from
   the PMS)** — with a warning when room sign-in is not working, and the **Room sign-in mode**: what the guest
   types besides the room number (*Any of the three (recommended)*, *Last name (surname)*, *First name*,
-  *Reservation number*) and a link to Network routing; **Email code** and **SMS code** (*Not available* until
+  *Reservation number*) and a link to PMS routing; **Email code** and **SMS code** (*Not available* until
   a sender exists and is switched on under Email & SMS); **Social login** (a checkbox per configured
   provider).
 - **Client sign-in protection:** *Maximum failed attempts*, *Observation window*, *Wait after too many
@@ -474,9 +286,9 @@ disconnect clients already online.
   **Discard**.
 - Which methods can be offered is also limited by the license.
 - **Who can change it:**
-  - Methods: Site admin, Site IT manager. **Read-only:** Front office, Client relations, Site viewer.
-  - Protection thresholds: Site admin, Site IT manager. The desk (Front office, Client relations) and Site
-    viewer see them read-only; the desk releases single devices on Client sign-in attempts instead.
+  - Methods: Site admin, Site IT manager. **Read-only:** Client services, Client relations, Site viewer.
+  - Protection thresholds: Site admin, Site IT manager. The desk (Client services, Client relations) and Site
+    viewer see them read-only; the desk releases single devices on Guest sign-in attempts instead.
 
 ### Portal settings — `/portal-branding`
 The designer for the client sign-in page, with a live preview. One **Save changes**; clients see the result as
@@ -510,7 +322,7 @@ Addresses a client device may reach before it has signed in. Keep it to what the
 - **Table:** Type (Domain name, Single address, Address range), Address, Ports (every port if empty), Why,
   Added. **Allow a site** dialog: type, address, ports (comma separated), why it is needed. **Remove** — a
   confirmation dialog.
-- **Who can change it:** Site admin, Site IT manager. **Read-only:** Front office, Client relations, Site
+- **Who can change it:** Site admin, Site IT manager. **Read-only:** Client services, Client relations, Site
   viewer.
 
 ### Social login — `/social-providers`
@@ -530,6 +342,201 @@ cannot be used.
   (write-only), account SID or API user, from address and name (email), **Use this sender**. **Remove** — a
   confirmation dialog.
 - **Who can change it:** Site admin, Site IT manager. **Read-only:** Site viewer.
+
+---
+
+## HOTEL
+
+Everything whose meaning depends on hospitality or a PMS is grouped here; the rest of the Admin Console is
+industry-neutral and speaks of *clients*. Inside Hotel, *guest*, *stay*, *room* and *check-in/checkout* keep
+the PMS's own meaning. The section appears only when the appliance serves these screens.
+
+The PMS is the site's reservation system. The appliance keeps a local copy of who is in house (the guest
+list) so room sign-in keeps working when the PMS link drops.
+
+### PMS connection — `/pms-interfaces`
+(In-page title *PMS connections*.) The links to the PMS: whether guests can sign in with their room number
+right now, and where the guest list comes from.
+
+- **Shows:** tiles *Connections*, *Room sign-in* (*Working*, *Partly working*, *Not working*, *Not in use*),
+  *Guests in house*, *Last heard from a PMS*. One card per connection with its state, the checks room
+  sign-in depends on, guest-list state and warnings such as messages needing a decision. The page refreshes
+  every 20 seconds (every 4 seconds while a guest-list refresh runs). An **Advanced diagnostics** section
+  links to *Roster reconciliation* and *Unresolved departures*, with a warning when there is something to
+  investigate.
+- **Add connection** (wizard): **Provider → Connection → Credentials** (only when the provider needs one) **→
+  Review**. The result is a saved draft; *"Publish and activate"* are separate steps, and both ask for your
+  password.
+- **Manage** opens a side sheet with tabs:
+  - **Overview** — the checks, guest list and backlog, links to investigate further.
+  - **Configuration** — the live version and drafts. **Put live** — **password confirmation** with a reason
+    chosen from a list. Also *Connection recovery* numbers with *Currently* and *Change it when* guidance,
+    saved with a reason.
+  - **Credentials** — whether one is stored; **Store / Replace credential** — **password confirmation**.
+    Nothing typed here is shown again.
+  - **Guest networks** using this connection.
+  - **History** — every version, with the option to put an earlier one back (the same **Put live** dialog).
+  - **Actions** — **Activate**, **Pause room sign-in**, **Wind down**: each a dialog stating the consequence,
+    with a **reason** (from a list) and **password confirmation**. **Test the connection** (reads a sample,
+    writes nothing). **Refresh the guest list now** — **password confirmation** and a reason from a list; the
+    current list stays in use until the new one is complete, and progress is shown in stages with the
+    record count (there is no percentage because the PMS does not say how many records will come).
+    Retiring a connection permanently is not offered here.
+- **Who can change it:** Site admin, Site IT manager. **Read-only:** Client services, Client relations, Site
+  viewer.
+
+Two diagnostic pages are reached from **Advanced diagnostics** and are not in the menu; both are read-only
+and have no buttons, on purpose:
+
+- **Unresolved departures** — `/pms-reconciliation`: departures that could not be matched to exactly one
+  stay, rooms with several stays, and stays past their departure date. The PMS resolves these, not this
+  screen. Visible to Site admin, Site IT manager, Client services, Client relations, Site viewer.
+- **Roster reconciliation** — `/roster-reconciliation`: the automatic process that keeps the guest list
+  identical to the PMS — what blocks it, what the next run will do, and past runs. Visible to Site admin,
+  Site IT manager, Client services.
+
+### Stays — `/stays`
+What the PMS reports about who is in house and which internet package each room has. Read-only: stays are
+changed in the PMS.
+
+- **Shows:** tiles *In-house stays*, *With an internet package*, *Devices online*, *Arriving*; search (room,
+  guest, reservation, package) and a status filter (In house by default). Table: Room, Guest, Stay, Status,
+  Internet package (package, speed, devices of the limit), Charges.
+- **View** opens the stay: *Internet for this room* (package, service plan, speed, devices online), arrival,
+  departure, charges to room, when the PMS last confirmed the stay, occupants, room type, rate plan, travel
+  agent and folios.
+- If the guest list has arrived and no in-house room has a package, a warning points to Internet packages
+  and PMS routing.
+- **Who can see it:** Site admin, Site IT manager, Client services, Client relations, Site viewer. No actions.
+
+### PMS activity — `/stay-events`
+Every message the PMS sent (check-ins, check-outs, stay changes) and whether the guest list was updated from
+it. Answers "has Wi-Fi seen that check-in yet?"
+
+- **Shows:** live status; tiles *Last message*, *Applied*, *Needs a decision*, *Not matched to a stay*;
+  search and a filter by result; table About (room and guest), What happened, Result, times, and **Details**
+  (including the PMS's own message identifier to quote to the PMS vendor). Read-only.
+- **Who can see it:** Site admin, Site IT manager, Client services, Client relations, Site viewer.
+
+### Guest sign-in checks — `/pms-resolutions`
+(Formerly *Client sign-in checks*.)
+Recent room sign-in checks against the PMS and why they were refused. Deliberately names no guest.
+
+- **Shows:** live status; tiles *Checks recorded*, *Let online*, *Refused*, *Networks involved*; **Why clients
+  were refused** (each outcome with what it means and what to do); **By Wi-Fi network**, which calls out the
+  pattern where one network fails while others work; **Recent attempts** (newest first, up to 200:
+  time, network, result). Read-only.
+- **Who can see it:** Site admin, Site IT manager, Site viewer.
+
+### Guest sign-in attempts — `/guest-signin-attempts`
+(Formerly *Client sign-in attempts*.)
+The desk's "why can't this client get online?" tool, and releasing a device that has been asked to wait
+after too many wrong tries.
+
+- **Sign-in attempts tab:** tiles *Attempts*, *Did not connect*, *Details did not match*, *System-side
+  failures*; search, room, result, credential type and period (24 hours to 30 days); table When, Room,
+  Network, Result, Why, Entered as, Guest-list age, Device (up to 200 rows). **Details** shows the
+  diagnostics and — only for roles allowed to see client credentials — *what was entered, and what would have
+  been accepted*. Other roles see an explanation instead. Two results come from the licence rather than the
+  client: *Licence refused new clients* (the licence did not admit anyone new at that moment) and *Licensed
+  capacity full* (the client's details were right, but the appliance was at its licensed number of clients
+  online).
+- **Active restrictions tab:** devices currently asked to wait, with the last room typed (marked
+  unverified), failures and a live countdown. **Release** — **reason required** (at least 3 characters), no
+  password; the dialog states that **releasing does not sign the client in**.
+- **Who can do what:**
+  - See the attempts list: Site admin, Site IT manager, Client services, Client relations, Site viewer.
+  - See what the client typed: Site admin, Site IT manager, Client services, Client relations (not Site viewer).
+  - Release a restriction: Site admin, Site IT manager, Client services, Client relations. **Read-only:** Site
+    viewer.
+  - The thresholds themselves are set on **Client Portal → Sign-in methods**.
+
+### Grace Period — `/checkout-grace`
+(Formerly *Checkout grace*.) Keeps a guest online for a short, capped time after checkout so leaving the site does not cut them off.
+
+- **Shows:** tiles *Policy in force*, *Published version*, *Last changed*, *Emergency fallback used*; any
+  warnings; **what a departing client receives** in plain words (grace time, speeds, data, devices, who
+  qualifies); and the policy history (each version opens with who published it, when and why).
+- **Edit policy / Create hotel policy** (side sheet, two steps): **Terms** — grace time, download/upload
+  speed, data allowance (MB), device handling and limit, stay rules after checkout, with a live *"Client will
+  receive…"* sentence — then **Review**: every change shown old → new, a **reason** (chosen from a list) and
+  **password confirmation**. Publishing creates a new version.
+- **Who can change it:** Site admin, Site IT manager. **Read-only:** Client services, Client relations, Site
+  viewer.
+
+### Post-stay access — `/post-stay`
+After checkout a guest can reconnect with a PIN for a limited time. A PIN belongs to one stay, never to a
+room.
+
+- **Shows:** tiles *Can reconnect now*, *Active, not usable*, *Ended by staff*; table Room, Reservation, Stay,
+  State, PIN, Valid until. A row opens its details.
+- **Reset PIN** — **reason (at least 4 characters) + password confirmation**, then a **one-time reveal**:
+  *"New PIN — shown once"* with **I have given it to the client**. The PIN is not stored in readable form.
+- **End access** — **reason + typed `REVOKE` + password confirmation**. Permanent for that stay; no
+  replacement PIN is issued.
+- **Who can change it:** Site admin, Site IT manager, Client services, Client relations. **Read-only:** Site
+  viewer. May be *Not enabled on this appliance*.
+
+**Charges.** Charge health, Manual review, Settlements and Recovery cover posting internet charges to a
+guest's room bill in the PMS, and online payments. Selling internet is not switched on today, so these pages
+are usually quiet or *Not enabled on this appliance*. Every decision here is an audited statement about real
+money.
+
+**Who can change it (all four charge pages):** Site admin, Payments operator. **Read-only:** Site IT manager,
+Client services, Site viewer.
+
+### Charge health — `/financial-health`
+Whether money is moving and, if not, why: an overall status with reasons, tiles for **PMS posting** (queued,
+in flight, held, oldest waiting, unknown outcomes, review queue), **Online payment** (created, pending,
+unknown, settlements) and **Configuration**. Action: **Refresh** only.
+
+### Manual review — `/financial-review`
+Decide what happened to a room charge whose outcome is unknown. The queue opens into the evidence: what the
+charge was attached to, every attempt, decisions already recorded. **Record decision** — what you
+established (from a list), why, the evidence source and a reference to it (never the evidence itself), and
+**password confirmation**.
+
+### Settlements — `/financial-settlements`
+Whether a client was actually charged, and what has been given back. Status filter (Required, In progress,
+Settled, Manual review, Failed, Partially reversed, Reversed) and the payment history of each. Read-only;
+there is no refund button.
+
+### Recovery — `/financial-recovery`
+After a database restore, reconcile the money that was in flight before charging resumes. Nothing here
+re-sends anything by itself. When recovery is active: per held item, record what you established (already
+completed / never completed / abandon / escalate) with evidence; **Authorize one attempt** for a posting that
+must still go out (with a reason and evidence); finally **Release financial recovery** with a note on why it
+is safe to resume. Every decision needs **password confirmation** (a password field on the page).
+
+### PMS routing — `/pms-routing`
+(Formerly *PMS routing*. In-page title *Which PMS each network checks*.) Which PMS each guest network's room sign-ins are checked
+against.
+
+- **Shows:** a *Why this matters* note (a network pointed at the wrong PMS produces no error — guests simply
+  cannot sign in); **Networks that can offer room sign-in** (network, the connection it is checked against,
+  and scope: that one PMS or *Every active PMS*); **Networks with no PMS** (a legitimate setup, because
+  vouchers and client accounts do not use the PMS).
+- **Change / Point at a PMS** — a dialog to choose the connection and scope. **Remove mapping** — a
+  confirmation dialog.
+- **Who can change it:** Site admin only. **Read-only:** Site IT manager, Client services, Client relations,
+  Site viewer.
+
+### Duplicate sources — `/pms-source-conflicts`
+Two PMS connections claiming the same rooms. Until one is given authority, guests in the contested rooms
+cannot be verified.
+
+- **Shows:** Connection, Conflicts with, Severity, Resolution. Read-only.
+- **Who can see it:** Site admin, Site IT manager, Client services, Client relations, Site viewer.
+
+### Cross-PMS transfer — `/stay-transfers`
+Moves a guest's live access from a stay on one PMS to a stay on another (for example a guest moved to the
+sister property). Not for normal room moves.
+
+- **Transfer a guest:** From stay, To stay, **Preview** (what will move, or why it cannot), then **Transfer
+  access** — **reason (at least 4 characters) + password confirmation**.
+- **Also shows:** *Review signals* (ambiguous sign-ins in the last 7 days) and *Recorded transfers*.
+- **Who can change it:** Site admin, Site IT manager, Client services, Client relations. **Read-only:** Site
+  viewer.
 
 ---
 
@@ -620,7 +627,7 @@ Checkouts the configured policy could not handle on its own (for example when an
 Table: alert, state, trigger, reason, boundary time, raised. **Acknowledge** and **Resolve**. Empty state:
 *"No open alerts"*.
 
-- **Who can change it:** Site admin, Site IT manager, Front office, Client relations. **Read-only:** Site
+- **Who can change it:** Site admin, Site IT manager, Client services, Client relations. **Read-only:** Site
   viewer.
 
 ### Activity — `/audit`
@@ -632,7 +639,7 @@ edited or removed.
   management system, Networks, Licence & cloud, Backups, Diagnostics*.
 - **List:** a plain-language title, category and security badges, who, when and from which address; expand
   for the recorded details. Up to 500 entries.
-- **Who can see it:** Site admin, Site IT manager, Front office, Client relations, Payments operator, Site
+- **Who can see it:** Site admin, Site IT manager, Client services, Client relations, Payments operator, Site
   viewer.
 
 ### Appliance & licence — `/appliance`
@@ -679,7 +686,7 @@ A complete copy of the site's data, taken nightly and on demand.
   password confirmation**. Progress is shown until it finishes, then a *Last restore* card.
 - **Storage and retention** (collapsed): disk used, backups kept, nightly sweep time and how long things are
   kept; changing them needs **password confirmation**.
-- **Who can change it:** Site admin. **Read-only:** Site IT manager, Front office, Client relations, Site
+- **Who can change it:** Site admin. **Read-only:** Site IT manager, Client services, Client relations, Site
   viewer. (Download is offered to every role that can see the page.)
 
 ### Operators — `/operators`
@@ -700,34 +707,34 @@ Site staff accounts for this appliance.
 
 W = can change, R = read-only, — = not shown. The appliance enforces these on every request.
 
-| Page | Site admin | Site IT manager | Front office | Client relations | Voucher operator | Payments operator | Site viewer |
+| Page | Site admin | Site IT manager | Client services | Client relations | Voucher operator | Payments operator | Site viewer |
 |---|---|---|---|---|---|---|---|
 | Overview | R | R | R | R | R | R | R |
 | Internet packages, Service plans | W | — | — | — | — | — | R |
-| Checkout grace | W | W | R | R | — | — | R |
 | Vouchers (cards) | W | W | W | W | W | R | R |
 | Vouchers (show / export codes) | W | — | W | W | W | — | — |
 | Vouchers (code format, keys) | W | W | R | R | R | — | R |
-| Stays | R | R | R | R | — | — | R |
 | Client accounts | W | W | W | W | W | — | R |
 | Active sessions | W | W | W | W | R | R | R |
 | Usage explorer | R | R | R | R | — | R | R |
 | Client devices | W | W | R | R | — | R | R |
 | Online-time budgets | R | R | R | R | R | R | R |
-| Post-stay access | W | W | W | W | — | — | R |
-| PMS connection | W | W | R | R | — | — | R |
-| Network routing | W | R | R | R | — | — | R |
-| PMS activity, Duplicate sources | R | R | R | R | — | — | R |
-| Client sign-in checks | R | R | — | — | — | — | R |
-| Client sign-in attempts (list) | R | R | R | R | — | — | R |
-| Client sign-in attempts (what was typed) | R | R | R | R | — | — | — |
-| Client sign-in attempts (release) | W | W | W | W | — | — | R |
-| Cross-PMS transfer | W | W | W | W | — | — | R |
-| Charges (all four pages) | W | R | R | — | — | W | R |
 | Sign-in methods | W | W | R | R | — | — | R |
 | Sign-in protection thresholds | W | W | R | R | — | — | R |
 | Portal settings, Social login, Email & SMS | W | W | — | — | — | — | R |
 | Allowed sites | W | W | R | R | — | — | R |
+| PMS connection | W | W | R | R | — | — | R |
+| Stays | R | R | R | R | — | — | R |
+| PMS activity, Duplicate sources | R | R | R | R | — | — | R |
+| Guest sign-in checks | R | R | — | — | — | — | R |
+| Guest sign-in attempts (list) | R | R | R | R | — | — | R |
+| Guest sign-in attempts (what was typed) | R | R | R | R | — | — | — |
+| Guest sign-in attempts (release) | W | W | W | W | — | — | R |
+| Grace Period | W | W | R | R | — | — | R |
+| Post-stay access | W | W | W | W | — | — | R |
+| Charge health, Manual review, Settlements, Recovery | W | R | R | — | — | W | R |
+| PMS routing | W | R | R | R | — | — | R |
+| Cross-PMS transfer | W | W | W | W | — | — | R |
 | Networking (all pages) | W | W | — | — | — | — | R |
 | Diagnostics | W | W | R | R | R | R | R |
 | Alerts | W | W | W | W | — | — | R |
@@ -744,7 +751,7 @@ W = can change, R = read-only, — = not shown. The appliance enforces these on 
 |---|---|---|
 | Disable an internet package | Internet packages | Reason + password |
 | Delete a package or service plan | Internet packages, Service plans | Reason + password (refused while in use) |
-| Publish a checkout grace policy | Checkout grace | Reason (from a list) + password |
+| Publish a Grace Period policy | Grace Period | Reason (from a list) + password |
 | Show a voucher code / export a batch | Vouchers | Reason + password, recorded |
 | Cancel a voucher card | Vouchers | Reason + password |
 | Change the voucher code format | Vouchers → Code security | Reason |
@@ -757,7 +764,7 @@ W = can change, R = read-only, — = not shown. The appliance enforces these on 
 | Store or replace a PMS credential | PMS connection | Password |
 | Activate / pause / wind down a PMS connection | PMS connection | Reason (from a list) + password |
 | Refresh the guest list | PMS connection | Reason (from a list) + password |
-| Release a sign-in restriction | Client sign-in attempts | Reason (no password) |
+| Release a sign-in restriction | Guest sign-in attempts | Reason (no password) |
 | Transfer access between PMSs | Cross-PMS transfer | Reason + password |
 | Record a charge decision / recovery decision | Manual review, Recovery | Password (plus the decision's own fields) |
 | Save custom CSS or HTML / restore a portal save | Portal settings | Password |

@@ -1,7 +1,7 @@
 # OneGate Admin Console — Configuration Manual
 
 Step-by-step instructions for configuring an appliance from **OneGate Admin
-Console** (formerly Hotel Admin), the console on the appliance. (In the Admin Console the **Clients** and **Client Portal** menu groups were formerly *Guests* and *Guest portal*; Client Portal was formerly Guest Portal.) For a description of what each page shows,
+Console** (formerly Hotel Admin), the console on the appliance. (In the Admin Console the **Clients** and **Client Portal** menu groups were formerly *Guests* and *Guest portal*; Client Portal was formerly Guest Portal.) Hospitality and PMS functions — the PMS connection, Stays, the Grace Period, post-stay access and room charges — are grouped under **Hotel**, which replaces the former *Property management system* and *Charges* groups; the rest of the console is industry-neutral. For a description of what each page shows,
 see [hotel-admin-reference.md](hotel-admin-reference.md).
 
 **Typical order:** Activate (licence) → WAN / LAN → build a Guest
@@ -151,7 +151,7 @@ immediately. Which methods can be offered also depends on the license.
 
 - **Voucher code** — needs an internet package and printed cards (§6).
 - **Client account** — username and password accounts (§6).
-- **Room sign-in (from the PMS)** — needs a working PMS connection and Network
+- **Room sign-in (from the PMS)** — needs a working PMS connection and PMS
   routing (§7). Choose what the guest types besides the room number: *Any of the
   three (recommended)*, *Last name (surname)*, *First name* or *Reservation
   number*.
@@ -159,8 +159,8 @@ immediately. Which methods can be offered also depends on the license.
 - **Social login** — tick each provider set up under **Social login** (§9).
 - **Client sign-in protection** — maximum failed attempts, observation window and
   how long a device must wait. Only the Site admin and Site IT manager can
-  change these; reception can release a single waiting device on **Client sign-in
-  attempts**.
+  change these; the desk (Client services or Client relations) can release a
+  single waiting device on **Hotel → Guest sign-in attempts**.
 
 Make sure anything the sign-in page needs before sign-in is listed under
 **Allowed sites** (§11).
@@ -240,7 +240,7 @@ password sign-in, an alternative to vouchers:
 
 ## 7. Connect the PMS (room sign-in)
 
-1. **Property management system → PMS connection** (`/pms-interfaces`) → **Add
+1. **Hotel → PMS connection** (`/pms-interfaces`) → **Add
    connection**: **Provider → Connection** (name, PMS time zone, address and
    port, timing settings) **→ Credentials** (if the provider needs one; stored
    write-only) **→ Review**. The configuration is saved as a draft.
@@ -248,7 +248,7 @@ password sign-in, an alternative to vouchers:
    (**password**, with a reason).
 3. **Actions** → **Activate** (**password**, with a reason). **Test the
    connection** reads a small sample and writes nothing to the PMS.
-4. **Property management system → Network routing** (`/pms-routing`, Site admin
+4. **Hotel → PMS routing** (`/pms-routing`, Site admin
    only): point each guest network that should offer room sign-in at the
    connection.
 5. Turn on **Room sign-in** under **Sign-in methods** (§5).
@@ -281,8 +281,8 @@ complete.
 ## 10. Charges (room charges and online payments)
 
 Selling internet is not switched on today; packages are free to the client. The
-**Charges** group (Charge health, Manual review, Settlements, Recovery) shows how
-room charges and online payments are moving where the feature is enabled, and is
+charge pages under **Hotel** (Charge health, Manual review, Settlements, Recovery) show how
+room charges and online payments are moving where the feature is enabled, and are
 otherwise *Not enabled on this appliance*. Decisions there belong to the Site
 admin and Payments operator and each needs your password.
 
@@ -328,10 +328,10 @@ default). Roles:
 | Site viewer | Read-only across the appliance; never sees client credentials or voucher codes |
 | Voucher operator | Issue, cancel and show voucher codes; client accounts; read sessions |
 | Client relations operator | Vouchers (including showing codes), client accounts, sessions (including disconnect), post-stay access, releasing a waiting device; read-only elsewhere |
-| Front office operator | As client relations, plus read-only Charges and roster reconciliation |
-| Payments operator | Charges decisions; read-only sessions, usage and voucher cards |
-| Site IT manager | Networking, PMS connection, sign-in methods and protection, portal settings, checkout grace, code format, diagnostics; cannot show voucher codes, does not see Internet packages or Service plans, cannot manage operators or take backups |
-| Site admin | Everything, including operators, internet packages, Network routing and backups |
+| Client services operator | As client relations, plus read-only charge pages and roster reconciliation |
+| Payments operator | Charge decisions (Hotel); read-only sessions, usage and voucher cards |
+| Site IT manager | Networking, PMS connection, sign-in methods and protection, portal settings, Grace Period, code format, diagnostics; cannot show voucher codes, does not see Internet packages or Service plans, cannot manage operators or take backups |
+| Site admin | Everything, including operators, internet packages, PMS routing and backups |
 
 > **Reading a printed code is its own permission.** Issuing and cancelling cards
 > is one power; recovering a code in the clear is another, and it asks for the
@@ -374,7 +374,8 @@ normally need to intervene. If you do: **Recheck** re-runs a health check,
 | Decide what clients are offered | Internet offering → Internet packages |
 | Issue guest Wi-Fi cards | Internet offering → Vouchers → Issue vouchers |
 | Turn sign-in methods on or off | Client Portal → Sign-in methods |
-| Room-number sign-in | Property management system → PMS connection, Network routing |
+| Room-number sign-in | Hotel → PMS connection, PMS routing |
+| Post-checkout access for guests | Hotel → Grace Period, Post-stay access |
 | Email/SMS codes | Client Portal → Email & SMS |
 | Google/Apple sign-in | Client Portal → Social login |
 | Change how the sign-in page looks | Client Portal → Portal settings |
