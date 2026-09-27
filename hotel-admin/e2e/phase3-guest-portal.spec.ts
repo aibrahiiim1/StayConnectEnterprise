@@ -17,7 +17,7 @@ import { portalHTML as renderLanding } from "./portal-page";
 // data-plane/cmd/portald/pms_phase3_handlers_test.go. Neither half proves the other, which is why both exist.
 
 const UNIFORM_MESSAGE =
-  "We could not verify your stay. Please check your details or contact reception.";
+  "We could not verify your stay. Please check your details or contact the site team for assistance.";
 
 // renderLanding comes from ./portal-page now.
 //

@@ -8,7 +8,7 @@ package main
 // on this appliance (master=false portal=false admin=false), so those routes are deliberately not mounted.
 //
 // The defect was on this side. tryIAMv2Auth already contained the right answer for exactly this case --
-// "Internet packages are not available right now. Please ask reception." -- behind a check for
+// "Internet packages are not available right now. Please contact the site team for assistance." -- behind a check for
 // `commerceSessions == nil`. But newHandler built that store unconditionally, so the field was never nil,
 // the branch was unreachable, and its own comment ("the store is only constructed when the Phase-2 portal
 // surface is on") described something the code did not do. The guest was issued a commerce cookie, sent to

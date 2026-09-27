@@ -25,11 +25,11 @@ Top to bottom:
 6. **The form** for the chosen method, and **"Or sign in with"** links to the group's other methods.
 7. **Extras:** the site's help line and custom HTML block.
 8. **Footer:** a **Terms of use** link (if the site set one; it is a link only, there is no acceptance
-   checkbox) and a **Device information** button that shows the device's IP and MAC address — *"Reception
-   may ask for these if you need help connecting."*
+   checkbox) and a **Device information** button that shows the device's IP and MAC address — *"The site
+   team may ask for these if you need help connecting."*
 
 If no method is enabled the page says: *"There is no way to sign in on this network yet. Please contact
-reception."*
+the site team for assistance."*
 
 ## Sign-in methods
 
@@ -44,7 +44,7 @@ license.
 | **Email** | Email address → **Send code**, then the 6-digit code → **Verify** | Needs a sender under **Email & SMS**. *Try a different email* starts again. |
 | **Phone** | Phone number with country code → **Send code**, then the 6-digit code → **Verify** | Needs a text-message sender under **Email & SMS**. |
 | **Social** | **Continue with Google / Apple / Facebook** | Leaves for the provider and comes back. Providers are set up under **Social login**. |
-| **Post-stay** | Post-stay PIN given at checkout → **Reconnect** | Lets a departed guest reconnect for a limited time (see **Post-stay access**). |
+| **Post-stay** | Post-stay PIN given at checkout → **Reconnect** | Lets a departed guest reconnect for a limited time (see **Hotel → Post-stay access**). |
 
 ## Messages clients can see
 
@@ -54,7 +54,7 @@ in it, and a wrong room and a wrong name give the same message. Examples (Englis
 | Situation | Message |
 |---|---|
 | Wrong room or guest detail | "The room number or guest detail you entered is incorrect. Check the room number and enter the full first name, family name, or reservation number." |
-| Stay cannot be checked right now | "We are unable to verify your stay right now. Please try again or contact Reception." |
+| Stay cannot be checked right now | "We are unable to verify your stay right now. Please try again or contact the site team for assistance." |
 | Too many attempts | "Too many attempts. Please wait N seconds and try again." with a live countdown, then "You can try again now." |
 | Wrong voucher | "That voucher code didn't work. Check the code and try again." |
 | Wrong account | "The username or password is incorrect." |
@@ -62,14 +62,14 @@ in it, and a wrong room and a wrong name give the same message. Examples (Englis
 | Appliance at its licensed number of online clients | "The guest network is at capacity. Please try again shortly." |
 | Device not on the guest network | "Your device isn't on the guest network." |
 | Access ended | "Your Internet package has ended because the data allowance was used." / "…because the access time expired." |
-| No internet package configured | "Internet access is not available here at the moment…please let reception know." |
+| No internet package configured | "Internet access is not available here at the moment…please let the site team know." |
 | Wrong or expired email/SMS code | "That code isn't right…" / "That code can no longer be used. Please ask for a new one." |
-| Post-stay PIN not accepted | "We could not verify your stay. Please check your details or contact reception." |
+| Post-stay PIN not accepted | "We could not verify your stay. Please check your details or contact the site team for assistance." |
 | Social sign-in did not finish | "Sign-in didn't work" page with **Back to sign-in** |
 
 How many wrong tries a device gets, and how long it must wait, is set under **Sign-in methods → Client
-sign-in protection**. Reception can release a waiting device on **Client sign-in attempts** — which lets it
-try again but does not sign the client in.
+sign-in protection**. The desk (Client services or Client relations) can release a waiting device on **Hotel → Guest
+sign-in attempts** — which lets it try again but does not sign the client in.
 
 ## Choose your package
 
@@ -137,4 +137,5 @@ Six layouts arrange the same sign-in page differently:
 
 The other **Client Portal** pages supply what the methods need: **Allowed sites** (addresses reachable before
 sign-in), **Social login** (provider apps) and **Email & SMS** (code senders). Client accounts, vouchers and
-internet packages are managed under **Clients** and **Internet offering**.
+internet packages are managed under **Clients** and **Internet offering**; room sign-in, the PMS
+connection, the Grace Period and post-stay access are under **Hotel**.

@@ -44,7 +44,7 @@ func realLandingHandler(t *testing.T) *handler {
 
 func TestARefusalTheServerComposedIsVisibleOnThePageTheGuestGetsBack(t *testing.T) {
 	h := realLandingHandler(t)
-	const msg = "Internet packages are not available right now. Please ask reception."
+	const msg = "Internet packages are not available right now. Please contact the site team for assistance."
 
 	rec := httptest.NewRecorder()
 	h.landing(rec, httptest.NewRequest(http.MethodPost, "/auth/voucher", nil), msg)
@@ -63,7 +63,7 @@ func TestEveryRefusalLandingHandlesActuallyReachesTheGuest(t *testing.T) {
 		"Please enter a voucher code.",
 		"Your device isn't on the guest network.",
 		"Unable to detect your device address.",
-		"Internet packages are not available right now. Please ask reception.",
+		"Internet packages are not available right now. Please contact the site team for assistance.",
 		"Please sign in again.",
 		"That package is not available. Please choose another.",
 	} {

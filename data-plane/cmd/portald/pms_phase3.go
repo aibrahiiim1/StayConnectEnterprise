@@ -38,7 +38,7 @@ const (
 	// must never be shown for an ordinary wrong value — sending someone to Reception because they mistyped
 	// their own surname is how a desk fills up with people who could have fixed it themselves.
 	guestAuthTechnicalMessage = "We are unable to verify your stay right now. " +
-		"Please try again or contact Reception."
+		"Please try again or contact the site team for assistance."
 	// guestAuthRateLimitedUnknownMessage is the RESTRICTED answer when the server did not send a remaining
 	// time. It exists because the alternative — printing a number this daemon guessed — would be the one
 	// sentence on the page that the server is not actually standing behind.
@@ -48,7 +48,7 @@ const (
 	// returning with a PIN has no room number, no family name and no reservation number to re-check, so the
 	// room sign-in sentence above would be actively misleading advice. This delivery changed the ROOM sign-in
 	// wording and deliberately left every other method's exactly as it was.
-	guestPostStayMessage = "We could not verify your stay. Please check your details or contact reception."
+	guestPostStayMessage = "We could not verify your stay. Please check your details or contact the site team for assistance."
 )
 
 // guestAuthMessages is the CLOSED SET. A test walks it to prove that every sentence a guest can receive
@@ -62,7 +62,7 @@ const guestRoomDeviceLimitMessage = "This room has reached its device limit. Dis
 // way they signed in.
 const (
 	guestCapacityMessage       = "The guest network is at capacity. Please try again shortly."
-	guestLicenseRefusedMessage = "This sign-in method is not available. Please ask reception."
+	guestLicenseRefusedMessage = "This sign-in method is not available. Please contact the site team for assistance."
 )
 
 // isLicenceRefusal reports whether scd refused a sign-in because of the appliance's licence (cmd/scd

@@ -1,8 +1,8 @@
-# Hotel Admin TLS Certificate — Managed Lifecycle
+# Admin Console TLS Certificate — Managed Lifecycle
 
-Production, self-managing lifecycle for the Hotel Admin dual-SAN leaf certificate
+Production, self-managing lifecycle for the Admin Console dual-SAN leaf certificate
 (`hotel.stayconnect.local` + the current Management/WAN IP). No operator has to
-remember to renew anything. Scope is ONLY this local Hotel Admin HTTPS leaf — it
+remember to renew anything. Scope is ONLY this local Admin Console HTTPS leaf — it
 never touches the vendor appliance mTLS PKI, Root/Intermediate CA, API-client certificates,
 or assignment/license keys.
 
@@ -14,7 +14,7 @@ or assignment/license keys.
 | `stayconnect-hotel-admin-cert-renew.{service,timer}` | systemd | runs the manager `renew` after boot and every 6h, jittered, `Persistent` |
 | scd `/v1/hotel-admin-cert/{check,rotate,renew}` | data-plane (root) | executes the manager on behalf of the sandboxed edged |
 | edged `/edge/v1/hotel-admin-cert[/check|/rotate]` | data-plane | status surface + manual controls (permission + step-up); proxies exec to scd |
-| Hotel Admin → **Networking → TLS certificate** | hotel-admin UI | live status card + “Check certificate” + “Rotate Hotel Admin certificate” |
+| Admin Console → **Networking → TLS certificate** | hotel-admin UI | live status card + “Check certificate” + “Rotate” |
 | `/etc/caddy/hotel-admin/vhost.caddy` | imported by main Caddyfile | managed vhost: site address (DNS + current IP), `tls`, reverse_proxy — rewritten on renewal |
 
 ## Renewal triggers & thresholds
@@ -22,8 +22,8 @@ or assignment/license keys.
 The manager renews when ANY of: remaining validity ≤ **45 days**; the management
 IP changed; the certificate SAN set no longer equals `{DNS:hotel.stayconnect.local,
 IP:<current mgmt IP>}`; or the cert is missing/invalid. Otherwise it is a **no-op**
-(idempotent). Status thresholds surfaced in Hotel Admin (Central receives no telemetry and does not show
-the Hotel Admin certificate — CLAUDE.md §0E):
+(idempotent). Status thresholds surfaced in Admin Console (Central receives no telemetry and does not show
+the Admin Console certificate — CLAUDE.md §0E):
 
 `healthy` > 45d · `renewal_due` ≤ 45d · `warning` ≤ 30d · `critical` ≤ 14d ·
 `emergency` ≤ 7d · `expired` invalid.
@@ -46,7 +46,7 @@ EC `prime256v1`; chain includes the intermediate. Any failure aborts before the
 active files are touched.
 
 **Permissions.** Directory `/etc/caddy/hotel-admin` is root-owned `0755` (not
-writable by the Hotel Admin app user `stayconnect`). The private key is `0600`
+writable by the Admin Console app user `stayconnect`). The private key is `0600`
 readable only by `caddy` (the TLS terminator); cert/chain are `0644`. Private key
 material is never printed to logs or sent in telemetry.
 
@@ -77,7 +77,7 @@ telemetry; the appliance's telemetry subsystem was removed — CLAUDE.md §0E.) 
 
 ## Manual controls (Hotel IT)
 
-- **Rotate Hotel Admin certificate** — Hotel-IT (`network`) role + password
+- **Rotate** — Hotel-IT (`network`) role + password
   step-up + reason + typed `ROTATE` confirmation. Runs the exact same safe
   lifecycle; cannot upload a key or bypass validation.
 - **Check certificate** — diagnostic only, validates the active cert, changes
@@ -96,7 +96,7 @@ timer never becomes a rapid loop.
 
 ## Operations runbook
 
-**Check status:** `stayconnect-hotel-admin-cert-manager status` (or Hotel Admin →
+**Check status:** `stayconnect-hotel-admin-cert-manager status` (or Admin Console →
 Networking → TLS certificate).
 **Force a rotation:** UI “Rotate”, or `systemctl start
 stayconnect-hotel-admin-cert-renew.service` for a due-only run, or (root)
@@ -129,7 +129,7 @@ re-mints from the CA.
   Admin: open `journalctl -u stayconnect-hotel-admin-cert-renew`, read
   `status.json` `last_error`. Common causes: ambiguous mgmt IP (fix the interface
   config), CA unavailable. Force a `rotate` once resolved.
-- **`expired`:** the box keeps running (guest plane unaffected); Hotel Admin HTTPS
+- **`expired`:** the box keeps running (guest plane unaffected); Admin Console HTTPS
   shows a browser warning. Run a manual `rotate`; if it fails, check the CA and the
   management IP, then re-run.
 - The cert lifecycle is isolated: a certificate incident is **never** a guest-service

@@ -52,7 +52,7 @@ async function serve(page: Page, template: string, design: Record<string, unknow
   await page.route("**/auth/pms/phase3", (r: Route) => {
     posted.push({ path: "/auth/pms/phase3", body: r.request().postData() ?? "" });
     return r.fulfill({ status: 200, contentType: "application/json",
-      body: JSON.stringify({ ok: false, message: "We could not verify your stay. Please check your details or contact reception." }) });
+      body: JSON.stringify({ ok: false, message: "We could not verify your stay. Please check your details or contact the site team for assistance." }) });
   });
   await page.route("**/auth/voucher", (r: Route) => {
     posted.push({ path: "/auth/voucher", body: r.request().postData() ?? "" });

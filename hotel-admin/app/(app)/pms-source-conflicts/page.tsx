@@ -81,7 +81,7 @@ export default function PMSSourceConflictsPage() {
   return (
     <PageShell>
       <PageHeader
-        eyebrow="Property management system"
+        eyebrow="Hotel"
         title="Duplicate sources"
         icon={<Layers />}
         description="PMS connections claiming the same rooms; guests in contested rooms cannot be verified until one is given authority."

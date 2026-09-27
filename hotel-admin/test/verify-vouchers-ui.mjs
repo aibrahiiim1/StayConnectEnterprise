@@ -79,7 +79,7 @@ try {
   check("the length control stops at eight", /8 characters/.test(len) && !/(9|1[0-9]) characters/.test(len), len);
 
   check("the chooser offers the real packages", /OneDay/.test(pkg) && /Free Internet/i.test(pkg), pkg.slice(0, 120));
-  check("the chooser hides the system packages", !/__sys|Post-?stay|Checkout grace/i.test(pkg), pkg.slice(0, 120));
+  check("the chooser hides the system packages", !/__sys|Post-?stay|Checkout grace|Grace Period/i.test(pkg), pkg.slice(0, 120));
 
   // A CODE IS NEVER IN THE LIST. The card rows show a masked tail and the full code is only ever produced by
   // the audited reveal, so the rendered page must not contain a redeemable code anywhere.

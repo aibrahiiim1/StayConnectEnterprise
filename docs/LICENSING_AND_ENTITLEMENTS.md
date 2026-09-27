@@ -170,7 +170,7 @@ joining the stay and a device rejoining after its session ended; a device that
 signs in again while its session is still open keeps it and takes no slot. A
 room sign-in refused by the licence is recorded as `LICENSE_REFUSED` or
 `LICENSE_CAPACITY_REACHED` in `iam_v2.sign_in_attempts` (appliance migration
-0092) and shown on the Admin Console's **Client sign-in attempts**; the client sees the
+0092) and shown on the Admin Console's **Hotel → Guest sign-in attempts**; the client sees the
 same refusal the other methods give.
 
 ## 6. Offline grace in practice

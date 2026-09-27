@@ -150,7 +150,7 @@ export default function PMSReconciliationPage() {
   return (
     <PageShell>
       <PageHeader
-        eyebrow="Property management system"
+        eyebrow="Hotel"
         title="Unresolved departures"
         icon={<ClipboardCheck />}
         description="Departures the appliance received but could not match to exactly one stay."

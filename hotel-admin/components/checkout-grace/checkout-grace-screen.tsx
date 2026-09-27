@@ -81,8 +81,8 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
     } catch (e: any) {
       setLoadError(
         e?.status === 404
-          ? "Checkout grace is not enabled on this appliance, so there is no policy to show."
-          : `The checkout grace policy could not be loaded${e?.message ? `: ${e.message}` : "."}`,
+          ? "The Grace Period is not enabled on this appliance, so there is no policy to show."
+          : `The Grace Period policy could not be loaded${e?.message ? `: ${e.message}` : "."}`,
       );
     }
   }, []);
@@ -107,7 +107,7 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
   async function onPublished(newVersion: number) {
     setEditing(false);
     setJustPublished(newVersion);
-    toast.success("Checkout grace policy published", `Version ${newVersion} applies to future checkouts.`);
+    toast.success("Grace Period policy published", `Version ${newVersion} applies to future checkouts.`);
     // Re-read rather than patch locally: what is in force is the server's answer.
     await load();
   }
@@ -116,22 +116,22 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
     <PageShell>
       <PageHeader
         icon={<LogOut />}
-        eyebrow="Internet offering"
-        title="Checkout grace"
+        eyebrow="Hotel"
+        title="Grace Period"
         description="A short, capped period online after checkout."
         help={
           <>
-            <HelpSection title="What checkout grace does">
+            <HelpSection title="What the Grace Period does">
               <p>
-                Keeps a client online for a short, capped period after they check out, so leaving the site does not
+                Keeps a guest online for a short, capped period after they check out, so leaving the hotel does not
                 cut them off mid-journey.
               </p>
             </HelpSection>
             <HelpSection title="Who qualifies">
               <p>
-                Every client who still has active internet access when they check out qualifies &mdash; free, paid
-                or included with the room. A client with no active access at checkout gets no grace. Each stay
-                receives grace once.
+                Every guest who still has active internet access when they check out qualifies &mdash; free, paid
+                or included with the room. A guest with no active access at checkout gets no Grace Period. Each stay
+                receives it once.
               </p>
             </HelpSection>
             <HelpSection title="When no site policy is published">
@@ -144,7 +144,7 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
             <HelpSection title="Versions and history">
               <HelpList items={[
                 "Every published version is kept, newest first. The record is append-only: publishing never rewrites what an earlier version promised.",
-                "A change applies to future checkouts only. A client already in grace keeps the exact terms they were given at checkout.",
+                "A change applies to future checkouts only. A guest already in the Grace Period keeps the exact terms they were given at checkout.",
                 "Each version records who published it and why.",
               ]} />
             </HelpSection>
@@ -175,7 +175,7 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
 
       {!state && !loadError && (
         <div className="space-y-5" aria-busy="true">
-          <span className="sr-only">Loading the checkout grace policy</span>
+          <span className="sr-only">Loading the Grace Period policy</span>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {[0, 1, 2, 3].map((i) => (
               <Skeleton key={i} className="h-24" />
@@ -189,7 +189,7 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
         <>
           {justPublished !== null && (
             <Callout tone="success" title={`Version ${justPublished} published`}>
-              It is now in force for future checkouts. Clients already in grace keep the terms they were given.
+              It is now in force for future checkouts. Guests already in the Grace Period keep the terms they were given.
             </Callout>
           )}
 
@@ -311,8 +311,8 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
                     items={[
                       {
                         label: "Who qualifies",
-                        value: "Clients who still have active internet access when they check out",
-                        hint: "Free, paid or included with the room alike. No active access at checkout means no grace. Once per stay.",
+                        value: "Guests who still have active internet access when they check out",
+                        hint: "Free, paid or included with the room alike. No active access at checkout means no Grace Period. Once per stay.",
                       },
                       {
                         label: "Devices",
@@ -325,26 +325,26 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
                       {
                         label: "Grace time is counted",
                         value: "On the clock from checkout",
-                        hint: "Not online time: grace ends when the time runs out or the data allowance is used up.",
+                        hint: "Not online time: the Grace Period ends when the time runs out or the data allowance is used up.",
                       },
                       {
                         label: "Stay rules after checkout",
                         value: effective.eligibility_window_seconds
                           ? fmtDuration(effective.eligibility_window_seconds)
                           : "Not part of the emergency terms",
-                        hint: "How long after checkout the stay still counts for stay-based package rules. It never removes grace from a client who qualifies.",
+                        hint: "How long after checkout the stay still counts for stay-based package rules. It never removes the Grace Period from a guest who qualifies.",
                       },
                       {
                         label: "Delivered as",
                         value: isEmergency
                           ? "Built-in emergency terms (no site package)"
-                          : "Checkout grace package — free, built automatically from this policy",
+                          : "Grace Period package — free, built automatically from this policy",
                         hint: isEmergency ? undefined : "No payment is taken and the package is not offered for sale.",
                       },
                       {
                         label: "Changes apply to",
                         value: "Future checkouts only",
-                        hint: "A client already in grace keeps the exact terms they were given at checkout.",
+                        hint: "A guest already in the Grace Period keeps the exact terms they were given at checkout.",
                       },
                     ]}
                   />

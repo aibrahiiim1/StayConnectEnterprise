@@ -86,7 +86,7 @@ export function GraceHistory({ history, inForce }: { history: GraceHistoryItem[]
 
   return (
     <>
-      <section aria-label="Checkout grace policy history">
+      <section aria-label="Grace Period policy history">
         <Timeline items={items} emptyLabel="No version has been published yet." />
       </section>
       {history.length > PREVIEW && (
@@ -100,7 +100,7 @@ export function GraceHistory({ history, inForce }: { history: GraceHistoryItem[]
           {open && (
             <>
               <SheetHeader
-                eyebrow="Checkout grace history"
+                eyebrow="Grace Period history"
                 icon={<History />}
                 title={`Version ${open.config_version}`}
                 description={`Published ${fmtWhen(open.published_at)} by ${open.actor}`}

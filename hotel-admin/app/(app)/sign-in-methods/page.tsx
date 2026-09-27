@@ -193,7 +193,7 @@ export default function SignInMethodsPage() {
               items={[
                 <><strong>Voucher code</strong> — the client types a code from a printed or emailed voucher. Vouchers are managed under Vouchers.</>,
                 <><strong>Client account</strong> — a username and password issued to the client, managed under Client accounts.</>,
-                <><strong>Room sign-in</strong> — the client enters their room number and one detail from their booking. OneGate checks it against the property management system for the network they are on; the client never chooses a system, and no booking details are shown back to them. Which system a network uses is set in Network routing.</>,
+                <><strong>Room sign-in</strong> — the client enters their room number and one detail from their booking. OneGate checks it against the property management system for the network they are on; the client never chooses a system, and no booking details are shown back to them. Which system a network uses is set in PMS routing, under Hotel.</>,
                 <><strong>Email code</strong> and <strong>SMS code</strong> — the client receives a one-time code. Each is available only once a sender exists and is switched on under Email &amp; SMS.</>,
                 <><strong>Social login</strong> — the client signs in with an existing account such as Google. Each provider is offered individually, because each needs its own credentials; providers are set up under Social login.</>,
               ]}
@@ -365,7 +365,7 @@ export default function SignInMethodsPage() {
                 </div>
                 <p className="text-xs text-muted-foreground">
                   Which property management system a client is checked against is decided by their network, in{" "}
-                  <Link href="/pms-routing" className="text-primary underline underline-offset-2 hover:decoration-2">Network routing</Link>.
+                  <Link href="/pms-routing" className="text-primary underline underline-offset-2 hover:decoration-2">PMS routing</Link> (under Hotel).
                 </p>
               </fieldset>
               </div>

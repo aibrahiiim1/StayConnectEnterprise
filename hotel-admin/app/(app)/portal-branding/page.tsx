@@ -599,7 +599,7 @@ export default function PortalSettingsPage() {
                 <Field label="Help line" error={fieldError("help_text")}
                   hint={`Shown below the sign-in, for clients who cannot get on. ${(d.help_text ?? "").length}/${LIMITS.helpText}`}>
                   <Input value={d.help_text ?? ""} disabled={!writable} maxLength={LIMITS.helpText}
-                    onChange={(e) => set("help_text", e.target.value)} placeholder="Ask reception if you need a code" />
+                    onChange={(e) => set("help_text", e.target.value)} placeholder="Ask the site team if you need a code" />
                 </Field>
                 <Field label="Terms of use link" error={fieldError("terms_url")}
                   hint="An https:// address, or a file you uploaded here (/assets/…). An external page loads only once the client is online.">

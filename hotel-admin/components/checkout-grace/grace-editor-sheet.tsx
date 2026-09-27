@@ -190,9 +190,9 @@ export function GraceEditorSheet({
 
   return (
     <Sheet open={open} onOpenChange={(v) => !busy && onOpenChange(v)}>
-      <SheetContent width="lg" aria-label="Edit checkout grace policy">
+      <SheetContent width="lg" aria-label="Edit Grace Period policy">
         <SheetHeader
-          eyebrow="Checkout grace"
+          eyebrow="Grace Period"
           icon={<LogOut />}
           title={published ? "Edit policy" : "Create site policy"}
           description={
@@ -208,12 +208,12 @@ export function GraceEditorSheet({
           <>
             <SheetBody>
               {error && <ErrorBanner err={error} />}
-              <form id="grace-terms" onSubmit={toReview} className="space-y-6" aria-label="Checkout grace terms" noValidate>
-                <SheetSection title="Allowance" description="How long grace lasts and what it includes.">
+              <form id="grace-terms" onSubmit={toReview} className="space-y-6" aria-label="Grace Period terms" noValidate>
+                <SheetSection title="Allowance" description="How long the Grace Period lasts and what it includes.">
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field
                       label="Grace time"
-                      hint="Counted on the clock from checkout, whether or not the client is online."
+                      hint="Counted on the clock from checkout, whether or not the guest is online."
                       error={err("durationValue")}
                       className="sm:col-span-2"
                     >
@@ -250,7 +250,7 @@ export function GraceEditorSheet({
                       hint={
                         errors.allowanceMb
                           ? "1 GB = 1024 MB."
-                          : `${fmtData(terms.grace_data_quota_bytes)} in total for the whole grace. 1 GB = 1024 MB.`
+                          : `${fmtData(terms.grace_data_quota_bytes)} in total for the whole Grace Period. 1 GB = 1024 MB.`
                       }
                       error={err("allowanceMb")}
                       className="sm:col-span-2"
@@ -268,7 +268,7 @@ export function GraceEditorSheet({
                   </div>
                 </SheetSection>
 
-                <SheetSection title="Devices" description="Which of the client's devices stay online during grace.">
+                <SheetSection title="Devices" description="Which of the guest's devices stay online during the Grace Period.">
                   <div role="radiogroup" aria-label="Device handling" className="grid gap-2">
                     {policyOptions.map((p) => (
                       <OptionCard
@@ -284,7 +284,7 @@ export function GraceEditorSheet({
                   </div>
                   <Field
                     label="Device limit"
-                    hint="Recorded with each client's grace for reporting. It never disconnects a device that was online at checkout, and it never lets a new device join."
+                    hint="Recorded with each guest's Grace Period for reporting. It never disconnects a device that was online at checkout, and it never lets a new device join."
                     error={err("deviceLimit")}
                   >
                     <Input
@@ -305,9 +305,9 @@ export function GraceEditorSheet({
                     <HelpTip title="Eligibility">
                       <HelpSection>
                         <p>
-                          Every client who still has active internet access when they check out qualifies — free, paid
-                          or included with the room. A client with no active access at checkout gets no grace. Each stay
-                          receives grace once.
+                          Every guest who still has active internet access when they check out qualifies — free, paid
+                          or included with the room. A guest with no active access at checkout gets no Grace Period. Each stay
+                          receives it once.
                         </p>
                         <p>
                           &ldquo;Stay rules after checkout&rdquo; is how long after checkout the stay still counts for
@@ -319,7 +319,7 @@ export function GraceEditorSheet({
                 >
                   <Field
                     label="Stay rules after checkout"
-                    hint="It never removes grace from a client who qualifies."
+                    hint="It never removes the Grace Period from a guest who qualifies."
                     error={err("eligibilityValue")}
                   >
                     <DurationInput
@@ -332,12 +332,12 @@ export function GraceEditorSheet({
                   </Field>
                 </SheetSection>
 
-                <section aria-label="Client will receive" className="rounded-lg border border-primary/20 bg-primary-subtle/40 p-4">
+                <section aria-label="Guest will receive" className="rounded-lg border border-primary/20 bg-primary-subtle/40 p-4">
                   <div className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground">
-                    Client will receive
+                    Guest will receive
                   </div>
                   <p className="mt-1.5 text-sm leading-relaxed" data-testid="grace-preview">
-                    {valid ? guestReceivesSentence(terms) : "Correct the highlighted fields to see what a client will receive."}
+                    {valid ? guestReceivesSentence(terms) : "Correct the highlighted fields to see what a guest will receive."}
                   </p>
                 </section>
               </form>
@@ -394,9 +394,9 @@ export function GraceEditorSheet({
                 </ul>
               </SheetSection>
 
-              <section aria-label="Client will receive" className="rounded-lg border border-primary/20 bg-primary-subtle/40 p-4">
+              <section aria-label="Guest will receive" className="rounded-lg border border-primary/20 bg-primary-subtle/40 p-4">
                 <div className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground">
-                  Client will receive
+                  Guest will receive
                 </div>
                 <p className="mt-1.5 text-sm leading-relaxed">{guestReceivesSentence(terms)}</p>
               </section>
@@ -407,7 +407,7 @@ export function GraceEditorSheet({
                 </Callout>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  This becomes version {version + 1}. It applies to future checkouts only — a client already in grace
+                  This becomes version {version + 1}. It applies to future checkouts only — a guest already in the Grace Period
                   keeps the exact terms they were given at checkout.
                 </p>
               )}
