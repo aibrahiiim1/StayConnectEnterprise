@@ -27,7 +27,7 @@ import { usePermissions } from "@/lib/permissions";
 import { usePoll } from "@/lib/use-poll";
 import { saveFile } from "@/lib/download";
 import {
-  actionTone, actionWords, activationInfo, ago, connectionSentence, daysUntil, formatDateTime, formatDay,
+  actionTone, actionWords, activationInfo, ago, connectionSentence, daysUntil, formatDateTime, formatDay, formatLicenseDay,
   licenseInfo,
 } from "@/lib/status";
 import { cn } from "@/lib/utils";
@@ -339,13 +339,13 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
                       <span className="tabular">{(lic.max_concurrent_online_guests ?? current?.max_concurrent_online_guests)?.toLocaleString() ?? "—"}</span>
                     </Fact>
                     <Fact label="Valid until">
-                      {formatDay(lic.valid_until)}
+                      {formatLicenseDay(lic.valid_until)}
                       {lic.valid_until && <div className="text-caption text-muted-foreground">{daysLeftWords(lic.valid_until)}</div>}
                     </Fact>
                     <Fact label="Grace period">
                       {current?.grace_period_days != null ? `${current.grace_period_days} days` : "—"}
                       {lic.grace_ends_at && (
-                        <div className="text-caption text-muted-foreground">ends {formatDay(lic.grace_ends_at)}</div>
+                        <div className="text-caption text-muted-foreground">ends {formatLicenseDay(lic.grace_ends_at)}</div>
                       )}
                     </Fact>
                   </dl>
@@ -399,7 +399,7 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
                       <TD className="tabular">v{l.license_version ?? "—"}</TD>
                       <TD><LicenseBadge value={l.state} /></TD>
                       <TD className="hidden tabular sm:table-cell">{l.max_concurrent_online_guests?.toLocaleString() ?? "—"}</TD>
-                      <TD>{formatDay(l.valid_until)}</TD>
+                      <TD>{formatLicenseDay(l.valid_until)}</TD>
                       <TD className="hidden text-muted-foreground md:table-cell">{formatDay(l.issued_at)}</TD>
                     </TR>
                   ))}

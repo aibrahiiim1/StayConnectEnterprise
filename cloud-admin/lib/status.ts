@@ -150,6 +150,16 @@ export function formatDay(iso: string | null | undefined): string {
   return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
+// A licence ends at the END of a calendar day, sent as 23:59:59Z. Shown in the viewer's own time zone that
+// day would read as the next one east of UTC ("Dec 2" for a licence chosen to end on Dec 1), so licence dates
+// are shown as the UTC calendar day they were issued for.
+export function formatLicenseDay(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return "—";
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+}
+
 export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -195,7 +205,7 @@ export function licenseSentence(l: ApplianceLicense | null | undefined, now: num
   if (!l || l.state === "none") return "No license issued";
   const left = daysUntil(l.valid_until, now);
   switch (l.state) {
-    case "active": return `Valid until ${formatDay(l.valid_until)}`;
+    case "active": return `Valid until ${formatLicenseDay(l.valid_until)}`;
     case "expiring": return left === null ? "Expiring soon" : `Expires ${inDays(Math.max(0, left))}`;
     case "grace": {
       const g = daysUntil(l.grace_ends_at, now);

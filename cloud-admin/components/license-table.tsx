@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import type { LicenseRow, LicenseState } from "@/lib/api";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { LicenseBadge } from "@/components/status-badge";
-import { formatDay, licenseSentence } from "@/lib/status";
+import { formatLicenseDay, licenseSentence } from "@/lib/status";
 
 /** Every license list: the fleet list and a customer's Licenses tab. A row opens the appliance it belongs to. */
 export function LicenseTable({ rows, showCustomer = true }: { rows: LicenseRow[]; showCustomer?: boolean }) {
@@ -45,7 +45,7 @@ export function LicenseTable({ rows, showCustomer = true }: { rows: LicenseRow[]
               <TD><LicenseBadge value={l.state} /></TD>
               <TD className="hidden tabular sm:table-cell">{l.max_concurrent_online_guests?.toLocaleString() ?? "—"}</TD>
               <TD>
-                <div>{formatDay(l.valid_until)}</div>
+                <div>{formatLicenseDay(l.valid_until)}</div>
                 {l.state !== "active" && l.state !== "superseded" && (
                   <div className="text-caption text-muted-foreground">
                     {licenseSentence({ state: l.state as LicenseState, valid_until: l.valid_until, grace_ends_at: l.grace_ends_at })}

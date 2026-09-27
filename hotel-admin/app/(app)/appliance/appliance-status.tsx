@@ -42,6 +42,15 @@ function day(s?: string | null): string {
   return Number.isNaN(d.getTime()) ? s : d.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
 }
 
+// A licence ends at the end of a calendar day (23:59:59Z). In a time zone east of UTC that instant is already
+// the next day, so a licence issued to end on 1 December would read "2 December". Licence dates are shown as
+// the UTC calendar day they were issued for; OneGate Central shows them the same way.
+function licenceDay(s?: string | null): string {
+  if (!s) return "—";
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? s : d.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
+}
+
 function daysWord(n?: number | null): string {
   if (n == null) return "";
   return n === 1 ? "1 day" : `${n} days`;
@@ -94,7 +103,7 @@ export function activationWords(st: CentralStatus): { title: string; tone: Tone;
 }
 
 export function licenceWords(l: CentralStatus["license"]): { title: string; tone: Tone; line: string } {
-  const until = l.valid_until ? day(l.valid_until) : "";
+  const until = l.valid_until ? licenceDay(l.valid_until) : "";
   switch (l.state) {
     case "none":
       return { title: "No licence yet", tone: "warn", line: "Guests cannot sign in until this appliance is activated and licensed." };
@@ -103,7 +112,7 @@ export function licenceWords(l: CentralStatus["license"]): { title: string; tone
     case "expiring":
       return { title: "Expires soon", tone: "warn", line: `Valid until ${until} · ${daysWord(l.days_left)} left.` };
     case "grace":
-      return { title: "Grace period", tone: "warn", line: `Ended ${until}. Guests keep signing in until ${day(l.grace_ends_at)}.` };
+      return { title: "Grace period", tone: "warn", line: `Ended ${until}. Guests keep signing in until ${licenceDay(l.grace_ends_at)}.` };
     case "expired":
       return { title: "Expired", tone: "err", line: until ? `Ended ${until}.` : "The licence has ended." };
     case "suspended":
@@ -325,7 +334,7 @@ export function ApplianceStatus() {
       )}
       {l.state === "grace" && (
         <Callout tone="warning" title="The licence is in its grace period">
-          It ended {day(l.valid_until)}. Guests keep signing in until <strong>{day(l.grace_ends_at)}</strong>
+          It ended {licenceDay(l.valid_until)}. Guests keep signing in until <strong>{licenceDay(l.grace_ends_at)}</strong>
           {l.days_left != null ? <> ({daysWord(l.days_left)} left)</> : null}. Ask your OneGate vendor to renew it; the
           renewal arrives by itself.
         </Callout>
