@@ -159,10 +159,23 @@ Hotel Admin's one status card ([CENTRAL_CONTROL_PLANE.md §8](CENTRAL_CONTROL_PL
 | Activation: Waiting for activation | Central can see it; an operator must press Activate |
 | Activation: Finishing activation… | Activated in Central; collecting assignment, certificate and licence |
 | Activation: Activated | Assignment adopted and verified; bound to *customer · site* |
-| Activation: Retired | Retired in Central; credentials revoked |
+| Activation: Retired | Retired in Central; credentials revoked; no new guests |
+| Activation: Removed from OneGate Central | Central deleted this appliance after it had held a customer (`details.reason` `removed_from_central`). It keeps its identity and data, admits no new guests (guests online are not disconnected), refuses licence and activation files (`409 removed_from_central`) and never registers again — the durable marker `/etc/stayconnect/removed-from-central.json` survives restarts. Only a factory-clean install and a new activation bring it back |
 | Licence: Grace period | Ended, still serving, with warnings |
 | Licence: Expired / Suspended / Revoked / Wrong appliance | No new guest sessions |
 | OneGate Central: Connected / Temporarily unreachable / Not configured | Link to Central only; guests are unaffected by it |
+
+**A deleted record.** Every 5 minutes (and at boot) the appliance asks Central `hello`. When Central twice
+answers that it does not know the appliance, an appliance that **never held a customer** clears its identity
+and registers again as waiting; one that **has held a customer** — a granting or terminal assignment on disk,
+or tenant data in its database — enters the *Removed from OneGate Central* state above instead. There is no
+in-place path to a different customer: changing customer is retire → factory-clean install → registration →
+activation ([CENTRAL_CONTROL_PLANE.md §4](CENTRAL_CONTROL_PLANE.md#4-lifecycle)).
+
+**Retirement is acknowledged.** When Central retires the appliance (Retire, or completion of a hardware
+replacement) it signs a terminal assignment; the appliance adopts it, stops admitting guests and sends a signed
+acknowledgement, which it retries until Central confirms. Only then does Central revoke its credentials. The
+offline-package reconciliation is likewise retried until Central confirms.
 
 Tenant and site are **never** typed into the appliance. They arrive only through the signed assignment, and
 every daemon takes them from the verified assignment — there is no environment-variable fallback in a

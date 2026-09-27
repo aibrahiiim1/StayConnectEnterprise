@@ -79,6 +79,21 @@ There are no enrollment tokens.
 
 ---
 
+## Appendix — moving, replacing or re-homing an appliance
+
+- **Another site of the same customer:** Central → the appliance → **Move**. The licence follows it with
+  the same terms; nothing is done on the appliance.
+- **New hardware at the same site:** Central → the old appliance → **Advanced → Mark for replacement**;
+  install the new appliance and activate it for the same customer and site. The old one retires itself once it
+  acknowledges its retirement.
+- **Another customer:** not a move. **Retire** it in Central, factory-reset it on site
+  ([DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md](DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md)), then activate it
+  for the new customer when it shows *Waiting for activation* again.
+- If Hotel Admin shows **Removed from OneGate Central**, the appliance's record was deleted in Central after
+  it had served a customer; only a factory-clean install and a new activation bring it back.
+
+---
+
 *Vendor/support-only procedures (operator provisioning, appliance wipe/removal,
 break-glass diagnostics) are intentionally **not** part of this manual — see
 [VENDOR_BREAKGLASS_RUNBOOK.md](VENDOR_BREAKGLASS_RUNBOOK.md). They require root, an

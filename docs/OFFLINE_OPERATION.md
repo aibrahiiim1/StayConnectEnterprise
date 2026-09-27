@@ -21,7 +21,7 @@ Everything that reads/writes only the site-local DB and local kernel state:
 | Hotel Admin (all of `/edge/v1`) | edged + hotel-admin are served from the appliance's **WAN/management IP** (two-NIC rule: WAN is the management interface) |
 | Local operator login | argon2id against local `operators` |
 | Voucher batch creation, GuestAccessPlan edits, walled garden, branding | local writes (license state permitting) |
-| License enforcement | evaluated offline from the persisted signed document |
+| License enforcement | evaluated offline from the persisted signed document — the same gate and the same concurrent-guest capacity for every method, PMS room sign-in included |
 | HA failover | **NOT available** — HA failover under the final two-NIC (WAN+LAN) architecture is **not yet designed, implemented, or accepted** (the old third-NIC `hasync` design is superseded; the HA-sync transport is an OPEN decision). **Single-appliance local-first/offline operation is what is current and supported.** The VRRP/conntrackd/nft/DB-replication ideas are design intent only. |
 | Backups | local pg_dump + `backup_records` |
 
@@ -31,7 +31,8 @@ Everything that reads/writes only the site-local DB and local kernel state:
 |---|---|
 | License refresh | current document keeps governing; Hotel Admin → **Appliance & licence** shows OneGate Central *Temporarily unreachable*; `CloudStale` warning after `offline_grace_days` without cloud validation — never degrades guest function while the document is valid |
 | Registration / activation | a not-yet-registered appliance keeps retrying (30 s backing off to 5 min); a site without internet uses offline activation |
-| Telemetry | none — switched off (CLAUDE.md §0E); nothing queues |
+| Telemetry | none — the appliance has no telemetry subsystem (CLAUDE.md §0E); nothing queues for Central |
+| Retirement acknowledgement, offline-package reconciliation | kept on the appliance and retried until Central confirms; neither is on a guest path |
 | Central visibility | the console shows the appliance's connection as *Recently seen*, then *Offline* after 24 h; nothing else changes |
 | **External providers** (inherently internet-dependent) | Twilio SMS OTP and SendGrid email OTP cannot deliver → those portal tabs fail; Google social login fails; **Stripe paid WiFi** checkout fails. Voucher and FIAS-PMS login remain as the offline-safe methods |
 | Mews/Apaleo (cloud-hosted PMS) | unreachable → PMS logins via those providers fail upstream (`upstream_fail`); FIAS is unaffected |

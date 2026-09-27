@@ -70,7 +70,10 @@ Field notes: `status` ∈ {`active`, `suspended`} (issuer-declared).
 licence Central issues carries **all** features — the only commercial controls
 are the hardware/identity binding, the capacity and the validity window.
 `commercial_plan_code` is always `direct`: plans and subscriptions no longer
-exist, and the field stays only because the signed format carries it.
+exist, and the field stays only because the signed format carries it. Central
+migration 0047 dropped the database copies of `commercial_plan_code`,
+`features` and `limits` from the `licenses` table (nothing read them);
+`licenses.signed_envelope` still holds the complete signed document.
 `license_version` is monotonic per appliance. Verifiers reject unknown
 `schema_version` rather than misreading fields; schema 1 and 2 documents still
 verify.
@@ -155,6 +158,21 @@ keep running — only **new** authorization is refused
 `FeatureEnabled(state, entitled)`: a feature works iff it is entitled in the
 document **and** the state is Active/GracePeriod.
 
+**One gate, one capacity, every Guest Access method.** Voucher, guest account,
+OTP, social login and **PMS room sign-in** all pass the same licence refusal
+(`cmd/scd` `licenseRefusal`: removed from Central, tenant transition pending,
+no licence, a state that does not allow new sessions, or the method's feature
+not entitled) before anything about the guest is looked at, and every new guest
+session takes a slot from the same atomic, appliance-scoped reservation of
+`max_concurrent_online_guests` (`reserveLicensedSlot`, counted inside the
+session-opening transaction). For room sign-in that includes a second device
+joining the stay and a device rejoining after its session ended; a device that
+signs in again while its session is still open keeps it and takes no slot. A
+room sign-in refused by the licence is recorded as `LICENSE_REFUSED` or
+`LICENSE_CAPACITY_REACHED` in `iam_v2.sign_in_attempts` (appliance migration
+0092) and shown on Hotel Admin's **Guest sign-in attempts**; the guest sees the
+same refusal the other methods give.
+
 ## 6. Offline grace in practice
 
 `GET /v1/appliance/license` succeeding calls `MarkCloudValidated`. The
@@ -205,6 +223,12 @@ offline for the year. Grace only matters when validity lapses while offline:
 - Suspending or revoking a licence never changes the appliance's lifecycle in
   Central: the appliance keeps its identity and keeps fetching, which is how
   it receives the suspension and the revocation list.
+- **Move** (same customer only): the licence is re-issued for the new site with
+  the same terms, as the next version, in the same transaction as the new
+  signed assignment. The move is refused (`503 licensing_unavailable`) when
+  Central cannot sign or cannot read the licence, and (`409 license_expired`)
+  when the licence is already past its end date. **Retire**, **Delete** and
+  completion of a **replacement** revoke the appliance's bound licence.
 
 ## 9. Enforcement bridge on the edge
 
