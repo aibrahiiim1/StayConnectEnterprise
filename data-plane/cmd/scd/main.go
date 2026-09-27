@@ -271,6 +271,13 @@ type server struct {
 	reg     *registrar
 	asgKick chan struct{}
 
+	// The two messages to Central that are retried until Central confirms (central_retry.go): the
+	// terminal-assignment acknowledgement and the offline-package reconciliation. centralTransport overrides
+	// the mTLS transport in tests; nil means s.mtlsTransport.
+	centralTransport func() (*http.Client, string, bool)
+	ackRunner        terminalAckRunner
+	reconcileKick    chan struct{}
+
 	// legacyBridge is the fallback ingress interface for sessions whose IP
 	// matches no configured guest network (pre-Phase-19 / legacy network).
 	legacyBridge string
@@ -673,6 +680,7 @@ func main() {
 	s.idStore = idStore
 	s.central = central
 	s.asgKick = make(chan struct{}, 1)
+	s.reconcileKick = make(chan struct{}, 1)
 	if ident != nil {
 		s.idPriv = ident.PrivateKey()
 		s.identityPubB64 = ident.PublicKeyB64
@@ -704,6 +712,8 @@ func main() {
 	// guest-network ownership, and re-execs scd so every subsystem adopts it.
 	if ident != nil && c.CtrlAPIBase != "" {
 		s.startAssignmentAgent(rootCtx, c.CtrlAPIBase)
+		// Offline packages consumed locally are offered to Central until it confirms them (central_retry.go).
+		go s.offlineReconcileLoop(rootCtx)
 	}
 
 	// Edge-first refactor: signed-license manager. Evaluates the on-disk

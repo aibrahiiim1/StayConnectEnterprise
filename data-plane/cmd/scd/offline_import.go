@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"context"
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
@@ -10,7 +8,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/applianceauth"
 	"github.com/stayconnect/enterprise/data-plane/internal/offline"
 	lic "github.com/stayconnect/enterprise/license"
 )
@@ -82,40 +79,13 @@ func (s *server) setupOfflineImport(w http.ResponseWriter, r *http.Request) {
 		}
 		installed = true
 	}
-	// Reconcile with Central (best-effort, idempotent). If offline now, a boot
-	// reconcile retries later.
-	go s.reconcileOfflinePackage(pkg.PackageID)
+	// Reconcile with Central (idempotent). offlineReconcileLoop (central_retry.go) offers every
+	// unreconciled package again until Central confirms, so an import made while offline is reconciled
+	// once the link returns.
+	s.kickOfflineReconcile()
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "activated", "package_id": pkg.PackageID, "license_installed": installed,
 		"note": "single-use consumption recorded; reconciles with Central when online",
 	})
-}
-
-// reconcileOfflinePackage tells Central the package was consumed (idempotent).
-// On success it stamps reconciled_at locally so boot-reconcile stops retrying.
-func (s *server) reconcileOfflinePackage(packageID string) {
-	if s.certMgr == nil || s.applID == "" {
-		return
-	}
-	cl, base, ok := s.certMgr.Transport()
-	if !ok {
-		return // offline; boot-reconcile will retry
-	}
-	body := []byte(`{"package_id":"` + packageID + `"}`)
-	tok, err := applianceauth.SignRequest(s.idPriv, s.applID, http.MethodPost, "/v1/appliance/offline-reconcile", body)
-	if err != nil {
-		return
-	}
-	req, _ := http.NewRequest(http.MethodPost, base+"/v1/appliance/offline-reconcile", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+tok)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := cl.Do(req)
-	if err != nil {
-		return
-	}
-	resp.Body.Close()
-	if resp.StatusCode == 200 && s.db != nil {
-		_, _ = s.db.Exec(context.Background(), `UPDATE edge_offline_packages SET reconciled_at=now() WHERE package_id=$1`, packageID)
-	}
 }
