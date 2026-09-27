@@ -51,7 +51,7 @@ The "who is online right now" view. Search by room, name, username, IP or MAC, o
 - **"Guest in 214 says their Wi-Fi is gone"** → find their session → if it has ended, the status gives the reason (time or data used up, checked out, idle…); if it's there, check the allowance meters.
 - **"Guest can't sign in with their room number"** → **Hotel → Guest sign-in attempts**: read **Why**, and **Release** the device if it has been asked to wait (releasing lets it try again; it does not sign the guest in).
 - **"Guest checked out but still connected"** → **Disconnect**. (Checkout normally ends room access automatically, after any Grace Period — **Hotel → Grace Period**.)
-- **"Something weird is happening on room 310"** → click the session → see MAC, IP, package and data. **Usage explorer** shows the room's full history.
+- **"Something weird is happening on room 310"** → click the session → see MAC, IP, package and data. **Usage explorer → By access source** (type *Hotel room/stay*) shows the room's full history.
 
 ### Signs of abuse to watch for
 
@@ -89,7 +89,7 @@ If it shows room sign-in not working or many recent failures, it's usually:
 
 - The PMS is down or in maintenance → wait / check with PMS support.
 - The PMS credential changed → ask the Site IT manager to replace it.
-- A guest network points at the wrong PMS → **Hotel → PMS routing** (Site admin).
+- A client network points at the wrong PMS → **Hotel → PMS routing** (Site admin).
 
 You cannot edit the connection from a desk role — that's the Site IT manager's job, and for good reason.
 

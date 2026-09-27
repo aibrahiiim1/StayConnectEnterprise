@@ -42,11 +42,12 @@ On the Aruba controller / Aruba Central (Instant AP flow is analogous):
    and DHCP server for it (unless you deliberately chose external DHCP, see
    [EXTERNAL_DHCP_MODE.md](EXTERNAL_DHCP_MODE.md)).
 
-Then in **StayConnect Hotel Admin**:
+Then in the **OneGate Admin Console**:
 
-5. Assign the appliance interface (e.g. `ens192`) the **`guest_trunk`** role
-   (Network → Interfaces).
-6. Create the guest network: type **VLAN**, parent `ens192`, VLAN id **20**,
+5. Make sure the appliance interface (e.g. `ens192`) has the **`guest_trunk`**
+   role — shown as *Client trunk* on the interface step of the new-network wizard.
+6. Create the client network (**Networking → Client networks → New client
+   network**): type **VLAN**, parent `ens192`, VLAN id **20**,
    gateway `10.20.0.1/22`, DHCP `local` with a pool, captive portal on. Set
    `ssid_label` to `Coral Sea Guest` for readability. Validate, apply, confirm
    ([GUEST_VLAN_CONFIGURATION.md](GUEST_VLAN_CONFIGURATION.md),
@@ -58,14 +59,12 @@ them a `10.20.x.x` lease, option 114, and the captive portal.
 
 ## 3. The exact UI note text
 
-Hotel Admin shows this on the VLAN step of the guest-network wizard, so operators
-know the controller work is theirs:
+The Admin Console shows this on the **Review** step of the **New client network**
+wizard, so operators know the controller work is theirs:
 
-> **StayConnect does not configure your WLAN controller.** On your Aruba (or
-> Ruckus / Cisco / Extreme) controller, create the SSID, map it to VLAN 20, and
-> trunk VLAN 20 (tagged) to this appliance's guest-trunk port. StayConnect then
-> provides the VLAN 20 gateway, DHCP, DNS, captive portal and internet access.
-> The SSID name below is a label only — it does not change your controller.
+> **Wireless controller action required** — Map the '‹SSID label›' SSID to VLAN 20
+> on your wireless controller. OneGate manages the gateway, DHCP and captive
+> portal; it does not broadcast Wi-Fi.
 
 ## 4. Other controllers (analogous)
 

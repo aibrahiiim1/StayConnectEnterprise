@@ -1,7 +1,7 @@
 # OneGate Client Portal — What Clients See
 
 The **Client Portal** (formerly Guest Portal) is the page that opens on a client's phone, tablet or laptop when it joins the site's
-guest Wi-Fi. It is served by the appliance itself, before the client has internet, so it carries no external
+client Wi-Fi network. It is served by the appliance itself, before the client has internet, so it carries no external
 fonts, scripts or tracking and works inside the small "sign in to network" browser that phones open
 automatically. Clients have no OneGate account; they only ever see this page.
 
@@ -16,14 +16,16 @@ Top to bottom:
 
 1. **Hero area** (only in some layouts): photograph, logo, site name and welcome line.
 2. **Language selector** in the top corner (top-left in Arabic).
-3. **The card:** logo and/or site name and the welcome line.
+3. **The card:** logo and/or site name and the welcome line. A site that has not set its own name shows
+   **Wi-Fi Access** (translated with the page).
 4. **Notices** when they apply: an amber notice that the client's access has ended (data or time used up),
    an amber notice that no internet package is available here, and a red message from the last attempt.
 5. **Two tabs:** **Client Login** (room sign-in and post-stay PIN) and **Account Login** (voucher, personal
    account, email code, phone code, social login). When only one group has anything enabled, the tabs are
    hidden.
 6. **The form** for the chosen method, and **"Or sign in with"** links to the group's other methods.
-7. **Extras:** the site's help line and custom HTML block.
+7. **Extras:** the site's help line and custom HTML block, and a **Help and tips** button with a short tip for
+   each offered method, ending *"Something not working? Please contact the site team for assistance."*
 8. **Footer:** a **Terms of use** link (if the site set one; it is a link only, there is no acceptance
    checkbox) and a **Device information** button that shows the device's IP and MAC address — *"The site
    team may ask for these if you need help connecting."*
@@ -38,7 +40,7 @@ license.
 
 | Method | What the client enters | Notes |
 |---|---|---|
-| **Room** | Room Number, plus one detail: last name, first name, reservation number, or any of them (the site chooses; a hint under the field says which) | Checked against the site's PMS through the appliance's guest list. If the guest qualifies for more than one internet package, the page offers **Choose your internet package**; with one package it is granted directly. |
+| **Room** | Room Number, plus exactly one detail from the reservation: surname, first name, reservation number, or any one of the three in a single box that is compared against all three (the site chooses under **Admin Console → Hotel → Room sign-in**; a hint under the field says which) | Checked against the site's PMS through the appliance's guest list. If the guest qualifies for more than one internet package, the page offers **Choose your internet package**; with one package it is granted directly. |
 | **Voucher** | Voucher Code | A **Use Personal Account** switch changes to the account form when both are enabled. |
 | **Personal account** | Username, Password | Accounts created by staff under the **Admin Console → Client accounts**. |
 | **Email** | Email address → **Send code**, then the 6-digit code → **Verify** | Needs a sender under **Email & SMS**. *Try a different email* starts again. |
@@ -59,8 +61,8 @@ in it, and a wrong room and a wrong name give the same message. Examples (Englis
 | Wrong voucher | "That voucher code didn't work. Check the code and try again." |
 | Wrong account | "The username or password is incorrect." |
 | Voucher or account at its device limit | "This voucher (account) has reached its device limit. Disconnect another device and try again." |
-| Appliance at its licensed number of online clients | "The guest network is at capacity. Please try again shortly." |
-| Device not on the guest network | "Your device isn't on the guest network." |
+| Appliance at its licensed number of online clients | "The Wi-Fi network is at capacity. Please try again shortly." |
+| Device not on a client network the appliance serves | "Your device isn't connected to this Wi-Fi network." |
 | Access ended | "Your Internet package has ended because the data allowance was used." / "…because the access time expired." |
 | No internet package configured | "Internet access is not available here at the moment…please let the site team know." |
 | Wrong or expired email/SMS code | "That code isn't right…" / "That code can no longer be used. Please ask for a new one." |
@@ -109,7 +111,7 @@ Six layouts arrange the same sign-in page differently:
 | **Split** | Photograph and welcome on one side, sign-in on the other; stacks on a phone |
 | **Immersive** | Full-screen photograph, large type, frosted-glass sign-in panel |
 | **Header bar** | A business layout: top bar with the logo, sign-in beside a help column, terms in a footer |
-| **Resort** | A tall banner with the welcome as the headline, the sign-in card overlapping it |
+| **Editorial** | A tall banner with the welcome as the headline, the sign-in card overlapping it |
 | **Kiosk** | No imagery and large controls, for a lobby tablet |
 
 ## What Admin Console controls
@@ -118,8 +120,10 @@ Six layouts arrange the same sign-in page differently:
 
 - Which methods are offered — voucher, client account, room sign-in, email code, SMS code, social login (per
   provider). Changes apply to the next client who opens the page; clients already online are not disconnected.
-- For room sign-in, what the guest types besides the room number.
 - Client sign-in protection: maximum failed attempts, observation window and waiting time.
+
+**Hotel → Room sign-in** (Site admin, Site IT manager): for room sign-in, what the guest types besides the
+room number. The on/off switch for room sign-in stays under Sign-in methods.
 
 **Client Portal → Portal settings** (Site admin, Site IT manager; saved changes reach clients immediately):
 

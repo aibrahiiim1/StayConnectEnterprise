@@ -1,6 +1,6 @@
 # Customer Admin (Tenant Admin) — User Guide
 
-You look after OneGate for your organisation (a single site, a chain or a group of sites) in **OneGate Central**. In Central you manage your customer's **sites** and its **users** (Central sign-ins), and you can see its appliances, licences and activity. Activating appliances and licences is done by the vendor's platform admin. The sites' day-to-day setup — guest networks, sign-in methods, packages, vouchers, the PMS — is done in **OneGate Admin Console** (formerly Hotel Admin) on each appliance, with an operator account created on that appliance.
+You look after OneGate for your organisation (a single site, a chain or a group of sites) in **OneGate Central**. In Central you manage your customer's **sites** and its **users** (Central sign-ins), and you can see its appliances, licences and activity. Activating appliances and licences is done by the vendor's platform admin. The sites' day-to-day setup — client networks, sign-in methods, packages, vouchers, the PMS — is done in **OneGate Admin Console** (formerly Hotel Admin) on each appliance, with an operator account created on that appliance.
 
 You can only see your own customer: **Customers** opens your customer's page directly, and Overview, Appliances and Licenses show only your customer. You **cannot** see or change any other customer. Central's server decides exactly which actions your role may perform (roles: [CENTRAL_CONTROL_PLANE.md §7](../CENTRAL_CONTROL_PLANE.md#7-roles)). **Customer owner** has the same Central rights as Customer admin.
 
@@ -50,9 +50,9 @@ Printed cards with a code, each giving an internet package. **Issue vouchers** (
 
 ### PMS (room + name)
 
-**Admin Console → Hotel → PMS connection** and **Hotel → PMS routing**
+**Admin Console → Hotel → PMS connection**, **Hotel → PMS routing** and **Hotel → Room sign-in**
 
-Guests sign in with their room number plus their name or reservation number, checked against the appliance's copy of the PMS guest list. Set up by the site's Site admin or Site IT manager.
+Guests sign in with their room number plus one detail from the reservation — first name, surname or reservation number, or any one of the three (recommended), as chosen under **Hotel → Room sign-in** — checked against the appliance's copy of the PMS guest list. The method is switched on under **Client Portal → Sign-in methods**. Set up by the site's Site admin or Site IT manager.
 
 ### Email / SMS codes
 

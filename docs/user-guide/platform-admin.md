@@ -57,7 +57,7 @@ On the appliance's page, **License → Renew or change**: clients online at once
 
 - **Don't** create users inside a customer unless the customer asked. It shows up in their activity log and confuses them.
 - **Don't** suspend or revoke a customer's licence without the agreed commercial decision behind it.
-- **Don't** expect to change a site's PMS, allowed sites, guest networks or portal from Central — these are operational decisions owned by the site and made in the Admin Console.
+- **Don't** expect to change a site's PMS, allowed sites, client networks or portal from Central — these are operational decisions owned by the site and made in the Admin Console.
 - **Don't** share one customer's data with another. Each customer is isolated from every other customer.
 
 ## Monitoring the platform

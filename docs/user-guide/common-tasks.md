@@ -21,7 +21,7 @@ Modern phones should pop up a "Sign in to network" window within a few seconds. 
 - **Android**: tap the Wi-Fi icon; many phones show "Sign in required" as an inline notification.
 - **Windows / Mac**: a "Sign in to network" browser window usually opens automatically. If not, browse to any `http://` site.
 
-If no device shows the sign-in page at all, check that the guest network has **Sign-in page** enabled (**Networking → Guest networks**) and look at **System → Diagnostics**. Escalate.
+If no device shows the sign-in page at all, check that the client network has **Sign-in page** enabled (**Networking → Client networks**) and look at **System → Diagnostics**. Escalate.
 
 ### 3. How are they trying to sign in?
 
@@ -43,7 +43,7 @@ If no device shows the sign-in page at all, check that the guest network has **S
 3. **Used** → already redeemed. Hand them a fresh card.
 4. **Expired never used** / **Not yet valid** → outside the card's validity; hand them a fresh card.
 5. **Cancelled** → the card was cancelled. Hand them a fresh card.
-6. **Available but not letting them in** → if the client sees *"This voucher has reached its device limit"*, the card is at its service plan's **devices at once** — disconnect one of its devices in **Active sessions**, or hand them a separate card. A reconnect from the *same* device never uses an extra place. *"The guest network is at capacity"* instead means the whole appliance is at its licensed **max concurrent online clients**.
+6. **Available but not letting them in** → if the client sees *"This voucher has reached its device limit"*, the card is at its service plan's **devices at once** — disconnect one of its devices in **Active sessions**, or hand them a separate card. A reconnect from the *same* device never uses an extra place. *"The Wi-Fi network is at capacity"* instead means the whole appliance is at its licensed **max concurrent online clients**.
 
 If you need to read the full code on a card (e.g. a smudged card), open it and use **Show full code** — it asks for a reason and your password, and is recorded.
 
@@ -53,9 +53,9 @@ If you need to read the full code on a card (e.g. a smudged card), open it and u
    - Not working → the PMS link or guest list is the problem. Open the connection for details; contact the PMS vendor if the PMS is unreachable.
 2. **Hotel → Guest sign-in attempts** → find the attempt by room and read **Why**. Roles allowed to see client credentials can open **Details** to compare what was entered with what would have been accepted.
    - Room number **exactly** as the PMS has it (some PMSes store "0214", some "214").
-   - Name spelling — the guest should enter the full first name, family name, or reservation number, depending on the mode set under **Sign-in methods**.
+   - Name spelling — the guest should enter the full first name, family name, or reservation number, depending on what **Hotel → Room sign-in** asks for (with *any one of*, the one box accepts any of the three).
    - **Why** says *Licence refused new clients* or *Licensed capacity full* → the client's details are not the problem: the appliance's licence did not admit a new client, or the appliance is at its licensed number of guests online (room guests, voucher and account guests all count, and each device of a room takes a place). Check **System → Appliance & licence**.
-3. **Hotel → Guest sign-in checks** → if every attempt on ONE guest network fails while others work, that network points at the wrong PMS or none: fix it under **Hotel → PMS routing**.
+3. **Hotel → Guest sign-in checks** → if every attempt on ONE client network fails while others work, that network points at the wrong PMS or none: fix it under **Hotel → PMS routing**.
 4. **Too many attempts**: after too many wrong tries (by default 5 within 60 seconds) the device is asked to wait (by default 60 seconds) and sees a countdown. The desk (Client services or Client relations) can **Release** it on **Guest sign-in attempts → Active restrictions** — this lets the device try again; it does not sign the client in.
 5. If all of the above check out and the PMS still rejects, the reservation may not be in the PMS correctly. Have reception check the PMS directly; **Hotel → PMS activity** shows whether the check-in message ever arrived.
 
@@ -96,8 +96,8 @@ Central deleted this appliance's record after it had served a customer. It keeps
 Something is badly wrong. Try in order:
 
 1. **Appliance healthy?** Check the Admin Console health pill and **System → Diagnostics**. If the Admin Console itself does not load, see above.
-2. **Sign-in page reachable?** From a phone on the guest SSID, browse to `http://<guest network gateway>:8380/` (e.g. `http://10.20.0.1:8380/`). If it doesn't load, the portal service is down (Diagnostics).
-3. **DHCP working?** From the same phone: **Settings → Wi-Fi → (SSID) → i**. Does it show an address in the guest network's range? If not, check **DHCP & leases** and Diagnostics.
+2. **Sign-in page reachable?** From a phone on the guest SSID, browse to `http://<client network gateway>:8380/` (e.g. `http://10.20.0.1:8380/`). If it doesn't load, the portal service is down (Diagnostics).
+3. **DHCP working?** From the same phone: **Settings → Wi-Fi → (SSID) → i**. Does it show an address in the client network's range? If not, check **DHCP & leases** and Diagnostics.
 4. **Sign-in working?** Try a known-good voucher yourself. If you can't sign in either, check the license on **System → Appliance & licence** (expired, suspended or at capacity refuses new sign-ins) and Diagnostics.
 
 Escalate with specifics: which of the four steps above failed.

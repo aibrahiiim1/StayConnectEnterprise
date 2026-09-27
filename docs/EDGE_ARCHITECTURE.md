@@ -256,7 +256,7 @@ the guest network from the source IP's subnet.
 | Domain | Tables |
 |---|---|
 | Interface inventory | `network_interfaces` (role `management`/`wan`/`guest_access`/`guest_trunk`/`ha_sync`/`unused`; observed link/speed/mtu) |
-| Guest networks | `guest_networks` (untagged or 802.1Q; gateway/subnet; dhcp_mode `local`/`external`/`relay`/`disabled`; portal/NAT/isolation flags) |
+| Client networks | `guest_networks` (untagged or 802.1Q; gateway/subnet; dhcp_mode `local`/`external`/`relay`/`disabled`; portal/NAT/isolation flags) |
 | DHCP | `dhcp_pools` (N ranges per subnet), `dhcp_reservations` (MAC → fixed IP) |
 | Transactional apply | `network_config_revisions` (draft→validated→applying→pending_confirmation→active/failed/rolled_back/superseded), `network_apply_events`, `network_health_checks` |
 | Session association | `sessions` gains `guest_network_id`/`vlan_id`/`ingress_interface`/`gateway_ip` |

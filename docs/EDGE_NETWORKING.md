@@ -36,8 +36,8 @@ Every mutation to the guest-network intent is captured and applied as a numbered
 |---|---|---|
 | `management` | Hotel Admin / SSH / sync interface | **protected** (read-only, guarded) |
 | `wan` | internet uplink; masquerade egress | **protected** (read-only, guarded) |
-| `guest_access` | untagged guest access port (single guest LAN) | yes |
-| `guest_trunk` | 802.1Q trunk carrying tagged guest VLANs from the WLAN controller | yes |
+| `guest_access` | untagged client access port (single client LAN); Admin Console label *Client access* | yes |
+| `guest_trunk` | 802.1Q trunk carrying tagged client VLANs from the WLAN controller; Admin Console label *Client trunk* | yes |
 | `ha_sync` | dedicated link between the HA pair (VRRP/conntrackd/replication) | protected |
 | `unused` | discovered but unassigned (default) | yes |
 
@@ -112,7 +112,7 @@ netd; reads may be served from the site DB.
 | `GET /edge/v1/network/interfaces/{name}` | one interface |
 | `PUT /edge/v1/network/interfaces/{name}/role` | assign role (guest_access/guest_trunk/unused); protected roles refused |
 
-**Guest networks** (`network.guest`)
+**Client networks** (`network.guest`; Admin Console **Networking → Client networks**)
 
 | Method & path | Purpose |
 |---|---|

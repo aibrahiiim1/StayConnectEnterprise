@@ -2,7 +2,7 @@
 
 > **Audience:** an IT engineer who is new to StayConnect and has no knowledge of
 > how the product was built. If you read this document top to bottom you can take a
-> site from an unpacked appliance to live, licensed guest WiFi, and run it day-2.
+> site from an unpacked appliance to live, licensed client Wi-Fi, and run it day-2.
 >
 > **This is the recommended starting point.** For screen-by-screen reference and
 > shorter step lists, see the companion documents linked in
@@ -26,7 +26,7 @@
 8. [Convergence: how the appliance becomes Active](#8-convergence-how-the-appliance-becomes-active)
 9. [The license model (states & enforcement)](#9-the-license-model-states--enforcement)
 10. [Concurrent online client capacity](#10-concurrent-online-client-capacity)
-11. [Guest networks / VLANs](#11-guest-networks--vlans)
+11. [Client networks / VLANs](#11-client-networks--vlans)
 12. [Worked examples: VLAN 100 & VLAN 200](#12-worked-examples-vlan-100--vlan-200)
 13. [DHCP, DNS, NAT & the captive portal](#13-dhcp-dns-nat--the-captive-portal)
 13a. [Client Portal settings](#13a-client-portal-settings)
@@ -67,7 +67,7 @@ StayConnect has two tiers:
 - **Appliance** (the on-site gateway) — a hardened box running Go daemons and an
   on-box web app called **Admin Console** (formerly Hotel Admin; `hotel-admin`, Next.js). The daemons:
   - `scd` — supervisor / guest-authorization / license state.
-  - `edged` — the Edge API behind the Admin Console (guest networks, DHCP, integrations,
+  - `edged` — the Edge API behind the Admin Console (client networks, DHCP, integrations,
     and the appliance's Central status).
   - `netd` — applies WAN/LAN/VLAN/nftables changes with an auto-rollback watchdog.
   - `portald` — serves the captive portal (`:8380` HTTP, `:8343` HTTPS).
@@ -91,7 +91,7 @@ generates itself on first boot; Central never learns the private key.
 | Create customers, sites | ✅ | — |
 | Activate an appliance, issue/renew/revoke its **license** | ✅ | — (shows state; can import an offline license file) |
 | Fleet status (activation, connection, licence), security alerts, certificates, audit | ✅ | Local health/audit only |
-| Guest networks / VLANs, DHCP, DNS, NAT | — | ✅ |
+| Client networks / VLANs, DHCP, DNS, NAT | — | ✅ |
 | Captive portal branding, auth methods, walled garden | — | ✅ |
 | Access plans, voucher batches, sessions | — (issues license terms) | ✅ |
 | PMS / OTP / Social / Payments integrations | — | ✅ |
@@ -105,14 +105,14 @@ enforces the license locally, even if Central is unreachable.
 ### Ownership hierarchy (how everything is organized)
 
 ```
-Platform  →  Customer  →  Site  →  Appliance  →  Guest Networks / VLANs
+Platform  →  Customer  →  Site  →  Appliance  →  Client Networks / VLANs
 ```
 
 - **Customer** = the organisation that owns the sites: a hotel group, company or other owner (a tenant). A Customer owns
   one or more Sites.
 - **Site** = **one physical location** (a single hotel, resort, office, campus or other
   deployment location). A Site belongs to exactly one Customer and contains one or more
-  Appliances. Buildings, floors, wings, SSIDs and guest VLANs are **not** Sites —
+  Appliances. Buildings, floors, wings, SSIDs and client VLANs are **not** Sites —
   they are configured on the appliance.
 - **Appliance** = the on-site gateway. It belongs to exactly one Site at a time
   and can **move** only between Sites of the same Customer. Giving it to another
@@ -151,7 +151,7 @@ This is the **only** normal way to bring a site online. Use it every time.
 11. **Verify** in Central (Appliances → **Activated**, license **Active**) and on
     the box (Admin Console → **Appliance & licence**: *Activated*, licence
     *Active*).
-12. On the appliance, **configure Guest Networks / VLANs**.
+12. On the appliance, **configure Client networks / VLANs**.
 13. **Configure authentication methods** (voucher / OTP / PMS / social / payment).
 14. **Perform a real client acceptance test** (connect a device, reach the portal,
     authenticate, reach the internet).
@@ -165,10 +165,10 @@ This is the **only** normal way to bring a site online. Use it every time.
 ## 4. Physical install & first boot
 
 - Rack/mount the appliance. Connect the **WAN** NIC to the site uplink and the
-  **LAN/trunk** NIC to the switch that carries your guest VLANs.
+  **LAN/trunk** NIC to the switch that carries your client VLANs.
 - Reference topology used throughout this manual:
   - **WAN interface: `ens160`** (uplink to the internet / site network).
-  - **LAN trunk interface: `ens192`** (802.1Q trunk to your switch; guest VLANs
+  - **LAN trunk interface: `ens192`** (802.1Q trunk to your switch; client VLANs
     ride on it).
 - Power on. On first boot with no stored identity, `scd` generates an Ed25519
   identity keypair, detects hardware (serial, WAN MAC, hardware fingerprint), and
@@ -186,18 +186,18 @@ WAN/LAN is configured **on the appliance** in the Admin Console → **WAN / LAN 
 bridge gateway must change.
 
 > This page covers only the **WAN uplink** and the appliance's **legacy base
-> bridge** (`br-lan`). It is **not** where guest WiFi lives — each Guest Network
+> bridge** (`br-lan`). It is **not** where client Wi-Fi lives — each client network
 > has its own VLAN, bridge, gateway, DHCP pool and captive portal (see §11).
 > Example: `CHR` → VLAN 90 → `ens192.90` → bridge `br-g90` → gateway `10.20.0.1/22`
 > → DHCP pool `10.20.0.100–10.20.3.250`. The legacy base bridge is shown under an
 > **Advanced · Base LAN / Legacy Bridge** section with a *Legacy* badge; its DHCP
-> showing **off** there is normal when clients are served by Guest Networks.
+> showing **off** there is normal when clients are served by client networks.
 
-1. Review the **WAN / Management** status card and the **Guest Networks** pointer.
+1. Review the **WAN / Management** status card and the **Client networks** pointer.
 2. Under **Change configuration**:
    - **WAN:** IP address, prefix length, default gateway, DNS (comma-separated).
-   - **Base LAN:** base-bridge gateway IP, prefix length (guest DHCP pools are
-     managed per guest network on the DHCP page, not here).
+   - **Base LAN:** base-bridge gateway IP, prefix length (client DHCP pools are
+     managed per client network on the DHCP page, not here).
 3. Click **Validate & preview** — check the before/after and the new management URL.
 4. Click **Apply change** and **re-enter your password**.
 5. A **countdown banner** appears. If the management IP changed, reconnect to the
@@ -279,7 +279,7 @@ during this window, the box keeps retrying; fetch failures are non-fatal.
 
 **Verify:** Central shows the appliance **Activated** with license **Active**;
 Admin Console → **Appliance & licence** shows the licence **Active**, **Clients
-online, all guest networks** against the licensed maximum, and **Valid until**.
+online, all client networks** against the licensed maximum, and **Valid until**.
 
 ---
 
@@ -323,7 +323,7 @@ Key guarantees:
 
 ## 10. Concurrent online client capacity
 
-- The cap is **per-appliance, appliance-wide across ALL its guest VLANs** — it is
+- The cap is **per-appliance, appliance-wide across ALL its client VLANs** — it is
   **not** per-VLAN and **not** per-tenant. Two clients on VLAN 100 and three on
   VLAN 200 count as five against one capacity number.
 - It is enforced **locally** on the appliance inside the same transaction that
@@ -348,14 +348,16 @@ Max Concurrent Online Clients (§20).
 
 ---
 
-## 11. Guest networks / VLANs
+<a id="11-guest-networks--vlans"></a>
+## 11. Client networks / VLANs
 
-Create guest networks in the Admin Console → **Guest networks** (`/network`) →
-**New guest network**. The 7-step wizard:
+Create client networks in the Admin Console → **Networking → Client networks** (`/network`) →
+**New client network**. The 7-step wizard:
 
 1. **Identity** — Name, Description, **SSID label** (a label only — the appliance
    does not broadcast; your controller maps the SSID onto the VLAN).
-2. **Interface / VLAN** — pick the parent interface (guest-access or guest-trunk).
+2. **Interface / VLAN** — pick the parent interface (a port whose role is
+   *Client access* or *Client trunk*, or an unused one).
    Tick **VLAN tagged (802.1Q)** and set the **VLAN id** (1–4094) for a tagged
    network.
 3. **Subnet & gateway** — Subnet CIDR and Gateway IP. The appliance owns the
@@ -373,7 +375,7 @@ Create guest networks in the Admin Console → **Guest networks** (`/network`) �
 > interface**, and **bridge name**. To change any of these, delete and recreate
 > the network. All other settings are editable on the network's detail page.
 >
-> A guest network **cannot be deleted while it is enabled or has active
+> A client network **cannot be deleted while it is enabled or has active
 > sessions** — disable it / let sessions drain first.
 
 **DHCP reservations:** pin a device MAC to a fixed IP on **DHCP & leases**
@@ -383,7 +385,7 @@ Create guest networks in the Admin Console → **Guest networks** (`/network`) �
 
 ## 12. Worked examples: VLAN 100 & VLAN 200
 
-Reference hardware: **WAN = `ens160`**, **guest trunk = `ens192`**.
+Reference hardware: **WAN = `ens160`**, **client trunk = `ens192`**.
 
 ### Example A — two VLANs, two different portals/experiences
 
@@ -396,10 +398,10 @@ Reference hardware: **WAN = `ens160`**, **guest trunk = `ens192`**.
 | Auth | Voucher + room (PMS) | Voucher only |
 | Portal URL | `http://10.100.0.1:8380` | `http://10.200.0.1:8380` |
 
-Steps: create two guest networks on parent **`ens192`**, VLAN tagged, ids **100**
+Steps: create two client networks on parent **`ens192`**, VLAN tagged, ids **100**
 and **200**, with the subnets/gateways above; give each its own DHCP pool; enable
 captive portal + NAT on both; apply + confirm each. On your wireless controller,
-map SSID "Guest Wi-Fi" → VLAN 100 and SSID "Conference" → VLAN 200. Set branding
+map SSID "Client Wi-Fi" → VLAN 100 and SSID "Conference" → VLAN 200. Set branding
 per network in Portal settings.
 
 ### Example B — two VLANs sharing one portal/experience
@@ -419,7 +421,7 @@ shared across VLAN 100 **and** VLAN 200 (and any legacy `br-lan`), not 300 each.
 
 ## 13. DHCP, DNS, NAT & the captive portal
 
-- **DHCP** is served by `kea` per guest network from the pools you defined.
+- **DHCP** is served by `kea` per client network from the pools you defined.
   Reservations pin a MAC to an IP.
 - **DHCP option 114** advertises the captive-portal URL
   (`http://{gateway}:8380`) so modern OSes auto-pop the portal (RFC 8910). This is
@@ -484,7 +486,7 @@ Six languages ship complete with the product — **English, Arabic, Italian,
 French, Russian, German** — so offering one costs a tick, not an afternoon of
 translation. Two separate things, deliberately:
 
-- **Guest languages** — which of them appear in the portal's selector. English is
+- **Client languages** — which of them appear in the portal's selector. English is
   always available and is what anything missing falls back to.
 - **Wording** — one language at a time, every field already showing the real text
   a client reads. Type over a string to change it for your site; press its
@@ -524,8 +526,13 @@ Clients can authenticate by:
   when you enable it there. Passwords are stored hashed (argon2id) and are
   write-only.
 - **OTP** — email or SMS one-time code (needs a Notifications provider, §16).
-- **PMS** — room number + name checked against the site PMS (needs a PMS
-  provider, §16). Subject to the same licence gate and concurrent-guest
+- **PMS (Room sign-in)** — room number plus exactly one detail from the
+  reservation, checked against the appliance's copy of the PMS guest list (needs
+  a PMS provider, §16). What the guest types is chosen in **Admin Console →
+  Hotel → Room sign-in**: *any one of first name, surname or reservation number*
+  (recommended — one box, compared against all three; an ambiguous match in the
+  room is refused), *surname*, *first name* or *reservation number*. The on/off
+  switch stays in **Client Portal → Sign-in methods**, which links to it. Subject to the same licence gate and concurrent-guest
   capacity as every other method (§10).
 - **Social login** — Google/Apple/Facebook/Microsoft (needs a Social provider).
 - **Payment** — paid WiFi via Stripe (needs a Payments provider).
@@ -553,13 +560,13 @@ editable in the **Admin Console → Sign-in methods → Client sign-in protectio
 | Observation window | seconds | **60** | 30–3600 | Attempts older than this stop counting. The window moves continuously (rolling), so it cannot be sidestepped by waiting for a clock boundary. |
 | Wait after too many attempts | seconds | **60** | 30–3600 | How long the device is asked to wait. Attempts made during the wait do not extend it. |
 
-**Scope is the device, on its site and guest network.** Not the room — restricting a room number would lock
+**Scope is the device, on its site and client network.** Not the room — restricting a room number would lock
 out the client who actually lives there while whoever chose that number simply moves to the next one. Not the
-address — a guest network NATs, so an address is a floor. The hardware address used is the one the appliance
+address — a client network NATs, so an address is a floor. The hardware address used is the one the appliance
 reads from its own neighbour table, never a value the browser sends, so refreshing the page, reopening the
 portal, clearing cookies or typing a different room does not reset anything.
 
-*Honest limit:* a MAC address is not unspoofable. Someone on the guest VLAN who changes their device address
+*Honest limit:* a MAC address is not unspoofable. Someone on the client VLAN who changes their device address
 gets a fresh counter. What the control buys is that casual enumeration stops being free, that no client is ever
 restricted by another client's behaviour, and that every restriction is attributable and releasable by a named
 member of staff.
@@ -581,7 +588,7 @@ submission itself.
 **Existing sessions are never disconnected.** A client already online stays online.
 
 **Ending a wait early.** **Admin Console → Hotel → Guest sign-in attempts → Active restrictions** lists every device
-currently waiting, with its guest network, the last room it typed (shown as *unverified input* — it is what
+currently waiting, with its client network, the last room it typed (shown as *unverified input* — it is what
 somebody typed, not where anyone is staying), the failure count, when the wait started and ends, a link to
 that device's sign-in attempts, and a **Release** action.
 
@@ -824,7 +831,7 @@ authenticating. Keep the list small.
 
 ## 18. Client zero-to-internet acceptance test
 
-Do this before go-live, on a real device, per guest VLAN:
+Do this before go-live, on a real device, per client VLAN:
 
 1. Join the guest SSID (mapped to the VLAN on your controller).
 2. Confirm the device gets a DHCP lease in the expected subnet and the gateway/DNS
@@ -1044,7 +1051,7 @@ Notes verified in code:
   It admits no new clients (clients already online are not disconnected), refuses
   license and activation files, and the Admin Console shows *Removed from OneGate
   Central*. Only a factory-clean install (§24) and a new activation bring it back.
-- A **guest network** (on the appliance) cannot be deleted while enabled or with
+- A **client network** (on the appliance) cannot be deleted while enabled or with
   active sessions.
 
 ---
@@ -1153,7 +1160,7 @@ appliance needs a human to come back, the run fails rather than hiding it.
       Console → Appliance & licence shows licence **Active**, the correct client
       maximum and **Valid until**).
 - [ ] WAN/LAN correct and confirmed (no pending rollback).
-- [ ] Guest network(s) / VLAN(s) created, applied and confirmed.
+- [ ] Client network(s) / VLAN(s) created, applied and confirmed.
 - [ ] DHCP pools, DNS, NAT and client isolation set per network.
 - [ ] Captive portal reachable at `http://{gateway}:8380`; option 114 popping the
       portal.
@@ -1179,7 +1186,7 @@ appliance needs a human to come back, the run fails rather than hiding it.
 | Rebind after a NIC swap | Central → Advanced → Rebind WAN MAC (§23) |
 | Rotate a cert | Admin Console → TLS certificate (§27) |
 | Issue voucher batches | Admin Console → Voucher batches (§15) |
-| Add a guest VLAN | Admin Console → Guest networks (§11) |
+| Add a client VLAN | Admin Console → Networking → Client networks (§11) |
 | Check backups | Central → System → Backup health (§28) |
 | Review audit log | Central → System → Audit log / Admin Console → Activity (§29) |
 | Retire hardware | Central → Retire appliance, then Delete record (§25, §26) |
@@ -1199,6 +1206,7 @@ risk, but should not be shown to operators as the primary term.
 | Wi-Fi end user | **Client** | guest (`guests`, `guest_*`, `/guest-*`) |
 | On-appliance console | **Admin Console** | `hotel-admin` |
 | Captive sign-in page | **Client Portal** | portald |
+| End-user access network | **Client network** (Admin Console: Networking → Client networks) | `guest_networks`, `guest_network_id`, bridge/VLAN names |
 | On-site gateway | **Appliance** | appliance |
 | Bring an appliance online (normal) | **Activate / Activation** (zero-touch) | register, `pending_approval → assigned` |
 | Install without internet | **Offline activation** | activation request / activation package |
