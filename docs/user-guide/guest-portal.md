@@ -54,7 +54,7 @@ in it, and a wrong room and a wrong name give the same message. Examples (Englis
 | Situation | Message |
 |---|---|
 | Wrong room or guest detail | "The room number or guest detail you entered is incorrect. Check the room number and enter the full first name, family name, or reservation number." |
-| Stay cannot be checked right now | "We are unable to verify your stay right now. Please try again or contact the site team." |
+| Stay cannot be checked right now | "We are unable to verify your stay right now. Please try again or contact the site team for assistance." |
 | Too many attempts | "Too many attempts. Please wait N seconds and try again." with a live countdown, then "You can try again now." |
 | Wrong voucher | "That voucher code didn't work. Check the code and try again." |
 | Wrong account | "The username or password is incorrect." |
@@ -64,7 +64,7 @@ in it, and a wrong room and a wrong name give the same message. Examples (Englis
 | Access ended | "Your Internet package has ended because the data allowance was used." / "…because the access time expired." |
 | No internet package configured | "Internet access is not available here at the moment…please let the site team know." |
 | Wrong or expired email/SMS code | "That code isn't right…" / "That code can no longer be used. Please ask for a new one." |
-| Post-stay PIN not accepted | "We could not verify your stay. Please check your details or contact the site team." |
+| Post-stay PIN not accepted | "We could not verify your stay. Please check your details or contact the site team for assistance." |
 | Social sign-in did not finish | "Sign-in didn't work" page with **Back to sign-in** |
 
 How many wrong tries a device gets, and how long it must wait, is set under **Sign-in methods → Client

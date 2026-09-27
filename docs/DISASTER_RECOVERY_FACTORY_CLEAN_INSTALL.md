@@ -27,7 +27,7 @@ existing machine. This is the procedure behind the **Fresh Production Appliance 
 | **Appliance identity** | — | **token-less self-registration → Activate in Central → signed assignment** |
 | **Tenant / Site** | — | **signed assignment document** (never env, never a dump) |
 | **Licence** | — | fetched from Central after activation (or uploaded via `POST /edge/v1/license`), hardware/identity bound |
-| **Operators** | — | created through Hotel Admin after activation |
+| **Operators** | — | created through Admin Console after activation |
 | **Guest access config, packages, plans, PMS interfaces, networks** | — | Hotel-Admin configuration |
 | **Guests, accounts, vouchers, sessions, folios** | — | real operation only |
 
@@ -421,9 +421,9 @@ production build (`-tags stayconnect_production`); the Hotel-Admin Next build an
    a platform admin **activates** it in Central ([CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md) §4).
    Wait for the **signed assignment** to resolve tenant and site. Do **not** set `EDGED_TENANT_ID` /
    `EDGED_SITE_ID` — a production build ignores them.
-9. **Confirm the licence** in Hotel Admin → **Appliance & licence** (it arrives by itself after activation; an
+9. **Confirm the licence** in Admin Console → **Appliance & licence** (it arrives by itself after activation; an
    offline site uploads the activation package or licence file there).
-10. **Configure the hotel** through Hotel Admin: networks, packages, access policy, PMS interfaces.
+10. **Configure the site** through Admin Console: networks, packages, access policy, PMS interfaces.
 11. **Acceptance test**, then a Product-Owner **Go-Live** decision. IAM-v2 is the only guest IAM authority: on
     a production build it cannot be configured off, and an attempt to do so is a startup refusal (§4G).
     first operation; legacy guest-auth is never configured on.
@@ -444,7 +444,7 @@ cases:
   enough: an appliance whose site database still holds a customer's data reports it in its signed registration
   (`holds_customer_id`), and Central activates it only for that customer (`409 holds_other_customer_data`
   otherwise) — so an identity reset without a blank-disk install cannot move it to someone else.
-- **After Hotel Admin shows *Removed from OneGate Central*.** Central deleted this appliance's record after it
+- **After Admin Console shows *Removed from OneGate Central*.** Central deleted this appliance's record after it
   had held a customer. It keeps that customer's data, admits no new guests, refuses licence and activation
   files and never registers again; the marker is `/etc/stayconnect/removed-from-central.json`.
   `deploy/scripts/provision-fresh-appliance.sh` **refuses** to run over such an appliance, because
