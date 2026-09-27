@@ -137,11 +137,12 @@ rm -f "$REL/control-plane/migrations/"*.go
 for f in central-lib.sh central-install.sh central-deploy.sh central-export.sh central-cleanup-obsolete.sh \
          central-migrate.sh central-preflight.sh central-mint-tls.sh central-firewall.sh central-build.sh \
          vendor-signing-key.sh install-central-endpoint.sh lib-central-endpoint.sh \
-         stayconnect-backup-cleanup.sh backup-retention.conf; do
+         central-backup.sh stayconnect-backup-cleanup.sh backup-retention.conf; do
   cp -a "$SRC/deploy/scripts/$f" "$REL/deploy/scripts/$f"
 done
 cp -a "$SRC/deploy/systemd/stayconnect-ctrlapi.service" "$SRC/deploy/systemd/stayconnect-cloud-admin.service" \
       "$SRC/deploy/systemd/stayconnect-backup-cleanup.service" "$SRC/deploy/systemd/stayconnect-backup-cleanup.timer" \
+      "$SRC/deploy/systemd/stayconnect-central-backup.service" "$SRC/deploy/systemd/stayconnect-central-backup.timer" \
       "$REL/deploy/systemd/"
 cp -a "$SRC/deploy/caddy/Caddyfile.central" "$SRC/deploy/caddy/stayconnect-caddy.central.service" "$REL/deploy/caddy/"
 cp -a "$SRC/deploy/compose/central-infra.yml" "$REL/deploy/compose/"

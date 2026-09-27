@@ -1,0 +1,15 @@
+# OneGate CENTRAL only: the daily local database backup (deploy/scripts/central-backup.sh), triggered by
+# stayconnect-central-backup.timer. Installed and enabled by central-install.sh. Inert on an appliance.
+#
+# Runs the script from the installed release's tooling (/opt/stayconnect/central/tooling -> the current
+# release), so a deploy that changes the backup procedure changes it here too.
+[Unit]
+Description=OneGate Central database backup (pg_dump -Fc to /opt/stayconnect/backups/db)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/stayconnect/central/tooling/deploy/scripts/central-backup.sh --reason scheduled
+Nice=10
+IOSchedulingClass=idle

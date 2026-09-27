@@ -532,6 +532,8 @@ install_unit "$REL/deploy/systemd/stayconnect-cloud-admin.service"   stayconnect
 install_unit "$REL/deploy/caddy/stayconnect-caddy.central.service"   stayconnect-caddy.service
 install_unit "$REL/deploy/systemd/stayconnect-backup-cleanup.service" stayconnect-backup-cleanup.service
 install_unit "$REL/deploy/systemd/stayconnect-backup-cleanup.timer"   stayconnect-backup-cleanup.timer
+install_unit "$REL/deploy/systemd/stayconnect-central-backup.service" stayconnect-central-backup.service
+install_unit "$REL/deploy/systemd/stayconnect-central-backup.timer"   stayconnect-central-backup.timer
 run install -m 0755 "$REL/deploy/scripts/stayconnect-backup-cleanup.sh" "$SC_OPT/bin/stayconnect-backup-cleanup"
 [ -f "$SC_ETC/backup-retention.conf" ] || run install -m 0644 "$REL/deploy/scripts/backup-retention.conf" "$SC_ETC/backup-retention.conf"
 run systemctl daemon-reload
@@ -541,7 +543,7 @@ if [ -n "$caddy_state" ] && [ "$caddy_state" != masked ] && [ "$caddy_state" != 
   run systemctl disable --now caddy.service || true
   run systemctl mask caddy.service || true
 fi
-run systemctl enable stayconnect-ctrlapi.service stayconnect-cloud-admin.service stayconnect-caddy.service stayconnect-backup-cleanup.timer
+run systemctl enable stayconnect-ctrlapi.service stayconnect-cloud-admin.service stayconnect-caddy.service stayconnect-backup-cleanup.timer stayconnect-central-backup.timer
 
 # ================================================================= 10. console release
 step "10/14 console release"
@@ -656,7 +658,15 @@ unit_restart_noblock stayconnect-caddy
 
 if [ "$SKIP_FW" = 1 ]; then say "firewall left alone (--skip-firewall). Required: 443/tcp and 9443/tcp public, nothing else."
 else run env DEPLOY="$REL/deploy" CENTRAL_ENDPOINT_CONFIG="$ENDPOINT_SRC" bash "$T/central-firewall.sh" --enable; fi
-run systemctl start stayconnect-backup-cleanup.timer
+run systemctl start stayconnect-backup-cleanup.timer stayconnect-central-backup.timer
+# The first backup NOW, through the same unit the timer fires: a fresh host has a backup (and a Backup health
+# status) from minute one, and the unit itself is proven to work rather than first tried at 02:15.
+if [ "$DRY_RUN" = 1 ]; then say "DRY-RUN would run stayconnect-central-backup.service once"
+else
+  systemctl start stayconnect-central-backup.service \
+    || { journalctl -u stayconnect-central-backup -n 20 --no-pager >&2 || true; die "the first database backup failed"; }
+  say "first backup: $(ls -1t "$CENTRAL_DB_BACKUPS"/central-*.dump 2>/dev/null | head -1)"
+fi
 
 # ================================================================= 14. public trust, provenance, smoke
 step "14/14 public trust material, provenance, smoke test"

@@ -14,7 +14,8 @@
 #
 # DEPLOY, IN ORDER (each step verified before the next):
 #   1. verify the release (SHA256SUMS, ctrlapi embeds its commit, console manifest = its BUILD_ID)
-#   2. database backup: pg_dump -Fc to /root/backups (retained by stayconnect-backup-cleanup), checked readable
+#   2. database backup: central-backup.sh --reason pre-<sha12> -> /opt/stayconnect/backups/db, the same place,
+#      pattern and retention as the daily backup; proven readable before it counts
 #   3. backup the running ctrlapi binary and ctrlapi.env
 #   4. stop ctrlapi; migrate (central-migrate.sh up + verify) with the NEW release's migrations
 #   5. install the new binary + units; start --no-block; poll /readyz; the running binary must embed the commit
@@ -172,7 +173,7 @@ rollback() {
   write_deployed "$(binary_revision "$CTRLAPI_BIN_PATH")" rollback
   [ "$DRY_RUN" = 1 ] || smoke || die "rolled back, but the smoke test still fails"
   say "rolled back. The database was NOT touched; the newest pre-deploy dump is:"
-  say "  $(ls -1t "$CENTRAL_DB_BACKUPS"/central-*.dump 2>/dev/null | head -1)"
+  say "  $(ls -1t "$CENTRAL_DB_BACKUPS"/central-*-pre-*.dump 2>/dev/null | head -1)"
 }
 
 case "$CMD" in
@@ -204,16 +205,15 @@ say "deploying $NAME over ctrlapi ${OLD_REV:0:12} / console $(cat "$CONSOLE_CURR
 T="$REL/deploy/scripts"
 
 step "2/8 database backup"
-run install -d -m 0700 "$CENTRAL_DB_BACKUPS"
-DUMP="$CENTRAL_DB_BACKUPS/central-$STAMP-pre-${COMMIT:0:12}.dump"
-if [ "$DRY_RUN" = 1 ]; then say "DRY-RUN would pg_dump -Fc to $DUMP"
+# The same tool, directory, naming and retention as the daily backup — so the pre-deploy dump is on the Backup
+# health page like any other, and "restore the newest backup" means the same thing whichever wrote it.
+if [ "$DRY_RUN" = 1 ]; then
+  DUMP="$CENTRAL_DB_BACKUPS/central-<stamp>-pre-${COMMIT:0:12}.dump"
+  say "DRY-RUN would run central-backup.sh --reason pre-${COMMIT:0:12} -> $DUMP"
 else
-  # pg_dump always warns about TimescaleDB's circular catalog FKs (harmless for a full dump); its stderr is
-  # kept and shown only if the dump fails.
-  docker exec "$CENTRAL_PG_CONTAINER" pg_dump -U "$CENTRAL_DB_USER" -d "$CENTRAL_DB" -Fc > "$DUMP.tmp" 2> "$WORK/pg_dump.err" \
-    || { cat "$WORK/pg_dump.err" >&2; rm -f "$DUMP.tmp"; die "pg_dump failed — nothing was changed"; }
-  docker exec -i "$CENTRAL_PG_CONTAINER" pg_restore -l < "$DUMP.tmp" >/dev/null || die "the backup just taken is not a readable archive"
-  chmod 0600 "$DUMP.tmp"; mv -f "$DUMP.tmp" "$DUMP"
+  out="$(bash "$T/central-backup.sh" --reason "pre-${COMMIT:0:12}")" || die "pre-deploy backup failed — nothing was changed"
+  DUMP="$(printf '%s\n' "$out" | sed -n 's/^\[central-backup\] backup \([^ ]*\) .*/\1/p' | tail -1)"
+  [ -s "$DUMP" ] || die "pre-deploy backup did not report its file — nothing was changed"
   say "backup $DUMP ($(du -h "$DUMP" | cut -f1))"
 fi
 
@@ -254,7 +254,9 @@ for pair in "systemd/stayconnect-ctrlapi.service:stayconnect-ctrlapi.service" \
             "systemd/stayconnect-cloud-admin.service:stayconnect-cloud-admin.service" \
             "caddy/stayconnect-caddy.central.service:stayconnect-caddy.service" \
             "systemd/stayconnect-backup-cleanup.service:stayconnect-backup-cleanup.service" \
-            "systemd/stayconnect-backup-cleanup.timer:stayconnect-backup-cleanup.timer"; do
+            "systemd/stayconnect-backup-cleanup.timer:stayconnect-backup-cleanup.timer" \
+            "systemd/stayconnect-central-backup.service:stayconnect-central-backup.service" \
+            "systemd/stayconnect-central-backup.timer:stayconnect-central-backup.timer"; do
   src="$REL/deploy/${pair%%:*}"; dest="/etc/systemd/system/${pair##*:}"
   if ! cmp -s "$src" "$dest"; then
     [ -f "$dest" ] && run cp -a "$dest" "$dest.bak-$STAMP"

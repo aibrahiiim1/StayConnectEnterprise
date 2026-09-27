@@ -1,0 +1,11 @@
+# OneGate CENTRAL only: daily local database backup. Persistent, so a host that was off at 02:15 backs up at boot.
+[Unit]
+Description=Daily OneGate Central database backup
+
+[Timer]
+OnCalendar=*-*-* 02:15:00
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

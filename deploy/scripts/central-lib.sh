@@ -31,8 +31,9 @@ CONSOLE_RELEASES="${CONSOLE_RELEASES:-$SC_OPT/releases/cloud-admin}"
 CONSOLE_CURRENT="${CONSOLE_CURRENT:-$SC_OPT/cloud-admin-current}"
 CONSOLE_PREVIOUS="${CONSOLE_PREVIOUS:-$SC_OPT/cloud-admin-current.previous}"
 CONSOLE_MANIFEST="cloud-admin-release.json"
-# Central DB dumps live where stayconnect-backup-cleanup's Central role already retains them.
-CENTRAL_DB_BACKUPS="${CENTRAL_DB_BACKUPS:-/root/backups}"
+# Central DB dumps: central-<stamp>-<reason>.dump, written by the daily central-backup.sh ("scheduled") and by
+# central-deploy.sh before a deploy ("pre-<sha12>"); retained by stayconnect-backup-cleanup (KEEP_DB).
+CENTRAL_DB_BACKUPS="${CENTRAL_DB_BACKUPS:-$SC_OPT/backups/db}"
 CADDYFILE_PATH="${CADDYFILE_PATH:-/etc/caddy/Caddyfile}"
 CADDY_TLS_CRT="${CADDY_TLS_CRT:-/etc/caddy/tls/server.crt}"
 CADDY_TLS_KEY="${CADDY_TLS_KEY:-/etc/caddy/tls/server.key}"

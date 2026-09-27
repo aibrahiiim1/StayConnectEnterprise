@@ -47,7 +47,8 @@
 | **cloud-admin** | `stayconnect-cloud-admin.service` → `node server.js` in `/opt/stayconnect/cloud-admin-current`, user `stayconnect`, `127.0.0.1:3000`, sandboxed, 512 MB cap. Node ≥ 18.17 at `/usr/bin/node` (built with 20). |
 | **Postgres + Redis** | [`deploy/compose/central-infra.yml`](../deploy/compose/central-infra.yml), project `stayconnect-central`: `sc-central-pg` (`timescale/timescaledb:2.16.1-pg16`) and `sc-central-redis` (`redis:7-alpine`, password, AOF), both on 127.0.0.1 only, passwords from `/opt/stayconnect/central/secrets/{db_password,redis_password}`. **No NATS.** |
 | **Caddy** | `stayconnect-caddy.service` (from `deploy/caddy/stayconnect-caddy.central.service`), user `caddy`, config rendered from the [`Caddyfile.central`](../deploy/caddy/Caddyfile.central) template. The apt package's own `caddy.service` is masked. |
-| **Backup retention** | `stayconnect-backup-cleanup.timer` (daily) prunes rollback artefacts and DB dumps under `/root/backups`; feeds *System → Backup health*. |
+| **Database backup** | `stayconnect-central-backup.timer` (daily, 02:15) runs `central-backup.sh`: `pg_dump -Fc` to `/opt/stayconnect/backups/db/central-<stamp>-scheduled.dump` (0600), proven readable before it counts. The installer runs it once immediately. **Local only** — see §9. |
+| **Backup retention** | `stayconnect-backup-cleanup.timer` (daily) and every backup run apply `/etc/stayconnect/backup-retention.conf` (`KEEP_DB` dumps, newest never deleted, `backup-retention.pins` never deleted; also rollback binaries and console releases) and write `/opt/stayconnect/backup-retention-status.json` — what *System → Backup health* (`GET /cloud/v1/backup-health`) shows. |
 | **Observability** | optional, separate: [`deploy/observability`](../deploy/observability) (Prometheus scrapes ctrlapi's loopback-only `/metrics`). Not installed by `central-install.sh`. |
 
 ## 2. Network exposure
@@ -93,7 +94,8 @@ it cannot drift from what appliances are told to dial. Central initiates **no** 
 /etc/stayconnect/pki/                         root-ca.crt, intermediate-ca.{crt,key}, server-mtls.{crt,key}, ca-bundle.crt
 /etc/stayconnect/pki-offline/root-ca.key      only until it is taken to cold storage
 /etc/caddy/Caddyfile   /etc/caddy/tls/server.{crt,key}
-/root/backups/central-<stamp>-pre-<sha>.dump  pre-deploy database dumps (retained by backup cleanup)
+/opt/stayconnect/backups/db/central-<stamp>-{scheduled|pre-<sha12>}.dump   daily + pre-deploy dumps (0700 dir)
+/opt/stayconnect/backup-retention-status.json  written by backup cleanup; read by the Backup health page
 ```
 
 ## 4. Build a release
@@ -142,14 +144,15 @@ What it does, in order (each step converges; re-running is safe):
 7. `central-migrate.sh up` + `verify`;
 8. renders `ctrlapi.env` (passwords, origins, every path explicit), installs `central-endpoint.env`, records the
    install settings in `/etc/stayconnect/central-install.env`;
-9. installs the units, masks the stock `caddy.service`, enables the backup-retention timer;
+9. installs the units, masks the stock `caddy.service`, enables the backup-retention and daily database-backup timers;
 10. installs the console release;
 11. starts ctrlapi — its first start creates the appliance CA and moves the Root CA key to
     `/etc/stayconnect/pki-offline` — then writes `pki/ca-bundle.crt` (intermediate + root) and restarts it so
     offline activation packages carry it; checks the assignment key is registered;
 12. seeds the first platform admin (skipped when one exists);
 13. starts the console, issues the :443 certificate, renders + validates the Caddyfile, starts Caddy, applies
-    the firewall;
+    the firewall; takes the first database backup through the backup unit (so *Backup health* reports from
+    minute one);
 14. publishes the **public** trust material to `/opt/stayconnect/central/appliance-trust` (vendor and registry
     public keys, appliance Root CA, Central TLS CA, `FINGERPRINTS.txt`), writes `DEPLOYED.json`, then runs
     `central-deploy.sh smoke` and `central-preflight.sh` — the install fails unless both pass.
@@ -222,8 +225,8 @@ sudo bash /opt/stayconnect/central/tooling/deploy/scripts/central-deploy.sh smok
 sudo bash /opt/stayconnect/central/tooling/deploy/scripts/central-deploy.sh rollback
 ```
 
-`deploy`: verify the release → `pg_dump -Fc` to `/root/backups/central-<stamp>-pre-<sha>.dump` (checked
-readable) → back up the binary and `ctrlapi.env` → stop ctrlapi → `central-migrate.sh up` + `verify` with the new
+`deploy`: verify the release → `central-backup.sh --reason pre-<sha12>` (`/opt/stayconnect/backups/db/central-<stamp>-pre-<sha12>.dump`,
+same place, pattern and retention as the daily backup, checked readable) → back up the binary and `ctrlapi.env` → stop ctrlapi → `central-migrate.sh up` + `verify` with the new
 release's migrations → install binary + changed units → start (`--no-block`), poll `/readyz`, require the running
 binary to embed the release commit → re-render the Caddyfile from the template and restart Caddy only if it
 changed (validated first) → new console release dir, atomic `current`/`previous` switch, wait until it serves the
@@ -246,7 +249,7 @@ docker exec sc-central-pg psql -U stayconnect -d postgres -c "DROP DATABASE stay
 docker exec sc-central-pg psql -U stayconnect -d postgres -c "CREATE DATABASE stayconnect"
 docker exec sc-central-pg psql -U stayconnect -d stayconnect -c "CREATE EXTENSION IF NOT EXISTS timescaledb"
 docker exec sc-central-pg psql -U stayconnect -d stayconnect -c "SELECT timescaledb_pre_restore()"
-docker exec -i sc-central-pg pg_restore -U stayconnect -d stayconnect < /root/backups/central-<stamp>-pre-<sha>.dump
+docker exec -i sc-central-pg pg_restore -U stayconnect -d stayconnect < /opt/stayconnect/backups/db/central-<stamp>-pre-<sha12>.dump
 docker exec sc-central-pg psql -U stayconnect -d stayconnect -c "SELECT timescaledb_post_restore()"
 docker exec sc-central-pg psql -U stayconnect -d stayconnect -tAc "SELECT count(*) FROM timescaledb_information.hypertables"
 bash /opt/stayconnect/central/tooling/deploy/scripts/central-deploy.sh rollback     # the binary that matches
@@ -285,7 +288,7 @@ obsolete `nats` service) and its console unit was written on the host. Nothing h
 | Assignment signing key, registry root key | `/etc/stayconnect/assignment-*.key` | export bundle. Key state changes: `ctrlapi assignment-key verify-only|revoke --key-id … --reason …`. |
 | Appliance Root CA key | cold storage (after first install) | offline; the export carries it only if it is still on the host |
 | Intermediate CA, :9443 cert, TLS CA, :443 cert | `/etc/stayconnect/pki`, `/opt/stayconnect/central/tls` | export bundle |
-| Database | `sc-central-pg` volume | `central-deploy.sh` dumps before every deploy; `central-export.sh` for escrow. **A scheduled off-host database backup is not installed by these scripts** — schedule `central-export.sh --out <off-host mount>` (snapshot mode) with `CENTRAL_BUNDLE_PASSPHRASE` from a root-only file. |
+| Database | `sc-central-pg` volume | **daily local dump** (`stayconnect-central-backup.timer` → `/opt/stayconnect/backups/db`, retained per `KEEP_DB`), a dump before every deploy, `central-export.sh` for escrow. **Off-host copies are the operator's responsibility** — the destination is a Product-Owner decision and nothing here ships data off the host. Copy `/opt/stayconnect/backups/db/` (it holds the whole licence database) to that destination, or schedule `central-export.sh --out <off-host mount>` (encrypted; also carries the keys) with `CENTRAL_BUNDLE_PASSPHRASE` from a root-only file. A backup on the same disk does not survive the host. |
 
 Restoring a whole Central from an export bundle is §6 on a clean host. Restoring only the database is §7.
 
