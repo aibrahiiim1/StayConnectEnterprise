@@ -14,12 +14,12 @@ Everything here is configured in **OneGate Admin Console** (formerly Hotel Admin
 
 Top to bottom:
 
-1. **Hero area** (only in some layouts): photograph, logo, hotel name and welcome line.
+1. **Hero area** (only in some layouts): photograph, logo, site name and welcome line.
 2. **Language selector** in the top corner (top-left in Arabic).
-3. **The card:** logo and/or hotel name and the welcome line.
+3. **The card:** logo and/or site name and the welcome line.
 4. **Notices** when they apply: an amber notice that the client's access has ended (data or time used up),
    an amber notice that no internet package is available here, and a red message from the last attempt.
-5. **Two tabs:** **Guest Login** (room sign-in and post-stay PIN) and **Account Login** (voucher, personal
+5. **Two tabs:** **Client Login** (room sign-in and post-stay PIN) and **Account Login** (voucher, personal
    account, email code, phone code, social login). When only one group has anything enabled, the tabs are
    hidden.
 6. **The form** for the chosen method, and **"Or sign in with"** links to the group's other methods.
@@ -96,7 +96,7 @@ online-time budget, how much time is left and when access ends; **Back** returns
 Six languages are built in: **English, Arabic, German, French, Italian and Russian**. Arabic is shown right to
 left, with the layout mirrored. The client's language is picked from their device's language settings, or
 remembered if they chose one from the selector. The sign-in page, the package page, the "You're online" page
-and the server's messages are all translated. The hotel name, welcome line and help line are single texts and
+and the server's messages are all translated. The site name, welcome line and help line are single texts and
 are not translated per language.
 
 ## Layout templates
@@ -114,20 +114,20 @@ Six layouts arrange the same sign-in page differently:
 
 ## What Admin Console controls
 
-**Client Portal → Sign-in methods** (Site admin, Hotel IT manager):
+**Client Portal → Sign-in methods** (Site admin, Site IT manager):
 
 - Which methods are offered — voucher, client account, room sign-in, email code, SMS code, social login (per
   provider). Changes apply to the next client who opens the page; clients already online are not disconnected.
 - For room sign-in, what the guest types besides the room number.
 - Client sign-in protection: maximum failed attempts, observation window and waiting time.
 
-**Client Portal → Portal settings** (Site admin, Hotel IT manager; saved changes reach clients immediately):
+**Client Portal → Portal settings** (Site admin, Site IT manager; saved changes reach clients immediately):
 
 - **Template** and its options (hero photograph, photo darkening, panel position, banner height, frosted or
   solid panel, spacing, heading typeface).
 - **Brand:** logo and background photograph (PNG, JPEG, WebP or GIF up to 8 MB, stored on the appliance; no
   SVG), brand colour, button shade, text colour, corner radius and typeface.
-- **Content:** hotel name (120 characters), welcome line (280), help line (600), terms of use link.
+- **Content:** site name (120 characters), welcome line (280), help line (600), terms of use link.
 - **Sign-in page text:** any built-in string can be reworded per language.
 - **Languages:** which of the six are offered (English is always available), and adding another language
   with the site's own wording.

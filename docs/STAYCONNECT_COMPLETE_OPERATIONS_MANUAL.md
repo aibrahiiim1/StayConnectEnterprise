@@ -440,7 +440,7 @@ no draft to promote, no version to pick and no publish step.
 
 | Section | What it holds |
 |---|---|
-| **General** | Hotel name, welcome line, help line, terms-of-use link. |
+| **General** | Site name, welcome line, help line, terms-of-use link. |
 | **Branding** | Logo, background photograph, brand colour, button shade, text colour, corner radius, typeface. |
 | **Languages** | Which languages clients are offered, and the wording in each. |
 | **Advanced** | Custom CSS and a custom HTML fragment. |
@@ -462,7 +462,7 @@ Mobile widths — not a drawing of it that could drift.
 
 | Change | Confirmation |
 |---|---|
-| Hotel name, welcome/help text, terms link, logo, background, colours, typeface, corner radius, languages, wording | **None.** Save and it is live. |
+| Site name, welcome/help text, terms link, logo, background, colours, typeface, corner radius, languages, wording | **None.** Save and it is live. |
 | **Custom CSS or custom HTML**, including clearing them | **Password step-up required.** |
 
 The reason is the boundary, not the screen. Those two fields are the only ones
@@ -594,9 +594,9 @@ client still has to enter details the site accepts.
 | Role | Change the settings | Release a restriction |
 |---|---|---|
 | Site admin | yes | yes |
-| Hotel IT manager | yes | yes |
+| Site IT manager | yes | yes |
 | Front office operator | no (read-only) | yes |
-| Guest relations operator | no (read-only) | yes |
+| Client relations operator | no (read-only) | yes |
 | Site viewer | no | no |
 
 The desk releases and does not re-tune, deliberately: turning "five" into "twenty" for the whole site

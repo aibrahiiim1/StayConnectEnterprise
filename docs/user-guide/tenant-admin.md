@@ -52,7 +52,7 @@ Printed cards with a code, each giving an internet package. **Issue vouchers** (
 
 **Admin Console → Property management system → PMS connection** and **Network routing**
 
-Guests sign in with their room number plus their name or reservation number, checked against the appliance's copy of the PMS guest list. Set up by the site's Site admin or Hotel IT manager.
+Guests sign in with their room number plus their name or reservation number, checked against the appliance's copy of the PMS guest list. Set up by the site's Site admin or Site IT manager.
 
 ### Email / SMS codes
 

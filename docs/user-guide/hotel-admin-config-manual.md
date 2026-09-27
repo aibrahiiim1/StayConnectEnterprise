@@ -41,7 +41,7 @@ from your OneGate vendor → Offline activation**, **Download activation request
 and send it to your vendor; they import it in Central, activate it and return an
 activation package; **Upload activation package** here.
 
-Only the Site admin and Hotel IT manager can upload files; other roles can
+Only the Site admin and Site IT manager can upload files; other roles can
 follow the status.
 
 **Retired** or **Removed from OneGate Central** means this appliance no longer
@@ -158,7 +158,7 @@ immediately. Which methods can be offered also depends on the license.
 - **Email code / SMS code** — need a sender under **Email & SMS** (§8).
 - **Social login** — tick each provider set up under **Social login** (§9).
 - **Client sign-in protection** — maximum failed attempts, observation window and
-  how long a device must wait. Only the Site admin and Hotel IT manager can
+  how long a device must wait. Only the Site admin and Site IT manager can
   change these; reception can release a single waiting device on **Client sign-in
   attempts**.
 
@@ -195,7 +195,7 @@ Site viewer can read them; other roles do not see these pages).
 **Vouchers** (**Internet offering → Vouchers**) — printed cards a client redeems for
 internet access.
 
-- **Code format** (Site admin or Hotel IT manager, on the **Code security** tab):
+- **Code format** (Site admin or Site IT manager, on the **Code security** tab):
   **Digits only** or **Letters and digits**, and a length of **6, 7 or 8**
   characters, with a reason. A change applies to the **next** batch; cards already
   printed keep working.
@@ -213,7 +213,7 @@ internet access.
   **Active sessions**.
 - **Access log** lists every code that was read, by whom and why. Nobody can edit
   or remove it.
-- **Code keys** (Site admin or Hotel IT manager): **Retire** a key (**reason and
+- **Code keys** (Site admin or Site IT manager): **Retire** a key (**reason and
   password**, cannot be undone) and new batches use a fresh one; cards already
   printed keep working.
 
@@ -307,7 +307,7 @@ changes**. Clients see it immediately.
   options.
 - **Brand** — logo and background photograph (PNG, JPEG, WebP or GIF, up to 8 MB;
   no SVG), colours, corner radius, typeface.
-- **Content** — hotel name, welcome line, help line, terms of use link.
+- **Content** — site name, welcome line, help line, terms of use link.
 - **Sign-in page text** and **Languages** — reword any built-in string per
   language; choose which languages are offered or add another.
 - **Advanced HTML & CSS** — custom code, saved with **password confirmation**.
@@ -327,15 +327,15 @@ default). Roles:
 |---|---|
 | Site viewer | Read-only across the appliance; never sees client credentials or voucher codes |
 | Voucher operator | Issue, cancel and show voucher codes; client accounts; read sessions |
-| Guest relations operator | Vouchers (including showing codes), client accounts, sessions (including disconnect), post-stay access, releasing a waiting device; read-only elsewhere |
-| Front office operator | As guest relations, plus read-only Charges and roster reconciliation |
+| Client relations operator | Vouchers (including showing codes), client accounts, sessions (including disconnect), post-stay access, releasing a waiting device; read-only elsewhere |
+| Front office operator | As client relations, plus read-only Charges and roster reconciliation |
 | Payments operator | Charges decisions; read-only sessions, usage and voucher cards |
-| Hotel IT manager | Networking, PMS connection, sign-in methods and protection, portal settings, checkout grace, code format, diagnostics; cannot show voucher codes, does not see Internet packages or Service plans, cannot manage operators or take backups |
+| Site IT manager | Networking, PMS connection, sign-in methods and protection, portal settings, checkout grace, code format, diagnostics; cannot show voucher codes, does not see Internet packages or Service plans, cannot manage operators or take backups |
 | Site admin | Everything, including operators, internet packages, Network routing and backups |
 
 > **Reading a printed code is its own permission.** Issuing and cancelling cards
 > is one power; recovering a code in the clear is another, and it asks for the
-> operator's password and a reason every time. The Hotel IT manager chooses what
+> operator's password and a reason every time. The Site IT manager chooses what
 > codes look like and cannot read one.
 
 Per operator: **Change password**, **+ role** / remove role (×), **Disable**. You

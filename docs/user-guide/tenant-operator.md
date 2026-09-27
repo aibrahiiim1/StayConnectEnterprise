@@ -1,6 +1,6 @@
 # Customer Operator (Tenant Operator) — User Guide
 
-You handle day-to-day Wi-Fi operations for your organisation. That work happens on each site's appliance in **OneGate Admin Console** (formerly Hotel Admin), with an operator account created for you on that appliance (usually the **Front office operator** or **Hotel IT manager** role).
+You handle day-to-day Wi-Fi operations for your organisation. That work happens on each site's appliance in **OneGate Admin Console** (formerly Hotel Admin), with an operator account created for you on that appliance (usually the **Front office operator** or **Site IT manager** role).
 
 **The *Customer operator* role grants nothing in OneGate Central** ([CENTRAL_CONTROL_PLANE.md §7](../CENTRAL_CONTROL_PLANE.md#7-roles)). Central is for licensing, activation and fleet status; if you need to see your appliances' licences there, ask your customer admin for a **Viewer** login. You **cannot** add or remove staff, change licences, or change sites — your customer admin (or the OneGate platform admin, for licences) does it.
 
@@ -63,39 +63,39 @@ The "who is online right now" view. Search by room, name, username, IP or MAC, o
 
 **Admin Console → Client Portal → Allowed sites**
 
-Addresses clients can reach before signing in. Usually set up once by the site's Site admin or Hotel IT manager, who can add entries when a sign-in method needs a new address. Add entries sparingly — every entry is reachable without signing in.
+Addresses clients can reach before signing in. Usually set up once by the site's Site admin or Site IT manager, who can add entries when a sign-in method needs a new address. Add entries sparingly — every entry is reachable without signing in.
 
-**To add an entry** (Site admin or Hotel IT manager): **Allow a site** → type (domain name, single address or address range), address, optional ports, why it is needed.
+**To add an entry** (Site admin or Site IT manager): **Allow a site** → type (domain name, single address or address range), address, optional ports, why it is needed.
 
 ## Portal settings
 
 **Admin Console → Client Portal → Portal settings**
 
-The look and wording of the client sign-in page: layout template, logo and photographs, colours, hotel name, welcome and help lines, terms link, and the wording in each language. You might update it when:
+The look and wording of the client sign-in page: layout template, logo and photographs, colours, site name, welcome and help lines, terms link, and the wording in each language. You might update it when:
 
 - The site rebrands (new logo, new colours).
 - Legal asks you to change the terms link.
 - You want to change the welcome or help line.
 
-Check the live preview (desktop, tablet, mobile) before you **Save changes** — clients see it immediately. Changing it needs the Site admin or Hotel IT manager role.
+Check the live preview (desktop, tablet, mobile) before you **Save changes** — clients see it immediately. Changing it needs the Site admin or Site IT manager role.
 
 ## PMS connection
 
 **Admin Console → Property management system → PMS connection**
 
-Usually set up once by the Hotel IT manager. With a desk role you can **view** the connection's state and whether room sign-in is working.
+Usually set up once by the Site IT manager. With a desk role you can **view** the connection's state and whether room sign-in is working.
 
 If it shows room sign-in not working or many recent failures, it's usually:
 
 - The PMS is down or in maintenance → wait / check with PMS support.
-- The PMS credential changed → ask the Hotel IT manager to replace it.
+- The PMS credential changed → ask the Site IT manager to replace it.
 - A guest network points at the wrong PMS → **Network routing** (Site admin).
 
-You cannot edit the connection from a desk role — that's the Hotel IT manager's job, and for good reason.
+You cannot edit the connection from a desk role — that's the Site IT manager's job, and for good reason.
 
 ## Email & SMS and Social login
 
-**View only** from desk roles in most cases. If you need a new sender or provider, ask the Hotel IT manager.
+**View only** from desk roles in most cases. If you need a new sender or provider, ask the Site IT manager.
 
 ## Charges
 
@@ -119,7 +119,7 @@ The morning check:
 - Create / remove operators (including yourself). Ask your customer admin (Central users) or the appliance's Site admin (Admin Console operators).
 - Change licences. Ask your platform admin contact.
 - Create, change or delete sites. Ask your customer admin.
-- Change PMS, email/SMS or social-login credentials from a desk role. Ask the Hotel IT manager.
+- Change PMS, email/SMS or social-login credentials from a desk role. Ask the Site IT manager.
 
 ## When to escalate to your customer admin
 

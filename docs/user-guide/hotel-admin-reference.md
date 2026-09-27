@@ -79,7 +79,7 @@ states) is defined once in the [OneGate design system](../../design-system/READM
   once, again across every method: a room guest's second device takes a place just like a voucher guest.
   **System → Appliance & licence** says why.
 
-**Role names used below:** Site admin, Hotel IT manager, Front office operator, Guest relations operator,
+**Role names used below:** Site admin, Site IT manager, Front office operator, Client relations operator,
 Voucher operator, Payments operator, Site viewer.
 
 ---
@@ -168,7 +168,7 @@ Keeps a guest online for a short, capped time after checkout so leaving the site
   speed, data allowance (MB), device handling and limit, stay rules after checkout, with a live *"Client will
   receive…"* sentence — then **Review**: every change shown old → new, a **reason** (chosen from a list) and
   **password confirmation**. Publishing creates a new version.
-- **Who can change it:** Site admin, Hotel IT manager. **Read-only:** Front office, Guest relations, Site
+- **Who can change it:** Site admin, Site IT manager. **Read-only:** Front office, Client relations, Site
   viewer.
 
 ### Vouchers — `/vouchers`
@@ -197,13 +197,13 @@ recorded.
 - **Access log tab:** who read a code, when and why. Nobody can edit or remove it.
 - **Code security tab:** the code format (*Digits only* or *Letters and digits*; length 6, 7 or 8, with a
   sample) and its history. Changing it goes through a review step with a **reason**; it applies to the next
-  batch only. **Code keys** (Site admin, Hotel IT manager): **Retire** a key — **reason + password
+  batch only. **Code keys** (Site admin, Site IT manager): **Retire** a key — **reason + password
   confirmation**, cannot be undone; new batches use a fresh key and printed cards keep working.
 - **Who can change it:**
-  - Issue and cancel cards: Site admin, Hotel IT manager, Front office, Guest relations, Voucher operator.
-  - Show and export codes, Access log: Site admin, Front office, Guest relations, Voucher operator (**not**
-    the Hotel IT manager).
-  - Change the code format and retire keys: Site admin, Hotel IT manager.
+  - Issue and cancel cards: Site admin, Site IT manager, Front office, Client relations, Voucher operator.
+  - Show and export codes, Access log: Site admin, Front office, Client relations, Voucher operator (**not**
+    the Site IT manager).
+  - Change the code format and retire keys: Site admin, Site IT manager.
   - **Read-only** (cards only, never codes): Payments operator, Site viewer.
 
 ---
@@ -222,7 +222,7 @@ changed in the PMS.
   agent and folios.
 - If the guest list has arrived and no in-house room has a package, a warning points to Internet packages
   and Network routing.
-- **Who can see it:** Site admin, Hotel IT manager, Front office, Guest relations, Site viewer. No actions.
+- **Who can see it:** Site admin, Site IT manager, Front office, Client relations, Site viewer. No actions.
 
 ### Client accounts — `/guest-accounts`
 A username and password a client can sign in with, instead of a room number or voucher. Which package the
@@ -240,7 +240,7 @@ client may take is decided by the rules on Internet packages.
 - **One-time reveal:** after creating an account or setting a password, *"Password for {username}"* is shown
   once with **Copy** and **I have it**. It cannot be looked up again. No reason or password confirmation is
   asked on this page.
-- **Who can change it:** Site admin, Hotel IT manager, Front office, Guest relations, Voucher operator.
+- **Who can change it:** Site admin, Site IT manager, Front office, Client relations, Voucher operator.
   **Read-only:** Site viewer.
 
 ### Active sessions — `/sessions`
@@ -256,7 +256,7 @@ several.
   sign-in the room and a link to the stay.
 - **Disconnect** — a confirmation dialog that names the client and how many of their other devices stay
   online. The client can sign in again.
-- **Who can change it:** Site admin, Hotel IT manager, Front office, Guest relations. **Read-only:** Voucher
+- **Who can change it:** Site admin, Site IT manager, Front office, Client relations. **Read-only:** Voucher
   operator, Payments operator, Site viewer.
 
 ### Usage explorer — `/usage`
@@ -267,7 +267,7 @@ behind them.
   and **By device** (look up a MAC address; a note reminds you that a device is not a person).
 - **Drill-down:** the stay's totals, the devices used, the sessions, and **Show evidence** to load the raw
   samples. Read-only.
-- **Who can see it:** Site admin, Hotel IT manager, Front office, Guest relations, Payments operator, Site
+- **Who can see it:** Site admin, Site IT manager, Front office, Client relations, Payments operator, Site
   viewer.
 
 ### Client devices — `/guest-device-self-service`
@@ -277,7 +277,7 @@ another, from the portal's *"You're online"* page.
 - **Shows:** two tiles kept separate — **This site offers it** (On/Off) and **Available in this
   release** (Yes/Not yet) — and a sentence explaining what clients can do with that combination.
 - **Switch on / Switch off** — an inline confirmation with an **optional reason**.
-- **Who can change it:** Site admin, Hotel IT manager. **Read-only:** Front office, Guest relations,
+- **Who can change it:** Site admin, Site IT manager. **Read-only:** Front office, Client relations,
   Payments operator, Site viewer. May be *Not enabled on this appliance*.
 
 ### Online-time budgets — `/online-time`
@@ -298,7 +298,7 @@ room.
   *"New PIN — shown once"* with **I have given it to the client**. The PIN is not stored in readable form.
 - **End access** — **reason + typed `REVOKE` + password confirmation**. Permanent for that stay; no
   replacement PIN is issued.
-- **Who can change it:** Site admin, Hotel IT manager, Front office, Guest relations. **Read-only:** Site
+- **Who can change it:** Site admin, Site IT manager, Front office, Client relations. **Read-only:** Site
   viewer. May be *Not enabled on this appliance*.
 
 ---
@@ -336,7 +336,7 @@ right now, and where the guest list comes from.
     current list stays in use until the new one is complete, and progress is shown in stages with the
     record count (there is no percentage because the PMS does not say how many records will come).
     Retiring a connection permanently is not offered here.
-- **Who can change it:** Site admin, Hotel IT manager. **Read-only:** Front office, Guest relations, Site
+- **Who can change it:** Site admin, Site IT manager. **Read-only:** Front office, Client relations, Site
   viewer.
 
 Two diagnostic pages are reached from **Advanced diagnostics** and are not in the menu; both are read-only
@@ -344,10 +344,10 @@ and have no buttons, on purpose:
 
 - **Unresolved departures** — `/pms-reconciliation`: departures that could not be matched to exactly one
   stay, rooms with several stays, and stays past their departure date. The PMS resolves these, not this
-  screen. Visible to Site admin, Hotel IT manager, Front office, Guest relations, Site viewer.
+  screen. Visible to Site admin, Site IT manager, Front office, Client relations, Site viewer.
 - **Roster reconciliation** — `/roster-reconciliation`: the automatic process that keeps the guest list
   identical to the PMS — what blocks it, what the next run will do, and past runs. Visible to Site admin,
-  Hotel IT manager, Front office.
+  Site IT manager, Front office.
 
 ### Network routing — `/pms-routing`
 (In-page title *Which PMS each network checks*.) Which PMS each guest network's room sign-ins are checked
@@ -359,7 +359,7 @@ against.
   vouchers and client accounts do not use the PMS).
 - **Change / Point at a PMS** — a dialog to choose the connection and scope. **Remove mapping** — a
   confirmation dialog.
-- **Who can change it:** Site admin only. **Read-only:** Hotel IT manager, Front office, Guest relations,
+- **Who can change it:** Site admin only. **Read-only:** Site IT manager, Front office, Client relations,
   Site viewer.
 
 ### PMS activity — `/stay-events`
@@ -369,7 +369,7 @@ it. Answers "has Wi-Fi seen that check-in yet?"
 - **Shows:** live status; tiles *Last message*, *Applied*, *Needs a decision*, *Not matched to a stay*;
   search and a filter by result; table About (room and guest), What happened, Result, times, and **Details**
   (including the PMS's own message identifier to quote to the PMS vendor). Read-only.
-- **Who can see it:** Site admin, Hotel IT manager, Front office, Guest relations, Site viewer.
+- **Who can see it:** Site admin, Site IT manager, Front office, Client relations, Site viewer.
 
 ### Client sign-in checks — `/pms-resolutions`
 Recent room sign-in checks against the PMS and why they were refused. Deliberately names no client.
@@ -378,7 +378,7 @@ Recent room sign-in checks against the PMS and why they were refused. Deliberate
   were refused** (each outcome with what it means and what to do); **By Wi-Fi network**, which calls out the
   pattern where one network fails while others work; **Recent attempts** (newest first, up to 200:
   time, network, result). Read-only.
-- **Who can see it:** Site admin, Hotel IT manager, Site viewer.
+- **Who can see it:** Site admin, Site IT manager, Site viewer.
 
 ### Client sign-in attempts — `/guest-signin-attempts`
 The desk's "why can't this client get online?" tool, and releasing a device that has been asked to wait
@@ -396,9 +396,9 @@ after too many wrong tries.
   unverified), failures and a live countdown. **Release** — **reason required** (at least 3 characters), no
   password; the dialog states that **releasing does not sign the client in**.
 - **Who can do what:**
-  - See the attempts list: Site admin, Hotel IT manager, Front office, Guest relations, Site viewer.
-  - See what the client typed: Site admin, Hotel IT manager, Front office, Guest relations (not Site viewer).
-  - Release a restriction: Site admin, Hotel IT manager, Front office, Guest relations. **Read-only:** Site
+  - See the attempts list: Site admin, Site IT manager, Front office, Client relations, Site viewer.
+  - See what the client typed: Site admin, Site IT manager, Front office, Client relations (not Site viewer).
+  - Release a restriction: Site admin, Site IT manager, Front office, Client relations. **Read-only:** Site
     viewer.
   - The thresholds themselves are set on **Client Portal → Sign-in methods**.
 
@@ -407,7 +407,7 @@ Two PMS connections claiming the same rooms. Until one is given authority, guest
 cannot be verified.
 
 - **Shows:** Connection, Conflicts with, Severity, Resolution. Read-only.
-- **Who can see it:** Site admin, Hotel IT manager, Front office, Guest relations, Site viewer.
+- **Who can see it:** Site admin, Site IT manager, Front office, Client relations, Site viewer.
 
 ### Cross-PMS transfer — `/stay-transfers`
 Moves a guest's live access from a stay on one PMS to a stay on another (for example a guest moved to the
@@ -416,7 +416,7 @@ sister property). Not for normal room moves.
 - **Transfer a guest:** From stay, To stay, **Preview** (what will move, or why it cannot), then **Transfer
   access** — **reason (at least 4 characters) + password confirmation**.
 - **Also shows:** *Review signals* (ambiguous sign-ins in the last 7 days) and *Recorded transfers*.
-- **Who can change it:** Site admin, Hotel IT manager, Front office, Guest relations. **Read-only:** Site
+- **Who can change it:** Site admin, Site IT manager, Front office, Client relations. **Read-only:** Site
   viewer.
 
 ---
@@ -427,7 +427,7 @@ Posting internet charges to a guest's room bill in the PMS, and online payments.
 switched on today, so these pages are usually quiet or *Not enabled on this appliance*. Every decision here
 is an audited statement about real money.
 
-**Who can change it (all four pages):** Site admin, Payments operator. **Read-only:** Hotel IT manager,
+**Who can change it (all four pages):** Site admin, Payments operator. **Read-only:** Site IT manager,
 Front office, Site viewer.
 
 ### Charge health — `/financial-health`
@@ -474,8 +474,8 @@ disconnect clients already online.
   **Discard**.
 - Which methods can be offered is also limited by the license.
 - **Who can change it:**
-  - Methods: Site admin, Hotel IT manager. **Read-only:** Front office, Guest relations, Site viewer.
-  - Protection thresholds: Site admin, Hotel IT manager. The desk (Front office, Guest relations) and Site
+  - Methods: Site admin, Site IT manager. **Read-only:** Front office, Client relations, Site viewer.
+  - Protection thresholds: Site admin, Site IT manager. The desk (Front office, Client relations) and Site
     viewer see them read-only; the desk releases single devices on Client sign-in attempts instead.
 
 ### Portal settings — `/portal-branding`
@@ -491,7 +491,7 @@ soon as it is saved.
   - **Brand** — logo and background photograph (PNG, JPEG, WebP or GIF up to 8 MB, stored on the appliance;
     SVG is refused), brand colour, button shade, text colour, corner radius, typeface, with contrast
     warnings.
-  - **Content** — hotel name (120 characters), welcome line (280), help line (600), terms of use link.
+  - **Content** — site name (120 characters), welcome line (280), help line (600), terms of use link.
   - **Sign-in page text** — per-language wording for every built-in string, each marked *Customised* with a
     reset; Arabic fields are right to left.
   - **Languages** — which built-in languages are offered (English is always available) and **Add another
@@ -502,7 +502,7 @@ soon as it is saved.
     confirmation**.
 - Saving a change to custom CSS or HTML asks for **password confirmation**; ordinary edits (name, colours,
   text) do not.
-- **Who can change it:** Site admin, Hotel IT manager. **Read-only:** Site viewer.
+- **Who can change it:** Site admin, Site IT manager. **Read-only:** Site viewer.
 
 ### Allowed sites — `/walled-garden`
 Addresses a client device may reach before it has signed in. Keep it to what the sign-in page itself needs.
@@ -510,7 +510,7 @@ Addresses a client device may reach before it has signed in. Keep it to what the
 - **Table:** Type (Domain name, Single address, Address range), Address, Ports (every port if empty), Why,
   Added. **Allow a site** dialog: type, address, ports (comma separated), why it is needed. **Remove** — a
   confirmation dialog.
-- **Who can change it:** Site admin, Hotel IT manager. **Read-only:** Front office, Guest relations, Site
+- **Who can change it:** Site admin, Site IT manager. **Read-only:** Front office, Client relations, Site
   viewer.
 
 ### Social login — `/social-providers`
@@ -519,7 +519,7 @@ Lets clients sign in with an account they already have (Google, Apple, Facebook,
 - **Table:** Provider, Client ID, Redirect URI, Last used, Offered. **Add / Edit** dialog: provider (fixed
   once created), name on the portal, Client ID, Client secret (write-only), Redirect URI, scopes, **Offer
   this provider**. **Remove** — a confirmation dialog.
-- **Who can change it:** Site admin, Hotel IT manager. **Read-only:** Site viewer.
+- **Who can change it:** Site admin, Site IT manager. **Read-only:** Site viewer.
 
 ### Email & SMS — `/notifications`
 How the appliance delivers one-time sign-in codes. Without a working sender, the email and SMS code methods
@@ -529,7 +529,7 @@ cannot be used.
   Delivery, Offered. **Add / Edit** dialog: channel and service (fixed once created), name, API key
   (write-only), account SID or API user, from address and name (email), **Use this sender**. **Remove** — a
   confirmation dialog.
-- **Who can change it:** Site admin, Hotel IT manager. **Read-only:** Site viewer.
+- **Who can change it:** Site admin, Site IT manager. **Read-only:** Site viewer.
 
 ---
 
@@ -540,7 +540,7 @@ applied, and then must be **confirmed before a countdown ends or they roll back 
 appliance does not broadcast Wi-Fi: each guest network is a VLAN the site's wireless controller maps an
 SSID to.
 
-**Who can change it (all Networking pages):** Site admin, Hotel IT manager. **Read-only:** Site viewer.
+**Who can change it (all Networking pages):** Site admin, Site IT manager. **Read-only:** Site viewer.
 Other roles do not see this group.
 
 ### Guest networks — `/network`
@@ -613,14 +613,14 @@ Whether each service on the appliance is running.
   recovery history.
 - **Actions:** **Recheck**; **Logs**; **Restart** — a dialog describing the impact for that service,
   **reason + password confirmation**.
-- **Who can change it:** Site admin, Hotel IT manager. **Read-only:** every other role.
+- **Who can change it:** Site admin, Site IT manager. **Read-only:** every other role.
 
 ### Alerts — `/operational-alerts`
 Checkouts the configured policy could not handle on its own (for example when an emergency grace was used).
 Table: alert, state, trigger, reason, boundary time, raised. **Acknowledge** and **Resolve**. Empty state:
 *"No open alerts"*.
 
-- **Who can change it:** Site admin, Hotel IT manager, Front office, Guest relations. **Read-only:** Site
+- **Who can change it:** Site admin, Site IT manager, Front office, Client relations. **Read-only:** Site
   viewer.
 
 ### Activity — `/audit`
@@ -632,7 +632,7 @@ edited or removed.
   management system, Networks, Licence & cloud, Backups, Diagnostics*.
 - **List:** a plain-language title, category and security badges, who, when and from which address; expand
   for the recorded details. Up to 500 entries.
-- **Who can see it:** Site admin, Hotel IT manager, Front office, Guest relations, Payments operator, Site
+- **Who can see it:** Site admin, Site IT manager, Front office, Client relations, Payments operator, Site
   viewer.
 
 ### Appliance & licence — `/appliance`
@@ -664,7 +664,7 @@ appliance register if needed and fetch its activation and licence from Central i
   appliance refuses a file for another appliance or an older licence).
 - **Technical details** (collapsed) — serial, appliance ID, identity key fingerprint, client certificate,
   assignment version and verification, licence version, WAN and LAN MAC, Central endpoint, software version.
-- **Who can change it** (upload files): Site admin, Hotel IT manager. **Read-only:** every other role.
+- **Who can change it** (upload files): Site admin, Site IT manager. **Read-only:** every other role.
 - Old addresses `/license`, `/network/cloud` and `/setup/enrollment` redirect here. There is no enrollment
   token or code: an appliance registers itself.
 
@@ -679,7 +679,7 @@ A complete copy of the site's data, taken nightly and on demand.
   password confirmation**. Progress is shown until it finishes, then a *Last restore* card.
 - **Storage and retention** (collapsed): disk used, backups kept, nightly sweep time and how long things are
   kept; changing them needs **password confirmation**.
-- **Who can change it:** Site admin. **Read-only:** Hotel IT manager, Front office, Guest relations, Site
+- **Who can change it:** Site admin. **Read-only:** Site IT manager, Front office, Client relations, Site
   viewer. (Download is offered to every role that can see the page.)
 
 ### Operators — `/operators`
@@ -692,7 +692,7 @@ Site staff accounts for this appliance.
   *Site viewer* by default).
 - You cannot remove your own Site admin role or disable yourself. There is no action to re-enable a disabled
   operator.
-- **Who can change it:** Site admin. **Read-only:** Hotel IT manager.
+- **Who can change it:** Site admin. **Read-only:** Site IT manager.
 
 ---
 
@@ -700,7 +700,7 @@ Site staff accounts for this appliance.
 
 W = can change, R = read-only, — = not shown. The appliance enforces these on every request.
 
-| Page | Site admin | Hotel IT manager | Front office | Guest relations | Voucher operator | Payments operator | Site viewer |
+| Page | Site admin | Site IT manager | Front office | Client relations | Voucher operator | Payments operator | Site viewer |
 |---|---|---|---|---|---|---|---|
 | Overview | R | R | R | R | R | R | R |
 | Internet packages, Service plans | W | — | — | — | — | — | R |

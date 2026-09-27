@@ -45,8 +45,8 @@ The role-based guides below are shorter, task-oriented walkthroughs for each rol
 | **Viewer / Auditor** | [viewer-and-billing.md](viewer-and-billing.md#viewer) | You can look at everything for your customer but not change anything. |
 | **Customer operator**, **Billing** (retired) | [tenant-operator.md](tenant-operator.md) · [viewer-and-billing.md](viewer-and-billing.md#billing) | These roles grant nothing in Central any more; day-to-day site work is in the Admin Console. |
 
-**OneGate Admin Console** (site staff) has seven roles of its own — Site admin, Hotel IT manager, Front office
-operator, Guest relations operator, Voucher operator, Payments operator and Site viewer. Which pages each can
+**OneGate Admin Console** (site staff) has seven roles of its own — Site admin, Site IT manager, Front office
+operator, Client relations operator, Voucher operator, Payments operator and Site viewer. Which pages each can
 use is listed in [hotel-admin-reference.md](hotel-admin-reference.md#who-can-use-which-page).
 
 If a client can't get online and you're trying to help them, jump straight to
