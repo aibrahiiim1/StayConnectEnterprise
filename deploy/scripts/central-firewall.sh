@@ -57,8 +57,10 @@ say "ensuring the appliance-facing ports are open (mTLS port $MTLS_PORT, from ce
 # SSH first and explicitly: enabling ufw without it locks the host out of its own management path.
 ufw allow 22/tcp     >/dev/null && say "  22/tcp    ssh"
 # ...and whatever port sshd ACTUALLY listens on, if it is not 22 — enabling ufw with only 22 open on a host
-# whose sshd was moved would lock the operator out of the machine.
-for p in $(ss -ltnpH 2>/dev/null | awk '/"sshd"/ {n=split($4,a,":"); print a[n]}' | sort -u); do
+# whose sshd was moved would lock the operator out of the machine. Only sockets reachable from outside count:
+# sshd also listens on loopback for X11/agent forwarding of an open session (127.0.0.1:6010, [::1]:6010), and
+# opening THAT port to the world is a rule for a port nobody outside can reach -- found on a real install.
+for p in $(ss -ltnpH 2>/dev/null | awk '/"sshd"/ && $4 !~ /^(127\.|\[::1\]:)/ {n=split($4,a,":"); print a[n]}' | sort -u); do
   [ "$p" = 22 ] && continue
   ufw allow "$p/tcp" >/dev/null && say "  $p/tcp   ssh (sshd listens here)"
 done

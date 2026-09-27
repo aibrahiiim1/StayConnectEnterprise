@@ -11,7 +11,7 @@
 # Usage (as root on the Central being exported):
 #   central-export.sh [--out <dir>]            snapshot: ctrlapi is stopped for the few seconds of the dump, then
 #                                              restarted. For rehearsals and for the key-custody escrow copy.
-#   central-export.sh --final [--out <dir>]    THE MOVE: ctrlapi and the console are stopped AND DISABLED and stay
+#   central-export.sh --final [--out <dir>]    THE MOVE: ctrlapi, the console and Caddy are stopped AND DISABLED and stay
 #                                              down. After the new host takes over, this one must never issue
 #                                              another licence (two Centrals with one identity = conflicting
 #                                              licence versions that appliances refuse).
@@ -115,9 +115,12 @@ if [ "$was_active" = 1 ]; then
   systemctl stop stayconnect-ctrlapi
 fi
 if [ "$FINAL" = 1 ]; then
-  systemctl stop stayconnect-cloud-admin 2>/dev/null || true
-  systemctl disable stayconnect-ctrlapi stayconnect-cloud-admin >/dev/null 2>&1 || true
-  say "FINAL: ctrlapi and the console are stopped and disabled on $HOST"
+  # Caddy too. Left running, it answers every appliance request with 502 (its upstream is gone), and an appliance
+  # that already holds a keep-alive connection to this host keeps using it after DNS has moved to the new
+  # Central -- found on the real move: PRE-LIVE reported "HTTP 502" until this Caddy stopped.
+  systemctl stop stayconnect-cloud-admin stayconnect-caddy 2>/dev/null || true
+  systemctl disable stayconnect-ctrlapi stayconnect-cloud-admin stayconnect-caddy >/dev/null 2>&1 || true
+  say "FINAL: ctrlapi, the console and Caddy are stopped and disabled on $HOST"
 fi
 # pg_dump always warns about TimescaleDB's circular catalog FKs (harmless for a full dump); shown only on failure.
 docker exec "$CENTRAL_PG_CONTAINER" pg_dump -U "$CENTRAL_DB_USER" -d "$CENTRAL_DB" -Fc > "$B/db/$CENTRAL_DB.dump" 2> "$STAGE/pg_dump.err" \
@@ -182,6 +185,6 @@ say "IT CONTAINS EVERY PRIVATE KEY OF THIS CENTRAL. Move it encrypted, keep the 
 say "every copy once the new host is verified."
 if [ "$FINAL" = 1 ]; then
   say ""
-  say "THIS HOST IS NOW STOPPED AS CENTRAL (ctrlapi + console disabled). Do not re-enable it once the new host"
+  say "THIS HOST IS NOW STOPPED AS CENTRAL (ctrlapi, console and Caddy disabled). Do not re-enable it once the new host"
   say "has issued anything. Next: central-install.sh --mode restore on the new host, then switch DNS."
 fi
