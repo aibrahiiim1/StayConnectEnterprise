@@ -462,7 +462,7 @@
     "rollback_rehearsal_occurred": true,
     "corrected_software_deployed": true,
     "deployed_head_on_appliance": "MIXED -- see deployed_runtime_services; there is no single deployed head",
-    "deployed_head_note": "PRE-LIVE 172.21.60.25, re-read live after the guest-access delivery (T0197). THE APPLIANCE RUNS BINARIES FROM SIX DIFFERENT COMMITS and this field names none. scd runs 13c43c1e (PR #192's content head). portald runs 7ba41e18, built by the concurrent UI-audit session from branch prelive/ui-audit-on-guest-access: PR #192's guest-access code with PR #193's UI-audit changes on top, in one integration commit that is NOT on master (PR #192 merges the guest-access half; PR #193 carries the rest). edged runs 334f9d91, pmsd 820bdec1, acctd ee83b62e and netd 5841a722. Every digest and commit in deployed_runtime_services was read out of the INSTALLED bytes; all six report vcs.modified=false and -tags=stayconnect_production, and /opt/stayconnect/DEPLOYED_BINARIES.sha256 verifies.\n\nWHY THE MIXED STATE IS KEPT: rebuilding unchanged services from a newer head to make this record uniform would ship unrelated changes onto PRE-LIVE.",
+    "deployed_head_note": "PRE-LIVE 172.21.60.25, re-read live after the Central-redesign deployment (2026-09-27). THE APPLIANCE RUNS BINARIES FROM TWO COMMITS and this field names neither. scd, edged, acctd, netd and pmsd run 2bf5b66a (branch central/refactor-activation-redesign, not on master): every daemon now resolves tenant/site from the VERIFIED signed assignment, registration retries without a token, and scd serves the single Central status. portald runs 24b80d7f (PR #193's content head) because the redesign changed no portald code. Every digest and commit in deployed_runtime_services was read out of the INSTALLED bytes; all report vcs.modified=false and -tags=stayconnect_production, and /opt/stayconnect/DEPLOYED_BINARIES.sha256 verifies.\n\nWHY THE MIXED STATE IS KEPT: rebuilding unchanged services from a newer head to make this record uniform would ship unrelated changes onto PRE-LIVE.",
     "live_increment9_revalidated": true,
     "live_increment9_revalidated_on": "2026-08-11",
     "live_increment9_revalidation_verdicts": {
@@ -856,16 +856,16 @@
     "dhcp_ownership_evidence_monitored_deployed_note": "DEPLOYED AND VERIFIED LIVE 2026-09-01 (T0109). netd health carries an ownership_evidence block filled by a fresh lease read on every request; the operational checker returns OK on the real socket and refuses when the socket is absent; the enforcement-plane gate consults it. Kea's hourly lease-file cleanup, which had failed every hour since 2026-08-28, has run cleanly since the repair with zero PID failures.",
     "hotel_admin_runtime_identity": {
       "_note": "THE UI IS NOT THE BINARIES. deployed_head_on_appliance names the commit whose build produced the nine SERVICE binaries; it says nothing about the Hotel Admin bundle, which is built and shipped separately and is routinely left untouched by a backend deployment. Recording one head for both is how a UI five days older than the backend was reported as current. These fields are read from the bundle's own hotel-admin-release.json on the appliance, never inferred.",
-      "source_commit": "7ba41e182cd93692a762c920e42b5421887d3546",
-      "build_id": "uQDTh7QgQ0sAnVQdrfwKO",
-      "release": "20260926-222437",
-      "previous_release": "20260926-205808",
-      "artifact_sha256": "005ce6dce5aeebe03edc03641aaf6db903b07e28f3fc76cdef71edf83d70520d",
+      "source_commit": "2bf5b66add0cab4df01da088dffb143d5e180d5d",
+      "build_id": "pJ-C0UiUtcOayK7t_kAUy",
+      "release": "20260927-080408",
+      "previous_release": "20260927-074720",
+      "artifact_sha256": "4d2d7028d3d669b7cfd7f2708fed44fb0ae6be807595df792923ef86ac5e9677",
       "build_flags": "none -- the release manifest records build_flags {}; the capability contract carries no build flags",
       "contract_version": "1",
-      "deployed_at": "2026-09-26 ~22:24Z UTC (release 20260926-222437), installed by the concurrent UI-audit session from branch prelive/ui-audit-on-guest-access (7ba41e18: PR #192's guest-access content with PR #193's UI-audit changes). The previous release, 20260926-205808, was PR #192's own bundle from be2ec844 (BUILD_ID pw0k3HKKfUkaIGZLYCTSK). Read back from the installed hotel-admin-release.json: source_state clean, contract_version 1, build_flags {}. Recorded by T0197.",
-      "verified_at": "2026-09-27, read back from the installed release manifest on the appliance.",
-      "rollback": "PRESENT: /opt/stayconnect/hotel-admin.previous -> /opt/stayconnect/releases/hotel-admin/20260925-210739 (source 38d2ab79, BUILD_ID dY7ynnaj6XBJuq2YR3qYd), the release that was serving immediately before."
+      "deployed_at": "2026-09-27 ~08:04Z UTC (release 20260927-080408), the Central-redesign candidate: one Appliance & licence page on /edge/v1/central/status. The previous release, 20260927-074720, is the same redesign built from 334a99e8. Read back from the installed hotel-admin-release.json: source_state clean. Central Control Plane redesign (branch central/refactor-activation-redesign, PR pending Product-Owner acceptance; not on master). Deployed to PRE-LIVE and Central under the mission's authorization on 2026-09-27.",
+      "verified_at": "2026-09-27, read back from the installed release manifest and exercised in Chrome (desktop and phone).",
+      "rollback": "PRESENT: /opt/stayconnect/hotel-admin.previous -> /opt/stayconnect/releases/hotel-admin/20260927-074720; the pre-redesign bundle is release 20260927-051759 (24b80d7f)."
     },
     "hotel_admin_deployment_contract": "PERMANENT RULE for every Hotel Admin release. (1) Exactly ONE servable release: /opt/stayconnect/hotel-admin is a symlink to a verified release under the managed releases directory - never a plain directory, which is what an install-by-copying leaves behind and what removes all provenance. (2) Every bundle carries hotel-admin-release.json recording source commit, BUILD_ID, release timestamp, the capability flags and their values, and the artifact checksum; packaging FAILS if the source commit cannot be identified or the contract is not satisfied. (3) Installation verifies the candidate - checksum, manifest, required routes, and that the flags were really inlined - BEFORE switching, and smoke-tests the live endpoint AFTER, proving the served BUILD_ID and that every required operator surface answers; a failure restores the previous verified release. (4) A rollback target must satisfy the same contract: an obsolete UI that would remove PMS, Service Plan or Package management is archive evidence, never an executable rollback, and the previous pointer is CLEARED rather than left aimed at one. (5) Release selection is explicit and provenance-verified - never by mtime, filename or 'latest-looking' directory. (6) Historical releases are retained under the archive directory, unreachable by Caddy, systemd or either pointer.",
     "hotel_admin_operator_endpoint_verified": true,
@@ -925,13 +925,13 @@
     "pms_published_generation_note": "THREE DIFFERENT COUNTERS HAVE ALL BEEN ABBREVIATED 'gen' AND MUST NOT BE CONFLATED. pms_interface_runtime.published_resync_generation is the RESYNC generation, bumped once per resync cycle: 300, read passively 2026-09-16 after the T0149 deployment. pms_interface_runtime.runtime_generation is a monotonic runtime-row counter bumped on every state write, which is why it is orders of magnitude larger: 74452. pms_interface_revisions.revision_no is the pinned Interface REVISION: 3, unchanged. The move followed the pmsd restart the T0149 deployment caused: the connector reconnected and requested its own resync, publishing generation 299 over 464 records at 2026-09-16T14:04:36Z and reaching 300 on the next cycle. No operator command and no configuration change; resync_command_id is NULL. HISTORICAL (do not read as current): 282 belongs to the 2026-09-15 restart, 209 to the migration-0065 closure, and 206-208 to the 2026-09-08T11:45Z restart sequence.",
     "deployed_runtime_head": "MIXED -- see deployed_runtime_services; there is no single deployed head",
     "deployed_runtime_services": {
-      "_note": "Per service: sha256 of the installed binary, the commit its own bytes name, and the build tag. Read back from /opt/stayconnect/bin on the appliance on 2026-09-27 (appliance clock 2026-09-26 ~22:40 UTC), after the guest-access scd (T0197) and the concurrent UI-audit portald were installed. The appliance carries no Go toolchain, so the Go build stamp was read directly out of the artifact with `grep -ao 'vcs.revision=[0-9a-f]\\{40\\}'`, `grep -ao -- '-tags=[a-z_,]*'` and `grep -ao 'vcs.modified=[a-z]*'` -- the same three values `go version -m` prints, taken from the same bytes.",
-      "netd": "ddd27a30a00dc97a437703726988644ece7bfc58ef19580ea95873b8aed6497a  (5841a722ddbd, tags=stayconnect_production, vcs.modified=false)",
-      "scd": "f97807bad0abd406af64c333e2769048da02ecf4374439da2e1def0731bd92d3  (13c43c1e2459, tags=stayconnect_production, vcs.modified=false)",
-      "edged": "3ad921a727568252a88b98204a9769ece996db09ced8eb7aaa6b207b6117ac7d  (334f9d917939, tags=stayconnect_production, vcs.modified=false)",
-      "pmsd": "579cab5c401e2f0878c6fc5550e79137d91b8fc4bd15e8b022ec2025155eaeda  (820bdec1ff76, tags=stayconnect_production, vcs.modified=false)",
-      "portald": "5a15b3a436bd77d105085e3d9b284fd75d4b012022750bed1563c4348fc3a4c7  (7ba41e182cd9, tags=stayconnect_production, vcs.modified=false)",
-      "acctd": "9e06178d18bfeea8250081663078be15ea5580bafe1cb8388b71f94beaff6b58  (ee83b62e8a9d, tags=stayconnect_production, vcs.modified=false)"
+      "_note": "Per service: sha256 of the installed binary, the commit its own bytes name, and the build tag. Read back from /opt/stayconnect/bin on the appliance on 2026-09-27 after the Central-redesign deployment (scd, edged, acctd, netd, pmsd replaced; portald unchanged). The appliance carries no Go toolchain, so the Go build stamp was read directly out of the artifact with `grep -ao 'vcs.revision=[0-9a-f]\\{40\\}'`, `grep -ao -- '-tags=[a-z_,]*'` and `grep -ao 'vcs.modified=[a-z]*'` -- the same three values `go version -m` prints, taken from the same bytes.",
+      "netd": "a42036b4bfc1d49112ada7bd395f8460ec085b6dfd0987683ea8790aa46fabe4  (2bf5b66add0c, tags=stayconnect_production, vcs.modified=false)",
+      "scd": "db413ea3eecc7bc4a13a682784b0f350696cec979ff93e9ade25e5f72119f8a3  (2bf5b66add0c, tags=stayconnect_production, vcs.modified=false)",
+      "edged": "38e95c9fb0357dc0216295a1b63aa804713d053866afd91823171eb6c0109d9a  (2bf5b66add0c, tags=stayconnect_production, vcs.modified=false)",
+      "pmsd": "0c21a0f3675dac4f8ed8161b61cdea8ac96acb42d3940d7aa02ce8d71f69f670  (2bf5b66add0c, tags=stayconnect_production, vcs.modified=false)",
+      "portald": "f5f30660e014e9a97d508c0956b4f5ab3a10203efdbb8f47dd1361fb66197935  (24b80d7f1239, tags=stayconnect_production, vcs.modified=false)",
+      "acctd": "c48febbfa2774556905820a8645114d30b9c52b8d0946871d2c0ee2140ad04b1  (2bf5b66add0c, tags=stayconnect_production, vcs.modified=false)"
     },
     "entitlement_usage_invariant": "HOLDS FOR EVERY ENTITLEMENT, including terminated ones (migration 0062). Attribution follows the half-open binding interval PLUS the closing instant itself when no other binding for that session covers it. That extra arm is reachable only at a terminal boundary, where the crossing sample would otherwise belong to nothing; at a Phase-5 rebinding the successor binding always covers the instant, so the arm cannot fire and no sample is counted twice. The half-open bound is unchanged and iam_v2.p6_data_crossing - the enforcement authority - was not touched.",
     "schema_head": "0080_the_service_may_read_the_ledger_it_writes",
@@ -1000,11 +1000,11 @@
       "lifecycle": "PRE-LIVE remains PRE-LIVE. No Go-Live, no cutover, no production enablement. Go-Live remains NOT AUTHORIZED."
     },
     "netd_runtime_identity": {
-      "_note": "netd IS OLDER THAN edged, pmsd, portald AND scd, recorded rather than smoothed over. It was last rebuilt and replaced at 5841a722 for the guest local-address isolation boundary; the Hotel Admin overhaul changed no netd code, so netd was not rebuilt. (This note previously said netd was the NEWEST binary and described a 2026-09-09 build; that stopped being true when later deliveries replaced other services, and it was not updated at the time.)",
+      "_note": "netd was rebuilt in the Central-redesign deployment because it now resolves its tenant/site from the verified signed assignment (it previously trusted assignment.json unverified). No enforcement code changed.",
       "binary": "netd",
-      "source_commit": "5841a722ddbd934daeb41a2971b96fabbf504c1d",
-      "sha256": "ddd27a30a00dc97a437703726988644ece7bfc58ef19580ea95873b8aed6497a",
-      "verified_at": "2026-09-24, read back from the installed bytes (see deployed_runtime_services)."
+      "source_commit": "2bf5b66add0cab4df01da088dffb143d5e180d5d",
+      "sha256": "a42036b4bfc1d49112ada7bd395f8460ec085b6dfd0987683ea8790aa46fabe4",
+      "verified_at": "2026-09-27, read back from the installed bytes (see deployed_runtime_services)."
     },
     "factory_clean_first_guest_network": {
       "status": "RESOLVED on master and PROVEN on PRE-LIVE (2026-09-09).",
@@ -1211,18 +1211,26 @@
     "nightly_authoritative_validation": "RETIRED by D42 (2026-09-26, T0196). From T0182 to T0195 the four gates ran a failing sentinel on every pull_request and a 06:00 Africa/Cairo orchestrator re-ran them for the single delivery candidate and merged an all-green head unattended. On 2026-09-26 the orchestrator workflow was first disabled in GitHub (disabled_manually) and PR #190 labelled nightly-hold, so no scheduled run could merge anything; T0196 then removed the workflow, tools/nightly_delivery.py, tools/nightly-status.py and scripts/ci/nightly-orchestrate.py. The first 06:00 scheduled run was therefore never observed. The record of the model is docs/NIGHTLY_AUTHORITATIVE_DELIVERY.md (superseded) and T0182-T0195.",
     "session_start_check": "None owed by the delivery model. Nothing runs unattended under D42, so there is no nightly verdict to read at session start (tools/nightly-status.py was removed by T0196). A session starts from the state of its own delivery branch and pull request.",
     "central_console_runtime_identity": {
-      "_note": "What Central 150.0.0.252 serves as its operator console (cloud-admin), read back from the installed release's own cloud-admin-release.json. Built and shipped separately from ctrlapi, which this record does not describe.",
-      "source_commit": "334f9d917939a21eeeb52530b2c6a8db29c6b165",
+      "_note": "What Central 150.0.0.252 serves as its operator console (cloud-admin), read back from the installed release's own cloud-admin-release.json. Built and shipped separately from ctrlapi (recorded in central_ctrlapi_runtime_identity).",
+      "source_commit": "2bf5b66add0cab4df01da088dffb143d5e180d5d",
       "source_state": "clean",
-      "build_id": "Uf1lYB7U-Snn0R2z2kRCu",
-      "release": "/opt/stayconnect/releases/cloud-admin/20260926-003937",
-      "artifact_sha256": "b791b8a444285e1247335868565cf2ffdf403d40de20a8674fbe8af7ab2c5790",
-      "previous_release": "/opt/stayconnect/releases/cloud-admin/20260821-135642 (cloud-admin-current.previous)",
-      "ctrlapi_runs": "0582eb7847be23583c9fc6c03d6c6c16f5601b79 (unchanged by this delivery)",
-      "deployed_at": "2026-09-26T00:39Z UTC (T0195)",
-      "verified": "Chrome, https://150.0.0.252: title 'OneGate Central', 12/12 screens 200 with no error, each with a working lightbulb; console /login 200 directly and through Caddy."
+      "build_id": "P7M6RaOXIgaGL2xA3v5x3",
+      "release": "/opt/stayconnect/releases/cloud-admin/20260927-080259",
+      "artifact_sha256": "a418b83ac13fbfdcb2c955bb6ffed2ceb8199501afd901ecf02f3c4eed410b60",
+      "previous_release": "/opt/stayconnect/releases/cloud-admin/20260927-074516 (cloud-admin-current.previous; same redesign, built from 334a99e8)",
+      "deployed_at": "2026-09-27T08:03Z UTC. Central Control Plane redesign (branch central/refactor-activation-redesign, PR pending Product-Owner acceptance; not on master). Deployed to PRE-LIVE and Central under the mission's authorization on 2026-09-27.",
+      "verified": "Chrome, https://150.0.0.252: five destinations (Overview, Customers, Appliances, Licenses, System), no customer selector, all nine screens render with no page error and no API 5xx, customer drill-down tabs, both appliance pages, phone width without horizontal overflow; old routes answer 308 to their replacements; /metrics is no longer reachable through Caddy."
     },
-    "prelive_guest_access_testing": "ENABLED on PRE-LIVE 172.21.60.25 for Product Owner testing (D43, T0197, 2026-09-26). STAYCONNECT_PHASE2_MASTER=1 and STAYCONNECT_PHASE2_PORTAL=1 in /etc/stayconnect/scd.env and portald.env; rollback copies *.bak-pre-guest-activation-20260926T193029Z (the portald.env copy removed by the retention sweep was reconstructed exactly as *-reconstructed). Live proof 2026-09-26: scripts/guest-access-e2e-test.sh 53/53 -- captive before sign-in, enforced (nft phase3_auth_ipv4) and online (generate_204 = 204, ICMP 1.1.1.1) after activation for all three methods, device limits, joining, reconnect, termination and backend-enforced method switches, with pms_postings, posting_outbox and payment_transactions unchanged. Test state reset afterwards."
+    "prelive_guest_access_testing": "ENABLED on PRE-LIVE 172.21.60.25 for Product Owner testing (D43, T0197, 2026-09-26). STAYCONNECT_PHASE2_MASTER=1 and STAYCONNECT_PHASE2_PORTAL=1 in /etc/stayconnect/scd.env and portald.env; rollback copies *.bak-pre-guest-activation-20260926T193029Z (the portald.env copy removed by the retention sweep was reconstructed exactly as *-reconstructed). Live proof 2026-09-26: scripts/guest-access-e2e-test.sh 53/53 -- captive before sign-in, enforced (nft phase3_auth_ipv4) and online (generate_204 = 204, ICMP 1.1.1.1) after activation for all three methods, device limits, joining, reconnect, termination and backend-enforced method switches, with pms_postings, posting_outbox and payment_transactions unchanged. Test state reset afterwards.",
+    "central_ctrlapi_runtime_identity": {
+      "_note": "The Central API binary, read back from /opt/stayconnect/bin/ctrlapi on Central.",
+      "sha256": "0bd9569839f520fb7d381c5b43d0d6fb3ef5690299e6f2c811ae151241b94312",
+      "source_commit": "2bf5b66add0cab4df01da088dffb143d5e180d5d",
+      "vcs_modified": false,
+      "schema": "Central migrations 0001-0046 applied and verified by deploy/scripts/central-migrate.sh (0045 was already in effect but unrecorded in the ledger; re-applying it was a no-op that recorded it).",
+      "rollback": "Binary /opt/stayconnect/bin/ctrlapi.bak-pre-334a99e8-20260927T074505Z is the pre-redesign build (0582eb78); it cannot run on schema 0046. Schema rollback = restore /opt/stayconnect/backups/db/central-pre-0046-20260927T071344Z.dump (or central-pre-334a99e8-20260927T074505Z.dump, taken immediately before the migration), or the lossy 0046 down migration.",
+      "deployed_at": "2026-09-27T08:03Z UTC. Central Control Plane redesign (branch central/refactor-activation-redesign, PR pending Product-Owner acceptance; not on master). Deployed to PRE-LIVE and Central under the mission's authorization on 2026-09-27."
+    }
   },
   "latest_transition_id": "T0197",
   "phase3_delivery_evidence": {
@@ -1838,14 +1846,14 @@
     "_note": "STANDING PRODUCT-OWNER DECISION, 2026-09-13: Central serves this appliance for LICENSING ONLY. It supersedes the earlier authorisation to activate operational telemetry. The telemetry link was built, completed and verified (87,742 records delivered, both sides reconciled, zero orphaned) and was then DISABLED BY DECISION. It is not a defect, and reconnecting telemetry must never be proposed as a repair.",
     "mode": "LICENSING_ONLY",
     "enforced_by": "iam_v2.site_cloud_mode + internal/cloudmode; every uncertainty (no row, no scope, unreadable setting, unrecognised value) resolves to LICENSING_ONLY so the mode cannot silently reactivate through defaults, restart or reconciliation.",
-    "retained": "HTTPS to ctrlapi only: /v1/appliances/register, /enroll; /v1/appliance/csr, /certificate; /v1/appliance/license, /offline-reconcile; /v1/appliance/hello (licence enforcement -- how a deleted appliance stops serving on a stale cached licence); /v1/appliance/assignment, /assignment-registry, /assignment/ack.",
+    "retained": "HTTPS to ctrlapi only: /v1/appliances/register (token-less, self-signed; token enrollment was removed by the 2026-09-27 Central redesign); /v1/appliance/csr, /certificate; /v1/appliance/license, /offline-reconcile; /v1/appliance/hello (licence enforcement -- how a deleted appliance stops serving on a stale cached licence); /v1/appliance/assignment, /assignment-registry, /assignment/ack.",
     "stopped": "The whole NATS transport: telemetry publishes (usage, health, service_health, license_ack), remote guest-session revoke, remote PMS test/cache/health, the tenant PMS config broadcast, the signed command channel, the software-update agent.",
     "license_ack_is_not_licensing": "Central stores it as a telemetry row; nothing consumes it and no licence operation depends on it. A report ABOUT licensing is not licensing.",
     "historical_records": "Retained on both sides. Nothing purged, no table dropped, no queued record replayed. The existing 30-day delivered-record retention still runs locally.",
     "receipt": "T0122",
     "non_licensing_functionality": "PERMANENTLY REMOVED from the product, not disabled. internal/{fleet,commands,updates,configpush,heartbeat,transport}; the fleet, usage, sessions, pms_admin, commands and updates APIs; cmd/nats-authz and cmd/nats-acctest; the cloud-admin fleet page. github.com/nats-io/* is no longer a control-plane dependency. Central migration 0045 dropped fleet_telemetry (251166 rows), fleet_telemetry_dedupe (251286), usage_counters, appliance_commands and appliance_update_assignments.",
     "nats_surface": "NONE. stayconnect-nats-authz stopped and disabled; sc-central-nats and sc-central-nats-mtls stopped.",
-    "deliberately_kept": "internal/metrics (payments, router, licensing paths) and internal/stripe (commercial billing for licences). A shared package is not removed because its name appears in a removal list."
+    "deliberately_kept": "internal/metrics (HTTP router metrics only; /metrics answers direct loopback requests only). internal/stripe was removed by the 2026-09-27 Central redesign together with every payment route; nothing on Central handles payments."
   },
   "open_product_owner_decisions": {
     "_note": "Every Product-Owner decision this repository is waiting on, and the ones recently resolved, in one place. Recording a decision here does not authorize any of its options. A resolved entry is kept rather than deleted, because the question and the answer are both worth reading later -- and because this list exists at all only after next_authorized_action described one open item as the only one while a second sat open elsewhere.",
