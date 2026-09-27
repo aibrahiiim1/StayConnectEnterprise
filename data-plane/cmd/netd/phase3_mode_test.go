@@ -7,7 +7,39 @@ package main
 import (
 	"context"
 	"testing"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
+	"github.com/stayconnect/enterprise/data-plane/internal/assignment/assignmenttest"
 )
+
+// F5: the enforcement plane takes its scope from the VERIFIED assignment. A document signed by a key outside the
+// trust registry used to be accepted here because netd read assignment.json raw.
+func TestModeRequiresAVerifiedAssignment(t *testing.T) {
+	envFor := func(f *assignmenttest.Fixture) func(string) string {
+		return env(map[string]string{
+			"STAYCONNECT_PHASE3_MASTER":     "true",
+			"NETD_IDENTITY_DIR":             f.IdentityDir,
+			"NETD_ASSIGNMENT_DIR":           f.Paths.Dir,
+			"NETD_ASSIGNMENT_REGISTRY":      f.Paths.RegistryPath,
+			"NETD_ASSIGNMENT_REGISTRY_ROOT": f.Paths.RegistryRootPath,
+			"NETD_ASSIGNMENT_TRUST":         f.Paths.TrustPath,
+		})
+	}
+	good := assignmenttest.New(t)
+	good.WriteAssignment(t, good.Doc(assignment.StateAssigned, 3))
+	mode, err := loadPhase3Mode(context.Background(), envFor(good))
+	if err != nil || !mode.Active || mode.TenantID != assignmenttest.TenantID || mode.AssignGen != 3 ||
+		mode.ApplianceID != good.ApplianceID {
+		t.Fatalf("a verified assignment must activate the scope: %+v err=%v", mode, err)
+	}
+
+	rogue := assignmenttest.New(t)
+	rogue.WriteAssignment(t, rogue.Rogue(3))
+	mode, err = loadPhase3Mode(context.Background(), envFor(rogue))
+	if err != nil || mode.Active || mode.TenantID != "" {
+		t.Fatalf("an unverifiable assignment must leave netd inactive with no scope: %+v err=%v", mode, err)
+	}
+}
 
 func env(pairs map[string]string) func(string) string {
 	return func(k string) string { return pairs[k] }

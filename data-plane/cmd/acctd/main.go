@@ -28,7 +28,6 @@ import (
 
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
-	"github.com/stayconnect/enterprise/data-plane/internal/identity"
 	"github.com/stayconnect/enterprise/data-plane/internal/livez"
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
@@ -49,8 +48,6 @@ func loadCfg() cfg {
 		DBURL:        envOr("ACCTD_DB_URL", "postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect?sslmode=disable"),
 		ScdSocket:    envOr("ACCTD_SCD_SOCKET", "/run/stayconnect/scd.sock"),
 		TickSeconds:  envInt("ACCTD_TICK_SECONDS", 1),
-		TenantID:     os.Getenv("ACCTD_TENANT_ID"),
-		ApplianceID:  os.Getenv("ACCTD_APPLIANCE_ID"),
 		LegacyBridge: envOr("ACCTD_LEGACY_BRIDGE", "br-lan"),
 	}
 }
@@ -104,27 +101,19 @@ func main() {
 	// must come from the same source of truth as everything else on the appliance:
 	//   appliance_id -> identity.json (enrollment)
 	//   tenant_id    -> the vendor-signed ASSIGNMENT document
-	// The legacy ACCTD_TENANT_ID/ACCTD_APPLIANCE_ID env vars are a migration-only
-	// fallback: leaving them hard-wired meant a re-assigned appliance kept billing
+	// Both come from the VERIFIED assignment and the registered identity (scope.go); a production build never
+	// takes them from the environment. Hard-wired env vars once meant a re-assigned appliance kept billing
 	// usage to the PREVIOUS customer.
-	idStore := &identity.Store{Dir: envOr("ACCTD_IDENTITY_DIR", "/etc/stayconnect/identity")}
-	if ident, err := idStore.LoadOrEnroll(rootCtx, "", "", "", false); err == nil && ident != nil {
-		c.ApplianceID = ident.ApplianceID
-	}
 	asgStore := &assignment.Store{Dir: envOr("ACCTD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment")}
-	assignedSite := ""
-	assignedGen := int64(0)
-	if aTen, aSite, _, aVer := asgStore.Resolved(); aTen != "" {
-		c.TenantID = aTen
-		assignedSite = aSite
-		assignedGen = aVer
-	} else {
-		c.TenantID = "" // unassigned appliance bills nobody
-	}
+	scope := resolveAcctdScope(os.Getenv)
+	c.TenantID, c.ApplianceID = scope.TenantID, scope.ApplianceID
+	assignedSite := scope.SiteID
+	assignedGen := scope.Version
 	if c.TenantID == "" || c.ApplianceID == "" {
-		slog.Warn("acctd: appliance not enrolled/assigned — accounting paused until a signed assignment arrives")
+		slog.Warn("acctd: appliance not registered/assigned — accounting paused until a verified signed assignment arrives",
+			"assignment_outcome", scope.Outcome.String())
 		// Wait for an assignment, then re-exec into the normal path.
-		waitForAssignment(rootCtx, asgStore)
+		waitForAssignment(rootCtx, func() bool { return resolveAcctdScope(os.Getenv).TenantID != "" })
 		return
 	}
 	slog.Info("acctd identity resolved", "tenant_id", c.TenantID, "appliance_id", c.ApplianceID)
