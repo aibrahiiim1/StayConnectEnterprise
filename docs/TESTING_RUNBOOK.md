@@ -14,7 +14,7 @@ Host / service map:
 | Plane | Host | Key services | Ingress |
 |---|---|---|---|
 | Central control plane | `172.21.96.196` | `stayconnect-ctrlapi` (:8080; appliance mutual TLS :9443), `cloud-admin` (:3000), Caddy, Postgres `sc-central-pg`, Redis `sc-central-redis`. No NATS (CLAUDE.md §0E) | `sc-central.echofusion.com` / `admin.stayconnect.local` → Caddy (`/v1`, `/cloud` → :8080, the rest → :3000) |
-| Appliance edge | `172.21.60.25` | `stayconnect-scd`, `edged` (:8090), `netd`, `portald` (:8380), `caddy` (:80/:443), `hotel-admin` (:3100), `acctd`, site Postgres `stayconnect-pg` | `portal.stayconnect.local` (guest) · `hotel.stayconnect.local` (Hotel Admin) |
+| Appliance edge | `172.21.60.25` | `stayconnect-scd`, `edged` (:8090), `netd`, `portald` (:8380), `caddy` (:80/:443), `hotel-admin` (:3100), `acctd`, site Postgres `stayconnect-pg` | `portal.stayconnect.local` (guest) · `hotel.stayconnect.local` (Admin Console) |
 
 > **UI note:** the admin UIs redirect unauthenticated requests, so a protected
 > route returns **307 → /login**, and **/login returns 200**. A `500` on a
@@ -101,7 +101,7 @@ Expect: a number, no error.
 Prefer the automated suite (Part E) for signed flows — it self‑cleans. Manual spot‑checks:
 
 **C1. License lifecycle** — renew/suspend/resume/revoke on the appliance's page in Central, press **Check now**
-in Hotel Admin (or `POST /v1/central/refresh` on the scd socket; otherwise the licence is fetched every 6 h),
+in Admin Console (or `POST /v1/central/refresh` on the scd socket; otherwise the licence is fetched every 6 h),
 then:
 ```bash
 ssh $A 'curl -s --unix-socket /run/stayconnect/scd.sock http://localhost/v1/central/status \

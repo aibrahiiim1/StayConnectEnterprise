@@ -200,7 +200,7 @@ export function IssueDialog({
                 <Input type="datetime-local" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
               </Field>
               <Field label="Note (optional)" hint="For your own reference, e.g. who the cards are for." className="sm:col-span-2">
-                <Textarea value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} placeholder="Conference desk, week 12" />
+                <Textarea value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} placeholder="Visitor desk, week 12" />
               </Field>
             </div>
           ) : (

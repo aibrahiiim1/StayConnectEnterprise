@@ -212,7 +212,7 @@ export default function HealthPage() {
               <HelpList
                 items={[
                   <><strong>Healthy</strong> — running and passing its health check.</>,
-                  <><strong>Waiting</strong> — intentionally idle until its prerequisite exists (for example DHCP before any guest network is configured). Not a fault.</>,
+                  <><strong>Waiting</strong> — intentionally idle until its prerequisite exists (for example DHCP before any client network is configured). Not a fault.</>,
                   <><strong>Starting / Recovering</strong> — coming up, or being restarted automatically.</>,
                   <><strong>Degraded</strong> — running, but a check or a dependency is failing.</>,
                   <><strong>Crash-loop / Failed</strong> — keeps stopping, or could not be recovered automatically.</>,

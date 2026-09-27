@@ -7,7 +7,7 @@ task-oriented ("how do I…") rather than a feature reference.
 
 > **New to OneGate?** Read the
 > [Complete Operations Manual](../STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md) first —
-> it takes a site from an unpacked appliance to live, licensed guest Wi-Fi. The full
+> it takes a site from an unpacked appliance to live, licensed client Wi-Fi. The full
 > documentation index is at [docs/README.md](../README.md).
 >
 > **Current model:** onboarding is **zero-touch** (the appliance registers itself, no token → *Waiting for
@@ -29,7 +29,7 @@ If you want a **page-by-page reference** (what every screen shows and does) or a
 | [control-panel-reference.md](control-panel-reference.md) | Every **OneGate Central** page — Overview, Customers (and the customer page), Appliances (and the appliance page), Licenses, System (Security alerts, Trust & keys, Audit log, Team, Backup health) |
 | [control-panel-config-manual.md](control-panel-config-manual.md) | How to create a **Customer → Site**, **activate** an appliance, manage its **licence**, and run day-2 operations in Central |
 | [hotel-admin-reference.md](hotel-admin-reference.md) | Every **OneGate Admin Console** page, group by group — Overview; Internet offering; Clients; Client Portal; Hotel; Networking; System |
-| [hotel-admin-config-manual.md](hotel-admin-config-manual.md) | How to **activate and fully configure** an appliance from the Admin Console — networking, guest networks, sign-in methods, packages, vouchers, PMS, portal, operators |
+| [hotel-admin-config-manual.md](hotel-admin-config-manual.md) | How to **activate and fully configure** an appliance from the Admin Console — networking, client networks, sign-in methods, packages, vouchers, PMS, portal, operators |
 | [guest-portal.md](guest-portal.md) | What **clients** see on the Wi-Fi sign-in page, and which Admin Console settings control it |
 
 The role-based guides below are shorter, task-oriented walkthroughs for each role.
@@ -85,8 +85,8 @@ and no action buttons.
 | **Internet offering** | Internet packages · Service plans · Vouchers |
 | **Clients** | Client accounts · Active sessions · Usage explorer · Client devices · Online-time budgets |
 | **Client Portal** | Sign-in methods · Portal settings · Allowed sites · Social login · Email & SMS |
-| **Hotel** | PMS connection · Stays · PMS activity · Guest sign-in checks · Guest sign-in attempts · Grace Period · Post-stay access · Charge health · Manual review · Settlements · Recovery · PMS routing · Duplicate sources · Cross-PMS transfer |
-| **Networking** | Guest networks · DHCP & leases · WAN / LAN settings · Config history · TLS certificate |
+| **Hotel** | PMS connection · Room sign-in · Stays · PMS activity · Guest sign-in checks · Guest sign-in attempts · Grace Period · Post-stay access · Charge health · Manual review · Settlements · Recovery · PMS routing · Duplicate sources · Cross-PMS transfer |
+| **Networking** | Client networks · DHCP & leases · WAN / LAN settings · Config history · TLS certificate |
 | **System** | Diagnostics · Alerts · Activity · Appliance & licence · Backups · Operators |
 
 Hospitality and PMS functions are grouped under **Hotel**, which replaces the former *Property management
@@ -109,10 +109,10 @@ no account; they:
 
 The portal speaks **six languages** — English, Arabic (right to left, fully mirrored), German, French,
 Italian and Russian — chosen from the client's device or the language selector, and it comes in **six layout
-templates**: Classic, Split, Immersive, Header bar, Resort and Kiosk.
+templates**: Classic, Split, Immersive, Header bar, Editorial and Kiosk.
 
-In the Admin Console, **Client Portal → Sign-in methods** controls which methods are offered (and what a client types
-for room sign-in, and how many wrong tries are allowed), and **Client Portal → Portal settings** controls the
+In the Admin Console, **Client Portal → Sign-in methods** controls which methods are offered (and how many wrong tries are
+allowed), **Hotel → Room sign-in** sets what a guest types besides the room number, and **Client Portal → Portal settings** controls the
 template, brand, wording, languages and custom CSS/HTML. Details: [guest-portal.md](guest-portal.md).
 
 ## Glossary
@@ -127,7 +127,7 @@ template, brand, wording, languages and custom CSS/HTML. Details: [guest-portal.
   period. The only entitlement.
 - **Max concurrent online clients** — How many clients may be online at once across the whole appliance.
 - **Grace period** — Days after a license expires during which clients are still served, with warnings.
-- **Guest network** — A Wi-Fi network for clients, carried on a VLAN, with its own addresses and portal.
+- **Client network** — A Wi-Fi network for clients, carried on a VLAN, with its own addresses and portal.
 - **Internet package** — What a client is offered; uses one service plan plus rules on who gets it and for
   how long.
 - **Service plan** — The technical recipe behind a package: speed, devices, data, time, timeouts.

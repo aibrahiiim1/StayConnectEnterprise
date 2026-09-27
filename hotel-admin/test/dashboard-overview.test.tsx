@@ -149,6 +149,9 @@ describe("the overview", () => {
     expect(screen.getByText("Name or reservation did not match")).toBeInTheDocument();
     expect(screen.getByText(/median 140 ms/)).toBeInTheDocument();
     expect(screen.getByTestId("resources")).toBeInTheDocument();
+    // The PMS card names the system, not the whole Hotel module (docs/PRODUCT_TERMINOLOGY.md).
+    expect(screen.getByText("Property Management System")).toBeInTheDocument();
+    expect(screen.getByText("Client networks")).toBeInTheDocument();
   });
 
   it("says all is normal when nothing needs attention, and does not show the list", async () => {
@@ -213,7 +216,7 @@ describe("unavailable blocks", () => {
     ]) {
       expect(text).toContain(phrase);
     }
-    expect(screen.getByText("Guest network configuration could not be read.")).toBeInTheDocument();
+    expect(screen.getByText("Client network configuration could not be read.")).toBeInTheDocument();
   });
 
   it("draws no fabricated figures when the figures could not be read", async () => {

@@ -27,7 +27,7 @@ The product words used throughout (Client, Admin Console, Client Portal, Site) a
 
 - [STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md](STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md)
   — end-to-end: architecture, install, WAN/LAN, registration, activation,
-  convergence, the license model & states, concurrent capacity, guest VLANs (with
+  convergence, the license model & states, concurrent capacity, client networks / VLANs (with
   worked VLAN 100 / VLAN 200 examples), DHCP/DNS/NAT/portal, auth methods, access
   plans & vouchers, integrations, renewal & anti-replay, recovery, Central-outage
   behavior, replacement & rebind, factory reset, move/retire/delete,
@@ -53,8 +53,8 @@ The product words used throughout (Client, Admin Console, Client Portal, Site) a
 ## 5. Admin Console (Appliance) — configuration manual
 
 - [user-guide/hotel-admin-config-manual.md](user-guide/hotel-admin-config-manual.md)
-  — activate (Appliance & licence page), then fully configure the appliance: WAN/LAN, guest VLANs,
-  auth methods, vouchers, integrations, branding, operators, TLS, diagnostics.
+  — activate (Appliance & licence page), then fully configure the appliance: WAN/LAN, client networks / VLANs,
+  auth methods (including Hotel → Room sign-in), vouchers, integrations, branding, operators, TLS, diagnostics.
 
 ## 6. Admin Console (Appliance) — page reference
 
@@ -107,7 +107,7 @@ The product words used throughout (Client, Admin Console, Client Portal, Site) a
 | Central (licensing, activation, fleet status) — authoritative | [CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md) |
 | Cloud / control-plane architecture | [CLOUD_ARCHITECTURE.md](CLOUD_ARCHITECTURE.md) · [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md) |
 | Edge / appliance architecture | [EDGE_ARCHITECTURE.md](EDGE_ARCHITECTURE.md) · [EDGE_NETWORKING.md](EDGE_NETWORKING.md) |
-| Guest VLANs | [GUEST_VLAN_CONFIGURATION.md](GUEST_VLAN_CONFIGURATION.md) · [ARUBA_SSID_VLAN_MAPPING.md](ARUBA_SSID_VLAN_MAPPING.md) |
+| Client networks / VLANs | [GUEST_VLAN_CONFIGURATION.md](GUEST_VLAN_CONFIGURATION.md) · [ARUBA_SSID_VLAN_MAPPING.md](ARUBA_SSID_VLAN_MAPPING.md) |
 | DHCP | [DHCP_MANAGEMENT.md](DHCP_MANAGEMENT.md) · [DHCP_OPTION_114.md](DHCP_OPTION_114.md) · [EXTERNAL_DHCP_MODE.md](EXTERNAL_DHCP_MODE.md) |
 | Sync protocol (historical — the appliance's telemetry subsystem was removed, CLAUDE.md §0E) | [SYNC_PROTOCOL.md](SYNC_PROTOCOL.md) |
 | Deployment | [DEPLOYMENT_CLOUD.md](DEPLOYMENT_CLOUD.md) · [DEPLOYMENT_APPLIANCE.md](DEPLOYMENT_APPLIANCE.md) |

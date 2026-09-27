@@ -37,7 +37,7 @@ The customer page opens. Its tabs are **Summary · Sites · Appliances · Licens
 
 A **Site** is **one physical location** — a single hotel, resort, office or campus — that
 belongs to exactly one Customer and can contain one or more Appliances.
-Buildings, floors, SSIDs and guest networks are configured on the appliance in
+Buildings, floors, SSIDs and client networks are configured on the appliance in
 Admin Console (formerly Hotel Admin); they are **not** Sites. A site with two buildings on one uplink is
 still one Site.
 
@@ -63,7 +63,7 @@ Use this when the appliance is installed, powered and has internet to Central.
    - **Where it is installed** — **Customer** (existing, or **New customer…**)
      and **Site** (existing, or a new one with its time zone).
    - **License** — **Clients online at once** (e.g. `500`; the limit covers the
-     whole appliance, across all guest networks), **Valid for** (a number of
+     whole appliance, across all client networks), **Valid for** (a number of
      days, or **Until a date**), and **Grace period (days)** (how long it keeps
      working after the end date).
 4. Confirm. The appliance shows **Activating**; within about a minute of its

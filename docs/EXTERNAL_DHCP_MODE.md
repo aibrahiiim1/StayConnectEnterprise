@@ -36,7 +36,7 @@ until you switch back to `local`.
 
 ## 3. The checklist StayConnect shows the external-DHCP admin
 
-Hotel Admin renders this for an `external` network so the hotel's DHCP admin can
+Admin Console renders this for an `external` network so the site's DHCP admin can
 configure their server to hand out addresses that route through StayConnect:
 
 | Setting on the hotel's DHCP server | Value |
@@ -64,7 +64,7 @@ coordination with StayConnect support.
 
 ## 5. Local vs external — how to decide
 
-- Want the simplest setup, pool + reservations managed in Hotel Admin, guaranteed
+- Want the simplest setup, pool + reservations managed in Admin Console, guaranteed
   option 114 → **`local`**.
 - Hotel insists on central addressing / their own IPAM, DHCP already lives on the
   guest VLAN → **`external`** (and make sure they set gateway + option 114 as

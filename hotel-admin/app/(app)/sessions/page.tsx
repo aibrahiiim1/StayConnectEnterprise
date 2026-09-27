@@ -245,12 +245,15 @@ export default function SessionsPage() {
             </Explain>
           }
         />
-        <StatCard
-          label="Rooms online"
-          value={rows ? summary.rooms.toLocaleString() : "—"}
-          icon={<Hotel />}
-          hint="Distinct rooms signed in with a room number"
-        />
+        {/* Rooms are a Hotel idea: the tile appears only when somebody is actually signed in with a room. */}
+        {rows && summary.rooms > 0 && (
+          <StatCard
+            label="Rooms online"
+            value={summary.rooms.toLocaleString()}
+            icon={<Hotel />}
+            hint="Distinct rooms signed in with a room number"
+          />
+        )}
         <StatCard
           label="Data in this list"
           value={rows ? formatBytes(summary.bytes) : "—"}
@@ -592,7 +595,7 @@ function SessionDetail({ s }: { s: Session }) {
       <DList
         items={[
           { label: "Signed in with", value: methodLabel(s.credential_method) },
-          { label: "Guest network", value: s.guest_network_name ?? s.ingress_interface ?? "—" },
+          { label: "Client network", value: s.guest_network_name ?? s.ingress_interface ?? "—" },
           { label: "IP address", value: <span className="font-mono text-xs">{s.ip}</span> },
           { label: "Device (MAC)", value: <span className="font-mono text-xs">{s.mac}</span> },
           {

@@ -67,7 +67,7 @@ function LoginInner() {
         <div className="relative z-10 max-w-md space-y-4">
           <div className="text-micro uppercase tracking-[0.14em] text-sidebar-active">On-appliance console</div>
           <p className="text-[1.75rem] font-bold leading-tight tracking-[-0.02em] text-white">
-            Guest Wi-Fi for this site: who is online, how they got there, and whether everything is healthy.
+            Client Wi-Fi for this site: who is online, how they got there, and whether everything is healthy.
           </p>
           <p className="text-sm leading-relaxed text-sidebar-muted">
             Runs on the appliance at the site and keeps working when the internet link or OneGate Central is

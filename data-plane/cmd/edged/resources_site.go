@@ -149,7 +149,7 @@ func validateAuthMethodsPatch(patch map[string]json.RawMessage) error {
 		return nil
 	}
 	if !pmsSignInModes[cfg.Mode] {
-		return errors.New("pms.mode must be room_lastname, room_firstname or room_reservation")
+		return errors.New("pms.mode must be room_any, room_lastname, room_firstname or room_reservation")
 	}
 	return nil
 }

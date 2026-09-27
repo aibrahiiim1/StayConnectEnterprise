@@ -61,7 +61,7 @@ const guestRoomDeviceLimitMessage = "This room has reached its device limit. Dis
 // show for the same two conditions (main.go, iamv2_commerce_session.go), so a guest reads one answer whichever
 // way they signed in.
 const (
-	guestCapacityMessage       = "The guest network is at capacity. Please try again shortly."
+	guestCapacityMessage       = "The Wi-Fi network is at capacity. Please try again shortly."
 	guestLicenseRefusedMessage = "This sign-in method is not available. Please contact the site team for assistance."
 )
 

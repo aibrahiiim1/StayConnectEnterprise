@@ -367,7 +367,13 @@ export function PackageForm({
           <div key={i} className="flex gap-2 items-center mb-2" data-testid={`rule-${i}`}>
             <Select data-testid={`rule-type-${i}`} aria-label={`${n}: type`} className="h-9 w-auto shrink-0 ps-2.5"
               value={r.type} onChange={(e) => setRules((rs) => rs.map((x, j) => (j === i ? emptyRule(e.target.value as RuleType) : x)))}>
-              {SUPPORTED_RULE_TYPES.map((t) => <option key={t} value={t}>{RULE_TYPE_LABELS[t]}</option>)}
+              {/* Conditions about a PMS stay only mean something at a hotel, so they are grouped as such. */}
+              <optgroup label="General">
+                {SUPPORTED_RULE_TYPES.filter((t) => !isPMSRuleType(t)).map((t) => <option key={t} value={t}>{RULE_TYPE_LABELS[t]}</option>)}
+              </optgroup>
+              <optgroup label="Hotel (PMS stay)">
+                {SUPPORTED_RULE_TYPES.filter((t) => isPMSRuleType(t)).map((t) => <option key={t} value={t}>{RULE_TYPE_LABELS[t]}</option>)}
+              </optgroup>
             </Select>
             {r.type === "AUTH_METHOD" && <Input data-testid={`rule-methods-${i}`} aria-label={`${n}: sign-in methods`} placeholder="account, voucher" value={r.methods} onChange={(e) => setRule(i, { methods: e.target.value })} />}
             {r.type === "SUBJECT_KIND" && <Input data-testid={`rule-kinds-${i}`} aria-label={`${n}: client kinds`} placeholder="ACCOUNT, VOUCHER" value={r.kinds} onChange={(e) => setRule(i, { kinds: e.target.value })} />}
@@ -382,7 +388,7 @@ export function PackageForm({
                 <option value="requires_prior">requires prior</option>
               </Select>
             )}
-            {r.type === "SITE_NETWORK" && <Input data-testid={`rule-networks-${i}`} aria-label={`${n}: guest networks`} placeholder="uuid,uuid" value={r.guest_network_ids} onChange={(e) => setRule(i, { guest_network_ids: e.target.value })} />}
+            {r.type === "SITE_NETWORK" && <Input data-testid={`rule-networks-${i}`} aria-label={`${n}: client networks`} placeholder="uuid,uuid" value={r.guest_network_ids} onChange={(e) => setRule(i, { guest_network_ids: e.target.value })} />}
             {/* STAY LENGTH. Either bound may be left empty — "8 nights or more" and "up to 7 nights" are both
                 real rules — so neither input is required and an empty one is omitted rather than sent as 0. */}
             {r.type === "STAY_LENGTH" && <>

@@ -11,7 +11,7 @@ import {
   Wallet, BadgeCheck, Paintbrush, Archive, Network, Wifi, History, Router, Cloud,
   ServerCog, Lock, Activity, Package, Gauge, Smartphone, LogIn, Search, X,
   PanelLeftClose, PanelLeftOpen, ClipboardCheck, Ticket,
-  DoorOpen, BedDouble, Plug, Route, Inbox, ShieldCheck, UserX, Layers, ArrowLeftRight, HeartPulse, Receipt,
+  DoorOpen, DoorClosed, BedDouble, Plug, Route, Inbox, ShieldCheck, UserX, Layers, ArrowLeftRight, HeartPulse, Receipt,
   LifeBuoy, Globe, AtSign, MessageSquare, Stethoscope, Bell, Hourglass, CalendarClock, ChartColumn,
 } from "lucide-react";
 import { BySemantics, OneGateLockup } from "@/components/brand";
@@ -124,6 +124,7 @@ const SECTIONS: Section[] = [
     title: "Hotel",
     items: [
       { href: "/pms-interfaces",       label: "PMS connection",       icon: Plug,  resource: "pms-interfaces", keywords: "protel fias connect sync resync opera status property management system hotel" },
+      { href: "/room-sign-in",         label: "Room sign-in",         icon: DoorClosed, resource: "auth-methods", capability: "pms-interfaces", keywords: "room number surname first name reservation what the guest types credential pms sign-in" },
       { href: "/stays",                label: "Stays",                icon: BedDouble,    resource: "pms-stays", keywords: "rooms reservations in house occupancy guest list guests hotel" },
       { href: "/stay-events",          label: "PMS activity",         icon: Inbox,   resource: "pms-events", keywords: "feed messages check in out log property management system hotel" },
       { href: "/pms-resolutions",      label: "Guest sign-in checks", icon: ShieldCheck,   resource: "pms-resolutions", keywords: "room verification failures evidence client sign-in checks hotel" },
@@ -145,7 +146,7 @@ const SECTIONS: Section[] = [
   {
     title: "Networking",
     items: [
-      { href: "/network",             label: "Guest networks",     icon: Network,   resource: "network", keywords: "vlan ssid subnet bridge captive portal" },
+      { href: "/network",             label: "Client networks",     icon: Network,   resource: "network", keywords: "vlan ssid subnet bridge captive portal guest networks" },
       { href: "/network/dhcp",        label: "DHCP & leases",      icon: Wifi,      resource: "network", keywords: "ip address pool lease kea reservation" },
       { href: "/network/system",      label: "WAN / LAN settings", icon: Router,    resource: "network", keywords: "uplink gateway dns static management" },
       { href: "/network/revisions",   label: "Config history",     icon: History,   resource: "network", keywords: "rollback revision applied" },

@@ -237,14 +237,14 @@ func TestSocialStartRefusalsAreFriendlyPagesForABrowser(t *testing.T) {
 	if w.Code != 400 {
 		t.Errorf("status %d, want the 400 it always sent", w.Code)
 	}
-	if rawAnswer.MatchString(page) || strings.Contains(page, "device not on guest network") {
+	if rawAnswer.MatchString(page) || strings.Contains(page, "device not on this Wi-Fi network") {
 		t.Error("the guest reads the raw refusal")
 	}
 	if !strings.Contains(page, esc(builtinStrings["fr"]["err.device.network"])) {
 		t.Error("the refusal is not in the guest's language")
 	}
 	w = serve(h, http.MethodGet, "/auth/social/start?provider=google", map[string]string{"Accept": "application/json"})
-	if w.Code != 400 || !strings.Contains(w.Body.String(), `"device not on guest network"`) {
+	if w.Code != 400 || !strings.Contains(w.Body.String(), `"device not on this Wi-Fi network"`) {
 		t.Errorf("the JSON refusal changed: %d %s", w.Code, w.Body.String())
 	}
 	w = serve(h, http.MethodGet, "/auth/social/start", map[string]string{"Accept": browserAccept})

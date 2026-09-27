@@ -320,7 +320,7 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
             <THead>
               <TR>
                 <TH>Outcome</TH>
-                <TH>Guest network</TH>
+                <TH>Client network</TH>
                 <TH className="text-end">Occurrences</TH>
                 <TH>Most recent</TH>
               </TR>
@@ -332,7 +332,7 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
                   {/* Plain text, not the copyable chip: this section is evidence with nothing to act on, and even a
                       copy button would be a control inside it. The full id is in the tooltip. */}
                   <TD>
-                    <span className="font-mono text-caption text-muted-foreground" title={`Guest network ${s.guest_network_id}`}>
+                    <span className="font-mono text-caption text-muted-foreground" title={`Client network ${s.guest_network_id}`}>
                       {s.guest_network_id.length > 12 ? `${s.guest_network_id.slice(0, 8)}…` : s.guest_network_id}
                     </span>
                   </TD>

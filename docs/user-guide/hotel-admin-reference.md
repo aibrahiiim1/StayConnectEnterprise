@@ -1,7 +1,7 @@
 # OneGate Admin Console — Page-by-Page Reference
 
 **OneGate Admin Console** (formerly Hotel Admin) is the console that runs on the appliance at the site. Site staff use it for
-everything day to day: guest networks, sign-in methods, vouchers, internet packages, the PMS, sessions and
+everything day to day: client networks, sign-in methods, vouchers, internet packages, the PMS, sessions and
 reports. It is reached over HTTPS on the site's management network and keeps working when OneGate Central
 cannot be reached. Operator accounts are local to the appliance: they are not OneGate cloud accounts and do
 not work at any other property.
@@ -102,8 +102,8 @@ appliance healthy.
   client; the device count is underneath), **Sign-ins**, **Data used** (down/up split) and **Room sign-in**
   (*Ready*, *x of y ready* or *Not in use*).
 - **Charts and cards:** Internet traffic; Connected devices (peak and average); Sign-in outcomes (by method,
-  room-check success and failure reasons); When clients sign in; Packages in use; Property management system
-  (per connection, occupancy and — where charging is enabled — room charges); Guest networks (address pool
+  room-check success and failure reasons); When clients sign in; Packages in use; **Property Management
+  System** (per connection, occupancy and — where charging is enabled — room charges); Client networks (address pool
   use, devices, traffic); Services; Addresses and names (DHCP and DNS); Appliance (license, versions,
   WAN/LAN, uptime, CPU, memory, disk).
 - **Actions:** none besides refresh; the page is read-only.
@@ -129,7 +129,9 @@ What clients are offered on the portal, and what those packages are doing for cl
 - **Add package / Edit** (large dialog): Name (what the client sees), Short code (fixed once created),
   Service plan (required, with a summary of what it gives), **How long access lasts**, **Data allowance**
   (the service plan's allowance or an amount per night of the stay, with minimum/maximum), **Who this package is
-  offered to** (conditions; empty means everyone who signs in), and advanced options (offer from/until,
+  offered to** (conditions; empty means everyone who signs in — the condition types are grouped **General**
+  and **Hotel (PMS stay)**, the Hotel group holding the conditions that only mean something for a PMS stay:
+  nights staying, room type, rate plan, VIP guest, travel agent and which PMS the stay came from), and advanced options (offer from/until,
   speed steps). Saving records a new permanent version; clients already online keep the terms they connected
   under. Packages are free to the client.
 - **Disable** ("Stop offering it") — **reason + password confirmation**. Clients stop being offered it at
@@ -180,7 +182,7 @@ recorded.
 - **Issue vouchers** (three steps: **Package → Quantity & validity → Review**): 1 to 500 cards, optional
   valid from / valid until, optional note. Issuing does **not** ask for a password. The codes are then shown
   **once** under *"Keep these codes now"* with **Copy all**, **Download CSV** and **Print cards** (a card
-  sheet with a heading of up to 60 characters printed on every card). Getting them back later is an export
+  sheet with a heading of up to 60 characters printed on every card; *Wi-Fi Access* when left empty). Getting them back later is an export
   on the Batches tab.
 - **Batches tab:** every print run with its counts; a batch sheet with **View cards** and **Export codes**
   (whole batch or unused only) — **reason + password confirmation**, recorded as one entry naming how many
@@ -225,7 +227,8 @@ Which devices are online, whose they are, and disconnecting one. A session is on
 several.
 
 - **Shows:** **Online now / Recent** switch; live status, refreshed every 10 seconds while *Online now*;
-  tiles *Devices online*, *Clients online*, *Rooms online*, *Data in this list*; search (room, name, username,
+  tiles *Devices online*, *Clients online*, *Data in this list*, plus *Rooms online* only while someone is
+  signed in with a room; search (room, name, username,
   IP, MAC) and a filter by how the client signed in. Rows lead with the client, then how they signed in, the
   internet package, allowance used (data and time meters where the service plan sets a limit), network and device,
   data down/up and status (with the end reason for ended sessions).
@@ -237,13 +240,19 @@ several.
   operator, Payments operator, Site viewer.
 
 ### Usage explorer — `/usage`
-Settles data-usage questions by drilling from a room or a device down to sessions and the accounting samples
-behind them.
+Settles data-usage questions by drilling from an access source or a device down to sessions and the
+accounting samples behind them.
 
-- **Tabs:** **By room or stay** (search, or leave blank for the heaviest users; downloaded, uploaded, total)
-  and **By device** (look up a MAC address; a note reminds you that a device is not a person).
-- **Drill-down:** the stay's totals, the devices used, the sessions, and **Show evidence** to load the raw
-  samples. Read-only.
+- **Tabs:** **By access source** and **By device**.
+- **By access source:** an access source is whatever granted the access — a **Client account**, a
+  **Voucher** or a **Hotel room/stay**. Filter by type (*All*, *Client account*, *Voucher*, *Hotel
+  room/stay*) and search by username, card reference, room number or reservation, or leave the search empty
+  for the heaviest users; the table shows each source's downloaded, uploaded and total data and its
+  allowance. Email, phone and social sign-ins are not listed as sources; the devices that used them still
+  appear under **By device**. Room and stay detail appears only for a Hotel room/stay.
+- **By device:** look up a MAC address; a note reminds you that a device is not a person.
+- **Drill-down:** the source's totals and allowance, the devices used, the sessions, and **Show evidence**
+  to load the raw samples, with their own total next to the session's. Read-only.
 - **Who can see it:** Site admin, Site IT manager, Client services, Client relations, Payments operator, Site
   viewer.
 
@@ -275,10 +284,9 @@ These pages control what clients see on the sign-in page — see [guest-portal.m
 How clients prove who they are on the portal. Each switch applies immediately; turning a method off does not
 disconnect clients already online.
 
-- **Method cards, each with an on/off switch:** **Voucher code**; **Client account**; **Room sign-in (from
-  the PMS)** — with a warning when room sign-in is not working, and the **Room sign-in mode**: what the guest
-  types besides the room number (*Any of the three (recommended)*, *Last name (surname)*, *First name*,
-  *Reservation number*) and a link to PMS routing; **Email code** and **SMS code** (*Not available* until
+- **Method cards, each with an on/off switch:** **Voucher code**; **Client account**; **Room sign-in** —
+  with a one-line warning when room sign-in is not working and a link, *Room sign-in settings — under Hotel*,
+  to the page where what the guest types is chosen (see **Hotel → Room sign-in**); **Email code** and **SMS code** (*Not available* until
   a sender exists and is switched on under Email & SMS); **Social login** (a checkbox per configured
   provider).
 - **Client sign-in protection:** *Maximum failed attempts*, *Observation window*, *Wait after too many
@@ -298,7 +306,7 @@ soon as it is saved.
   Layout, Languages offered, Custom code and Checks (*N to fix* / *All clear*).
 - **Sections** (left rail) with a live preview (Desktop, Tablet, Mobile) beside them:
   - **Template** — six layouts: **Classic** (the default), **Split**, **Immersive**, **Header bar**,
-    **Resort**, **Kiosk**, each with only the options it uses (hero photograph, photo darkening 0–90%,
+    **Editorial**, **Kiosk**, each with only the options it uses (hero photograph, photo darkening 0–90%,
     sign-in panel position, banner height, panel surface, spacing, heading typeface).
   - **Brand** — logo and background photograph (PNG, JPEG, WebP or GIF up to 8 MB, stored on the appliance;
     SVG is refused), brand colour, button shade, text colour, corner radius, typeface, with contrast
@@ -374,7 +382,7 @@ right now, and where the guest list comes from.
     saved with a reason.
   - **Credentials** — whether one is stored; **Store / Replace credential** — **password confirmation**.
     Nothing typed here is shown again.
-  - **Guest networks** using this connection.
+  - **Client networks** using this connection.
   - **History** — every version, with the option to put an earlier one back (the same **Put live** dialog).
   - **Actions** — **Activate**, **Pause room sign-in**, **Wind down**: each a dialog stating the consequence,
     with a **reason** (from a list) and **password confirmation**. **Test the connection** (reads a sample,
@@ -394,6 +402,26 @@ and have no buttons, on purpose:
 - **Roster reconciliation** — `/roster-reconciliation`: the automatic process that keeps the guest list
   identical to the PMS — what blocks it, what the next run will do, and past runs. Visible to Site admin,
   Site IT manager, Client services.
+
+### Room sign-in — `/room-sign-in`
+What a guest types besides the room number when signing in with a room. It sits under Hotel because its
+meaning depends on the PMS stay record; whether room sign-in is offered at all is still switched on or off in
+**Client Portal → Sign-in methods**, which this page links to (*Offered on the Client Portal*, *On* / *Off*).
+
+- **What the guest types** — always the room number plus exactly one detail from the reservation; the
+  choice saves as soon as it is picked:
+  - **Room number + any one of: first name, surname or reservation number (recommended)** — one box; the
+    guest is not asked which detail it is, and the appliance compares the value against all three. If it
+    matches more than one guest in that room, sign-in is refused rather than guessed.
+  - **Room number + surname**
+  - **Room number + first name**
+  - **Room number + reservation number**
+- A site still on the older *either* setting (surname or reservation number, guessed from what was typed)
+  sees a warning that some surnames are rejected; choosing one of the options replaces it.
+- A warning appears while room sign-in is offered but not working because the PMS is unavailable. Which PMS
+  a guest is checked against is decided by their network, in **PMS routing**.
+- **Who can change it:** Site admin, Site IT manager. **Read-only:** Client services, Client relations, Site
+  viewer.
 
 ### Stays — `/stays`
 What the PMS reports about who is in house and which internet package each room has. Read-only: stays are
@@ -509,7 +537,7 @@ must still go out (with a reason and evidence); finally **Release financial reco
 is safe to resume. Every decision needs **password confirmation** (a password field on the page).
 
 ### PMS routing — `/pms-routing`
-(Formerly *PMS routing*. In-page title *Which PMS each network checks*.) Which PMS each guest network's room sign-ins are checked
+(Formerly *PMS routing*. In-page title *Which PMS each network checks*.) Which PMS each client network's room sign-ins are checked
 against.
 
 - **Shows:** a *Why this matters* note (a network pointed at the wrong PMS produces no error — guests simply
@@ -544,16 +572,17 @@ sister property). Not for normal room moves.
 
 A wrong network change could cut off the admin or every client, so network changes are staged, validated,
 applied, and then must be **confirmed before a countdown ends or they roll back automatically**. The
-appliance does not broadcast Wi-Fi: each guest network is a VLAN the site's wireless controller maps an
+appliance does not broadcast Wi-Fi: each client network is a VLAN the site's wireless controller maps an
 SSID to.
 
 **Who can change it (all Networking pages):** Site admin, Site IT manager. **Read-only:** Site viewer.
 Other roles do not see this group.
 
-### Guest networks — `/network`
+<a id="guest-networks--network"></a>
+### Client networks — `/network`
 The Wi-Fi networks clients join, each with its own addresses and sign-in page.
 
-- **Header:** **Validate**, **Apply changes**, **New guest network**.
+- **Header:** **Validate**, **Apply changes**, **New client network**.
 - **Pending banner** after Apply: *"Revision #N — confirm or it rolls back automatically"* with the
   deadline, a live countdown, the validation and health-check results, **Keep this change** and **Roll back
   now**.
@@ -561,16 +590,16 @@ The Wi-Fi networks clients join, each with its own addresses and sign-in page.
   Portal (*Sign-in page* / *Open*), Status, Clients. **Edit** opens the network; **Disable** (enabled
   networks) and **Delete** (disabled networks) are confirmation dialogs that explain nothing reaches clients
   until the change is applied.
-- Applying, keeping and rolling back guest-network changes do **not** ask for a password.
+- Applying, keeping and rolling back client-network changes do **not** ask for a password.
 
-**New guest network** — `/network/new` (seven steps): **Identity → Interface / VLAN → Subnet & gateway →
+**New client network** — `/network/new` (seven steps): **Identity → Interface / VLAN → Subnet & gateway →
 DHCP & DNS → Captive portal → Review** (with a *"Wireless controller action required"* reminder to map the
 SSID to the VLAN) **→ Apply** (*"Create, validate & apply"*, then the pending banner). A role that cannot
-change networks sees *"You cannot create guest networks"*.
+change networks sees *"You cannot create client networks"*.
 
-**Guest network detail** — `/network/{id}`: the topology (type, VLAN, parent, bridge) is read-only and
+**Client network detail** — `/network/{id}`: the topology (type, VLAN, parent, bridge) is read-only and
 cannot change after creation; name, SSID label, addresses, pools, DNS, lease times and portal/internet/NAT/
-isolation settings are editable (*"Saved — not applied yet"* until applied on Guest networks). Also the
+isolation settings are editable (*"Saved — not applied yet"* until applied on Client networks). Also the
 network's **DHCP reservations** (add, edit, remove — each in a dialog).
 
 ### DHCP & leases — `/network/dhcp`
@@ -578,11 +607,11 @@ Which client devices hold an address now, and which always get the same one. Tab
 **Reservations** (across all networks): **New reservation**, edit, and **Remove** — a confirmation dialog.
 
 ### WAN / LAN settings — `/network/system`
-The appliance's own internet uplink and management address. Guest Wi-Fi is configured on Guest networks, not
+The appliance's own internet uplink and management address. Client Wi-Fi is configured on Client networks, not
 here.
 
 - **Shows:** the **WAN / Management** card (interface, MAC, link, IP, gateway, DNS, management URL,
-  connectivity, a warning when the running address differs from the saved one), a pointer to Guest
+  connectivity, a warning when the running address differs from the saved one), a pointer to Client
   networks, and a collapsed **Advanced · Base LAN / Legacy bridge** card.
 - **Change configuration:** WAN IP, prefix, gateway, DNS; base LAN gateway and prefix. **Validate &
   preview** shows before → after and the new management URL. **Apply change…** — **password
@@ -660,7 +689,7 @@ appliance register if needed and fetch its activation and licence from Central i
     no new clients (clients already online are not disconnected), refuses licence and activation files and never
     registers again by itself. To use it again, it must be factory-reset and activated by your OneGate vendor.
   - **Licence** — *No licence yet*, *Active*, *Expires soon*, *Grace period*, *Expired*, *Suspended*, *Revoked*
-    or *Wrong appliance*, with the end date and days left, and **Clients online, all guest networks** against
+    or *Wrong appliance*, with the end date and days left, and **Clients online, all client networks** against
     the licensed maximum with a meter.
   - **OneGate Central** — *Connected*, *Temporarily unreachable* or *Not configured*, **Last answered** and
     **Last problem**. Losing Central changes only this part; the licence keeps being checked on the appliance
@@ -724,6 +753,7 @@ W = can change, R = read-only, — = not shown. The appliance enforces these on 
 | Portal settings, Social login, Email & SMS | W | W | — | — | — | — | R |
 | Allowed sites | W | W | R | R | — | — | R |
 | PMS connection | W | W | R | R | — | — | R |
+| Room sign-in | W | W | R | R | — | — | R |
 | Stays | R | R | R | R | — | — | R |
 | PMS activity, Duplicate sources | R | R | R | R | — | — | R |
 | Guest sign-in checks | R | R | — | — | — | — | R |
@@ -768,7 +798,7 @@ W = can change, R = read-only, — = not shown. The appliance enforces these on 
 | Transfer access between PMSs | Cross-PMS transfer | Reason + password |
 | Record a charge decision / recovery decision | Manual review, Recovery | Password (plus the decision's own fields) |
 | Save custom CSS or HTML / restore a portal save | Portal settings | Password |
-| Apply a guest-network change | Guest networks | Apply → confirm → automatic rollback (no password) |
+| Apply a client-network change | Client networks | Apply → confirm → automatic rollback (no password) |
 | Apply or roll back a WAN / LAN change | WAN / LAN settings | Password; apply → confirm → automatic rollback |
 | Rotate the TLS certificate | TLS certificate | Reason + type `ROTATE` + password |
 | Restart a service | Diagnostics | Reason + password |

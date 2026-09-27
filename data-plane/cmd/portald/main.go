@@ -218,7 +218,7 @@ func (h *handler) authVoucher(w http.ResponseWriter, r *http.Request) {
 	mac, ok := h.arpCache(ip)
 	if !ok {
 		slog.Warn("no arp entry", "ip", ip.String())
-		h.landing(w, r, "Your device isn't on the guest network.")
+		h.landing(w, r, "Your device isn't connected to this Wi-Fi network.")
 		return
 	}
 
@@ -290,7 +290,7 @@ func (h *handler) authCredentials(w http.ResponseWriter, r *http.Request) {
 	}
 	mac, ok := h.arpCache(ip)
 	if !ok {
-		h.landing(w, r, "Your device isn't on the guest network.")
+		h.landing(w, r, "Your device isn't connected to this Wi-Fi network.")
 		return
 	}
 	body, _ := json.Marshal(map[string]string{

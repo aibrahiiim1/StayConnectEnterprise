@@ -91,7 +91,7 @@ export default function RevisionsPage() {
           <>
             <HelpSection title="What a revision is">
               <p>
-                Each validate and apply of the guest network configuration is recorded as a numbered revision, with its
+                Each validate and apply of the client network configuration is recorded as a numbered revision, with its
                 validation result, apply events and health checks. Select a row to see them.
               </p>
             </HelpSection>

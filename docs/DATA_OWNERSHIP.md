@@ -102,7 +102,7 @@ Consequences:
 - GDPR/data-locality: guest data residency equals the hotel's own premises;
   retention is enforced locally on the appliance.
 - Cloud support staff see only activation, connection and licence state; to
-  diagnose a site they ask hotel staff to act in Hotel Admin.
+  diagnose a site they ask site staff to act in Admin Console.
 
 ## 6. Duplicated-by-design rows
 

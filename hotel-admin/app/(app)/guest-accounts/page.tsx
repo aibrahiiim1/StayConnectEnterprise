@@ -559,10 +559,10 @@ function AccountForm({ account, onSubmit, busy, withPassword, onCancel }: {
     <form onSubmit={onSubmit} className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Username" required hint="What the client types. Short is fine — even a single character.">
-          <Input name="username" required minLength={1} maxLength={64} defaultValue={account?.username} placeholder="room101" />
+          <Input name="username" required minLength={1} maxLength={64} defaultValue={account?.username} placeholder="alex.morgan" />
         </Field>
         <Field label="Name" hint="For your own reference; the client never sees it.">
-          <Input name="display_name" defaultValue={account?.display_name ?? ""} placeholder="Meeting room 3" />
+          <Input name="display_name" defaultValue={account?.display_name ?? ""} placeholder="Visitor pass" />
         </Field>
       </div>
 

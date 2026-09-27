@@ -3,7 +3,7 @@
 **OneGate Central** (also called the Control Panel or Cloud Admin) is the vendor's console in the cloud. It
 answers five questions: *who is the customer, which site and appliance, is it activated, what does its licence
 allow, and is it healthy right now.* **Central is used for licensing, activation and fleet status only.** It
-never configures a site's guest networks, sign-in methods, packages or clients, and it cannot control an
+never configures a site's client networks, sign-in methods, packages or clients, and it cannot control an
 appliance remotely — those are run from **OneGate Admin Console** (formerly Hotel Admin) on each appliance (see
 [hotel-admin-reference.md](hotel-admin-reference.md)).
 
@@ -81,7 +81,7 @@ customer still has sites or appliances). Tabs:
 - **Summary** — sites, appliances, active licences, what needs attention, customer since, status.
 - **Sites** — a site is one physical location. **New site**: Name, Time zone, Country (optional), Short code
   (optional). Row actions **Edit**, **Archive** / **Restore**, **Delete** (typed confirmation + reason).
-  Buildings, floors, SSIDs and guest networks are configured on the appliance, not here.
+  Buildings, floors, SSIDs and client networks are configured on the appliance, not here.
 - **Appliances** — this customer's appliances (same columns as the Appliances page).
 - **Licenses** — this customer's licences.
 - **Users** — the customer's own Central sign-ins (optional). **Add user**: Email, Name, Initial password,

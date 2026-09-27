@@ -30,7 +30,7 @@ pilot: ctrlapi listens on all interfaces.
 
 - Fix: remove both accepts from `deploy/nftables/stayconnect.nft`; bind
   any remaining listener to loopback/mgmt and front it only via Caddy. In the
-  target architecture the appliance runs no ctrlapi at all and Hotel Admin is
+  target architecture the appliance runs no ctrlapi at all and Admin Console is
   served **only on the management interface** ([EDGE_ARCHITECTURE.md](EDGE_ARCHITECTURE.md) §5).
 
 ## 3. Dev database credentials — OPEN
@@ -90,7 +90,7 @@ ctrlapi, a JWT replayed against a *different* replica would pass.
 | Guest-PII boundary | Enforced by design: guest data exists only on the appliance, which has no telemetry subsystem (CLAUDE.md §0E; removed by appliance migration 0093); the guest-domain tables on Central were dropped (migration 0046) and the archived guest history with the `legacy_archive` schema (migration 0047) |
 | License anti-rollback | Implemented: monotonic `license_version` + issued_at + revoked-id store + 48h clock high-water ([LICENSING_AND_ENTITLEMENTS.md](LICENSING_AND_ENTITLEMENTS.md) §7) |
 | Vendor signing key | 0600 file, cloud-only; escrow + rotation procedure documented; treat as CA-grade secret ([BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md) §2) |
-| Hotel Admin exposure | Mgmt interface only, never WAN or guest network — enforce in Caddy binds *and* nftables input chain |
+| Admin Console exposure | Mgmt interface only, never WAN or guest network — enforce in Caddy binds *and* nftables input chain |
 | Provider secrets (PMS/Stripe/Twilio/SendGrid/OAuth) | Write-only in APIs; stored per-site in the site DB; never sync |
 | No RLS | Cloud tenant isolation remains app-enforced (`EffectiveTenantID`); the edge split removes the worst blast radius (guest data), RLS on the cloud DB remains desirable — Roadmap |
 | Registration / activation | Token-less, self-signed registration (proof of the identity key), rate-limited per client address; clone and hardware-reuse attempts are refused with a security alert; a retired identity key is recorded (`retired_appliance_identities`) and refused (`identity_retired`); nothing is authorized until a platform admin activates it (step-up) and the appliance verifies the signed assignment against its pinned key registry. Enrollment tokens no longer exist ([CENTRAL_CONTROL_PLANE.md §5](CENTRAL_CONTROL_PLANE.md#5-security-invariants-unchanged-by-this-redesign)) |

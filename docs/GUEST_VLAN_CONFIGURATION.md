@@ -143,14 +143,18 @@ applying this file cannot disturb management connectivity. The parent's own
 address is never touched — parents are expected to be L2 trunks (no IP), or the
 base netplan already owns the legacy untagged case.
 
-## 5. The 7-step create wizard (Hotel Admin)
+<a id="5-the-7-step-create-wizard-hotel-admin"></a>
+## 5. The 7-step create wizard (Admin Console)
 
-The UI walks an operator through a guest network and its apply:
+The Admin Console (**Networking → Client networks → New client network**) walks an
+operator through a client network (a `guest_networks` row) and its apply:
 
 1. **Identity** — name, description, `ssid_label` (descriptive only; the WLAN
    controller owns the real SSID — see
    [ARUBA_SSID_VLAN_MAPPING.md](ARUBA_SSID_VLAN_MAPPING.md)).
-2. **Interface / VLAN** — pick the parent interface and untagged vs VLAN + id.
+2. **Interface / VLAN** — pick the parent interface (role `guest_access` or
+   `guest_trunk`, shown as *Client access* / *Client trunk*, or `unused`) and
+   untagged vs VLAN + id.
    The bridge name is generated for you.
 3. **Subnet / Gateway** — `subnet_cidr` and `gateway_ip` (must be inside the
    subnet, not the network/broadcast address).

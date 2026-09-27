@@ -320,7 +320,7 @@ export default function NotificationsPage() {
                 />
               </Field>
               <Field label="From name">
-                <Input value={f.from_name} onChange={(e) => set("from_name", e.target.value)} placeholder="Guest Wi-Fi" />
+                <Input value={f.from_name} onChange={(e) => set("from_name", e.target.value)} placeholder="Wi-Fi Access" />
               </Field>
             </>
           )}

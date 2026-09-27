@@ -31,7 +31,7 @@ export function CodesHeld({
   warning: React.ReactNode;
 }) {
   const toast = useToast();
-  const [heading, setHeading] = React.useState(defaultHeading || "Guest Wi-Fi");
+  const [heading, setHeading] = React.useState(defaultHeading || "Wi-Fi Access");
   const [job, setJob] = React.useState<PrintJob | null>(null);
   const headingId = React.useId();
 

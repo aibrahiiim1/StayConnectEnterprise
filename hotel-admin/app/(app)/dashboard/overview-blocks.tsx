@@ -338,7 +338,7 @@ export function PmsCard({ snap, canCharges }: { snap: OverviewSnapshot | null; c
   const neverConfigured = (pms?.interfaces.length ?? 0) - inUse.length;
   return (
     <BlockCard
-      title="Property management system"
+      title="Property Management System"
       description="Whether a client can sign in with their room number and name."
       href="/pms-interfaces"
       linkLabel="PMS connection"
@@ -449,7 +449,7 @@ export function NetworksCard({ snap }: { snap: OverviewSnapshot | null }) {
     <Card className="min-w-0">
       <CardHeader>
         <div className="min-w-0">
-          <CardTitle>Guest networks</CardTitle>
+          <CardTitle>Client networks</CardTitle>
           <CardDescription className="mt-0.5 text-xs">
             Address pool use comes from the DHCP server's live leases; devices online from active sessions.
           </CardDescription>
@@ -464,8 +464,8 @@ export function NetworksCard({ snap }: { snap: OverviewSnapshot | null }) {
         <CardBody>
           <EmptyState
             icon={<Network />}
-            title="No guest network is configured"
-            hint="No device can be put online until at least one guest network exists."
+            title="No client network is configured"
+            hint="No device can be put online until at least one client network exists."
             action={<Link href="/network/new" className={buttonVariants({ variant: "secondary", size: "sm" })}>Create one</Link>}
           />
         </CardBody>
@@ -582,7 +582,7 @@ export function DhcpDnsCard({ snap }: { snap: OverviewSnapshot | null }) {
                     ? <>Sign-in page advertised to devices by DHCP (option 114) on: {d.captive_option_networks.join(", ")}.</>
                     : d.local_dhcp_networks > 0
                       ? "No network advertises the sign-in page through DHCP (option 114)."
-                      : "No guest network gets its addresses from this appliance."}
+                      : "No client network gets its addresses from this appliance."}
                 </p>
               </>
             )}

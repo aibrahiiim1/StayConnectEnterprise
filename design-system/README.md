@@ -17,7 +17,7 @@ drifts, and one that checks the text contrast of every token pair in both themes
 
 ## Principles
 
-1. **Clarity over decoration.** Operators use these screens at a front desk, often mid-conversation with a
+1. **Clarity over decoration.** Operators use these screens at a service desk, often mid-conversation with a
    client. Every screen answers one question first; decoration never competes with state.
 2. **One primary action per screen.** Brand colour is the logo, the single main action, and the active
    navigation item. If a second thing wants to be brand-coloured it is wrong.
@@ -25,7 +25,7 @@ drifts, and one that checks the text contrast of every token pair in both themes
 4. **Flat where the eye scans.** Lists and queues are square and shadowless; depth comes from hairlines and
    tonal layers. Elevation is reserved for things that float (menus, dialogs, sheets) or respond (hover).
 5. **Say it in the site's words.** The glossary in the redesign handoff is binding: *Customer*, *Site*,
-   *Appliance*, *Guest network*, *Internet package*, *Service plan*, *Stay*, *Operator*, *Password
+   *Appliance*, *Client network*, *Internet package*, *Service plan*, *Stay*, *Operator*, *Password
    confirmation*… Internal words (tenant, VLAN as a label, mirror, step-up, FIAS) are never the main label.
 6. **Nothing silently changes behaviour.** The design system presents behaviour; it never decides it.
    Password confirmations, mandatory reasons, typed confirmations, one-time secrets and apply→confirm→
@@ -185,7 +185,7 @@ opens in a captive-portal mini-browser. Its default look uses the same palette, 
 roles as the consoles, expressed as CSS custom properties that each site's Portal settings override
 (brand colour, button shade, text colour, radius, typeface, layout template, density, panel position,
 hero height, surface, photo darkening). Six layout templates (Classic, Split, Immersive, Header bar,
-Resort, Kiosk) are variations of one token set, so each stays coherent under any site's colour and photo.
+Editorial, Kiosk) are variations of one token set, so each stays coherent under any site's colour and photo.
 Every page — sign-in, package choice, "You're online", errors — is branded and translated in the six
 built-in languages, and fully mirrored in Arabic.
 

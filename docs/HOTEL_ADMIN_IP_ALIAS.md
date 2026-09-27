@@ -1,6 +1,6 @@
-# Hotel Admin — Management IP Alias
+# Admin Console — Management IP Alias
 
-The Hotel Admin is reachable at its canonical name **and** at the appliance
+The Admin Console is reachable at its canonical name **and** at the appliance
 management IP, both fronted by Caddy, from one app instance:
 
 | URL | |
@@ -53,7 +53,7 @@ Caddy bind:
   (`10.10.0.1:8343`) — it never reaches Caddy.
 - Guest→management ranges (`172.16/12`, `192.168/16`) are dropped.
 
-So the Hotel Admin — DNS name or IP — is **not** exposed through br-lan, the guest
+So the Admin Console — DNS name or IP — is **not** exposed through br-lan, the guest
 network, or as a public WAN service. Guest services (portal, DNS, DHCP) are
 unaffected.
 

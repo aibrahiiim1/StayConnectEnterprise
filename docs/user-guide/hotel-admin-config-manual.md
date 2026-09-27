@@ -1,12 +1,12 @@
 # OneGate Admin Console — Configuration Manual
 
 Step-by-step instructions for configuring an appliance from **OneGate Admin
-Console** (formerly Hotel Admin), the console on the appliance. (In the Admin Console the **Clients** and **Client Portal** menu groups were formerly *Guests* and *Guest portal*; Client Portal was formerly Guest Portal.) Hospitality and PMS functions — the PMS connection, Stays, the Grace Period, post-stay access and room charges — are grouped under **Hotel**, which replaces the former *Property management system* and *Charges* groups; the rest of the console is industry-neutral. For a description of what each page shows,
+Console** (formerly Hotel Admin), the console on the appliance. (In the Admin Console the **Clients** and **Client Portal** menu groups were formerly *Guests* and *Guest portal*; Client Portal was formerly Guest Portal; **Networking → Client networks** was formerly *Guest networks*.) Hospitality and PMS functions — the PMS connection, Room sign-in, Stays, the Grace Period, post-stay access and room charges — are grouped under **Hotel**, which replaces the former *Property management system* and *Charges* groups; the rest of the console is industry-neutral. For a description of what each page shows,
 see [hotel-admin-reference.md](hotel-admin-reference.md).
 
-**Typical order:** Activate (licence) → WAN / LAN → build a Guest
+**Typical order:** Activate (licence) → WAN / LAN → build a Client
 network → Service plans and Internet packages → Sign-in methods → Vouchers and
-client accounts → PMS → Email & SMS / Social login → Allowed sites → Portal
+client accounts → PMS and Room sign-in → Email & SMS / Social login → Allowed sites → Portal
 settings → Operators.
 
 > Sensitive actions ask you to **confirm your password** in a dialog — for
@@ -68,7 +68,7 @@ a file for another appliance or an older licence, and nothing changes.
 
 **Reading the Licence part:**
 - **Active** — licensed; clients can connect up to the licensed maximum, shown as
-  **Clients online, all guest networks** with a meter (amber from 80%, red at
+  **Clients online, all client networks** with a meter (amber from 80%, red at
   100%).
 - **Expires soon** — 30 days or fewer left; ask your vendor to renew.
 - **Grace period** — the licence has ended but clients keep signing in until the
@@ -94,15 +94,15 @@ never stops clients.
 Go to **Networking → WAN / LAN settings** (`/network/system`).
 
 > This page covers only the **WAN uplink / management address** and the
-> appliance's **legacy base bridge**. Guest Wi-Fi is **not** configured here —
-> each guest network has its own VLAN, gateway, address pool and sign-in page,
-> managed under **Guest networks** (§4) and **DHCP & leases**. The legacy bridge
+> appliance's **legacy base bridge**. Client Wi-Fi is **not** configured here —
+> each client network has its own VLAN, gateway, address pool and sign-in page,
+> managed under **Client networks** (§4) and **DHCP & leases**. The legacy bridge
 > sits in a collapsed **Advanced · Base LAN / Legacy bridge** card.
 
 1. Review the **WAN / Management** card.
 2. Under **Change configuration** set what you need:
    - **WAN:** IP address, prefix length, default gateway, DNS.
-   - **Base LAN:** gateway IP and prefix length. (DHCP is managed per guest
+   - **Base LAN:** gateway IP and prefix length. (DHCP is managed per client
      network, not here.)
 3. Click **Validate & preview** — review before → after and the new management
    address.
@@ -114,14 +114,16 @@ Go to **Networking → WAN / LAN settings** (`/network/system`).
 
 ---
 
-## 4. Create a Guest network (a VLAN with its own addresses and sign-in page)
+<a id="4-create-a-guest-network-a-vlan-with-its-own-addresses-and-sign-in-page"></a>
+## 4. Create a Client network (a VLAN with its own addresses and sign-in page)
 
-Go to **Networking → Guest networks** (`/network`) → **New guest network**. The
+Go to **Networking → Client networks** (`/network`) → **New client network**. The
 seven steps:
 
 1. **Identity** — name, description, SSID label (a label only; the appliance
    does not broadcast Wi-Fi — the site's wireless controller does).
-2. **Interface / VLAN** — pick the parent interface; for a tagged network tick
+2. **Interface / VLAN** — pick the parent interface (a port whose role is
+   *Client access*, *Client trunk* or unused); for a tagged network tick
    the VLAN option and set the **VLAN id** (1–4094).
 3. **Subnet & gateway** — e.g. `10.20.0.0/22` and `10.20.0.1`. Clients use the
    gateway as their router and DNS.
@@ -136,10 +138,10 @@ seven steps:
 > The topology (type, VLAN, parent interface) cannot change after creation — to
 > change it, delete and recreate the network. Other settings are editable on the
 > network's own page; saved edits reach clients only after **Apply changes** on
-> Guest networks (and confirming in time).
+> Client networks (and confirming in time).
 
 **DHCP reservations:** pin a device's MAC to a fixed address on **DHCP & leases**
-(`/network/dhcp` → Reservations → **New reservation**) or on the guest network's
+(`/network/dhcp` → Reservations → **New reservation**) or on the client network's
 own page.
 
 ---
@@ -151,10 +153,9 @@ immediately. Which methods can be offered also depends on the license.
 
 - **Voucher code** — needs an internet package and printed cards (§6).
 - **Client account** — username and password accounts (§6).
-- **Room sign-in (from the PMS)** — needs a working PMS connection and PMS
-  routing (§7). Choose what the guest types besides the room number: *Any of the
-  three (recommended)*, *Last name (surname)*, *First name* or *Reservation
-  number*.
+- **Room sign-in** — needs a working PMS connection and PMS routing (§7). What
+  the guest types besides the room number is chosen under **Hotel → Room
+  sign-in** (§7); the card links there (*Room sign-in settings — under Hotel*).
 - **Email code / SMS code** — need a sender under **Email & SMS** (§8).
 - **Social login** — tick each provider set up under **Social login** (§9).
 - **Client sign-in protection** — maximum failed attempts, observation window and
@@ -180,7 +181,8 @@ clients.
 **Internet package** (**Internet offering → Internet packages → Add package**) —
 what the client is offered: name, short code, the service plan, how long access
 lasts, the data allowance (the service plan's, or per night of the stay), and **who it is
-offered to** (conditions; empty means everyone who signs in). Packages are free to
+offered to** (conditions, grouped **General** and **Hotel (PMS stay)**; empty
+means everyone who signs in). Packages are free to
 the client. Only the Site admin can create or change packages and service plans (the
 Site viewer can read them; other roles do not see these pages).
 
@@ -202,7 +204,7 @@ internet access.
 - **Issue vouchers**: choose the **internet package**, **how many** (1–500),
   optional **valid from / valid until**, and an optional **note**. The codes are
   shown **once** — **Copy all**, **Download CSV** or **Print cards** (with a
-  heading of up to 60 characters on each card).
+  heading of up to 60 characters on each card; *Wi-Fi Access* when left empty).
 - **Batches**: every issue run is a batch. **Export codes** (whole batch or unused
   only) asks for a **reason and your password**.
 - **Show full code** recovers one code for a card already in circulation — the
@@ -249,9 +251,21 @@ password sign-in, an alternative to vouchers:
 3. **Actions** → **Activate** (**password**, with a reason). **Test the
    connection** reads a small sample and writes nothing to the PMS.
 4. **Hotel → PMS routing** (`/pms-routing`, Site admin
-   only): point each guest network that should offer room sign-in at the
+   only): point each client network that should offer room sign-in at the
    connection.
-5. Turn on **Room sign-in** under **Sign-in methods** (§5).
+5. **Hotel → Room sign-in** (`/room-sign-in`): choose what the guest types
+   besides the room number — always exactly one detail from the reservation:
+   - **Room number + any one of: first name, surname or reservation number
+     (recommended)** — one box; the appliance compares the value against all
+     three, and refuses sign-in rather than guess if it matches more than one
+     guest in the room;
+   - **Room number + surname**, **Room number + first name** or **Room number +
+     reservation number** — only that detail is accepted.
+
+   The choice saves immediately. A site still on the older *either* setting
+   sees a warning; choosing one of the options replaces it.
+6. Turn on **Room sign-in** under **Client Portal → Sign-in methods** (§5) — the
+   on/off switch stays there.
 
 If the guest list needs reloading, use **Actions → Refresh the guest list now**
 (**password**, with a reason); the current list stays in use until the new one is
@@ -303,7 +317,7 @@ sign-in page itself needs — every entry is reachable without signing in.
 sign-in page with a live preview (desktop, tablet, mobile), then **Save
 changes**. Clients see it immediately.
 
-- **Template** — Classic, Split, Immersive, Header bar, Resort or Kiosk, and its
+- **Template** — Classic, Split, Immersive, Header bar, Editorial or Kiosk, and its
   options.
 - **Brand** — logo and background photograph (PNG, JPEG, WebP or GIF, up to 8 MB;
   no SVG), colours, corner radius, typeface.
@@ -368,13 +382,13 @@ normally need to intervene. If you do: **Recheck** re-runs a health check,
 | See activation, licence and Central status | System → Appliance & licence |
 | Upload an activation package or licence file | System → Appliance & licence → Files from your OneGate vendor |
 | Change the WAN or management address | Networking → WAN / LAN settings |
-| Add a new guest network | Networking → Guest networks → New guest network |
+| Add a new client network | Networking → Client networks → New client network |
 | Pin a device to a fixed address | Networking → DHCP & leases → Reservations |
 | Define speeds and limits | Internet offering → Service plans |
 | Decide what clients are offered | Internet offering → Internet packages |
-| Issue guest Wi-Fi cards | Internet offering → Vouchers → Issue vouchers |
+| Issue Wi-Fi voucher cards | Internet offering → Vouchers → Issue vouchers |
 | Turn sign-in methods on or off | Client Portal → Sign-in methods |
-| Room-number sign-in | Hotel → PMS connection, PMS routing |
+| Room-number sign-in | Hotel → PMS connection, PMS routing, Room sign-in |
 | Post-checkout access for guests | Hotel → Grace Period, Post-stay access |
 | Email/SMS codes | Client Portal → Email & SMS |
 | Google/Apple sign-in | Client Portal → Social login |

@@ -93,7 +93,7 @@ describe("no native browser dialog remains on a Networking screen", () => {
 
   it("every page title equals its menu label and none says StayConnect", () => {
     const titles: Record<string, string> = {
-      "page.tsx": 'title="Guest networks"',
+      "page.tsx": 'title="Client networks"',
       "dhcp/page.tsx": 'title="DHCP & leases"',
       "system/page.tsx": 'title="WAN / LAN settings"',
       "revisions/page.tsx": 'title="Config history"',
@@ -108,7 +108,7 @@ describe("no native browser dialog remains on a Networking screen", () => {
   });
 });
 
-describe("Guest networks", () => {
+describe("Client networks", () => {
   it("shows the pending revision with a live countdown, and Keep confirms that revision", async () => {
     const deadline = new Date(Date.now() + 90_000).toISOString();
     route({
@@ -153,8 +153,8 @@ describe("Guest networks", () => {
       "/network/revisions": list([{ id: "rev-9", seq: 9, state: "pending_confirmation", confirm_deadline: new Date(Date.now() + 60_000).toISOString() }]),
     });
     render(<GuestNetworksPage />);
-    await screen.findByText(/Your role can view guest networks but not change them/);
-    expect(screen.queryByText("New guest network")).toBeNull();
+    await screen.findByText(/Your role can view client networks but not change them/);
+    expect(screen.queryByText("New client network")).toBeNull();
     expect(screen.queryByRole("button", { name: /Apply changes/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Disable/ })).toBeNull();
     // The countdown is still shown; the actions are not.
@@ -163,7 +163,7 @@ describe("Guest networks", () => {
   });
 });
 
-describe("New guest network", () => {
+describe("New client network", () => {
   it("is a 7-step wizard whose interface picker only offers guest-capable ports", async () => {
     route({
       "/auth/whoami": IT,
@@ -214,7 +214,7 @@ describe("DHCP & leases", () => {
   });
 });
 
-describe("Guest network detail", () => {
+describe("Client network detail", () => {
   it("shows the topology read-only and removes a reservation through a dialog", async () => {
     route({
       "/auth/whoami": IT,

@@ -70,7 +70,7 @@ const RESULT_WORDS: Record<string, { tone: "ok" | "warn" | "err" | "info" | "neu
   RATE_LIMITED: { tone: "info", meaning: "Refused before any details were evaluated: too many recent attempts." },
   ROUTING_OR_INTERFACE_FAILURE: {
     tone: "err",
-    meaning: "The request reached no PMS interface: the device was on no mapped guest network, or the network maps to none.",
+    meaning: "The request reached no PMS interface: the device was on no mapped client network, or the network maps to none.",
   },
   SERVICE_UNAVAILABLE: { tone: "err", meaning: "An internal failure. The details were never compared." },
   SPENT_REQUEST_ID: {
@@ -510,7 +510,7 @@ export default function GuestSignInAttemptsPage() {
               columns={2}
               items={[
                 { label: "Local date and time", value: formatDate(detail.occurred_at) },
-                { label: "Guest network", value: detail.guest_network || "—" },
+                { label: "Client network", value: detail.guest_network || "—" },
                 { label: "Room found in the guest list", value: detail.room_in_mirror === null || detail.room_in_mirror === undefined ? "not reached" : detail.room_in_mirror ? "yes" : "no" },
                 {
                   label: "Eligible stays on that room",

@@ -362,7 +362,7 @@ describe("operator wording", () => {
     await screen.findByText("Main PMS");
     const texts = [baseElement.textContent ?? ""];
     await userEvent.click(screen.getByRole("button", { name: "Manage" }));
-    for (const tab of ["Overview", "Configuration", "Guest networks", "History", "Actions"]) {
+    for (const tab of ["Overview", "Configuration", "Client networks", "History", "Actions"]) {
       await userEvent.click(await screen.findByRole("tab", { name: tab }));
       await waitFor(() => expect(screen.getByRole("tabpanel")).toBeTruthy());
       texts.push(baseElement.textContent ?? "");

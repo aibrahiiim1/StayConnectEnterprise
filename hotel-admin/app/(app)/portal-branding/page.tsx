@@ -98,7 +98,7 @@ const PAGE_HELP = (
       <HelpList
         items={[
           <>Custom CSS is wrapped in its own cascade layer: your rules beat the portal&apos;s styling and template, but cannot hide the sign-in forms. !important is removed — it is not needed.</>,
-          <>Custom HTML is shown below the sign-in (as content blocks in the Resort layout): text, headings, lists, tables, links and images from your uploads or https.</>,
+          <>Custom HTML is shown below the sign-in (as content blocks in the Editorial layout): text, headings, lists, tables, links and images from your uploads or https.</>,
           <>Saving a change to either asks for your password, because this page collects room numbers and voucher codes.</>,
         ]}
       />

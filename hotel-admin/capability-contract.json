@@ -139,7 +139,7 @@
         "surface": "notification-providers"
       },
       {
-        "label": "Guest networks",
+        "label": "Client networks",
         "route": "/network",
         "surface": "network"
       },

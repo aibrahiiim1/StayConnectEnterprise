@@ -109,9 +109,9 @@ export default function DhcpPage() {
             <HelpSection title="Reservations">
               <HelpList
                 items={[
-                  "A reservation pins a device, by MAC address, to a fixed address on one guest network.",
+                  "A reservation pins a device, by MAC address, to a fixed address on one client network.",
                   "Use it for devices that must stay reachable at one address — a printer, a TV or a door lock.",
-                  "You can also manage reservations from each guest network's own page.",
+                  "You can also manage reservations from each client network's own page.",
                 ]}
               />
             </HelpSection>
@@ -196,7 +196,7 @@ export default function DhcpPage() {
               <EmptyState
                 icon={<Pin />}
                 title="No reservations"
-                hint="Pin a device to a fixed address on one of your guest networks — a printer, a TV or a door lock."
+                hint="Pin a device to a fixed address on one of your client networks — a printer, a TV or a door lock."
                 action={writable ? <Button size="sm" onClick={() => setAdding(true)}><Plus /> New reservation</Button> : undefined}
               />
             ) : shownRes.length === 0 ? (
@@ -205,7 +205,7 @@ export default function DhcpPage() {
               <Table>
                 <THead>
                   <TR>
-                    <TH>Guest network</TH>
+                    <TH>Client network</TH>
                     <TH className="hidden sm:table-cell">MAC address</TH>
                     <TH>Reserved IP</TH>
                     <TH className="hidden md:table-cell">Hostname</TH>

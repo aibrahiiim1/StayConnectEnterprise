@@ -143,7 +143,7 @@ export default function DashboardPage() {
                 <><strong>How busy, how much?</strong> Clients online, sign-ins, data used and room sign-in readiness, each with its trend over the range.</>,
                 <><strong>The shape of the range.</strong> Traffic and devices connected at once.</>,
                 <><strong>Is anyone failing to get in?</strong> Sign-in outcomes, and when clients sign in.</>,
-                <><strong>Packages and the PMS</strong>, the guest networks, and the appliance itself.</>,
+                <><strong>Packages and the PMS</strong>, the client networks, and the appliance itself.</>,
               ]} />
             </HelpSection>
             <HelpSection title="Clients and devices">
