@@ -10,5 +10,5 @@ import { permanentRedirect } from "next/navigation";
 // A server redirect (308), like /commercial-packages: the old address answers before any client code runs, so
 // there is no interim "Taking you there…" page and no flash of it. The move is permanent.
 export default function ActivationMoved(): never {
-  permanentRedirect("/appliance?section=setup");
+  permanentRedirect("/appliance");
 }

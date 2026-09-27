@@ -259,31 +259,24 @@ describe("Operators", () => {
   });
 });
 
-describe("Licence", () => {
+describe("Appliance & licence", () => {
   const STATUS = {
-    serial: "VN-0001",
-    hardware: { serial: "VN-0001", wan_mac: "aa:bb:cc:dd:ee:ff" },
-    activation_status: "activated",
-    enrolled: true,
-    api_mtls: { mtls_ready: true },
-    nats_mtls: { connected: false },
-    network: { central_https_443: true },
-    assignment: { assigned: true, tenant_name: "Acme Hotels", site_name: "Nile" },
-    license: { state: "Expired", valid_until: "2026-09-01T00:00:00Z", max_concurrent_online_guests: 100, current_online_guests: 85, usage_percent: 85 },
+    activation: "activated", serial: "VN-0001", appliance_id: "ap-1", customer_name: "Acme Hotels", site_name: "Nile",
+    license: { state: "expired", valid_until: "2026-09-01T00:00:00Z", grace_ends_at: "2026-09-15T00:00:00Z", days_left: 0,
+      max_concurrent_online_guests: 100, current_online_guests: 85 },
+    central: { state: "connected", last_contact_at: new Date().toISOString(), last_error: null },
+    details: { identity_key_fingerprint: "ab", cert_fingerprint: "cd", cert_not_after: null, assignment_version: 3,
+      license_version: 2, wan_mac: "aa:bb:cc:dd:ee:ff", lan_mac: "", central_endpoint: "https://central.example" },
   };
 
-  it("says existing guest sessions survive, shows the capacity in words and never calls the cloud link broken", async () => {
-    routes({ "/setup/status": STATUS, "/license": { state: "Expired" } }, ["site_admin"]);
-    const { LicenseSection } = await import("@/app/(app)/appliance/license-section");
-    render(<LicenseSection />);
-    expect(await screen.findByText(/New guest logins are refused; existing guest sessions are not dropped/)).toBeTruthy();
-    expect(screen.getByText("VN-0001")).toBeTruthy();
-    expect(screen.getByText("aa:bb:cc:dd:ee:ff")).toBeTruthy();
-    expect(screen.getByText(/85% in use/)).toBeTruthy();
-    expect(screen.getByText(/nearly full/)).toBeTruthy();
-    expect(screen.getByText("Licensing only")).toBeTruthy();
+  it("is titled by its menu label, says existing guest sessions survive and shows the capacity in words", async () => {
+    routes({ "/central/status": STATUS }, ["site_admin"]);
+    const Page = (await import("@/app/(app)/appliance/page")).default;
+    render(<Page />);
+    expect(screen.getByRole("heading", { level: 1, name: "Appliance & licence" })).toBeTruthy();
+    expect(await screen.findByText(/guests already online are not disconnected/)).toBeTruthy();
+    expect(screen.getByText(/85% of the licensed capacity · nearly full/)).toBeTruthy();
     expect(screen.getByRole("button", { name: /Upload licence file/ })).toBeTruthy();
-    // Retired words never appear as current.
     const text = document.body.textContent ?? "";
     for (const retired of ["Subscription", "Trial", "Plan limits", "Fleet telemetry"]) {
       expect(text, `"${retired}" is a retired word`).not.toContain(retired);

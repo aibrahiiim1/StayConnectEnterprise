@@ -22,7 +22,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { api, EdgeHealth, SetupStatus } from "@/lib/api";
+import { api, CentralStatus, EdgeHealth } from "@/lib/api";
 import {
   type OverviewRange, type OverviewSnapshot, OVERVIEW_RANGES, fetchOverview, fmtInt, normalizeOverview, reasonText,
 } from "@/lib/api/dashboard";
@@ -92,9 +92,9 @@ export default function DashboardPage() {
 
   // Which property and which box this is, once. Purely a label: if it cannot be read the header just omits it.
   useEffect(() => {
-    api.get<SetupStatus>("/setup/status")
+    api.get<CentralStatus>("/central/status")
       .then((s) => {
-        const parts = [s.assignment?.site_name, s.hardware?.hostname].filter(Boolean) as string[];
+        const parts = [s.site_name, s.serial].filter(Boolean) as string[];
         if (parts.length) setContext(parts.join(" · "));
       })
       .catch(() => {});
@@ -115,7 +115,7 @@ export default function DashboardPage() {
   // A licensing-only appliance never raises a cloud item: that state is a decision, and the obvious "repair"
   // is the one thing that must not happen.
   if (outbox.tone === "err" && health?.sync_outbox?.mode !== "LICENSING_ONLY") {
-    attention.push({ text: outbox.summary, href: "/appliance?section=license", tone: "warn" });
+    attention.push({ text: outbox.summary, href: "/appliance", tone: "warn" });
   }
   // Worth knowing, not worth doing: kept out of the attention list on purpose.
   const notes: { text: string; href: string }[] = [];
@@ -131,7 +131,7 @@ export default function DashboardPage() {
   const t = snap?.traffic;
   const pms = snap?.pms;
   const so = snap?.sign_in_outcomes;
-  const license = describeLicense(health?.license_state, health?.license_installed);
+  const license = describeLicense(health?.license_state);
 
   return (
     <PageShell width="wide">
@@ -363,7 +363,7 @@ export default function DashboardPage() {
                     back as an ordinary row.
                   */}
                   {outbox.headline !== "Licensing only" && (
-                    <ServiceRow title="Reporting to the OneGate cloud" info={outbox} href="/appliance?section=license" />
+                    <ServiceRow title="Reporting to the OneGate cloud" info={outbox} href="/appliance" />
                   )}
                 </>
               )}

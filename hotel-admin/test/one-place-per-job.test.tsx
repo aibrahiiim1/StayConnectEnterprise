@@ -45,33 +45,19 @@ describe("the dashboard states licensing once", () => {
   });
 });
 
-describe("an activated appliance has one place to install a licence", () => {
-  const setup = read("app/(app)/appliance/setup-section.tsx");
-  const license = read("app/(app)/appliance/license-section.tsx");
+describe("the appliance has one place for activation and licence files", () => {
+  const view = read("app/(app)/appliance/appliance-status.tsx");
 
-  it("Setup offers no licence upload once the appliance is activated", () => {
-    // The upload is inside the not-activated branch. Two controls that install the same thing is two places
-    // to look when a renewal is refused, and an invitation to upload a renewal into the onboarding flow of
-    // an appliance that finished onboarding months ago.
-    const card = setup.slice(setup.indexOf("LICENCE, ONCE ONBOARDING IS DONE"));
-    const gate = card.indexOf("{complete ? (");
-    const upload = card.indexOf("onPackageFile(e.target.files");
-    expect(gate, "the licence card no longer branches on activation").toBeGreaterThan(-1);
-    expect(upload, "the onboarding licence upload has vanished entirely").toBeGreaterThan(-1);
-    expect(upload, "the licence upload is not behind the not-yet-activated branch").toBeGreaterThan(gate);
-    // The activated branch must point at the one place that owns renewals.
-    const activated = card.slice(gate, upload);
-    expect(activated).toContain("/appliance?section=license");
+  it("installs a licence file only through the one licence upload", () => {
+    expect(view).toContain("Upload licence file");
+    expect(view).toContain('api.postRaw("/license"');
   });
 
-  it("Setup keeps the initial activation package, which is not a licence upload", () => {
-    // Offline ONBOARDING must stay here: the signed activation package carries assignment, trust material
-    // and the first licence together, and there is nowhere else it could go.
-    expect(setup).toContain("/setup/activation-package");
-    expect(setup).toContain("upload the activation package");
-  });
-
-  it("Licence remains the one place a licence file is installed after activation", () => {
-    expect(license).toContain("Upload licence file");
+  it("carries offline activation over the section 8 endpoints only", () => {
+    expect(view).toContain('"/central/offline-request"');
+    expect(view).toContain('"/central/offline-package"');
+    for (const gone of ["/setup/activation-package", "/setup/offline-import", "/setup/enroll", "/setup/status"]) {
+      expect(view, gone).not.toContain(gone);
+    }
   });
 });

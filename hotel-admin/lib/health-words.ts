@@ -10,7 +10,7 @@
 //
 // Everything below turns one of those internal counters into a sentence an operator can act on, plus a tone so
 // the UI can colour it consistently. The rules are kept here rather than in a component because the same
-// figures appear on the dashboard, in the top-bar health pill, on Diagnostics and on Cloud connection, and four
+// figures appear on the dashboard, in the top-bar health pill, on Diagnostics and on Appliance & licence, and four
 // independent descriptions of one number is how a product ends up contradicting itself.
 
 export type Tone = "ok" | "warn" | "err" | "default";
@@ -166,7 +166,7 @@ export function describeOutbox(o?: OutboxFigures | null): Explained {
       parts.push(
         `${num(dead)} ${dead === 1 ? "record was" : "records were"} retried until the appliance gave up on ` +
           `${dead === 1 ? "it" : "them"}. ${dead === 1 ? "It" : "They"} will not be sent again until ` +
-          `${dead === 1 ? "it is" : "they are"} recovered — Cloud connection has the button.`,
+          `${dead === 1 ? "it is" : "they are"} recovered by OneGate support.`,
       );
     }
     if (reason.line) parts.push(reason.line);
@@ -226,53 +226,54 @@ export function describeSessionController(ok: boolean): Explained {
       };
 }
 
-/** Licence state, in terms of what it stops rather than what it is called. */
-export function describeLicense(state: string | null | undefined, installed: boolean | undefined): Explained {
-  if (!installed) {
-    return {
-      headline: "Pending activation",
-      summary:
-        "No signed licence is installed. The appliance runs in a permissive mode for commissioning; it is " +
-        "not activated, and it should be activated before the property opens.",
-      tone: "warn",
-    };
-  }
+/**
+ * Licence state, in terms of what it stops rather than what it is called.
+ *
+ * The state is the appliance's own section 8 vocabulary (docs/CENTRAL_CONTROL_PLANE.md): none, active,
+ * expiring, grace, expired, suspended, revoked, wrong_hardware -- computed once by the appliance, so the
+ * dashboard and Appliance & licence cannot disagree. (This used to key on "Unlicensed" while the appliance sent
+ * "unlicensed", and it told operators an unlicensed appliance "runs in a permissive mode". It does not: a
+ * production appliance with no licence signs in no guests at all.)
+ */
+export function describeLicense(state: string | null | undefined): Explained {
   switch (state) {
-    case "Active":
+    case "none":
+    case null:
+    case undefined:
+      return {
+        headline: "Not activated",
+        summary:
+          "No licence is installed yet, so guests cannot sign in. Activate this appliance on Appliance & licence.",
+        tone: "warn",
+      };
+    case "active":
       return { headline: "Active", summary: "This appliance is licensed and fully enabled.", tone: "ok" };
-    case "GracePeriod":
-      // THIS DESCRIBED THE WRONG THING ENTIRELY, and it is the dashboard -- the first screen anyone opens.
-      //
-      // It said the licence "has not been confirmed with the cloud recently" and that the appliance was
-      // "running on its offline grace allowance". Neither is what this state means. Grace is entered because
-      // the licence's own end date passed; losing the cloud does not change the licence state at all (it
-      // raises a separate staleness flag, shown on the Cloud connection page). An operator reading the old
-      // text would have concluded their internet was flaky and done nothing, while the thing that had
-      // actually happened was their licence expiring with a fixed number of days left to renew it.
-      //
-      // It also promised the appliance "will restrict itself", which describes a Restricted state that the
-      // current licence model does not have: after grace the appliance goes to Expired and stops
-      // authorizing NEW guests.
+    case "expiring":
+      return {
+        headline: "Expires soon",
+        summary: "The licence ends within 30 days. Ask your OneGate vendor to renew it; guests are not affected yet.",
+        tone: "warn",
+      };
+    case "grace":
+      // Grace is entered because the licence's own end date passed. Losing the connection to Central does not
+      // change the licence state at all.
       return {
         headline: "Grace period",
         summary:
           "The licence end date has passed and the appliance is running on its renewal grace period. " +
           "Guests keep signing in exactly as before. When the grace period ends, new sign-ins stop; " +
-          "sessions already in progress are not cut off. See the Licence page for the exact end date.",
+          "sessions already in progress are not cut off. Appliance & licence shows the exact end date.",
         tone: "warn",
       };
-    case "Suspended":
-    case "Restricted":
+    case "suspended":
       return {
-        headline: state === "Suspended" ? "Suspended" : "Restricted",
+        headline: "Suspended",
         summary:
-          "The licence is no longer in good standing, so some capabilities are withheld. Contact Semantics.",
-        tone: "warn",
+          "Your OneGate vendor has suspended the licence. New guest sign-ins are refused; guests already online " +
+          "are not disconnected.",
+        tone: "err",
       };
-    case "Expired":
-      // "The licence end date has passed" was true of the GRACE state too, so on its own it did not
-      // distinguish the state where guests still sign in from the one where they no longer can. It also left
-      // the most reassuring fact unsaid: guests already online are not thrown off.
+    case "expired":
       return {
         headline: "Expired",
         summary:
@@ -280,20 +281,24 @@ export function describeLicense(state: string | null | undefined, installed: boo
           "guests already online are not disconnected. Renew to restore service.",
         tone: "err",
       };
-    case "Revoked":
+    case "revoked":
       return {
         headline: "Revoked",
-        summary: "This licence was revoked centrally. The appliance will not operate normally.",
+        summary:
+          "Your OneGate vendor has revoked this licence. New guest sign-ins are refused; guests already online " +
+          "are not disconnected.",
         tone: "err",
       };
-    case "Unlicensed":
+    case "wrong_hardware":
       return {
-        headline: "Unlicensed",
-        summary: "No valid licence is in force on this appliance.",
+        headline: "Wrong appliance",
+        summary:
+          "The installed licence was issued for a different appliance, so new guest sign-ins are refused. Ask your " +
+          "OneGate vendor for a licence for this appliance's serial number.",
         tone: "err",
       };
     default:
-      return { headline: state ?? "Unknown", summary: "The licence state could not be interpreted.", tone: "default" };
+      return { headline: state, summary: "The licence state could not be interpreted.", tone: "default" };
   }
 }
 
