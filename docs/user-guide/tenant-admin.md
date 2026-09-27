@@ -36,7 +36,7 @@ An appliance is the OneGate gateway (physical or virtual) at a site. A new appli
 - **Activation** — *Waiting for activation*, *Activating*, *Activated*, *Retiring*, *Retired*.
 - **Connection** — *Connected* (contacted Central in the last 5 minutes), *Recently seen* (last 24 hours), *Offline* (more than a day), *Never connected*. An offline appliance keeps serving guests — Central is used for licensing only — but ask someone at the property to check its uplink.
 
-**Moving, retiring or replacing an appliance** changes its signed assignment and licence — ask the platform admin.
+**Moving, retiring or replacing an appliance** changes its signed assignment and licence — ask the platform admin. An appliance can move only between your own sites; giving it to another customer means retiring it and having it factory-reset and activated again.
 
 ## Authentication setup
 
@@ -87,7 +87,7 @@ Older roles (Customer operator, Billing) no longer grant anything in Central.
 
 ### Adding a user
 
-1. **Add user**: email, name, initial password, role.
+1. **Add user**: email, name, initial password, role. Central asks you to confirm your own password first; so does every role change, disable/enable and removal.
 2. Share the initial password out-of-band.
 3. They sign in with it.
 

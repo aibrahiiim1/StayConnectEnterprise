@@ -24,7 +24,7 @@ The sidebar is **Overview · Customers · Appliances · Licenses · System**. Th
 1. **Customers → New customer** — the name.
 2. On the customer page, **Sites → New site** for each property (name, time zone).
 3. When each appliance is powered on it registers itself and appears under **Appliances** as **Waiting for activation**. Open it → **Activate** → choose the customer and site and the licence terms. (You can also create the customer and site inside the Activate dialog.) Details: [control-panel-config-manual.md](control-panel-config-manual.md).
-4. If the customer should have its own Central login: customer page → **Users → Add user**, role **Customer admin** (or **Auditor**/**Viewer** for read-only). Send them the initial password out-of-band (encrypted email, phone, etc.).
+4. If the customer should have its own Central login: customer page → **Users → Add user**, role **Customer admin** (or **Auditor**/**Viewer** for read-only). Central asks you to confirm your own password first, as it does for every change to a sign-in. Send them the initial password out-of-band (encrypted email, phone, etc.).
 5. Tell them to sign in at your Central address, then follow the [customer admin guide](tenant-admin.md).
 
 Hotel staff never sign in to Central to run their hotel; they use the operator accounts created on their appliance in Hotel Admin.
@@ -40,6 +40,14 @@ If an appliance is offline you'd usually contact the hotel rather than fix it yo
 1. **Suspend** or **Revoke** each appliance's licence (the appliance's page → **License**) — guest access on those appliances stops.
 2. **Archive** the customer — hidden from active lists; sites, appliances, licences and the audit log are kept. **Restore** reverses it.
 3. To remove it permanently, remove bottom-up: **Retire** each appliance and **Delete record** → delete each site → delete the customer. Each delete asks you to type the serial or name and give a reason.
+
+### Moving, replacing or re-homing an appliance
+
+- **Another site of the same customer** — the appliance's page → **Move**. The licence is re-issued for the new site with the same terms; if Central cannot re-issue it, nothing changes.
+- **New hardware at the same site** — old appliance → **Advanced → Mark for replacement**; activate the new appliance for the same customer and site. The old one then retires through the acknowledged two-phase retirement.
+- **Another customer** — there is no move between customers. **Retire** the appliance, have it factory-reset on site, and **Activate** it for the new customer when it registers again as *Waiting for activation*.
+
+Procedures: [control-panel-config-manual.md §5](control-panel-config-manual.md#5-move-replace-repair-or-retire-an-appliance).
 
 ### Changing what a hotel may serve
 

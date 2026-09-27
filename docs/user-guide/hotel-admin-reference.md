@@ -74,8 +74,10 @@ states) is defined once in the [OneGate design system](../../design-system/READM
   down. What is lost is news: a guest who checked in during the outage cannot sign in by room number until
   the link is back.
 - **Licence state.** When the appliance's licence is expired, suspended, revoked or missing, new guest
-  sign-ins are refused and some creation actions are blocked for every role; existing guest sessions are
-  not dropped. **System → Appliance & licence** says why.
+  sign-ins are refused — by every method, room sign-in included — and some creation actions are blocked for
+  every role; existing guest sessions are not dropped. The licence also caps how many guests may be online at
+  once, again across every method: a room guest's second device takes a place just like a voucher guest.
+  **System → Appliance & licence** says why.
 
 **Role names used below:** Site admin, Hotel IT manager, Front office operator, Guest relations operator,
 Voucher operator, Payments operator, Site viewer.
@@ -386,7 +388,10 @@ after too many wrong tries.
   failures*; search, room, result, credential type and period (24 hours to 30 days); table When, Room,
   Network, Result, Why, Entered as, Guest-list age, Device (up to 200 rows). **Details** shows the
   diagnostics and — only for roles allowed to see guest credentials — *what was entered, and what would have
-  been accepted*. Other roles see an explanation instead.
+  been accepted*. Other roles see an explanation instead. Two results come from the licence rather than the
+  guest: *Licence refused new guests* (the licence did not admit anyone new at that moment) and *Licensed
+  capacity full* (the guest's details were right, but the appliance was at its licensed number of guests
+  online).
 - **Active restrictions tab:** devices currently asked to wait, with the last room typed (marked
   unverified), failures and a live countdown. **Release** — **reason required** (at least 3 characters), no
   password; the dialog states that **releasing does not sign the guest in**.
@@ -643,7 +648,10 @@ appliance register if needed and fetch its activation and licence from Central i
 - **Status card**, three parts:
   - **Activation** — *Not registered yet* (Central not reached yet; it keeps retrying by itself), *Waiting for
     activation* (with the copyable **Serial number** to give your OneGate vendor; nothing needs to be typed
-    here), *Finishing activation…*, *Activated* (licensed to customer · site), *Retired*.
+    here), *Finishing activation…*, *Activated* (licensed to customer · site), *Retired*, or *Removed from
+    OneGate Central* — Central deleted this appliance after it had served a customer: it keeps its data, admits
+    no new guests (guests already online are not disconnected), refuses licence and activation files and never
+    registers again by itself. To use it again, it must be factory-reset and activated by your OneGate vendor.
   - **Licence** — *No licence yet*, *Active*, *Expires soon*, *Grace period*, *Expired*, *Suspended*, *Revoked*
     or *Wrong appliance*, with the end date and days left, and **Guests online, all guest networks** against
     the licensed maximum with a meter.

@@ -44,6 +44,15 @@ activation package; **Upload activation package** here.
 Only the Site admin and Hotel IT manager can upload files; other roles can
 follow the status.
 
+**Retired** or **Removed from OneGate Central** means this appliance no longer
+admits new guests (guests already online are not disconnected). *Removed from
+OneGate Central* appears when Central deleted the appliance after it had served
+a customer: it keeps its data, refuses licence and activation files and never
+registers again by itself. Moving it to another customer, or using it again at
+all, needs a factory-clean install
+([DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md](../DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md))
+and a new activation by your vendor.
+
 ---
 
 ## 2. The licence
@@ -176,9 +185,10 @@ the guest. Only the Site admin can create or change packages and service plans (
 Site viewer can read them; other roles do not see these pages).
 
 > **License capacity vs. max devices.** The signed license caps the total number
-> of guests online **across the whole appliance**. A service plan's **devices at
-> once** caps the devices **per guest, voucher or account**. Both are checked on
-> every sign-in; a device refused for either reason gets a clear message on the
+> of guests online **across the whole appliance**, whatever the sign-in method —
+> room sign-in, vouchers, guest accounts, OTP and social login share it. A
+> service plan's **devices at once** caps the devices **per guest, voucher or
+> account**. Both are checked on every sign-in; a device refused for either reason gets a clear message on the
 > portal and no session. A device that is already signed in does not use a
 > second place when it reconnects.
 

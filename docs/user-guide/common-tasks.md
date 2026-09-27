@@ -54,6 +54,7 @@ If you need to read the full code on a card (e.g. a smudged card), open it and u
 2. **Guest sign-in attempts** → find the attempt by room and read **Why**. Roles allowed to see guest credentials can open **Details** to compare what was entered with what would have been accepted.
    - Room number **exactly** as the PMS has it (some PMSes store "0214", some "214").
    - Name spelling — the guest should enter the full first name, family name, or reservation number, depending on the mode set under **Sign-in methods**.
+   - **Why** says *Licence refused new guests* or *Licensed capacity full* → the guest's details are not the problem: the appliance's licence did not admit a new guest, or the appliance is at its licensed number of guests online (room guests, voucher and account guests all count, and each device of a room takes a place). Check **System → Appliance & licence**.
 3. **Guest sign-in checks** → if every attempt on ONE guest network fails while others work, that network points at the wrong PMS or none: fix it under **Network routing**.
 4. **Too many attempts**: after too many wrong tries (by default 5 within 60 seconds) the device is asked to wait (by default 60 seconds) and sees a countdown. Reception can **Release** it on **Guest sign-in attempts → Active restrictions** — this lets the device try again; it does not sign the guest in.
 5. If all of the above check out and the PMS still rejects, the reservation may not be in the PMS correctly. Have reception check the PMS directly; **PMS activity** shows whether the check-in message ever arrived.
@@ -85,6 +86,10 @@ If you need to read the full code on a card (e.g. a smudged card), open it and u
 4. Still offline after 10 minutes → escalate to Semantics support with the appliance serial and last-seen time.
 
 An appliance that cannot reach Central keeps serving guests — Central is used for licensing only. On site, **Hotel Admin → System → Appliance & licence** shows whether Central is *Connected*, *Temporarily unreachable* or *Not configured*, when it last answered, and the last problem; **Check now** retries immediately.
+
+## Hotel Admin says "Removed from OneGate Central"
+
+Central deleted this appliance's record after it had served a customer. It keeps its data, admits no new guests (guests already online stay connected) and will not register again by itself. To use it again — for the same or another customer — it must be factory-reset ([DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md](../DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md)) and then activated in Central when it registers as *Waiting for activation*.
 
 ## Sessions count is zero but guests are present
 

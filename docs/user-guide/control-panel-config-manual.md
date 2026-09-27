@@ -117,19 +117,38 @@ keeps contacting Central and picks up the change.
 
 All on the appliance's page:
 
-- **Move** (*Installed at*) — to another site. Moving to **another customer**
-  revokes its licence and the appliance erases the previous customer's local
-  data; set a new licence after the move.
-- **Retire appliance** — type the serial and a reason. Retirement is two-phase:
-  the appliance confirms, normally within a minute, then its credentials are
-  revoked. Tick **Emergency** for a lost, stolen or dead appliance: it is retired
-  without waiting.
+- **Move** (*Installed at*) — to another site **of the same customer**: choose
+  the new site and give a reason. Its licence is re-issued for the new site with
+  the same terms, in the same step. If Central cannot re-issue the licence
+  (licensing unavailable) nothing changes and you can try again later; a licence
+  already past its end date must be renewed first. A move can never change the
+  customer.
+- **Change the customer** — not a move. **Retire** the appliance, have it
+  **factory-reset** on site (it gets a new identity), wait for it to appear
+  again as *Waiting for activation*, then **Activate** it for the new customer.
+- **Retire appliance** — type the serial and a reason. The licence is revoked
+  at once; retirement is two-phase: the appliance collects its retirement and
+  confirms, normally within a minute, and only then are its credentials
+  revoked. If it does not confirm within 10 minutes the retirement shows as not
+  confirmed (and a security alert opens); *retire it now without waiting* (an
+  emergency retirement) then
+  finishes it without waiting. Tick **Emergency** straight away for a lost,
+  stolen or dead appliance.
+- **Replace hardware** — **Advanced → Mark for replacement** on the old
+  appliance. It keeps working and licensed (for up to 72 hours; after that an
+  alert asks for a decision). Power on the new appliance at the same site; it
+  registers itself; **Activate** it for the **same customer and site**. The old
+  appliance's licence is then revoked and it retires through the same
+  acknowledged two-phase retirement.
 - **Advanced → Repair:** **Reissue certificate**; **Rebind WAN MAC** after a
-  network-card change (licence terms stay the same); **Mark for replacement**
-  (activating a new appliance at the same site then retires this one);
-  **Offline activation package**.
+  network-card change (licence terms stay the same); **Offline activation
+  package**.
 - **Delete record** — only for a *Waiting for activation* or *Retired*
-  appliance: type the serial and a reason. Audit history is kept.
+  appliance: type the serial and a reason. Audit history is kept. A retired
+  appliance's identity is remembered and can never register again: the box must
+  be factory-reset first. An appliance that held a customer and whose record is
+  deleted shows *Removed from OneGate Central* in its Hotel Admin and stops
+  admitting new guests until it is factory-reset and activated again.
 
 ---
 

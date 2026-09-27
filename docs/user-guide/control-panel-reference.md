@@ -86,7 +86,7 @@ customer still has sites or appliances). Tabs:
 - **Licenses** — this customer's licences.
 - **Users** — the customer's own Central sign-ins (optional). **Add user**: Email, Name, Initial password,
   Role (**Customer admin**, **Auditor (read only)**, **Viewer (read only)**). Row actions **Role**,
-  **Disable** / **Enable**, **Remove**.
+  **Disable** / **Enable**, **Remove**. Each of these asks you to confirm your own password first.
 - **Activity** — the audit log for this customer.
 
 ## Appliances — `/appliances`
@@ -117,16 +117,21 @@ Everything about one appliance and every lifecycle action on it (all platform-ad
   **Revoke** (permanent; set a new licence to restore service) and **Offline license file**. **License
   history** lists every version. Suspending or revoking a licence does not cut the appliance off from Central.
 - **Activity** — recent lifecycle and audit events.
-- **Installed at** — customer and site; **Move** re-assigns an activated appliance to another site. Moving to
-  another customer revokes its licence and the appliance erases the previous customer's local data; set a new
-  licence afterwards.
+- **Installed at** — customer and site; **Move** re-assigns an activated appliance to another site **of the same
+  customer** (new site + reason). Its licence is re-issued for the new site with the same terms in the same step;
+  if licensing is unavailable on Central the move is refused and nothing changes, and a licence past its end date
+  must be renewed first. To give an appliance to another customer: **Retire** it, factory-reset it, and
+  **Activate** it for that customer when it registers again.
 - **Appliance** — connection, registered, activated, last address, software version; **Retire appliance**
-  (typed serial + reason; two-phase: it is retired once the appliance confirms, normally within a minute; the
-  *Emergency* option, for a lost, stolen or dead appliance, does not wait) or, for a *Waiting* or *Retired*
-  appliance, **Delete record** (typed serial + reason; audit history is kept).
+  (typed serial + reason; the licence is revoked at once; two-phase: it is retired once the appliance confirms,
+  normally within a minute, and its credentials stay valid until then; not confirmed within 10 minutes → an
+  alert, and *retire it now without waiting* finishes it; the *Emergency* option, for a lost, stolen or dead appliance, does not
+  wait) or, for a *Waiting* or *Retired* appliance, **Delete record** (typed serial + reason; audit history is
+  kept; a retired appliance's identity can never register again — factory-reset the box first).
 - **Advanced** (collapsed) — *Repair*: **Reissue certificate**, **Rebind WAN MAC** (after a network-card change;
-  licence terms stay the same), **Mark for replacement** (activating a new appliance at the same site retires
-  this one), **Offline activation package**; and *Technical details* (appliance ID, MACs, hardware and identity
+  licence terms stay the same), **Mark for replacement** (this appliance keeps working, for up to 72 hours;
+  activating the new appliance at the same site revokes this one's licence and retires it through the same
+  acknowledged two-phase retirement), **Offline activation package**; and *Technical details* (appliance ID, MACs, hardware and identity
   key fingerprints, certificate, assignment version and signing key, licence version).
 
 ## Licenses — `/licenses`
@@ -164,8 +169,9 @@ Customer, Action (e.g. `license.revoked`), From. Entries cannot be edited or rem
 ### Team — `/system/team`
 The people who run Central. **Add team member**: Email, Name, Initial password, Role (**Platform admin** —
 everything, including activation and licences; **Support (read only)**). Row actions **Role**, **Password**,
-**Disable** / **Enable**, **Remove**. A role change takes effect at the next sign-in. A customer's own users are
-managed on that customer's **Users** tab.
+**Disable** / **Enable**, **Remove**. Every one of these asks you to confirm your own password first. A role
+change takes effect at the next sign-in. A customer's own users are managed on that customer's **Users** tab, with
+the same password confirmation.
 
 ### Backup health — `/system/backup-health`
 Whether Central's own backup and rollback storage is healthy. Read only: *Disk used*, *Rollback path*, *Last
