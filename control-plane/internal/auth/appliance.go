@@ -65,6 +65,8 @@ func RequireAppliance(db *pgxpool.Pool, cache *applianceauth.ReplayCache) func(h
                  WHERE id = $1
             `, iss).Scan(&pubB64, &tenantID, &siteID, &serial, &lifecycle)
 			if errors.Is(err, pgx.ErrNoRows) || (err == nil && pubB64 == "") {
+				// WIRE CONTRACT: deployed appliances detect that their record was deleted by a 401 whose body
+				// says "not enrolled" (data-plane cmd/scd orphan recovery). Keep the wording.
 				applianceAuthFail(r.Context(), db, r, iss, "not enrolled")
 				jsonErr(w, http.StatusUnauthorized, "unauthenticated", "appliance not enrolled", r)
 				return
@@ -117,7 +119,7 @@ func RequireAppliance(db *pgxpool.Pool, cache *applianceauth.ReplayCache) func(h
 				return
 			}
 			_, _ = db.Exec(r.Context(),
-				`UPDATE appliances SET identity_verified_at = now(), last_seen_at = now(),
+				`UPDATE appliances SET last_seen_at = now(),
 				        version = COALESCE(NULLIF($2,''), version) WHERE id = $1`,
 				iss, claims.Ver)
 			ident := &ApplianceIdent{

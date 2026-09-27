@@ -21,6 +21,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"time"
@@ -30,6 +31,7 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/activation"
 	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/control-plane/internal/audit"
+	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
 	"github.com/stayconnect/enterprise/control-plane/internal/offline"
 )
 
@@ -96,6 +98,15 @@ func (b *OfflineBase) importRequest(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := DBCtx(r)
 	defer cancel()
 
+	// A retired identity cannot be brought back by a file either (see RegisterHandler).
+	if retired, err := identityRetired(ctx, b.DB, req.PublicKey); err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "lookup failed")
+		return
+	} else if retired {
+		Fail(w, r, http.StatusConflict, "identity_retired",
+			"This appliance identity was retired. Factory-reset the appliance and create a new activation request.")
+		return
+	}
 	var appID, lifecycle, existingPub string
 	err := b.DB.QueryRow(ctx,
 		`SELECT id::text, lifecycle_state, COALESCE(public_key,'') FROM appliances WHERE serial=$1`, req.Serial).
@@ -116,10 +127,10 @@ func (b *OfflineBase) importRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	default:
 		if err := b.DB.QueryRow(ctx, `
-            INSERT INTO appliances(serial, name, lifecycle_state, public_key,
+            INSERT INTO appliances(serial, lifecycle_state, public_key,
                                    wan_mac, lan_mac, hardware_fingerprint, hostname, model,
-                                   enrolled_at, first_seen_at)
-            VALUES ($1, $1, 'pending_approval', $2,
+                                   registered_at, first_seen_at)
+            VALUES ($1, 'pending_approval', $2,
                     NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLIF($7,''),
                     now(), now())
             RETURNING id::text`,
@@ -204,12 +215,8 @@ func (b *OfflineBase) activationPackage(w http.ResponseWriter, r *http.Request) 
 	}
 	asgRaw, _ = json.Marshal(&asg) // the document exactly as Issue produced it (jsonb reorders keys)
 	// The appliance's OWN current licence (F10: never another appliance's licence at the same site).
-	var licEnv string
-	if b.Lic != nil {
-		licEnv, _, _ = b.Lic.CurrentEnvelopeForAppliance(ctx, appID)
-	}
-	if licEnv == "" {
-		Fail(w, r, http.StatusConflict, "no_license", "the appliance has no current licence; set one first")
+	licEnv, ok := b.currentEnvelope(w, r, appID)
+	if !ok {
 		return
 	}
 	idFpr := ""
@@ -271,12 +278,8 @@ func (b *OfflineBase) offlineLicense(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := DBCtx(r)
 	defer cancel()
-	var licEnv string
-	if b.Lic != nil {
-		licEnv, _, _ = b.Lic.CurrentEnvelopeForAppliance(ctx, appID)
-	}
-	if licEnv == "" {
-		Fail(w, r, http.StatusConflict, "no_license", "the appliance has no current licence; set one first")
+	licEnv, ok := b.currentEnvelope(w, r, appID)
+	if !ok {
 		return
 	}
 	var serial, pubKey, certFpr string
@@ -308,6 +311,25 @@ func (b *OfflineBase) offlineLicense(w http.ResponseWriter, r *http.Request) {
 		"_tenant_id": pkg.TenantID, "package_id": pkg.PackageID, "expires_at": pkg.ExpiresAt})
 	// The downloadable document is under "license" (the activation package's is under "package").
 	writeFile(w, "license-"+serial+".json", map[string]any{"package_id": pkg.PackageID, "license": pkg})
+}
+
+// currentEnvelope is the appliance's own current signed licence, or writes the refusal. Fail closed: only a
+// verified "no licence" is reported as such; licensing being unavailable or the lookup failing is a 503.
+func (b *OfflineBase) currentEnvelope(w http.ResponseWriter, r *http.Request, appID string) (string, bool) {
+	if b.Lic == nil {
+		Fail(w, r, http.StatusServiceUnavailable, "licensing_unavailable", "Licensing is unavailable on Central right now. Try again later.")
+		return "", false
+	}
+	env, _, err := b.Lic.CurrentEnvelopeForAppliance(r.Context(), appID)
+	switch {
+	case errors.Is(err, licensing.ErrNoLicense):
+		Fail(w, r, http.StatusConflict, "no_license", "The appliance has no current licence; set one first.")
+		return "", false
+	case err != nil:
+		Fail(w, r, http.StatusServiceUnavailable, "licensing_unavailable", "Central could not read the appliance's licence. Try again later.")
+		return "", false
+	}
+	return env, true
 }
 
 // writeFile answers with a JSON document the browser saves as a file.

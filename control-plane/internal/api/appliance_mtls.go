@@ -28,7 +28,7 @@ func ApplianceMTLSRouter(db *pgxpool.Pool, rdb *redis.Client, replay *appliancea
 	// GET /v1/appliance/assignment authenticates SOLELY from the verified client
 	// certificate: URI-SAN appliance_id → exact certificate serial → exact
 	// certificate fingerprint → Central appliance record (strictMTLSSelf). It does
-	// NOT run RequireAppliance, so no appliance JWT, bearer, bootstrap or enrollment
+	// NOT run RequireAppliance, so no appliance JWT or bearer
 	// token is required or consulted — the mTLS listener has already verified the
 	// certificate chain against the CA. GET-only, read-only, rate-limited, audited.
 	if assignKey != nil {
@@ -44,9 +44,9 @@ func ApplianceMTLSRouter(db *pgxpool.Pool, rdb *redis.Client, replay *appliancea
 		r.Use(auth.RequireAppliance(db, replay))
 		r.Use(mtlsCertBinding(db))
 
-		enrollBase := &EnrollmentBase{Base: &Base{DB: db}, ReplayCache: replay}
-		r.Get("/v1/appliance/hello", enrollBase.HelloHandler)
-		r.Post("/v1/appliance/offline-reconcile", enrollBase.OfflineReconcile)
+		identityBase := &IdentityBase{Base: &Base{DB: db}, ReplayCache: replay}
+		r.Get("/v1/appliance/hello", identityBase.HelloHandler)
+		r.Post("/v1/appliance/offline-reconcile", identityBase.OfflineReconcile)
 		if lic != nil {
 			licBase := &LicensesBase{Base: &Base{DB: db}, Svc: lic}
 			r.Get("/v1/appliance/license", licBase.ApplianceLicenseHandler)

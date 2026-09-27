@@ -205,19 +205,29 @@ func (b *LicensesBase) ApplianceLicenseHandler(w http.ResponseWriter, r *http.Re
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "license lookup failed")
 		return
 	}
+	// The revocation list is part of the answer: an empty list because the query failed would read as "nothing
+	// revoked" on the appliance. Fail instead; the appliance keeps its last verified state and retries.
 	var revoked []string
 	rows, err := b.DB.Query(ctx, `
         SELECT l.id FROM licenses l
          WHERE $1::uuid = ANY(l.appliance_ids) AND l.status = 'revoked'
     `, ident.ApplianceID)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var id string
-			if rows.Scan(&id) == nil {
-				revoked = append(revoked, id)
-			}
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "license lookup failed")
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			Fail(w, r, http.StatusInternalServerError, CodeInternal, "license lookup failed")
+			return
 		}
+		revoked = append(revoked, id)
+	}
+	if rows.Err() != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "license lookup failed")
+		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

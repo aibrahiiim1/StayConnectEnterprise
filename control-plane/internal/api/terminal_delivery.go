@@ -208,9 +208,16 @@ func (b *Base) AckHandler(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "phase2 failed")
 		return
 	}
+	var prevLifecycle string
+	_ = b.DB.QueryRow(ctx, `SELECT lifecycle_state FROM appliances WHERE id=$1`, ident.ApplianceID).Scan(&prevLifecycle)
 	_, _ = b.DB.Exec(ctx, `UPDATE appliances SET lifecycle_state=$2, replacement_pending=false, updated_at=now() WHERE id=$1`,
 		ident.ApplianceID, lifecycleForTerminal(ack.TerminalState))
+	recordLifecycle(ctx, b.DB, ident.ApplianceID, prevLifecycle, lifecycleForTerminal(ack.TerminalState), "appliance",
+		clientIPFromReq(r), "retirement acknowledged by the appliance")
 	_, _ = b.DB.Exec(ctx, `UPDATE appliance_terminal_delivery SET delivery_state='credential_revoked' WHERE appliance_id=$1`, ident.ApplianceID)
+	// A late ack confirms a retirement that had timed out: the "did not confirm" alert is now answered.
+	_, _ = b.DB.Exec(ctx, `UPDATE appliance_security_alerts SET status='resolved', resolved=true, acknowledged_at=now()
+         WHERE appliance_id=$1 AND kind='terminal_delivery_failed' AND NOT resolved`, ident.ApplianceID)
 	WriteJSON(w, http.StatusOK, map[string]any{"status": "credential_revoked", "version": ack.Version})
 }
 
@@ -260,10 +267,10 @@ func ReconcileTerminalTimeouts(ctx context.Context, b *Base) (int64, error) {
 
 // StrictApplianceAssignmentHandler serves GET /v1/appliance/assignment under the
 // full mTLS trust rules. It is the ONLY delivery channel for assignment documents
-// (no JWT/bootstrap fallback; that mount is removed from the :443 router).
+// (there is no JWT fallback and no :443 mount).
 func (b *AssignmentBase) StrictApplianceAssignmentHandler(w http.ResponseWriter, r *http.Request) {
 	// IDENTITY COMES ONLY FROM THE VERIFIED CLIENT CERTIFICATE. This endpoint
-	// consults no appliance JWT, bearer, bootstrap or enrollment token — any
+	// consults no appliance JWT or bearer token — any
 	// Authorization header on the request is ignored. The mTLS listener has
 	// already verified the certificate chain against the CA; here we bind the
 	// cert's URI-SAN appliance_id, and strictMTLSSelf enforces the exact

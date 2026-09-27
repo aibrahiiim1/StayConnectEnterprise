@@ -159,7 +159,7 @@ func (b *CertBase) issueCertForAppliance(ctx context.Context, r *http.Request, a
 		return nil, err
 	}
 	_, _ = tx.Exec(ctx, `UPDATE appliance_certificate_requests SET status='signed', decided_at=now(), decided_by=NULLIF($2,'')::uuid WHERE appliance_id=$1 AND status='pending'`, appID, operatorID)
-	_, _ = tx.Exec(ctx, `UPDATE appliances SET cert_fingerprint=$2, current_cert_fingerprint=$2, cert_not_after=$3, updated_at=now() WHERE id=$1`, appID, sc.FingerprintHex, sc.NotAfter)
+	_, _ = tx.Exec(ctx, `UPDATE appliances SET current_cert_fingerprint=$2, cert_not_after=$3, updated_at=now() WHERE id=$1`, appID, sc.FingerprintHex, sc.NotAfter)
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}

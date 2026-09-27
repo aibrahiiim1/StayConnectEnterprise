@@ -37,7 +37,16 @@ type Deps struct {
 	Version       string
 	AllowOrigins  []string // CORS allowlist for the console in development
 	CookieSecure  bool     // set true behind HTTPS
+
+	rateCounter api.RateCounter // tests only; production counts in Redis
 }
+
+// Per-client-address limits, per minute.
+const (
+	loginPerMinute    = 20
+	reauthPerMinute   = 20
+	registerPerMinute = 30
+)
 
 // NewRouter serves exactly the §6 contract: /v1/auth/*, the appliance endpoints under /v1/appliance* and
 // /v1/appliances/register, and the operator API under /cloud/v1. Plus /healthz, /readyz and a
@@ -51,7 +60,7 @@ func NewRouter(d Deps) http.Handler {
 	if replayCache == nil {
 		replayCache = applianceauth.NewReplayCache(2*time.Minute, 8192)
 	}
-	enrollBase := &api.EnrollmentBase{Base: &api.Base{DB: d.DB}, ReplayCache: replayCache}
+	identityBase := &api.IdentityBase{Base: &api.Base{DB: d.DB}, ReplayCache: replayCache}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -72,28 +81,36 @@ func NewRouter(d Deps) http.Handler {
 		r.Method("GET", "/metrics", loopbackOnly(d.Metrics.Handler()))
 	}
 
+	// Every limit is keyed on the server-derived client address (clientip), never on a header a direct
+	// client controls.
+	var counter api.RateCounter = d.rateCounter
+	if counter == nil && d.Redis != nil {
+		counter = api.RedisRateCounter(d.Redis)
+	}
+	limit := func(prefix string, n int) func(http.Handler) http.Handler {
+		return api.RateLimitWith(counter, prefix, n, time.Minute)
+	}
+
 	r.Route("/v1", func(r chi.Router) {
-		// Operator authentication.
-		r.With(api.RateLimit(d.Redis, "login", 20, time.Minute)).Post("/auth/login", adeps.login)
+		// Operator authentication. Password re-entry is limited BEFORE the session check, so the limit also
+		// holds for guesses made without a valid session.
+		r.With(limit("login", loginPerMinute)).Post("/auth/login", adeps.login)
 		r.Post("/auth/logout", adeps.logout)
-		r.Group(func(r chi.Router) {
-			r.Use(auth.RequireAuth(store))
-			r.Get("/auth/whoami", adeps.whoami)
-			r.With(api.RateLimit(d.Redis, "reauth", 20, time.Minute)).Post("/auth/reauth", adeps.reauth)
-		})
+		r.With(limit("reauth", reauthPerMinute), auth.RequireAuth(store)).Post("/auth/reauth", adeps.reauth)
+		r.With(auth.RequireAuth(store)).Get("/auth/whoami", adeps.whoami)
 
 		// Appliance: TOKEN-LESS registration. The appliance self-signs with its locally generated identity
-		// key and appears as WAITING. There is no enrollment token.
-		r.With(api.RateLimit(d.Redis, "register", 30, time.Minute)).
-			Post("/appliances/register", enrollBase.RegisterHandler)
+		// key and appears as WAITING.
+		r.With(limit("register", registerPerMinute)).
+			Post("/appliances/register", identityBase.RegisterHandler)
 
 		// Appliance: signed request JWT (and, on the mTLS listener, a client certificate as well). The
 		// assignment channel (/appliance/assignment, /ack, /assignment-registry) is mTLS-only and is served
 		// by api.ApplianceMTLSRouter, never here.
 		r.Group(func(r chi.Router) {
 			r.Use(auth.RequireAppliance(d.DB, replayCache))
-			r.Get("/appliance/hello", enrollBase.HelloHandler)
-			r.Post("/appliance/offline-reconcile", enrollBase.OfflineReconcile)
+			r.Get("/appliance/hello", identityBase.HelloHandler)
+			r.Post("/appliance/offline-reconcile", identityBase.OfflineReconcile)
 			if d.Licensing != nil {
 				licBase := &api.LicensesBase{Base: &api.Base{DB: d.DB}, Svc: d.Licensing}
 				r.Get("/appliance/license", licBase.ApplianceLicenseHandler)

@@ -1,6 +1,7 @@
-// Package migrations holds Central's SQL migrations. This test guards the properties of 0046 that must
-// never regress: it refuses to drop a table that holds data, it archives (never drops) commercial history,
-// and every up has a down.
+// Package migrations holds Central's SQL migrations. These tests guard properties that must never regress:
+// 0046 refused to drop a table that held data and archived commercial history; 0047 deletes that archive by
+// Product-Owner decision but never takes a live table with it, keeps the signed licence format, and hard-codes
+// no appliance; and every up has a down.
 package migrations
 
 import (
@@ -82,5 +83,57 @@ func TestEveryUpFrom0037HasADown(t *testing.T) {
 		if _, err := os.Stat(strings.TrimSuffix(u, ".up.sql") + ".down.sql"); err != nil {
 			t.Errorf("%s has no down migration", u)
 		}
+	}
+}
+
+func Test0047DropsTheArchiveBehindAGuard(t *testing.T) {
+	up := read(t, "0047_central_cleanup.up.sql")
+	guard := strings.Index(up, "RAISE EXCEPTION")
+	drop := strings.Index(up, "DROP SCHEMA IF EXISTS legacy_archive CASCADE;")
+	if guard < 0 || drop < 0 || guard > drop {
+		t.Fatal("0047 must check for outside dependents (RAISE) before DROP SCHEMA legacy_archive CASCADE")
+	}
+	if !strings.Contains(up, "_timescaledb_catalog.hypertable") {
+		t.Error("hypertables in the archive must be dropped through TimescaleDB first")
+	}
+	// CASCADE is used for the archive only.
+	if n := strings.Count(strings.ToUpper(up), "CASCADE;"); n != 1 {
+		t.Errorf("0047 uses CASCADE %d times; only the archive schema may be dropped with CASCADE", n)
+	}
+}
+
+func Test0047HardCodesNoAppliance(t *testing.T) {
+	for _, f := range []string{"0047_central_cleanup.up.sql", "0047_central_cleanup.down.sql"} {
+		s := read(t, f)
+		if regexp.MustCompile(`(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|SC-[A-Z0-9]{4}-`).MatchString(s) {
+			t.Errorf("%s names a specific appliance; deleting one is an API operation, not a migration", f)
+		}
+		if regexp.MustCompile(`(?i)DELETE\s+FROM\s+appliances`).MatchString(s) {
+			t.Errorf("%s deletes appliances", f)
+		}
+	}
+}
+
+func Test0047DownRestoresStructure(t *testing.T) {
+	down := read(t, "0047_central_cleanup.down.sql")
+	for _, want := range []string{
+		"CREATE SCHEMA IF NOT EXISTS legacy_archive",
+		"legacy_archive.plans (", "legacy_archive.plan_limits (", "legacy_archive.plan_limit_history (",
+		"legacy_archive.subscription_events (",
+		"RENAME COLUMN registered_at TO enrolled_at",
+		"DROP TABLE IF EXISTS retired_appliance_identities",
+	} {
+		if !strings.Contains(down, want) {
+			t.Errorf("0047 down is missing %q", want)
+		}
+	}
+	up := read(t, "0047_central_cleanup.up.sql")
+	for _, m := range regexp.MustCompile(`(?m)^ALTER TABLE (\w+)\s+DROP COLUMN IF EXISTS (\w+);`).FindAllStringSubmatch(up, -1) {
+		if !regexp.MustCompile(`ALTER TABLE ` + m[1] + `\s+ADD COLUMN IF NOT EXISTS ` + m[2] + ` `).MatchString(down) {
+			t.Errorf("0047 down does not restore %s.%s", m[1], m[2])
+		}
+	}
+	if !strings.Contains(strings.ToUpper(down), "DOES NOT RESTORE DATA") {
+		t.Error("0047 down must say that it restores structure only")
 	}
 }

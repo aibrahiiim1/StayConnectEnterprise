@@ -385,17 +385,17 @@ func (b *Base) deleteCustomer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var sites, apps int
-	_ = b.DB.QueryRow(ctx, `SELECT count(*) FROM sites WHERE tenant_id=$1`, id).Scan(&sites)
-	_ = b.DB.QueryRow(ctx, `SELECT count(*) FROM appliances WHERE tenant_id=$1`, id).Scan(&apps)
+	if err := b.DB.QueryRow(ctx, `SELECT (SELECT count(*) FROM sites WHERE tenant_id=$1),
+                                         (SELECT count(*) FROM appliances WHERE tenant_id=$1)`, id).Scan(&sites, &apps); err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "Central could not check what the customer still has, so it was not deleted.")
+		return
+	}
 	if blocking := blockers(blocker{"site", "Sites", sites}, blocker{"appliance", "Appliances", apps}); len(blocking) > 0 {
 		Fail(w, r, http.StatusConflict, CodeConflict,
 			"the customer still has sites or appliances; delete or move them first",
 			map[string]any{"blocking": blocking})
 		return
 	}
-	// Recorded before the delete: audit_log has no foreign key, so the record outlives the customer.
-	audit.Op(r.Context(), b.DB, r, "customer.deleted", "customer", id, map[string]any{
-		"_tenant_id": id, "name": name, "slug": slug, "reason": in.Reason})
 	tx, err := b.DB.Begin(ctx)
 	if err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "delete failed")
@@ -417,6 +417,9 @@ func (b *Base) deleteCustomer(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "delete failed")
 		return
 	}
+	// audit_log has no foreign key, so the record outlives the customer. Written only once it is gone.
+	audit.Op(r.Context(), b.DB, r, "customer.deleted", "customer", id, map[string]any{
+		"_tenant_id": id, "name": name, "slug": slug, "reason": in.Reason})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -596,7 +599,10 @@ func (b *Base) deleteSite(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := DBCtx(r)
 	defer cancel()
 	var code, name string
-	_ = b.DB.QueryRow(ctx, `SELECT code, name FROM sites WHERE id=$1`, id).Scan(&code, &name)
+	if err := b.DB.QueryRow(ctx, `SELECT code, name FROM sites WHERE id=$1`, id).Scan(&code, &name); err != nil {
+		Fail(w, r, http.StatusNotFound, CodeNotFound, "site not found")
+		return
+	}
 	if in.Confirm != code && in.Confirm != name {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "type the exact site name to confirm", map[string]any{"expected": name})
 		return
@@ -606,16 +612,18 @@ func (b *Base) deleteSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var apps, current int
-	_ = b.DB.QueryRow(ctx, `SELECT count(*) FROM appliances WHERE site_id=$1`, id).Scan(&apps)
-	_ = b.DB.QueryRow(ctx, `SELECT count(*) FROM licenses WHERE site_id=$1 AND status IN ('active','suspended')`, id).Scan(&current)
+	if err := b.DB.QueryRow(ctx, `SELECT (SELECT count(*) FROM appliances WHERE site_id=$1),
+                                         (SELECT count(*) FROM licenses WHERE site_id=$1 AND status IN ('active','suspended'))`,
+		id).Scan(&apps, &current); err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "Central could not check what the site still has, so it was not deleted.")
+		return
+	}
 	if blocking := blockers(blocker{"appliance", "Appliances", apps}, blocker{"license", "Current licences", current}); len(blocking) > 0 {
 		Fail(w, r, http.StatusConflict, CodeConflict,
 			"the site still has appliances or a current licence; move or delete them first",
 			map[string]any{"blocking": blocking})
 		return
 	}
-	audit.Op(r.Context(), b.DB, r, "site.deleted", "site", id, map[string]any{
-		"_tenant_id": customerID, "code": code, "name": name, "reason": in.Reason})
 	tx, err := b.DB.Begin(ctx)
 	if err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "delete failed")
@@ -636,5 +644,7 @@ func (b *Base) deleteSite(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "delete failed")
 		return
 	}
+	audit.Op(r.Context(), b.DB, r, "site.deleted", "site", id, map[string]any{
+		"_tenant_id": customerID, "code": code, "name": name, "reason": in.Reason})
 	w.WriteHeader(http.StatusNoContent)
 }

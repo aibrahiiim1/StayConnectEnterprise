@@ -1,5 +1,5 @@
 // Appliance-facing identity endpoints: token-less registration lives in register.go; this file holds the
-// signed hello and offline-package reconciliation. Enrollment tokens no longer exist.
+// signed hello and offline-package reconciliation.
 package api
 
 import (
@@ -10,8 +10,8 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 )
 
-// EnrollmentBase serves the appliance-facing identity endpoints.
-type EnrollmentBase struct {
+// IdentityBase serves the appliance-facing identity endpoints.
+type IdentityBase struct {
 	*Base
 	ReplayCache *applianceauth.ReplayCache
 }
@@ -20,7 +20,7 @@ type EnrollmentBase struct {
 // consumed/reconciled centrally. Idempotent: repeating it never creates a
 // duplicate record and never re-activates. The package must belong to the
 // authenticated appliance.
-func (b *EnrollmentBase) OfflineReconcile(w http.ResponseWriter, r *http.Request) {
+func (b *IdentityBase) OfflineReconcile(w http.ResponseWriter, r *http.Request) {
 	ident := auth.ApplianceFromContext(r.Context())
 	if ident == nil {
 		Fail(w, r, http.StatusUnauthorized, CodeUnauthenticated, "no appliance context")
@@ -55,7 +55,7 @@ func (b *EnrollmentBase) OfflineReconcile(w http.ResponseWriter, r *http.Request
 
 // HelloHandler is the signed liveness call. It is also licence ENFORCEMENT (CLAUDE.md §0E): a deleted
 // appliance gets 401 here and learns it is orphaned; a retired one gets 403.
-func (b *EnrollmentBase) HelloHandler(w http.ResponseWriter, r *http.Request) {
+func (b *IdentityBase) HelloHandler(w http.ResponseWriter, r *http.Request) {
 	a := auth.ApplianceFromContext(r.Context())
 	if a == nil {
 		Fail(w, r, http.StatusUnauthorized, CodeUnauthenticated, "no appliance context")

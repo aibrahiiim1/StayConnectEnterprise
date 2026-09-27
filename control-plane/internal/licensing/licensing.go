@@ -25,8 +25,8 @@ import (
 	lic "github.com/stayconnect/enterprise/license"
 )
 
-// PlanCode is what every licence records in commercial_plan_code. Plans and subscriptions no longer exist;
-// the column stays because the signed document format carries it.
+// PlanCode is the commercial_plan_code field of every signed licence document. There are no plans; the field
+// stays in the document because deployed appliances verify that exact signed format (license/doc.go).
 const PlanCode = "direct"
 
 // newUUID returns a random RFC 4122 v4 UUID string (avoids an extra dep).
@@ -67,7 +67,7 @@ type IssueParams struct {
 }
 
 // PreservedTerms is the re-issue rule used whenever a licence is re-signed WITHOUT the operator changing its
-// terms (suspend, resume, WAN-MAC rebind): every commercial term and the status carry over unchanged; only
+// terms (suspend, resume, WAN-MAC rebind, same-customer move): every term and the status carry over unchanged; only
 // the actor differs, and issue() assigns the next licence_version.
 func PreservedTerms(cur IssueParams, createdBy string) IssueParams {
 	p := cur
@@ -266,26 +266,16 @@ func (s *Service) IssueTx(ctx context.Context, tx pgx.Tx, p IssueParams) (*lic.D
 	if p.Status == lic.DocSuspended {
 		rowStatus = "suspended"
 	}
+	// The queryable projection. Features, limits and the plan code live only in the signed envelope.
 	if _, err := tx.Exec(ctx, `
-        INSERT INTO licenses (id, tenant_id, site_id, commercial_plan_code, status,
+        INSERT INTO licenses (id, tenant_id, site_id, status,
                               issued_at, valid_until, valid_from, offline_grace_days, appliance_ids,
-                              features, limits, signed_envelope, key_id, created_by,
+                              signed_envelope, key_id, created_by,
                               license_version, max_concurrent_online_guests, grace_period_days,
                               supersedes_license_id)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-                jsonb_build_object('pms',true,'paid_wifi',true,'sms_otp',true,
-                                   'email_otp',true,'social_login',true,'ha',true,
-                                   'white_label',true),
-                jsonb_build_object('max_appliances_for_site',0,
-                                   'max_concurrent_guest_sessions',$11::int,
-                                   'max_local_operators',0,
-                                   'max_guest_access_plans',0,
-                                   'accounting_retention_days',0,
-                                   'audit_retention_days',0),
-                $12,$13,$14,$15,$16,$17,NULLIF($18,'')::uuid)
-    `, doc.LicenseID, p.TenantID, p.SiteID, PlanCode, rowStatus,
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NULLIF($16,'')::uuid)
+    `, doc.LicenseID, p.TenantID, p.SiteID, rowStatus,
 		doc.IssuedAt, doc.ValidUntil, doc.ValidFrom, p.OfflineGraceDays, applianceIDs,
-		p.MaxConcurrentOnlineGuests,
 		string(envRaw), env.KeyID, createdByArg,
 		doc.LicenseVersion, p.MaxConcurrentOnlineGuests, p.GracePeriodDays,
 		doc.SupersedesLicenseID); err != nil {
@@ -324,20 +314,20 @@ func (s *Service) Revoke(ctx context.Context, licenseID string) error {
 	return nil
 }
 
-// CurrentTerms reads the terms of a CURRENT (active or suspended) licence, including its status, so it can
-// be re-signed unchanged.
-func (s *Service) CurrentTerms(ctx context.Context, licenseID string) (p IssueParams, err error) {
+const currentTermsColumns = `tenant_id::text, site_id::text, valid_until, valid_from, offline_grace_days,
+               COALESCE(max_concurrent_online_guests, 0), COALESCE(grace_period_days, 0),
+               COALESCE(appliance_ids[1]::text, ''), status`
+
+func scanTerms(row pgx.Row) (p IssueParams, err error) {
 	var validFrom *time.Time
 	var status string
-	err = s.DB.QueryRow(ctx, `
-        SELECT tenant_id::text, site_id::text, valid_until, valid_from, offline_grace_days,
-               COALESCE(max_concurrent_online_guests, 0), COALESCE(grace_period_days, 0),
-               COALESCE(appliance_ids[1]::text, ''), status
-          FROM licenses WHERE id = $1 AND status IN ('active','suspended')
-    `, licenseID).Scan(&p.TenantID, &p.SiteID, &p.ValidUntil, &validFrom, &p.OfflineGraceDays,
+	err = row.Scan(&p.TenantID, &p.SiteID, &p.ValidUntil, &validFrom, &p.OfflineGraceDays,
 		&p.MaxConcurrentOnlineGuests, &p.GracePeriodDays, &p.ApplianceID, &status)
 	if errors.Is(err, pgx.ErrNoRows) {
-		err = ErrNoLicense
+		return IssueParams{}, ErrNoLicense
+	}
+	if err != nil {
+		return IssueParams{}, err
 	}
 	if validFrom != nil {
 		p.ValidFrom = *validFrom
@@ -346,7 +336,26 @@ func (s *Service) CurrentTerms(ctx context.Context, licenseID string) (p IssuePa
 	if status == "suspended" {
 		p.Status = lic.DocSuspended
 	}
-	return
+	return p, nil
+}
+
+// CurrentTerms reads the terms of a CURRENT (active or suspended) licence, including its status, so it can
+// be re-signed unchanged. ErrNoLicense means verified: there is no current licence with that id.
+func (s *Service) CurrentTerms(ctx context.Context, licenseID string) (IssueParams, error) {
+	return scanTerms(s.DB.QueryRow(ctx, `SELECT `+currentTermsColumns+`
+          FROM licenses WHERE id = $1 AND status IN ('active','suspended')`, licenseID))
+}
+
+// CurrentTermsForApplianceTx reads the appliance's current licence terms inside the caller's transaction,
+// holding the same per-appliance lock IssueTx takes, so what is read cannot change before it is re-signed.
+// ErrNoLicense means verified: the appliance has no current licence. Any other error means unknown.
+func (s *Service) CurrentTermsForApplianceTx(ctx context.Context, tx pgx.Tx, applianceID string) (IssueParams, error) {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 42))`, applianceID); err != nil {
+		return IssueParams{}, err
+	}
+	return scanTerms(tx.QueryRow(ctx, `SELECT `+currentTermsColumns+`
+          FROM licenses WHERE $1::uuid = ANY(appliance_ids) AND status IN ('active','suspended')
+         ORDER BY issued_at DESC LIMIT 1`, applianceID))
 }
 
 // CurrentLicenseID returns the id of the appliance's current licence, or ErrNoLicense.

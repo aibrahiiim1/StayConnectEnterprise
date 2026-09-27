@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -220,11 +221,64 @@ func (b *Base) activate(w http.ResponseWriter, r *http.Request) {
 // Move
 // ---------------------------------------------------------------------------------------------------------
 
+// Operator-facing refusals of a move. The console shows `message` verbatim.
+const (
+	msgMoveCrossCustomer = "An appliance cannot move to another customer. Retire it, factory-reset it and " +
+		"activate it for the new customer."
+	msgMoveLicensingUnavailable = "Licensing is unavailable on Central right now, so the appliance was not moved; " +
+		"its licence would not follow it. Try again later."
+	msgMoveLicenceLookupFailed = "Central could not read the appliance's licence, so the appliance was not moved; " +
+		"its licence would not follow it. Try again later."
+	msgMoveLicenceExpired = "The appliance's licence is past its end date and cannot be re-issued for another " +
+		"site, so the appliance was not moved. Renew the licence first, then move the appliance."
+)
+
+// moveRefusal is why a move is refused before anything is written; nil means go ahead.
+type moveRefusal struct {
+	Status  int
+	Code    string
+	Message string
+}
+
+// checkMoveCustomer refuses a move to another customer. The appliance's local data cannot be guaranteed to
+// be cleared in place, so changing customer is Retire -> factory-reset -> register -> Activate.
+func checkMoveCustomer(currentCustomer, requestedCustomer string) *moveRefusal {
+	if requestedCustomer != currentCustomer {
+		return &moveRefusal{http.StatusConflict, "cross_customer_move", msgMoveCrossCustomer}
+	}
+	return nil
+}
+
+// decideMoveLicence decides what the licence does on a (same-customer) move. It FAILS CLOSED: the licence
+// must follow the appliance, so a move goes ahead only when Central can prove what the licence is.
+//
+//	licensing unavailable (no vendor signer)      -> refuse (503): nothing could re-sign the licence
+//	lookup failed for any reason but ErrNoLicense -> refuse (503): "no licence" was not verified
+//	verified ErrNoLicense                          -> move, nothing to carry
+//	current licence already past valid_until      -> refuse (409): it cannot be re-signed; renew first
+//	otherwise                                      -> move, re-sign with the SAME terms for the new site
+func decideMoveLicence(licensingAvailable bool, terms licensing.IssueParams, lookupErr error, now time.Time) (carry bool, refusal *moveRefusal) {
+	if !licensingAvailable {
+		return false, &moveRefusal{http.StatusServiceUnavailable, "licensing_unavailable", msgMoveLicensingUnavailable}
+	}
+	if errors.Is(lookupErr, licensing.ErrNoLicense) {
+		return false, nil
+	}
+	if lookupErr != nil {
+		return false, &moveRefusal{http.StatusServiceUnavailable, "licensing_unavailable", msgMoveLicenceLookupFailed}
+	}
+	if !terms.ValidUntil.After(now) {
+		return false, &moveRefusal{http.StatusConflict, "license_expired", msgMoveLicenceExpired}
+	}
+	return true, nil
+}
+
 // move: POST /cloud/v1/appliances/{id}/move {customer_id, site_id, reason}
 //
-// Re-signs the assignment for the new site. Within the same customer the licence is re-issued, terms
-// unchanged, bound to the new site. To another customer the licence is revoked: the appliance purges the
-// previous customer's local data, and the new customer's licence is a new decision (Set licence).
+// Moves an activated appliance to another site OF THE SAME CUSTOMER: the assignment is re-signed for the new
+// site and the current licence is re-issued with exactly the same terms, bound to the new site, as the next
+// version — in one transaction. customer_id must be the appliance's current customer; any other is refused
+// (checkMoveCustomer). The move fails closed on licensing (decideMoveLicence).
 func (b *Base) move(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var in struct {
@@ -244,37 +298,35 @@ func (b *Base) move(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if row.lifecycle != "assigned" || row.Activation == ActivationRetiring {
-		invalidState(w, r, "only an activated appliance can be moved", row)
+		invalidState(w, r, "Only an activated appliance can be moved.", row)
 		return
 	}
-	if deref(row.SiteID) == in.SiteID {
-		Fail(w, r, http.StatusConflict, CodeConflict, "the appliance is already at that site")
+	prevCustomer, prevSite := deref(row.CustomerID), deref(row.SiteID)
+	if ref := checkMoveCustomer(prevCustomer, in.CustomerID); ref != nil {
+		Fail(w, r, ref.Status, ref.Code, ref.Message)
+		return
+	}
+	if prevSite == in.SiteID {
+		Fail(w, r, http.StatusConflict, CodeConflict, "The appliance is already at that site.")
+		return
+	}
+	if b.Lic == nil || b.AssignKey == nil {
+		// Without the vendor key the licence cannot follow; without the assignment key nothing can be signed.
+		Fail(w, r, http.StatusServiceUnavailable, "licensing_unavailable", msgMoveLicensingUnavailable)
 		return
 	}
 	ctx, cancel := DBCtx(r)
 	defer cancel()
 	var siteStatus string
 	if err := b.DB.QueryRow(ctx, `SELECT status FROM sites WHERE id::text=$1 AND tenant_id::text=$2`, in.SiteID, in.CustomerID).Scan(&siteStatus); err != nil {
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "site not found for this customer")
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "That site does not belong to the appliance's customer.")
 		return
 	}
 	if siteStatus == "archived" {
-		Fail(w, r, http.StatusConflict, CodeConflict, "the site is archived; restore it first")
+		Fail(w, r, http.StatusConflict, CodeConflict, "The site is archived; restore it first.")
 		return
 	}
 	operatorID, email := actorOf(r)
-	prevCustomer, prevSite := deref(row.CustomerID), deref(row.SiteID)
-	crossCustomer := prevCustomer != in.CustomerID
-
-	var curLicense licensing.IssueParams
-	var hadLicense bool
-	if b.Lic != nil {
-		if lid, err := b.Lic.CurrentLicenseID(ctx, id); err == nil {
-			if curLicense, err = b.Lic.CurrentTerms(ctx, lid); err == nil {
-				hadLicense = true
-			}
-		}
-	}
 
 	tx, err := b.DB.Begin(ctx)
 	if err != nil {
@@ -282,8 +334,16 @@ func (b *Base) move(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `UPDATE appliances SET tenant_id=$2, site_id=$3, updated_at=now() WHERE id=$1`,
-		id, in.CustomerID, in.SiteID); err != nil {
+	// The licence is read INSIDE the transaction, under the per-appliance licence lock, so a suspend or renew
+	// racing this move cannot be undone by re-signing stale terms.
+	curLicense, lookupErr := b.Lic.CurrentTermsForApplianceTx(ctx, tx, id)
+	carry, ref := decideMoveLicence(true, curLicense, lookupErr, time.Now())
+	if ref != nil {
+		Fail(w, r, ref.Status, ref.Code, ref.Message)
+		return
+	}
+	if _, err := tx.Exec(ctx, `UPDATE appliances SET site_id=$2, updated_at=now() WHERE id=$1 AND tenant_id::text=$3`,
+		id, in.SiteID, in.CustomerID); err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "move failed: "+err.Error())
 		return
 	}
@@ -297,29 +357,21 @@ func (b *Base) move(w http.ResponseWriter, r *http.Request) {
 	ab := &AssignmentBase{Base: b, SignKey: b.AssignKey}
 	asg, err := ab.IssueTx(ctx, tx, id, assignment.StateAssigned)
 	if err != nil {
-		Fail(w, r, http.StatusServiceUnavailable, "assignment_unsignable", "the move could not be signed, so nothing changed: "+err.Error())
+		Fail(w, r, http.StatusServiceUnavailable, "assignment_unsignable", "The move could not be signed, so nothing changed: "+err.Error())
 		return
 	}
-	// A licence already past valid_until cannot be re-signed for the new site (a licence is never issued
-	// already expired); it is revoked like a cross-customer move and the operator sets new terms.
-	revokeLicense := hadLicense && (crossCustomer || !curLicense.ValidUntil.After(time.Now()))
 	var newLicenseID string
-	if hadLicense && !revokeLicense {
+	var newLicenseVersion int64
+	if carry {
 		p := licensing.PreservedTerms(curLicense, operatorID)
 		p.TenantID, p.SiteID = in.CustomerID, in.SiteID
 		doc, _, err := b.Lic.IssueTx(ctx, tx, p)
 		if err != nil {
-			Fail(w, r, http.StatusBadRequest, CodeBadRequest, "the licence could not be re-issued for the new site, so nothing changed: "+err.Error())
+			Fail(w, r, http.StatusServiceUnavailable, "licensing_unavailable",
+				"The licence could not be re-issued for the new site, so the appliance was not moved: "+err.Error())
 			return
 		}
-		newLicenseID = doc.LicenseID
-	}
-	if revokeLicense {
-		if _, err := tx.Exec(ctx, `UPDATE licenses SET status='revoked', revoked_at=now()
-            WHERE $1::uuid = ANY(appliance_ids) AND status IN ('active','suspended')`, id); err != nil {
-			Fail(w, r, http.StatusInternalServerError, CodeInternal, "move failed")
-			return
-		}
+		newLicenseID, newLicenseVersion = doc.LicenseID, doc.LicenseVersion
 	}
 	if err := tx.Commit(ctx); err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "commit failed")
@@ -327,9 +379,9 @@ func (b *Base) move(w http.ResponseWriter, r *http.Request) {
 	}
 	recordLifecycle(ctx, b.DB, id, "assigned", "assigned", email, clientIPFromReq(r), "moved: "+in.Reason)
 	audit.Op(ctx, b.DB, r, "appliance.moved", "appliance", id, map[string]any{
-		"_tenant_id": in.CustomerID, "site_id": in.SiteID, "prev_customer_id": prevCustomer, "prev_site_id": prevSite,
-		"cross_customer": crossCustomer, "license_revoked": revokeLicense,
-		"new_license_id": newLicenseID, "assignment_version": asg.Version, "reason": in.Reason})
+		"_tenant_id": in.CustomerID, "site_id": in.SiteID, "prev_site_id": prevSite,
+		"license_carried": carry, "new_license_id": newLicenseID, "new_license_version": newLicenseVersion,
+		"assignment_version": asg.Version, "reason": in.Reason})
 	b.writeAppliance(w, r, http.StatusOK, id)
 }
 
@@ -379,12 +431,18 @@ func (b *Base) retire(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := DBCtx(r)
 	defer cancel()
-	ver, err := b.beginTerminalDelivery(ctx, r, id, terminal, in.Reason, in.Emergency)
+	// Licence first: if it cannot be revoked nothing has changed and the operator can simply retry. Licence
+	// revocation never blocks the assignment channel or the ack, so it does not get in the way of phase 1.
+	revoked, err := b.revokeApplianceBoundLicenses(ctx, id)
 	if err != nil {
-		Fail(w, r, http.StatusServiceUnavailable, "retire_failed", "retirement could not start: "+err.Error())
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "The licence could not be revoked, so retirement did not start. Try again.")
 		return
 	}
-	revoked, _ := b.revokeApplianceBoundLicenses(ctx, id)
+	ver, err := b.beginTerminalDelivery(ctx, r, id, terminal, in.Reason, in.Emergency)
+	if err != nil {
+		Fail(w, r, http.StatusServiceUnavailable, "retire_failed", "Retirement could not start: "+err.Error())
+		return
+	}
 	_, email := actorOf(r)
 	to := "retiring"
 	if in.Emergency {
@@ -498,8 +556,12 @@ func (b *Base) rebindWANMAC(w http.ResponseWriter, r *http.Request) {
 	}
 	operatorID, _ := actorOf(r)
 	lid, err := b.Lic.CurrentLicenseID(ctx, id)
+	if errors.Is(err, licensing.ErrNoLicense) {
+		Fail(w, r, http.StatusConflict, "no_license", "The appliance has no current licence to rebind; set a licence instead.")
+		return
+	}
 	if err != nil {
-		Fail(w, r, http.StatusConflict, "no_license", "the appliance has no current licence to rebind; set a licence instead")
+		Fail(w, r, http.StatusServiceUnavailable, "licensing_unavailable", "Central could not read the appliance's licence, so nothing changed. Try again later.")
 		return
 	}
 	if _, err := b.DB.Exec(ctx, `UPDATE appliances SET wan_mac=$2, updated_at=now() WHERE id=$1`, id, newMAC); err != nil {
@@ -639,21 +701,57 @@ func (b *Base) deleteAppliance(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := DBCtx(r)
 	defer cancel()
 	operatorID, _ := actorOf(r)
-	// Defence in depth: nothing this appliance held may outlive it.
-	_ = b.revokeActiveCertificates(ctx, id, operatorID, "appliance deleted")
-	revoked, _ := b.revokeApplianceBoundLicenses(ctx, id)
-	audit.Op(ctx, b.DB, r, "appliance.deleted", "appliance", id, map[string]any{
-		"_tenant_id": deref(row.CustomerID), "serial": row.Serial, "activation": row.Activation,
-		"reason": in.Reason, "licenses_revoked": len(revoked)})
-	tag, err := b.DB.Exec(ctx, `DELETE FROM appliances WHERE id=$1 AND lifecycle_state IN ('pending_approval','revoked','decommissioned')`, id)
+	// Defence in depth: nothing this appliance held may outlive it. Fail closed — a record whose certificate
+	// or licence could not be revoked is not deleted.
+	if err := b.revokeActiveCertificates(ctx, id, operatorID, "appliance deleted"); err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "The appliance's certificate could not be revoked, so it was not deleted. Try again.")
+		return
+	}
+	revoked, err := b.revokeApplianceBoundLicenses(ctx, id)
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "The appliance's licence could not be revoked, so it was not deleted. Try again.")
+		return
+	}
+	tx, err := b.DB.Begin(ctx)
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "begin failed")
+		return
+	}
+	defer tx.Rollback(ctx)
+	// A retired identity key stays refused after its record is gone: the box must be factory-reset (a new
+	// key) before it can register and be activated again.
+	if _, err := tx.Exec(ctx, `
+        INSERT INTO retired_appliance_identities (public_key, serial, appliance_id, reason)
+        SELECT public_key, serial, id, 'record deleted'
+          FROM appliances WHERE id=$1 AND lifecycle_state IN ('revoked','decommissioned') AND COALESCE(public_key,'') <> ''
+        ON CONFLICT (public_key) DO NOTHING`, id); err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "delete failed: "+err.Error())
+		return
+	}
+	// Its open alerts are closed, not orphaned: they would otherwise stay "open" with no appliance to act on.
+	if _, err := tx.Exec(ctx, `
+        UPDATE appliance_security_alerts SET status='resolved', resolved=true,
+               acknowledged_by=NULLIF($2,'')::uuid, acknowledged_at=now()
+         WHERE appliance_id=$1 AND NOT resolved`, id, operatorID); err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "delete failed: "+err.Error())
+		return
+	}
+	tag, err := tx.Exec(ctx, `DELETE FROM appliances WHERE id=$1 AND lifecycle_state IN ('pending_approval','revoked','decommissioned')`, id)
 	if err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "delete failed: "+err.Error())
 		return
 	}
 	if tag.RowsAffected() == 0 {
-		Fail(w, r, http.StatusConflict, "invalid_state", "the appliance changed state; reload and try again")
+		Fail(w, r, http.StatusConflict, "invalid_state", "The appliance changed state; reload and try again.")
 		return
 	}
+	if err := tx.Commit(ctx); err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "commit failed")
+		return
+	}
+	audit.Op(ctx, b.DB, r, "appliance.deleted", "appliance", id, map[string]any{
+		"_tenant_id": deref(row.CustomerID), "serial": row.Serial, "activation": row.Activation,
+		"reason": in.Reason, "licenses_revoked": len(revoked)})
 	w.WriteHeader(http.StatusNoContent)
 }
 

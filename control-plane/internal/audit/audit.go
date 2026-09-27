@@ -18,7 +18,7 @@ import (
 
 type Entry struct {
 	TenantID   string
-	ActorType  string // operator | system | api | appliance | guest
+	ActorType  string // operator | system | appliance
 	ActorID    string
 	Action     string // e.g. "site.created", "operator.role_added"
 	TargetType string

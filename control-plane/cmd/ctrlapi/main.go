@@ -224,7 +224,7 @@ func serve() {
 		CA:            appCA,
 		ReplayCache:   sharedReplay,
 		VendorKeyPath: vendorKeyPath,
-		CABundlePath:  envOrDefault("CTRLAPI_CA_BUNDLE", "/etc/stayconnect/pki/nats-ca-bundle.crt"),
+		CABundlePath:  envOrDefault("CTRLAPI_CA_BUNDLE", "/etc/stayconnect/pki/ca-bundle.crt"),
 		ApplianceBase: os.Getenv("CTRLAPI_APPLIANCE_BASE"),
 		Version:       version,
 		AllowOrigins:  cfg.AllowOrigins,

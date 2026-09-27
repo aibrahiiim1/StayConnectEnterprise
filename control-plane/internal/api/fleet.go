@@ -71,7 +71,7 @@ func (b *Base) queryAppliances(ctx context.Context, customerID, applianceID stri
         SELECT a.id::text, a.serial, COALESCE(a.hostname,''), COALESCE(a.model,''), COALESCE(a.version,''),
                COALESCE(a.tenant_id::text,''), COALESCE(t.name,''), COALESCE(a.site_id::text,''), COALESCE(s.name,''),
                a.lifecycle_state, a.last_seen_at, COALESCE(a.last_public_ip,''),
-               COALESCE(a.enrolled_at, a.first_seen_at, a.created_at), a.activated_at,
+               COALESCE(a.registered_at, a.first_seen_at, a.created_at), a.activated_at,
                EXISTS (SELECT 1 FROM appliance_certificates c WHERE c.appliance_id = a.id AND c.status = 'active'),
                COALESCE(td.delivery_state,''), td.timeout_at, a.replacement_pending,
                (SELECT count(*) FROM appliance_security_alerts x WHERE x.appliance_id = a.id AND NOT x.resolved),

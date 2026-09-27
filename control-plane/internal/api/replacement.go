@@ -2,8 +2,11 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/control-plane/internal/audit"
@@ -14,52 +17,70 @@ import (
 // replacement registers itself and is activated at the same site.
 const replacementWindow = 72 * time.Hour
 
-// completeReplacementIfPending is invoked when an appliance becomes Active. If the
-// SAME site has an outgoing appliance flagged replacement_pending, the replacement
-// is now complete, so the OLD appliance's authority is terminated through the
-// centralized lifecycle policy: revoke its bound licenses, revoke its credentials
-// (cert → mTLS denied), mark it decommissioned, and link the two rows.
-// Idempotent and safe: a no-op when no replacement is pending. This is what
-// guarantees the old box cannot remain licensed once its replacement is online.
+// completeReplacementIfPending is invoked when an appliance is activated. If the SAME site has an outgoing
+// appliance marked for replacement, the replacement is complete and the OLD appliance is retired through the
+// normal, acknowledged two-phase terminal delivery (terminal_delivery.go) — exactly like Retire:
+//
+//   - its licence is revoked now (licence state never blocks the assignment channel or the ack);
+//   - a signed DECOMMISSIONED assignment is minted and delivery is recorded as pending;
+//   - its certificate and identity stay valid, so the old box can fetch that document over mTLS, adopt it
+//     and send its signed acknowledgment. Only that ack (AckHandler) revokes its credentials and marks it
+//     decommissioned. No ack within terminalTimeout -> terminal_delivery_failed + a security alert; the
+//     operator may then retire it as an emergency, which revokes the credentials without waiting.
+//
+// Revoking the credentials here, before the ack, is the bug this replaced: the old box could then never fetch
+// its retirement (strictMTLSSelf refuses a revoked certificate) and kept serving on its cached assignment.
+// Idempotent: a no-op when no replacement is pending.
 func (b *Base) completeReplacementIfPending(ctx context.Context, r *http.Request, newID, siteID string) {
 	if siteID == "" {
 		return
 	}
-	var oldID, prevState string
-	if err := b.DB.QueryRow(ctx, `
-        SELECT id::text, COALESCE(lifecycle_state,'')
+	var oldID string
+	err := b.DB.QueryRow(ctx, `
+        SELECT id::text
           FROM appliances
          WHERE site_id=$1 AND id <> $2 AND replacement_pending = true AND replaced_by IS NULL
            AND lifecycle_state = 'assigned'
-         ORDER BY updated_at ASC LIMIT 1`, siteID, newID).Scan(&oldID, &prevState); err != nil {
-		return // nothing pending — normal activation
+         ORDER BY updated_at ASC LIMIT 1`, siteID, newID).Scan(&oldID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return // nothing pending — a normal activation
 	}
-
-	licRevoked, _ := b.revokeApplianceBoundLicenses(ctx, oldID)
-	// The outgoing box is told, in a signed terminal document, that it is retired — the same authority every
-	// other retirement uses — and its credentials are pulled now: its replacement is already live.
-	if err := b.issueAssignment(ctx, oldID, assignment.StateDecommissioned); err != nil {
-		audit.Op(ctx, b.DB, r, "appliance.replacement_terminal_unsigned", "appliance", oldID, map[string]any{"error": err.Error()})
+	if err != nil {
+		audit.Op(ctx, b.DB, r, "appliance.replacement_check_failed", "appliance", newID,
+			map[string]any{"site_id": siteID, "error": err.Error()})
+		return
 	}
-	_ = b.phase2ShutCredentials(ctx, r, oldID, "replaced")
-	_, _ = b.DB.Exec(ctx, `
-        UPDATE appliances SET lifecycle_state='decommissioned',
-               replacement_pending=false, replacement_deadline=NULL, replaced_by=$2::uuid, updated_at=now()
-         WHERE id=$1`, oldID, newID)
-	_, _ = b.DB.Exec(ctx, `UPDATE appliances SET replacement_of=$2::uuid, updated_at=now() WHERE id=$1`, newID, oldID)
-
 	actor := "system"
 	if s := auth.FromContext(r.Context()); s != nil {
 		actor = emailOf(s)
 	}
-	recordLifecycle(ctx, b.DB, oldID, prevState, "decommissioned", actor, clientIPFromReq(r), "replacement completed by "+newID)
-	audit.Op(ctx, b.DB, r, "appliance.replacement_completed", "appliance", oldID, map[string]any{
-		"replaced_by": newID, "site_id": siteID, "licenses_revoked": len(licRevoked),
-	})
-	// A completed replacement clears any window-expiry alert it may have raised.
+	reason := "replaced by " + newID
+
+	// Link the two rows and close the replacement window first, so a retry never picks the old box again and
+	// the window reconciler never alerts on a replacement that did complete.
+	_, _ = b.DB.Exec(ctx, `UPDATE appliances SET replacement_pending=false, replacement_deadline=NULL,
+        replaced_by=$2::uuid, updated_at=now() WHERE id=$1`, oldID, newID)
+	_, _ = b.DB.Exec(ctx, `UPDATE appliances SET replacement_of=$2::uuid, updated_at=now() WHERE id=$1`, newID, oldID)
 	_, _ = b.DB.Exec(ctx, `
         UPDATE appliance_security_alerts SET status='resolved', resolved=true, acknowledged_at=now()
          WHERE appliance_id=$1 AND kind='replacement_window_expired' AND resolved=false`, oldID)
+
+	licRevoked, licErr := b.revokeApplianceBoundLicenses(ctx, oldID)
+	ver, termErr := b.beginTerminalDelivery(ctx, r, oldID, assignment.StateDecommissioned, reason, false)
+	if termErr != nil {
+		// The replacement is live but the old box was not told. Visible, never silent: the operator retires
+		// it (normal or emergency) from its page.
+		audit.Op(ctx, b.DB, r, "appliance.replacement_terminal_unsigned", "appliance", oldID,
+			map[string]any{"replaced_by": newID, "error": termErr.Error()})
+	} else {
+		recordLifecycle(ctx, b.DB, oldID, "assigned", "retiring", actor, clientIPFromReq(r), reason)
+	}
+	payload := map[string]any{"replaced_by": newID, "site_id": siteID, "licenses_revoked": len(licRevoked),
+		"assignment_version": ver, "retirement": "awaiting_ack"}
+	if licErr != nil {
+		payload["license_revoke_error"] = licErr.Error()
+	}
+	audit.Op(ctx, b.DB, r, "appliance.replacement_completed", "appliance", oldID, payload)
 }
 
 // ReconcileReplacements raises a visible operational/security alert for any
