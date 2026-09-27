@@ -3,8 +3,10 @@
 //
 //	register (token-less, self-signed) -> WAITING -> Activate (inline customer + site, licence) -> CSR
 //	auto-signed -> ACTIVATED -> mTLS hello + certificate-only assignment -> licence suspend/resume/set/
-//	expiry/grace (appliance never cut off) -> rebind keeps terms -> offline files -> roles -> move ->
-//	retire (normal + emergency) -> delete; plus replay/body-tamper rejection, step-up, audit, /metrics.
+//	expiry/grace (appliance never cut off) -> rebind keeps terms -> offline files -> roles -> move (same
+//	customer only; licence carried with the same terms) -> retire (normal + emergency) -> delete -> a
+//	retired identity cannot register again -> replacement retires the old box through its signed ack;
+//	plus replay/body-tamper rejection, step-up, audit, /metrics.
 //
 // It creates its own fixtures (serials ACC-*, customers "Acceptance *") and needs:
 //
@@ -37,6 +39,7 @@ import (
 
 	"github.com/stayconnect/enterprise/control-plane/internal/activation"
 	"github.com/stayconnect/enterprise/control-plane/internal/applianceauth"
+	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
 )
 
 var (
@@ -231,9 +234,21 @@ func main() {
 	check(code == 403, "security-alert triage needs security.manage, not view (HTTP %d)", code)
 
 	// ---------------- move ----------------
+	otherSite := field(post(op, "/cloud/v1/customers/"+other+"/sites", jb(map[string]any{"name": "Other " + run, "timezone": "UTC"}), 201), "id")
+	code, body = do(op, "POST", "/cloud/v1/appliances/"+a1.id+"/move", jb(map[string]any{"customer_id": other, "site_id": otherSite, "reason": "sold"}))
+	check(code == 409 && field(body, "error") == "cross_customer_move" && strings.Contains(field(body, "message"), "factory-reset"),
+		"a move to another customer is refused with an operator sentence (HTTP %d %s)", code, trunc(body))
+	check(field(get(op, "/cloud/v1/appliances/"+a1.id), "customer_id") == custID, "the refused move changed nothing")
+	before := get(op, "/cloud/v1/appliances/"+a1.id)
 	code, body = do(op, "POST", "/cloud/v1/appliances/"+a1.id+"/move", jb(map[string]any{"customer_id": custID, "site_id": annex, "reason": "moved in-house"}))
 	check(code == 200 && field(body, "site_id") == annex && sub(body, "license", "state") == "active",
 		"a same-customer move keeps a valid licence (re-issued for the new site) (HTTP %d)", code)
+	moved := get(op, "/cloud/v1/licenses?q="+a1.serial+"&state=active")
+	check(strings.Contains(moved, `"max_concurrent_online_guests":150`) && strings.Contains(moved, until) &&
+		strings.Contains(moved, `"site_id":"`+annex+`"`),
+		"the moved licence keeps cap and valid_until and is bound to the new site")
+	check(subNum(body, "license", "license_version") == subNum(before, "license", "license_version")+1,
+		"the moved licence is the next version (v%d -> v%d)", subNum(before, "license", "license_version"), subNum(body, "license", "license_version"))
 	code, body = a1.mtls("GET", "/v1/appliance/assignment", false)
 	check(code == 200 && field(body, "site_id") == annex, "the appliance receives a newly signed assignment")
 
@@ -263,18 +278,50 @@ func main() {
 	check(code == 204, "a retired appliance's record deletes (HTTP %d)", code)
 	code, _ = a1.signed("GET", "/v1/appliance/hello", nil)
 	check(code == 401, "a deleted appliance learns it is orphaned from hello (HTTP %d)", code)
+	code, body = a1.register()
+	check(code == 403 && field(body, "error") == "identity_retired",
+		"a retired identity cannot register again after its record is deleted (HTTP %d)", code)
+	a1b := &appliance{serial: a1.serial, priv: newKey()}
+	code, _ = a1b.register()
+	check(code == 200 && field(get(op, "/cloud/v1/appliances/"+a1b.id), "activation") == "waiting",
+		"the same hardware with a new identity (factory reset) registers as WAITING (HTTP %d)", code)
 	check(strings.Contains(get(op, "/cloud/v1/audit?appliance_id="+a1.id), "appliance.deleted"), "audit history outlives the appliance")
 
-	// ---------------- replacement ----------------
+	// ---------------- replacement: the old box is retired through its signed acknowledgment ----------------
 	code, body = do(op, "POST", "/cloud/v1/appliances/"+a2.id+"/activate", activateBody(custID, "", annex, ""))
 	check(code == 200, "activate A2 at the annex (HTTP %d)", code)
+	a2.tlsPriv = newKey()
+	a2.signed("POST", "/v1/appliance/csr", jb(map[string]any{"csr_pem": makeCSR(a2.tlsPriv, a2.id)}))
+	fetch = a2.get("/v1/appliance/certificate")
+	a2.certPEM, a2.caPEM = field(fetch, "certificate_pem"), field(fetch, "ca_chain")
+	check(a2.certPEM != "", "A2 holds a certificate")
 	code, _ = do(op, "POST", "/cloud/v1/appliances/"+a2.id+"/replace", jb(map[string]any{"reason": "failing disk"}))
 	check(code == 200, "mark A2 for replacement (HTTP %d)", code)
 	a3 := newAppliance("ACC-A3-" + run)
 	a3.register()
 	code, _ = do(op, "POST", "/cloud/v1/appliances/"+a3.id+"/activate", activateBody(custID, "", annex, ""))
 	check(code == 200, "activate the new hardware at the same site (HTTP %d)", code)
-	check(field(get(op, "/cloud/v1/appliances/"+a2.id), "activation") == "retired", "activating the replacement retired the old appliance")
+	old := get(op, "/cloud/v1/appliances/"+a2.id)
+	check(field(old, "activation") == "retiring" && sub(old, "retirement", "state") == "terminal_delivery_pending",
+		"activating the replacement starts the old appliance's acknowledged retirement (%s)", field(old, "activation"))
+	check(sub(old, "license", "state") == "revoked", "the old appliance's licence is revoked at once")
+	check(sub(old, "replacement", "replaced_by") == a3.id && sub(get(op, "/cloud/v1/appliances/"+a3.id), "replacement", "replaces") == a2.id,
+		"replacement links are appliance ids")
+	code, body = a2.mtls("GET", "/v1/appliance/hello", true)
+	check(code == 200, "the old appliance's credentials stay valid until it acknowledges (HTTP %d)", code)
+	code, body = a2.mtls("GET", "/v1/appliance/assignment", false)
+	check(code == 200 && field(body, "state") == "decommissioned", "the old appliance fetches its signed retirement (HTTP %d)", code)
+	var doc assignment.Document
+	_ = json.Unmarshal([]byte(body), &doc)
+	ack := &assignment.Ack{ApplianceID: a2.id, Version: doc.Version, TerminalState: doc.State,
+		Fingerprint: assignment.DocFingerprint(&doc), AdoptedAt: time.Now().Unix()}
+	assignment.SignAck(a2.priv, ack)
+	code, body = a2.mtlsBody("POST", "/v1/appliance/assignment/ack", jb(ack))
+	check(code == 200 && field(body, "status") == "credential_revoked", "the old appliance acknowledges (HTTP %d %s)", code, trunc(body))
+	old = get(op, "/cloud/v1/appliances/"+a2.id)
+	check(field(old, "activation") == "retired", "after the ack the old appliance is RETIRED (%s)", field(old, "activation"))
+	code, _ = a2.mtls("GET", "/v1/appliance/hello", true)
+	check(code != 200, "and only now are its credentials revoked (HTTP %d)", code)
 
 	// ---------------- offline first activation ----------------
 	a4 := newAppliance("ACC-A4-" + run)
@@ -440,6 +487,29 @@ func (a *appliance) mtls(method, path string, signed bool) (int, string) {
 	return resp.StatusCode, string(b)
 }
 
+// mtlsBody is mtls for a signed request with a body.
+func (a *appliance) mtlsBody(method, path string, body []byte) (int, string) {
+	keyDER, _ := x509.MarshalPKCS8PrivateKey(a.tlsPriv)
+	pair, err := tls.X509KeyPair([]byte(a.certPEM), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}))
+	if err != nil {
+		return 0, err.Error()
+	}
+	pool := x509.NewCertPool()
+	pool.AppendCertsFromPEM([]byte(a.caPEM))
+	cl := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{Certificates: []tls.Certificate{pair}, RootCAs: pool}}}
+	req, _ := http.NewRequest(method, mtls+path, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+a.token(method, path, body))
+	resp, err := cl.Do(req)
+	if err != nil {
+		return 0, err.Error()
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
 func claimsToken(priv ed25519.PrivateKey, iss, method, path string, body []byte) string {
 	pub := priv.Public().(ed25519.PublicKey)
 	var nonce [16]byte
@@ -526,6 +596,15 @@ func sub(s, k1, k2 string) string {
 func num(s, k string) int {
 	if v, ok := decode(s)[k].(float64); ok {
 		return int(v)
+	}
+	return -1
+}
+
+func subNum(s, k1, k2 string) int {
+	if m, ok := decode(s)[k1].(map[string]any); ok {
+		if v, ok := m[k2].(float64); ok {
+			return int(v)
+		}
 	}
 	return -1
 }

@@ -6,7 +6,7 @@
 set -u
 API=${API:-http://127.0.0.1:8080}; CJ=/tmp/rfr.txt; REG=${REG:-/tmp/regtest}
 ADMIN_EMAIL=${ADMIN_EMAIL:?set ADMIN_EMAIL}; ADMIN_PASS=${ADMIN_PASS:?set ADMIN_PASS}
-PSQL() { docker exec sc-central-pg psql -U stayconnect -d stayconnect -tA -c "$1"; }
+PSQL() { docker exec ${PGC:-sc-central-pg} psql -U stayconnect -d stayconnect -tA -c "$1"; }
 jqget() { python3 -c "import sys,json;d=json.load(sys.stdin);print(eval('d'+sys.argv[1]))" "$1" 2>/dev/null; }
 code() { curl -s --max-time 15 -b $CJ -c $CJ -o /tmp/rb.json -w "%{http_code}" -H 'Content-Type: application/json' "$@"; }
 PASS=0; FAIL=0; ok(){ echo "  PASS  $1"; PASS=$((PASS+1)); }; bad(){ echo "  FAIL  $1"; FAIL=$((FAIL+1)); }
@@ -20,6 +20,7 @@ activate(){ reauth; code -X POST "$API/cloud/v1/appliances/$1/activate" \
   -d "{\"customer_id\":\"$TID\",\"site_id\":\"$SID\",\"license\":{\"max_concurrent_online_guests\":20,\"valid_days\":365}}"; }
 clean(){ PSQL "BEGIN;
  DELETE FROM appliance_security_alerts WHERE serial LIKE 'ZZZ-%';
+ DELETE FROM retired_appliance_identities WHERE serial LIKE 'ZZZ-%';
  UPDATE appliances SET replaced_by=NULL, replacement_of=NULL WHERE serial LIKE 'ZZZ-%';
  DELETE FROM licenses WHERE tenant_id IN (SELECT id FROM tenants WHERE slug LIKE 'zzz-%');
  DELETE FROM appliances WHERE tenant_id IN (SELECT id FROM tenants WHERE slug LIKE 'zzz-%') OR serial LIKE 'ZZZ-%';
@@ -48,13 +49,15 @@ pend=$(PSQL "SELECT replacement_pending FROM appliances WHERE id='$OLD';"); dl=$
 $REG -base $API -serial ZZZ-NEW >/dev/null; NEW=$(appid ZZZ-NEW)
 activate "$NEW" >/dev/null
 os=$(PSQL "SELECT lifecycle_state FROM appliances WHERE id='$OLD';"); ol=$(licstat "$OLD"); rb=$(PSQL "SELECT replaced_by::text FROM appliances WHERE id='$OLD';"); ro=$(PSQL "SELECT replacement_of::text FROM appliances WHERE id='$NEW';"); nl=$(licstat "$NEW")
-[ "$os" = "decommissioned" ] && [ "$ol" = "revoked" ] && ok "new activated -> OLD retired + licence revoked" || bad "old state=$os lic=$ol"
+od=$(PSQL "SELECT delivery_state FROM appliance_terminal_delivery WHERE appliance_id='$OLD';")
+[ "$os" = "assigned" ] && [ "$od" = "terminal_delivery_pending" ] && [ "$ol" = "revoked" ] \
+  && ok "new activated -> OLD licence revoked, acknowledged retirement pending" || bad "old state=$os delivery=$od lic=$ol"
 [ "$rb" = "$NEW" ] && [ "$ro" = "$OLD" ] && ok "old/new linked (replaced_by / replacement_of)" || bad "link rb=$rb ro=$ro"
 [ "$nl" = "active" ] && ok "NEW appliance is licensed (service continuity preserved)" || bad "new lic=$nl"
 oc=$(PSQL "SELECT status FROM appliance_certificates WHERE appliance_id='$OLD' ORDER BY created_at DESC LIMIT 1;")
-[ "$oc" = "revoked" ] && ok "old credentials (certificate) revoked" || bad "old cert=$oc"
+[ "$oc" = "active" ] && ok "old credentials stay valid until the old box acknowledges its retirement" || bad "old cert revoked before the ack: $oc"
 ot=$(PSQL "SELECT state FROM appliance_signed_assignments WHERE appliance_id='$OLD';")
-[ "$ot" = "decommissioned" ] && ok "old appliance holds a signed terminal assignment" || bad "old assignment state=$ot"
+[ "$ot" = "decommissioned" ] && ok "old appliance holds a signed terminal assignment to fetch" || bad "old assignment state=$ot"
 
 c=$(activate "$NEW")
 [ "$c" = "409" ] && [ "$(PSQL "SELECT count(*) FROM appliances WHERE replacement_of='$OLD';")" -le 1 ] \
@@ -92,6 +95,8 @@ reauth; code -X POST "$API/cloud/v1/appliances/$FR/retire" -d '{"reason":"reset 
 OUT=$($REG -base $API -serial ZZZ-FR)
 st=$(PSQL "SELECT lifecycle_state || '/' || COALESCE(tenant_id::text,'none') FROM appliances WHERE id='$FR';")
 echo "$OUT" | grep -q "HTTP 200" && [ "$st" = "pending_approval/none" ] && ok "retired hardware re-registers on the same row as WAITING, unowned" || bad "re-register after retire: $OUT state=$st"
+rk=$(PSQL "SELECT count(*) FROM retired_appliance_identities WHERE appliance_id='$FR';")
+[ "$rk" -ge 1 ] && ok "the retired identity key is recorded; it can never register again" || bad "retired key not recorded ($rk)"
 
 echo ""
 echo "############ INVARIANTS ############"

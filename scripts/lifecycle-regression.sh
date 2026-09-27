@@ -2,9 +2,9 @@
 # Appliance lifecycle consistency regression suite (docs/CENTRAL_CONTROL_PLANE.md §4).
 #
 # Exercises every lifecycle path against isolated zzz-* / ZZZ-* fixtures and asserts the invariants: no path
-# leaves a current (active/suspended) licence bound to a retired or deleted appliance, credential state
-# matches the lifecycle, licence operations never touch the appliance lifecycle, and the derived activation
-# state is what the contract says. Idempotent (self-cleans); NEVER touches real customers or appliances.
+# leaves a current (active/suspended) licence bound to a retired or deleted appliance, credentials are revoked
+# only after a retirement is acknowledged (or on an emergency), licence operations never touch the appliance
+# lifecycle, moves stay within the customer, and the derived activation state is what the contract says. Idempotent (self-cleans); NEVER touches real customers or appliances.
 #
 # Needs the regtest helper (go build -o /tmp/regtest ./control-plane/cmd/regtest) for token-less registration.
 #
@@ -12,7 +12,7 @@
 set -u
 API=${API:-http://127.0.0.1:8080}; CJ=/tmp/lifereg.txt; REG=${REG:-/tmp/regtest}
 ADMIN_EMAIL=${ADMIN_EMAIL:?set ADMIN_EMAIL}; ADMIN_PASS=${ADMIN_PASS:?set ADMIN_PASS}
-PSQL() { docker exec sc-central-pg psql -U stayconnect -d stayconnect -tA -c "$1"; }
+PSQL() { docker exec ${PGC:-sc-central-pg} psql -U stayconnect -d stayconnect -tA -c "$1"; }
 jqget() { python3 -c "import sys,json;d=json.load(sys.stdin);print(eval('d'+sys.argv[1]))" "$1" 2>/dev/null; }
 code() { curl -s --max-time 15 -b $CJ -c $CJ -o /tmp/lr.json -w "%{http_code}" -H 'Content-Type: application/json' "$@"; }
 PASS=0; FAIL=0
@@ -24,6 +24,7 @@ reauth() { curl -s --max-time 8 -b $CJ -c $CJ -o /dev/null -X POST $API/v1/auth/
 CAVER=$(PSQL "SELECT version FROM appliance_ca_versions ORDER BY version DESC LIMIT 1;")
 
 clean() { PSQL "BEGIN;
+ DELETE FROM retired_appliance_identities WHERE serial LIKE 'ZZZ-%';
  DELETE FROM licenses WHERE tenant_id IN (SELECT id FROM tenants WHERE slug LIKE 'zzz-%');
  DELETE FROM appliances WHERE tenant_id IN (SELECT id FROM tenants WHERE slug LIKE 'zzz-%') OR serial LIKE 'ZZZ-%';
  DELETE FROM sites WHERE tenant_id IN (SELECT id FROM tenants WHERE slug LIKE 'zzz-%');
@@ -88,7 +89,7 @@ reauth; c=$(code -X POST $API/cloud/v1/appliances/$AID/retire -d '{"reason":"reg
 reauth; c=$(code -X DELETE $API/cloud/v1/appliances/$AID -d '{"confirm_serial":"ZZZ-D5-1","reason":"reg"}')
 [ "$c" = "204" ] && ok "a retired appliance's record deletes" || bad "delete retired c=$c"
 
-echo ""; echo "### 6. REPLACE: the old appliance keeps its licence until the new one is activated ###"
+echo ""; echo "### 6. REPLACE: the old appliance keeps its licence until the new one is activated, then retires with an ack ###"
 mkfixture d6
 reauth; c=$(code -X POST $API/cloud/v1/appliances/$AID/replace -d '{"reason":"reg replace"}')
 OLD=$AID
@@ -97,20 +98,31 @@ OLD=$AID
 register "ZZZ-D6-2"
 reauth; code -X POST $API/cloud/v1/appliances/$AID/activate -d "{\"customer_id\":\"$TID\",\"site_id\":\"$SID\",\"license\":{\"valid_days\":30}}" >/dev/null
 AID=$OLD
-[ "$(lic)" = "revoked" ] && [ "$(activation)" = "retired" ] && ok "activating the replacement retired the old appliance" || bad "old lic=$(lic) act=$(activation)"
+dstate=$(PSQL "SELECT delivery_state FROM appliance_terminal_delivery WHERE appliance_id='$AID';")
+[ "$(lic)" = "revoked" ] && [ "$(activation)" = "retiring" ] && [ "$dstate" = "terminal_delivery_pending" ] \
+  && ok "activating the replacement revoked the old licence and started acknowledged retirement" || bad "old lic=$(lic) act=$(activation) dstate=$dstate"
+[ "$(cert_status)" = "active" ] && ok "the old appliance's certificate stays valid until it acknowledges (it must fetch its retirement)" \
+  || bad "old certificate revoked before the ack: $(cert_status)"
+reauth; c=$(code -X POST $API/cloud/v1/appliances/$AID/retire -d '{"reason":"reg retire now","emergency":true,"confirm_serial":"ZZZ-D6-1"}')
+[ "$c" = "200" ] && [ "$(activation)" = "retired" ] && [ "$(cert_status)" = "revoked" ] \
+  && ok "retire now (emergency) while retiring: credentials revoked, retired" || bad "retire now c=$c act=$(activation) cert=$(cert_status)"
 
-echo ""; echo "### 7. MOVE to another customer: the licence is revoked ###"
-mkfixture d7; T7=$TID
+echo ""; echo "### 7. MOVE to another customer is refused; nothing changes ###"
+mkfixture d7; T7=$TID; S7=$SID
 mkcustomer d7b
 reauth; c=$(code -X POST $API/cloud/v1/appliances/$AID/move -d "{\"customer_id\":\"$TID\",\"site_id\":\"$SID\",\"reason\":\"reg move\"}")
-[ "$c" = "200" ] && [ "$(lic)" = "revoked" ] && ok "cross-customer move revoked the licence" || bad "move c=$c lic=$(lic)"
+err=$(jqget "['error']" </tmp/lr.json)
+[ "$c" = "409" ] && [ "$err" = "cross_customer_move" ] && [ "$(lic)" = "active" ] \
+  && [ "$(PSQL "SELECT tenant_id::text||'/'||site_id::text FROM appliances WHERE id='$AID';")" = "$T7/$S7" ] \
+  && ok "cross-customer move refused (409), licence and binding unchanged" || bad "move c=$c err=$err lic=$(lic)"
 
-echo ""; echo "### 8. MOVE within the customer: the licence is re-issued, terms kept ###"
+echo ""; echo "### 8. MOVE within the customer: the licence is re-issued, terms kept, next version ###"
 mkfixture d8
 code -X POST $API/cloud/v1/customers/$TID/sites -d '{"name":"Annex d8","timezone":"UTC"}' >/dev/null; S2=$(jqget "['id']" </tmp/lr.json)
 reauth; c=$(code -X POST $API/cloud/v1/appliances/$AID/move -d "{\"customer_id\":\"$TID\",\"site_id\":\"$S2\",\"reason\":\"reg move\"}")
-[ "$c" = "200" ] && [ "$(lic)" = "active" ] && [ "$(PSQL "SELECT max_concurrent_online_guests FROM licenses WHERE '$AID'=ANY(appliance_ids) AND status='active';")" = "50" ] \
-  && ok "same-customer move re-issued the licence with the same cap" || bad "move c=$c lic=$(lic)"
+[ "$c" = "200" ] && [ "$(lic)" = "active" ] && [ "$(PSQL "SELECT max_concurrent_online_guests||'/'||site_id::text FROM licenses WHERE '$AID'=ANY(appliance_ids) AND status='active';")" = "50/$S2" ] \
+  && ok "same-customer move re-issued the licence with the same cap, bound to the new site" || bad "move c=$c lic=$(lic)"
+[ "$(PSQL "SELECT max(license_version) FROM licenses WHERE '$AID'=ANY(appliance_ids);")" = "2" ] && ok "the moved licence is a new version" || bad "licence version not bumped"
 
 echo ""; echo "### 9. SITE DELETE refused while an appliance is there ###"
 reauth; c=$(code -X DELETE $API/cloud/v1/sites/$S2 -d '{"confirm":"Annex d8","reason":"reg"}')
