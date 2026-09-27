@@ -71,13 +71,12 @@ func assignmentPaths() assignment.Paths {
 // appliance falls back to awaiting-assignment rather than operating on an
 // unverifiable identity.
 //
-// Returns (tenantID, siteID, state, version); tenant/site are non-empty only for a
-// verified 'assigned' document.
-func verifiedAssignment(_ *assignment.Store, ident *identity.Identity) (string, string, string, int64) {
-	r := assignment.Resolve(assignmentPaths(), assignment.ApplianceBinding{
+// The Resolution's Outcome says WHY there is no scope (absent vs refused), which is what decides whether a
+// development build may fall back to its env tenant/site: only when nothing is present at all.
+func verifiedAssignment(_ *assignment.Store, ident *identity.Identity) assignment.Resolution {
+	return assignment.Resolve(assignmentPaths(), assignment.ApplianceBinding{
 		ApplianceID: ident.ApplianceID, Serial: ident.Serial, PublicKeyB64: ident.PublicKeyB64,
 	}, time.Now(), slog.Default())
-	return r.TenantID, r.SiteID, r.State, r.Version
 }
 
 // cloudHTTPClient is the plain-HTTPS client used before an mTLS client cert
@@ -85,40 +84,6 @@ func verifiedAssignment(_ *assignment.Store, ident *identity.Identity) (string, 
 // default roots verify it (same approach as the license fetcher).
 func (s *server) cloudHTTPClient() *http.Client {
 	return &http.Client{Timeout: 10 * time.Second}
-}
-
-// assignmentStatus surfaces the durable assignment record for the setup wizard and
-// the Platform. `status: stale` means the document is past expires_at and Central
-// has not refreshed it — the appliance KEEPS operating on it; this is a warning for
-// operators, not a loss of authority.
-func (s *server) assignmentStatus() map[string]any {
-	store := s.assignmentStore()
-	rec, err := store.Load()
-	if err != nil || rec == nil || rec.Current == nil {
-		return map[string]any{"status": assignment.StatusNone, "assigned": false}
-	}
-	d := rec.Current
-	out := map[string]any{
-		"status":               store.Status(), // current | stale
-		"assigned":             assignment.Grants(d.State),
-		"lifecycle_state":      d.State,
-		"version":              rec.Version,
-		"signer_key_id":        rec.SignerKeyID,
-		"tenant_id":            d.TenantID,
-		"site_id":              d.SiteID,
-		"tenant_name":          d.TenantName,
-		"site_name":            d.SiteName,
-		"adopted_at":           rec.AdoptedAt,
-		"last_refresh_success": rec.LastRefreshSuccess,
-		"last_refresh_attempt": rec.LastRefreshAttempt,
-		"stale_since":          rec.StaleSince,
-		"expires_at":           d.ExpiresAt,
-		"expired":              assignment.IsExpired(d, time.Now()),
-	}
-	if rec.Previous != nil {
-		out["previous_version"] = rec.Previous.Version
-	}
-	return out
 }
 
 // startAssignmentAgent polls Central for this appliance's signed assignment,
@@ -187,6 +152,11 @@ func (s *server) startAssignmentAgent(ctx context.Context, ctrlBase string) {
 		}
 		slog.Info("assignment: applied signed assignment", "version", doc.Version, "state", doc.State,
 			"signer_key_id", doc.SignerKeyID, "tenant_id", doc.TenantID, "site_id", doc.SiteID)
+		// A new assignment is when the licence is most likely waiting: fetch it now rather than at the next
+		// tick (F10). If scd re-execs below, the new process fetches at boot anyway.
+		if s.lic != nil {
+			s.lic.Kick()
+		}
 		s.repointGuestNetworks(ctx, doc)
 		prevVersion := currentVersion
 		currentVersion = doc.Version
@@ -216,6 +186,8 @@ func (s *server) startAssignmentAgent(ctx context.Context, ctrlBase string) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
+				poll()
+			case <-s.asgKick: // Check now
 				poll()
 			}
 		}
@@ -263,18 +235,22 @@ func (s *server) fetchAssignment(ctx context.Context, _ string) (*assignment.Doc
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, base+"/v1/appliance/assignment", nil)
 	resp, err := cl.Do(req)
 	if err != nil {
+		s.central.record(err, time.Now())
 		slog.Warn("assignment: fetch failed", "base", base, "err", err)
 		return nil, false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNoContent {
+		s.central.record(nil, time.Now())
 		return nil, false
 	}
 	if resp.StatusCode != http.StatusOK {
+		s.central.record(&httpStatusErr{code: resp.StatusCode}, time.Now())
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		slog.Warn("assignment: fetch non-200", "status", resp.StatusCode, "body", string(b))
 		return nil, false
 	}
+	s.central.record(nil, time.Now())
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	var doc assignment.Document
 	if json.Unmarshal(body, &doc) != nil {

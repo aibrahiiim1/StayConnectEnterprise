@@ -31,9 +31,11 @@ var edgedDependsOn = []struct{ method, path string }{
 	{"Post", "/v1/backup/settings"},
 	{"Get", "/v1/tenant/branding"},
 	{"Get", "/v1/tenant/auth-methods"},
-	{"Get", "/v1/license/status"},
-	{"Post", "/v1/license/refresh"},
-	{"Get", "/v1/setup/status"},
+	{"Get", "/v1/central/status"},
+	{"Post", "/v1/central/refresh"},
+	{"Get", "/v1/central/offline-request"},
+	{"Post", "/v1/central/offline-package"},
+	{"Post", "/v1/license/install"},
 	// The voucher operator surface. Issuance was routed here for a whole delivery with no caller anywhere
 	// -- the inverse of the defect this file exists for, and just as invisible: a reachable route nothing
 	// reaches is as useless as an unreachable handler. edged now proxies all six.

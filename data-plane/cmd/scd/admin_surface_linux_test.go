@@ -88,7 +88,7 @@ func TestAForeignUIDCannotReachTheAdminSurface(t *testing.T) {
 	for _, path := range []string{
 		"/v1/backup/restore",
 		"/v1/license/install",
-		"/v1/setup/enroll",
+		"/v1/central/offline-package",
 		"/v1/vouchers/0f8b9a0e-0000-0000-0000-000000000000/reveal",
 		"/v1/voucher-key-generations",
 	} {
@@ -133,7 +133,7 @@ func TestSharingEdgedsUIDIsNotEnough(t *testing.T) {
 		"/usr/bin/curl",
 		"/opt/stayconnect/bin/edged-copy", // a near-miss name must not pass
 	} {
-		for _, path := range []string{"/v1/backup/restore", "/v1/license/install", "/v1/setup/enroll"} {
+		for _, path := range []string{"/v1/backup/restore", "/v1/license/install", "/v1/central/offline-package"} {
 			code, body := gate(t, asPeer("POST", path, mine, exe))
 			if code != http.StatusForbidden {
 				t.Errorf("%s from edged's uid running %s returned %d, not 403", path, exe, code)

@@ -18,7 +18,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/buildprofile"
 	"github.com/stayconnect/enterprise/data-plane/internal/cloudmode"
 	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
 	"github.com/stayconnect/enterprise/data-plane/internal/nft"
@@ -76,107 +75,8 @@ func (s *server) licenseGate(w http.ResponseWriter, feature string) bool {
 
 // ----- license admin endpoints (unix socket; consumed by edged) -------------
 
-// cloudInfo returns the appliance's Cloud connection identity + endpoints for
-// the Hotel Admin Cloud Connection page. Secrets (NATS password) are masked; no
-// keys/tokens are ever returned.
-func (s *server) cloudInfo(w http.ResponseWriter, r *http.Request) {
-	// Separate real transport states (5F): API mTLS and NATS mTLS are reported
-	// distinctly — never a single generic "connected".
-	apiMTLS := map[string]any{"ready": false}
-	if s.certMgr != nil {
-		apiMTLS = s.certMgr.Status() // {mtls_ready, cert_fingerprint, not_after}
-	}
-	natsMTLS := map[string]any{
-		"url":       maskCreds(s.natsURL),
-		"mtls":      strings.HasPrefix(s.natsURL, "tls://") && !strings.Contains(s.natsURL, "@"),
-		"connected": s.natsConn != nil && s.natsConn.IsConnected(),
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"cloud_api_url": s.ctrlBase,
-		"nats_url":      maskCreds(s.natsURL),
-		"tenant_id":     s.tenID,
-		"site_id":       s.siteID,
-		"appliance_id":  s.applID,
-		"serial":        s.serial,
-		"enrolled":      s.applID != "" && s.tenID != "",
-		"api_mtls":      apiMTLS,
-		"nats_mtls":     natsMTLS,
-	})
-}
-
-// maskCreds strips any user:password from a URL (scheme://user:pass@host -> scheme://***@host).
-func maskCreds(u string) string {
-	at := strings.Index(u, "@")
-	sep := strings.Index(u, "://")
-	if at < 0 || sep < 0 || at < sep {
-		return u
-	}
-	return u[:sep+3] + "***@" + u[at+1:]
-}
-
-func (s *server) licenseStatus(w http.ResponseWriter, r *http.Request) {
-	if s.lic == nil {
-		// Fail safe: report UNLICENSED, never a false "Active".
-		writeJSON(w, http.StatusOK, map[string]any{
-			"state": string(lic.StateUnlicensed), "installed": false, "license_id": "",
-		})
-		return
-	}
-	ev, loaded := s.lic.Evaluation()
-	if !loaded {
-		out := map[string]any{
-			"state": string(s.lic.State()), "installed": false, "license_id": "",
-			"build_profile": buildprofile.Name,
-		}
-		if s.permissiveBlocked != "" {
-			out["permissive_blocked"] = s.permissiveBlocked
-		}
-		writeJSON(w, http.StatusOK, out)
-		return
-	}
-	// Live usage against the licensed concurrent-online-guest cap.
-	var current int64 = -1
-	if n, err := s.activeSessionCount(r.Context()); err == nil {
-		current = int64(n)
-	}
-	maxGuests := s.lic.MaxConcurrentOnlineGuests()
-	var remaining any = "unlimited"
-	var usagePct any
-	if maxGuests > 0 {
-		rem := maxGuests - current
-		if rem < 0 {
-			rem = 0
-		}
-		remaining = rem
-		usagePct = float64(current) / float64(maxGuests) * 100
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"state":                        string(ev.State),
-		"installed":                    true,
-		"license_id":                   ev.Doc.LicenseID,
-		"license_version":              ev.Doc.LicenseVersion,
-		"commercial_plan_code":         ev.Doc.CommercialPlanCode,
-		"issued_at":                    ev.Doc.IssuedAt,
-		"valid_from":                   ev.Doc.ValidFrom,
-		"valid_until":                  ev.Doc.ValidUntil,
-		"offline_grace_days":           ev.Doc.OfflineGraceDays,
-		"grace_period_days":            ev.Doc.EffectiveGraceDays(),
-		"grace_until":                  ev.GraceUntil,
-		"restricted_until":             ev.RestrictedUntil,
-		"features":                     ev.Doc.Features,
-		"limits":                       ev.Doc.Limits,
-		"max_concurrent_online_guests": maxGuests,
-		"current_online_guests":        current,
-		"remaining_capacity":           remaining,
-		"usage_percent":                usagePct,
-		"cloud_stale":                  ev.CloudStale,
-		"clock_rollback":               ev.ClockRollback,
-		"last_cloud_validation":        ev.LastCloudValidation,
-		"build_profile":                buildprofile.Name,
-		"permissive_blocked":           s.permissiveBlocked,
-	})
-}
-
+// licenseInstall: POST /v1/license/install -- the Upload licence file action. Every other licence and
+// activation read goes through /v1/central/status (central.go).
 func (s *server) licenseInstall(w http.ResponseWriter, r *http.Request) {
 	if s.lic == nil {
 		httpErr(w, http.StatusServiceUnavailable, "license manager unavailable")
@@ -207,18 +107,6 @@ func (s *server) licenseInstall(w http.ResponseWriter, r *http.Request) {
 		"license_version": doc.LicenseVersion,
 		"state":           string(s.lic.State()),
 	})
-}
-
-func (s *server) licenseRefresh(w http.ResponseWriter, r *http.Request) {
-	if s.lic == nil || s.licFetch == nil {
-		httpErr(w, http.StatusServiceUnavailable, "cloud fetch not configured")
-		return
-	}
-	if err := s.licFetch(r.Context()); err != nil {
-		httpErr(w, http.StatusBadGateway, "refresh failed: "+err.Error())
-		return
-	}
-	s.licenseStatus(w, r)
 }
 
 func (s *server) pmsAdminReload(w http.ResponseWriter, r *http.Request) {

@@ -99,8 +99,7 @@ var adminPrefixes = []string{
 	"/v1/license/",
 	"/v1/hotel-admin-cert/",
 	"/v1/maintenance",
-	"/v1/cloud/",
-	"/v1/setup/",
+	"/v1/central/",
 	"/v1/phase3/signin-attempts/",
 }
 

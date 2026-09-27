@@ -6,7 +6,8 @@
 //
 //	SCD_IDENTITY_DIR   (required)
 //	SCD_CTRLAPI_BASE   (required)
-//	SCD_BOOTSTRAP_TOKEN, SCD_SERIAL (required on first run)
+//
+// A factory-clean identity dir is registered token-less (POST /v1/appliances/register).
 //
 // Exits 0 on success; prints the resolved identity + hello response to stdout.
 package main
@@ -46,8 +47,6 @@ func main() {
 
 	dir := os.Getenv("SCD_IDENTITY_DIR")
 	base := os.Getenv("SCD_CTRLAPI_BASE")
-	token := os.Getenv("SCD_BOOTSTRAP_TOKEN")
-	serial := os.Getenv("SCD_SERIAL")
 	if dir == "" || base == "" {
 		fatal("SCD_IDENTITY_DIR and SCD_CTRLAPI_BASE are required")
 	}
@@ -59,13 +58,12 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	// Token-less registration (enrollment tokens no longer exist): reuse a registered identity, otherwise
+	// register this keypair with Central.
 	store := &identity.Store{Dir: dir}
-	ident, err := store.LoadOrEnroll(ctx, base, token, serial, false)
+	ident, err := store.Register(ctx, base, nil)
 	if err != nil {
-		fatal("enroll: %v", err)
-	}
-	if ident == nil {
-		fatal("no identity and no bootstrap token")
+		fatal("register: %v", err)
 	}
 
 	jwt, err := applianceauth.Sign(ident.PrivateKey(), ident.ApplianceID)

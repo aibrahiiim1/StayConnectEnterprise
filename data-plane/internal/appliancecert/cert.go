@@ -48,7 +48,23 @@ type Manager struct {
 	notAfter time.Time
 	fpr      string
 	ready    bool
+
+	// kick cuts the bootstrap backoff short (Check now, a freshly adopted assignment); onAttempt observes every
+	// bootstrap attempt's outcome, which is how scd knows Central is answering while the appliance waits.
+	kick      chan struct{}
+	onAttempt func(error)
 }
+
+// Kick asks a waiting certificate bootstrap to try again now. Non-blocking.
+func (m *Manager) Kick() {
+	select {
+	case m.kick <- struct{}{}:
+	default:
+	}
+}
+
+// OnAttempt registers an observer for every bootstrap attempt's outcome. Set it before EnsureUntilInstalled.
+func (m *Manager) OnAttempt(fn func(error)) { m.onAttempt = fn }
 
 func (m *Manager) mtlsKeyPath() string { return filepath.Join(m.dir, "mtls-client.key") }
 
@@ -95,7 +111,8 @@ func (m *Manager) ensureMTLSKey() error {
 }
 
 func New(dir, ctrlBase, mtlsBase, applianceID string, priv ed25519.PrivateKey) *Manager {
-	return &Manager{dir: dir, ctrlBase: ctrlBase, mtlsBase: mtlsBase, applianceID: applianceID, priv: priv}
+	return &Manager{dir: dir, ctrlBase: ctrlBase, mtlsBase: mtlsBase, applianceID: applianceID, priv: priv,
+		kick: make(chan struct{}, 1)}
 }
 
 func (m *Manager) certPath() string { return filepath.Join(m.dir, "client.crt") }
@@ -247,6 +264,9 @@ func (m *Manager) EnsureUntilInstalled(ctx context.Context) error {
 	for {
 		attempt++
 		err := m.Ensure(ctx)
+		if m.onAttempt != nil {
+			m.onAttempt(err)
+		}
 		if err == nil {
 			if attempt > 1 {
 				slog.Info("appliancecert: certificate acquired after waiting", "attempts", attempt)
@@ -287,6 +307,9 @@ func (m *Manager) EnsureUntilInstalled(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(delay):
+		case <-m.kick:
+			delay = first // an operator asked, or activation just happened: start the short backoff again
+			continue
 		}
 		if delay < cap {
 			delay *= 2

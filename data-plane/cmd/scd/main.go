@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -72,17 +71,16 @@ type cfg struct {
 	MailLogPath string
 	SMSLogPath  string
 
-	// Phase 5.1 — appliance identity. When IdentityDir holds an identity.json
-	// it takes precedence over the legacy TenantID/SiteID/ApplianceID env
-	// vars. On first boot with no identity file, BootstrapToken + Serial +
-	// CtrlAPIBase drive the enrollment flow.
-	IdentityDir    string
-	CtrlAPIBase    string
-	BootstrapToken string
-	Serial         string
+	// Appliance identity. identity.json (appliance id + public key) and the
+	// private key live in IdentityDir. A factory-clean appliance registers itself
+	// with Central at CtrlAPIBase, token-less; enrollment tokens no longer exist.
+	IdentityDir string
+	CtrlAPIBase string
+	Serial      string
 	// AutoRegister: a factory-clean appliance self-registers (token-less) with
-	// Central using its signed identity so it appears as Pending Activation.
-	// Default true; set SCD_AUTO_REGISTER=false to require a bootstrap token.
+	// Central using its signed identity so it appears as waiting for activation.
+	// Default true; SCD_AUTO_REGISTER=false leaves offline activation as the only
+	// way in (a site with no route to Central).
 	AutoRegister bool
 
 	// Phase 5.2 — remote transport. When set, scd subscribes to
@@ -133,11 +131,10 @@ func loadCfg() cfg {
 		MailLogPath: envOr("SCD_MAIL_LOG", "/var/log/stayconnect/otp-mail.log"),
 		SMSLogPath:  envOr("SCD_SMS_LOG", "/var/log/stayconnect/otp-sms.log"),
 
-		IdentityDir:    envOr("SCD_IDENTITY_DIR", "/etc/stayconnect/identity"),
-		CtrlAPIBase:    os.Getenv("SCD_CTRLAPI_BASE"),
-		BootstrapToken: os.Getenv("SCD_BOOTSTRAP_TOKEN"),
-		Serial:         os.Getenv("SCD_SERIAL"),
-		AutoRegister:   os.Getenv("SCD_AUTO_REGISTER") != "false",
+		IdentityDir:  envOr("SCD_IDENTITY_DIR", "/etc/stayconnect/identity"),
+		CtrlAPIBase:  os.Getenv("SCD_CTRLAPI_BASE"),
+		Serial:       os.Getenv("SCD_SERIAL"),
+		AutoRegister: os.Getenv("SCD_AUTO_REGISTER") != "false",
 
 		NATSURL: os.Getenv("SCD_NATS_URL"),
 
@@ -261,12 +258,18 @@ type server struct {
 	// natsConn is the live NATS connection (nil if not connected).
 	natsConn *nats.Conn
 	// identityKeyFpr is the fingerprint of the identity-signing public key
-	// (distinct from the mTLS cert fingerprint) — shown in the setup wizard.
+	// (distinct from the mTLS cert fingerprint) — shown under Technical details.
 	identityKeyFpr string
-	// idStore + bootstrap token config for runtime enrollment (setup wizard).
-	idStore  *identity.Store
-	enrolled bool
-	idPriv   ed25519.PrivateKey // identity-signing key (for signed reconcile calls)
+	identityPubB64 string
+	// idStore holds the identity (offline first activation writes to it).
+	idStore *identity.Store
+	idPriv  ed25519.PrivateKey // identity-signing key (for signed reconcile calls)
+
+	// central tracks the last successful / failed authenticated contact with Central (central.go); reg is the
+	// background registration loop while unregistered (registration.go); asgKick wakes the assignment agent.
+	central *centralContact
+	reg     *registrar
+	asgKick chan struct{}
 
 	// legacyBridge is the fallback ingress interface for sessions whose IP
 	// matches no configured guest network (pre-Phase-19 / legacy network).
@@ -279,11 +282,9 @@ type server struct {
 
 	met *metrics.Registry // phase 7
 
-	// Edge-first refactor: signed-license manager, telemetry outbox and the
-	// on-demand cloud license fetch (nil when not configured).
-	lic      *licstate.Manager
-	obx      *outbox.Outbox
-	licFetch func(context.Context) error
+	// Edge-first refactor: signed-license manager and telemetry outbox.
+	lic *licstate.Manager
+	obx *outbox.Outbox
 
 	// permissiveBlocked is non-empty when a production appliance rejected an
 	// attempt to enable permissive/dev licensing (env var or dev-mode marker).
@@ -503,58 +504,63 @@ func main() {
 	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Phase 5.1 — resolve appliance identity. Priority:
-	//   1. identity.json + keypair already on disk → load them
-	//   2. no identity, but SCD_BOOTSTRAP_TOKEN + SCD_SERIAL set → enroll
-	//   3. no identity, but legacy SCD_TENANT_ID/SITE_ID/APPLIANCE_ID set →
-	//      run un-enrolled (no signed calls to ctrlapi) with a warning
-	//   4. otherwise fatal
+	// APPLIANCE IDENTITY. A registered identity is loaded from disk. A factory-clean appliance registers itself
+	// with Central, token-less (identity.Register); the first attempt happens here, and if Central cannot be
+	// reached the registration loop keeps retrying in the background (registration.go).
+	central := &centralContact{}
 	idStore := &identity.Store{Dir: c.IdentityDir}
-	ident, err := idStore.LoadOrEnroll(rootCtx, c.CtrlAPIBase, c.BootstrapToken, c.Serial, c.AutoRegister)
+	ident, err := idStore.LoadBound()
 	if err != nil {
-		slog.Error("identity: load/enroll failed", "err", err)
+		slog.Error("identity: load failed", "err", err)
 		os.Exit(1)
 	}
-	// Tenant/site are NEVER authoritative from identity.json or env: a generic
-	// appliance ships with NO customer identity. The authoritative source is the
-	// signed ASSIGNMENT document, persisted locally after Central assigns this
-	// appliance. Before assignment the appliance runs in awaiting-assignment mode
-	// (tenant/site empty; guest plane pre-license; setup wizard + assignment agent
-	// active). The legacy SCD_TENANT_ID/SITE_ID env vars are honored ONLY as a
-	// migration fallback when no signed assignment exists yet.
+	if ident == nil && c.AutoRegister && c.CtrlAPIBase != "" {
+		rctx, rcancel := context.WithTimeout(rootCtx, 10*time.Second)
+		ident, err = idStore.Register(rctx, c.CtrlAPIBase, nil)
+		rcancel()
+		central.record(err, time.Now())
+		if err != nil {
+			slog.Warn("self-registration did not complete at boot; retrying in the background", "err", err)
+			ident = nil
+		}
+	}
+	// Tenant/site are NEVER authoritative from identity.json or env: a generic appliance ships with NO customer
+	// identity. The authoritative source is the signed ASSIGNMENT document, re-verified on every boot. The legacy
+	// SCD_TENANT_ID/SITE_ID pair is honoured only when NO assignment exists at all, and only in an explicit
+	// development build (assignment.EnvFallbackAllowed) -- never when an assignment is present but fails
+	// verification, and never in a production binary.
+	envTenant, envSite := c.TenantID, c.SiteID
+	c.TenantID, c.SiteID = "", ""
 	asgStore := &assignment.Store{Dir: envOr("SCD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment")}
 	if ident != nil {
 		slog.Info("identity loaded", "appliance_id", ident.ApplianceID, "serial", ident.Serial)
 		c.ApplianceID = ident.ApplianceID
-		// The identity serial is the authoritative hardware-derived StayConnect
-		// serial that Central bound the signed assignment + license to. It MUST
-		// win over any stale SCD_SERIAL env, otherwise assignment adoption fails
-		// with "serial mismatch" and the box never converges.
+		// The identity serial is the authoritative hardware-derived serial that Central bound the signed
+		// assignment + license to. It MUST win over any stale SCD_SERIAL env, otherwise assignment adoption
+		// fails with "serial mismatch" and the box never converges.
 		if ident.Serial != "" {
 			c.Serial = ident.Serial
 		}
-		// The persisted assignment is RE-VERIFIED on every boot against the local
-		// trust registry (signature by an ACTIVE dedicated assignment key + binding
-		// to this appliance). An appliance never operates under an assignment it
-		// cannot verify — e.g. one signed by a retired key, or by the license /
-		// command / update key, which are absent from the registry.
-		aTen, aSite, aState, aVer := verifiedAssignment(asgStore, ident)
-		if aTen != "" && aSite != "" {
-			c.TenantID, c.SiteID = aTen, aSite
-			slog.Info("assignment resolved", "tenant_id", aTen, "site_id", aSite, "version", aVer)
-		} else if aState == "" && c.TenantID != "" && c.SiteID != "" {
-			slog.Warn("no signed assignment; using legacy env tenant/site as migration fallback",
-				"tenant_id", c.TenantID, "site_id", c.SiteID)
-		} else {
-			c.TenantID, c.SiteID = "", ""
-			slog.Warn("awaiting assignment: appliance enrolled but not yet assigned to a tenant/site",
-				"assignment_state", aState)
+		// Re-verified on every boot against the local trust registry (signature by a trusted assignment key +
+		// binding to this appliance). An appliance never operates under an assignment it cannot verify.
+		res := verifiedAssignment(asgStore, ident)
+		switch {
+		case res.Assigned():
+			c.TenantID, c.SiteID = res.TenantID, res.SiteID
+			slog.Info("assignment resolved", "tenant_id", res.TenantID, "site_id", res.SiteID, "version", res.Version)
+		case assignment.EnvFallbackAllowed(res) && envTenant != "" && envSite != "":
+			c.TenantID, c.SiteID = envTenant, envSite
+			slog.Warn("no signed assignment; development build using legacy env tenant/site",
+				"tenant_id", envTenant, "site_id", envSite)
+		default:
+			slog.Warn("awaiting assignment: appliance registered but holds no verified granting assignment",
+				"assignment_outcome", res.Outcome.String(), "assignment_state", res.State)
 		}
 	} else {
-		// No identity at all → awaiting enrollment. scd still boots to serve the
-		// local setup wizard; the guest plane is pre-license until enrolled.
-		c.TenantID, c.SiteID, c.ApplianceID = "", "", ""
-		slog.Warn("awaiting enrollment: no appliance identity; run the local setup wizard to enroll")
+		// No registered identity → waiting for registration (or offline activation). scd still boots to serve
+		// Hotel Admin; the guest plane is pre-license until activated.
+		c.ApplianceID = ""
+		slog.Warn("awaiting registration: this appliance has no registered identity yet")
 	}
 
 	pool, err := pgxpool.New(rootCtx, c.DBURL)
@@ -663,15 +669,30 @@ func main() {
 		}
 	}
 
-	// Setup-wizard state: identity store (for runtime enrollment) + identity
-	// key fingerprint (distinct from the mTLS cert fingerprint).
+	// Identity state + Central contact tracking.
 	s.idStore = idStore
-	s.enrolled = ident != nil
+	s.central = central
+	s.asgKick = make(chan struct{}, 1)
 	if ident != nil {
 		s.idPriv = ident.PrivateKey()
+		s.identityPubB64 = ident.PublicKeyB64
 		if raw, err := base64.RawStdEncoding.DecodeString(ident.PublicKeyB64); err == nil && len(raw) == ed25519.PublicKeySize {
 			s.identityKeyFpr = applianceauth.KeyID(ed25519.PublicKey(raw))
 		}
+	} else if c.AutoRegister && c.CtrlAPIBase != "" {
+		// KEEP TRYING while unregistered (F2). On success scd re-executes so every Central agent starts with the
+		// new identity (registration.go explains why a re-exec rather than a late start).
+		s.reg = newRegistrar(
+			func(ctx context.Context) (*identity.Identity, error) {
+				return idStore.Register(ctx, c.CtrlAPIBase, nil)
+			},
+			func(err error) { central.record(err, time.Now()) },
+			func(id *identity.Identity) {
+				slog.Info("registered with Central; re-executing scd to start the Central agents",
+					"appliance_id", id.ApplianceID)
+				go func() { time.Sleep(500 * time.Millisecond); s.reexec() }()
+			})
+		go s.reg.run(rootCtx)
 	}
 
 	// Assignment agent — the ONLY channel by which this appliance adopts or changes
@@ -722,12 +743,10 @@ func main() {
 	// (iamv2_session_activate.go), which reads s.lic itself. Central availability plays no part in guest
 	// authorization.
 	if ident != nil && c.CtrlAPIBase != "" {
-		priv := ident.PrivateKey()
-		applID := ident.ApplianceID
-		s.licFetch = func(ctx context.Context) error {
-			return s.lic.FetchFromCloud(ctx, c.CtrlAPIBase, applID, priv)
-		}
-		s.lic.StartLoops(rootCtx, c.CtrlAPIBase, applID, priv, 6*time.Hour)
+		// Every fetch outcome feeds the Central contact record. While no licence is installed the loop asks
+		// every minute (F10); once licensed, every six hours; Check now and a newly adopted assignment kick it.
+		s.lic.OnFetch(func(err error) { central.record(err, time.Now()) })
+		s.lic.StartLoops(rootCtx, c.CtrlAPIBase, ident.ApplianceID, ident.PrivateKey(), 6*time.Hour)
 	} else {
 		s.lic.StartLoops(rootCtx, "", "", nil, 0)
 	}
@@ -813,9 +832,15 @@ func main() {
 	r.Get("/v1/backup/settings", s.backupSettingsGet)
 	r.Post("/v1/backup/settings", s.backupSettingsSet)
 	// Edge-first refactor: license + local-admin plumbing for edged.
-	r.Get("/v1/license/status", s.licenseStatus)
+	// Appliance activation, licence and the link to Central (docs/CENTRAL_CONTROL_PLANE.md section 8). edged
+	// proxies these for Hotel Admin; central.go holds the one computation of every state they report.
+	r.Get("/v1/central/status", s.centralStatus)
+	r.Post("/v1/central/refresh", s.centralRefresh)
+	// OFFLINE ACTIVATION: the request this appliance emits, and the package (first activation OR a licence
+	// package for an activated appliance) that comes back. See offline_first_activation.go / offline_import.go.
+	r.Get("/v1/central/offline-request", s.setupActivationRequest)
+	r.Post("/v1/central/offline-package", s.centralOfflinePackage)
 	r.Post("/v1/license/install", s.licenseInstall)
-	r.Post("/v1/license/refresh", s.licenseRefresh)
 	r.Post("/v1/admin/pms/reload", s.pmsAdminReload)
 	r.Post("/v1/admin/walled-garden/reload", s.gardenReload)
 	r.Get("/v1/admin/outbox/stats", s.outboxStats)
@@ -825,14 +850,6 @@ func main() {
 	r.Post("/v1/hotel-admin-cert/check", s.hotelAdminCertCheck)
 	r.Post("/v1/hotel-admin-cert/rotate", s.hotelAdminCertRotate)
 	r.Post("/v1/hotel-admin-cert/renew", s.hotelAdminCertRenew)
-	r.Get("/v1/cloud/info", s.cloudInfo)
-	r.Get("/v1/setup/status", s.setupStatus)
-	r.Post("/v1/setup/enroll", s.setupEnroll)
-	r.Post("/v1/setup/offline-import", s.setupOfflineImport)
-	// OFFLINE FIRST ACTIVATION. Separate from offline-import above, which carries a licence to an appliance
-	// that is already assigned; these two carry a factory-clean appliance all the way to assigned+licensed.
-	r.Get("/v1/setup/activation-request", s.setupActivationRequest)
-	r.Post("/v1/setup/activation-package", s.setupActivationPackage)
 
 	// Phase 2 (DARK): guest-portal commerce routes are mounted ONLY when the portal surface is ON. While
 	// dark they are ABSENT (404) and the commerce engine holds a nil repository, so zero Phase-2 SQL runs.
@@ -1133,43 +1150,25 @@ func main() {
 			return code == 401 && (strings.Contains(l, "not enrolled") || strings.Contains(l, "unknown appliance") || strings.Contains(l, "not found"))
 		}
 		helloProbe := func() {
-			hctx, cancel := context.WithTimeout(rootCtx, 10*time.Second)
-			defer cancel()
-			tok, err := applianceauth.SignRequest(ident.PrivateKey(), ident.ApplianceID, "GET", "/v1/appliance/hello", nil)
-			if err != nil {
-				slog.Warn("hello: sign failed", "err", err)
+			code, body, err := s.helloRaw(rootCtx)
+			if err == nil {
 				return
 			}
-			req, _ := http.NewRequestWithContext(hctx, "GET", c.CtrlAPIBase+"/v1/appliance/hello", nil)
-			req.Header.Set("Authorization", "Bearer "+tok)
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
+			if code == 0 {
 				slog.Warn("hello: call failed", "err", err)
 				return
 			}
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-			resp.Body.Close()
-			if resp.StatusCode == 200 {
-				return
-			}
-			slog.Warn("hello: unexpected status", "status", resp.StatusCode, "body", string(body))
-			if c.AutoRegister && orphan(resp.StatusCode, body) {
+			slog.Warn("hello: unexpected status", "status", code, "body", string(body))
+			if c.AutoRegister && orphan(code, body) {
 				time.Sleep(3 * time.Second)
-				tok2, _ := applianceauth.SignRequest(ident.PrivateKey(), ident.ApplianceID, "GET", "/v1/appliance/hello", nil)
-				req2, _ := http.NewRequestWithContext(context.Background(), "GET", c.CtrlAPIBase+"/v1/appliance/hello", nil)
-				req2.Header.Set("Authorization", "Bearer "+tok2)
-				if r2, e2 := http.DefaultClient.Do(req2); e2 == nil {
-					b2, _ := io.ReadAll(io.LimitReader(r2.Body, 4096))
-					r2.Body.Close()
-					if orphan(r2.StatusCode, b2) {
-						slog.Warn("hello: appliance unknown to Central (deleted) — self-resetting to re-register as Pending")
-						for _, p := range []string{c.IdentityDir, envOr("SCD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment"), c.LicenseDir} {
-							_ = removeDirContents(p)
-						}
-						_ = os.Remove(c.CertDir + "/client.crt")
-						_ = os.Remove(c.CertDir + "/mtls-client.key")
-						_ = exec.Command("systemctl", "restart", "stayconnect-scd").Run()
+				if code2, b2, _ := s.helloRaw(context.Background()); orphan(code2, b2) {
+					slog.Warn("hello: appliance unknown to Central (deleted) — self-resetting to re-register as waiting")
+					for _, p := range []string{c.IdentityDir, envOr("SCD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment"), c.LicenseDir} {
+						_ = removeDirContents(p)
 					}
+					_ = os.Remove(c.CertDir + "/client.crt")
+					_ = os.Remove(c.CertDir + "/mtls-client.key")
+					_ = exec.Command("systemctl", "restart", "stayconnect-scd").Run()
 				}
 			}
 		}
@@ -1204,6 +1203,9 @@ func main() {
 			certMgr = appliancecert.New(c.CertDir, c.CtrlAPIBase, c.MTLSBase, ident.ApplianceID, ident.PrivateKey())
 			s.certMgr = certMgr
 		}
+		// Every bootstrap attempt tells us whether Central is answering -- including while the appliance waits
+		// for an operator to activate it (a pending certificate is a successful conversation).
+		certMgr.OnAttempt(func(err error) { central.record(err, time.Now()) })
 		go func() {
 			// KEEP TRYING. This used to be a single Ensure() whose ten-minute window started at boot; on
 			// expiry it logged a warning and returned, ending the certificate lifecycle for the life of the

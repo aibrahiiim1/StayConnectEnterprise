@@ -59,8 +59,8 @@ code=$(curl -s -b "$EC" -X POST $EDGE/edge/v1/voucher-batches -H 'Content-Type: 
 { [ "$code" = "201" ] || [ "$code" = "200" ]; } && ok "voucher batch created offline via Hotel Admin" || bad "offline batch create: HTTP $code $(cat /tmp/vb17.json)"
 
 echo "== 17.7 license still evaluates locally =="
-state=$(curl -s --unix-socket $SCD_SOCK http://unix/v1/license/status | python3 -c 'import sys,json;print(json.load(sys.stdin)["state"])')
-[ "$state" = "Active" ] && ok "license Active with cloud down (offline evaluation)" || bad "license state offline: $state"
+state=$(curl -s --unix-socket $SCD_SOCK http://unix/v1/central/status | python3 -c 'import sys,json;print(json.load(sys.stdin)["license"]["state"])')
+[ "$state" = "active" ] && ok "license Active with cloud down (offline evaluation)" || bad "license state offline: $state"
 
 echo "== 17.8 telemetry queues durably while offline =="
 sleep 65   # one telemetry tick
