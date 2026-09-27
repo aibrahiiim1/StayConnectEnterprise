@@ -185,6 +185,11 @@ echo
 
 # ---------------------------------------------------------------- 3. schema
 echo "Database schema"
+# A standard Central (central-install.sh) runs Postgres in the sc-central-pg container and has no psql on the
+# host, so the connection string alone cannot be used. With no explicit connection, use that container.
+if [ "${#PG_ARGS[@]}" = 0 ] && [ -z "${CENTRAL_DB_URL:-}" ] && ! command -v psql >/dev/null 2>&1    && command -v docker >/dev/null 2>&1 && docker inspect sc-central-pg >/dev/null 2>&1; then
+  PG_ARGS=(--pg-exec "docker exec -i sc-central-pg" --db stayconnect)
+fi
 if [ "${#PG_ARGS[@]}" -gt 0 ] || [ -n "${CENTRAL_DB_URL:-}" ] || envget CTRLAPI_DB_URL >/dev/null; then
   if [ "${#PG_ARGS[@]}" = 0 ] && [ -z "${CENTRAL_DB_URL:-}" ]; then
     CENTRAL_DB_URL="$(envget CTRLAPI_DB_URL)"; export CENTRAL_DB_URL
