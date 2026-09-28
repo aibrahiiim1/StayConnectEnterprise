@@ -24,7 +24,7 @@ retries immediately.)
    **Advanced**, the WAN MAC) against the box in front of you before continuing.
 2. Press **Activate**. **Customer** — pick an existing one or create it.
 3. **Site** — pick an existing one or create it. This is the site the appliance is bound to.
-4. **Clients online at once** — the licensed ceiling. `0` is unlimited. It is **appliance-wide across all guest
+4. **Clients online at once** — the licensed ceiling. `0` is unlimited. It is **appliance-wide across all client
    VLANs**, and it is enforced per appliance, so this is the real limit for this box.
 5. **Valid for** — a number of days, or an end date.
 6. **Grace period (days)** — after the end date clients keep working, with warnings.
@@ -185,11 +185,11 @@ branding) and says so — that is the correct state, not a fault.
 The licence's binding to this appliance (identity key, appliance id, serial, hardware fingerprint, WAN MAC) is
 checked on every evaluation — every minute and at boot — not only when a licence is installed.
 
-**DHCP shows `waiting`, not `failed`, until guest networking exists.** Kea binds the LAN bridge, which does
-not exist until an operator applies and confirms a guest network, so on a new appliance it is deliberately
+**DHCP shows `waiting`, not `failed`, until client networking exists.** Kea binds the LAN bridge, which does
+not exist until an operator applies and confirms a client network, so on a new appliance it is deliberately
 stopped. Health reports that as *waiting* with the reason, and boot convergence treats it as satisfied —
 otherwise every factory-clean appliance would report itself broken and permanently unconverged, burying any
-real convergence failure underneath a false one. The moment a guest network is confirmed, Kea is checked
+real convergence failure underneath a false one. The moment a client network is confirmed, Kea is checked
 normally and a genuine failure is reported as a failure. Nothing starts Kea early to make the screen green.
 
 ---
@@ -221,7 +221,7 @@ admin UI can later require MFA, VPN or Zero-Trust without any of that becoming a
 site's connectivity.
 
 **Local-first.** Once activated with a valid signed licence, losing Central changes nothing that a client or
-the site can see: Admin Console, guest networking, local authentication, PMS operation and existing sessions
+the site can see: Admin Console, client networking, local authentication, PMS operation and existing sessions
 all continue. The licence carries an offline grace period, and the assignment's expiry is a refresh horizon,
 not a kill switch.
 

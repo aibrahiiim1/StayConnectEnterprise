@@ -47,7 +47,7 @@ type SiteRow struct {
 
 var slugStrip = regexp.MustCompile(`[^a-z0-9]+`)
 
-// slugify turns a display name into a url-safe identifier ("Coral Sea Resorts" -> "coral-sea-resorts").
+// slugify turns a display name into a url-safe identifier ("Northwind Sites" -> "northwind-sites").
 func slugify(name string) string {
 	s := strings.Trim(slugStrip.ReplaceAllString(strings.ToLower(strings.TrimSpace(name)), "-"), "-")
 	if len(s) > 48 {

@@ -2,7 +2,7 @@
 
 > Two independent backup domains, matching the data-ownership split: each
 > site backs up its own `stayconnect_site` DB locally; the cloud backs up the
-> central `stayconnect` DB. Guest PII therefore stays inside the hotel even
+> central `stayconnect` DB. Client PII therefore stays inside the site even
 > in backup form.
 
 ## 1. Site DB backup (per appliance)
@@ -16,7 +16,7 @@
 - optionally the Caddy internal CA material.
 
 **Phase 19 networking is covered by the existing site-DB backup.** The site DB
-is the source of truth for guest networks/VLANs/DHCP: the `network_interfaces`,
+is the source of truth for client networks/VLANs/DHCP: the `network_interfaces`,
 `guest_networks`, `dhcp_pools`, `dhcp_reservations`, `network_config_revisions`,
 `network_apply_events` and `network_health_checks` tables are all in the
 `stayconnect_site` `pg_dump`, and the added `sessions` columns
@@ -44,8 +44,8 @@ deploy/scripts/stayconnect-site-backup.sh
 > schedule.
 >
 > `deploy/systemd/stayconnect-site-backup.{service,timer}` closes that. **02:10 local time**, not UTC,
-> because the policy is "a low-traffic hour in the site's timezone" and a hotel's quiet hour is a property
-> of where the hotel is. That is comfortably before the 03:30 retention cleanup, so a night's backup exists
+> because the policy is "a low-traffic hour in the site's timezone" and a site's quiet hour is a property
+> of where the site is. That is comfortably before the 03:30 retention cleanup, so a night's backup exists
 > before retention runs and the newest full backup the cleanup protects is the one just taken.
 > `Persistent=true`, so an appliance powered off overnight takes its backup when it returns rather than
 > skipping a day in silence.
@@ -85,7 +85,7 @@ tar czf "${OUT%.dump}-etc.tgz" --exclude=financial-restore-generation.json /etc/
 > restore history, and money movement is held until an operator establishes which is right.
 
 **`backup_records` is written by the OTHER backup path, not by this script.** The table exists (migration
-0001) and `POST /edge/v1/backups` — the Hotel-Admin path, which produces `db-<stamp>.sql.gz` through scd —
+0001) and `POST /edge/v1/backups` — the Admin Console path, which produces `db-<stamp>.sql.gz` through scd —
 records every run in it with `status running→ok/failed` and `kind scheduled|manual|pre_migration`. That is
 what the backups page shows.
 
@@ -106,7 +106,7 @@ tables were dropped by migration 0045, so no fleet view reports backup health fr
   `stayconnect-site-backup.timer` at 02:10 local, `Persistent=true`.
 - Retention: keep 7 daily + 4 weekly on the appliance; prune by age and by
   the license's retention limits for the underlying data.
-- Off-box copies go to **hotel-controlled** storage (NAS/SFTP on the hotel
+- Off-box copies go to **site-controlled** storage (NAS/SFTP on the site
   network) — never to StayConnect cloud storage (PII boundary,
   [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md)).
 - ~~HA pairs: back up on the current primary only (replication covers the secondary); the agent checks VRRP
@@ -154,7 +154,7 @@ It does what the raw commands below do, plus the three things that make a financ
    appliance able to detect that its database is older than it should be, and then records the restore and
    enters `FINANCIAL_RECOVERY_MODE`.
 
-After it completes, guest internet access runs normally and **money movement is held** until an operator
+After it completes, client internet access runs normally and **money movement is held** until an operator
 reconciles every item that was in flight when the backup was taken. Nothing is replayed automatically.
 
 The underlying commands, for reference and for a pre-Phase-4 appliance. **These were corrected after being
@@ -227,7 +227,7 @@ restores with `/etc` and is honoured), and only a factory-clean install brings i
   retired-identity register, **licenses incl. signed envelopes**, operators and
   roles and `audit_log`
   ([CLOUD_ARCHITECTURE.md §2](CLOUD_ARCHITECTURE.md#2-central-database-ownership)).
-  Central holds no guest or commercial history (migration 0047 dropped the
+  Central holds no client or commercial history (migration 0047 dropped the
   `legacy_archive` schema);
 - the **vendor signing key** (`CTRLAPI_VENDOR_KEY` file) — backed up
   separately, encrypted, access-restricted: losing it means no new licenses
@@ -280,8 +280,8 @@ appliance for **licensing only**.
 > anywhere to restore. See `current_state_facts.central_scope` in
 > `governance/project-state.json`.
 
-**Key property of the architecture: a cloud restore never interrupts hotels.**
-Appliances keep serving guests on their persisted licenses throughout
+**Key property of the architecture: a cloud restore never interrupts sites.**
+Appliances keep serving clients on their persisted licenses throughout
 ([OFFLINE_OPERATION.md](OFFLINE_OPERATION.md)).
 
 ## 3. Restore drills
@@ -291,10 +291,10 @@ Run quarterly, and once as part of pilot acceptance:
 | Drill | Steps | Pass criteria |
 |---|---|---|
 | Site restore | restore latest site dump to a scratch DB (`stayconnect_site_drill`), count rows vs `backup_records.size_bytes` era, spot-check a voucher and a session | pg_restore exit 0; counts plausible; no FK errors |
-| Full appliance rebuild | fresh VM → deploy stack → restore site dump + `/etc/stayconnect` → run phase 1 suite | guest login green without touching the cloud |
+| Full appliance rebuild | fresh VM → deploy stack → restore site dump + `/etc/stayconnect` → run phase 1 suite | client login green without touching the cloud |
 | Cloud restore | restore cloud dump to scratch; issue a test license against it | envelope signs & verifies |
 | Vendor-key escrow check | decrypt the escrowed key, `LoadSigner` succeeds, key_id matches production | key_id equality |
-| Outage replay | combine with the cloud-outage drill: restore cloud from a dump taken *before* an edge outage window; appliances keep serving guests throughout, and their next licence fetch and assignment poll succeed against the restored Central | guests unaffected; appliances `Connected` again |
+| Outage replay | combine with the cloud-outage drill: restore cloud from a dump taken *before* an edge outage window; appliances keep serving clients throughout, and their next licence fetch and assignment poll succeed against the restored Central | clients unaffected; appliances `Connected` again |
 
 Record every drill in the cloud audit log (`backup.drill` action) and, for
 site drills, as a `manual` row in `backup_records`.

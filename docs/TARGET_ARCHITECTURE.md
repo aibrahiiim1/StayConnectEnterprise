@@ -1,6 +1,6 @@
 # Target Architecture — Edge-First Refactor
 
-> Authoritative design for the cloud-controlled / hotel-local split. Companion docs:
+> Authoritative design for the cloud-controlled / site-local split. Companion docs:
 > [CLOUD_ARCHITECTURE.md](CLOUD_ARCHITECTURE.md), [EDGE_ARCHITECTURE.md](EDGE_ARCHITECTURE.md),
 > [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md), [LICENSING_AND_ENTITLEMENTS.md](LICENSING_AND_ENTITLEMENTS.md),
 > [OFFLINE_OPERATION.md](OFFLINE_OPERATION.md). Central is specified by
@@ -23,13 +23,13 @@
 
 ## 1. Design goal
 
-The hotel's guest WiFi must work with the internet and the cloud down.
-Everything a guest or a hotel operator touches runs **on the appliance against a
+A site's Client Wi-Fi must work with the internet and the cloud down.
+Everything a client or a site operator touches runs **on the appliance against a
 site-local database**. The cloud (Central) keeps only licensing, activation and
 fleet status: who the customers are, which sites and appliances exist, whether
 each appliance is activated and connected, and its signed licence (CLAUDE.md
 §0E). The appliance has no telemetry subsystem at all. The appliance opens **outbound HTTPS
-connections only** — nothing in the cloud ever needs to reach into a hotel
+connections only** — nothing in the cloud ever needs to reach into a site
 network.
 
 ## 2. Hierarchy
@@ -43,13 +43,13 @@ network.
                      └────────────┬─────────────┘
                                   │ 1..n
                      ┌────────────▼─────────────┐
-                     │  CUSTOMER / HOTEL GROUP  │  a hotel chain or brand
+                     │     CUSTOMER / GROUP     │  an organisation, chain or brand
                      │  sites, customer users,  │  (tenants table, cloud)
                      │  customer activity       │
                      └────────────┬─────────────┘
                                   │ 1..n
                      ┌────────────▼─────────────┐
-                     │      SITE / HOTEL        │  one property
+                     │           SITE           │  one physical location
                      │  one ISOLATED local DB   │  (sites table, cloud;
                      │  per appliance           │   stayconnect_site DB, edge)
                      └────────────┬─────────────┘
@@ -65,12 +65,12 @@ network.
 
 | Product | Runs | Serves | Data |
 |---|---|---|---|
-| **Cloud / Central** (`control-plane/` = ctrlapi + `cloud-admin/` UI) | StayConnect's infrastructure, served centrally | Platform operators and customer users: customers, sites, appliance activation and lifecycle, license issuance/suspension/revocation, fleet status | Cloud Postgres — no guest PII |
-| **Edge Appliance** (`data-plane/` = scd, portald, acctd, edged) | On-prem at each hotel, inline on the guest network | Guests (captive portal) and the Admin Console API | Site-local Postgres `stayconnect_site` — the entire guest domain |
-| **Admin Console** (`hotel-admin/` UI) | Served from the appliance itself via Caddy on the **management IP** (e.g. `https://172.21.15.30`) | Hotel staff: guest access plans, vouchers, sessions, PMS, walled garden, payments, local operators, backups | Talks only to the local `/edge/v1` API — works with the cloud down |
+| **Cloud / Central** (`control-plane/` = ctrlapi + `cloud-admin/` UI) | StayConnect's infrastructure, served centrally | Platform operators and customer users: customers, sites, appliance activation and lifecycle, license issuance/suspension/revocation, fleet status | Cloud Postgres — no client PII |
+| **Edge Appliance** (`data-plane/` = scd, portald, acctd, edged) | On-prem at each site, inline on the client network | Clients (Client Portal) and the Admin Console API | Site-local Postgres `stayconnect_site` — the entire client domain |
+| **Admin Console** (`hotel-admin/` UI) | Served from the appliance itself via Caddy on the **management IP** (e.g. `https://172.21.15.30`) | Site staff: access plans, vouchers, sessions, PMS, walled garden, payments, local operators, backups | Talks only to the local `/edge/v1` API — works with the cloud down |
 
 Terminology rule used everywhere: **GuestAccessPlan** = the edge
-`ticket_templates` table (what a hotel sells/grants a guest). The cloud-side
+`ticket_templates` table (what a site sells/grants a client). The cloud-side
 **CommercialPlan** (`plans`) is retired — the signed appliance licence is the
 only entitlement; the old tables were archived by Central migration 0046 and
 dropped with the `legacy_archive` schema by migration 0047. Plain
@@ -101,17 +101,17 @@ dropped with the `legacy_archive` schema by migration 0047. Plain
  │                                                  │           │     │
  │   local PMS (FIAS TCP / Mews / Apaleo REST) ◀── scd          │     │
  │                                                              │     │
- │   guest iface (e.g. 10.20.0.1) ── Kea DHCP · Unbound DNS     │     │
+ │   client iface (e.g. 10.20.0.1) ── Kea DHCP · Unbound DNS    │     │
  │        │  nftables captive DNAT ──▶ portald ──unix──▶ scd ───┘     │
  │        ▼                                                           │
- │   Guest devices              [HA sync: SUPERSEDED third-NIC design; │
+ │   Client devices             [HA sync: SUPERSEDED third-NIC design; │
  │                               transport OPEN, not implemented — §6]  │
  └────────────────────────────────────────────────────────────────────┘
 ```
 
 Key invariants:
 
-- **The guest path never leaves the box.** Voucher, OTP, PMS and social auth,
+- **The client path never leaves the box.** Voucher, OTP, PMS and social auth,
   concurrency checks, shaping, quotas and accounting all read/write the local DB.
   (External providers — Twilio/SendGrid/Google/Stripe — are internet dependencies
   by nature; see [OFFLINE_OPERATION.md](OFFLINE_OPERATION.md).)
@@ -128,7 +128,7 @@ Key invariants:
   factory-clean install → registration → activation; an appliance Central
   deletes after it held a customer never re-registers
   ([CENTRAL_CONTROL_PLANE.md §4](CENTRAL_CONTROL_PLANE.md#4-lifecycle)).
-- **Guest PII never reaches the cloud.**
+- **Client PII never reaches the cloud.**
 
 ## 5. API namespaces
 
@@ -168,8 +168,8 @@ serves appliances for licensing only, CLAUDE.md §0E).
 - **Production:** cloud and appliances are physically separate
   ([DEPLOYMENT_CLOUD.md](DEPLOYMENT_CLOUD.md), [DEPLOYMENT_APPLIANCE.md](DEPLOYMENT_APPLIANCE.md)).
   Each appliance has **exactly two physical NICs**: a **WAN interface that is also the
-  management interface** (Admin Console, SSH, outbound HTTPS to Central) and a **LAN guest-gateway
-  interface** (captive network + guest VLAN trunk). There is **no separate management NIC** and
+  management interface** (Admin Console, SSH, outbound HTTPS to Central) and a **LAN client-gateway
+  interface** (captive network + client VLAN trunk). There is **no separate management NIC** and
   **no approved dedicated HA-sync NIC** — the HA-sync transport under two NICs is an **OPEN
   architecture decision** (§6).
 

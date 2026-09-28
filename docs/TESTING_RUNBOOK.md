@@ -14,7 +14,7 @@ Host / service map:
 | Plane | Host | Key services | Ingress |
 |---|---|---|---|
 | Central control plane | `172.21.96.196` | `stayconnect-ctrlapi` (:8080; appliance mutual TLS :9443), `cloud-admin` (:3000), Caddy, Postgres `sc-central-pg`, Redis `sc-central-redis`. No NATS (CLAUDE.md §0E) | `sc-central.echofusion.com` / `admin.stayconnect.local` → Caddy (`/v1`, `/cloud` → :8080, the rest → :3000) |
-| Appliance edge | `172.21.60.25` | `stayconnect-scd`, `edged` (:8090), `netd`, `portald` (:8380), `caddy` (:80/:443), `hotel-admin` (:3100), `acctd`, site Postgres `stayconnect-pg` | `portal.stayconnect.local` (guest) · `hotel.stayconnect.local` (Admin Console) |
+| Appliance edge | `172.21.60.25` | `stayconnect-scd`, `edged` (:8090), `netd`, `portald` (:8380), `caddy` (:80/:443), `hotel-admin` (:3100), `acctd`, site Postgres `stayconnect-pg` | `portal.stayconnect.local` (Client Portal) · `hotel.stayconnect.local` (Admin Console) |
 
 > **UI note:** the admin UIs redirect unauthenticated requests, so a protected
 > route returns **307 → /login**, and **/login returns 200**. A `500` on a
@@ -72,7 +72,7 @@ Expect: all `active`.
 ssh $A 'curl -s --unix-socket /run/stayconnect/scd.sock http://localhost/v1/central/status | python3 -m json.tool'
 ```
 Expect: `activation: "activated"`, `license.state: "active"`, `central.state: "connected"`, a recent
-`central.last_contact_at`, and a future `details.cert_not_after` ([CENTRAL_CONTROL_PLANE.md §8](CENTRAL_CONTROL_PLANE.md#8-hotel-admin--central)).
+`central.last_contact_at`, and a future `details.cert_not_after` ([CENTRAL_CONTROL_PLANE.md §8](CENTRAL_CONTROL_PLANE.md#8-admin-console--central)).
 `activation: "retired"` with `details.reason: "removed_from_central"` means Central deleted this appliance after
 it had held a customer (marker `/etc/stayconnect/removed-from-central.json`); it does not register again and
 needs a factory-clean install.
@@ -115,7 +115,7 @@ activation stays `activated` throughout — licence actions never touch the appl
 
 ---
 
-## Part D — Guest plane (edge)
+## Part D — Client plane (edge)
 
 **D1. Captive portal + HTTPS**
 ```bash
@@ -127,7 +127,7 @@ ssh $A 'curl -s -o /dev/null -w "generate_204: %{http_code}\n" http://127.0.0.1/
 ```
 Expect: `generate_204: 308`, `portal HTTPS: 200`, `hotel-admin /login: 200`.
 
-**D2. Full guest journey** (real client on guest VLAN 219) — connect → DHCP lease → captive auto‑pop → redeem voucher → internet + a `sessions` row in the site DB. Touches the live VLAN; run only in a maintenance window.
+**D2. Full client journey** (real client on client VLAN 219) — connect → DHCP lease → captive auto‑pop → redeem voucher → internet + a `sessions` row in the site DB. Touches the live VLAN; run only in a maintenance window.
 
 ---
 

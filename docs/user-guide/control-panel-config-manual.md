@@ -42,7 +42,7 @@ Admin Console (formerly Hotel Admin); they are **not** Sites. A site with two bu
 still one Site.
 
 1. Open the customer (**Customers** → the customer) and select the **Sites** tab.
-2. Click **New site** and fill in **Name** (e.g. `Semantics Demo Hotel`),
+2. Click **New site** and fill in **Name** (e.g. `Semantics Demo Site`),
    **Time zone** (e.g. `Africa/Cairo`), and optionally **Country** and **Short
    code**.
 3. Save.

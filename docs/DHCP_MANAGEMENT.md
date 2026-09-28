@@ -1,6 +1,6 @@
 # DHCP Management (Phase 19)
 
-> Local DHCP for guest networks with Kea, driven **online through the control
+> Local DHCP for client networks with Kea, driven **online through the control
 > socket** — no restart, no CSV parsing. Renderer:
 > `data-plane/internal/netcfg/render_kea.go`. Validator: `validate.go`.
 > Overview: [EDGE_NETWORKING.md](EDGE_NETWORKING.md).
@@ -9,7 +9,7 @@
 
 The appliance runs **Kea DHCP4 2.0.2** with a live Unix control socket
 (`/run/kea/kea4-ctrl-socket`). netd renders the full `Dhcp4` object from the
-enabled **local** guest networks and drives Kea online:
+enabled **local** client networks and drives Kea online:
 
 | Step | Kea command | Effect |
 |---|---|---|
@@ -26,7 +26,7 @@ start matches what was `config-set`.
 
 Only `dhcp_mode = local` networks are rendered into `subnet4`. `external`,
 `relay` and `disabled` networks are intentionally **not** served (Kea must not
-answer for a subnet the hotel runs itself) and their interfaces are excluded
+answer for a subnet the site runs itself) and their interfaces are excluded
 from the bind list.
 
 ## 2. What a rendered subnet looks like
@@ -64,11 +64,11 @@ Notes:
 - `v4-captive-portal` (RFC 8910 option 114) is emitted only when
   `captive_portal_enabled` — see [DHCP_OPTION_114.md](DHCP_OPTION_114.md).
 - `user-context` carries `guest_network_id` + `vlan_id` so `lease4-get-all`
-  results attribute back to a guest network.
+  results attribute back to a client network.
 
 ## 3. Scopes, pools and reservations
 
-- **Scope** = one guest network's subnet (`subnet_cidr` + `gateway_ip`).
+- **Scope** = one client network's subnet (`subnet_cidr` + `gateway_ip`).
 - **Pools** (`dhcp_pools`): a subnet may have **several** ranges, each
   `start_ip … end_ip`, ordered by `sort_order`. Rendered as
   `{ "pool": "start - end" }` entries. The `dhcp_pool_order` CHECK enforces
@@ -86,7 +86,7 @@ Notes:
 
 `GET /edge/v1/dhcp/{networkId}/leases` calls Kea `lease4-get-all` and shows
 active leases (IP, MAC, hostname, expiry) for the network, using `user-context`
-to filter to the selected guest network. Nothing is read from the memfile CSV.
+to filter to the selected client network. Nothing is read from the memfile CSV.
 
 ## 5. Validation rules (from `validate.go`)
 
@@ -97,7 +97,7 @@ issues. Pool/reservation checks run only for `dhcp_mode = local`. Every code:
 |---|---|---|
 | `required` (name/parent) | name or parent interface missing | supply it |
 | `interface_not_found` | parent interface not present on the appliance | pick a discovered interface |
-| `protected_interface` | parent is the management/WAN interface | choose a guest interface |
+| `protected_interface` | parent is the management/WAN interface | choose a client-network interface |
 | `bad_network_type` | `network_type` not `untagged`/`vlan` | fix the type |
 | `vlan_out_of_range` | VLAN id not in 1–4094 | use a valid 802.1Q id |
 | `vlan_on_untagged` | untagged network set a VLAN id | clear `vlan_id` |
@@ -133,14 +133,14 @@ Cross-network checks from `ValidateSet`:
 |---|---|
 | `duplicate_vlan` | same VLAN id already used on that parent interface |
 | `duplicate_bridge` | bridge name used by more than one network |
-| `subnet_overlap` | this subnet overlaps another enabled guest subnet (no VRF yet) |
+| `subnet_overlap` | this subnet overlaps another enabled client subnet (no VRF yet) |
 
 Validation is a hard gate before apply — see
 [NETWORK_APPLY_AND_ROLLBACK.md](NETWORK_APPLY_AND_ROLLBACK.md) §3.
 
 ## 6. DHCP modes
 
-`local` (this document), `external`, `relay`, `disabled`. `external` — the hotel
+`local` (this document), `external`, `relay`, `disabled`. `external` — the site
 runs DHCP; StayConnect is still gateway + captive portal, see
 [EXTERNAL_DHCP_MODE.md](EXTERNAL_DHCP_MODE.md). `relay` is supported in the schema
 (`relay_targets`) but minimal in this release. `disabled` serves no DHCP.

@@ -14,7 +14,7 @@ or assignment/license keys.
 | `stayconnect-hotel-admin-cert-renew.{service,timer}` | systemd | runs the manager `renew` after boot and every 6h, jittered, `Persistent` |
 | scd `/v1/hotel-admin-cert/{check,rotate,renew}` | data-plane (root) | executes the manager on behalf of the sandboxed edged |
 | edged `/edge/v1/hotel-admin-cert[/check|/rotate]` | data-plane | status surface + manual controls (permission + step-up); proxies exec to scd |
-| Admin Console → **Networking → TLS certificate** | hotel-admin UI | live status card + “Check certificate” + “Rotate” |
+| Admin Console → **Networking → TLS certificate** | Admin Console UI (`hotel-admin/`) | live status card + “Check certificate” + “Rotate” |
 | `/etc/caddy/hotel-admin/vhost.caddy` | imported by main Caddyfile | managed vhost: site address (DNS + current IP), `tls`, reverse_proxy — rewritten on renewal |
 
 ## Renewal triggers & thresholds
@@ -32,8 +32,8 @@ the Admin Console certificate — CLAUDE.md §0E):
 
 The management interface is read from netd's own config (`NETD_MGMT_IFACE`, else
 `NETD_WAN_IFACE`); the IP is read **live** off that interface (single global-scope
-IPv4). Renewal is **refused** if the IP is ambiguous/absent, and guest-LAN
-(`10.10.0.x`), loopback, link-local and docker addresses are rejected — the guest
+IPv4). Renewal is **refused** if the IP is ambiguous/absent, and client-LAN
+(`10.10.0.x`), loopback, link-local and docker addresses are rejected — the client
 LAN address can never enter the management certificate.
 
 ## Safe minting & validation
@@ -75,9 +75,9 @@ telemetry; the appliance's telemetry subsystem was removed — CLAUDE.md §0E.) 
 `management_ip_changed`, `certificate_san_changed`; edged additionally records
 `hotel_admin_cert.rotate_requested` with the operator + reason.
 
-## Manual controls (Hotel IT)
+## Manual controls (site IT)
 
-- **Rotate** — Hotel-IT (`network`) role + password
+- **Rotate** — Site IT (`network`) role + password
   step-up + reason + typed `ROTATE` confirmation. Runs the exact same safe
   lifecycle; cannot upload a key or bypass validation.
 - **Check certificate** — diagnostic only, validates the active cert, changes
@@ -87,7 +87,7 @@ telemetry; the appliance's telemetry subsystem was removed — CLAUDE.md §0E.) 
 
 Renewal is a background maintenance job with **no** dependency from
 caddy/edged/scd/netd/portald/acctd — a renewal failure never stops DHCP, DNS, the
-captive portal, guest auth, sessions, PMS, accounting or the data plane. If renewal
+captive portal, client sign-in, sessions, PMS, accounting or the data plane. If renewal
 fails while the current cert is still valid, that cert keeps serving, alerts are
 raised, and the manager backs off (bounded exponential, capped at 24h) so the 6h
 timer never becomes a rapid loop.
@@ -125,19 +125,19 @@ re-mints from the CA.
 
 ## Certificate incident procedure
 
-- **`warning`/`critical`/`emergency`/renewal-failure** in Hotel
-  Admin: open `journalctl -u stayconnect-hotel-admin-cert-renew`, read
+- **`warning`/`critical`/`emergency`/renewal-failure** in the Admin
+  Console: open `journalctl -u stayconnect-hotel-admin-cert-renew`, read
   `status.json` `last_error`. Common causes: ambiguous mgmt IP (fix the interface
   config), CA unavailable. Force a `rotate` once resolved.
-- **`expired`:** the box keeps running (guest plane unaffected); Admin Console HTTPS
+- **`expired`:** the box keeps running (client plane unaffected); Admin Console HTTPS
   shows a browser warning. Run a manual `rotate`; if it fails, check the CA and the
   management IP, then re-run.
-- The cert lifecycle is isolated: a certificate incident is **never** a guest-service
+- The cert lifecycle is isolated: a certificate incident is **never** a client-service
   incident.
 
 ## Management IP change workflow
 
-When Hotel IT changes the WAN/Management IP via **Networking → WAN/LAN settings**
+When the site IT team changes the WAN/Management IP via **Networking → WAN/LAN settings**
 (apply → confirm), edged fires an idempotent renewal after confirm. The manager
 resolves the new IP, mints a cert with the new IP SAN, **removes the old IP SAN**,
 keeps the DNS SAN, rewrites `vhost.caddy` so Caddy routes the new IP, atomically

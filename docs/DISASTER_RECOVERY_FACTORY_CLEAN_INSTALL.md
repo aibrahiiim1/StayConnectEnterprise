@@ -18,18 +18,18 @@ existing machine. This is the procedure behind the **Fresh Production Appliance 
 | OS + packages | base image / distro install | — |
 | PostgreSQL schema | `data-plane/migrations/*.up.sql` + `data-plane/migrations/iam_base/` | — |
 | Service binaries | built from `data-plane/cmd/*` | — |
-| Hotel-Admin bundle | built from `hotel-admin/` (Next standalone) | — |
+| Admin Console bundle | built from `hotel-admin/` (Next standalone) | — |
 | systemd units | `deploy/systemd/*.service`, `deploy/kea/systemd/override.conf` | — |
 | Database roles + privileges | `deploy/gatep/gatep-roles.sql`, `gatep-iam-roles.sql`, `gatep-grants.sql` (+ its includes) | passwords generated **on the appliance**, never committed |
 | Network baseline | `deploy/netplan/`, `deploy/nftables/`, `deploy/sysctl/`, `deploy/tmpfiles/` | WAN/LAN addressing confirmed on site |
-| Reverse proxy | `deploy/caddy/` + the managed hotel-admin vhost | certificate minted on the appliance |
+| Reverse proxy | `deploy/caddy/` + the managed Admin Console vhost | certificate minted on the appliance |
 | DHCP | `deploy/kea/` | leases are runtime state |
 | **Appliance identity** | — | **token-less self-registration → Activate in Central → signed assignment** |
 | **Tenant / Site** | — | **signed assignment document** (never env, never a dump) |
 | **Licence** | — | fetched from Central after activation (or uploaded via `POST /edge/v1/license`), hardware/identity bound |
 | **Operators** | — | created through Admin Console after activation |
-| **Guest access config, packages, plans, PMS interfaces, networks** | — | Hotel-Admin configuration |
-| **Guests, accounts, vouchers, sessions, folios** | — | real operation only |
+| **Client access config, packages, plans, PMS interfaces, networks** | — | Admin Console configuration |
+| **Clients, accounts, vouchers, sessions, folios** | — | real operation only |
 
 **Verified:** a factory-clean build seeds **only** the `schema_migrations` ledger. Every identity-bearing
 table is empty — `tenants=0 sites=0 appliances=0 operators=0 guest_accounts=0 vouchers=0 ticket_templates=0`.
@@ -414,7 +414,7 @@ production build (`-tags stayconnect_production`); the Hotel-Admin Next build an
    Do **not** add `-ldflags`: it is not recorded in Go's build metadata, so a stripped binary and an
    unstripped one are indistinguishable from the artifact, and the ability to check a running binary against
    its source later is worth more than the few megabytes. Install binaries and
-   units from `deploy/systemd/`; install the Hotel-Admin bundle with `deploy/scripts/deploy-hotel-admin.sh
+   units from `deploy/systemd/`; install the Admin Console bundle with `deploy/scripts/deploy-hotel-admin.sh
    install`.
 7. **Network baseline** from `deploy/netplan/`, `deploy/nftables/`, `deploy/kea/`, `deploy/caddy/`.
 8. Start scd: the appliance **registers itself** with Central (no token) and shows *Waiting for activation*;
@@ -445,7 +445,7 @@ cases:
   (`holds_customer_id`), and Central activates it only for that customer (`409 holds_other_customer_data`
   otherwise) — so an identity reset without a blank-disk install cannot move it to someone else.
 - **After Admin Console shows *Removed from OneGate Central*.** Central deleted this appliance's record after it
-  had held a customer. It keeps that customer's data, admits no new guests, refuses licence and activation
+  had held a customer. It keeps that customer's data, admits no new clients, refuses licence and activation
   files and never registers again; the marker is `/etc/stayconnect/removed-from-central.json`.
   `deploy/scripts/provision-fresh-appliance.sh` **refuses** to run over such an appliance, because
   re-provisioning over it would keep the database and `/etc/stayconnect` — reinstall from a blank disk.

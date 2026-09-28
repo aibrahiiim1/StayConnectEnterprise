@@ -9,15 +9,15 @@
 
 | Owned by the WLAN controller (Aruba/Ruckus/Cisco/Extreme) | Owned by StayConnect |
 |---|---|
-| The **SSID** ("Coral Sea Guest") and its radio/security settings | — |
+| The **SSID** ("OneGate Wi-Fi") and its radio/security settings | — |
 | **SSID → VLAN** assignment (which VLAN a client lands on) | — |
-| Tagging guest traffic 802.1Q and **trunking the VLAN** to the StayConnect guest-trunk port | — |
+| Tagging client traffic 802.1Q and **trunking the VLAN** to the StayConnect client-trunk port (`guest_trunk` role) | — |
 | — | **VLAN → interface** (the `parent.<vlan>` sub-interface + bridge) |
 | — | **Gateway** (`gateway_ip`/`subnet_cidr`), **DHCP**, **DNS** |
 | — | **Captive portal** (option 114, DNAT interception, portald) |
 | — | **Internet policy** (NAT, walled garden, shaping, client isolation) |
 
-One sentence: **the controller decides which VLAN a guest is on; StayConnect
+One sentence: **the controller decides which VLAN a client is on; StayConnect
 provides everything that VLAN needs to reach the internet through a sign-in
 page.** `guest_networks.ssid_label` is descriptive only — a human label to help
 operators match a StayConnect network to the controller's SSID. Setting it does
@@ -27,8 +27,8 @@ not touch the controller.
 
 On the Aruba controller / Aruba Central (Instant AP flow is analogous):
 
-1. **Create the SSID.** WLAN → *New*. Name it `Coral Sea Guest`. Set the security
-   you want (typically Open or Enhanced Open for a captive-portal guest network;
+1. **Create the SSID.** WLAN → *New*. Name it `OneGate Wi-Fi`. Set the security
+   you want (typically Open or Enhanced Open for a captive-portal client network;
    leave the controller's own captive portal **off** — StayConnect is the
    portal).
 2. **Map the SSID to VLAN 20.** In the SSID's network/VLAN settings, set the
@@ -49,11 +49,11 @@ Then in the **OneGate Admin Console**:
 6. Create the client network (**Networking → Client networks → New client
    network**): type **VLAN**, parent `ens192`, VLAN id **20**,
    gateway `10.20.0.1/22`, DHCP `local` with a pool, captive portal on. Set
-   `ssid_label` to `Coral Sea Guest` for readability. Validate, apply, confirm
+   `ssid_label` to `OneGate Wi-Fi` for readability. Validate, apply, confirm
    ([GUEST_VLAN_CONFIGURATION.md](GUEST_VLAN_CONFIGURATION.md),
    [NETWORK_APPLY_AND_ROLLBACK.md](NETWORK_APPLY_AND_ROLLBACK.md)).
 
-The result: a guest joins `Coral Sea Guest` → the AP tags them VLAN 20 → the
+The result: a client joins `OneGate Wi-Fi` → the AP tags them VLAN 20 → the
 trunk carries VLAN 20 to `ens192` → `ens192.20` → `br-g20` → StayConnect gives
 them a `10.20.x.x` lease, option 114, and the captive portal.
 
@@ -99,23 +99,23 @@ Once both sides are configured, walk the path from the client inward:
 | Tagged frames arrive | `ip -br link show ens192.20` | device exists, state UP |
 | Bridge carries the VLAN | `bridge link show` | `ens192.20` master `br-g20` |
 | Gateway is live | `ip -br addr show br-g20` | `10.20.0.1/22` |
-| Guest gets a lease | leases page / Kea `lease4-get-all` | client in `10.20.x.x`, gateway `10.20.0.1` |
-| Portal pops | join `Coral Sea Guest` on a phone | sign-in page at `http://10.20.0.1:8380/` |
+| Client gets a lease | leases page / Kea `lease4-get-all` | client in `10.20.x.x`, gateway `10.20.0.1` |
+| Portal pops | join `OneGate Wi-Fi` on a phone | sign-in page at `http://10.20.0.1:8380/` |
 
 If the VLAN device or bridge never shows traffic counters incrementing
 (`ip -s link show ens192.20`), the tagged frames aren't arriving — recheck the
 controller SSID→VLAN mapping and the switch/AP trunk. On ESXi, also confirm the
 LAN portgroup allows Promiscuous / MAC-changes / Forged-transmits (needed for the
-bridge to pass VLAN-tagged guest MACs).
+bridge to pass VLAN-tagged client MACs).
 
 ## 7. Common mapping mistakes
 
-- **Controller portal left on** — the AP shows its own splash page and guests
+- **Controller portal left on** — the AP shows its own splash page and clients
   never reach StayConnect's. Turn the controller's captive portal off for the
   SSID; StayConnect is the portal.
 - **VLAN sent untagged** — if the controller puts VLAN 20 on the trunk untagged,
   create an `untagged` StayConnect network on that access port instead, or fix the
   trunk to tag it. Untagged frames can't be demuxed to `ens192.20`.
 - **Access port instead of trunk** — a single-VLAN access port works only for one
-  untagged network; to carry multiple guest VLANs the appliance port must be a
+  untagged network; to carry multiple client VLANs the appliance port must be a
   tagged trunk with role `guest_trunk`.

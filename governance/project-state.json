@@ -462,7 +462,7 @@
     "rollback_rehearsal_occurred": true,
     "corrected_software_deployed": true,
     "deployed_head_on_appliance": "MIXED -- see deployed_runtime_services; there is no single deployed head",
-    "deployed_head_note": "PRE-LIVE 172.21.60.25, re-read live after the neutral-core deployment (2026-09-27 ~22:43Z UTC). THE APPLIANCE RUNS BINARIES FROM FOUR COMMITS and this field names none. edged, portald and netd run 588f9835 (master, the merge of PR #198); scd, acctd and pmsd run 42675ea2 (the Central-redesign head, on master since PR #194 merged as ddcce35a); all six read out of the INSTALLED bytes: vcs.modified=false, -tags=stayconnect_production; /opt/stayconnect/DEPLOYED_BINARIES.{sha256,txt} were rewritten from the installed bytes and `sha256sum -c` reports all six OK. netd's restart left the network untouched: the `nft -s list ruleset` digest (eae33658198e81e6) and `ip -br addr` were identical before and after. The helper binaries keep their own builds: keybootstrap runs d4e1dc76; sitemigrate and svc-run run 29a6b21f. The previous edged, portald and netd are kept as *.bak-pre-588f9835-20260927T224309Z. No migration was applied. WHY THE MIXED STATE IS KEPT: rebuilding unchanged services from a newer head to make this record uniform would ship unrelated changes onto PRE-LIVE.",
+    "deployed_head_note": "PRE-LIVE 172.21.60.25, re-read live after the neutral-core deployment (2026-09-27 ~22:43Z UTC). THE APPLIANCE RUNS BINARIES FROM FOUR COMMITS and this field names none. edged, portald and netd run 588f9835 (master, the merge of PR #198); scd, acctd and pmsd run 42675ea2 (the Central-redesign head, on master since PR #194 merged); all six read out of the INSTALLED bytes: vcs.modified=false, -tags=stayconnect_production; /opt/stayconnect/DEPLOYED_BINARIES.{sha256,txt} were rewritten from the installed bytes and `sha256sum -c` reports all six OK. netd's restart left the network untouched: the `nft -s list ruleset` output and `ip -br addr` were byte-identical before and after. The helper binaries keep their own builds: keybootstrap runs d4e1dc76; sitemigrate and svc-run run 29a6b21f. The previous edged, portald and netd are kept as *.bak-pre-588f9835-20260927T224309Z. No migration was applied. WHY THE MIXED STATE IS KEPT: rebuilding unchanged services from a newer head to make this record uniform would ship unrelated changes onto PRE-LIVE.",
     "live_increment9_revalidated": true,
     "live_increment9_revalidated_on": "2026-08-11",
     "live_increment9_revalidation_verdicts": {
@@ -1747,17 +1747,17 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "PRELIVE_GUEST_ACCESS",
-    "decision": "D43: PRE-LIVE Guest Access for Product Owner testing (2026-09-26); merged on the Product Owner's 'Approved and merge'.",
-    "decision_note": "Recorded by T0197. No migration, no schema change, no PMS/financial/payment traffic, no other environment, no Go-Live.",
-    "manifest": "docs/manifests/GuestAccess-change-manifest.md",
-    "base": "33bc78ce8b9609b6af89ad7c22b2218e0944da1d",
-    "base_note": "Master after the merge of PR #191 (D42).",
-    "head": "13c43c1e",
-    "head_note": "The last CONTENT commit of PR #192 (13c43c1e), deployed to PRE-LIVE as scd.",
+    "kind": "INDUSTRY_NEUTRAL_TERMINOLOGY",
+    "decision": "Product-Owner terminology decisions of 2026-09-27: an industry-neutral OneGate core (Client, Admin Console, Client Portal, Site, Client networks, Wi-Fi Access) with hospitality grouped as one Hotel module. Binding reference docs/PRODUCT_TERMINOLOGY.md; recorded as current_state_facts.product_terminology.",
+    "decision_note": "Missions authorized merge and PRE-LIVE/Central deployment in advance. No migration, no schema change, no PMS/financial/payment traffic, no networking change, no Go-Live.",
+    "manifest": "docs/manifests/NeutralTerminology-change-manifest.md",
+    "base": "ddcce35a43ef196a175c4ff81790614643ae00ab",
+    "base_note": "Master after the merge of PR #194, immediately before PR #195 began the terminology work.",
+    "head": "c691cf37",
+    "head_note": "The last CONTENT commit of the documentation sweep that closes the terminology work (PRs #195-#199 and the sweep PR); the manifest records base..HEAD at that commit.",
     "transition": "T0197",
-    "previous_delivery": "T0196",
-    "note": "T0197 / D43. Guest Access complete on PRE-LIVE for Product Owner testing: voucher, guest account and PMS room, end to end with real enforcement and internet; 53/53 live."
+    "previous_delivery": "T0197 (PRELIVE_GUEST_ACCESS, docs/manifests/GuestAccess-change-manifest.md)",
+    "note": "Terminology deliveries merged as 14855bd2 (#195), 5c96d410 (#196), 5df7c971 (#197), 588f9835 (#198), ac1ce011 (#199), then the current-documentation sweep. No new transition receipt: the work ran under D42's Product-Owner-led model, which records deliveries here rather than per transition."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

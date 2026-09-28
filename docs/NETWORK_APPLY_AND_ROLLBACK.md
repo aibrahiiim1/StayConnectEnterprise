@@ -1,6 +1,6 @@
 # Network Apply & Rollback (Phase 19)
 
-> Every guest-network change is a **numbered revision** applied transactionally,
+> Every client-network change is a **numbered revision** applied transactionally,
 > with pre-apply gates, a snapshot, health checks, and a 120 s watchdog that
 > auto-rolls-back if you don't confirm — so a bad change can never lock you out.
 > Schema: `network_config_revisions` / `network_apply_events` /
@@ -75,7 +75,7 @@ the previous known-good revision's bundle, the current running Kea config
 (`config-get`), the live nftables ruleset, and current netplan. The
 `previous_seq` link records exactly which revision to restore. **Management and
 WAN interfaces are never part of the applied set** — the netplan renderer never
-emits them, so a guest-network apply structurally cannot reconfigure the
+emits them, so a client-network apply structurally cannot reconfigure the
 management link.
 
 ## 5. Health checks
@@ -86,7 +86,7 @@ After apply (`phase = health`), netd runs the checks in
 | Check | Verifies |
 |---|---|
 | `mgmt_reachable` | the management interface/route is still up and Admin Console is reachable — **the connectivity-protection check on every apply** |
-| `gateway_up` | each new/changed guest gateway address is present and the bridge is up |
+| `gateway_up` | each new/changed client gateway address is present and the bridge is up |
 | `kea_running` | Kea answers `status-get` after `config-set` |
 | `portal_listen` | portald is listening on the gateway `:8380`/`:8343` |
 | `dns` | Unbound answers on each gateway after reload |

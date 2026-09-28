@@ -49,12 +49,12 @@ Caddy bind:
 
 - `:443` is accepted **only** on the management interface `ens160` to the management
   IP (`iifname "ens160" ip daddr the retired development reference appliance tcp dport 443 accept`).
-- Guest `:443` arriving on `br-lan` is DNAT'd to the **captive portal**
+- Client `:443` arriving on `br-lan` is DNAT'd to the **captive portal**
   (`10.10.0.1:8343`) — it never reaches Caddy.
-- Guest→management ranges (`172.16/12`, `192.168/16`) are dropped.
+- Client→management ranges (`172.16/12`, `192.168/16`) are dropped.
 
-So the Admin Console — DNS name or IP — is **not** exposed through br-lan, the guest
-network, or as a public WAN service. Guest services (portal, DNS, DHCP) are
+So the Admin Console — DNS name or IP — is **not** exposed through br-lan, the client
+network, or as a public WAN service. Client services (portal, DNS, DHCP) are
 unaffected.
 
 ## Why the IP alias "just works" at the app layer
@@ -76,4 +76,4 @@ edged (`/license`), favicon/`/icon.svg` + `/_next` static, page refresh + relati
 redirect, logout (+ post-logout `whoami` 401). Persistence confirmed across **Caddy
 reload/restart, edged + hotel-admin restart, and a full appliance reboot** — both
 URLs kept serving the same dual-SAN cert (identical serial) and the full flow, with
-guest services up throughout.
+client services up throughout.

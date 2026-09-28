@@ -1,6 +1,6 @@
 # Offline Operation
 
-> The defining property of the edge-first architecture: **a site's guest WiFi
+> The defining property of the edge-first architecture: **a site's Client Wi-Fi
 > and its Admin Console (formerly Hotel Admin) keep working with the cloud and even the whole internet
 > uplink's control traffic down.** This doc states exactly what
 > continues, what pauses, and how to prove it.
@@ -18,10 +18,10 @@ Everything that reads/writes only the site-local DB and local kernel state:
 | Session concurrency/limits | `tenant_effective_limits` is a local table fed by the signed license |
 | Bandwidth shaping, data/time quotas, accounting | tc + acctd + local `accounting_records` |
 | Session reaper, idle timeout, natural expiry | scd local loops |
-| Admin Console (all of `/edge/v1`) | edged + hotel-admin are served from the appliance's **WAN/management IP** (two-NIC rule: WAN is the management interface) |
+| Admin Console (all of `/edge/v1`) | edged + the Admin Console UI (`hotel-admin`) are served from the appliance's **WAN/management IP** (two-NIC rule: WAN is the management interface) |
 | Local operator login | argon2id against local `operators` |
 | Voucher batch creation, GuestAccessPlan edits, walled garden, branding | local writes (license state permitting) |
-| License enforcement | evaluated offline from the persisted signed document — the same gate and the same concurrent-guest capacity for every method, PMS room sign-in included |
+| License enforcement | evaluated offline from the persisted signed document — the same gate and the same concurrent-client capacity for every method, PMS room sign-in included |
 | HA failover | **NOT available** — HA failover under the final two-NIC (WAN+LAN) architecture is **not yet designed, implemented, or accepted** (the old third-NIC `hasync` design is superseded; the HA-sync transport is an OPEN decision). **Single-appliance local-first/offline operation is what is current and supported.** The VRRP/conntrackd/nft/DB-replication ideas are design intent only. |
 | Backups | local pg_dump + `backup_records` |
 
@@ -69,7 +69,7 @@ Run on a non-production appliance. Expected total time ≈ 20 minutes.
    **Appliance & licence** shows OneGate Central *Connected*.
 2. **Sever the cloud**: drop it at the appliance's firewall —
    `nft add rule inet filter output ip daddr <central-ip> drop`.
-3. **Guest path must stay green**:
+3. **Client path must stay green**:
    - new voucher login from the netns client succeeds;
    - PMS (stub/FIAS) login succeeds;
    - existing session keeps passing traffic; shaping/quota still enforced;
@@ -88,7 +88,7 @@ Run on a non-production appliance. Expected total time ≈ 20 minutes.
    *Connected* again.
 8. **Re-run** the relevant phase suites (1, 2, 4.5) to confirm no regression.
 
-Failure of step 3 or 4 is a release blocker: it means a guest-path component
+Failure of step 3 or 4 is a release blocker: it means a client-path component
 still has a hidden cloud dependency (compare
 [CURRENT_STATE_ASSESSMENT.md](CURRENT_STATE_ASSESSMENT.md) §3 — the exact
 defect this refactor removes).
@@ -96,6 +96,6 @@ defect this refactor removes).
 ## 5. Reboot-while-offline
 
 A power-cycled appliance with no cloud must come back serving clients:
-identity, license (`current.json` + `state.json`), and all guest data are on
+identity, license (`current.json` + `state.json`), and all client data are on
 local disk; nft `auth_ipv4` is rebuilt from active `sessions` rows at boot
 (HA boot-reconcile path). Include one reboot in every offline drill.
