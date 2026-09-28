@@ -10,10 +10,13 @@ import { DialogForm } from "@/components/ui/dialog";
 import { Field, Input, Select } from "@/components/ui/input";
 import { Callout } from "@/components/ui/error-banner";
 import { useToast } from "@/components/ui/toast";
-import { DEFAULT_TERMS, LicenseTermsFields, termsBody, termsProblem, type TermsDraft } from "@/components/license-terms";
 import {
-  PlacementFields, emptyPlacement, placementBody, placementProblem, type Placement,
+  DEFAULT_TERMS, LicenseTermsFields, termsBody, termsProblem, withSuggestedModules, type TermsDraft,
+} from "@/components/license-terms";
+import {
+  PlacementFields, emptyPlacement, placementBody, placementProblem, placementSiteType, type Placement,
 } from "@/components/placement-fields";
+import { useModuleCatalog } from "@/lib/modules";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -50,6 +53,8 @@ export function ActivateDialog({
   const [terms, setTerms] = useState<TermsDraft>(DEFAULT_TERMS);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
+  const { catalog } = useModuleCatalog();
+  const siteType = placementSiteType(placement);
 
   useEffect(() => {
     if (open) {
@@ -58,6 +63,11 @@ export function ActivateDialog({
       setErr(null);
     }
   }, [open, heldId, heldGone]);
+
+  // A new license starts from the site type's suggested modules until the operator changes them by hand.
+  useEffect(() => {
+    setTerms((t) => withSuggestedModules(t, catalog, siteType));
+  }, [catalog, siteType]);
 
   async function submit() {
     if (heldGone) {
@@ -121,7 +131,7 @@ export function ActivateDialog({
         />
       </Section>
       <Section title="License">
-        <LicenseTermsFields value={terms} onChange={setTerms} />
+        <LicenseTermsFields value={terms} onChange={setTerms} siteType={siteType} />
       </Section>
     </DialogForm>
   );
@@ -134,7 +144,7 @@ export function SetLicenseDialog({
   onOpenChange,
   onDone,
 }: {
-  appliance: Pick<ApplianceRow, "id" | "serial" | "license">;
+  appliance: Pick<ApplianceRow, "id" | "serial" | "license" | "site_type">;
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onDone: () => void;
@@ -146,17 +156,26 @@ export function SetLicenseDialog({
   const [err, setErr] = useState<unknown>(null);
   const current = appliance.license;
   const hasLicense = !!current && current.state !== "none";
+  const { catalog } = useModuleCatalog();
 
   useEffect(() => {
     if (!open) return;
     setTerms({
       ...DEFAULT_TERMS,
       maxGuests: String(current?.max_concurrent_online_guests ?? DEFAULT_TERMS.maxGuests),
+      // A change keeps the current license's modules unless the operator edits them. Only a first license
+      // starts from the site type's suggestion.
+      modules: hasLicense ? [...(current?.modules ?? [])] : [],
+      modulesTouched: hasLicense,
     });
     setReason("");
     setErr(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  useEffect(() => {
+    if (open && !hasLicense) setTerms((t) => withSuggestedModules(t, catalog, appliance.site_type));
+  }, [open, hasLicense, catalog, appliance.site_type]);
 
   async function submit() {
     const problem = termsProblem(terms) ?? (reason.trim() ? null : "Enter a reason; it is recorded in the audit log.");
@@ -197,7 +216,7 @@ export function SetLicenseDialog({
       error={err}
       onSubmit={submit}
     >
-      <LicenseTermsFields value={terms} onChange={setTerms} />
+      <LicenseTermsFields value={terms} onChange={setTerms} siteType={appliance.site_type} />
       <Field label="Reason" required hint="Recorded in the audit log.">
         <Input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} placeholder="e.g. annual renewal" />
       </Field>

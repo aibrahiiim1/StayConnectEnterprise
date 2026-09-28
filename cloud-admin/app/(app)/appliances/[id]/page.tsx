@@ -30,6 +30,8 @@ import {
   licenseInfo,
 } from "@/lib/status";
 import { cn } from "@/lib/utils";
+import { siteTypeLabel } from "@/lib/site-types";
+import { modulesSummary } from "@/components/license-table";
 
 type ReasonAction = {
   title: string;
@@ -398,6 +400,7 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
                         <div className="text-caption text-muted-foreground">ends {formatLicenseDay(lic.grace_ends_at)}</div>
                       )}
                     </Fact>
+                    <Fact label="Modules">{modulesSummary(lic.modules ?? current?.modules)}</Fact>
                   </dl>
                 ) : (
                   <p className="text-sm text-muted-foreground">
@@ -490,7 +493,10 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
                     </Link>
                   ) : "Not assigned yet"}
                 </Fact>
-                <Fact label="Site">{a.site_name ?? "—"}</Fact>
+                <Fact label="Site">
+                  {a.site_name ?? "—"}
+                  {a.site_name && <div className="text-caption text-muted-foreground">{siteTypeLabel(a.site_type)}</div>}
+                </Fact>
               </dl>
             </CardBody>
           </Card>

@@ -115,7 +115,7 @@ describe("Activate", () => {
     expect(sent[1].body).toEqual({
       customer_id: "c1",
       site_id: "s1",
-      license: { max_concurrent_online_guests: 500, valid_days: 365, grace_period_days: 30 },
+      license: { max_concurrent_online_guests: 500, valid_days: 365, grace_period_days: 30, modules: [] },
     });
     expect(calls.some((c) => c.url === "/api/v1/auth/reauth")).toBe(true);
   });
@@ -193,7 +193,7 @@ describe("Activate", () => {
     expect(body.new_site).toMatchObject({ name: "Marsa Resort", country: "EG" });
     expect(typeof body.new_site.timezone).toBe("string");
     expect(body.customer_id).toBeUndefined();
-    expect(body.license).toEqual({ max_concurrent_online_guests: 250, valid_until: "2030-12-31T23:59:59Z", grace_period_days: 30 });
+    expect(body.license).toEqual({ max_concurrent_online_guests: 250, valid_until: "2030-12-31T23:59:59Z", grace_period_days: 30, modules: [] });
   });
 });
 
@@ -247,7 +247,7 @@ describe("License operations", () => {
     await user.click(within(dialog).getByRole("button", { name: "Save new license" }));
     await waitFor(() => expect(calls.some((c) => c.url === "/api/cloud/v1/appliances/a1/license")).toBe(true));
     expect(calls.find((c) => c.url === "/api/cloud/v1/appliances/a1/license")!.body).toEqual({
-      max_concurrent_online_guests: 500, valid_days: 365, grace_period_days: 30, reason: "annual renewal",
+      max_concurrent_online_guests: 500, valid_days: 365, grace_period_days: 30, modules: [], reason: "annual renewal",
     });
   });
 

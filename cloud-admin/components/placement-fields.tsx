@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, itemsOf, qs, type Customer, type Items, type Site } from "@/lib/api";
 import { Field, Input, Select } from "@/components/ui/input";
+import { DEFAULT_SITE_TYPE, SITE_TYPES } from "@/lib/site-types";
 
 const NEW = "__new";
 
@@ -14,6 +15,8 @@ export type Placement = {
   newSiteName: string;
   newSiteTimezone: string;
   newSiteCountry: string;
+  newSiteType: string;      // one of SITE_TYPES
+  existingSiteType: string; // the chosen existing site's type, for the license's suggested modules
 };
 
 export function browserTimezone(): string {
@@ -32,11 +35,18 @@ export function emptyPlacement(customerId = "", siteId = ""): Placement {
     newSiteName: "",
     newSiteTimezone: browserTimezone(),
     newSiteCountry: "",
+    newSiteType: DEFAULT_SITE_TYPE,
+    existingSiteType: "",
   };
 }
 
 const isNewCustomer = (p: Placement) => p.customerId === NEW;
 const isNewSite = (p: Placement) => p.siteId === NEW || p.customerId === NEW;
+
+/** The type of the site the appliance goes to: the new site's chosen type, or the existing site's. */
+export function placementSiteType(p: Placement): string {
+  return isNewSite(p) ? p.newSiteType : p.existingSiteType;
+}
 
 export function placementProblem(p: Placement): string | null {
   if (!p.customerId) return "Choose a customer.";
@@ -56,7 +66,9 @@ export function placementBody(p: Placement): Record<string, unknown> {
   if (isNewCustomer(p)) out.new_customer = { name: p.newCustomerName.trim() };
   else out.customer_id = p.customerId;
   if (isNewSite(p)) {
-    const site: Record<string, string> = { name: p.newSiteName.trim(), timezone: p.newSiteTimezone.trim() };
+    const site: Record<string, string> = {
+      name: p.newSiteName.trim(), timezone: p.newSiteTimezone.trim(), site_type: p.newSiteType || DEFAULT_SITE_TYPE,
+    };
     if (p.newSiteCountry.trim()) site.country = p.newSiteCountry.trim().toUpperCase();
     out.new_site = site;
   } else out.site_id = p.siteId;
@@ -80,6 +92,22 @@ export function TimezoneSelect({ value, onChange }: { value: string; onChange: (
     <Select value={value} onChange={(e) => onChange(e.target.value)}>
       {!zones.includes(value) && <option value={value}>{value}</option>}
       {zones.map((z) => <option key={z} value={z}>{z}</option>)}
+    </Select>
+  );
+}
+
+/** A site's type. Descriptive only; an unknown value Central sent is kept and shown as is. */
+export function SiteTypeSelect({
+  value,
+  onChange,
+  ...rest
+}: { value: string; onChange: (v: string) => void } & Omit<React.SelectHTMLAttributes<HTMLSelectElement>, "value" | "onChange">) {
+  const known = SITE_TYPES.some((t) => t.value === value);
+  // `rest` carries the id and aria-* that Field injects, so the label is bound to this control.
+  return (
+    <Select {...rest} value={value} onChange={(e) => onChange(e.target.value)}>
+      {!known && value && <option value={value}>{value}</option>}
+      {SITE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
     </Select>
   );
 }
@@ -129,7 +157,7 @@ export function PlacementFields({
           <Select
             value={value.customerId}
             disabled={customers === null}
-            onChange={(e) => set({ customerId: e.target.value, siteId: e.target.value === NEW ? NEW : "" })}
+            onChange={(e) => set({ customerId: e.target.value, siteId: e.target.value === NEW ? NEW : "", existingSiteType: "" })}
           >
             <option value="">{customers === null ? "Loading…" : "Choose a customer…"}</option>
             {(customers ?? []).map((c) => (
@@ -149,7 +177,10 @@ export function PlacementFields({
           <Select
             value={value.siteId}
             disabled={!value.customerId || sites === null}
-            onChange={(e) => set({ siteId: e.target.value })}
+            onChange={(e) => set({
+              siteId: e.target.value,
+              existingSiteType: (sites ?? []).find((s) => s.id === e.target.value)?.site_type ?? "",
+            })}
           >
             <option value="">{!value.customerId ? "Choose a customer first" : sites === null ? "Loading…" : "Choose a site…"}</option>
             {(sites ?? []).map((s) => (
@@ -167,6 +198,9 @@ export function PlacementFields({
           </Field>
           <Field label="Time zone" required>
             <TimezoneSelect value={value.newSiteTimezone} onChange={(v) => set({ newSiteTimezone: v })} />
+          </Field>
+          <Field label="Site type" hint="Describes the place. It does not turn anything on.">
+            <SiteTypeSelect value={value.newSiteType} onChange={(v) => set({ newSiteType: v })} />
           </Field>
           <Field label="Country" hint="Two letters, such as EG. Optional.">
             <Input
