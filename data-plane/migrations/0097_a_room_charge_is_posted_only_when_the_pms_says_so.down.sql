@@ -73,6 +73,7 @@ BEGIN
   RETURN NEW;
 END $fn$;
 
+ALTER FUNCTION iam_v2.p4_consume_retry_authorization() SECURITY INVOKER;
 DROP FUNCTION IF EXISTS iam_v2.p4_posting_review_apply(uuid,uuid,uuid);
 DROP FUNCTION IF EXISTS iam_v2.p4_posting_settlement_outcome(uuid);
 DROP FUNCTION IF EXISTS iam_v2.p4_create_room_charge_posting(uuid,uuid,uuid);

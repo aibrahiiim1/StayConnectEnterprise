@@ -329,6 +329,14 @@ func (e *Engine) settle(ctx context.Context, claim *Claim, attemptID string, out
 	if err := tx.Commit(ctx); err != nil {
 		return out, fail(ErrRepo, "could not commit the settlement")
 	}
+	// THE SETTLEMENT FOLLOWS THE PMS (migration 0097): PA=OK settles the purchase's settlement and grants the
+	// entitlement; any other PA fails it; UNKNOWN sends it to manual review. Applied after the attempt is
+	// durable, and idempotent, so a crash between the two is repaired by the next pass (ApplySettlementOutcomes).
+	if outcome == "ACKED" || outcome == "UNKNOWN" {
+		if _, err := e.repo.pool.Exec(ctx, `SELECT iam_v2.p4_posting_settlement_outcome($1)`, claim.PostingID); err != nil {
+			return out, classify(err)
+		}
+	}
 	if outcome == "UNKNOWN" {
 		return out, fail(ErrUnknownTerminal,
 			"the attempt is UNKNOWN and will not be retried without an audited review decision")
@@ -374,6 +382,36 @@ UPDATE iam_v2.posting_outbox o
 	if ct.RowsAffected() == 0 {
 		return fail(ErrRetryNotAuthed,
 			"no audited CONFIRM_NOT_POSTED_RETRY authorizes requeueing this posting")
+	}
+	return nil
+}
+
+// ApplySettlementOutcomes re-applies the settlement effect of every concluded CHARGE posting whose settlement
+// has not caught up (a crash between recording the PA and moving the settlement). Idempotent.
+func (e *Engine) ApplySettlementOutcomes(ctx context.Context, tenantID, siteID string) error {
+	rows, err := e.repo.pool.Query(ctx, `
+SELECT p.id::text FROM iam_v2.pms_postings p
+  JOIN iam_v2.settlements se ON se.id = p.settlement_id
+ WHERE p.tenant_id=$1 AND p.site_id=$2 AND p.posting_type='CHARGE' AND se.method='PMS_POSTING'
+   AND se.status = 'IN_PROGRESS'
+   AND EXISTS (SELECT 1 FROM iam_v2.posting_attempts a WHERE a.internal_posting_id = p.id
+                AND a.outcome IN ('ACKED','UNKNOWN'))
+ LIMIT 100`, tenantID, siteID)
+	if err != nil {
+		return classify(err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	for _, id := range ids {
+		if _, err := e.repo.pool.Exec(ctx, `SELECT iam_v2.p4_posting_settlement_outcome($1)`, id); err != nil {
+			return classify(err)
+		}
 	}
 	return nil
 }

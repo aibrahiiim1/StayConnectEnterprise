@@ -355,13 +355,17 @@ GRANT SELECT ON iam_v2.pms_interfaces, iam_v2.pms_interface_revisions, iam_v2.pu
                 iam_v2.internet_package_revisions, iam_v2.stays, iam_v2.folios, iam_v2.stay_folios,
                 iam_v2.package_settlement_mappings, iam_v2.settlements, iam_v2.pms_postings,
                 iam_v2.posting_outbox, iam_v2.posting_attempts, iam_v2.posting_review_state,
-                iam_v2.posting_execution_state TO sc_posting_runtime;
+                iam_v2.posting_execution_state, iam_v2.pms_interface_runtime TO sc_posting_runtime;
 GRANT UPDATE (state) ON iam_v2.posting_outbox TO sc_posting_runtime;
 GRANT INSERT, UPDATE ON iam_v2.posting_attempts TO sc_posting_runtime;
 GRANT INSERT ON iam_v2.posting_attempt_events TO sc_posting_runtime;
 GRANT EXECUTE ON FUNCTION iam_v2.allocate_p_number(uuid,uuid,uuid) TO sc_posting_runtime;
 GRANT EXECUTE ON FUNCTION iam_v2.p4_interface_freshness_block(uuid,uuid,uuid,uuid,timestamptz) TO sc_posting_runtime;
 GRANT EXECUTE ON FUNCTION iam_v2.p4_posting_settlement_outcome(uuid) TO sc_posting_runtime;
+-- Consuming a retry authorisation is part of inserting the authorised attempt. It runs as the owner, so the
+-- worker needs no write privilege on review decisions at all.
+ALTER FUNCTION iam_v2.p4_consume_retry_authorization() SECURITY DEFINER;
+REVOKE ALL ON FUNCTION iam_v2.p4_consume_retry_authorization() FROM PUBLIC;
 
 REVOKE ALL ON iam_v2.pms_financial_onboardings FROM PUBLIC;
 REVOKE ALL ON FUNCTION iam_v2.pms_interface_financial_onboard(uuid,uuid,uuid,uuid,text,text,smallint,text,text,uuid) FROM PUBLIC;
@@ -398,6 +402,7 @@ BEGIN
     EXECUTE 'ALTER FUNCTION iam_v2.p4_posting_settlement_outcome(uuid) OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.p4_posting_review_apply(uuid,uuid,uuid) OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.p4_settlement_state_machine() OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER FUNCTION iam_v2.p4_consume_retry_authorization() OWNER TO iam_v2_owner';
   END IF;
 END $own$;
 
