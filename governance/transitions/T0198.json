@@ -1,0 +1,51 @@
+{
+  "transition_id": "T0198",
+  "seq": 198,
+  "timestamp": "2026-09-28T21:40:00+03:00",
+  "timestamp_derivation": "Written after the PRE-LIVE and Central deployments were read back and verified, and before the commit that introduces this receipt.",
+  "record_type": "SITE_MODULES_ACQUISITION_AND_SINGLE_FIAS_ROOM_CHARGE_READY_FOR_PRODUCT_OWNER_TESTING",
+  "authorisation": "Product-Owner mission of 2026-09-28 (D44) and the Room Charge transport decision of the same day (D45), both authorising implementation, migrations, PRE-LIVE and Central deployment, verification and governance synchronization, and NOT the merge.",
+  "decision": "D45",
+  "decisions_recorded": [
+    "D44",
+    "D45"
+  ],
+  "delivered": [
+    "Licence v4: modules are the sole commercial authority; features a derived projection; Central migration 0049 (sites.site_type, licenses.modules).",
+    "Site Type carried in the signed assignment (tail field, byte-identical when empty); descriptive only.",
+    "Four-gate module resolver with audited local enablement (0094); module-gated Admin Console surfaces that fail closed.",
+    "Acquisition methods on the existing commerce spine (0095): Free, package-backed one-step Voucher, open package selection by a distinct anonymous access subject, voucher batch revocation.",
+    "Card payment (0096): Stripe and Paymob hosted checkout, outbound status reconciliation, sealed write-only credentials, separate outcome authority, provider-originated refunds and chargebacks recorded, LIVE refused by the ceiling; the plaintext stripe_accounts path retired.",
+    "Room charge (0097): FIAS financial onboarding, posting-code mappings, settlement follows the PMS, review decisions applied in the same transaction.",
+    "D45 (0098): the financial path hands pmsd an immutable authorised command over a root-only unix socket; pmsd carries the exact bytes on its existing FIAS link only after p4_posting_command_authorised confirms them, and returns the matched PA; UNKNOWN is never resent; orphaned attempts become UNKNOWN."
+  ],
+  "verification": "Go: license, assignment, licstate, modules, iamv2, payment (integration), posting (integration, incl. the end-to-end hand-off through the real socket, relay and FIAS adapter with svc_posting and svc_pmsd logins), pmsd, scd, edged, portald. Admin Console vitest 52 files / 596 tests and tsc. phase4-dark-check PASS (two new boundary assertions), validate-migration-grant-durability PASS, FACTORY_CLEAN_BASELINE PASS through 0098. Live on PRE-LIVE: scripts/guest-access-e2e-test.sh 51/51 (Voucher, client accounts, Room sign-in, device limits, enforcement, real internet), check-hotel-admin-integrity PASS, Central central-deploy.sh smoke PASS 8/8.",
+  "deployment_provenance": "PRE-LIVE 172.21.60.25: scd and pmsd db05d7ba, edged and the Admin Console 567284c3, portald, netd, acctd and keybootstrap 99ba9f10; site migrations through 0098. Central 172.21.96.196: ctrlapi and console 567284c3, Central migrations through 0049. Every value read back from the installed artifacts; see current_state_facts.deployed_runtime_services, hotel_admin_runtime_identity, central_ctrlapi_runtime_identity and central_console_runtime_identity.",
+  "financial_traffic": "NONE. pms_postings, posting_attempts, payment_transactions and payment_checkouts are all 0 on PRE-LIVE. STAYCONNECT_PHASE4_PMS_TRANSMIT and STAYCONNECT_PAYMENT_LIVE_ALLOWED are set nowhere; pmsd has no posting socket.",
+  "open_inputs": [
+    "Central operator (Product Owner): set the PRE-LIVE site's Site Type to HOTEL and re-issue its v4 licence with hospitality, paid_access, card_payment and room_charge (and white_label and ha if they are to stay licensed).",
+    "Product Owner: Stripe and/or Paymob sandbox credentials for the non-LIVE card verification.",
+    "Product Owner acceptance of PR #202 before any merge."
+  ],
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0197."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no closed phase is reopened and no Phase 8 exists. D44/D45 are delivered to PRE-LIVE for Product Owner testing on the unmerged PR #202. PRE-LIVE remains PRE-LIVE."
+  },
+  "state_note": "No phase, activity or acceptance state changes. The delivery is READY FOR PRODUCT OWNER TESTING, not merged and not closed.",
+  "base": "42823d9dfecd4339ac540d1b5d19ee0bf5df40f4",
+  "base_note": "Master at the time the branch was cut (the merge of PR #201).",
+  "head": "619c9f5f",
+  "head_note": "PR #202's last content commit before this governance record.",
+  "previous_delivery": "T0197",
+  "go_live": "NOT authorised. Real PMS posting and LIVE provider transactions remain prohibited."
+}
