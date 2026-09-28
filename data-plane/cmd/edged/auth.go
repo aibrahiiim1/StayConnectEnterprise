@@ -183,7 +183,14 @@ var rolePerms = map[string]map[string]perm{
 		"usage":        permRead,
 		"auth-methods": permWrite, "walled-garden": permWrite,
 		"portal-branding": permWrite, "portal-assets": permWrite, "notification-providers": permWrite,
-		"social-providers": permWrite, "stripe-accounts": permWrite,
+		"social-providers": permWrite,
+		// Card payment provider accounts (site-local; secrets write-only and sealed). Replaces the retired
+		// plaintext stripe-accounts surface.
+		"payment-providers": permWrite,
+		// Modules: the IT manager sees what the licence authorises and what is switched on; switching a
+		// module is a site_admin decision. Financial onboarding of a PMS interface is likewise read here and
+		// approved by site_admin only.
+		"modules": permRead, "pms-financial-onboarding": permRead,
 		"network": permWrite,
 		// Phase 2 (DARK) commercial packages: revisioned CRUD is a manager action.
 		"commercial-packages": permWrite,
@@ -322,7 +329,7 @@ var rolePerms = map[string]map[string]perm{
 		"voucher-code-settings": permRead,
 	},
 	"payments_operator": {
-		"stripe-accounts": permRead,
+		"payment-providers": permRead, "modules": permRead, "pms-financial-onboarding": permRead,
 		// Phase 6 (DARK): read-only, which is this role's established relationship with everything that is
 		// not money. It is on the list rather than absent because "read-only on everything else" is the
 		// documented semantic, and silently omitting a resource would narrow the role by accident.
@@ -348,7 +355,7 @@ var rolePerms = map[string]map[string]perm{
 		"guest-signin-protection": permRead, "guest-signin-restrictions": permRead,
 		"guest-accounts": permRead, "sessions": permRead, "usage": permRead, "auth-methods": permRead,
 		"walled-garden": permRead, "portal-branding": permRead, "portal-assets": permRead, "notification-providers": permRead, "social-providers": permRead,
-		"stripe-accounts": permRead, "audit": permRead, "reports": permRead,
+		"payment-providers": permRead, "modules": permRead, "audit": permRead, "reports": permRead,
 		"backups": permRead, "license": permRead, "network": permRead, "diagnostics": permRead,
 		"commercial-packages": permRead,
 		// Phase 3 (DARK): a viewer sees the evidence and never acts on it.
