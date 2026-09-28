@@ -597,7 +597,8 @@ func TestC5RevisionLifecycleNonPMS(t *testing.T) {
 	if n := count(t, db, `SELECT count(*) FROM iam_v2.package_settlement_mappings`); n != 0 {
 		t.Fatalf("no settlement mapping may exist in Phase 2, got %d", n)
 	}
-	if n := count(t, db, `SELECT count(*) FROM iam_v2.settlements WHERE method <> 'NOT_REQUIRED'`); n != 0 {
-		t.Fatalf("no non-NOT_REQUIRED settlement may exist, got %d", n)
+	// Free grants settle NOT_REQUIRED and voucher redemptions PREPAID; no money rail was touched.
+	if n := count(t, db, `SELECT count(*) FROM iam_v2.settlements WHERE method NOT IN ('NOT_REQUIRED','PREPAID')`); n != 0 {
+		t.Fatalf("no money-rail settlement may exist, got %d", n)
 	}
 }

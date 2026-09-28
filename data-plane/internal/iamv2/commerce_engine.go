@@ -18,6 +18,8 @@ type CommerceEngine struct {
 	// mode through this engine; see TimeModeAcquirable, which is the single rule every acquisition path
 	// shares.
 	aggregateOnlineTime bool
+	// methodGate reports which optional acquisition modules are effective at this site (acquisition.go).
+	methodGate MethodGate
 }
 
 // NewCommerceEngine builds the engine. repo MUST be nil while the master flag is OFF (dark) and MUST be
@@ -106,6 +108,18 @@ type CommerceTx interface {
 	GrantQuotedEntitlement(ctx context.Context, tenantID, siteID, purchaseID string) (string, string, error)
 	MarkPurchaseGranted(ctx context.Context, purchaseID string) error
 
+	// --- Acquisition (acquisition.go / acquisition_flow.go) ---
+	// LoadPackageRevisionByID resolves one revision by id, current or not: a voucher is honoured against the
+	// immutable revision it was printed for, whatever the package's current revision or active flag.
+	LoadPackageRevisionByID(ctx context.Context, tenantID, siteID, packageRevisionID string) (PackageRevisionRow, error)
+	// InsertPurchaseAs writes a purchase with an explicit trigger and initial state.
+	InsertPurchaseAs(ctx context.Context, p PurchaseSpec, trigger, state string) (string, error)
+	// InsertSettlementAs writes a settlement with an explicit method and first status (the DB birth rule
+	// refuses incoherent pairs).
+	InsertSettlementAs(ctx context.Context, tenantID, siteID, purchaseID, method, status string) (string, error)
+	// GrantVoucherEntitlement is the VOUCHER grant entry point (migration 0095).
+	GrantVoucherEntitlement(ctx context.Context, tenantID, siteID, purchaseID string) (string, string, error)
+
 	// --- GrantSettledPurchase (money already moved; see commerce_settled_grant.go) ---
 	// A READ that resolves everything the grant needs from rows the purchase already points at, so the
 	// paid entry point pins exactly what the free one pins and a caller supplies nothing.
@@ -118,7 +132,12 @@ type CommerceSubject struct {
 	VoucherID   string
 	AccountID   string
 	PrincipalID string
+	// AnonymousID is the opaque anonymous access subject of open package selection. It is never a MAC.
+	AnonymousID string
 	Method      Method
+	// DeviceID is the device the auth context was issued to. It is NOT a subject: it is what free-package
+	// limits for an anonymous subject are evaluated against, so a new anonymous subject never resets them.
+	DeviceID string
 }
 
 // AuthContextRow is the loaded auth_context (never mutated by CreateQuote).
@@ -232,11 +251,16 @@ type QuoteResult struct {
 	Reason    string
 }
 
-// PurchaseResult is the result of ConfirmFreePurchase.
+// PurchaseResult is the result of a confirm. A Free or Voucher confirm grants immediately (EntitlementID set).
+// A Card payment confirm creates the purchase and its REQUIRED settlement and grants NOTHING: access follows
+// only a provider-verified capture (AwaitingSettlement, SettlementID set).
 type PurchaseResult struct {
-	Disabled      bool
-	PurchaseID    string
-	EntitlementID string
-	Superseded    string
-	Reason        string
+	Disabled           bool
+	PurchaseID         string
+	EntitlementID      string
+	Superseded         string
+	SettlementID       string
+	Method             string
+	AwaitingSettlement bool
+	Reason             string
 }

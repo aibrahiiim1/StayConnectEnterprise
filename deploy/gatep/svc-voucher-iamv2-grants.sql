@@ -71,3 +71,9 @@ GRANT EXECUTE ON FUNCTION
   iam_v2.voucher_code_generation_supersede(uuid, uuid, uuid, uuid, text) TO svc_scd;
 
 -- STILL NOT granted: UPDATE or DELETE on iam_v2.voucher_code_key_generations, to anyone. 0087 asserts it.
+
+-- Batch revocation (migration 0095): one audited definer call that revokes every UNUSED voucher of a batch and
+-- records the operator and reason in iam_v2.voucher_revocations. Same caller as voucher_revoke.
+GRANT EXECUTE ON FUNCTION iam_v2.voucher_batch_revoke(uuid, uuid, uuid, uuid, text) TO svc_scd;
+-- Issuance records its batch (migration 0095): package, revision and label of every printed run.
+GRANT SELECT, INSERT ON iam_v2.voucher_batches TO svc_scd;

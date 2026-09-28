@@ -286,3 +286,12 @@ GRANT SELECT          ON iam_v2.appliance_product_settings                    TO
 -- LOCAL MODULE ENABLEMENT (migration 0094). scd hosts the module resolver: it reads the site's switches and
 -- can change none of them.
 GRANT EXECUTE ON FUNCTION iam_v2.site_module_get(uuid,uuid) TO svc_scd;
+
+-- ACQUISITION (migration 0095). The voucher grant entry point beside the free one; the anonymous access
+-- subject of open package selection (create, read, and stamp its last resume -- nothing else) and its
+-- HMAC-only resume/recovery credentials.
+GRANT EXECUTE ON FUNCTION iam_v2.p4_grant_quoted_entitlement(uuid,uuid,uuid)  TO svc_scd;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_grant_voucher_entitlement(uuid,uuid,uuid) TO svc_scd;
+GRANT SELECT, INSERT              ON iam_v2.anonymous_access_subjects      TO svc_scd;
+GRANT UPDATE (last_resumed_at)    ON iam_v2.anonymous_access_subjects      TO svc_scd;
+GRANT SELECT, INSERT              ON iam_v2.anonymous_subject_credentials  TO svc_scd;

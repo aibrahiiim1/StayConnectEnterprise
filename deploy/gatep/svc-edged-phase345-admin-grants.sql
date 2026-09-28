@@ -371,3 +371,8 @@ GRANT EXECUTE ON FUNCTION
 GRANT SELECT ON iam_v2.site_module_changes TO svc_edged;
 GRANT EXECUTE ON FUNCTION iam_v2.site_module_get(uuid,uuid)                         TO svc_edged;
 GRANT EXECUTE ON FUNCTION iam_v2.site_module_set(uuid,uuid,text,boolean,text,text)  TO svc_edged;
+
+-- ACQUISITION (migration 0095): usage by access source reads the anonymous subject; the Vouchers screen reads
+-- who revoked what and why.
+GRANT SELECT ON iam_v2.anonymous_access_subjects TO svc_edged;
+GRANT SELECT ON iam_v2.voucher_revocations       TO svc_edged;

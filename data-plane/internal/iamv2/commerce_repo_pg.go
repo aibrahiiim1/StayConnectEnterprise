@@ -91,17 +91,17 @@ func (t *pgCommerceTx) LockAuthContextForUpdate(ctx context.Context, tenantID, s
 func (t *pgCommerceTx) loadAuthContext(ctx context.Context, tenantID, siteID, id string, lock bool) (AuthContextRow, error) {
 	q := `SELECT id::text, tenant_id::text, site_id::text, method,
 	             guest_account_id::text, voucher_id::text, guest_principal_id::text, stay_id::text,
-	             device_id::text, guest_network_id::text, expires_at, consumed_at
+	             device_id::text, guest_network_id::text, expires_at, consumed_at, anonymous_subject_id::text
 	        FROM iam_v2.auth_contexts WHERE tenant_id=$1 AND site_id=$2 AND id=$3`
 	if lock {
 		q += " FOR UPDATE"
 	}
 	var row AuthContextRow
-	var acct, vouch, princ, stay *string
+	var acct, vouch, princ, stay, anon *string
 	var consumed *time.Time
 	var method string
 	err := t.tx.QueryRow(ctx, q, tenantID, siteID, id).Scan(&row.ID, &row.TenantID, &row.SiteID, &method,
-		&acct, &vouch, &princ, &stay, &row.DeviceID, &row.GuestNetworkID, &row.ExpiresAt, &consumed)
+		&acct, &vouch, &princ, &stay, &row.DeviceID, &row.GuestNetworkID, &row.ExpiresAt, &consumed, &anon)
 	if err == pgx.ErrNoRows {
 		return AuthContextRow{}, &Error{Code: ErrACNotFound, Msg: "auth_context"}
 	}
@@ -120,7 +120,10 @@ func (t *pgCommerceTx) loadAuthContext(ctx context.Context, tenantID, siteID, id
 		row.Subject = CommerceSubject{Kind: SubjectAccount, AccountID: *acct, Method: row.Method}
 	case princ != nil:
 		row.Subject = CommerceSubject{Kind: SubjectPrincipal, PrincipalID: *princ, Method: row.Method}
+	case anon != nil:
+		row.Subject = CommerceSubject{Kind: SubjectAnonymous, AnonymousID: *anon, Method: row.Method}
 	}
+	row.Subject.DeviceID = row.DeviceID
 	return row, nil
 }
 
@@ -305,6 +308,22 @@ func (t *pgCommerceTx) LoadGrantTiers(ctx context.Context, packageRevisionID str
 }
 
 func (t *pgCommerceTx) HasPriorPurchase(ctx context.Context, tenantID, siteID, packageRevisionID string, subj CommerceSubject) (bool, error) {
+	// AN ANONYMOUS SUBJECT IS NEW EVERY TIME A DEVICE HAS NO LIVE ACCESS, so a package limit evaluated against
+	// the subject alone would reset on every visit. It is evaluated against the DEVICE the auth context was
+	// issued to: the device's own acquisition history, through purchase -> auth context -> device. The device
+	// is not the subject; it is what makes "once per client" mean something for a client with no identity.
+	if subj.Kind == SubjectAnonymous {
+		var exists bool
+		err := t.tx.QueryRow(ctx,
+			`SELECT EXISTS(
+			    SELECT 1 FROM iam_v2.entitlements e
+			      JOIN iam_v2.purchases pu     ON pu.id = e.purchase_id
+			      JOIN iam_v2.auth_contexts ac ON ac.id = pu.auth_context_id
+			     WHERE e.tenant_id=$1 AND e.site_id=$2 AND e.package_revision_id=$3
+			       AND ac.device_id = $4::uuid)`,
+			tenantID, siteID, packageRevisionID, nullable(subj.DeviceID)).Scan(&exists)
+		return exists, err
+	}
 	v, a, p := subjectCols(subj)
 	var exists bool
 	err := t.tx.QueryRow(ctx,
@@ -316,6 +335,95 @@ func (t *pgCommerceTx) HasPriorPurchase(ctx context.Context, tenantID, siteID, p
 		          OR ($6::uuid IS NOT NULL AND e.guest_principal_id=$6::uuid) ))`,
 		tenantID, siteID, packageRevisionID, v, a, p).Scan(&exists)
 	return exists, err
+}
+
+// nullable maps "" to SQL NULL.
+func nullable(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+// LoadPackageRevisionByID resolves one revision by id -- current or not, package active or not. It is the
+// voucher path: a card is honoured against the immutable revision it was printed for.
+func (t *pgCommerceTx) LoadPackageRevisionByID(ctx context.Context, tenantID, siteID, revID string) (PackageRevisionRow, error) {
+	var row PackageRevisionRow
+	var display, duration []byte
+	var settlement []string
+	var cexp *int
+	var cur *string
+	err := t.tx.QueryRow(ctx,
+		`SELECT r.id::text, r.package_id::text, r.service_plan_revision_id::text, r.package_type,
+		        r.price_minor, r.currency, r.currency_exponent, r.settlement_methods,
+		        r.visible_from, r.visible_until, p.active, (p.current_revision_id = r.id) AS is_current,
+		        r.display, r.duration_policy
+		   FROM iam_v2.internet_package_revisions r
+		   JOIN iam_v2.internet_packages p ON p.tenant_id = r.tenant_id AND p.site_id = r.site_id AND p.id = r.package_id
+		  WHERE r.tenant_id=$1 AND r.site_id=$2 AND r.id=$3`,
+		tenantID, siteID, revID).Scan(&row.ID, &row.PackageID, &row.PlanRevisionID, &row.PackageType,
+		&row.PriceMinor, &cur, &cexp, &settlement, &row.VisibleFrom, &row.VisibleUntil,
+		&row.PackageActive, &row.IsCurrent, &display, &duration)
+	if err == pgx.ErrNoRows {
+		return PackageRevisionRow{}, &Error{Code: ErrInvalidInput, Msg: "package_revision_not_found"}
+	}
+	if err != nil {
+		return PackageRevisionRow{}, err
+	}
+	if cur != nil {
+		row.Currency = *cur
+	}
+	if cexp != nil {
+		row.CurrencyExponent = *cexp
+	}
+	row.SettlementMethods = settlement
+	if len(display) > 0 {
+		_ = json.Unmarshal(display, &row.Display)
+	}
+	if len(duration) > 0 {
+		row.DurationPolicy = unmarshalNumberAware(duration)
+	}
+	return row, nil
+}
+
+// InsertPurchaseAs writes a purchase with an explicit trigger and first state.
+func (t *pgCommerceTx) InsertPurchaseAs(ctx context.Context, p PurchaseSpec, trigger, state string) (string, error) {
+	var id string
+	err := t.tx.QueryRow(ctx,
+		`INSERT INTO iam_v2.purchases
+		   (tenant_id, site_id, package_revision_id, offer_quote_id, auth_context_id, trigger, amount_minor, currency, currency_exponent, state)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id::text`,
+		p.TenantID, p.SiteID, p.PackageRevisionID, p.OfferQuoteID, p.AuthContextID, trigger, p.AmountMinor, p.Currency,
+		p.CurrencyExponent, state).Scan(&id)
+	return id, err
+}
+
+// InsertSettlementAs writes a settlement with an explicit method and first status. The database birth rule
+// (migration 0095) refuses any incoherent pair, including a PREPAID settlement that is not a voucher's.
+func (t *pgCommerceTx) InsertSettlementAs(ctx context.Context, tenantID, siteID, purchaseID, method, status string) (string, error) {
+	var id string
+	err := t.tx.QueryRow(ctx,
+		`INSERT INTO iam_v2.settlements (tenant_id, site_id, purchase_id, method, status)
+		 VALUES ($1,$2,$3,$4,$5) RETURNING id::text`, tenantID, siteID, purchaseID, method, status).Scan(&id)
+	return id, err
+}
+
+// GrantVoucherEntitlement calls the voucher grant entry point, which re-resolves its own evidence and burns
+// the voucher inside the kernel.
+func (t *pgCommerceTx) GrantVoucherEntitlement(ctx context.Context, tenantID, siteID, purchaseID string) (string, string, error) {
+	var eid string
+	var superseded *string
+	var already bool
+	err := t.tx.QueryRow(ctx,
+		`SELECT entitlement_id::text, already_granted, superseded::text
+		   FROM iam_v2.p4_grant_voucher_entitlement($1,$2,$3)`, tenantID, siteID, purchaseID).Scan(&eid, &already, &superseded)
+	if err != nil {
+		return "", "", err
+	}
+	if superseded != nil {
+		return eid, *superseded, nil
+	}
+	return eid, "", nil
 }
 
 func (t *pgCommerceTx) InsertOfferQuote(ctx context.Context, q OfferQuoteSpec) (string, error) {

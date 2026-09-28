@@ -32,7 +32,7 @@ func TestListEligiblePackagesFiltersAndIsReadOnly(t *testing.T) {
 	pricedPkg := scan1(t, db, `INSERT INTO iam_v2.internet_packages (tenant_id,site_id,code,active) VALUES ($1,$2,'PRICED',true) RETURNING id::text`, p2Tenant, p2Site)
 	pricedRev := scan1(t, db, `INSERT INTO iam_v2.internet_package_revisions
 		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent,settlement_methods,duration_policy,display)
-		VALUES ($1,$2,$3,1,$4,'GENERAL',500,'USD',2,'{NOT_REQUIRED}','{"end_mode":"MANUAL_END"}'::jsonb,'{"name":"Priced"}'::jsonb) RETURNING id::text`,
+		VALUES ($1,$2,$3,1,$4,'GENERAL',500,'USD',2,'{ONLINE_PAYMENT}','{"end_mode":"MANUAL_END"}'::jsonb,'{"name":"Priced"}'::jsonb) RETURNING id::text`,
 		p2Tenant, p2Site, pricedPkg, s.planRevID)
 	if _, err := db.Exec(ctx, `UPDATE iam_v2.internet_packages SET current_revision_id=$1 WHERE id=$2`, pricedRev, pricedPkg); err != nil {
 		t.Fatalf("priced pointer: %v", err)
