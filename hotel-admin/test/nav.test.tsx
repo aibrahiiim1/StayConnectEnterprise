@@ -46,7 +46,7 @@ const SERVED = [
   "guest-signin-protection", "guest-signin-restrictions", "license", "network", "notification-providers",
   "operational-alerts", "operators", "pms-events", "pms-interfaces", "pms-reconciliation", "pms-resolutions",
   "pms-roster-reconciliation", "pms-routing", "pms-source-conflicts", "pms-stays", "portal-assets",
-  "portal-branding", "reports", "sessions", "social-providers", "stripe-accounts", "usage", "walled-garden",
+  "portal-branding", "reports", "sessions", "social-providers", "payment-providers", "modules", "pms-financial-onboarding", "usage", "walled-garden",
 ];
 
 async function renderNavWith(surfaces: string[], roles: string[]) {
@@ -85,11 +85,19 @@ describe("the navigation contract", () => {
     expect(screen.queryByText("Operators")).toBeNull();
   });
 
-  it("shows nothing that needs a surface while the capability answer is still unknown", async () => {
+  it("keeps core destinations while the capability answer is still unknown", async () => {
     // Unknown must not empty the menu — a sidebar that blanks for a second on every load is its own defect —
-    // so an unknown answer is optimistic and every page enforces its own state.
+    // so an unknown answer is optimistic for the CORE, and every page enforces its own state.
     await renderNavWith([], ["site_admin"]);
-    expect(screen.getByText("Stays")).toBeInTheDocument();
+    expect(screen.getByText("Internet packages")).toBeInTheDocument();
+    expect(screen.getByText("Modules")).toBeInTheDocument();
+  });
+
+  it("offers no licence-controlled destination until the appliance says it serves it", async () => {
+    // A module the site is not licensed for is never presented, not even for the moment before the answer.
+    await renderNavWith([], ["site_admin"]);
+    expect(screen.queryByText("Stays")).toBeNull();
+    expect(screen.queryByText("Room charge")).toBeNull();
   });
 });
 

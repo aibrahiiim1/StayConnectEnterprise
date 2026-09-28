@@ -484,6 +484,7 @@ export function VouchersView(props: {
         <TabsContent value="batches" className="pt-4">
           <BatchesTab
             canRevealCodes={canRevealCodes}
+            canCancel={canIssue}
             reloadKey={reloadKey}
             onViewCards={viewBatchCards}
             hotelName={hotelName}

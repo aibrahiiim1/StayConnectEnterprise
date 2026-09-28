@@ -58,8 +58,23 @@ export function useCapabilities(): Capabilities | null {
   return caps;
 }
 
-/** Whether a nav resource is served here. Unknown answers YES — see CAPABILITIES_UNKNOWN. */
+/** MODULE-OWNED SURFACES follow the licence and the site's choice (docs/architecture/
+ *  ONEGATE_MODULES_AND_ACQUISITION.md). edged stops reporting one whose module is not manageable here. This
+ *  list mirrors `surfaceModules` in data-plane/cmd/edged/modules.go, which a test checks. */
+export const MODULE_SURFACES: readonly string[] = [
+  "pms-stays", "pms-events", "pms-resolutions", "guest-signin-attempts", "guest-signin-credentials",
+  "guest-signin-protection", "guest-signin-restrictions", "checkout-grace", "operational-alerts",
+  "pms-interfaces", "pms-routing", "pms-source-conflicts", "pms-reconciliation", "pms-roster-reconciliation",
+  "post-stay-profiles", "stay-transfers", "pms-financial-onboarding", "payment-providers",
+  "financial-review", "financial-ops",
+];
+
+/** Whether a nav resource is served here.
+ *
+ *  Unknown answers YES for a core surface — see CAPABILITIES_UNKNOWN — and NO for a module-owned one. A
+ *  licence-controlled destination is offered only on a positive answer: the menu must never present a module
+ *  the site is not licensed for, even for the moment before the answer arrives. */
 export function surfaceAvailable(caps: Capabilities | null, resource: string): boolean {
-  if (!caps || caps.surfaces.length === 0) return true;
+  if (!caps || caps.surfaces.length === 0) return !MODULE_SURFACES.includes(resource);
   return caps.surfaces.includes(resource);
 }

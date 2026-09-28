@@ -13,6 +13,7 @@ import {
   PanelLeftClose, PanelLeftOpen, ClipboardCheck, Ticket,
   DoorOpen, DoorClosed, BedDouble, Plug, Route, Inbox, ShieldCheck, UserX, Layers, ArrowLeftRight, HeartPulse, Receipt,
   LifeBuoy, Globe, AtSign, MessageSquare, Stethoscope, Bell, Hourglass, CalendarClock, ChartColumn,
+  CreditCard, BedSingle, Blocks,
 } from "lucide-react";
 import { BySemantics, OneGateLockup } from "@/components/brand";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -86,6 +87,9 @@ const SECTIONS: Section[] = [
       { href: "/service-plans",     label: "Service plans",     icon: Gauge,   resource: "commercial-packages", keywords: "speed bandwidth quota devices mbps" },
       // Vouchers sit with the offer rather than with the client: a voucher IS an internet package, printed.
       { href: "/vouchers",          label: "Vouchers",          icon: Ticket,  resource: "vouchers", keywords: "code card print batch redeem scratch prepaid" },
+      // How a client may get a package here: Free, Voucher, Card payment, Room charge. Under the always-mounted
+      // "modules" resource because the page explains a method that is NOT available as much as one that is.
+      { href: "/payment-methods",   label: "Payment methods",   icon: CreditCard, resource: "modules", keywords: "card stripe paymob provider price paid free voucher room charge checkout acquisition" },
     ],
   },
   {
@@ -131,6 +135,7 @@ const SECTIONS: Section[] = [
       { href: "/guest-signin-attempts", label: "Guest sign-in attempts", icon: UserX, resource: "guest-signin-attempts", keywords: "attempt failed reason room typed credential mismatch why cannot connect client sign-in attempts hotel" },
       { href: "/checkout-grace",       label: "Grace Period",         icon: DoorOpen,  resource: "checkout-grace", keywords: "checkout grace after checkout late departure hotel" },
       { href: "/post-stay",            label: "Post-stay access",     icon: CalendarClock, resource: "post-stay-profiles", keywords: "after departure loyalty guests hotel" },
+      { href: "/room-charge",           label: "Room charge",   icon: BedSingle, resource: "pms-financial-onboarding", keywords: "charge to room folio posting fias onboarding approve currency hotel" },
       { href: "/financial-health",      label: "Charge health", icon: HeartPulse, resource: "financial-review", keywords: "charges posting queue outbox money hotel" },
       { href: "/financial-review",      label: "Manual review", icon: ClipboardCheck, resource: "financial-review", keywords: "charges failed posting decide hotel" },
       { href: "/financial-settlements", label: "Settlements",   icon: Receipt, resource: "financial-review", keywords: "charges payment room charge card hotel" },
@@ -181,6 +186,7 @@ const SECTIONS: Section[] = [
       { href: "/audit",              label: "Activity",    icon: ScrollText, resource: "audit", keywords: "audit log who did what history trail security changes" },
       // Running it.
       { href: "/appliance",          label: "Appliance & licence", icon: ServerCog, resource: "license", keywords: "enrol claim serial activate setup cloud connection central licence capacity expiry plan offline renewal first-time" },
+      { href: "/modules",            label: "Modules",     icon: Blocks,     resource: "modules", keywords: "licence licensed features hospitality paid access card payment room charge switch on off site type" },
       { href: "/backups",            label: "Backups",     icon: Archive,    resource: "backups", keywords: "restore snapshot database retention schedule" },
       // Who may.
       { href: "/operators",          label: "Operators",   icon: Users,      resource: "operators", keywords: "staff users roles password" },

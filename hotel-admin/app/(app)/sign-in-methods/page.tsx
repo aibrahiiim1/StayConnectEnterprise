@@ -38,7 +38,7 @@ import { Skeleton, Switch } from "@/components/ui/misc";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
-import { Ticket, Hotel, KeyRound, Mail, MessageSquare, Users, ArrowUpRight, LogIn } from "lucide-react";
+import { Ticket, Hotel, KeyRound, Mail, MessageSquare, Users, ArrowUpRight, LogIn, PackageOpen } from "lucide-react";
 
 // The auth_methods document. Only the keys this screen owns are typed; everything else is preserved
 // untouched by the server's merge, so an unknown future method cannot be deleted by saving here.
@@ -47,6 +47,9 @@ type PMSMethod = { enabled?: boolean; mode?: string; provider?: string; template
 type AuthMethods = {
   voucher?: Method;
   guest_account?: Method;
+  // Open package selection: the client picks an Internet package without any credential (Free or Card
+  // payment). The access is held by an anonymous access subject, never by the device's MAC address.
+  open?: Method;
   email?: Method;
   sms?: Method;
   social?: Record<string, Method>;
@@ -140,6 +143,7 @@ export default function SignInMethodsPage() {
               items={[
                 <><strong>Voucher code</strong> — the client types a code from a printed or emailed voucher. Vouchers are managed under Vouchers.</>,
                 <><strong>Client account</strong> — a username and password issued to the client, managed under Client accounts.</>,
+                <><strong>Choose a package without signing in</strong> — for a café, office or venue: the client chooses a Free package, or one paid by card, without any credential. Only packages the client can actually get are listed. A client who returns later resumes the same access with the recovery code shown after they connect.</>,
                 <><strong>Room sign-in</strong> — the client enters their room number and one detail from their booking. OneGate checks it against the property management system for the network they are on; the client never chooses a system, and no booking details are shown back to them. Which detail is asked for is set in Room sign-in, and which system a network uses in PMS routing — both under Hotel.</>,
                 <><strong>Email code</strong> and <strong>SMS code</strong> — the client receives a one-time code. Each is available only once a sender exists and is switched on under Email &amp; SMS.</>,
                 <><strong>Social login</strong> — the client signs in with an existing account such as Google. Each provider is offered individually, because each needs its own credentials; providers are set up under Social login.</>,
@@ -203,6 +207,18 @@ export default function SignInMethodsPage() {
           onToggle={(v) => save({ guest_account: { ...(cfg.guest_account ?? {}), enabled: v } }, "Client account")}
           manageHref="/guest-accounts"
           manageLabel="Client accounts"
+        />
+
+        <MethodCard
+          icon={<PackageOpen />}
+          title="Choose a package without signing in"
+          description="The client picks a Free package, or pays by card, with no code, account or room. A returning client resumes with a recovery code shown on screen."
+          enabled={!!cfg.open?.enabled}
+          busy={busy === "Open package selection"}
+          writable={writable}
+          onToggle={(v) => save({ open: { ...(cfg.open ?? {}), enabled: v } }, "Open package selection")}
+          manageHref="/payment-methods"
+          manageLabel="Payment methods"
         />
 
         {/* Room sign-in spans the row so the grid of single methods below it stays even. */}

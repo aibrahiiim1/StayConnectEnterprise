@@ -90,6 +90,9 @@ func (s *server) listGrantablePackageRevisions(w http.ResponseWriter, r *http.Re
 	      JOIN iam_v2.internet_package_revisions r
 	        ON r.tenant_id = p.tenant_id AND r.site_id = p.site_id AND r.id = p.current_revision_id
 	     WHERE p.tenant_id = $1 AND p.site_id = $2 AND p.active AND NOT p.is_system
+	       -- Only packages acquirable by Voucher: the issuance gate (0095) refuses any other, so offering
+	       -- one in the picker would be offering a refusal.
+	       AND 'PREPAID' = ANY (r.settlement_methods)
 	     ORDER BY p.code`, s.tenantID, s.siteID)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "query_failed", "the package list could not be read")

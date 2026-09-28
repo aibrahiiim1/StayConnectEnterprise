@@ -18,16 +18,19 @@
       "/guest-signin-attempts",
       "/health",
       "/internet-packages",
+      "/modules",
       "/network",
       "/notifications",
       "/operational-alerts",
       "/operators",
+      "/payment-methods",
       "/pms-interfaces",
       "/pms-reconciliation",
       "/pms-resolutions",
       "/pms-routing",
       "/pms-source-conflicts",
       "/portal-branding",
+      "/room-charge",
       "/roster-reconciliation",
       "/service-plans",
       "/sessions",
@@ -177,6 +180,21 @@
         "label": "Vouchers",
         "route": "/vouchers",
         "surface": "vouchers"
+      },
+      {
+        "label": "Payment methods",
+        "route": "/payment-methods",
+        "surface": "modules"
+      },
+      {
+        "label": "Room charge",
+        "route": "/room-charge",
+        "surface": "pms-financial-onboarding"
+      },
+      {
+        "label": "Modules",
+        "route": "/modules",
+        "surface": "modules"
       }
     ]
   },
