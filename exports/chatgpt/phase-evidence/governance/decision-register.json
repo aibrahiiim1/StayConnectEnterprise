@@ -713,6 +713,34 @@
       ],
       "does_not_authorize": "Go-Live; serving real hotel guests; deployment to any other environment; PMS financial posting; payment-provider traffic; settlement, reversal or financial egress; Root-CA or trust change; contact with the retired development reference appliance.",
       "implementation": "PR #192 (T0197): Phase-2 guest portal flags on PRE-LIVE; the package-list NULL-currency fix; success only after enforcement; Hotel Admin sign-in method switches enforced by scd; devices join live access within the plan's device limit (contract B3, 6.2-6.3); a redeemed voucher rejoins only its own live entitlement; PMS offers exclude packages a stay has taken; activation waits for enforcement. Proven live by scripts/guest-access-e2e-test.sh (53/53)."
+    },
+    {
+      "id": "D44",
+      "title": "ONEGATE SITE TYPE, LICENCE MODULES AND INTERNET PACKAGE ACQUISITION (2026-09-28). Site Type is descriptive Central metadata delivered in the signed assignment and never authorises or enables anything. Licence v4 carries modules as its SOLE commercial authority (features is only a derived projection): hospitality, paid_access, card_payment, room_charge, sms_otp, email_otp, social_login, white_label, ha, with explicit dependencies. Every module passes four separate gates -- deployment ceiling, licence, local site enablement, runtime readiness -- and readiness never hides configuration, history, reconciliation or recovery. Internet Packages are the canonical offer, acquired by Free, Voucher (package-backed, one step, no cash concept), Card payment (Stripe and Paymob hosted pages, outbound status reconciliation, UNKNOWN to review, provider-originated refunds and chargebacks recorded but no refund feature) or Room charge (every accepted Phase-0 invariant kept). Open package selection uses a distinct anonymous access subject; MAC identifies a device only. Already-issued vouchers survive republish and deactivation; only audited revocation ends them. MANUAL_APPROVAL stays dormant.",
+      "decided_on": "2026-09-28",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-09-28",
+      "authorization_evidence": "Product-Owner mission of 2026-09-28 'Site Type, licence-controlled modules and Internet Package acquisition/payment architecture, end to end', its answers during planning (implement both Paymob and Stripe; deploy Central 172.21.96.196; the Product Owner supplies sandbox keys), and two correction rounds approved the same day (open access never keyed by MAC; vouchers survive republish; MANUAL_APPROVAL dormant; PREPAID only where required; modules the sole v4 authority; least-privilege walled garden; a distinct anonymous access subject; CONFIRM_NOT_POSTED_RETRY preserved; provider-originated refunds recorded without a refund feature).",
+      "supersedes": [],
+      "does_not_authorize": "Go-Live; real guest production; LIVE-mode provider transactions (STAYCONNECT_PAYMENT_LIVE_ALLOWED); real PMS financial posting (STAYCONNECT_PHASE4_PMS_TRANSMIT); a Cash settlement concept or cash accounting; a OneGate refund workflow; Root-CA or trust changes; networking or topology changes; merging PR #202 before Product Owner acceptance.",
+      "implementation": "docs/architecture/ONEGATE_MODULES_AND_ACQUISITION.md; PR #202 (branch delivery/site-modules-acquisition); appliance migrations 0094-0098 and Central migration 0049; recorded by T0198."
+    },
+    {
+      "id": "D45",
+      "title": "ROOM CHARGE USES THE EXISTING SINGLE FIAS CONNECTION (2026-09-28). pmsd remains the sole owner of the property's one FIAS connection and is TRANSPORT ONLY for the financial command: financial validation -> immutable authorised posting command -> narrow local hand-off to pmsd -> pmsd transmits the PS on its existing link -> the matched PA returns to the financial execution path -> authoritative financial state transition; PA=OK settles and then the entitlement is granted. pmsd never decides a charge, amount, RN, G#, currency, posting code or pinned reference, never creates a posting, never retries an UNKNOWN, never reverses, never decides a settlement and never grants access. No second FIAS connection, no second PMS interface for posting, no property-side PMS topology change.",
+      "decided_on": "2026-09-28",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-09-28",
+      "authorization_evidence": "Product-Owner instruction of 2026-09-28 resolving the open Room Charge architecture decision ('use the existing single FIAS connection') and authorising the remainder of the D44 mission, including governance synchronization, end to end.",
+      "supersedes": [
+        "The pmsd invariant 'pmsd must never construct or send PS/PA' in the narrowed form now enforced: pmsd still never CONSTRUCTS a PS or PA, its read-only allowlist still refuses both, and it transmits a PS only through the relay's single PS-only path, verbatim, for bytes the database confirms against a SENDING attempt."
+      ],
+      "does_not_authorize": "Real PMS financial posting, which remains prohibited until separately authorised (STAYCONNECT_PHASE4_PMS_TRANSMIT stays off on scd and on pmsd); Go-Live; a second FIAS connection or interface; any property-side PMS change.",
+      "implementation": "Migration 0098 (posting_attempts.ps_sha256 in the immutable attempt identity; p4_posting_command_authorised, EXECUTE for svc_pmsd only); internal/postinghandoff; internal/posting handoff transport and orphan recovery; internal/pmsd FinancialRelay and the PS-only writer path; scd posting worker as svc_posting. Commit db05d7ba; recorded by T0198."
     }
   ]
 }
