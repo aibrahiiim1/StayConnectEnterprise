@@ -181,6 +181,14 @@ func (s *server) authorizeSocial(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusGone, "state expired")
 		return
 	}
+	// The provider is the one the state row was started for. A real IdP
+	// returns only code + state to the callback (the redirect_uri registered
+	// with it is the bare /auth/social/callback), so portald may send no
+	// provider at all; when it does send one — the Stub round-trips it — it
+	// must agree with the state.
+	if req.Provider == "" {
+		req.Provider = stProvider
+	}
 	if stProvider != req.Provider {
 		httpErr(w, http.StatusBadRequest, "provider mismatch")
 		return

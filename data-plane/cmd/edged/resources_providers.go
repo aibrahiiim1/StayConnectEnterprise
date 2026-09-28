@@ -7,11 +7,15 @@ package main
 // responses, and a blank/omitted secret on update keeps the stored value.
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/social"
+	"github.com/stayconnect/enterprise/data-plane/internal/socialloader"
 )
 
 // The PMS provider CRUD surface and its connector-kind list were removed here; see
@@ -239,13 +243,20 @@ var socialAllowedProviders = map[string]bool{
 }
 
 type edgeSocialProvider struct {
-	ID            string     `json:"id"`
-	Provider      string     `json:"provider"`
-	Enabled       bool       `json:"enabled"`
-	DisplayName   string     `json:"display_name,omitempty"`
-	ClientID      string     `json:"client_id"` // public per OAuth2 spec
-	RedirectURI   string     `json:"redirect_uri"`
-	Scopes        string     `json:"scopes,omitempty"`
+	ID          string `json:"id"`
+	Provider    string `json:"provider"`
+	Enabled     bool   `json:"enabled"`
+	DisplayName string `json:"display_name,omitempty"`
+	ClientID    string `json:"client_id"` // public per OAuth2 spec
+	RedirectURI string `json:"redirect_uri"`
+	Scopes      string `json:"scopes,omitempty"`
+	// Non-secret provider settings kept in the row's extra jsonb (the same
+	// socialloader.Extra scd builds the provider from): Microsoft's tenant,
+	// Apple's Team ID and Key ID. Apple's .p8 private key is the
+	// client_secret and, like every secret, is never returned.
+	Tenant        string     `json:"tenant,omitempty"`
+	TeamID        string     `json:"team_id,omitempty"`
+	KeyID         string     `json:"key_id,omitempty"`
 	LastSuccessAt *time.Time `json:"last_success_at,omitempty"`
 	LastError     string     `json:"last_error,omitempty"`
 	LastErrorAt   *time.Time `json:"last_error_at,omitempty"`
@@ -256,13 +267,20 @@ type edgeSocialProvider struct {
 const socialCols = `id, provider, enabled, COALESCE(display_name,''),
        client_id, redirect_uri, COALESCE(scopes,''),
        last_success_at, COALESCE(last_error,''), last_error_at,
-       created_at, updated_at`
+       created_at, updated_at, COALESCE(extra,'{}'::jsonb)::text`
 
 func scanSocial(row interface{ Scan(...any) error }, p *edgeSocialProvider) error {
-	return row.Scan(&p.ID, &p.Provider, &p.Enabled, &p.DisplayName,
+	var extraJSON string
+	if err := row.Scan(&p.ID, &p.Provider, &p.Enabled, &p.DisplayName,
 		&p.ClientID, &p.RedirectURI, &p.Scopes,
 		&p.LastSuccessAt, &p.LastError, &p.LastErrorAt,
-		&p.CreatedAt, &p.UpdatedAt)
+		&p.CreatedAt, &p.UpdatedAt, &extraJSON); err != nil {
+		return err
+	}
+	var x socialloader.Extra
+	_ = json.Unmarshal([]byte(extraJSON), &x) // unreadable extra shows as unset; scd refuses to build from it
+	p.Tenant, p.TeamID, p.KeyID = x.Tenant, x.TeamID, x.KeyID
+	return nil
 }
 
 type socialWriteReq struct {
@@ -273,6 +291,71 @@ type socialWriteReq struct {
 	ClientSecret *string `json:"client_secret,omitempty"` // write-only
 	RedirectURI  *string `json:"redirect_uri,omitempty"`
 	Scopes       *string `json:"scopes,omitempty"`
+	Tenant       *string `json:"tenant,omitempty"`  // microsoft only
+	TeamID       *string `json:"team_id,omitempty"` // apple only
+	KeyID        *string `json:"key_id,omitempty"`  // apple only
+}
+
+// extraPatch is the JSON object written to the row's extra column: only the
+// keys the request actually carried, trimmed. On create it is the whole
+// column; on update it is merged over what is stored (extra || patch), so a
+// PATCH that omits team_id keeps the stored one.
+func (in *socialWriteReq) extraPatch() string {
+	m := map[string]string{}
+	for k, v := range map[string]*string{"tenant": in.Tenant, "team_id": in.TeamID, "key_id": in.KeyID} {
+		if v != nil {
+			m[k] = strings.TrimSpace(*v)
+		}
+	}
+	b, _ := json.Marshal(m)
+	return string(b)
+}
+
+// validateSocialWrite checks the provider-specific fields of a create
+// (creating=true) or an update and returns an operator-readable reason, or ""
+// when the request is acceptable. It is the save-time half of what scd's
+// loader enforces at start-up: a configuration that could never sign anyone
+// in is refused here, where the operator sees why, rather than logged on the
+// appliance at the next guest's attempt. The secret itself never appears in
+// the message.
+func validateSocialWrite(provider string, in *socialWriteReq, creating bool) string {
+	trim := func(p *string) (string, bool) {
+		if p == nil {
+			return "", false
+		}
+		return strings.TrimSpace(*p), true
+	}
+	tenant, hasTenant := trim(in.Tenant)
+	teamID, hasTeam := trim(in.TeamID)
+	keyID, hasKey := trim(in.KeyID)
+	if provider != "microsoft" && hasTenant && tenant != "" {
+		return "tenant applies to Microsoft only"
+	}
+	if provider != "apple" && ((hasTeam && teamID != "") || (hasKey && keyID != "")) {
+		return "team_id and key_id apply to Apple only"
+	}
+	switch provider {
+	case "microsoft":
+		if hasTenant && !social.ValidMicrosoftTenant(tenant) {
+			return "tenant must be common, organizations, consumers, a directory (tenant) ID or a verified domain"
+		}
+	case "apple":
+		if creating && (!hasTeam || !hasKey) {
+			return "Sign in with Apple needs team_id (the Apple Team ID) and key_id (the Key ID of the .p8 key)"
+		}
+		if hasTeam && !social.ValidAppleID(teamID) {
+			return "team_id must be the 10-character Apple Team ID (uppercase letters and digits)"
+		}
+		if hasKey && !social.ValidAppleID(keyID) {
+			return "key_id must be the 10-character Key ID shown next to the key in the Apple developer account"
+		}
+		if secret := strDeref(in.ClientSecret); secret != "" {
+			if _, err := social.ParseP256PrivateKey(secret); err != nil {
+				return "client_secret must be the Sign in with Apple private key (.p8): " + err.Error()
+			}
+		}
+	}
+	return ""
 }
 
 func (s *server) socialProvidersRoutes() http.Handler {
@@ -342,6 +425,10 @@ func (s *server) createSocialProvider(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "client_id, client_secret, redirect_uri required")
 		return
 	}
+	if msg := validateSocialWrite(in.Provider, &in, true); msg != "" {
+		jsonErr(w, http.StatusBadRequest, "bad_request", msg)
+		return
+	}
 	enabled := true
 	if in.Enabled != nil {
 		enabled = *in.Enabled
@@ -352,15 +439,15 @@ func (s *server) createSocialProvider(w http.ResponseWriter, r *http.Request) {
 	err := scanSocial(s.db.QueryRow(ctx, `
         INSERT INTO social_oauth_providers(
             tenant_id, provider, enabled, display_name,
-            client_id, client_secret, redirect_uri, scopes
+            client_id, client_secret, redirect_uri, scopes, extra
         ) VALUES (
             $1, $2, $3, NULLIF($4,''),
-            $5, $6, $7, NULLIF($8,'')
+            $5, $6, $7, NULLIF($8,''), $9::jsonb
         )
         RETURNING `+socialCols,
 		s.tenantID, in.Provider, enabled, strDeref(in.DisplayName),
 		strDeref(in.ClientID), strDeref(in.ClientSecret), strDeref(in.RedirectURI),
-		strDeref(in.Scopes),
+		strDeref(in.Scopes), in.extraPatch(),
 	), &p)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -385,8 +472,25 @@ func (s *server) patchSocialProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
+	// The provider-specific checks need to know which provider this row is.
+	var provider string
+	err := s.db.QueryRow(ctx,
+		`SELECT provider FROM social_oauth_providers WHERE id=$1 AND tenant_id=$2`,
+		id, s.tenantID).Scan(&provider)
+	if isNoRows(err) {
+		jsonErr(w, http.StatusNotFound, "not_found", "provider not found")
+		return
+	}
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	if msg := validateSocialWrite(provider, &in, false); msg != "" {
+		jsonErr(w, http.StatusBadRequest, "bad_request", msg)
+		return
+	}
 	var p edgeSocialProvider
-	err := scanSocial(s.db.QueryRow(ctx, `
+	err = scanSocial(s.db.QueryRow(ctx, `
         UPDATE social_oauth_providers SET
             enabled       = COALESCE($3, enabled),
             display_name  = COALESCE($4, display_name),
@@ -394,13 +498,14 @@ func (s *server) patchSocialProvider(w http.ResponseWriter, r *http.Request) {
             client_secret = COALESCE(NULLIF($6,''), client_secret),
             redirect_uri  = COALESCE(NULLIF($7,''), redirect_uri),
             scopes        = COALESCE($8, scopes),
+            extra         = COALESCE(extra,'{}'::jsonb) || $9::jsonb,
             updated_at    = now()
          WHERE id = $1 AND tenant_id = $2
          RETURNING `+socialCols,
 		id, s.tenantID,
 		in.Enabled, in.DisplayName,
 		strDeref(in.ClientID), strDeref(in.ClientSecret), strDeref(in.RedirectURI),
-		in.Scopes,
+		in.Scopes, in.extraPatch(),
 	), &p)
 	if isNoRows(err) {
 		jsonErr(w, http.StatusNotFound, "not_found", "provider not found")

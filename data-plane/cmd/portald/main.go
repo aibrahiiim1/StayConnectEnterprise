@@ -474,6 +474,7 @@ func (h *handler) routes() http.Handler {
 	r.Post("/auth/otp/verify", h.authOTPVerify)
 	r.Get("/auth/social/start", h.socialStart)
 	r.Get("/auth/social/callback", h.socialCallback)
+	r.Post("/auth/social/callback", h.socialCallback) // Sign in with Apple: response_mode=form_post
 	r.Get("/api/oauth/stub/authorize", h.stubAuthorize)
 	r.Post("/api/oauth/stub/authorize-confirm", h.stubAuthorizeConfirm)
 	// The legacy /auth/pms/verify hop is REMOVED; /auth/pms/phase3 below is the current PMS guest flow.

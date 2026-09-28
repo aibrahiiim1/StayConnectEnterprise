@@ -291,3 +291,44 @@ func TestSocialSignInFailuresAreFriendlyPages(t *testing.T) {
 		}
 	}
 }
+
+// A real provider returns only code + state (no `provider` -- scd resolves it from the state row), and Sign in
+// with Apple returns them as a POST form (response_mode=form_post). Both must get past parameter checking to
+// the device check; a POST form without a code is the ordinary social failure page.
+func TestSocialCallbackAcceptsProviderlessGETAndApplesFormPost(t *testing.T) {
+	h := designHandler(t, map[string]any{"hotel_name": "Semantics Demo Hotel"})
+	for _, tc := range []struct {
+		name   string
+		req    func() *http.Request
+		status int
+		key    string
+	}{
+		{"GET without provider", func() *http.Request {
+			return httptest.NewRequest(http.MethodGet, "/auth/social/callback?state=s&code=c", nil)
+		}, http.StatusBadRequest, "err.device.network"},
+		{"Apple form_post", func() *http.Request {
+			r := httptest.NewRequest(http.MethodPost, "/auth/social/callback",
+				strings.NewReader("state=s&code=c&user=%7B%7D"))
+			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			return r
+		}, http.StatusBadRequest, "err.device.network"},
+		{"Apple form_post without code", func() *http.Request {
+			r := httptest.NewRequest(http.MethodPost, "/auth/social/callback",
+				strings.NewReader("state=s&error=user_cancelled_authorize"))
+			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			return r
+		}, http.StatusBadRequest, "errpage.social"},
+	} {
+		w := httptest.NewRecorder()
+		r := tc.req()
+		r.RemoteAddr = "10.77.0.42:51000"
+		r.Header.Set("Accept-Language", "en")
+		h.socialCallback(w, r)
+		if w.Code != tc.status {
+			t.Errorf("%s: status %d, want %d", tc.name, w.Code, tc.status)
+		}
+		if !strings.Contains(w.Body.String(), template.HTMLEscapeString(builtinStrings["en"][tc.key])) {
+			t.Errorf("%s: expected the %s page", tc.name, tc.key)
+		}
+	}
+}

@@ -4,9 +4,9 @@
 // the browser should be sent to (AuthorizeURL), and exchange the redirect's
 // `code` for verified user info (Exchange).
 //
-// Phase 4.3 ships a Stub provider for end-to-end validation without a real
-// OAuth client. Real Google / Apple / Facebook implementations slot in by
-// implementing the same interface.
+// Real implementations: Google (google.go), Microsoft (microsoft.go), Apple
+// (apple.go) and Facebook (facebook.go). The Stub provider remains for
+// end-to-end validation without a real OAuth client.
 package social
 
 import (
