@@ -364,3 +364,10 @@ GRANT EXECUTE ON FUNCTION iam_v2.p6_set_guest_device_self_service(uuid, uuid, uu
 -- operation on the operator surface.
 GRANT EXECUTE ON FUNCTION
   iam_v2.p4_reconcile_financial_epoch_v2(uuid, uuid, text, bigint, boolean) TO svc_edged;
+
+-- LOCAL MODULE ENABLEMENT (migration 0094). The Modules screen reads the site's switches and their history
+-- and changes a switch through one definer function that writes the change row in the same transaction. No
+-- table write privilege: the change log is mandatory by privilege.
+GRANT SELECT ON iam_v2.site_module_changes TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.site_module_get(uuid,uuid)                         TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.site_module_set(uuid,uuid,text,boolean,text,text)  TO svc_edged;

@@ -282,3 +282,7 @@ GRANT EXECUTE ON FUNCTION iam_v2.guest_signin_note_success(uuid,uuid,macaddr)   
 -- Gate-P entry for a privilege the chain withdrew, so this cannot come back as a mirroring accident.
 GRANT EXECUTE ON FUNCTION iam_v2.p6_guest_release_device_policy(uuid, uuid)   TO svc_scd;
 GRANT SELECT          ON iam_v2.appliance_product_settings                    TO svc_scd;
+
+-- LOCAL MODULE ENABLEMENT (migration 0094). scd hosts the module resolver: it reads the site's switches and
+-- can change none of them.
+GRANT EXECUTE ON FUNCTION iam_v2.site_module_get(uuid,uuid) TO svc_scd;

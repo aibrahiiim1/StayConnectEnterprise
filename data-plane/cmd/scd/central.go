@@ -177,6 +177,7 @@ type centralInputs struct {
 	Asg          assignment.Resolution
 	CustomerName string
 	SiteName     string
+	SiteType     string
 
 	CertRequired bool // a certificate lifecycle is configured on this appliance
 	CertReady    bool
@@ -239,14 +240,16 @@ type centralDetails struct {
 
 // CentralStatus is the section 8 document.
 type CentralStatus struct {
-	Activation   string         `json:"activation"`
-	Serial       string         `json:"serial"`
-	ApplianceID  *string        `json:"appliance_id"`
-	CustomerName *string        `json:"customer_name"`
-	SiteName     *string        `json:"site_name"`
-	License      centralLicense `json:"license"`
-	Central      centralLink    `json:"central"`
-	Details      centralDetails `json:"details"`
+	Activation   string  `json:"activation"`
+	Serial       string  `json:"serial"`
+	ApplianceID  *string `json:"appliance_id"`
+	CustomerName *string `json:"customer_name"`
+	SiteName     *string `json:"site_name"`
+	// SiteType is descriptive metadata from the signed assignment. It authorises nothing.
+	SiteType *string        `json:"site_type"`
+	License  centralLicense `json:"license"`
+	Central  centralLink    `json:"central"`
+	Details  centralDetails `json:"details"`
 }
 
 func strPtr(s string) *string {
@@ -372,6 +375,7 @@ func computeCentralStatus(in centralInputs) CentralStatus {
 		out.Activation = activationRetired
 	case in.Asg.Outcome == assignment.OutcomeGranted:
 		out.CustomerName, out.SiteName = strPtr(in.CustomerName), strPtr(in.SiteName)
+		out.SiteType = strPtr(in.SiteType)
 		switch {
 		case !in.Lic.Installed:
 			// Assigned, licence not collected yet.
@@ -442,7 +446,7 @@ func (s *server) centralInputs(ctx context.Context) centralInputs {
 	var doc *assignment.Document
 	in.Asg, doc = s.resolveOwnAssignment(now)
 	if doc != nil {
-		in.CustomerName, in.SiteName = doc.TenantName, doc.SiteName
+		in.CustomerName, in.SiteName, in.SiteType = doc.TenantName, doc.SiteName, doc.SiteType
 	}
 	if s.certMgr != nil {
 		in.CertRequired = true

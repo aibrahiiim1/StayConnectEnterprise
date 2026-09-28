@@ -35,6 +35,8 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/appliancecert"
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/data-plane/internal/buildprofile"
+	"github.com/stayconnect/enterprise/data-plane/internal/deployment"
+	"github.com/stayconnect/enterprise/data-plane/internal/modules"
 	"github.com/stayconnect/enterprise/data-plane/internal/hwid"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/identity"
@@ -212,6 +214,11 @@ type server struct {
 	// can still tell whether the aggregate mode may be reported at all. It is not a second gate: the routes
 	// Phase 6 owns are still absent while dark.
 	p6cfg iamv2.Phase6Config
+
+	// ceiling is the deployment ceiling and modules the four-gate module resolver (modules.go). New product
+	// logic asks these, never the phase flags directly.
+	ceiling deployment.Ceiling
+	modules *modules.Resolver
 
 	// PMS registry is live-reloadable (phase 5.3). All readers must go
 	// through currentPMSReg(); the reload path atomically swaps it under
@@ -751,6 +758,10 @@ func main() {
 		WANMAC:                 s.hw.WANMAC,
 	})
 	s.lic.Load(rootCtx)
+	if err := s.initModules(); err != nil {
+		slog.Error("deployment ceiling: incoherent configuration", "err", err)
+		os.Exit(2)
+	}
 	// CRASH RECOVERY FOR OFFLINE FIRST ACTIVATION. Runs after the licence state is loaded, because deciding
 	// whether an interrupted activation completed means asking whether the licence actually landed. Either
 	// finishes the activation or rolls it back to unassigned; never leaves it half-applied.
@@ -852,6 +863,7 @@ func main() {
 	// Appliance activation, licence and the link to Central (docs/CENTRAL_CONTROL_PLANE.md section 8). edged
 	// proxies these for Hotel Admin; central.go holds the one computation of every state they report.
 	r.Get("/v1/central/status", s.centralStatus)
+	r.Get("/v1/modules", s.modulesStatus)
 	r.Post("/v1/central/refresh", s.centralRefresh)
 	// OFFLINE ACTIVATION: the request this appliance emits, and the package (first activation OR a licence
 	// package for an activated appliance) that comes back. See offline_first_activation.go / offline_import.go.

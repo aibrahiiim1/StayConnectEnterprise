@@ -101,6 +101,10 @@ var adminPrefixes = []string{
 	"/v1/maintenance",
 	"/v1/central/",
 	"/v1/phase3/signin-attempts/",
+	// The module resolver's full state (licence, local switches, readiness) is operator information, read by
+	// edged for the capability list and the Modules screen. The portal never needs it: what a client may do is
+	// decided inside the guest routes themselves.
+	"/v1/modules",
 }
 
 func classifyRoute(path string) routeClass {

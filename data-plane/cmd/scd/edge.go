@@ -70,6 +70,14 @@ func (s *server) licenseRefusal(feature string) map[string]any {
 			"license_state": string(s.lic.State()),
 		}
 	}
+	// The Hotel module must also be enabled by the site and deployed; a licence alone never executes it.
+	if feature == licstate.FeatPMS && s.modules != nil && !s.moduleEffective(context.Background(), lic.ModuleHospitality) {
+		return map[string]any{
+			"error":         "module_not_enabled",
+			"feature":       feature,
+			"license_state": string(s.lic.State()),
+		}
+	}
 	return nil
 }
 
@@ -287,7 +295,9 @@ func (s *server) applyLicenseToMethods(cfg *tenantcfg.AuthMethods) {
 	if !s.lic.FeatureEnabled(licstate.FeatSocialLogin) {
 		cfg.Social = nil
 	}
-	if !s.lic.FeatureEnabled(licstate.FeatPMS) {
+	// Room sign-in is part of the Hotel module: licensed is not enough, the site must have it enabled and the
+	// software deployed (the four-gate resolver decides).
+	if !s.lic.FeatureEnabled(licstate.FeatPMS) || (s.modules != nil && !s.moduleEffective(context.Background(), lic.ModuleHospitality)) {
 		cfg.PMS = nil
 	}
 }
