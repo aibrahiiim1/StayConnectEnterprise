@@ -113,7 +113,8 @@ describe("PackageForm", () => {
   });
 
   it("the eligibility rule-type dropdown offers ONLY implemented types and NO PMS types", () => {
-    render(<PackageForm mode="add" plans={plans} onSave={() => {}} />);
+    render(<PackageForm mode="add" plans={plans} onSave={() => {}}
+      modules={{ modules: { hospitality: { id: "hospitality", label: "Hospitality", licensed: true, enabled: true, ready: true, readiness: [], reasons: [] } as never } }} />);
     fireEvent.click(screen.getByText("Add condition"));
     const typeSelect = screen.getByTestId("rule-type-0") as HTMLSelectElement;
     const offered = Array.from(typeSelect.options).map((o) => o.value);
@@ -121,10 +122,23 @@ describe("PackageForm", () => {
     for (const pms of FORBIDDEN_RULE_TYPES) expect(offered).not.toContain(pms);
   });
 
+  // A SITE WITHOUT HOSPITALITY IS NOT OFFERED HOTEL CONDITIONS OR A PER-NIGHT ALLOWANCE.
+  it("without Hospitality: no hotel conditions and no per-night allowance", () => {
+    render(<PackageForm mode="add" plans={plans} onSave={() => {}} modules={{ modules: {} }} />);
+    fireEvent.click(screen.getByText("Add condition"));
+    const offered = Array.from((screen.getByTestId("rule-type-0") as HTMLSelectElement).options).map((o) => o.value);
+    expect(offered).not.toContain("STAY_LENGTH");
+    expect(offered).not.toContain("ROOM_TYPE");
+    expect(screen.queryByRole("group", { name: "Hotel (PMS stay)" })).toBeNull();
+    const modes = Array.from((screen.getByTestId("allocation-mode") as HTMLSelectElement).options).map((o) => o.value);
+    expect(modes).not.toContain("PER_STAY_NIGHT");
+  });
+
   it("a new package starts Free, and saving it untouched publishes a Free package", () => {
     const onSave = vi.fn();
     render(<PackageForm mode="add" plans={plans} onSave={onSave} />);
-    expect((screen.getByLabelText("Price") as HTMLInputElement).value).toBe("0");
+    // No Paid access here, so there is no price to set.
+    expect(screen.queryByLabelText("Price")).toBeNull();
     expect((screen.getByTestId("method-check-NOT_REQUIRED") as HTMLInputElement).checked).toBe(true);
     fireEvent.change(screen.getByTestId("code"), { target: { value: "X" } });
     fireEvent.change(screen.getByTestId("service-plan"), { target: { value: "plan-gold" } });

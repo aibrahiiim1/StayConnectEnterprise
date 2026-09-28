@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -68,6 +69,13 @@ func (s *server) authMethodsRoutes() http.Handler {
 		}
 		if err := validateAuthMethodsPatch(patch); err != nil {
 			jsonErr(w, http.StatusBadRequest, "validation", err.Error())
+			return
+		}
+		// A METHOD THAT BELONGS TO AN UNLICENSED MODULE CANNOT BE SWITCHED ON. The screen does not offer it,
+		// and the API refuses it too, so a site without Hospitality cannot be given Room sign-in by a direct
+		// call. Switching a method OFF is always allowed.
+		if code, msg := s.authMethodModuleRefusal(req.Context(), patch); code != 0 {
+			jsonErr(w, code, "module_not_licensed", msg)
 			return
 		}
 		ctx, cancel := dbCtx(req)
@@ -530,4 +538,58 @@ func (s *server) pokeSCD(req *http.Request, path string) {
 	if _, _, err := s.scd.call(req.Context(), http.MethodPost, path, nil); err != nil {
 		s.audit(req, "scd.poke_failed", "scd", path, map[string]any{"error": err.Error()})
 	}
+}
+
+// authMethodModules names the licence module behind each optional sign-in method.
+var authMethodModules = map[string]struct{ module, label string }{
+	"pms":      {"hospitality", "Room sign-in"},
+	"email":    {"email_otp", "Email code"},
+	"sms":      {"sms_otp", "SMS code"},
+	"whatsapp": {"whatsapp_otp", "WhatsApp code"},
+	"social":   {"social_login", "Social login"},
+}
+
+// authMethodModuleRefusal returns (status, message) when the patch switches ON a method whose module is not
+// licensed here, else (0, ""). Unreadable module state refuses switching an optional method on (fail closed).
+func (s *server) authMethodModuleRefusal(ctx context.Context, patch map[string]json.RawMessage) (int, string) {
+	for key, m := range authMethodModules {
+		raw, ok := patch[key]
+		if !ok || !turnsOn(key, raw) {
+			continue
+		}
+		if s.modCache == nil {
+			continue // a server assembled without module wiring (focused unit tests)
+		}
+		rep, ok := s.moduleReport(ctx)
+		if !ok {
+			return http.StatusServiceUnavailable, "The appliance could not determine which modules are available. Try again shortly."
+		}
+		st := rep.Modules[m.module]
+		if !st.Licensed || !st.Deployed {
+			return http.StatusConflict, m.label + " is not part of this site's licence, so it cannot be switched on."
+		}
+	}
+	return 0, ""
+}
+
+// turnsOn reports whether a method patch enables it ({"enabled":true}; for social, any provider enabled).
+func turnsOn(key string, raw json.RawMessage) bool {
+	if key == "social" {
+		var providers map[string]struct {
+			Enabled bool `json:"enabled"`
+		}
+		if json.Unmarshal(raw, &providers) != nil {
+			return false
+		}
+		for _, p := range providers {
+			if p.Enabled {
+				return true
+			}
+		}
+		return false
+	}
+	var m struct {
+		Enabled bool `json:"enabled"`
+	}
+	return json.Unmarshal(raw, &m) == nil && m.Enabled
 }

@@ -4,8 +4,10 @@
 //
 // A package has a price (0 is Free) and the ways a client may acquire it: Free, Voucher, Card payment, Room
 // charge. Free and Voucher are the core product. A price above zero, Card payment and Room charge each belong
-// to a module the site must have licensed and switched on; an option the site cannot use is shown disabled
-// with the reason, not hidden, so the operator learns what exists and where it is switched on.
+// to a module. A module the site is NOT LICENSED for is not shown at all -- a café does not see Room charge,
+// and a site without Paid access sees no price -- unless the package already uses it, so it stays removable.
+// A licensed module that is switched off or not ready is shown disabled with the reason, because that one the
+// operator can act on.
 //
 // The section is controlled: the form owns the value and validates it with buildAcquisition on save. The
 // server stays authoritative and re-checks every rule, the module state included.
@@ -16,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
 import {
   ACQUISITION_METHODS, ACQUISITION_METHOD_LABELS, OFFERED_CURRENCIES, PAID_ACCESS_MODULE,
-  currencyExponent, isPaidPrice, methodAvailability, methodsForPriceChange, moduleAvailability,
+  currencyExponent, isPaidPrice, methodAvailability, methodShown, methodsForPriceChange, moduleAvailability, moduleLicensedIn,
   roomChargeNotReadyText,
   type AcquisitionForm, type AcquisitionMethod, type ModulesReport, type RoomChargeInterface,
   type RoomChargeMappingForm,
@@ -43,6 +45,8 @@ export function AcquisitionSection({
   const paid = isPaidPrice(value.price, value.currency, value.currency_exponent);
   const exponent = currencyExponent(value.currency, value.currency_exponent);
   const paidAccess = moduleAvailability(PAID_ACCESS_MODULE, modules);
+  // The price appears only where charging exists: Paid access licensed, or a package that already has a price.
+  const showPrice = moduleLicensedIn(PAID_ACCESS_MODULE, modules) || paid;
   const set = (patch: Partial<AcquisitionForm>) => onChange({ ...value, ...patch });
 
   // A currency this build does not list stays selectable when the package already uses it; otherwise saving
@@ -78,7 +82,7 @@ export function AcquisitionSection({
     <div role="group" aria-labelledby={headingID} data-testid="acquisition-section">
       <h3 id={headingID} className="text-sm font-medium mb-2">Price and how clients get it</h3>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      {showPrice && <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Price" hint={exponent === null ? undefined
           : exponent === 0 ? "In whole units. 0 means free." : `Up to ${exponent} decimal places. 0 means free.`}>
           <Input data-testid="price" inputMode="decimal" value={value.price}
@@ -90,7 +94,7 @@ export function AcquisitionSection({
             {currencies.map((c) => <option key={c} value={c}>{c}</option>)}
           </Select>
         </Field>
-      </div>
+      </div>}
 
       {/* A PRICE NEEDS PAID ACCESS. The price input is not locked -- a package that already has one must stay
           editable -- but the operator is told before saving that the server will refuse it. */}
@@ -102,15 +106,14 @@ export function AcquisitionSection({
       )}
       {modules === "error" && (
         <p className="mt-2 text-xs text-warning-subtle-foreground" role="note" data-testid="modules-error-note">
-          The site&rsquo;s module state could not be read, so Card payment and Room charge cannot be chosen right
-          now. Free and Voucher are always available.
+          The site&rsquo;s module state could not be read, so only Free and Voucher can be chosen right now.
         </p>
       )}
 
       <fieldset className="mt-3" aria-labelledby={methodsLegendID}>
         <legend id={methodsLegendID} className="mb-1.5 text-sm">How clients get it</legend>
         <div className="space-y-1.5">
-          {ACQUISITION_METHODS.map((m) => {
+          {ACQUISITION_METHODS.filter((m) => methodShown(m, modules, value.methods.includes(m))).map((m) => {
             const checked = value.methods.includes(m);
             const avail = methodAvailability(m, modules);
             // The price decides which methods can apply at all, independently of any module.

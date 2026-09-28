@@ -143,7 +143,7 @@ describe("PackageForm price section", () => {
     expect(box("PREPAID").checked).toBe(true);
   });
 
-  it("a method whose module is not licensed or switched off cannot be ticked, and says why", () => {
+  it("an unlicensed method is not shown at all; a licensed one that is switched off says why", () => {
     renderForm({
       modules: { modules: {
         paid_access: mod("paid_access", true, true),
@@ -153,20 +153,28 @@ describe("PackageForm price section", () => {
       roomChargeInterfaces: IFACES,
     });
     fireEvent.change(screen.getByLabelText("Price"), { target: { value: "25" } });
-    expect(box("ONLINE_PAYMENT").disabled).toBe(true);
-    expect(screen.getByTestId("method-ONLINE_PAYMENT").textContent).toMatch(/Not licensed/);
+    // A site not licensed for Card payment does not see it.
+    expect(screen.queryByTestId("method-ONLINE_PAYMENT")).toBeNull();
     expect(box("PMS_POSTING").disabled).toBe(true);
     expect(screen.getByTestId("method-PMS_POSTING").textContent).toMatch(/Switched off in System › Modules/);
     expect(box("PREPAID").disabled).toBe(false);
   });
 
+  it("a site with no paid modules sees no price, no Card payment and no Room charge", () => {
+    renderForm({ modules: { modules: {} } });
+    expect(screen.queryByLabelText("Price")).toBeNull();
+    expect(screen.queryByTestId("method-ONLINE_PAYMENT")).toBeNull();
+    expect(screen.queryByTestId("method-PMS_POSTING")).toBeNull();
+    expect(box("NOT_REQUIRED")).toBeTruthy();
+    expect(box("PREPAID")).toBeTruthy();
+  });
+
   it("fails closed when the module state cannot be read, and says so", () => {
     renderForm({ modules: "error", roomChargeInterfaces: IFACES });
-    fireEvent.change(screen.getByLabelText("Price"), { target: { value: "25" } });
-    expect(box("ONLINE_PAYMENT").disabled).toBe(true);
-    expect(box("PMS_POSTING").disabled).toBe(true);
+    expect(screen.queryByLabelText("Price")).toBeNull();
+    expect(screen.queryByTestId("method-ONLINE_PAYMENT")).toBeNull();
+    expect(screen.queryByTestId("method-PMS_POSTING")).toBeNull();
     expect(screen.getByTestId("modules-error-note")).toBeInTheDocument();
-    expect(screen.getByTestId("paid-access-note")).toBeInTheDocument();
   });
 
   it("a selectable method that is not ready says clients will not be offered it yet", () => {

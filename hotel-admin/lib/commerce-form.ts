@@ -524,6 +524,21 @@ export function moduleAvailability(moduleID: string, report: ModulesReport | "er
   return { selectable: true };
 }
 
+/** Whether a module is LICENSED here (whatever its switch or readiness). Unknown or unreadable = no. */
+export function moduleLicensedIn(moduleID: string, report: ModulesReport | "error" | null): boolean {
+  if (!report || report === "error") return false;
+  const m = report.modules?.[moduleID];
+  return !!m && !!m.licensed;
+}
+
+/** Whether an acquisition method belongs on this site's package form at all: Free and Voucher always; a
+ *  module-owned method only when its module is licensed. A method that is not licensed is not shown -- a café
+ *  does not see "Room charge" -- unless the package already uses it, so it can still be removed. */
+export function methodShown(method: AcquisitionMethod, report: ModulesReport | "error" | null, checked: boolean): boolean {
+  const mod = METHOD_MODULE[method];
+  return !mod || checked || moduleLicensedIn(mod, report);
+}
+
 export function methodAvailability(method: AcquisitionMethod, report: ModulesReport | "error" | null): Availability {
   const mod = METHOD_MODULE[method];
   return mod ? moduleAvailability(mod, report) : { selectable: true };

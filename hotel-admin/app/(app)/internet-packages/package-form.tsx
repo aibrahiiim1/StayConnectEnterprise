@@ -41,6 +41,7 @@ import {
   type PublishPayload,
   type RuleType,
 } from "@/lib/commerce-form";
+import { moduleLicensedIn } from "@/lib/commerce-form";
 import { AcquisitionSection } from "./acquisition-section";
 
 export type PackageFormValue = {
@@ -114,6 +115,8 @@ export function PackageForm({
   /** The PMS interfaces a room charge can be mapped to. null while loading; "error" when they cannot be listed. */
   roomChargeInterfaces?: RoomChargeInterface[] | "error" | null;
 }) {
+  // HOSPITALITY decides whether hotel conditions and the per-night allowance are offered at all.
+  const hotel = moduleLicensedIn("hospitality", modules ?? null);
   const [code, setCode] = useState(initial?.code ?? "");
   const [name, setName] = useState(initial?.name ?? "");
   const [rules, setRules] = useState<EligibilityRuleForm[]>(initial?.rules ?? []);
@@ -276,9 +279,13 @@ export function PackageForm({
         <Select data-testid="allocation-mode" aria-labelledby={allocHeadingID}
           value={alloc.mode}
           onChange={(e) => setAlloc((a) => ({ ...a, mode: e.target.value as AllocationForm["mode"] }))}>
-          {(Object.keys(ALLOCATION_MODE_LABELS) as (keyof typeof ALLOCATION_MODE_LABELS)[]).map((m) => (
-            <option key={m} value={m}>{ALLOCATION_MODE_LABELS[m]}</option>
-          ))}
+          {(Object.keys(ALLOCATION_MODE_LABELS) as (keyof typeof ALLOCATION_MODE_LABELS)[])
+            // A per-night allowance needs a stay to count nights of: offered with Hospitality, and kept for a
+            // stored package that already uses it.
+            .filter((m) => m !== "PER_STAY_NIGHT" || hotel || alloc.mode === "PER_STAY_NIGHT")
+            .map((m) => (
+              <option key={m} value={m}>{ALLOCATION_MODE_LABELS[m]}</option>
+            ))}
         </Select>
         {alloc.mode === "PER_STAY_NIGHT" && (
           <div className="mt-2 space-y-2">
@@ -393,9 +400,12 @@ export function PackageForm({
               <optgroup label="General">
                 {SUPPORTED_RULE_TYPES.filter((t) => !isPMSRuleType(t)).map((t) => <option key={t} value={t}>{RULE_TYPE_LABELS[t]}</option>)}
               </optgroup>
-              <optgroup label="Hotel (PMS stay)">
-                {SUPPORTED_RULE_TYPES.filter((t) => isPMSRuleType(t)).map((t) => <option key={t} value={t}>{RULE_TYPE_LABELS[t]}</option>)}
-              </optgroup>
+              {/* Offered only with Hospitality; a stored condition of this kind stays visible so it can be changed. */}
+              {(hotel || isPMSRuleType(r.type)) && (
+                <optgroup label="Hotel (PMS stay)">
+                  {SUPPORTED_RULE_TYPES.filter((t) => isPMSRuleType(t) && (hotel || t === r.type)).map((t) => <option key={t} value={t}>{RULE_TYPE_LABELS[t]}</option>)}
+                </optgroup>
+              )}
             </Select>
             {r.type === "AUTH_METHOD" && <Input data-testid={`rule-methods-${i}`} aria-label={`${n}: sign-in methods`} placeholder="account, voucher" value={r.methods} onChange={(e) => setRule(i, { methods: e.target.value })} />}
             {r.type === "SUBJECT_KIND" && <Input data-testid={`rule-kinds-${i}`} aria-label={`${n}: client kinds`} placeholder="ACCOUNT, VOUCHER" value={r.kinds} onChange={(e) => setRule(i, { kinds: e.target.value })} />}

@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Package, Plus } from "lucide-react";
 import { api, ApiError, Whoami } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
+import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
@@ -36,6 +37,9 @@ function useDisabled() {
 }
 
 export default function InternetPackagesPage() {
+  const caps = useCapabilities();
+  const hotel = moduleLicensed(caps, "hospitality");
+  const paidAccess = moduleLicensed(caps, "paid_access");
   const [tab, setTab] = useState<Tab>("packages");
   const [err, setErr] = useState<string | null>(null);
   const [addRequest, setAddRequest] = useState(0);
@@ -70,17 +74,20 @@ export default function InternetPackagesPage() {
               </p>
               <p>Each saved change to a package is kept permanently. A client keeps the terms that applied when they connected.</p>
             </HelpSection>
-            <HelpSection title="Data allowance per stay night">
-              <p>
-                The allowance is worked out once, when the client is given the package, and does not change
-                afterwards if their stay is extended or shortened. Clients who did not sign in with their room
-                are not offered such a package, because their stay length is not known.
-              </p>
-            </HelpSection>
+            {hotel && (
+              <HelpSection title="Data allowance per stay night">
+                <p>
+                  The allowance is worked out once, when the client is given the package, and does not change
+                  afterwards if their stay is extended or shortened. Clients who did not sign in with their room
+                  are not offered such a package, because their stay length is not known.
+                </p>
+              </HelpSection>
+            )}
             <HelpSection title="Price">
               <p>
-                Selling packages to clients is not enabled on this appliance, so there is no price to set; a
-                package is granted rather than sold.
+                {paidAccess
+                  ? "A package with a price is acquired by the methods chosen for it, which are set up under Payment methods. A price of 0 is Free."
+                  : "Packages are granted free or by voucher at this site; charging for a package needs the Paid access module."}
               </p>
             </HelpSection>
           </>

@@ -60,6 +60,9 @@ type Item = {
    *  live under the always-mounted "sessions" resource but need a sub-feature that most appliances do not
    *  run, so the resource name alone would keep offering a screen with nothing behind it. */
   capability?: string;
+  /** Optional licence modules this destination belongs to: shown only when at least one is licensed. An
+   *  optional sign-in provider screen is not offered to a site that cannot offer that sign-in method. */
+  modules?: string[];
   keywords?: string;
 };
 type Section = { title: string; items: Item[] };
@@ -110,8 +113,8 @@ const SECTIONS: Section[] = [
       { href: "/sign-in-methods",  label: "Sign-in methods", icon: LogIn,    resource: "auth-methods", keywords: "room number voucher otp sms email social guest portal" },
       { href: "/portal-branding",  label: "Portal settings", icon: Paintbrush, resource: "portal-branding", keywords: "branding logo background colours terms languages translations guest portal" },
       { href: "/walled-garden",    label: "Allowed sites", icon: Globe,     resource: "walled-garden", keywords: "whitelist domains before login guest portal" },
-      { href: "/social-providers", label: "Social login",  icon: AtSign,   resource: "social-providers", keywords: "google apple facebook microsoft oauth guest portal" },
-      { href: "/notifications",    label: "Email & SMS",   icon: MessageSquare,       resource: "notification-providers", keywords: "sendgrid twilio ses otp delivery guest portal" },
+      { href: "/social-providers", label: "Social login",  icon: AtSign,   resource: "social-providers", modules: ["social_login"], keywords: "google apple facebook microsoft oauth guest portal" },
+      { href: "/notifications",    label: "Email & SMS",   icon: MessageSquare,       resource: "notification-providers", modules: ["email_otp", "sms_otp", "whatsapp_otp"], keywords: "sendgrid twilio ses otp whatsapp delivery guest portal" },
     ],
   },
   {
@@ -262,6 +265,7 @@ export function Nav({
       items: sec.items.filter((it) => {
         if (!canRead(it.resource, roles)) return false;
         if (!surfaceAvailable(caps, it.capability ?? it.resource)) return false;
+        if (it.modules && !it.modules.some((m) => moduleLicensed(caps, m))) return false;
         if (!q) return true;
         return (
           it.label.toLowerCase().includes(q) ||

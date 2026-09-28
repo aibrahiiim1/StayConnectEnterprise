@@ -82,12 +82,21 @@ export function PackagesTab({
     if (!formOpen) return;
     let live = true;
     setModules(null); setRoomIfaces(null);
+    // The PMS interfaces room charge can map to are asked for only when Room charge is licensed: a site
+    // without it never calls the room-charge surface.
     api.get<ModulesReport>("/modules")
-      .then((m) => { if (live) setModules(m ?? {}); })
-      .catch(() => { if (live) setModules("error"); });
-    api.get<{ interfaces?: RoomChargeInterface[] | null }>("/pms-financial-onboarding")
-      .then((r) => { if (live) setRoomIfaces(r?.interfaces ?? []); })
-      .catch(() => { if (live) setRoomIfaces("error"); });
+      .then((m) => {
+        if (!live) return;
+        setModules(m ?? {});
+        if (m?.modules?.room_charge?.licensed) {
+          api.get<{ interfaces?: RoomChargeInterface[] | null }>("/pms-financial-onboarding")
+            .then((r) => { if (live) setRoomIfaces(r?.interfaces ?? []); })
+            .catch(() => { if (live) setRoomIfaces("error"); });
+        } else {
+          setRoomIfaces([]);
+        }
+      })
+      .catch(() => { if (live) { setModules("error"); setRoomIfaces([]); } });
     return () => { live = false; };
   }, [formOpen]);
 

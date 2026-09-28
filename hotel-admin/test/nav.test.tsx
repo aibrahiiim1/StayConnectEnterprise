@@ -30,10 +30,14 @@ vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
 //
 // vi.mock is hoisted and file-scoped. The holder lets each test choose the answer without touching the
 // registry, and surfaceAvailable stays the real implementation.
-const CAPS: { surfaces: string[] | null } = { surfaces: null };
+const ALL_MODULES = Object.fromEntries(
+  ["hospitality", "paid_access", "card_payment", "room_charge", "social_login", "email_otp", "sms_otp", "whatsapp_otp"].map(
+    (id) => [id, { deployed: true, licensed: true, enabled: true, ready: true, effective: true, manageable: true }]),
+);
+const CAPS: { surfaces: string[] | null; modules: Record<string, unknown> | null } = { surfaces: null, modules: ALL_MODULES };
 vi.mock("@/lib/capabilities", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/capabilities")>();
-  return { ...actual, useCapabilities: () => (CAPS.surfaces === null ? null : { surfaces: CAPS.surfaces }) };
+  return { ...actual, useCapabilities: () => (CAPS.surfaces === null ? null : { surfaces: CAPS.surfaces, modules: CAPS.modules as never }) };
 });
 
 const NAV_SRC = readFileSync(join(process.cwd(), "components/nav.tsx"), "utf8");
@@ -56,8 +60,16 @@ async function renderNavWith(surfaces: string[], roles: string[]) {
 }
 
 describe("the navigation contract", () => {
-  beforeEach(() => { CAPS.surfaces = null; });
-  afterEach(() => { cleanup(); CAPS.surfaces = null; });
+  beforeEach(() => { CAPS.surfaces = null; CAPS.modules = ALL_MODULES; });
+  afterEach(() => { cleanup(); CAPS.surfaces = null; CAPS.modules = ALL_MODULES; });
+
+  it("optional sign-in provider screens appear only with their module", async () => {
+    CAPS.modules = { hospitality: ALL_MODULES.hospitality };
+    await renderNavWith(SERVED, ["site_admin"]);
+    expect(screen.queryByText("Social login")).toBeNull();
+    expect(screen.queryByText("Email & SMS")).toBeNull();
+    expect(screen.getByText("Sign-in methods")).toBeInTheDocument();
+  });
 
   it("offers every destination the contract requires, on an appliance that serves it", async () => {
     // Data-driven from capability-contract.json, so a destination added to the contract is covered without

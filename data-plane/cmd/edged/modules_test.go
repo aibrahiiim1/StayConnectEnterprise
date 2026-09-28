@@ -122,3 +122,41 @@ func TestUnlicensedModuleKeepsOnlyItsHistory(t *testing.T) {
 		}
 	}
 }
+
+// THE API REFUSES WHAT THE SCREEN DOES NOT OFFER: a site without Hospitality cannot be given Room sign-in (or
+// any optional method it is not licensed for) by a direct call; switching a method off always works.
+func TestAuthMethodsRefuseSwitchingOnAnUnlicensedMethod(t *testing.T) {
+	s := &server{modCache: &moduleCache{}, scd: fakeSCDModules(t, 200, report(map[string]moduleState{
+		"hospitality":  {ID: "hospitality", Deployed: true, Licensed: false},
+		"social_login": {ID: "social_login", Deployed: true, Licensed: true},
+	}))}
+	ctx := context.Background()
+	on := func(k, v string) map[string]json.RawMessage { return map[string]json.RawMessage{k: json.RawMessage(v)} }
+	if code, _ := s.authMethodModuleRefusal(ctx, on("pms", `{"enabled":true,"mode":"room_any"}`)); code != http.StatusConflict {
+		t.Fatalf("switching Room sign-in on without Hospitality: got %d", code)
+	}
+	if code, _ := s.authMethodModuleRefusal(ctx, on("pms", `{"enabled":false}`)); code != 0 {
+		t.Fatalf("switching it off must always work: got %d", code)
+	}
+	if code, _ := s.authMethodModuleRefusal(ctx, on("email", `{"enabled":true}`)); code != http.StatusConflict {
+		t.Fatalf("email without email_otp: got %d", code)
+	}
+	if code, _ := s.authMethodModuleRefusal(ctx, on("social", `{"google":{"enabled":true}}`)); code != 0 {
+		t.Fatalf("social with social_login licensed: got %d", code)
+	}
+	if code, _ := s.authMethodModuleRefusal(ctx, on("voucher", `{"enabled":true}`)); code != 0 {
+		t.Fatalf("core methods are never refused: got %d", code)
+	}
+}
+
+func TestOverviewAttentionFollowsModules(t *testing.T) {
+	s := &server{modCache: &moduleCache{}, scd: fakeSCDModules(t, 200, report(map[string]moduleState{
+		"hospitality": {ID: "hospitality", Deployed: true, Licensed: false, Manageable: true},
+		"room_charge": {ID: "room_charge", Deployed: true, Licensed: false, Manageable: false},
+	}))}
+	in := attentionInput{PMS: []attentionPMS{{Label: "FIAS", Active: true}}, PMSReviewCases: 2, PostingsReviewOpen: 1}
+	got := s.moduleScopedAttention(context.Background(), in)
+	if got.PMS != nil || got.PMSReviewCases != 2 || got.PostingsReviewOpen != 0 {
+		t.Fatalf("no room-sign-in readiness items without the licence; history work stays: %+v", got)
+	}
+}
