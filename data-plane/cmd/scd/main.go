@@ -834,6 +834,7 @@ func main() {
 	r.Post("/v1/vouchers/export", s.exportVoucherCodes)
 	r.Post("/v1/vouchers/{id}/reveal", s.revealVoucherCode)
 	r.Post("/v1/vouchers/{id}/revoke", s.revokeVoucher)
+	r.Post("/v1/voucher-batches/{id}/revoke", s.revokeVoucherBatch)
 	// Key rotation. superseded_at was read by issuance and written by nothing, so a per-generation blind
 	// index key was the key forever; this is the deliberate audited path the grant file always described.
 	r.Get("/v1/voucher-key-generations", s.listVoucherKeyGenerations)

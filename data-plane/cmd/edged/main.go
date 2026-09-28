@@ -417,6 +417,7 @@ func main() {
 			// stripe-accounts is REMOVED (migration 0096). It stored provider secrets in clear text and was read by
 			// nothing. Card payment accounts live under "payment-providers": site-local, secrets sealed and
 			// write-only, served by scd which owns the key.
+			mountResource(r, s, "payment-providers", s.paymentProvidersRoutes)
 			mountResource(r, s, "notification-providers", s.notificationProvidersRoutes)
 			mountResource(r, s, "social-providers", s.socialProvidersRoutes)
 			// Phase 2 (DARK): the commercial-packages admin resource is mounted ONLY when the admin
@@ -446,6 +447,8 @@ func main() {
 				mountResource(r, s, "pms-interfaces", s.pmsInterfacesRoutes)
 				// The connector catalogue the connection form is built from. Guarded by the pms-interfaces key.
 				r.With(s.resourcePermission("pms-interfaces")).Get("/pms-providers", s.listPMSProviders)
+				// Room charge: approving a FIAS interface financially. Module-gated on room_charge (modules.go).
+				mountResource(r, s, "pms-financial-onboarding", s.pmsFinancialOnboardingRoutes)
 				mountResource(r, s, "pms-routing", s.pmsRoutingRoutes)
 				mountResource(r, s, "pms-source-conflicts", s.pmsSourceConflictsRoutes)
 				// Unresolved departures as CASES. Read is wide because "which guests does the PMS and the

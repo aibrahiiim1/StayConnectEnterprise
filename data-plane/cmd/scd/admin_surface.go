@@ -93,6 +93,7 @@ var guestPrefixes = []string{
 // guest prefixes and is listed here deliberately.
 var adminPrefixes = []string{
 	"/v1/vouchers",
+	"/v1/voucher-batches",
 	"/v1/voucher-key-generations",
 	"/v1/admin/",
 	"/v1/backup/",

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -79,6 +80,8 @@ type CommerceAdminTx interface {
 	InsertPackageRevision(ctx context.Context, spec PackagePublishSpec, packageID string, revNo int) (revisionID string, err error)
 	InsertEligibilityRule(ctx context.Context, tenantID, siteID, revisionID string, rule EligibilityRule) error
 	InsertGrantTier(ctx context.Context, tenantID, siteID, revisionID string, tier GrantTier) error
+	// InsertRoomChargeMapping writes the revision's posting code for one PMS interface (room charge).
+	InsertRoomChargeMapping(ctx context.Context, tenantID, siteID, revisionID string, m RoomChargeMapping) error
 	SetCurrentRevision(ctx context.Context, packageID, revisionID string) error
 	SetPackageActive(ctx context.Context, tenantID, siteID, packageID string, active bool) error
 
@@ -291,6 +294,8 @@ type PackageCurrent struct {
 	// the editor cannot read is a field the editor silently drops: saving an unrelated rename would quietly
 	// turn a PER_STAY_NIGHT package back into a flat one, on a new immutable revision nobody could tell apart.
 	DataAllocationPolicy map[string]any `json:"data_allocation_policy,omitempty"`
+	// RoomChargeMappings are the revision's live posting codes per PMS interface (room charge only).
+	RoomChargeMappings []RoomChargeMapping `json:"room_charge_mappings"`
 }
 
 // PackagePublishSpec is a request to publish a new immutable free package revision.
@@ -311,6 +316,23 @@ type PackagePublishSpec struct {
 	// CreateOnly means "this is a NEW package": publication refuses with ErrCodeExists when the code is already
 	// in use, instead of silently becoming a new revision of the package that owns it. Edit leaves it false.
 	CreateOnly bool
+	// Price and acquisition. PriceMinor 0 with no methods publishes a Free package, as every client that
+	// predates these fields did. A priced package names its currency (ISO-4217, exponent authoritative) and
+	// at least one of Voucher, Card payment and Room charge. Room charge needs a mapping per interface.
+	PriceMinor         int64
+	Currency           string
+	CurrencyExponent   int
+	AcquisitionMethods []string
+	RoomChargeMappings []RoomChargeMapping
+}
+
+// RoomChargeMapping is how a room-charge purchase of one revision is posted on one PMS interface: the
+// posting code the PMS books the charge under and, optionally, the tax code and rate it reports.
+type RoomChargeMapping struct {
+	PMSInterfaceID string `json:"pms_interface_id"`
+	PostingCode    string `json:"posting_code"`
+	TaxCode        string `json:"tax_code,omitempty"`
+	TaxRateBP      *int   `json:"tax_rate_bp,omitempty"`
 }
 
 // AdminResult is the guest-independent result of an admin mutation.
@@ -398,6 +420,9 @@ func (a *CommerceAdmin) PublishRevision(ctx context.Context, spec PackagePublish
 	if _, err := ParseDataAllocationPolicy(spec.DataAllocationPolicy); err != nil {
 		return AdminResult{Reason: "invalid_data_allocation_policy: " + err.Error()}, nil
 	}
+	if reason := normalizeAcquisition(&spec); reason != "" {
+		return AdminResult{Reason: reason}, nil
+	}
 
 	var res AdminResult
 	err := a.repo.WithTx(ctx, func(tx CommerceAdminTx) error {
@@ -433,6 +458,11 @@ func (a *CommerceAdmin) PublishRevision(ctx context.Context, spec PackagePublish
 		}
 		for _, tier := range spec.GrantTiers {
 			if err := tx.InsertGrantTier(ctx, spec.TenantID, spec.SiteID, revID, tier); err != nil {
+				return err
+			}
+		}
+		for _, m := range spec.RoomChargeMappings {
+			if err := tx.InsertRoomChargeMapping(ctx, spec.TenantID, spec.SiteID, revID, m); err != nil {
 				return err
 			}
 		}
@@ -747,3 +777,60 @@ func (a *CommerceAdmin) SetActive(ctx context.Context, tenantID, siteID, package
 // It exists so composition tests can assert what the REAL startup wiring produced, rather than asserting
 // against a validator called directly with a flag the test chose itself.
 func (a *CommerceAdmin) AggregateOnlineTimeAllowed() bool { return a != nil && a.aggregateOnlineTime }
+
+// normalizeAcquisition fills the Free defaults and validates price, currency, methods and room-charge
+// mappings, returning an operator-readable refusal reason or "". The database CHECKs hold the same rules.
+func normalizeAcquisition(spec *PackagePublishSpec) string {
+	if len(spec.AcquisitionMethods) == 0 && spec.PriceMinor == 0 {
+		spec.AcquisitionMethods = []string{AcquireFree}
+	}
+	if err := ValidateAcquisitionMethods(spec.PriceMinor, spec.AcquisitionMethods); err != nil {
+		return "invalid_acquisition_methods: " + err.Error()
+	}
+	if spec.PriceMinor == 0 && strings.TrimSpace(spec.Currency) == "" {
+		spec.Currency, spec.CurrencyExponent = "USD", 2
+	} else {
+		c, err := ValidateCurrency(spec.Currency, spec.CurrencyExponent)
+		if err != nil {
+			return "invalid_currency: " + err.Error()
+		}
+		spec.Currency = c
+	}
+	room := hasMethod(spec.AcquisitionMethods, AcquireRoomCharge)
+	if !room && len(spec.RoomChargeMappings) > 0 {
+		return "invalid_room_charge_mapping: mappings are only for packages acquired by room charge"
+	}
+	if room && len(spec.RoomChargeMappings) == 0 {
+		return "invalid_room_charge_mapping: room charge needs a posting code for at least one PMS interface"
+	}
+	seen := map[string]bool{}
+	for i := range spec.RoomChargeMappings {
+		m := &spec.RoomChargeMappings[i]
+		m.PMSInterfaceID = strings.TrimSpace(m.PMSInterfaceID)
+		m.PostingCode = strings.TrimSpace(m.PostingCode)
+		m.TaxCode = strings.TrimSpace(m.TaxCode)
+		if m.PMSInterfaceID == "" || seen[m.PMSInterfaceID] {
+			return "invalid_room_charge_mapping: one mapping per PMS interface"
+		}
+		seen[m.PMSInterfaceID] = true
+		if l := len(m.PostingCode); l < 1 || l > 20 || strings.Contains(m.PostingCode, "|") || hasControl(m.PostingCode) {
+			return "invalid_room_charge_mapping: the posting code must be 1 to 20 printable characters without |"
+		}
+		if len(m.TaxCode) > 20 || strings.Contains(m.TaxCode, "|") || hasControl(m.TaxCode) {
+			return "invalid_room_charge_mapping: the tax code must be at most 20 printable characters without |"
+		}
+		if m.TaxRateBP != nil && (*m.TaxRateBP < 0 || *m.TaxRateBP > 10000) {
+			return "invalid_room_charge_mapping: the tax rate must be between 0 and 100%"
+		}
+	}
+	return ""
+}
+
+func hasControl(s string) bool {
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			return true
+		}
+	}
+	return false
+}

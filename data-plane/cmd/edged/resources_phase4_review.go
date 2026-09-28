@@ -401,8 +401,17 @@ func (s *server) postReviewAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The decision and its consequence commit together: a terminal decision on a room-charge posting moves
+	// the settlement (CONFIRM_POSTED settles and grants, ABANDON fails it, RETRY requeues the one authorised
+	// attempt) in the same transaction as the ledger row, so neither can exist without the other.
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "the decision could not be recorded")
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
 	var actionID string
-	err := s.db.QueryRow(ctx,
+	err = tx.QueryRow(ctx,
 		`SELECT iam_v2.record_posting_review_action($1,$2,$3,$4,$5::jsonb,$6,$7)::text`,
 		id, in.Action, sess.OperatorID, reason, evidence,
 		in.ExpectedVersion, in.ReversalAmountMinor).Scan(&actionID)
@@ -411,10 +420,22 @@ func (s *server) postReviewAction(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, code, msg, reviewErrorMessage(err))
 		return
 	}
+	var applied string
+	if err := tx.QueryRow(ctx, `SELECT iam_v2.p4_posting_review_apply($1::uuid,$2::uuid,$3::uuid)`,
+		s.tenantID, s.siteID, id).Scan(&applied); err != nil {
+		code, msg := classifyReviewError(err)
+		jsonErr(w, code, msg, reviewErrorMessage(err))
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "the decision could not be recorded")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"action_id": actionID,
 		"action":    in.Action,
 		"actor":     sess.OperatorID,
+		"applied":   applied,
 	})
 }
 

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	lic "github.com/stayconnect/enterprise/license"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -405,6 +406,52 @@ type publishPackageReq struct {
 	// CreateOnly is sent by "Add package". Without it a code that already existed silently became a new
 	// revision of that package; with it the answer is 409 code_exists. Edit omits it and revises as before.
 	CreateOnly bool `json:"create_only"`
+	// Price and acquisition (docs/architecture/ONEGATE_MODULES_AND_ACQUISITION.md). All optional: a request
+	// that names none publishes a Free package, exactly as before.
+	PriceMinor         int64                     `json:"price_minor"`
+	Currency           string                    `json:"currency"`
+	CurrencyExponent   int                       `json:"currency_exponent"`
+	AcquisitionMethods []string                  `json:"acquisition_methods"`
+	RoomChargeMappings []iamv2.RoomChargeMapping `json:"room_charge_mappings"`
+}
+
+// acquisitionModuleRefusal names the module a publication needs and does not have. Publishing is
+// configuration, so readiness (a provider account, an onboarded interface) is not required -- the module
+// must be licensed and switched on at this site. The client offer is gated again on all four gates.
+func (s *server) acquisitionModuleRefusal(r *http.Request, in publishPackageReq) (string, bool) {
+	need := map[string]bool{}
+	if in.PriceMinor > 0 {
+		need[lic.ModulePaidAccess] = true
+	}
+	for _, m := range in.AcquisitionMethods {
+		switch m {
+		case iamv2.AcquireCard:
+			need[lic.ModuleCardPayment] = true
+		case iamv2.AcquireRoomCharge:
+			need[lic.ModuleRoomCharge] = true
+		}
+	}
+	if len(need) == 0 {
+		return "", true
+	}
+	rep, ok := s.moduleReport(r.Context())
+	if !ok {
+		return "", false
+	}
+	for _, id := range []string{lic.ModulePaidAccess, lic.ModuleCardPayment, lic.ModuleRoomCharge} {
+		if !need[id] {
+			continue
+		}
+		st, found := rep.Modules[id]
+		if !found || !st.Licensed || !st.Enabled {
+			label := id
+			if found && st.Label != "" {
+				label = st.Label
+			}
+			return fmt.Sprintf("%s is not licensed and switched on at this site (System > Modules).", label), true
+		}
+	}
+	return "", true
 }
 
 func (s *server) publishCommercialPackage(w http.ResponseWriter, r *http.Request) {
@@ -420,6 +467,18 @@ func (s *server) publishCommercialPackage(w http.ResponseWriter, r *http.Request
 		VisibleFrom: in.VisibleFrom, VisibleUntil: in.VisibleUntil,
 		DataAllocationPolicy: in.DataAllocationPolicy,
 		CreateOnly:           in.CreateOnly,
+		PriceMinor:           in.PriceMinor,
+		Currency:             in.Currency,
+		CurrencyExponent:     in.CurrencyExponent,
+		AcquisitionMethods:   in.AcquisitionMethods,
+		RoomChargeMappings:   in.RoomChargeMappings,
+	}
+	if msg, ok := s.acquisitionModuleRefusal(r, in); !ok {
+		jsonErr(w, http.StatusServiceUnavailable, "modules_unavailable", "the module state could not be read")
+		return
+	} else if msg != "" {
+		jsonErr(w, http.StatusConflict, "module_not_enabled", msg)
+		return
 	}
 	for _, ru := range in.EligibilityRules {
 		spec.EligibilityRules = append(spec.EligibilityRules, iamv2.EligibilityRule{Type: ru.Type, Value: ru.Value})

@@ -224,7 +224,7 @@ const pmsInterfaceCols = `i.id::text, i.connector_kind, i.display_label, i.lifec
          WHERE g.pms_interface_id = i.id),
        (SELECT r.config->>'endpoint' FROM iam_v2.pms_interface_revisions r WHERE r.id = i.current_revision_id),
        (SELECT r.source_timezone FROM iam_v2.pms_interface_revisions r WHERE r.id = i.current_revision_id),
-       (SELECT r.config->>'financial_base_currency' FROM iam_v2.pms_interface_revisions r WHERE r.id = i.current_revision_id)`
+       (SELECT r.financial_base_currency::text FROM iam_v2.pms_interface_revisions r WHERE r.id = i.current_revision_id)`
 
 func scanPMSInterface(row interface{ Scan(...any) error }, e *pmsInterfaceRow) error {
 	if err := row.Scan(&e.ID, &e.ConnectorKind, &e.DisplayLabel, &e.LifecycleState,
