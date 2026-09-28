@@ -2,7 +2,7 @@
 """NEGATIVE TESTS for check_appliance_facts_agree in tools/project-state.py.
 
 The rule this file guards exists because of a specific green gate. `production_appliance` is the SOURCE of the
-"Guest traffic:" clause in every generated current-state block, and it sat reading
+"Client traffic:" clause (formerly "Guest traffic:") in every generated current-state block, and it sat reading
 
     "NONE. No guest has authenticated: purchases=0, entitlements=0, sessions=0, and the first real Room Login
      has not been performed."
