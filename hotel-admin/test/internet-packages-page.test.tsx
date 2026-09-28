@@ -235,6 +235,40 @@ describe("InternetPackagesPage — packages", () => {
     expect(p.mock.calls[0][1]).not.toHaveProperty("create_only");
   });
 
+  it("Edit hands the stored price, methods and room-charge mappings back, and reads a price refusal in words", async () => {
+    routes({
+      "/commercial-packages": list([{ ...PKG, price_minor: 15000, currency: "EGP", currency_exponent: 2 }]),
+      "/commercial-packages/plans": list([PLAN]),
+      "/commercial-packages/pk1/current": {
+        package_id: "pk1", code: "FREEWIFI", revision_id: "r1", revision_no: 1, service_plan_revision_id: "rev-gold",
+        display: { name: "Free WiFi" }, duration_policy: { end_mode: "MANUAL_END" },
+        eligibility_rules: [], grant_tiers: [{ order: 10, value: {} }],
+        price_minor: 15000, currency: "EGP", currency_exponent: 2, settlement_methods: ["PREPAID", "PMS_POSTING"],
+        room_charge_mappings: [{ pms_interface_id: "if-1", posting_code: "WIFI", tax_rate_bp: 1400 }],
+      },
+      "/modules": { modules: {
+        paid_access: { id: "paid_access", label: "Paid access", licensed: true, enabled: true, ready: true },
+        room_charge: { id: "room_charge", label: "Room charge", licensed: true, enabled: true, ready: true },
+      } },
+      "/pms-financial-onboarding": { interfaces: [
+        { pms_interface_id: "if-1", display_label: "Front office", financial_base_currency: "EGP", ready: true, reason: null },
+      ], strategies: [] },
+    });
+    p.mockRejectedValueOnce(new ApiError(400, { error: "validation", message: "invalid_room_charge_mapping: one mapping per PMS interface" }));
+    render(<InternetPackagesPage />);
+    await screen.findByText("Free WiFi");
+    fireEvent.click(screen.getByRole("button", { name: /^edit$/i }));
+    await screen.findByTestId("room-charge-mappings");
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    await waitFor(() => expect(p).toHaveBeenCalledTimes(1));
+    expect(p.mock.calls[0][1]).toMatchObject({
+      price_minor: 15000, currency: "EGP", currency_exponent: 2, acquisition_methods: ["PREPAID", "PMS_POSTING"],
+      room_charge_mappings: [{ pms_interface_id: "if-1", posting_code: "WIFI", tax_rate_bp: 1400 }],
+    });
+    const dialog = screen.getByRole("dialog");
+    expect(await within(dialog).findByText("Room charge: One mapping per PMS interface.")).toBeInTheDocument();
+  });
+
   // DELETE… REFUSES WITH THE SERVER'S REASONS when anything uses the package, and offers Disable.
   it("Delete… of a used package explains, with real counts, and offers Disable instead — it never deletes", async () => {
     routes({
