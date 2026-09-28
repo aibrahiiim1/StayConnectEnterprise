@@ -9,6 +9,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
+// A site licensed for every module (the scenarios below are a hotel with every module).
+vi.mock("@/lib/capabilities", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/capabilities")>();
+  const on = { deployed: true, licensed: true, enabled: true, ready: true, effective: true, manageable: true };
+  const ids = ["hospitality", "paid_access", "card_payment", "room_charge", "email_otp", "sms_otp", "whatsapp_otp", "social_login"];
+  return { ...actual, useCapabilities: () => ({ surfaces: [], modules: Object.fromEntries(ids.map((m) => [m, on])) }) };
+});
+
 vi.mock("@/lib/api", async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);
   return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() } };

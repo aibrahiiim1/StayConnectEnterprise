@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0098, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0099, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -11759,7 +11759,7 @@ CREATE TABLE public.auth_otps (
     ip inet,
     user_agent text,
     otp_key_generation integer,
-    CONSTRAINT auth_otps_channel_check CHECK ((channel = ANY (ARRAY['email'::text, 'sms'::text])))
+    CONSTRAINT auth_otps_channel_check CHECK ((channel = ANY (ARRAY['email'::text, 'sms'::text, 'whatsapp'::text])))
 );
 
 
@@ -12015,8 +12015,9 @@ CREATE TABLE public.notification_providers (
     last_error_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT notification_providers_channel_check CHECK ((channel = ANY (ARRAY['email'::text, 'sms'::text]))),
-    CONSTRAINT notification_providers_kind_check CHECK ((kind = ANY (ARRAY['stub'::text, 'sendgrid'::text, 'ses'::text, 'twilio'::text])))
+    CONSTRAINT notification_providers_channel_check CHECK ((channel = ANY (ARRAY['email'::text, 'sms'::text, 'whatsapp'::text]))),
+    CONSTRAINT notification_providers_kind_check CHECK ((kind = ANY (ARRAY['stub'::text, 'sendgrid'::text, 'ses'::text, 'twilio'::text, 'meta_whatsapp'::text, 'twilio_whatsapp'::text]))),
+    CONSTRAINT notification_providers_whatsapp_kind_check CHECK ((((channel = 'whatsapp'::text) = (kind = ANY (ARRAY['meta_whatsapp'::text, 'twilio_whatsapp'::text]))) OR (kind = 'stub'::text)))
 );
 
 

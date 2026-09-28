@@ -10,6 +10,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
+// A site licensed for every module (the scenarios below are a hotel with every module).
+vi.mock("@/lib/capabilities", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/capabilities")>();
+  const on = { deployed: true, licensed: true, enabled: true, ready: true, effective: true, manageable: true };
+  const ids = ["hospitality", "paid_access", "card_payment", "room_charge", "email_otp", "sms_otp", "whatsapp_otp", "social_login"];
+  return { ...actual, useCapabilities: () => ({ surfaces: [], modules: Object.fromEntries(ids.map((m) => [m, on])) }) };
+});
+
 vi.mock("@/lib/api", async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);
   return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() } };
@@ -105,7 +113,7 @@ describe("Payment methods — the four methods", () => {
     expect(within(screen.getByTestId("method-Room charge")).getByRole("link", { name: /room charge/i })).toHaveAttribute("href", "/room-charge");
   });
 
-  it("derives each module state: not licensed, switched off, not ready in words, ready", async () => {
+  it("derives each module state: not ready in words; an unlicensed method is absent", async () => {
     routes(["site_admin"], {
       card_payment: mod("card_payment", { ready: false, effective: false, readiness: ["NO_ACTIVE_PAYMENT_ACCOUNT", "PAYMENT_KEY_MISSING", "SOMETHING_NEW"] }),
       room_charge: mod("room_charge", { licensed: false, enabled: false, ready: false, effective: false, manageable: false }),
@@ -117,7 +125,8 @@ describe("Payment methods — the four methods", () => {
     expect(within(card).getByText("This appliance has no payment key")).toBeInTheDocument();
     // An unknown code is shown verbatim, in a code element.
     expect(within(card).getByText("SOMETHING_NEW").tagName).toBe("CODE");
-    expect(within(screen.getByTestId("method-Room charge")).getByText("Not licensed")).toBeInTheDocument();
+    // A method the site is not licensed for is not presented at all.
+    expect(screen.queryByTestId("method-Room charge")).toBeNull();
   });
 
   it("says Switched off with a link to Modules, and Ready when everything is in place", async () => {
@@ -132,10 +141,12 @@ describe("Payment methods — the four methods", () => {
     expect(within(screen.getByTestId("method-Room charge")).getByText("Ready")).toBeInTheDocument();
   });
 
-  it("hides the Card payment configuration until Card payment is manageable", async () => {
+  it("a site without Card payment sees no Card payment and never asks for its accounts", async () => {
     routes(["site_admin"], { card_payment: mod("card_payment", { licensed: false, manageable: false }), room_charge: mod("room_charge") });
     render(<PaymentMethodsPage />);
-    expect(await screen.findByText(/appear here once Card payment is licensed/i)).toBeInTheDocument();
+    await screen.findByTestId("method-Room charge");
+    // Not licensed: no Card payment card, no configuration, and the accounts API is never called.
+    expect(screen.queryByTestId("method-Card payment")).toBeNull();
     expect(g).not.toHaveBeenCalledWith("/payment-providers/accounts");
   });
 });

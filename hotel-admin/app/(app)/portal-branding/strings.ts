@@ -97,6 +97,7 @@ export const PORTAL_STRINGS: PortalString[] = [
   { group: "Navigation", key: "method.account", english: "Personal account" },
   { group: "Navigation", key: "method.email", english: "Email", module: "email_otp" },
   { group: "Navigation", key: "method.sms", english: "Phone", module: "sms_otp" },
+  { group: "Navigation", key: "method.whatsapp", english: "WhatsApp", module: "whatsapp_otp" },
   { group: "Navigation", key: "method.social", english: "Social", module: "social_login" },
 
   { group: "Client Login", key: "pms.room", english: "Room Number", module: "hospitality" },
@@ -114,13 +115,14 @@ export const PORTAL_STRINGS: PortalString[] = [
   { group: "Account Login", key: "account.pass", english: "Password" },
 
   { group: "Email and SMS", key: "email.dest", english: "Email address", module: "email_otp" },
-  { group: "Email and SMS", key: "sms.dest", english: "Phone number", module: "sms_otp" },
-  { group: "Email and SMS", key: "sms.hint", english: "Include the country code, for example +44 20 7946 0958", module: "sms_otp" },
+  { group: "Email and SMS", key: "sms.dest", english: "Phone number", module: ["sms_otp", "whatsapp_otp"] },
+  { group: "Email and SMS", key: "sms.hint", english: "Include the country code, for example +44 20 7946 0958", module: ["sms_otp", "whatsapp_otp"] },
   { group: "Email and SMS", key: "otp.code", english: "Verification code", module: OTP },
   { group: "Email and SMS", key: "otp.sent.email", english: "We sent a 6-digit code to", module: "email_otp" },
   { group: "Email and SMS", key: "otp.sent.sms", english: "We texted a 6-digit code to", module: "sms_otp" },
+  { group: "Email and SMS", key: "otp.sent.whatsapp", english: "We sent a 6-digit code on WhatsApp to", module: "whatsapp_otp" },
   { group: "Email and SMS", key: "otp.retry.email", english: "Try a different email", module: "email_otp" },
-  { group: "Email and SMS", key: "otp.retry.sms", english: "Use a different number", module: "sms_otp" },
+  { group: "Email and SMS", key: "otp.retry.sms", english: "Use a different number", module: ["sms_otp", "whatsapp_otp"] },
 
   { group: "Post-stay", key: "poststay.pin", english: "Post-stay PIN", module: "hospitality" },
   { group: "Post-stay", key: "poststay.hint", english: "The PIN you were given at checkout", module: "hospitality" },
@@ -246,6 +248,7 @@ export const PORTAL_STRINGS: PortalString[] = [
   { group: "Help and tips", key: "help.account", english: "Enter the username and password you were given. If a voucher field is showing, switch on “Use Personal Account” first." },
   { group: "Help and tips", key: "help.email", english: "Enter your email address and tap Send code, then type the 6-digit code from the email. Check your spam folder if it does not arrive.", module: "email_otp" },
   { group: "Help and tips", key: "help.sms", english: "Enter your phone number with the country code and tap Send code, then type the 6-digit code from the text message.", module: "sms_otp" },
+  { group: "Help and tips", key: "help.whatsapp", english: "Enter your WhatsApp phone number with the country code and tap Send code, then type the 6-digit code from the WhatsApp message.", module: "whatsapp_otp" },
   { group: "Help and tips", key: "help.fail", english: "Something not working? Please contact the site team for assistance." },
   { group: "Sign-in page", key: "brand.by", english: "Wi-Fi by" },
 ];
