@@ -54,10 +54,7 @@ func guestPages(t *testing.T, design map[string]any, header http.Header) map[str
 	h.landing(w, req("/auth/voucher"), "Voucher AUTH_DENIED.")
 	out["sign-in refused"] = w.Body.String()
 	w = httptest.NewRecorder()
-	h.renderPackages(w, req("/packages"), []struct {
-		PackageID string         `json:"package_id"`
-		Display   map[string]any `json:"display"`
-	}{{"p1", map[string]any{"name": "Standard", "down_kbps": float64(10000), "time_quota_seconds": float64(3600)}}})
+	h.renderPackages(w, req("/packages"), []guestPackage{{PackageID: "p1", Display: map[string]any{"name": "Standard", "down_kbps": float64(10000), "time_quota_seconds": float64(3600)}}}, "")
 	out["packages"] = w.Body.String()
 	w = httptest.NewRecorder()
 	h.renderGuestError(w, req("/auth/social/callback"), http.StatusBadGateway, "errpage.social")

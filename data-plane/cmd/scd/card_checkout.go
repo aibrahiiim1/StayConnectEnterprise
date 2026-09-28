@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -189,7 +190,10 @@ func (s *server) startCardCheckout(w http.ResponseWriter, r *http.Request, purch
 
 type purchaseStatusReq struct {
 	PurchaseID string `json:"purchase_id"`
-	DeviceID   string `json:"device_id"`
+	// IP and MAC are server-derived by portald from the connection. The device is resolved from them here, so
+	// the return page works even when the client's browser dropped every cookie.
+	IP  string `json:"ip"`
+	MAC string `json:"mac"`
 }
 
 // purchaseStatus answers where one purchase stands, for the portal's pending and return pages. It is bound to
@@ -197,11 +201,22 @@ type purchaseStatusReq struct {
 // (rate limited); what the browser says plays no part.
 func (s *server) purchaseStatus(w http.ResponseWriter, r *http.Request) {
 	var req purchaseStatusReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.PurchaseID == "" || req.DeviceID == "" {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.PurchaseID == "" {
+		httpErr(w, http.StatusBadRequest, "unavailable")
+		return
+	}
+	mac, merr := net.ParseMAC(req.MAC)
+	if merr != nil || net.ParseIP(req.IP) == nil {
 		httpErr(w, http.StatusBadRequest, "unavailable")
 		return
 	}
 	ctx := r.Context()
+	var deviceID string
+	if err := s.db.QueryRow(ctx, `SELECT id::text FROM iam_v2.devices
+		WHERE tenant_id=$1 AND site_id=$2 AND mac=$3::macaddr`, s.tenID, s.siteID, mac.String()).Scan(&deviceID); err != nil {
+		httpErr(w, http.StatusNotFound, "unavailable")
+		return
+	}
 	var method, pstate, sstatus string
 	var eid *string
 	err := s.db.QueryRow(ctx, `
@@ -211,7 +226,7 @@ func (s *server) purchaseStatus(w http.ResponseWriter, r *http.Request) {
 		  JOIN iam_v2.settlements se ON se.purchase_id = pu.id
 		  LEFT JOIN iam_v2.entitlements e ON e.purchase_id = pu.id
 		 WHERE pu.tenant_id=$1 AND pu.site_id=$2 AND pu.id=$3 AND ac.device_id=$4`,
-		s.tenID, s.siteID, req.PurchaseID, req.DeviceID).Scan(&method, &pstate, &sstatus, &eid)
+		s.tenID, s.siteID, req.PurchaseID, deviceID).Scan(&method, &pstate, &sstatus, &eid)
 	if err != nil {
 		httpErr(w, http.StatusNotFound, "unavailable")
 		return
@@ -228,7 +243,8 @@ func (s *server) purchaseStatus(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	out := map[string]any{"purchase_id": req.PurchaseID, "method": method, "state": purchaseView(pstate, sstatus)}
+	out := map[string]any{"purchase_id": req.PurchaseID, "method": method, "state": purchaseView(pstate, sstatus),
+		"device_id": deviceID}
 	if eid != nil {
 		out["entitlement_id"] = *eid
 	}

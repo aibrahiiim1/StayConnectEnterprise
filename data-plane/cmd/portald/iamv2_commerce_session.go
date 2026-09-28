@@ -42,6 +42,8 @@ type iamv2AuthReply struct {
 	Method         string `json:"method"`
 	// LiveEntitlementID: the subject already holds ACTIVE access, so this device joins it rather than buying.
 	LiveEntitlementID string `json:"live_entitlement_id,omitempty"`
+	// RecoveryCode is present only on an open-selection reply that minted a new anonymous subject.
+	RecoveryCode string `json:"recovery_code,omitempty"`
 }
 
 // commerceSessionTTL bounds how long the server-held pins stay usable. It is deliberately short: the pins
@@ -90,6 +92,7 @@ func (h *handler) tryIAMv2Auth(w http.ResponseWriter, r *http.Request, payload [
 		deviceID:       reply.DeviceID,
 		guestNetworkID: reply.GuestNetworkID,
 		expiry:         time.Now().Add(commerceSessionTTL),
+		returnCode:     reply.RecoveryCode,
 	}
 	// ALREADY ENTITLED: JOIN, DON'T BUY. A guest whose voucher or account already holds ACTIVE access -- a
 	// second phone, or the same one reconnecting -- takes a device slot on that access. Offering a purchase
@@ -116,6 +119,14 @@ func (h *handler) tryIAMv2Auth(w http.ResponseWriter, r *http.Request, payload [
 			h.landing(w, r, "We could not bring your device online. Please try again in a moment.")
 		default:
 			h.landing(w, r, "We could not connect your device.")
+		}
+		return true
+	}
+	// A VOUCHER IS REDEEMED IN ONE STEP. The client entered a code; there is nothing to choose. The code grants
+	// exactly the package revision it was printed for, and is spent in the same transaction as the grant.
+	if reply.Method == "VOUCHER" {
+		if !h.redeemVoucher(w, r, sess) {
+			h.landing(w, r, msgVoucherInvalid)
 		}
 		return true
 	}
@@ -157,17 +168,22 @@ func (h *handler) packagesPage(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 	var out struct {
-		Packages []struct {
-			PackageID string         `json:"package_id"`
-			Display   map[string]any `json:"display"`
-		} `json:"packages"`
+		Packages []guestPackage `json:"packages"`
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &out) != nil || len(out.Packages) == 0 {
 		h.landing(w, r, "No internet packages are available for you right now.")
 		return
 	}
-	h.renderPackages(w, r, out.Packages)
+	code := sess.returnCode
+	if code != "" {
+		// Shown once: the page that displays it is the only place it is ever rendered.
+		if c, err := r.Cookie(commerceCookie); err == nil {
+			sess.returnCode = ""
+			h.commerceSessions.put(c.Value, sess)
+		}
+	}
+	h.renderPackages(w, r, out.Packages, code)
 }
 
 // acquirePackage runs quote -> confirm -> activate server-side.
@@ -190,6 +206,11 @@ func (h *handler) acquirePackage(w http.ResponseWriter, r *http.Request) {
 		h.landing(w, r, "Please choose a package.")
 		return
 	}
+	// The method the client chose. scd re-validates it against every gate; an unknown value is refused there.
+	method := strings.TrimSpace(r.FormValue("method"))
+	if len(method) > 32 {
+		method = ""
+	}
 	post := func(path string, body map[string]any) (map[string]any, bool) {
 		raw, _ := json.Marshal(body)
 		resp, err := h.scdDo(r.Context(), http.MethodPost, path, raw)
@@ -206,15 +227,36 @@ func (h *handler) acquirePackage(w http.ResponseWriter, r *http.Request) {
 	}
 	quote, ok := post("/v1/commerce/quote", map[string]any{
 		"auth_context_id": sess.authContextID, "device_id": sess.deviceID,
-		"guest_network_id": sess.guestNetworkID, "package_id": pkgID})
+		"guest_network_id": sess.guestNetworkID, "package_id": pkgID, "method": method})
 	if !ok {
+		if method == "ONLINE_PAYMENT" {
+			h.landing(w, r, msgCardUnavailable)
+			return
+		}
 		h.landing(w, r, "That package is not available. Please choose another.")
 		return
 	}
 	confirm, ok := post("/v1/commerce/confirm", map[string]any{
 		"quote_id": quote["quote_id"], "device_id": sess.deviceID,
-		"guest_network_id": sess.guestNetworkID})
+		"guest_network_id": sess.guestNetworkID, "return_base": portalOrigin(r)})
+	if pending, _ := confirm["awaiting_settlement"].(bool); pending {
+		// CARD PAYMENT: nothing is granted yet. The client pays on the provider's page, and comes back to a page
+		// that asks where the purchase stands.
+		pid, _ := confirm["purchase_id"].(string)
+		if u, _ := confirm["redirect_url"].(string); strings.HasPrefix(u, "https://") {
+			http.Redirect(w, r, u, http.StatusSeeOther)
+			return
+		}
+		if validPurchaseID(pid) {
+			http.Redirect(w, r, "/pay/return?p="+pid, http.StatusSeeOther)
+			return
+		}
+	}
 	if !ok {
+		if method == "ONLINE_PAYMENT" {
+			h.landing(w, r, msgCardUnavailable)
+			return
+		}
 		h.landing(w, r, "We could not complete that. Please try again.")
 		return
 	}
@@ -251,16 +293,13 @@ func (h *handler) acquirePackage(w http.ResponseWriter, r *http.Request) {
 // Every value that reaches the page goes through html/template, which escapes it. Package display text is
 // operator-authored, but it arrives here through the database and an API, and treating it as trusted markup
 // would make the package name an injection point into a page shown to every guest.
-func (h *handler) renderPackages(w http.ResponseWriter, r *http.Request, pkgs []struct {
-	PackageID string         `json:"package_id"`
-	Display   map[string]any `json:"display"`
-}) {
+func (h *handler) renderPackages(w http.ResponseWriter, r *http.Request, pkgs []guestPackage, returnCode string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	// The same policy as the sign-in page; the page's only scripts carry this nonce.
 	nonce := setPortalCSP(w)
 	p := h.newGuestPage(r, nonce)
-	_ = packagesTmpl.Execute(w, packagesView{guestPage: p, Packages: packageRows(p.T, pkgs)})
+	_ = packagesTmpl.Execute(w, packagesView{guestPage: p, Packages: packageRows(p.T, pkgs), ReturnCode: returnCode})
 }
 
 var packagesTmpl = template.Must(template.New("packages").Parse(compactMarkup(packagesHTML)))
@@ -342,4 +381,18 @@ func (h *handler) activateEnforced(r *http.Request, sess commerceSession, entitl
 	}
 	sid, _ := act["session_id"].(string)
 	return sid, ""
+}
+
+// portalOrigin is the origin the client reached the portal on (scheme://host), for the provider's return URL.
+// The host is the one the captive client already used; anything odd yields "" and card payment is refused.
+func portalOrigin(r *http.Request) string {
+	host := r.Host
+	if host == "" || strings.ContainsAny(host, "/\\ @?#") || len(host) > 255 {
+		return ""
+	}
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return scheme + "://" + host
 }

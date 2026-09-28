@@ -523,6 +523,10 @@ func (h *handler) routes() http.Handler {
 	// Package selection: reachable only with a valid commerce session, which only IAM-v2 auth issues.
 	r.Get("/packages", h.packagesPage)
 	r.Post("/packages/acquire", h.acquirePackage)
+	// Open package selection and the card payment return (acquisition.go).
+	r.Post("/auth/open", h.authOpen)
+	r.Get("/pay/return", h.payReturn)
+	r.Get("/api/pay/status", h.payStatusAPI)
 	r.Get("/success", h.success)
 	r.Post("/logout", h.logout)
 	r.Get("/status", h.status)

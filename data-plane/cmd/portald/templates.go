@@ -291,6 +291,19 @@ const landingHTML = `<!doctype html>
     </script>
     {{end}}
 
+    <!-- OPEN PACKAGE SELECTION: choose a package without signing in, or come back with a return code. Shown only
+         when the site switched it on. -->
+    <div class="open-access" id="open-access" hidden>
+      <form method="post" action="/auth/open"><button class="btn" type="submit" data-i18n="open.button" data-i18n-en="Continue without signing in">{{index .T "open.button"}}</button></form>
+      <details class="open-code"><summary data-i18n="open.code.ask" data-i18n-en="Have a return code?">{{index .T "open.code.ask"}}</summary>
+        <form method="post" action="/auth/open" autocomplete="off">
+          <label for="return-code"><span data-i18n="open.code.hint" data-i18n-en="Enter the return code you were given to continue with the same access.">{{index .T "open.code.hint"}}</span></label>
+          <input id="return-code" name="return_code" maxlength="20" autocapitalize="characters" spellcheck="false" dir="ltr" required>
+          <button class="btn btn--outline" type="submit" data-i18n="open.code.submit" data-i18n-en="Continue">{{index .T "open.code.submit"}}</button>
+        </form>
+      </details>
+    </div>
+
     <div class="tabs" id="tabs" role="tablist"></div>
     <div class="panels" id="signin-panel">
 
@@ -1047,10 +1060,19 @@ const landingHTML = `<!doctype html>
         n.textContent = t('notice.nopackages');
         n.classList.add('show');
       }
+      // OPEN PACKAGE SELECTION is shown beside (or instead of) the sign-in methods.
+      const openOn = !!(cfg.open && cfg.open.enabled);
+      if (openOn) document.getElementById('open-access').hidden = false;
       // THE HELP SHEET explains only the ways in this hotel offers.
       document.querySelectorAll('[data-help-method]').forEach(function (el) {
         el.hidden = enabled.indexOf(el.dataset.helpMethod) < 0;
       });
+      if (enabled.length === 0 && openOn) {
+        // Open selection is the only way in: no tabs, no empty sign-in panel.
+        tabsEl.style.display = 'none';
+        document.getElementById('signin-panel').style.display = 'none';
+        return;
+      }
       if (enabled.length === 0) {
         // NO WAY IN AT ALL: said plainly, with nothing on the page that looks like it might work.
         const none = document.createElement('p');
@@ -1472,10 +1494,12 @@ const packagesHTML = guestHead + `
 <div class="sc-body">
   <h1 class="page-title">{{index .T "pkg.title"}}</h1>
   <p class="page-lead">{{index .T "pkg.subtitle"}}</p>
+  {{with .ReturnCode}}<div class="notice show" role="status"><strong>{{index $.T "open.code.title"}}: <span dir="ltr" class="return-code">{{.}}</span></strong><br>{{index $.T "open.code.lead"}}</div>{{end}}
   <div class="choice-list">
   {{range .Packages}}<form method="post" action="/packages/acquire">
     <input type="hidden" name="package_id" value="{{.ID}}">
-    <button class="choice" type="submit"><span class="c-text"><span class="c-name" dir="auto">{{.Name}}</span>{{if .Detail}}<span class="c-detail">{{.Detail}}</span>{{end}}</span>` + iconChevNext + `</button>
+    <input type="hidden" name="method" value="{{.Method}}">
+    <button class="choice" type="submit"><span class="c-text"><span class="c-name" dir="auto">{{.Name}}</span>{{if .Detail}}<span class="c-detail">{{.Detail}}</span>{{end}}<span class="c-detail c-price" dir="auto">{{.Price}} · {{index $.T .MethodKey}}</span></span>` + iconChevNext + `</button>
   </form>{{end}}
   </div>
 </div>` + guestFoot + `
@@ -1493,6 +1517,51 @@ const packagesHTML = guestHead + `
         }, 0);
       });
     }
+  })();
+</script>
+</body></html>`
+
+// ============================================================================================================
+// CONFIRMING A PAYMENT (the page a card provider sends the client back to)
+// ============================================================================================================
+
+// payHTML asks the portal, every few seconds, where the purchase stands. The answer comes from scd, which asks
+// the payment provider; this page proves nothing and grants nothing. It works without any cookie: the device
+// is identified from the connection.
+const payHTML = guestHead + `
+<title>{{index .T "pay.title"}}</title>
+</head><body>
+<div class="page">` + guestChrome + `
+<main class="card card--page">` + guestBrandblock + `
+<div class="sc-body">
+  <h1 class="page-title">{{index .T "pay.title"}}</h1>
+  <p class="page-lead" id="pay-lead" role="status" aria-live="polite">{{if .Cancelled}}{{index .T "pay.cancelled"}}{{else}}{{index .T "pay.lead"}}{{end}}</p>
+  <div class="actions" id="pay-actions" hidden><a class="btn" href="/">{{index .T "pay.again"}}</a></div>
+</div>` + guestFoot + `
+</main>
+</div>` + guestScripts + `
+<script nonce="{{.Nonce}}">
+  (function () {
+    var p = {{.PurchaseID}};
+    var lead = document.getElementById('pay-lead');
+    var words = {{.JS}};
+    var started = Date.now();
+    function show(key) { lead.textContent = words[key] || lead.textContent; }
+    function done() { document.getElementById('pay-actions').hidden = false; }
+    function poll() {
+      fetch('/api/pay/status?p=' + encodeURIComponent(p), {cache: 'no-store'})
+        .then(function (r) { return r.json(); })
+        .then(function (s) {
+          if (s.state === 'connected' && s.redirect) { show('pay.connecting'); window.location.href = s.redirect; return; }
+          if (s.state === 'failed') { show('pay.failed'); done(); return; }
+          if (s.state === 'review') { show('pay.review'); done(); return; }
+          if (s.state === 'granted' && s.activation) { show('err.connect'); done(); return; }
+          if (Date.now() - started > 20 * 60 * 1000) { show('pay.review'); done(); return; }
+          setTimeout(poll, 3000);
+        })
+        .catch(function () { setTimeout(poll, 5000); });
+    }
+    poll();
   })();
 </script>
 </body></html>`

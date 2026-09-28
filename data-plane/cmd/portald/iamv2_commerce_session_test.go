@@ -45,9 +45,11 @@ func portalFixtureCommerceOff() *handler {
 	}
 }
 
+// iamv2Payload is an ACCOUNT sign-in: authentication leads to the package choice. (A VOUCHER is redeemed in one
+// step instead; see acquisition_test.go.)
 func iamv2Payload() []byte {
 	return []byte(`{"auth_context_id":"ac-1","device_id":"dev-1","guest_network_id":"gn-1",` +
-		`"method":"VOUCHER","authority":"iam_v2"}`)
+		`"method":"ACCOUNT","authority":"iam_v2"}`)
 }
 
 func TestIAMv2AuthIssuesCommerceSessionAndDoesNotClaimConnected(t *testing.T) {
