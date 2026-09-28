@@ -278,3 +278,8 @@ GRANT EXECUTE ON FUNCTION iam_v2.pms_reconciliation_settings_get(uuid, uuid)    
 -- pms_record_resync_coverage above, never by a direct INSERT, so the connector needs no write here.
 GRANT SELECT ON iam_v2.pms_resync_coverage TO svc_pmsd;
 GRANT SELECT ON iam_v2.pms_room_inventory  TO svc_pmsd;
+
+-- ROOM CHARGE ON THE ONE FIAS LINK (migration 0098, decision D45). pmsd carries a posting command only after
+-- this read-only definer confirms a SENDING attempt with the same interface, P# and SHA-256. pmsd holds no
+-- privilege on any posting table: it can ask whether a command is authorised and record nothing.
+GRANT EXECUTE ON FUNCTION iam_v2.p4_posting_command_authorised(uuid, text, text) TO svc_pmsd;

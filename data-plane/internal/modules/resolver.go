@@ -4,7 +4,7 @@
 //  1. Deployed  -- the deployment ceiling (internal/deployment): can this software run it here?
 //  2. Licensed  -- the signed licence (v4 modules; legacy mapping for older licences) in an Active/Grace state.
 //  3. Enabled   -- the site's own choice (iam_v2.site_module_settings, or the Sign-in methods switch for the
-//                  identity modules). Modules without a local switch are enabled when licensed.
+//     identity modules). Modules without a local switch are enabled when licensed.
 //  4. Ready     -- runtime readiness (a provider reachable, an interface onboarded, ...).
 //
 // EXECUTION (offering a method to a client, creating a quote, posting a charge) requires all four.
@@ -39,8 +39,8 @@ const (
 
 // Licence is what the resolver needs from the licence manager.
 type Licence interface {
-	ModuleEnabled(id string) bool             // authorised AND the licence state allows features
-	AuthorizedModules() map[string]bool        // authorised, regardless of state (display)
+	ModuleEnabled(id string) bool       // authorised AND the licence state allows features
+	AuthorizedModules() map[string]bool // authorised, regardless of state (display)
 }
 
 // Local reads the site's switches for the switchable modules (site_module_get).

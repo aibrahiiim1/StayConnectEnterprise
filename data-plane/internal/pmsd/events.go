@@ -31,6 +31,10 @@ const (
 	RecDR RecordType = "DR" // resync request
 	RecDS RecordType = "DS" // database resync start
 	RecDE RecordType = "DE" // database resync end
+
+	// financial answer (decision D45). A PA is READ so it can be handed back, verbatim, to the financial path
+	// that is waiting for it (financial_relay.go). pmsd never interprets it and never sends one.
+	RecPA RecordType = "PA" // posting answer
 )
 
 var domainRecords = map[RecordType]struct{}{RecGI: {}, RecGC: {}, RecGO: {}}
@@ -38,7 +42,7 @@ var controlRecords = map[RecordType]struct{}{RecLS: {}, RecLA: {}, RecLE: {}, Re
 
 func (r RecordType) IsDomain() bool  { _, ok := domainRecords[r]; return ok }
 func (r RecordType) IsControl() bool { _, ok := controlRecords[r]; return ok }
-func (r RecordType) Valid() bool     { return r.IsDomain() || r.IsControl() }
+func (r RecordType) Valid() bool     { return r.IsDomain() || r.IsControl() || r == RecPA }
 
 var (
 	ErrEventInvalid = errors.New("pmsd: invalid protocol event")

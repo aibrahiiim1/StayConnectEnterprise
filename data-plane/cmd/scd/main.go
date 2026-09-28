@@ -1030,6 +1030,7 @@ func main() {
 	// actually enforced — reconciled into the nft walled_garden_ip set.
 	go s.gardenReconcileLoop(rootCtx)
 	go s.cardReconcileLoop(rootCtx)
+	go s.postingLoop(rootCtx, s.initPostingWorker(rootCtx))
 	// Periodic safety-net reload: Hotel Admin changes reload immediately through /v1/admin/pms/reload, and a
 	// 10-minute background sweep guarantees eventual consistency from the DB if one was missed.
 	go s.pmsReloadSafetyLoop(rootCtx)

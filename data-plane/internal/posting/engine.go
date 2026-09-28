@@ -2,9 +2,12 @@ package posting
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -65,21 +68,16 @@ func NewProductionEngine(repo *Repo) (*Engine, error) {
 
 // productionTransport returns the real financial transport for this build.
 //
-// In this milestone it returns nil, and that is the honest answer rather than a placeholder: no real FIAS
-// posting transport has been built, and none is authorized. A nil inner transport is safe by construction
-// because DarkGuard refuses before it would ever be reached — and if the flags were somehow ON, the guard
-// refuses with "no financial transport is configured" instead of inventing one.
-//
-// When the real transport is built it goes HERE, behind the same guard, and nowhere else.
+// THE TRANSPORT IS THE HAND-OFF TO pmsd (decision D45). The property's PMS accepts one FIAS connection and
+// pmsd owns it, so a room charge is carried there as an immutable, authorised command and pmsd returns the
+// matched PA (handoff_transport.go, internal/postinghandoff, internal/pmsd/financial_relay.go). It is
+// constructed only when transmission is ON; while DARK the inner transport is nil, DarkGuard refuses before
+// it would be reached, and no hand-off client exists at all. It stays behind the same guard, and nowhere else.
 func productionTransport(cfg Config) (Transport, error) {
-	if cfg.TransmitOn() {
-		// Fail closed and loudly. A deployment that enabled transmission against a build that has no
-		// transport is a misconfiguration, and starting anyway would leave an operator believing money was
-		// flowing when it was not.
-		return nil, fail(ErrConfig,
-			"phase-4 transmission is enabled but this build has no financial transport; refusing to start")
+	if !cfg.TransmitOn() {
+		return nil, nil
 	}
-	return nil, nil
+	return newHandoffTransport(), nil
 }
 
 // Config returns a COPY of the flag state. Config is a value type, so a caller can read the posture and
@@ -242,7 +240,10 @@ func (e *Engine) RunOnce(ctx context.Context, tenantID, siteID, interfaceID stri
 	if err != nil {
 		return e.decline(ctx, tx, &out, claim, err)
 	}
-	attemptID, err := e.repo.InsertAttempt(ctx, tx, claim.Pinned, claim.PostingID, claim.AttemptNo, pn)
+	// The attempt records the SHA-256 of the exact bytes it authorises. pmsd carries a command only when the
+	// database confirms a SENDING attempt with this interface, P# and hash (p4_posting_command_authorised), so
+	// no byte sequence the financial path did not durably authorise can ever be written to the PMS.
+	attemptID, err := e.repo.InsertAttempt(ctx, tx, claim.Pinned, claim.PostingID, claim.AttemptNo, pn, psHash(body))
 	if err != nil {
 		return out, err
 	}
@@ -261,6 +262,66 @@ func (e *Engine) RunOnce(ctx context.Context, tenantID, siteID, interfaceID stri
 			"the PA answers a different protocol-attempt reference; this attempt is unresolved")
 	}
 	return e.settle(ctx, claim, attemptID, out, pa, sendErr)
+}
+
+// RecoverOrphanedAttempts closes every attempt the worker left SENDING -- the process stopped after the
+// attempt became durable and before its outcome was recorded. Such a PS may or may not have reached the PMS,
+// so each becomes UNKNOWN: outbox HELD_RECOVERY, settlement MANUAL_REVIEW, and nothing resends it.
+//
+// It only touches attempts older than olderThan, which is never less than AnswerDeadline plus a minute --
+// longer than any in-process send can last -- so a send still in progress is never judged.
+func (e *Engine) RecoverOrphanedAttempts(ctx context.Context, tenantID, siteID string, olderThan time.Duration) (int, error) {
+	if olderThan < AnswerDeadline+time.Minute {
+		olderThan = AnswerDeadline + time.Minute
+	}
+	rows, err := e.repo.pool.Query(ctx, `
+SELECT a.id::text, a.internal_posting_id::text, a.pms_interface_id::text, o.id::text
+  FROM iam_v2.posting_attempts a
+  JOIN iam_v2.posting_outbox o ON o.posting_id = a.internal_posting_id AND o.state = 'IN_FLIGHT'
+ WHERE a.tenant_id = $1 AND a.site_id = $2 AND a.outcome = 'SENDING'
+   AND a.sent_at < now() - make_interval(secs => $3)`, tenantID, siteID, olderThan.Seconds())
+	if err != nil {
+		return 0, classify(err)
+	}
+	type orphan struct{ attempt, posting, iface, outbox string }
+	var list []orphan
+	for rows.Next() {
+		var o orphan
+		if err := rows.Scan(&o.attempt, &o.posting, &o.iface, &o.outbox); err != nil {
+			rows.Close()
+			return 0, classify(err)
+		}
+		list = append(list, o)
+	}
+	rows.Close()
+	n := 0
+	for _, o := range list {
+		tx, err := e.repo.pool.Begin(ctx)
+		if err != nil {
+			return n, fail(ErrRepo, "could not begin orphan recovery")
+		}
+		p := Pinned{TenantID: tenantID, SiteID: siteID, PMSInterfaceID: o.iface}
+		ok := e.repo.SettleAttempt(ctx, tx, o.attempt, "UNKNOWN", "") == nil &&
+			e.repo.AppendAttemptEvent(ctx, tx, p, o.attempt, "UNKNOWN_NO_CONCLUSIVE_PA",
+				`{"record":"PA","classification":"UNKNOWN_WORKER_STOPPED_BEFORE_OUTCOME"}`) == nil &&
+			e.repo.FinishClaim(ctx, tx, o.outbox, "HELD_RECOVERY") == nil
+		if !ok || tx.Commit(ctx) != nil {
+			_ = tx.Rollback(ctx)
+			return n, fail(ErrRepo, "could not record an orphaned attempt as UNKNOWN")
+		}
+		if _, err := e.repo.pool.Exec(ctx, `SELECT iam_v2.p4_posting_settlement_outcome($1)`, o.posting); err != nil {
+			return n, classify(err)
+		}
+		n++
+	}
+	return n, nil
+}
+
+// psHash is the command identity recorded on the attempt: lowercase hex SHA-256 of the exact PS body, the
+// same value internal/postinghandoff.BodyHash computes on the wire.
+func psHash(body string) string {
+	s := sha256.Sum256([]byte(body))
+	return hex.EncodeToString(s[:])
 }
 
 // decline releases the claim and records why, without consuming a P# or writing an attempt.

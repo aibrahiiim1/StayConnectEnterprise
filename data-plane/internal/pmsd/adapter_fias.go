@@ -34,6 +34,21 @@ func (g *guardedConn) writeFrame(body string) error {
 	return pms.WriteFramedRecord(g.c, body)
 }
 
+// writeFinancialFrame is the ONE path by which a PS reaches the wire (decision D45), and it is not a
+// general-purpose writer: it accepts a PS record and nothing else -- never a PA, never a control or domain
+// record -- and it is reachable only from the serialized writer for a request the financial relay submitted
+// after the database confirmed the exact bytes. The read-only allowlist above is unchanged and still refuses
+// PS and PA for every other caller.
+func (g *guardedConn) writeFinancialFrame(body string) error {
+	if pms.RecordID(body) != "PS" || !IsFinancialRecord("PS") {
+		return coded(CodeOutboundBlocked, ErrOutboundNotAllowed{Record: pms.RecordID(body)})
+	}
+	if g.writeTimeout > 0 {
+		_ = g.c.SetWriteDeadline(time.Now().Add(g.writeTimeout))
+	}
+	return pms.WriteFramedRecord(g.c, body)
+}
+
 // fiasAdapter is the production-capable read-only FIAS connection. It reuses internal/pms framing + parsing
 // (no second parser) and drives the interface-level axes + typed domain-event queue via the AxisSink.
 type fiasAdapter struct {
@@ -50,6 +65,9 @@ type fiasAdapter struct {
 	// log carries the connector's redacted diagnostics. A nil logger is inert, so tests that construct an
 	// adapter directly need not supply one.
 	log *slog.Logger
+	// relay, when non-nil, lets the financial path hand a posting command to THIS link (decision D45). Nil
+	// on every connector that is not a FIAS link and whenever room-charge transmission is not deployed.
+	relay *FinancialRelay
 }
 
 // AdapterKeys carries the two DISTINCT keyed-HMAC keys the adapter needs, each with its own purpose and
@@ -70,6 +88,12 @@ type AdapterKeys struct {
 // refuses is visible solely as a bounded code in pms_interface_runtime — which is how a live appliance came
 // to sit CONNECTED, resyncing every few seconds, admitting nothing, and saying nothing about why.
 func NewFIASDial(dialer Dialer, keys AdapterKeys, now func() time.Time, log *slog.Logger) func(context.Context, DialParams) (Conn, error) {
+	return NewFIASDialWithRelay(dialer, keys, now, log, nil)
+}
+
+// NewFIASDialWithRelay is NewFIASDial with the financial relay attached: each FIAS link this dial opens can
+// carry authorised posting commands (financial_relay.go). A nil relay is exactly NewFIASDial.
+func NewFIASDialWithRelay(dialer Dialer, keys AdapterKeys, now func() time.Time, log *slog.Logger, relay *FinancialRelay) func(context.Context, DialParams) (Conn, error) {
 	if now == nil {
 		now = time.Now
 	}
@@ -90,7 +114,7 @@ func NewFIASDial(dialer Dialer, keys AdapterKeys, now func() time.Time, log *slo
 			iface: p.Iface, rev: p.Rev,
 			evKey: keys.EvidenceKey, evKeyNo: keys.EvidenceKeyVersion,
 			identKey: keys.IdentityKey, identKeyN: keys.IdentityKeyVersion,
-			profile: "protel-fias/v1", now: now, log: log,
+			profile: "protel-fias/v1", now: now, log: log, relay: relay,
 		}, nil
 	}
 }
@@ -124,6 +148,15 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 	if err := sink.OnConnected(a.now()); err != nil {
 		return err
 	}
+	// THE FINANCIAL PORT (decision D45). The link is offered to the relay only after the handshake, and it is
+	// withdrawn when this ownership cycle ends; a command waiting on it at that moment is resolved UNKNOWN,
+	// because its PS may already be with the PMS. The port starts NOT steady: nothing is carried until a full
+	// DS..DE generation has been published.
+	var port *relayPort
+	if a.relay != nil {
+		port = a.relay.attach(a.iface.ID, w.SubmitFinancial)
+		defer a.relay.detach(port)
+	}
 	// §G/§H: raise the application barrier and request the INITIAL full resync through the single writer. Until
 	// a complete DS→DE generation is published, no LIVE admission occurs. The DR is submitted (bounded, async
 	// through the serialized writer) so the read loop can immediately begin consuming DS…DE; a DR write failure
@@ -154,6 +187,10 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 	lastReportedSkipped := 0
 	readDeadline := a.rev.HeartbeatTimeout
 	for {
+		if port != nil {
+			// A posting command is carried only between resyncs, never inside a DS..DE window.
+			port.setSteady(!resyncing)
+		}
 		if ctx.Err() != nil {
 			return ctx.Err() // the writer emits LE + closes the socket on wctx cancel (deferred)
 		}
@@ -238,6 +275,15 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			}
 		case RecLE:
 			return coded(CodeProtocolLinkEnded, nil)
+		case RecPA:
+			// A posting answer. Handed back verbatim to the command waiting for this P#, if there is one; it
+			// is never interpreted here and never changes connector state. A PA nobody is waiting for is
+			// reported (without its content) and dropped -- it cannot settle anything from here.
+			if port == nil || !port.onPA(body) {
+				if a.log != nil {
+					a.log.Warn("pmsd: posting answer with no waiting command ignored", "interface", a.iface.ID)
+				}
+			}
 		case RecDS:
 			resyncing = true
 			// WHAT THIS SWEEP SEES, which is not the same as what it admits. The vacant rooms below are

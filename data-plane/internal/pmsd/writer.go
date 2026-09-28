@@ -15,6 +15,9 @@ import (
 type writeReq struct {
 	body string
 	ack  chan error
+	// financial marks a PS submitted by the financial relay. Only SubmitFinancial sets it, and the writer
+	// routes it to guardedConn.writeFinancialFrame, which accepts a PS and nothing else.
+	financial bool
 }
 
 // serialWriter is the SOLE owner of the outbound socket. EXACTLY ONE goroutine (run) ever calls
@@ -70,7 +73,12 @@ func (w *serialWriter) run(ctx context.Context) {
 				}
 				continue
 			}
-			err := w.g.writeFrame(req.body)
+			var err error
+			if req.financial {
+				err = w.g.writeFinancialFrame(req.body)
+			} else {
+				err = w.g.writeFrame(req.body)
+			}
 			if req.ack != nil {
 				req.ack <- err
 			}
@@ -131,6 +139,29 @@ func (w *serialWriter) SubmitSync(ctx context.Context, body string) error {
 		return coded(CodeContextCanceled, ctx.Err())
 	case <-w.done:
 		return w.stoppedErr()
+	}
+}
+
+// SubmitFinancial writes one PS through the single writer and reports whether the writer ever TOOK it.
+//
+// enqueued=false means provably nothing was written: the request never reached the writer. Once it is taken,
+// the write may be partial or complete whatever error follows, so the caller must treat any err as UNKNOWN.
+func (w *serialWriter) SubmitFinancial(ctx context.Context, body string) (enqueued bool, err error) {
+	ack := make(chan error, 1)
+	select {
+	case w.reqCh <- writeReq{body: body, ack: ack, financial: true}:
+	case <-ctx.Done():
+		return false, coded(CodeContextCanceled, ctx.Err())
+	case <-w.done:
+		return false, w.stoppedErr()
+	}
+	select {
+	case err := <-ack:
+		return true, err
+	case <-ctx.Done():
+		return true, coded(CodeContextCanceled, ctx.Err())
+	case <-w.done:
+		return true, w.stoppedErr()
 	}
 }
 

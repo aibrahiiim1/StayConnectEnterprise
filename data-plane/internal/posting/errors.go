@@ -47,6 +47,9 @@ const (
 	ErrReviewConflict   Code = "review_conflict"
 	ErrReviewStale      Code = "review_version_stale"
 	ErrWireFieldInvalid Code = "wire_field_invalid"
+	// ErrTransportUnavailable: the hand-off to pmsd (decision D45) did not produce a matched PA. Whether that
+	// means "not sent" or UNKNOWN is carried by ErrNotTransmitted / ErrTransmittedNoAnswer, never by this code.
+	ErrTransportUnavailable Code = "transport_unavailable"
 )
 
 // Error is a deterministic typed error. Msg must never contain secrets, card data, guest PII or amounts.

@@ -156,6 +156,27 @@ fi
 
 # 5. The Phase-3 read-only connector still forbids the financial records. If PS were ever moved onto its
 #    allowlist, a Phase-4 defect could smuggle a charge out through the Phase-3 socket.
+# THE ROOM-CHARGE TRANSPORT (decision D45) is a hand-off to pmsd over a LOCAL unix socket, never a network
+# dial of the financial core's own, and pmsd only CARRIES: the ordinary writer still refuses PS, the one PS
+# path accepts nothing but PS, it is reachable only from the relay, and the relay exists only when pmsd's own
+# three Phase-4 flags are on and the database confirms the exact bytes.
+ho=data-plane/internal/postinghandoff/handoff.go
+if grep -q 'DialContext(ctx, "unix", socket)' "$ho" && ! grep -qE '"tcp"|net\.Dial\(|http\.' "$ho" \
+   && grep -q 'return newHandoffTransport(), nil' data-plane/internal/posting/engine.go \
+   && grep -q 'if !cfg.TransmitOn() {' data-plane/internal/posting/engine.go; then
+  say "the only financial transport is the local hand-off to pmsd, constructed only when transmission is on"
+else
+  bad "the financial transport is no longer only the local unix-socket hand-off built only when transmitting"
+fi
+fin_writers="$(grep -rn 'financial: true' data-plane/internal/pmsd --include='*.go' | grep -v '_test.go' | wc -l | tr -d ' ')"
+if [ "$fin_writers" = 1 ] && grep -q 'func (w \*serialWriter) SubmitFinancial' data-plane/internal/pmsd/writer.go \
+   && grep -q 'if pms.RecordID(body) != "PS"' data-plane/internal/pmsd/adapter_fias.go \
+   && grep -q 'if pmsd.RelayTransmitDeployed(os.Getenv) {' data-plane/cmd/pmsd/main.go \
+   && grep -q 'p4_posting_command_authorised' data-plane/cmd/pmsd/main.go; then
+  say "pmsd writes a PS only through the relay's single PS-only path, only when its own flags are on, only for database-authorised bytes"
+else
+  bad "pmsd's financial write path is no longer the single, flag-gated, authorised PS-only relay path"
+fi
 if grep -q '"PS": {}, // financial Posting (Phase 4 only)' data-plane/internal/pmsd/fias_adapter.go \
    && grep -q '"PA": {}, // posting answer (financial)' data-plane/internal/pmsd/fias_adapter.go; then
   say "pmsd still classifies PS and PA as forbidden outbound records"

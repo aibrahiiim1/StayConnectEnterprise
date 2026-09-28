@@ -1,6 +1,6 @@
 # OneGate — Site Type, Licence Modules and Internet Package Acquisition
 
-**Status:** authoritative architecture contract for the Site-Modules-Acquisition delivery (decision D44).
+**Status:** authoritative architecture contract for the Site-Modules-Acquisition delivery (decisions D44 and D45).
 **Scope:** how a site's type, its licensed modules and its Internet Package acquisition methods work, end to end,
 from OneGate Central to the appliance and the Client Portal. Where this document and older wording disagree about
 these subjects, this document wins. It does not change any other accepted contract.
@@ -187,8 +187,8 @@ Available only when `hospitality`, `paid_access` and `room_charge` are licensed,
 
 ```
 package → quote (pins interface, mapping, stay, currency) → purchase AWAITING_SETTLEMENT
-→ settlement PMS_POSTING/REQUIRED → posting (gate + DB triggers) → outbox → posting worker (pmsd)
-→ PS → PA OK (authoritative ACK) → p4_settle_posting → settlement SETTLED → grant → access
+→ settlement PMS_POSTING/REQUIRED → posting (gate + DB triggers) → outbox → posting worker (scd) → pmsd (transport, §11)
+→ PS → PA OK (authoritative ACK) → p4_posting_settlement_outcome → settlement SETTLED → grant → access
 ```
 * No entitlement is granted because a posting was sent. `PA` other than `OK` → `FAILED`.
 * **UNKNOWN** → attempt `UNKNOWN`, outbox `HELD_RECOVERY`, settlement `MANUAL_REVIEW`. Never retried
@@ -257,20 +257,58 @@ Each is enforced in the SQL grant entry point, which is the only path to the ent
 LIVE-mode provider transactions (`STAYCONNECT_PAYMENT_LIVE_ALLOWED`), real PMS posting
 (`STAYCONNECT_PHASE4_PMS_TRANSMIT`), Go-Live, and real guest-production cutover.
 
-## 11. Open Product-Owner decision: the FIAS posting transport
+## 11. Room charge on the one FIAS connection (decision D45)
 
-Everything on the room-charge path up to the outbox is built: onboarding, mappings, offering, purchase,
-settlement, posting creation, the settle-on-`PA=OK` and review-apply functions, and the posting engine's
-settlement step. What is **not** built is the component that takes a queued posting off the outbox and sends
-`PS` over FIAS, because two accepted facts conflict:
+**Product-Owner decision D45 (2026-09-28):** room-charge postings use the property's existing FIAS connection,
+which pmsd owns. There is no second FIAS connection, no second PMS interface for posting and no property-side
+PMS change. pmsd remains the sole owner of the link and is **transport only** for the financial command; the
+financial execution path keeps every financial decision.
 
-* The PMS accepts **exactly one** active FIAS client connection per interface (Gate 3A), and pmsd holds it for
-  Room sign-in.
-* pmsd **must never construct or send `PS`/`PA`** (accepted invariant, enforced by
-  `scripts/ci/phase4-dark-check.sh`).
+```
+scd posting worker (svc_posting, internal/posting)          pmsd (svc_pmsd)                      PMS
+  claim QUEUED posting on its lane (one IN_FLIGHT per interface)
+  re-verify pinned stay, folio, RN+G#, currency, freshness (gate)
+  allocate P#, build PS, record attempt SENDING + sha256(PS)
+  commit  ──── immutable command ────►  root-only unix socket /run/stayconnect/pmsd-posting.sock
+                                          own flags on? (MASTER + OUTBOX_WORKER + PMS_TRANSMIT)
+                                          shape: PS only, bounded, wire-safe, P# = command P#, hash
+                                          DB: p4_posting_command_authorised(iface, P#, sha256)
+                                          link connected, between resyncs, not busy, P# not carried
+                                          single serialized writer ── PS (verbatim) ──────────────►
+                                          read loop: PA with the same P# ◄──────────────────────────
+  ◄──── ANSWERED (PA verbatim) | NOT_TRANSMITTED | UNKNOWN ────
+  parse PA, verify P#; record ACKED/FAILED/UNKNOWN
+  p4_posting_settlement_outcome: PA=OK → SETTLED → grant; other PA → FAILED; UNKNOWN → MANUAL_REVIEW
+```
 
-The options are (a) a separate, ceiling-gated financial sender that shares pmsd's one link through a narrow,
-audited hand-off — which changes the accepted pmsd invariant — or (b) a second, dedicated FIAS interface per
-property for posting, which needs a PMS-side configuration change at each property. Either is a product and
-architecture decision, and real posting is prohibited in this delivery in any case. Until it is decided, Room
-charge is configurable and reviewable, readiness reports `PMS_POSTING_NOT_AUTHORISED`, and it is never offered.
+**What pmsd may do:** carry the exact bytes it was handed, once, on a steady link, and hand back the PA whose
+P# matches, verbatim. **What it cannot do, by construction:** build or edit a PS; choose or change the amount,
+RN, G#, currency or posting code; create a posting; retry anything; interpret AS; decide a settlement; reverse;
+grant access. pmsd holds `EXECUTE` on the read-only authorisation check and **no privilege on any posting
+table**. The ordinary FIAS writer still refuses `PS` and `PA`; the one `PS` path (`writeFinancialFrame`) accepts
+a `PS` and nothing else and is reachable only from the relay.
+
+**Safeguards kept or added:**
+
+* **Immutable authorised command.** The attempt records `ps_sha256` in the same transaction as the attempt,
+  before any byte exists; the hash is part of the attempt's immutable identity (`pa_oneway`). pmsd carries
+  bytes only when the database confirms a *SENDING, recent* attempt for that interface and P# with *that* hash,
+  on an in-flight CHARGE, on an interface still financially ready (migration 0098). Tampered, stale or replayed
+  commands are refused before anything is written.
+* **Two independent switches.** Transmission needs `STAYCONNECT_PHASE4_PMS_TRANSMIT` (with master and outbox) on
+  scd *and* on pmsd. Without it on scd, the DARK guard refuses and there is no hand-off client; without it on
+  pmsd, there is no socket at all.
+* **The UNKNOWN contract is preserved end to end.** `NOT_TRANSMITTED` is answered only when pmsd provably wrote
+  nothing (refused before its writer took the command) or pmsd could not be reached. Anything after the writer
+  took it — an incomplete write, no PA within the bound, a lost link, a P# already carried — is `UNKNOWN`:
+  outbox `HELD_RECOVERY`, settlement `MANUAL_REVIEW`, never resent. An attempt left `SENDING` by a worker that
+  stopped mid-send is concluded `UNKNOWN` by orphan recovery; nothing resends it.
+* **No duplicate execution.** One `IN_FLIGHT` posting per interface (database); one command in flight per link
+  (pmsd); a P# is never carried twice (pmsd) and a concluded attempt is never authorised again (database).
+* **Unchanged:** verified RN + G#, pinned stay/interface/mapping, exact currency equality and no FX,
+  PA=OK before SETTLED, audited manual review including `CONFIRM_NOT_POSTED_RETRY` under the existing
+  single-use authorisation, and no programmatic reversal.
+
+Real PMS financial posting remains prohibited until the Product Owner separately authorises it: on PRE-LIVE
+`STAYCONNECT_PHASE4_PMS_TRANSMIT` is off on both processes, readiness reports `PMS_POSTING_NOT_AUTHORISED`, and
+Room charge is configurable and reviewable but never offered.

@@ -153,17 +153,17 @@ func (r *Repo) AllocatePNumber(ctx context.Context, tx pgx.Tx, tenantID, siteID,
 // InsertAttempt records a transmission attempt as SENDING. The database refuses it outright unless RN and
 // G# are present and wire-safe, the attempt number continues the sequence, and any retry after an UNKNOWN
 // or ACKED attempt carries an audited authorization.
-func (r *Repo) InsertAttempt(ctx context.Context, tx pgx.Tx, p Pinned, postingID string, attemptNo int, pNumber int64) (string, error) {
+func (r *Repo) InsertAttempt(ctx context.Context, tx pgx.Tx, p Pinned, postingID string, attemptNo int, pNumber int64, psSHA256 string) (string, error) {
 	var id string
 	if err := tx.QueryRow(ctx, `
 INSERT INTO iam_v2.posting_attempts
-  (tenant_id, site_id, internal_posting_id, pms_interface_id, attempt_no, p_number, rn, g_number, sent_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
+  (tenant_id, site_id, internal_posting_id, pms_interface_id, attempt_no, p_number, rn, g_number, sent_at, ps_sha256)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now(), NULLIF($9,''))
 RETURNING id::text`,
 		p.TenantID, p.SiteID, postingID, p.PMSInterfaceID, attemptNo,
 		// p_number is a text column: render the allocated integer here rather than casting in SQL, so the
 		// value that is stored is byte-for-byte the value that goes on the wire.
-		strconv.FormatInt(pNumber, 10), p.RN, p.GNumber).Scan(&id); err != nil {
+		strconv.FormatInt(pNumber, 10), p.RN, p.GNumber, psSHA256).Scan(&id); err != nil {
 		return "", classify(err)
 	}
 	return id, nil

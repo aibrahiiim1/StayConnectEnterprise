@@ -14,6 +14,7 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	"github.com/stayconnect/enterprise/data-plane/internal/postinghandoff"
 	"log/slog"
 	"net"
 	"os"
@@ -57,6 +58,30 @@ func main() {
 	getPool := func(ctx context.Context) (*pgxpool.Pool, error) {
 		poolOnce.Do(func() { pool, poolErr = pgxpool.New(ctx, dsn) })
 		return pool, poolErr
+	}
+
+	// ROOM CHARGE ON THE ONE FIAS LINK (decision D45). pmsd carries a posting command the financial path
+	// handed it -- verbatim, only after the database confirms exactly those bytes -- and returns the PA. The
+	// relay and its socket exist only when transmission is deployed on THIS process as well; otherwise there is
+	// no socket at all, and scd's hand-off finds nothing to reach (not transmitted).
+	var relay *pmsd.FinancialRelay
+	if pmsd.RelayTransmitDeployed(os.Getenv) {
+		relay = pmsd.NewFinancialRelay(true, func(ctx context.Context, iface string, pn int64, sha string) (string, error) {
+			p, err := getPool(ctx)
+			if err != nil {
+				return "", err
+			}
+			var verdict string
+			err = p.QueryRow(ctx, `SELECT iam_v2.p4_posting_command_authorised($1::uuid, $2, $3)`,
+				iface, strconv.FormatInt(pn, 10), sha).Scan(&verdict)
+			return verdict, err
+		}, log)
+		go func() {
+			if err := relay.ServeSocket(ctx, strings.TrimSpace(os.Getenv(postinghandoff.EnvSocket))); err != nil {
+				log.Error("pmsd: posting relay socket stopped", "err", err)
+			}
+		}()
+		log.Warn("pmsd: room-charge transmission is DEPLOYED on this process; the posting relay is listening")
 	}
 	defer func() {
 		if pool != nil {
@@ -147,10 +172,10 @@ func main() {
 		// The provider registry routes each interface to its adapter. protel-fias reaches exactly the FIAS dial
 		// it always used; the REST connectors (Mews, Apaleo, OPERA Cloud) reach the polled REST adapter.
 		Dial: pmsd.NewRegistryDial(
-			pmsd.NewFIASDial(netDialer, pmsd.AdapterKeys{
+			pmsd.NewFIASDialWithRelay(netDialer, pmsd.AdapterKeys{
 				IdentityKey: identKey, IdentityKeyVersion: identKeyVer,
 				EvidenceKey: evKey, EvidenceKeyVersion: evKeyVer,
-			}, time.Now, log),
+			}, time.Now, log, relay),
 			pmsd.NewRESTDial(pmsd.RESTDialDeps{
 				Keys: pmsd.AdapterKeys{
 					IdentityKey: identKey, IdentityKeyVersion: identKeyVer,

@@ -15,9 +15,12 @@ import (
 	lic "github.com/stayconnect/enterprise/license"
 )
 
-type fakeLic struct{ auth map[string]bool; active bool }
+type fakeLic struct {
+	auth   map[string]bool
+	active bool
+}
 
-func (f fakeLic) ModuleEnabled(id string) bool      { return f.active && f.auth[id] }
+func (f fakeLic) ModuleEnabled(id string) bool       { return f.active && f.auth[id] }
 func (f fakeLic) AuthorizedModules() map[string]bool { return f.auth }
 
 type fakeLocal struct {
@@ -25,7 +28,9 @@ type fakeLocal struct {
 	err error
 }
 
-func (f fakeLocal) SiteModules(context.Context, string, string) (map[string]bool, error) { return f.m, f.err }
+func (f fakeLocal) SiteModules(context.Context, string, string) (map[string]bool, error) {
+	return f.m, f.err
+}
 
 func allDeployed() deployment.Ceiling {
 	return deployment.New(
@@ -111,7 +116,9 @@ func TestDependencyMustBeEffective(t *testing.T) {
 func TestIdentityModulesUseTheSignInSwitches(t *testing.T) {
 	auth := map[string]bool{lic.ModuleSMSOTP: true, lic.ModuleEmailOTP: true}
 	r := New(allDeployed(), fakeLic{auth, true}, fakeLocal{m: map[string]bool{}},
-		func(context.Context, string) (map[string]bool, error) { return map[string]bool{lic.ModuleSMSOTP: true}, nil })
+		func(context.Context, string) (map[string]bool, error) {
+			return map[string]bool{lic.ModuleSMSOTP: true}, nil
+		})
 	snap := r.Resolve(context.Background(), "t", "s")
 	if !snap.Effective(lic.ModuleSMSOTP) || snap.Effective(lic.ModuleEmailOTP) {
 		t.Fatalf("identity switches not honoured: %+v", snap.Modules)
