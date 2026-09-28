@@ -648,6 +648,7 @@ func (a *Adapter) QueryStatus(ctx context.Context, q payment.StatusQuery) (payme
 				Kind:        "REFUND",
 				AmountMinor: t.RefundedAmountCents,
 				ProviderRef: txnRef,
+				Cumulative:  true,
 			}}
 		}
 		return res, nil

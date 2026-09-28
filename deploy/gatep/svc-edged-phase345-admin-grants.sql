@@ -381,3 +381,8 @@ GRANT SELECT ON iam_v2.voucher_revocations       TO svc_edged;
 -- history, the extra payment domains and checkout state. Every write goes through scd.
 GRANT SELECT ON iam_v2.payment_provider_accounts, iam_v2.payment_provider_account_changes,
                 iam_v2.site_payment_domains, iam_v2.site_payment_domain_changes, iam_v2.payment_checkouts TO svc_edged;
+-- Card payment settings (0096): checkout expiry and reconciliation grace, read and changed through definer
+-- functions that write the change row; the history is readable.
+GRANT SELECT ON iam_v2.site_card_payment_setting_changes TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.card_payment_settings_get(uuid,uuid)                           TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.card_payment_settings_set(uuid,uuid,integer,integer,text,text) TO svc_edged;

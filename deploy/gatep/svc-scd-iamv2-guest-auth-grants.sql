@@ -304,3 +304,4 @@ GRANT EXECUTE ON FUNCTION iam_v2.payment_account_set_secret(uuid,uuid,uuid,uuid,
 GRANT EXECUTE ON FUNCTION iam_v2.site_payment_domains_set(uuid,uuid,text[],text,text)                                  TO svc_scd;
 GRANT SELECT ON iam_v2.payment_provider_accounts, iam_v2.payment_provider_secret_generations,
                 iam_v2.site_payment_domains, iam_v2.payment_checkouts TO svc_scd;
+GRANT EXECUTE ON FUNCTION iam_v2.card_payment_settings_get(uuid,uuid) TO svc_scd;

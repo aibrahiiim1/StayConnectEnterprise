@@ -297,6 +297,7 @@ GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_acctd;
 \ir svc-acctd-iamv2-accounting-grants.sql
 \ir svc-edged-phase2-commerce-grants.sql
 \ir svc-edged-phase345-admin-grants.sql
+\ir svc-payment-least-privilege-grants.sql
 -- svc_pmsd is reconciled here like every other runtime role. It used to be converged nowhere: absent from the
 -- revoke loop above and from this list, so its privileges were whatever the last incremental apply happened to
 -- leave, and the reconcile's own D32 assertion then judged a role it had never converged.

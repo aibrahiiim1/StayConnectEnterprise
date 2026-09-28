@@ -14,6 +14,10 @@ END $guard$;
 DROP TRIGGER IF EXISTS p4_purchase_follows_settlement ON iam_v2.settlements;
 DROP FUNCTION IF EXISTS iam_v2.p4_purchase_follows_settlement();
 DROP FUNCTION IF EXISTS iam_v2.p4_record_provider_reversal(uuid,uuid,uuid,text,bigint,text,text);
+DROP FUNCTION IF EXISTS iam_v2.card_payment_settings_set(uuid,uuid,integer,integer,text,text);
+DROP FUNCTION IF EXISTS iam_v2.card_payment_settings_get(uuid,uuid);
+DROP TABLE IF EXISTS iam_v2.site_card_payment_setting_changes;
+DROP TABLE IF EXISTS iam_v2.site_card_payment_settings;
 DROP FUNCTION IF EXISTS iam_v2.site_payment_domains_set(uuid,uuid,text[],text,text);
 DROP FUNCTION IF EXISTS iam_v2.valid_payment_domain(text);
 DROP TABLE IF EXISTS iam_v2.site_payment_domain_changes;
@@ -80,5 +84,16 @@ BEGIN
     EXECUTE 'ALTER FUNCTION iam_v2.p4_payment_identity_gate() OWNER TO iam_v2_owner';
   END IF;
 END $own$;
+
+-- Restore the pre-0096 PUBLIC execute on the nine functions 0096 narrowed.
+GRANT EXECUTE ON FUNCTION iam_v2.p5_controlled_operation_open(text) TO PUBLIC;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_connection_settings_get(uuid,uuid,uuid) TO PUBLIC;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_connection_settings_set(uuid,uuid,uuid,text,text,integer,integer,integer,integer,integer) TO PUBLIC;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_dispose_snapshot_cases(uuid,uuid,uuid,text,text) TO PUBLIC;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_reconciliation_settings_get(uuid,uuid) TO PUBLIC;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_reconciliation_settings_set(uuid,uuid,integer,integer,text,text,integer,integer) TO PUBLIC;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_record_resync_coverage(uuid,uuid,uuid,bigint,text[],integer,integer,integer) TO PUBLIC;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_roster_of_generation(uuid,uuid,uuid,bigint) TO PUBLIC;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_site_blocked_after_refusals(uuid,uuid) TO PUBLIC;
 
 COMMIT;

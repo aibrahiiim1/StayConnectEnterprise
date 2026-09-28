@@ -112,8 +112,12 @@ func seedPaidChain(t *testing.T, p *pgxpool.Pool) scope {
 	pkg := scan1[string](t, p, `INSERT INTO iam_v2.internet_packages(tenant_id,site_id,code) VALUES ($1,$2,$3)
 		RETURNING id::text`, s.tenant, s.site, fmt.Sprintf("K%d", u))
 	pkgRev := scan1[string](t, p, `INSERT INTO iam_v2.internet_package_revisions
-		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent)
-		VALUES ($1,$2,$3,1,$4,'GENERAL',1000,'USD',2) RETURNING id::text`, s.tenant, s.site, pkg, planRev)
+		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent,settlement_methods)
+		VALUES ($1,$2,$3,1,$4,'GENERAL',1000,'USD',2,'{ONLINE_PAYMENT,PREPAID}') RETURNING id::text`, s.tenant, s.site, pkg, planRev)
+	// A voucher is issued only against the current revision of an active package (migration 0095).
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.internet_packages SET current_revision_id=$1, active=true WHERE id=$2`, pkgRev, pkg); err != nil {
+		t.Fatalf("current revision: %v", err)
+	}
 
 	// a voucher subject, so the grant has exactly one subject to pin
 	keyGen := scan1[string](t, p, `INSERT INTO iam_v2.voucher_code_key_generations

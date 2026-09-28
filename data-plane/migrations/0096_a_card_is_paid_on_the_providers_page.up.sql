@@ -11,7 +11,8 @@
 --   2. A hosted checkout is recorded beside its transaction (payment_checkouts): the provider's session
 --      reference is write-once; the reconciler's bookkeeping (last status check) is the only thing that moves.
 --   3. Provider-originated refunds and chargebacks reported by a status query are recorded in the existing
---      ledger through the outcome role (p4_record_provider_reversal). OneGate never initiates one.
+--      ledger through the outcome role (p4_record_provider_reversal). OneGate never initiates one. A reversal's
+--      provider reference is its own event (the charge keeps its own reference).
 --   4. The purchase follows its settlement when the settlement fails or goes to manual review, so a purchase
 --      whose money never arrived does not stay "awaiting" forever.
 --   5. Extra payment walled-garden domains a Site Admin may add (bounded, FQDN-only, audited).
@@ -274,8 +275,8 @@ BEGIN
   RETURNING id INTO v_id;
   UPDATE iam_v2.payment_transactions SET status = 'PENDING' WHERE id = v_id;
   SELECT iam_v2.apply_payment_callback_v2(p_tenant, par.provider, par.merchant_account_id, v_ref,
-           left(p_provider_event_id, 200), p_kind, 'CAPTURED', p_provider_txn_ref,
-           jsonb_build_object('source','provider_status_query','kind',p_kind))
+           left(p_provider_event_id, 200), p_kind, 'CAPTURED', left('evt:' || p_provider_event_id, 200),
+           jsonb_build_object('provider_status','CAPTURED','provider_message','provider-reported ' || lower(p_kind)))
     INTO v_result;
   RETURN v_result;
 END $fn$;
@@ -372,6 +373,82 @@ BEGIN
 END $fn$;
 
 -- ---------------------------------------------------------------------------------------------------------
+-- 5b. Card payment operational settings (CLAUDE.md 0C): how long a hosted checkout stays payable, and how long
+--     after that the reconciler keeps asking the provider before the outcome becomes UNKNOWN (manual review).
+--     Absence of a row means the approved defaults (30 / 60 minutes), never "off".
+-- ---------------------------------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS iam_v2.site_card_payment_settings (
+  tenant_id               uuid NOT NULL,
+  site_id                 uuid NOT NULL,
+  checkout_expiry_minutes integer NOT NULL DEFAULT 30,
+  reconcile_grace_minutes integer NOT NULL DEFAULT 60,
+  config_version          bigint  NOT NULL DEFAULT 1,
+  updated_at              timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant_id, site_id),
+  CONSTRAINT site_card_payment_settings_bounds CHECK (
+    checkout_expiry_minutes BETWEEN 30 AND 240 AND reconcile_grace_minutes BETWEEN 15 AND 1440)
+);
+CREATE TABLE IF NOT EXISTS iam_v2.site_card_payment_setting_changes (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   uuid NOT NULL,
+  site_id     uuid NOT NULL,
+  changed_at  timestamptz NOT NULL DEFAULT now(),
+  changed_by  text NOT NULL CHECK (length(btrim(changed_by)) > 0),
+  change_reason text,
+  old_checkout_expiry_minutes integer,
+  old_reconcile_grace_minutes integer,
+  new_checkout_expiry_minutes integer NOT NULL,
+  new_reconcile_grace_minutes integer NOT NULL,
+  new_config_version bigint NOT NULL
+);
+DROP TRIGGER IF EXISTS scpsc_append_only ON iam_v2.site_card_payment_setting_changes;
+CREATE TRIGGER scpsc_append_only BEFORE UPDATE OR DELETE ON iam_v2.site_card_payment_setting_changes
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p4_append_only_refuse();
+
+CREATE OR REPLACE FUNCTION iam_v2.card_payment_settings_get(p_tenant uuid, p_site uuid)
+  RETURNS TABLE (checkout_expiry_minutes integer, reconcile_grace_minutes integer, config_version bigint,
+                 updated_at timestamptz, is_default boolean)
+  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+  SELECT COALESCE(s.checkout_expiry_minutes, 30), COALESCE(s.reconcile_grace_minutes, 60),
+         COALESCE(s.config_version, 1), s.updated_at, (s.tenant_id IS NULL)
+    FROM (SELECT 1) one
+    LEFT JOIN iam_v2.site_card_payment_settings s ON s.tenant_id = p_tenant AND s.site_id = p_site;
+$fn$;
+
+CREATE OR REPLACE FUNCTION iam_v2.card_payment_settings_set(
+    p_tenant uuid, p_site uuid, p_expiry integer, p_grace integer, p_operator text, p_reason text DEFAULT NULL)
+  RETURNS bigint
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE v_version bigint; v_old_e int; v_old_g int;
+BEGIN
+  IF p_operator IS NULL OR btrim(p_operator) = '' THEN
+    RAISE EXCEPTION 'an operator label is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_expiry IS NULL OR p_expiry < 30 OR p_expiry > 240 THEN
+    RAISE EXCEPTION 'checkout expiry must be between 30 and 240 minutes (got %)', p_expiry;
+  END IF;
+  IF p_grace IS NULL OR p_grace < 15 OR p_grace > 1440 THEN
+    RAISE EXCEPTION 'reconciliation grace must be between 15 and 1440 minutes (got %)', p_grace;
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('card_payment_settings'), hashtext(p_site::text));
+  SELECT s.checkout_expiry_minutes, s.reconcile_grace_minutes INTO v_old_e, v_old_g
+    FROM iam_v2.site_card_payment_settings s WHERE s.tenant_id = p_tenant AND s.site_id = p_site FOR UPDATE;
+  INSERT INTO iam_v2.site_card_payment_settings AS s (tenant_id, site_id, checkout_expiry_minutes, reconcile_grace_minutes)
+  VALUES (p_tenant, p_site, p_expiry, p_grace)
+  ON CONFLICT (tenant_id, site_id) DO UPDATE
+     SET checkout_expiry_minutes = EXCLUDED.checkout_expiry_minutes,
+         reconcile_grace_minutes = EXCLUDED.reconcile_grace_minutes,
+         config_version = s.config_version + 1, updated_at = now()
+  RETURNING s.config_version INTO v_version;
+  INSERT INTO iam_v2.site_card_payment_setting_changes
+    (tenant_id, site_id, changed_by, change_reason, old_checkout_expiry_minutes, old_reconcile_grace_minutes,
+     new_checkout_expiry_minutes, new_reconcile_grace_minutes, new_config_version)
+  VALUES (p_tenant, p_site, btrim(p_operator), NULLIF(btrim(COALESCE(p_reason,'')),''), v_old_e, v_old_g,
+          p_expiry, p_grace, v_version);
+  RETURN v_version;
+END $fn$;
+
+-- ---------------------------------------------------------------------------------------------------------
 -- 6. The legacy plaintext Stripe credential path is removed.
 -- ---------------------------------------------------------------------------------------------------------
 DROP TABLE IF EXISTS public.stripe_accounts CASCADE;
@@ -390,6 +467,11 @@ REVOKE ALL ON FUNCTION iam_v2.payment_account_set_secret(uuid,uuid,uuid,uuid,byt
 REVOKE ALL ON FUNCTION iam_v2.p4_resolve_payment_account_v2(uuid,uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION iam_v2.p4_record_provider_reversal(uuid,uuid,uuid,text,bigint,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION iam_v2.site_payment_domains_set(uuid,uuid,text[],text,text) FROM PUBLIC;
+REVOKE ALL ON iam_v2.site_card_payment_settings FROM PUBLIC;
+REVOKE ALL ON iam_v2.site_card_payment_setting_changes FROM PUBLIC;
+REVOKE ALL ON FUNCTION iam_v2.card_payment_settings_get(uuid,uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION iam_v2.card_payment_settings_set(uuid,uuid,integer,integer,text,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION iam_v2.card_payment_settings_get(uuid,uuid) TO sc_payment_runtime;
 
 GRANT EXECUTE ON FUNCTION iam_v2.p4_resolve_payment_account_v2(uuid,uuid) TO sc_payment_runtime;
 GRANT SELECT, INSERT ON iam_v2.payment_checkouts TO sc_payment_runtime;
@@ -406,13 +488,50 @@ BEGIN
     GRANT EXECUTE ON FUNCTION iam_v2.site_payment_domains_set(uuid,uuid,text[],text,text) TO svc_scd;
     GRANT SELECT ON iam_v2.payment_provider_accounts, iam_v2.payment_provider_secret_generations,
                     iam_v2.site_payment_domains, iam_v2.payment_checkouts TO svc_scd;
+    GRANT EXECUTE ON FUNCTION iam_v2.card_payment_settings_get(uuid,uuid) TO svc_scd;
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_edged') THEN
     GRANT SELECT ON iam_v2.payment_provider_accounts, iam_v2.payment_provider_account_changes,
                     iam_v2.site_payment_domains, iam_v2.site_payment_domain_changes, iam_v2.payment_checkouts TO svc_edged;
+    GRANT SELECT ON iam_v2.site_card_payment_setting_changes TO svc_edged;
+    GRANT EXECUTE ON FUNCTION iam_v2.card_payment_settings_get(uuid,uuid) TO svc_edged;
+    GRANT EXECUTE ON FUNCTION iam_v2.card_payment_settings_set(uuid,uuid,integer,integer,text,text) TO svc_edged;
   END IF;
 END
 $grant$;
+
+-- ---------------------------------------------------------------------------------------------------------
+-- 7b. LEAST PRIVILEGE FOR THE NEW PAYMENT LOGINS. Nine definer functions from later migrations were never revoked
+--     from PUBLIC, so every login role -- including the two payment logins this migration introduces -- could
+--     execute them (for example pms_connection_settings_set). PUBLIC is revoked and the grant is re-made
+--     explicitly to exactly the roles that held it before (the five existing service roles and the commerce /
+--     financial group roles), so no existing service loses anything and the payment logins gain nothing. The
+--     service-role grants are mirrored in Gate-P.
+-- ---------------------------------------------------------------------------------------------------------
+DO $pub$
+DECLARE f text; r text;
+BEGIN
+  FOREACH f IN ARRAY ARRAY[
+    'iam_v2.p5_controlled_operation_open(text)',
+    'iam_v2.pms_connection_settings_get(uuid,uuid,uuid)',
+    'iam_v2.pms_connection_settings_set(uuid,uuid,uuid,text,text,integer,integer,integer,integer,integer)',
+    'iam_v2.pms_dispose_snapshot_cases(uuid,uuid,uuid,text,text)',
+    'iam_v2.pms_reconciliation_settings_get(uuid,uuid)',
+    'iam_v2.pms_reconciliation_settings_set(uuid,uuid,integer,integer,text,text,integer,integer)',
+    'iam_v2.pms_record_resync_coverage(uuid,uuid,uuid,bigint,text[],integer,integer,integer)',
+    'iam_v2.pms_roster_of_generation(uuid,uuid,uuid,bigint)',
+    'iam_v2.pms_site_blocked_after_refusals(uuid,uuid)'
+  ] LOOP
+    IF to_regprocedure(f) IS NULL THEN CONTINUE; END IF;
+    EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC', f);
+    FOREACH r IN ARRAY ARRAY['svc_scd','svc_edged','svc_acctd','svc_netd','svc_pmsd',
+                             'sc_commerce_runtime','sc_financial_operator','sc_financial_readonly'] LOOP
+      IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
+        EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO %I', f, r);
+      END IF;
+    END LOOP;
+  END LOOP;
+END $pub$;
 
 DO $own$
 BEGIN
@@ -432,6 +551,10 @@ BEGIN
     EXECUTE 'ALTER FUNCTION iam_v2.p4_purchase_follows_settlement() OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.valid_payment_domain(text) OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.site_payment_domains_set(uuid,uuid,text[],text,text) OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER TABLE iam_v2.site_card_payment_settings OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER TABLE iam_v2.site_card_payment_setting_changes OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER FUNCTION iam_v2.card_payment_settings_get(uuid,uuid) OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER FUNCTION iam_v2.card_payment_settings_set(uuid,uuid,integer,integer,text,text) OWNER TO iam_v2_owner';
   END IF;
 END $own$;
 

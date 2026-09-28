@@ -63,10 +63,10 @@ var ErrCheckoutNotCreated = errors.New("checkout provably not created")
 type CheckoutState string
 
 const (
-	CheckoutOpen     CheckoutState = "OPEN"     // not paid yet, still payable
-	CheckoutCaptured CheckoutState = "CAPTURED" // paid and captured
-	CheckoutDeclined CheckoutState = "DECLINED" // a conclusive failure
-	CheckoutExpired  CheckoutState = "EXPIRED"  // expired or cancelled without payment
+	CheckoutOpen     CheckoutState = "OPEN"      // not paid yet, still payable
+	CheckoutCaptured CheckoutState = "CAPTURED"  // paid and captured
+	CheckoutDeclined CheckoutState = "DECLINED"  // a conclusive failure
+	CheckoutExpired  CheckoutState = "EXPIRED"   // expired or cancelled without payment
 	CheckoutNotFound CheckoutState = "NOT_FOUND" // the provider has no checkout for this reference
 )
 
@@ -77,6 +77,10 @@ type ProviderEvent struct {
 	Kind        string // REFUND | CHARGEBACK
 	AmountMinor int64
 	ProviderRef string
+	// Cumulative is true when AmountMinor is the provider's running TOTAL of this kind on the charge rather
+	// than one event's amount (Paymob reports only a cumulative refunded amount). The engine then records
+	// only the increase over what is already recorded, so a partial refund is never counted twice.
+	Cumulative bool
 }
 
 // StatusQuery identifies one checkout.
@@ -118,6 +122,6 @@ type HostedCheckoutProvider interface {
 type CredentialKey struct {
 	Key      string `json:"key"`
 	Label    string `json:"label"`
-	Secret   bool   `json:"secret"`   // write-only; never returned by any API
+	Secret   bool   `json:"secret"` // write-only; never returned by any API
 	Required bool   `json:"required"`
 }
