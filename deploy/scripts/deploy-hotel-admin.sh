@@ -385,7 +385,12 @@ rollback_eligible() {
   # ONE implementation of the rule, shared with the standing integrity checker. When these were separate, the
   # checker held a rollback target only to the flag scan and reported a release missing an operator route as
   # "a legitimate rollback".
-  ha_release_satisfies_contract "$rel" "${HOTEL_ADMIN_CONTRACT:-$rel/capability-contract.json}" quiet
+  #
+  # AND ONE CONTRACT: a rollback target is judged against the contract of the release that will be SERVING
+  # (the second argument), exactly as the standing checker judges it. Judging an old release against its own
+  # older contract let a release that lacks a newly required route stay wired as the rollback, and the
+  # checker then failed the appliance right after an otherwise clean install.
+  ha_release_satisfies_contract "$rel" "${HOTEL_ADMIN_CONTRACT:-${2:-$rel/capability-contract.json}}" quiet
 }
 
 guard_not_root_cwd() {
@@ -604,7 +609,7 @@ install() {
     mv -T "$CURRENT_LINK" "$ARCHIVE_DIR/unmanaged-$(date -u +%Y%m%d-%H%M%S)"
   fi
   if [ -n "$outgoing" ] && [ "$outgoing" != "$rel" ]; then
-    if rollback_eligible "$outgoing"; then
+    if rollback_eligible "$outgoing" "$rel/capability-contract.json"; then
       atomic_link "$outgoing" "$PREVIOUS_LINK"
       echo ">> previous release recorded: $outgoing"
     else
@@ -617,7 +622,7 @@ install() {
   # about to set. A pointer left by an earlier deployment - or by an install-by-copying that never touched it -
   # survives untouched, and on this appliance that meant an obsolete release stayed wired as the rollback
   # through the very deployment that was fixing the problem.
-  if [ -L "$PREVIOUS_LINK" ] && ! rollback_eligible "$(readlink -f "$PREVIOUS_LINK")"; then
+  if [ -L "$PREVIOUS_LINK" ] && ! rollback_eligible "$(readlink -f "$PREVIOUS_LINK")" "$rel/capability-contract.json"; then
     echo ">> WARN: the inherited previous-release pointer references $(readlink -f "$PREVIOUS_LINK")," >&2
     echo "   which does not satisfy the current capability contract. Clearing it: that release remains on disk" >&2
     echo "   as archive evidence and is no longer reachable as an executable rollback." >&2
@@ -658,7 +663,7 @@ rollback() {
   [ "$prev" != "$cur" ] || die "previous release equals current ($prev); nothing to roll back to"
   # THE ROLLBACK TARGET IS HELD TO THE SAME CONTRACT AS A DEPLOYMENT. Going backwards is not permission to
   # serve a UI this appliance has outgrown.
-  rollback_eligible "$prev"     || die "previous release $prev does not satisfy the current Hotel Admin capability contract — it is archive evidence, not an executable rollback. Deploy a compatible release instead."
+  rollback_eligible "$prev" "$(readlink -f "$CURRENT_LINK")/capability-contract.json" || die "previous release $prev does not satisfy the current Hotel Admin capability contract — it is archive evidence, not an executable rollback. Deploy a compatible release instead."
   # Swap: current becomes previous, and we flip to the recorded previous.
   [ -n "$cur" ] && atomic_link "$cur" "$PREVIOUS_LINK"
   atomic_link "$prev" "$CURRENT_LINK"
