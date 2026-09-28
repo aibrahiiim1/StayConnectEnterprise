@@ -36,13 +36,13 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/data-plane/internal/buildprofile"
 	"github.com/stayconnect/enterprise/data-plane/internal/deployment"
-	"github.com/stayconnect/enterprise/data-plane/internal/modules"
 	"github.com/stayconnect/enterprise/data-plane/internal/hwid"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/identity"
 	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
 	"github.com/stayconnect/enterprise/data-plane/internal/mail"
 	"github.com/stayconnect/enterprise/data-plane/internal/metrics"
+	"github.com/stayconnect/enterprise/data-plane/internal/modules"
 	"github.com/stayconnect/enterprise/data-plane/internal/nft"
 	"github.com/stayconnect/enterprise/data-plane/internal/notifyloader"
 	"github.com/stayconnect/enterprise/data-plane/internal/otpkey"
@@ -219,6 +219,8 @@ type server struct {
 	// logic asks these, never the phase flags directly.
 	ceiling deployment.Ceiling
 	modules *modules.Resolver
+	// card is the card-payment wiring (card_checkout.go); never nil after initCard.
+	card *cardState
 
 	// PMS registry is live-reloadable (phase 5.3). All readers must go
 	// through currentPMSReg(); the reload path atomically swaps it under
@@ -762,6 +764,8 @@ func main() {
 		slog.Error("deployment ceiling: incoherent configuration", "err", err)
 		os.Exit(2)
 	}
+	s.initCard(rootCtx, c.SecretsDir)
+	s.registerModuleProbes()
 	// CRASH RECOVERY FOR OFFLINE FIRST ACTIVATION. Runs after the licence state is loaded, because deciding
 	// whether an interrupted activation completed means asking whether the licence actually landed. Either
 	// finishes the activation or rolls it back to unassigned; never leaves it half-applied.
@@ -864,6 +868,7 @@ func main() {
 	// proxies these for Hotel Admin; central.go holds the one computation of every state they report.
 	r.Get("/v1/central/status", s.centralStatus)
 	r.Get("/v1/modules", s.modulesStatus)
+	s.paymentAdminRoutes(r)
 	r.Post("/v1/central/refresh", s.centralRefresh)
 	// OFFLINE ACTIVATION: the request this appliance emits, and the package (first activation OR a licence
 	// package for an activated appliance) that comes back. See offline_first_activation.go / offline_import.go.
@@ -885,6 +890,8 @@ func main() {
 		r.Get("/v1/commerce/packages", s.commercePackages)
 		r.Post("/v1/commerce/quote", s.commerceQuote)
 		r.Post("/v1/commerce/confirm", s.commerceConfirm)
+		r.Post("/v1/commerce/redeem", s.commerceRedeemVoucher)
+		r.Post("/v1/commerce/purchase-status", s.purchaseStatus)
 		slog.Info("phase2 portal commerce routes mounted")
 	}
 
@@ -1015,6 +1022,7 @@ func main() {
 	// Edge-first refactor: walled-garden rules from the (site) DB are now
 	// actually enforced — reconciled into the nft walled_garden_ip set.
 	go s.gardenReconcileLoop(rootCtx)
+	go s.cardReconcileLoop(rootCtx)
 	// Periodic safety-net reload: Hotel Admin changes reload immediately through /v1/admin/pms/reload, and a
 	// 10-minute background sweep guarantees eventual consistency from the DB if one was missed.
 	go s.pmsReloadSafetyLoop(rootCtx)

@@ -105,6 +105,10 @@ var adminPrefixes = []string{
 	// edged for the capability list and the Modules screen. The portal never needs it: what a client may do is
 	// decided inside the guest routes themselves.
 	"/v1/modules",
+	// Card payment administration: provider accounts (credentials are sealed here, where the key is), the
+	// connection test and the site's extra payment domains. Read and written by edged for the Payment methods
+	// screen; the portal never reaches it.
+	"/v1/payment/",
 }
 
 func classifyRoute(path string) routeClass {

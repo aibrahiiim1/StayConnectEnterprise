@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/deployment"
+	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/modules"
 	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
 	lic "github.com/stayconnect/enterprise/license"
@@ -107,4 +108,24 @@ func (s *server) modulesStatus(w http.ResponseWriter, r *http.Request) {
 			string(deployment.CapRoomChargeTransmit): s.ceiling.Available(deployment.CapRoomChargeTransmit),
 		},
 	})
+}
+
+// siteAcquisitionMethods is the commerce engine's method gate: which optional acquisition modules are
+// effective here right now (licensed, enabled, deployed and ready). Free and Voucher are core.
+func (s *server) siteAcquisitionMethods(ctx context.Context) iamv2.SiteMethods {
+	snap := s.moduleSnapshot(ctx)
+	return iamv2.SiteMethods{
+		PaidAccess: snap.Effective(lic.ModulePaidAccess),
+		Card:       snap.Effective(lic.ModuleCardPayment),
+		RoomCharge: snap.Effective(lic.ModuleRoomCharge),
+	}
+}
+
+// registerModuleProbes gives the resolver the readiness and history answers only their owners can give.
+func (s *server) registerModuleProbes() {
+	if s.modules == nil {
+		return
+	}
+	s.modules.SetProbe(lic.ModuleCardPayment, s.cardReadiness)
+	s.modules.SetRecordsProbe(lic.ModuleCardPayment, s.cardHasRecords)
 }

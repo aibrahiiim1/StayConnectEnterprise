@@ -233,6 +233,11 @@ func (s *server) reconcileWalledGarden(ctx context.Context) (int, error) {
 	// Resolve domains (best effort, short timeout each). DNS answers churn;
 	// re-resolution every reconcile pass keeps the set fresh enough for
 	// login/payment endpoints, which is the walled garden's purpose.
+	// Card payment's hosted-page domains (least privilege: only while card payment is licensed, enabled and
+	// deployed, only the providers in use, plus the site's bounded extra list).
+	for _, d := range s.paymentGardenDomains(ctx) {
+		domains = append(domains, domain{d})
+	}
 	resolver := &net.Resolver{}
 	for _, d := range domains {
 		rctx, cancel := context.WithTimeout(ctx, 3*time.Second)

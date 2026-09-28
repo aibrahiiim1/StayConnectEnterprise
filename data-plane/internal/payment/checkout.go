@@ -151,7 +151,7 @@ func (e *CheckoutEngine) adapterFor(a ResolvedAccount) (HostedCheckoutProvider, 
 	if a.Mode != ModeLive && a.Mode != ModeTest {
 		return nil, ErrCredentials
 	}
-	ad, ok := e.Adapters[a.Provider]
+	ad, ok := e.Adapters[AdapterKey(a.Provider, a.Credentials)]
 	if !ok || ad == nil {
 		return nil, ErrNoAdapter
 	}
@@ -348,7 +348,7 @@ func (e *CheckoutEngine) queryAndApply(ctx context.Context, t txnRow) error {
 	if err != nil {
 		return err
 	}
-	ad, ok := e.Adapters[t.provider]
+	ad, ok := e.Adapters[AdapterKey(t.provider, acct.Credentials)]
 	if !ok || ad == nil {
 		return ErrNoAdapter
 	}
@@ -501,7 +501,7 @@ func (e *CheckoutEngine) SweepReversals(ctx context.Context, tenantID, siteID st
 		if err != nil {
 			continue
 		}
-		ad := e.Adapters[t.provider]
+		ad := e.Adapters[AdapterKey(t.provider, acct.Credentials)]
 		if ad == nil {
 			continue
 		}
@@ -720,4 +720,15 @@ func newUUID() (string, error) {
 	b[6] = (b[6] & 0x0f) | 0x40
 	b[8] = (b[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
+}
+
+// AdapterKey selects the adapter instance for a provider account. Paymob adapters are bound to one region, so
+// a Paymob account whose "region" credential names another region uses that region's instance.
+func AdapterKey(provider string, c Credentials) string {
+	if provider == "paymob" {
+		if r := strings.ToLower(strings.TrimSpace(c["region"])); r != "" && r != "egypt" {
+			return "paymob:" + r
+		}
+	}
+	return provider
 }
