@@ -1753,7 +1753,7 @@
     "manifest": "docs/manifests/NeutralTerminology-change-manifest.md",
     "base": "ddcce35a43ef196a175c4ff81790614643ae00ab",
     "base_note": "Master after the merge of PR #194, immediately before PR #195 began the terminology work.",
-    "head": "PENDING",
+    "head": "5267f888",
     "head_note": "The last CONTENT commit of the documentation sweep that closes the terminology work (PRs #195-#199 and the sweep PR); the manifest records base..HEAD at that commit.",
     "transition": "T0197",
     "previous_delivery": "T0197 (PRELIVE_GUEST_ACCESS, docs/manifests/GuestAccess-change-manifest.md)",
