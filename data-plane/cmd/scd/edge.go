@@ -297,6 +297,9 @@ func (s *server) applyLicenseToMethods(cfg *tenantcfg.AuthMethods) {
 	if !s.lic.FeatureEnabled(licstate.FeatSMSOTP) {
 		cfg.SMS = nil
 	}
+	if !s.lic.FeatureEnabled(licstate.FeatWhatsAppOTP) {
+		cfg.WhatsApp = nil
+	}
 	if !s.lic.FeatureEnabled(licstate.FeatSocialLogin) {
 		cfg.Social = nil
 	}

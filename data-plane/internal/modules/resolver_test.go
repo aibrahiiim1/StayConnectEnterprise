@@ -125,6 +125,30 @@ func TestIdentityModulesUseTheSignInSwitches(t *testing.T) {
 	}
 }
 
+func TestWhatsAppIsAnIdentityModuleSeparateFromSMS(t *testing.T) {
+	auth := map[string]bool{lic.ModuleSMSOTP: true, lic.ModuleWhatsAppOTP: true}
+	r := New(allDeployed(), fakeLic{auth, true}, fakeLocal{m: map[string]bool{}},
+		func(context.Context, string) (map[string]bool, error) {
+			return map[string]bool{lic.ModuleWhatsAppOTP: true}, nil
+		})
+	snap := r.Resolve(context.Background(), "t", "s")
+	wa := snap.Modules[lic.ModuleWhatsAppOTP]
+	if !wa.Deployed || !wa.Licensed || !wa.Enabled || !wa.Effective || wa.Switchable {
+		t.Fatalf("whatsapp_otp %+v", wa)
+	}
+	if snap.Effective(lic.ModuleSMSOTP) {
+		t.Fatal("the WhatsApp switch enabled SMS")
+	}
+	// Unlicensed: the switch alone never makes it effective.
+	r = New(allDeployed(), fakeLic{map[string]bool{lic.ModuleSMSOTP: true}, true}, fakeLocal{m: map[string]bool{}},
+		func(context.Context, string) (map[string]bool, error) {
+			return map[string]bool{lic.ModuleWhatsAppOTP: true}, nil
+		})
+	if r.Resolve(context.Background(), "t", "s").Effective(lic.ModuleWhatsAppOTP) {
+		t.Fatal("unlicensed whatsapp_otp effective")
+	}
+}
+
 // Site Type authorises nothing: the resolver has no Site Type input at all.
 func TestResolverNeverReadsSiteType(t *testing.T) {
 	files, _ := filepath.Glob("*.go")

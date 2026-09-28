@@ -31,8 +31,10 @@ import (
 // Feature names accepted by FeatureEnabled. They mirror the portal auth
 // methods plus the coarser commercial features.
 const (
-	FeatEmailOTP    = "email_otp"
-	FeatSMSOTP      = "sms_otp"
+	FeatEmailOTP = "email_otp"
+	FeatSMSOTP   = "sms_otp"
+	// FeatWhatsAppOTP is the WhatsApp one-time code channel. It is its own module (whatsapp_otp), never SMS.
+	FeatWhatsAppOTP = "whatsapp_otp"
 	FeatSocialLogin = "social_login"
 	FeatPMS         = "pms"
 	FeatPaidWiFi    = "paid_wifi"
@@ -278,7 +280,7 @@ func (m *Manager) FeatureEnabled(name string) bool {
 		return m.ModuleEnabled(lic.ModuleHospitality)
 	case FeatPaidWiFi:
 		return m.ModuleEnabled(lic.ModulePaidAccess)
-	case FeatEmailOTP, FeatSMSOTP, FeatSocialLogin, FeatHA, FeatWhiteLabel:
+	case FeatEmailOTP, FeatSMSOTP, FeatWhatsAppOTP, FeatSocialLogin, FeatHA, FeatWhiteLabel:
 		return m.ModuleEnabled(name)
 	default:
 		return false
@@ -424,13 +426,14 @@ func (m *Manager) syncLimits(ctx context.Context, d *lic.Document) error {
 	// Mirrored from the authorised modules (never from a v4 Features block).
 	am := d.AuthorizedModules()
 	bools := map[string]bool{
-		"feature.pms_integration": am[lic.ModuleHospitality],
-		"feature.paid_wifi":       am[lic.ModulePaidAccess],
-		"feature.auth.sms_otp":    am[lic.ModuleSMSOTP],
-		"feature.auth.email_otp":  am[lic.ModuleEmailOTP],
-		"feature.auth.social":     am[lic.ModuleSocialLogin],
-		"feature.ha_pair":         am[lic.ModuleHA],
-		"feature.white_label":     am[lic.ModuleWhiteLabel],
+		"feature.pms_integration":   am[lic.ModuleHospitality],
+		"feature.paid_wifi":         am[lic.ModulePaidAccess],
+		"feature.auth.sms_otp":      am[lic.ModuleSMSOTP],
+		"feature.auth.whatsapp_otp": am[lic.ModuleWhatsAppOTP],
+		"feature.auth.email_otp":    am[lic.ModuleEmailOTP],
+		"feature.auth.social":       am[lic.ModuleSocialLogin],
+		"feature.ha_pair":           am[lic.ModuleHA],
+		"feature.white_label":       am[lic.ModuleWhiteLabel],
 	}
 	tx, err := m.db.Begin(ctx)
 	if err != nil {

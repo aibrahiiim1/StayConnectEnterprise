@@ -213,4 +213,35 @@ func TestModulesAreTheSoleAuthority(t *testing.T) {
 	if m.FeatureEnabled(FeatPaidWiFi) {
 		t.Fatal("paid_wifi must follow paid_access")
 	}
+	if m.FeatureEnabled(FeatWhatsAppOTP) {
+		t.Fatal("whatsapp_otp enabled without authorisation")
+	}
+}
+
+func TestWhatsAppFeatureFollowsItsOwnModule(t *testing.T) {
+	f := newFixture(t)
+	now := time.Now().UTC()
+	mods := lic.Modules{lic.ModuleWhatsAppOTP: {}}
+	d := &lic.Document{
+		LicenseID: "11111111-1111-1111-1111-11111111111a", Status: lic.DocActive,
+		TenantID: "22222222-2222-2222-2222-222222222222", SiteID: "33333333-3333-3333-3333-333333333333",
+		IssuedAt: now.Add(-time.Hour), ValidUntil: now.AddDate(0, 6, 0), SchemaVersion: lic.CurrentSchemaVersion,
+		IdentityKeyFingerprint: "aaaa", LicenseVersion: 1, Modules: mods, Features: lic.ProjectFeatures(mods),
+	}
+	env, err := f.signer.Sign(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := env.Encode()
+	m := New(nil, "", f.dir, f.pubPath, true)
+	m.SetLocalIdentity(lic.LocalIdentity{IdentityKeyFingerprint: "aaaa"})
+	if _, err := m.Install(context.Background(), raw); err != nil {
+		t.Fatal(err)
+	}
+	if !m.FeatureEnabled(FeatWhatsAppOTP) || !m.ModuleEnabled(lic.ModuleWhatsAppOTP) {
+		t.Fatal("whatsapp_otp must be enabled")
+	}
+	if m.FeatureEnabled(FeatSMSOTP) {
+		t.Fatal("a WhatsApp grant enabled SMS")
+	}
 }

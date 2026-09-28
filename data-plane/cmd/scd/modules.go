@@ -39,7 +39,7 @@ func (s *server) initModules() error {
 }
 
 // identitySwitches maps the Sign-in methods switches onto the identity modules: that screen stays the single
-// local source for SMS, email and social sign-in.
+// local source for SMS, WhatsApp, email and social sign-in.
 func (s *server) identitySwitches(ctx context.Context, tenantID string) (map[string]bool, error) {
 	var cfg *tenantcfg.AuthMethods
 	var err error
@@ -56,6 +56,9 @@ func (s *server) identitySwitches(ctx context.Context, tenantID string) (map[str
 	out := map[string]bool{}
 	if cfg.SMS != nil && cfg.SMS.Enabled {
 		out[lic.ModuleSMSOTP] = true
+	}
+	if cfg.WhatsApp != nil && cfg.WhatsApp.Enabled {
+		out[lic.ModuleWhatsAppOTP] = true
 	}
 	if cfg.Email != nil && cfg.Email.Enabled {
 		out[lic.ModuleEmailOTP] = true

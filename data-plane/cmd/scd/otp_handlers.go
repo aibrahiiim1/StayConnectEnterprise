@@ -19,6 +19,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/phone"
 	"github.com/stayconnect/enterprise/data-plane/internal/sms"
 	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
+	"github.com/stayconnect/enterprise/data-plane/internal/whatsapp"
 )
 
 // ---- /v1/tenant/auth-methods ------------------------------------------------
@@ -104,8 +105,8 @@ func (s *server) sitePackagesAvailable(ctx context.Context) bool {
 // ---- /v1/auth/otp/issue ----------------------------------------------------
 
 type otpIssueReq struct {
-	Channel     string `json:"channel"`     // "email" (sms in 4.2)
-	Destination string `json:"destination"` // email address
+	Channel     string `json:"channel"`     // "email" | "sms" | "whatsapp"
+	Destination string `json:"destination"` // email address, or a phone number (normalised to E.164)
 	IP          string `json:"ip"`
 }
 
@@ -130,9 +131,19 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 		if !s.licenseGate(w, licstate.FeatSMSOTP) {
 			return
 		}
+	case "whatsapp":
+		if !s.licenseGate(w, licstate.FeatWhatsAppOTP) {
+			return
+		}
 	}
 
-	cfg, err := tenantcfg.Load(r.Context(), s.db, s.tenID)
+	var cfg *tenantcfg.AuthMethods
+	var err error
+	if s.methodSwitches != nil {
+		cfg, err = s.methodSwitches(r.Context())
+	} else {
+		cfg, err = tenantcfg.Load(r.Context(), s.db, s.tenID)
+	}
 	if err != nil {
 		httpErr(w, http.StatusInternalServerError, "tenant config unavailable")
 		return
@@ -161,6 +172,16 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		dest = d
+	case "whatsapp":
+		// A WhatsApp code is addressed to a phone number exactly as SMS is, but it is a different channel:
+		// its own method switch, its own provider and an approved template.
+		method = cfg.WhatsApp
+		d, err := phone.Normalize(req.Destination)
+		if err != nil {
+			httpErr(w, http.StatusBadRequest, "invalid phone: "+err.Error())
+			return
+		}
+		dest = d
 	default:
 		httpErr(w, http.StatusBadRequest, "unsupported channel")
 		return
@@ -178,7 +199,13 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	issued, err := otp.Issue(r.Context(), s.db, s.otpRing, otp.IssueParams{
+	issue := s.otpIssuer
+	if issue == nil {
+		issue = func(ctx context.Context, p otp.IssueParams) (*otp.Issued, error) {
+			return otp.Issue(ctx, s.db, s.otpRing, p)
+		}
+	}
+	issued, err := issue(r.Context(), otp.IssueParams{
 		TenantID:    s.tenID,
 		ApplianceID: s.applID,
 		TemplateID:  method.TemplateID,
@@ -221,6 +248,17 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 			Text: shortText,
 		}); err != nil {
 			slog.Warn("sms send", "err", err)
+		}
+	case "whatsapp":
+		// The code travels as a parameter of the provider-approved authentication template, never as text.
+		if s.whatsapp == nil {
+			slog.Warn("whatsapp send: no sender configured")
+		} else if err := s.whatsapp.Send(r.Context(), whatsapp.Message{
+			To:         dest,
+			Code:       issued.Code,
+			TTLMinutes: int(otp.DefaultTTL.Minutes()),
+		}); err != nil {
+			slog.Warn("whatsapp send", "err", err)
 		}
 	}
 
@@ -305,15 +343,20 @@ func (s *server) authorizeOTP(w http.ResponseWriter, r *http.Request) {
 	// duration and shaping, a public.sessions row, and direct nft/shaping calls. Duration, data cap and
 	// shaping are not properties of the credential in the current model -- they come from the package the
 	// guest selects in the commerce flow after authentication.
-	factorType := "EMAIL"
-	if v.Channel != "email" {
-		factorType = "PHONE"
-	}
 	s.authorizeViaIAMv2(w, r, iamv2.MethodOTP, iamv2.Request{
-		FactorType:  factorType,
+		FactorType:  otpFactorType(v.Channel),
 		FactorValue: v.Destination,
 		Device:      iamv2.DeviceContext{MAC: mac.String()},
 	}, ip)
+}
+
+// otpFactorType maps a verified challenge's channel onto the IAM-v2 factor it proves. A WhatsApp code, like an
+// SMS code, proves possession of the phone number it was sent to, so both are PHONE factors.
+func otpFactorType(channel string) string {
+	if channel == "email" {
+		return "EMAIL"
+	}
+	return "PHONE"
 }
 
 // ---- helpers ---------------------------------------------------------------

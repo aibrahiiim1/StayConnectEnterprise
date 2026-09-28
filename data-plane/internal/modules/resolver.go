@@ -63,7 +63,9 @@ var switchable = map[string]bool{
 }
 
 // identity are the modules whose local switch is the Sign-in methods screen.
-var identity = map[string]bool{lic.ModuleSMSOTP: true, lic.ModuleEmailOTP: true, lic.ModuleSocialLogin: true}
+var identity = map[string]bool{
+	lic.ModuleSMSOTP: true, lic.ModuleWhatsAppOTP: true, lic.ModuleEmailOTP: true, lic.ModuleSocialLogin: true,
+}
 
 // Resolver evaluates module state. Probes may be registered after construction by the subsystem that owns
 // the readiness question (payment, posting).

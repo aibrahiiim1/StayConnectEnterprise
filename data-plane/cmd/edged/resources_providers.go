@@ -1,6 +1,6 @@
 package main
 
-// Provider configuration CRUD: PMS, notification (email/sms) and social OAuth.
+// Provider configuration CRUD: PMS, notification (email/sms/whatsapp) and social OAuth.
 // (Card payment accounts are NOT here: they live under payment-providers, with
 // sealed credentials held by scd.) Ported from the control-plane admin handlers with the
 // fixed site scope. Secrets are write-only everywhere: never returned in
@@ -8,7 +8,9 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -28,49 +30,157 @@ import (
 
 // ----- notification providers ----------------------------------------------------
 
+// WhatsApp is its own channel with its own provider kinds; it is never an SMS kind.
 var notifyAllowedKinds = map[string]map[string]bool{
-	"email": {"stub": true, "sendgrid": true, "ses": true},
-	"sms":   {"stub": true, "twilio": true},
+	"email":    {"stub": true, "sendgrid": true, "ses": true},
+	"sms":      {"stub": true, "twilio": true},
+	"whatsapp": {"stub": true, "meta_whatsapp": true, "twilio_whatsapp": true},
 }
 
+// whatsappExtraKeys are the non-secret settings a WhatsApp provider keeps in notification_providers.extra.
+var whatsappExtraKeys = map[string]bool{"template_name": true, "language": true, "content_sid": true}
+
+var (
+	reMetaPhoneID   = regexp.MustCompile(`^[0-9]{5,32}$`)
+	reMetaTemplate  = regexp.MustCompile(`^[a-z0-9_]{1,512}$`)
+	reTemplateLang  = regexp.MustCompile(`^[a-z]{2,3}(_[A-Z]{2})?$`)
+	reTwilioSID     = regexp.MustCompile(`^AC[0-9a-fA-F]{32}$`)
+	reTwilioContent = regexp.MustCompile(`^HX[0-9a-fA-F]{32}$`)
+	reE164          = regexp.MustCompile(`^\+[1-9][0-9]{7,14}$`)
+)
+
 type edgeNotificationProvider struct {
-	ID            string     `json:"id"`
-	Channel       string     `json:"channel"`
-	Kind          string     `json:"kind"`
-	Enabled       bool       `json:"enabled"`
-	DisplayName   string     `json:"display_name,omitempty"`
-	APIUser       string     `json:"api_user,omitempty"` // not a secret (Twilio account_sid)
-	FromAddress   string     `json:"from_address,omitempty"`
-	FromName      string     `json:"from_name,omitempty"`
-	Region        string     `json:"region,omitempty"`
-	LastSuccessAt *time.Time `json:"last_success_at,omitempty"`
-	LastError     string     `json:"last_error,omitempty"`
-	LastErrorAt   *time.Time `json:"last_error_at,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	ID            string            `json:"id"`
+	Channel       string            `json:"channel"`
+	Kind          string            `json:"kind"`
+	Enabled       bool              `json:"enabled"`
+	DisplayName   string            `json:"display_name,omitempty"`
+	APIUser       string            `json:"api_user,omitempty"` // not a secret (Twilio account SID / Meta phone number ID)
+	FromAddress   string            `json:"from_address,omitempty"`
+	FromName      string            `json:"from_name,omitempty"`
+	Region        string            `json:"region,omitempty"`
+	Extra         map[string]string `json:"extra,omitempty"` // non-secret provider settings (WhatsApp template)
+	LastSuccessAt *time.Time        `json:"last_success_at,omitempty"`
+	LastError     string            `json:"last_error,omitempty"`
+	LastErrorAt   *time.Time        `json:"last_error_at,omitempty"`
+	CreatedAt     time.Time         `json:"created_at"`
+	UpdatedAt     time.Time         `json:"updated_at"`
 }
 
 const notifyCols = `id, channel, kind, enabled, COALESCE(display_name,''),
        COALESCE(api_user,''), COALESCE(from_address,''), COALESCE(from_name,''),
-       COALESCE(region,''), last_success_at, COALESCE(last_error,''),
+       COALESCE(region,''), COALESCE(extra,'{}'::jsonb)::text, last_success_at, COALESCE(last_error,''),
        last_error_at, created_at, updated_at`
 
 func scanNotify(row interface{ Scan(...any) error }, n *edgeNotificationProvider) error {
-	return row.Scan(&n.ID, &n.Channel, &n.Kind, &n.Enabled, &n.DisplayName,
-		&n.APIUser, &n.FromAddress, &n.FromName, &n.Region,
-		&n.LastSuccessAt, &n.LastError, &n.LastErrorAt, &n.CreatedAt, &n.UpdatedAt)
+	var extra string
+	if err := row.Scan(&n.ID, &n.Channel, &n.Kind, &n.Enabled, &n.DisplayName,
+		&n.APIUser, &n.FromAddress, &n.FromName, &n.Region, &extra,
+		&n.LastSuccessAt, &n.LastError, &n.LastErrorAt, &n.CreatedAt, &n.UpdatedAt); err != nil {
+		return err
+	}
+	n.Extra = publicExtra(extra)
+	return nil
+}
+
+// publicExtra returns only the known non-secret settings of the extra column.
+func publicExtra(raw string) map[string]string {
+	var m map[string]any
+	if json.Unmarshal([]byte(raw), &m) != nil {
+		return nil
+	}
+	out := map[string]string{}
+	for k, v := range m {
+		if sv, ok := v.(string); ok && whatsappExtraKeys[k] {
+			out[k] = sv
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 type notifyWriteReq struct {
-	Channel     string  `json:"channel,omitempty"` // create-only
-	Kind        string  `json:"kind,omitempty"`    // create-only
-	Enabled     *bool   `json:"enabled,omitempty"`
-	DisplayName *string `json:"display_name,omitempty"`
-	APIKey      *string `json:"api_key,omitempty"` // write-only
-	APIUser     *string `json:"api_user,omitempty"`
-	FromAddress *string `json:"from_address,omitempty"`
-	FromName    *string `json:"from_name,omitempty"`
-	Region      *string `json:"region,omitempty"`
+	Channel     string            `json:"channel,omitempty"` // create-only
+	Kind        string            `json:"kind,omitempty"`    // create-only
+	Enabled     *bool             `json:"enabled,omitempty"`
+	DisplayName *string           `json:"display_name,omitempty"`
+	APIKey      *string           `json:"api_key,omitempty"` // write-only
+	APIUser     *string           `json:"api_user,omitempty"`
+	FromAddress *string           `json:"from_address,omitempty"`
+	FromName    *string           `json:"from_name,omitempty"`
+	Region      *string           `json:"region,omitempty"`
+	Extra       map[string]string `json:"extra,omitempty"` // WhatsApp template settings; an empty value removes a key
+}
+
+// notifyProviderShape is what validation sees: the provider as it would be stored.
+type notifyProviderShape struct {
+	Channel, Kind, APIUser, FromAddress string
+	HasAPIKey                           bool
+	Extra                               map[string]string
+}
+
+// validateNotifyProvider returns a readable message for a provider that cannot work, or "" when it can.
+// Only WhatsApp providers are checked field by field; email and SMS keep their historical rules.
+func validateNotifyProvider(p notifyProviderShape) string {
+	if p.Channel != "whatsapp" {
+		if len(p.Extra) > 0 {
+			return "extra settings apply only to WhatsApp providers"
+		}
+		return ""
+	}
+	for k := range p.Extra {
+		if !whatsappExtraKeys[k] {
+			return fmt.Sprintf("unknown WhatsApp setting %q (allowed: template_name, language, content_sid)", k)
+		}
+	}
+	lang := strings.TrimSpace(p.Extra["language"])
+	switch p.Kind {
+	case "stub":
+		return ""
+	case "meta_whatsapp":
+		switch {
+		case !reMetaPhoneID.MatchString(strings.TrimSpace(p.APIUser)):
+			return "Meta WhatsApp needs the phone number ID (digits) in api_user"
+		case !p.HasAPIKey:
+			return "Meta WhatsApp needs the access token in api_key"
+		case !reMetaTemplate.MatchString(strings.TrimSpace(p.Extra["template_name"])):
+			return "Meta WhatsApp needs extra.template_name: the approved authentication template name (lowercase letters, digits, underscores)"
+		case lang != "" && !reTemplateLang.MatchString(lang):
+			return "extra.language must be a template language code such as en, ar or en_US"
+		}
+		return ""
+	case "twilio_whatsapp":
+		switch {
+		case !reTwilioSID.MatchString(strings.TrimSpace(p.APIUser)):
+			return "Twilio WhatsApp needs the account SID (AC followed by 32 hex characters) in api_user"
+		case !p.HasAPIKey:
+			return "Twilio WhatsApp needs the auth token in api_key"
+		case !reE164.MatchString(strings.TrimPrefix(strings.TrimSpace(p.FromAddress), "whatsapp:")):
+			return "Twilio WhatsApp needs the WhatsApp sender number in from_address, in E.164 form (for example +14155238886)"
+		case !reTwilioContent.MatchString(strings.TrimSpace(p.Extra["content_sid"])):
+			return "Twilio WhatsApp needs extra.content_sid: the approved authentication template (HX followed by 32 hex characters)"
+		}
+		return ""
+	}
+	return "kind not supported for this channel"
+}
+
+// mergeExtra applies a patch to stored settings; an empty value removes the key.
+func mergeExtra(stored, patch map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range stored {
+		out[k] = v
+	}
+	for k, v := range patch {
+		if strings.TrimSpace(v) == "" {
+			delete(out, k)
+		} else {
+			out[k] = strings.TrimSpace(v)
+		}
+	}
+	return out
 }
 
 func (s *server) notificationProvidersRoutes() http.Handler {
@@ -135,13 +245,22 @@ func (s *server) createNotifyProvider(w http.ResponseWriter, r *http.Request) {
 	in.Kind = strings.TrimSpace(in.Kind)
 	allowed, ok := notifyAllowedKinds[in.Channel]
 	if !ok {
-		jsonErr(w, http.StatusBadRequest, "bad_request", "channel must be email|sms")
+		jsonErr(w, http.StatusBadRequest, "bad_request", "channel must be email|sms|whatsapp")
 		return
 	}
 	if !allowed[in.Kind] {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "kind not supported for this channel")
 		return
 	}
+	extra := mergeExtra(nil, in.Extra)
+	if msg := validateNotifyProvider(notifyProviderShape{
+		Channel: in.Channel, Kind: in.Kind, APIUser: strDeref(in.APIUser), FromAddress: strDeref(in.FromAddress),
+		HasAPIKey: strings.TrimSpace(strDeref(in.APIKey)) != "", Extra: extra,
+	}); msg != "" {
+		jsonErr(w, http.StatusBadRequest, "bad_request", msg)
+		return
+	}
+	extraJSON, _ := json.Marshal(extra)
 	enabled := true
 	if in.Enabled != nil {
 		enabled = *in.Enabled
@@ -152,15 +271,15 @@ func (s *server) createNotifyProvider(w http.ResponseWriter, r *http.Request) {
 	err := scanNotify(s.db.QueryRow(ctx, `
         INSERT INTO notification_providers(
             tenant_id, channel, kind, enabled, display_name,
-            api_key, api_user, from_address, from_name, region
+            api_key, api_user, from_address, from_name, region, extra
         ) VALUES (
             $1, $2, $3, $4, NULLIF($5,''),
-            NULLIF($6,''), NULLIF($7,''), NULLIF($8,''), NULLIF($9,''), NULLIF($10,'')
+            NULLIF($6,''), NULLIF($7,''), NULLIF($8,''), NULLIF($9,''), NULLIF($10,''), $11::jsonb
         )
         RETURNING `+notifyCols,
 		s.tenantID, in.Channel, in.Kind, enabled, strDeref(in.DisplayName),
 		strDeref(in.APIKey), strDeref(in.APIUser),
-		strDeref(in.FromAddress), strDeref(in.FromName), strDeref(in.Region),
+		strDeref(in.FromAddress), strDeref(in.FromName), strDeref(in.Region), string(extraJSON),
 	), &n)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -185,8 +304,48 @@ func (s *server) patchNotifyProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
+
+	// Validate the provider as it will be stored: the current row with this patch applied.
+	var cur notifyProviderShape
+	var curExtra string
+	err := s.db.QueryRow(ctx, `
+        SELECT channel, kind, COALESCE(api_user,''), COALESCE(from_address,''),
+               COALESCE(api_key,'') <> '', COALESCE(extra,'{}'::jsonb)::text
+          FROM notification_providers WHERE id=$1 AND tenant_id=$2`, id, s.tenantID).
+		Scan(&cur.Channel, &cur.Kind, &cur.APIUser, &cur.FromAddress, &cur.HasAPIKey, &curExtra)
+	if isNoRows(err) {
+		jsonErr(w, http.StatusNotFound, "not_found", "provider not found")
+		return
+	}
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	if in.APIUser != nil {
+		cur.APIUser = *in.APIUser
+	}
+	if in.FromAddress != nil {
+		cur.FromAddress = *in.FromAddress
+	}
+	if strings.TrimSpace(strDeref(in.APIKey)) != "" {
+		cur.HasAPIKey = true
+	}
+	var extraArg *string
+	if len(in.Extra) > 0 {
+		cur.Extra = mergeExtra(publicExtra(curExtra), in.Extra)
+		b, _ := json.Marshal(cur.Extra)
+		sb := string(b)
+		extraArg = &sb
+	} else if cur.Channel == "whatsapp" {
+		cur.Extra = publicExtra(curExtra)
+	} // stored extras on email/SMS rows are left exactly as they are
+	if msg := validateNotifyProvider(cur); msg != "" {
+		jsonErr(w, http.StatusBadRequest, "bad_request", msg)
+		return
+	}
+
 	var n edgeNotificationProvider
-	err := scanNotify(s.db.QueryRow(ctx, `
+	err = scanNotify(s.db.QueryRow(ctx, `
         UPDATE notification_providers SET
             enabled      = COALESCE($3, enabled),
             display_name = COALESCE($4, display_name),
@@ -195,12 +354,13 @@ func (s *server) patchNotifyProvider(w http.ResponseWriter, r *http.Request) {
             from_address = COALESCE($7, from_address),
             from_name    = COALESCE($8, from_name),
             region       = COALESCE($9, region),
+            extra        = COALESCE($10::jsonb, extra),
             updated_at   = now()
          WHERE id = $1 AND tenant_id = $2
          RETURNING `+notifyCols,
 		id, s.tenantID,
 		in.Enabled, in.DisplayName,
-		strDeref(in.APIKey), in.APIUser, in.FromAddress, in.FromName, in.Region,
+		strDeref(in.APIKey), in.APIUser, in.FromAddress, in.FromName, in.Region, extraArg,
 	), &n)
 	if isNoRows(err) {
 		jsonErr(w, http.StatusNotFound, "not_found", "provider not found")

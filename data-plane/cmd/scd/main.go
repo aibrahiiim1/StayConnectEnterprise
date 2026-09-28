@@ -45,6 +45,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/modules"
 	"github.com/stayconnect/enterprise/data-plane/internal/nft"
 	"github.com/stayconnect/enterprise/data-plane/internal/notifyloader"
+	"github.com/stayconnect/enterprise/data-plane/internal/otp"
 	"github.com/stayconnect/enterprise/data-plane/internal/otpkey"
 	"github.com/stayconnect/enterprise/data-plane/internal/pms"
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsloader"
@@ -56,6 +57,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
 	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
 	"github.com/stayconnect/enterprise/data-plane/internal/throttle"
+	"github.com/stayconnect/enterprise/data-plane/internal/whatsapp"
 	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 	lic "github.com/stayconnect/enterprise/license"
 )
@@ -68,6 +70,8 @@ type cfg struct {
 	ApplianceID string
 	MailLogPath string
 	SMSLogPath  string
+	// WhatsAppLogPath is the development stub's file for WhatsApp codes (used only when no provider is set).
+	WhatsAppLogPath string
 
 	// Appliance identity. identity.json (appliance id + public key) and the
 	// private key live in IdentityDir. A factory-clean appliance registers itself
@@ -113,13 +117,14 @@ type cfg struct {
 
 func loadCfg() cfg {
 	return cfg{
-		SocketPath:  envOr("SCD_SOCKET", "/run/stayconnect/scd.sock"),
-		DBURL:       envOr("SCD_DB_URL", "postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect?sslmode=disable"),
-		TenantID:    os.Getenv("SCD_TENANT_ID"),
-		SiteID:      os.Getenv("SCD_SITE_ID"),
-		ApplianceID: os.Getenv("SCD_APPLIANCE_ID"),
-		MailLogPath: envOr("SCD_MAIL_LOG", "/var/log/stayconnect/otp-mail.log"),
-		SMSLogPath:  envOr("SCD_SMS_LOG", "/var/log/stayconnect/otp-sms.log"),
+		SocketPath:      envOr("SCD_SOCKET", "/run/stayconnect/scd.sock"),
+		DBURL:           envOr("SCD_DB_URL", "postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect?sslmode=disable"),
+		TenantID:        os.Getenv("SCD_TENANT_ID"),
+		SiteID:          os.Getenv("SCD_SITE_ID"),
+		ApplianceID:     os.Getenv("SCD_APPLIANCE_ID"),
+		MailLogPath:     envOr("SCD_MAIL_LOG", "/var/log/stayconnect/otp-mail.log"),
+		SMSLogPath:      envOr("SCD_SMS_LOG", "/var/log/stayconnect/otp-sms.log"),
+		WhatsAppLogPath: envOr("SCD_WHATSAPP_LOG", "/var/log/stayconnect/otp-whatsapp.log"),
 
 		IdentityDir:  envOr("SCD_IDENTITY_DIR", "/etc/stayconnect/identity"),
 		CtrlAPIBase:  os.Getenv("SCD_CTRLAPI_BASE"),
@@ -177,8 +182,12 @@ type server struct {
 	shp            *shape.Client
 	mail           mail.Mailer
 	sms            sms.Sender
-	socialReg      *social.Registry
-	loginRL        *loginLimiter // layered throttling for guest username/password logins (optional fast in-memory layer)
+	// whatsapp delivers one-time codes as a WhatsApp authentication template (its own channel, not SMS).
+	whatsapp whatsapp.Sender
+	// otpIssuer issues a challenge; nil means otp.Issue against s.db. A test with no database supplies its own.
+	otpIssuer func(ctx context.Context, p otp.IssueParams) (*otp.Issued, error)
+	socialReg *social.Registry
+	loginRL   *loginLimiter // layered throttling for guest username/password logins (optional fast in-memory layer)
 
 	// Phase 1B dark-auth machinery. All are inert unless explicitly enabled at deploy time:
 	//   - authThrottle: durable, DB-backed authoritative throttle (D4). nil => legacy in-memory only.
@@ -639,6 +648,7 @@ func main() {
 		shp:          shape.New(),
 		mail:         mail.NewStub(c.MailLogPath),
 		sms:          sms.NewStub(c.SMSLogPath),
+		whatsapp:     whatsapp.NewStub(c.WhatsAppLogPath),
 		socialReg:    socialReg,
 		loginRL:      newLoginLimiter(),
 		pmsReg:       pmsReg,
@@ -798,14 +808,15 @@ func main() {
 	// columns (last_success_at / last_error_at) for the admin UI.
 	{
 		nctx, ncancel := context.WithTimeout(rootCtx, 10*time.Second)
-		nloaded, err := notifyloader.Load(nctx, pool, c.TenantID, s.mail, s.sms)
+		nloaded, err := notifyloader.Load(nctx, pool, c.TenantID, s.mail, s.sms, s.whatsapp)
 		ncancel()
 		if err != nil {
 			slog.Warn("notifyloader: load failed; using stubs", "err", err)
 		}
 		s.mail = notifyloader.WrapMailer(nloaded.Mailer, nloaded.MailerKind, s.met, pool, c.TenantID)
 		s.sms = notifyloader.WrapSender(nloaded.Sender, nloaded.SenderKind, s.met, pool, c.TenantID)
-		slog.Info("notification providers loaded", "email", nloaded.MailerKind, "sms", nloaded.SenderKind)
+		s.whatsapp = notifyloader.WrapWhatsApp(nloaded.WhatsApp, nloaded.WhatsAppKind, s.met, pool, c.TenantID)
+		slog.Info("notification providers loaded", "email", nloaded.MailerKind, "sms", nloaded.SenderKind, "whatsapp", nloaded.WhatsAppKind)
 	}
 
 	r := chi.NewRouter()

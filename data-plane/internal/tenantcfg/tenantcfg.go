@@ -19,6 +19,9 @@ type AuthMethods struct {
 	Voucher *AuthMethod `json:"voucher,omitempty"`
 	Email   *AuthMethod `json:"email,omitempty"`
 	SMS     *AuthMethod `json:"sms,omitempty"`
+	// WhatsApp is a one-time code delivered as a WhatsApp authentication-template message. It is a separate
+	// channel from SMS (its own licence module, whatsapp_otp, and its own provider), never an SMS variant.
+	WhatsApp *AuthMethod `json:"whatsapp,omitempty"`
 	// Social is keyed by provider name (e.g. "google", "apple"). Each entry
 	// has its own enabled flag + template_id so providers can be turned on
 	// independently and route to different ticket templates if desired.

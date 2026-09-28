@@ -111,3 +111,51 @@ func TestCoreOnlyV4LicenceKeepsAnEmptyModulesMap(t *testing.T) {
 		t.Fatal("core-only licence authorised a module")
 	}
 }
+
+func TestWhatsAppOTPIsItsOwnRegisteredIdentityModule(t *testing.T) {
+	spec, ok := LookupModule(ModuleWhatsAppOTP)
+	if !ok || spec.ID != "whatsapp_otp" || spec.Label != "WhatsApp one-time code" || len(spec.Requires) != 0 {
+		t.Fatalf("whatsapp_otp spec %+v ok=%v", spec, ok)
+	}
+	m, err := ModulesFromIDs([]string{ModuleWhatsAppOTP})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// It is not SMS: authorising WhatsApp never authorises SMS, and the legacy Features projection is unchanged.
+	if f := ProjectFeatures(m); f != (Features{}) {
+		t.Fatalf("whatsapp_otp projected onto legacy features: %+v", f)
+	}
+	d := &Document{SchemaVersion: 4, Modules: m}
+	got := d.AuthorizedModules()
+	if !got[ModuleWhatsAppOTP] || got[ModuleSMSOTP] {
+		t.Fatalf("authorized %v", got)
+	}
+}
+
+func TestV4LicenceWithWhatsAppValidatesAndSurvivesSigning(t *testing.T) {
+	s := newSigner(t)
+	v := NewVerifier(s.PublicKey())
+	d := testDoc(time.Now().UTC())
+	d.Modules = Modules{ModuleWhatsAppOTP: {}, ModuleSMSOTP: {}}
+	d.Features = ProjectFeatures(d.Modules)
+	env, err := s.Sign(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := v.Verify(env)
+	if err != nil {
+		t.Fatalf("v4 licence with whatsapp_otp must verify: %v", err)
+	}
+	if !got.AuthorizedModules()[ModuleWhatsAppOTP] {
+		t.Fatal("whatsapp_otp lost")
+	}
+}
+
+func TestLegacyLicenceNeverDerivesWhatsApp(t *testing.T) {
+	for _, v := range []int{1, 2, 3} {
+		d := &Document{SchemaVersion: v, Features: Features{PMS: true, PaidWiFi: true, SMSOTP: true, EmailOTP: true, SocialLogin: true, HA: true, WhiteLabel: true}}
+		if d.AuthorizedModules()[ModuleWhatsAppOTP] {
+			t.Fatalf("v%d licence derived whatsapp_otp", v)
+		}
+	}
+}

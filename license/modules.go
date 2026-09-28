@@ -19,6 +19,10 @@ const (
 	ModuleCardPayment = "card_payment" // Card payment through a provider-hosted page
 	ModuleRoomCharge  = "room_charge"  // PMS Room Charge (financial posting)
 	ModuleSMSOTP      = "sms_otp"
+	// ModuleWhatsAppOTP is a one-time code delivered as a WhatsApp authentication-template message. It is its
+	// own identity channel: it is never SMS, never derived from an SMS grant, and a legacy (v1-v3) licence
+	// cannot authorise it (legacyModules has no source for it).
+	ModuleWhatsAppOTP = "whatsapp_otp"
 	ModuleEmailOTP    = "email_otp"
 	ModuleSocialLogin = "social_login"
 	ModuleWhiteLabel  = "white_label"
@@ -38,6 +42,7 @@ var registry = []ModuleSpec{
 	{ID: ModuleCardPayment, Label: "Card payment", Requires: []string{ModulePaidAccess}},
 	{ID: ModuleRoomCharge, Label: "Room charge (PMS posting)", Requires: []string{ModuleHospitality, ModulePaidAccess}},
 	{ID: ModuleSMSOTP, Label: "SMS one-time code"},
+	{ID: ModuleWhatsAppOTP, Label: "WhatsApp one-time code"},
 	{ID: ModuleEmailOTP, Label: "Email one-time code"},
 	{ID: ModuleSocialLogin, Label: "Social sign-in"},
 	{ID: ModuleWhiteLabel, Label: "White label"},
@@ -109,6 +114,10 @@ func ModulesFromIDs(ids []string) (Modules, error) {
 
 // ProjectFeatures is the ONLY way legacy Features are produced from a v4
 // licence. Features is a compatibility projection, never an authority.
+//
+// Modules added after v4 (whatsapp_otp) have no legacy Feature: nothing older
+// than v4 can express them, and the v4 Features block must keep its exact
+// historical shape so existing signed documents still validate.
 func ProjectFeatures(m Modules) Features {
 	_, pms := m[ModuleHospitality]
 	_, paid := m[ModulePaidAccess]
