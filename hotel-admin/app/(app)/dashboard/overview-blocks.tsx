@@ -161,16 +161,22 @@ export function ConcurrencyCard({ snap }: { snap: OverviewSnapshot | null }) {
 // row 4: sign-in outcomes and when guests sign in
 // ---------------------------------------------------------------------------------------------------------
 
-export function SignInOutcomesCard({ snap }: { snap: OverviewSnapshot | null }) {
+export function SignInOutcomesCard({ snap, rooms = true }: { snap: OverviewSnapshot | null; rooms?: boolean }) {
   const s = snap?.sign_in_outcomes;
   const g = snap?.guests;
   const failed = s ? s.total - s.verified : 0;
+  // ROOM CHECKS ARE A HOSPITALITY FIGURE. A site without Hospitality sees sign-ins by method only, and the card
+  // does not link to a Room sign-in history it has no reason to open.
   return (
     <BlockCard
       title="Sign-in outcomes"
-      description={snap ? `Successful sign-ins by method, and room sign-in checks, ${rangeWords[snap.range]}. No client is named.` : undefined}
-      href="/guest-signin-attempts"
-      linkLabel="Attempts"
+      description={snap
+        ? rooms
+          ? `Successful sign-ins by method, and room sign-in checks, ${rangeWords[snap.range]}. No client is named.`
+          : `Successful sign-ins by method, ${rangeWords[snap.range]}. No client is named.`
+        : undefined}
+      href={rooms ? "/guest-signin-attempts" : "/sessions"}
+      linkLabel={rooms ? "Attempts" : "Sessions"}
     >
       {!snap || !s || !g ? (
         <Skeleton className="h-48" />
@@ -188,7 +194,7 @@ export function SignInOutcomesCard({ snap }: { snap: OverviewSnapshot | null }) 
             )}
           </section>
 
-          <section className="space-y-2">
+          {rooms && (<section className="space-y-2">
             <h3 className="text-xs font-medium text-muted-foreground">Room sign-in checks</h3>
             {!s.available ? (
               <Unavailable block={s} />
@@ -225,7 +231,7 @@ export function SignInOutcomesCard({ snap }: { snap: OverviewSnapshot | null }) 
                 )}
               </>
             )}
-          </section>
+          </section>)}
 
           {s.not_recorded.length > 0 && (
             <p data-testid="not-recorded" className="rounded-md bg-surface/60 px-3 py-2 text-xs text-muted-foreground">

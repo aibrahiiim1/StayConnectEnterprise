@@ -112,16 +112,18 @@ export default function PaymentMethodsPage() {
       description="How clients may acquire Internet packages at this site."
       help={
         <>
-          <HelpSection title="The four methods">
+          <HelpSection title="The methods">
             <HelpList
               items={[
                 <><strong>Free</strong> — a package priced at zero. The client simply chooses it.</>,
                 <><strong>Voucher</strong> — the client types a code the property issued. Codes are printed and managed under Vouchers.</>,
-                <><strong>Card payment</strong> — the client pays on the payment provider&rsquo;s own page. OneGate never sees the card number.</>,
-                <><strong>Room charge</strong> — a verified hotel guest charges the package to their room, posted to their folio in the PMS.</>,
+                ...(mods?.modules?.card_payment?.licensed ? [<><strong>Card payment</strong> — the client pays on the payment provider&rsquo;s own page. OneGate never sees the card number.</>] : []),
+                ...(mods?.modules?.room_charge?.licensed ? [<><strong>Room charge</strong> — a verified hotel guest charges the package to their room, posted to their folio in the PMS.</>] : []),
               ]}
             />
           </HelpSection>
+          {mods?.modules?.card_payment?.licensed && (
+            <>
           <HelpSection title="Card payment setup">
             <p>
               Add the merchant account your provider gave you, test the connection, and choose the timings. Stored
@@ -135,6 +137,8 @@ export default function PaymentMethodsPage() {
               Settlements.
             </p>
           </HelpSection>
+            </>
+          )}
         </>
       }
     />
@@ -163,6 +167,10 @@ export default function PaymentMethodsPage() {
 
   const card = mods?.modules?.card_payment;
   const room = mods?.modules?.room_charge;
+  // A method this site is not licensed for is not presented at all: a café does not look like it charges rooms,
+  // and a site without Card payment does not look like it takes cards. Settlements keep any history.
+  const cardLicensed = !!card?.licensed && !!card?.deployed;
+  const roomLicensed = !!room?.licensed && !!room?.deployed;
   const cardState = moduleState(card);
   const roomState = moduleState(room);
 
@@ -187,33 +195,31 @@ export default function PaymentMethodsPage() {
           description="The client types a code the property issued, on a printed card or by email."
           link={{ href: "/vouchers", label: "Vouchers" }}
         />
-        <MethodCard
-          icon={<CreditCard />}
-          title="Card payment"
-          state={cardState}
-          description="The client pays on the payment provider's hosted page."
-        />
-        <MethodCard
-          icon={<BedDouble />}
-          title="Room charge"
-          state={roomState}
-          description="A verified hotel guest charges the package to their room, posted to the folio in the PMS."
-          link={{ href: "/room-charge", label: "Room charge — under Hotel" }}
-        />
-      </section>
-
-      <section aria-labelledby="card-config-heading" className="space-y-3">
-        <h2 id="card-config-heading" className="text-headline">Card payment configuration</h2>
-        {card?.manageable ? (
-          <CardPaymentConfig writable={writable} />
-        ) : (
-          <NotAvailable
+        {cardLicensed && (
+          <MethodCard
             icon={<CreditCard />}
-            title="Not configurable yet"
-            reason="Provider accounts, payment domains and timings appear here once Card payment is licensed for this site."
+            title="Card payment"
+            state={cardState}
+            description="The client pays on the payment provider's hosted page."
+          />
+        )}
+        {roomLicensed && (
+          <MethodCard
+            icon={<BedDouble />}
+            title="Room charge"
+            state={roomState}
+            description="A verified hotel guest charges the package to their room, posted to the folio in the PMS."
+            link={{ href: "/room-charge", label: "Room charge — under Hotel" }}
           />
         )}
       </section>
+
+      {cardLicensed && (
+        <section aria-labelledby="card-config-heading" className="space-y-3">
+          <h2 id="card-config-heading" className="text-headline">Card payment configuration</h2>
+          <CardPaymentConfig writable={writable} />
+        </section>
+      )}
     </PageShell>
   );
 }

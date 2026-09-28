@@ -36,7 +36,7 @@ import { Explain } from "@/components/ui/tooltip";
 import { Separator, Skeleton } from "@/components/ui/misc";
 import { Sparkline } from "@/components/ui/chart";
 import { Segmented } from "@/components/ui/tabs";
-import { useCapabilities, surfaceAvailable } from "@/lib/capabilities";
+import { moduleLicensed, useCapabilities, surfaceAvailable } from "@/lib/capabilities";
 import { cn, formatBytes, formatRelative } from "@/lib/utils";
 import { describeDatabase, describeSessionController, describeLicense } from "@/lib/health-words";
 import { ArrowDownUp, CheckCircle2, Hotel, LayoutDashboard, LogIn, RefreshCw, Users } from "lucide-react";
@@ -101,6 +101,9 @@ export default function DashboardPage() {
   }, []);
 
   const caps = useCapabilities();
+  // A site without Hospitality is not a hotel on its Overview: no Room sign-in tile, no PMS card, no room
+  // checks, no PMS notes. Everything else is identical.
+  const hotel = moduleLicensed(caps, "hospitality");
   const stale = !!snap && snap.range !== range;
   const rangeLong = OVERVIEW_RANGES.find((r) => r.value === range)?.long ?? "";
 
@@ -113,7 +116,7 @@ export default function DashboardPage() {
   if (health && !health.scd) attention.push({ text: describeSessionController(false).summary, href: "/health", tone: "err" });
   // Worth knowing, not worth doing: kept out of the attention list on purpose.
   const notes: { text: string; href: string }[] = [];
-  const historical = snap?.pms.historical_exceptions ?? 0;
+  const historical = hotel ? (snap?.pms.historical_exceptions ?? 0) : 0;
   if (historical > 0) {
     notes.push({
       text: `${fmtInt(historical)} historical PMS exception${historical === 1 ? "" : "s"} — a departure recorded before this appliance had the full guest list. Clients are unaffected and nothing here needs doing.`,
@@ -140,15 +143,15 @@ export default function DashboardPage() {
               <p>The page answers, top to bottom, the questions a shift asks:</p>
               <HelpList items={[
                 <><strong>Does anything need me?</strong> A &ldquo;Needs attention&rdquo; list appears only when something does; otherwise one calm line.</>,
-                <><strong>How busy, how much?</strong> Clients online, sign-ins, data used and room sign-in readiness, each with its trend over the range.</>,
+                <><strong>How busy, how much?</strong> Clients online, sign-ins and data used{hotel ? " and room sign-in readiness" : ""}, each with its trend over the range.</>,
                 <><strong>The shape of the range.</strong> Traffic and devices connected at once.</>,
                 <><strong>Is anyone failing to get in?</strong> Sign-in outcomes, and when clients sign in.</>,
-                <><strong>Packages and the PMS</strong>, the client networks, and the appliance itself.</>,
+                <><strong>Packages{hotel ? " and the PMS" : ""}</strong>, the client networks, and the appliance itself.</>,
               ]} />
             </HelpSection>
             <HelpSection title="Clients and devices">
               <p>
-                A client is one room, account or voucher &mdash; whatever the internet was granted to. One client with
+                A client is one {hotel ? "room, account or voucher" : "account, voucher or sign-in"} &mdash; whatever the internet was granted to. One client with
                 a phone and a laptop is one client and two devices.
               </p>
             </HelpSection>
@@ -231,7 +234,7 @@ export default function DashboardPage() {
             {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-32" />)}
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className={cn("grid gap-4 sm:grid-cols-2", hotel ? "xl:grid-cols-4" : "xl:grid-cols-3")}>
             <StatCard
               label="Clients online"
               value={g.available ? fmtInt(g.guests_online) : "—"}
@@ -241,7 +244,7 @@ export default function DashboardPage() {
               hint={g.available ? `${fmtInt(g.devices_online)} device${g.devices_online === 1 ? "" : "s"} connected now` : reasonText(g.reason)}
               explain={
                 <Explain>
-                  A <strong>client</strong> is one room, account or voucher — whatever the internet was granted to.
+                  A <strong>client</strong> is one {hotel ? "room, account or voucher" : "account, voucher or sign-in"} — whatever the internet was granted to.
                   One client with a phone and a laptop is one client and two devices. The trend line is the most
                   devices online at once in each interval.
                 </Explain>
@@ -277,7 +280,7 @@ export default function DashboardPage() {
               }
               footer={t.available ? <Sparkline values={t.series_down.map((d, i) => d + (t.series_up[i] ?? 0))} width={120} token="chart-3" /> : undefined}
             />
-            <StatCard
+            {hotel && <StatCard
               label="Room sign-in"
               value={
                 !pms.available || pms.active_interfaces === 0 ? (
@@ -303,7 +306,7 @@ export default function DashboardPage() {
                       : reasonText(so.reason)
               }
               footer={pms.available && so.available && so.total > 0 ? <Sparkline values={so.series_verified} width={120} token="chart-4" /> : undefined}
-            />
+            />}
           </div>
         )}
 
@@ -315,14 +318,14 @@ export default function DashboardPage() {
 
         {/* ---------------------------------------------------------------- row 4 */}
         <div className="grid gap-4 lg:grid-cols-2">
-          <SignInOutcomesCard snap={snap} />
+          <SignInOutcomesCard snap={snap} rooms={hotel} />
           <SignInPatternCard snap={snap} />
         </div>
 
         {/* ---------------------------------------------------------------- row 5 */}
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className={cn("grid gap-4", hotel && "lg:grid-cols-2")}>
           <PackagesCard snap={snap} />
-          <PmsCard snap={snap} canCharges={surfaceAvailable(caps, "financial-review")} />
+          {hotel && <PmsCard snap={snap} canCharges={surfaceAvailable(caps, "financial-review")} />}
         </div>
 
         {/* ---------------------------------------------------------------- row 6 */}

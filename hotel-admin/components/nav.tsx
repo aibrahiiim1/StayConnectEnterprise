@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { canRead } from "@/lib/roles";
-import { useCapabilities, surfaceAvailable } from "@/lib/capabilities";
+import { useCapabilities, surfaceAvailable, moduleLicensed } from "@/lib/capabilities";
 import { ROLE_LABELS, type SiteRole } from "@/lib/roles";
 import {
   LayoutDashboard, Users, LogOut, Monitor, Shield, ScrollText, Hotel, Send, KeyRound,
@@ -253,8 +253,12 @@ export function Nav({
 
   const visibleSections = useMemo(() => {
     const q = query.trim().toLowerCase();
+    // A site whose licence no longer covers Hospitality keeps its hotel HISTORY (edged still serves stays, PMS
+    // activity, sign-in history and reconciliation where records exist) but is not a hotel: the section says
+    // what it now holds.
+    const hotelTitle = moduleLicensed(caps, "hospitality") ? "Hotel" : "Hotel records";
     return SECTIONS.map((sec) => ({
-      title: sec.title,
+      title: sec.title === "Hotel" ? hotelTitle : sec.title,
       items: sec.items.filter((it) => {
         if (!canRead(it.resource, roles)) return false;
         if (!surfaceAvailable(caps, it.capability ?? it.resource)) return false;
