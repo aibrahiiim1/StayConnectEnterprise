@@ -179,19 +179,30 @@ rate-limited per client address, which ctrlapi derives itself (the TCP peer, or 
 `GET /cloud/v1/customers?status=active|archived|all&q=` → `{items:[{id,name,slug,status,created_at,sites,appliances,activated,licenses_active,attention}]}`
 `POST /cloud/v1/customers {name, slug?}` · `GET /cloud/v1/customers/{id}` (same row) · `PATCH {name}` ·
 `POST …/{id}/archive|restore` · `DELETE …/{id} {confirm,reason}` **SU** (refused while it has sites/appliances)
-`GET /cloud/v1/customers/{id}/sites` → `{items:[{id,customer_id,code,name,timezone,country,status,appliances}]}` ·
-`POST /cloud/v1/customers/{id}/sites {name,code?,timezone,country?}` · `PATCH /cloud/v1/sites/{id}` ·
+`GET /cloud/v1/customers/{id}/sites` → `{items:[{id,customer_id,code,name,timezone,country,site_type,status,appliances}]}` ·
+`POST /cloud/v1/customers/{id}/sites {name,code?,timezone,country?,site_type?}` ·
+`PATCH /cloud/v1/sites/{id} {name?,timezone?,country?,site_type?}` ·
 `POST /cloud/v1/sites/{id}/archive|restore` · `DELETE /cloud/v1/sites/{id} {confirm,reason}` **SU**
+
+**Site type** (`site_type`) is descriptive: `HOTEL`, `CAFE`, `OFFICE`, `CLINIC`, `CAMPUS`, `VENUE`, `COMPOUND`,
+`BEACH_CLUB`, `OTHER` or `UNSPECIFIED` (the default, and what an omitted value means). Writes accept only these
+(`400` otherwise); the column itself (migration 0049) checks only the shape `^[A-Z][A-Z0-9_]{1,31}$`, so a later type
+needs no migration. A site type **never grants or gates anything** — licence modules do. It is signed into the
+appliance's assignment as the last field `site_type` (omitted for `UNSPECIFIED`, so an untyped site's document is
+byte-identical to the earlier layout). When a PATCH changes a site's name or type, Central re-signs, in the same
+transaction, the assignment of every appliance at that site whose current assignment grants ownership (same state,
+next version); a retiring or retired appliance is not touched. If a document cannot be signed the PATCH is refused
+(`503 assignment_unsignable`) and nothing changes.
 
 ### Appliances
 Row shape used by every list:
 ```json
 { "id","serial","hostname","model","version",
-  "customer_id","customer_name","site_id","site_name",
+  "customer_id","customer_name","site_id","site_name","site_type",
   "activation":"waiting|activating|activated|retiring|retired",
   "connection":"connected|recently_seen|offline|never","last_seen_at","last_public_ip",
   "license": {"id","state":"none|active|expiring|grace|expired|suspended|revoked","valid_until","grace_ends_at",
-              "max_concurrent_online_guests","license_version"} ,
+              "max_concurrent_online_guests","license_version","modules"} ,
   "registered_at","activated_at","open_alerts",
   "holds_customer_id","holds_customer_name" }
 ```
@@ -203,8 +214,8 @@ Central.
 assignment:{version,state,signer_key_id,issued_at,acked_version},licenses:[history newest first],events:[recent lifecycle/audit],
 replacement:{pending,deadline,replaces,replaced_by}|null,retirement:{state,deadline}|null}` — `replaces`/`replaced_by` are
 appliance ids; `retirement.state` is `terminal_delivery_pending|terminal_delivery_failed|credential_revoked`
-`POST /cloud/v1/appliances/{id}/activate {customer_id|new_customer{name}, site_id|new_site{name,timezone,country?},
-license{max_concurrent_online_guests,valid_until|valid_days,grace_period_days}}` **SU** — `waiting` only;
+`POST /cloud/v1/appliances/{id}/activate {customer_id|new_customer{name}, site_id|new_site{name,timezone,country?,site_type?},
+license{max_concurrent_online_guests,valid_until|valid_days,grace_period_days,modules?}}` **SU** — `waiting` only;
 `409 holds_other_customer_data` (with `holds_customer_id`) when the appliance holds another customer's data (§4)
 `POST /cloud/v1/appliances/{id}/move {customer_id, site_id, reason}` **SU** — `customer_id` must be the current customer
 (`409 cross_customer_move` otherwise); `503 licensing_unavailable` when the licence cannot follow; `409 license_expired`
@@ -220,8 +231,17 @@ verify unchanged) and stored as on registration
 
 ### Licences
 `GET /cloud/v1/licenses?customer_id=&state=&q=` → `{items:[{id,appliance_id,serial,customer_id,customer_name,site_id,site_name,
-state,status,valid_from,valid_until,grace_period_days,grace_ends_at,max_concurrent_online_guests,license_version,issued_at}]}`
-`POST /cloud/v1/appliances/{id}/license {max_concurrent_online_guests, valid_until|valid_days, grace_period_days, reason}` **SU** — issue, renew or change terms
+state,status,valid_from,valid_until,grace_period_days,grace_ends_at,max_concurrent_online_guests,license_version,issued_at,modules}]}`
+`POST /cloud/v1/appliances/{id}/license {max_concurrent_online_guests, valid_until|valid_days, grace_period_days, modules?, reason}` **SU** — issue, renew or change terms
+`GET /cloud/v1/modules` → `{modules:[{id,label,requires}], site_types:[{id,preset}]}` — the licence module registry
+(`license/modules.go`) and each site type's suggested modules (`HOTEL` → `[hospitality]`, every other type `[]`).
+Presets are suggestions for the console only; nothing applies them server-side.
+
+`modules` is the list of module ids the licence authorises; omitted or `[]` = core only. Unknown ids and unmet
+dependencies (`card_payment` needs `paid_access`; `room_charge` needs `hospitality` and `paid_access`) are refused
+with `400`. The ids are persisted in `licenses.modules` and carried unchanged by every preserved-terms re-issue
+(suspend, resume, WAN-MAC rebind, move); a licence issued before modules existed re-issues as core only — no module
+is invented. A new licence (Set licence) states its modules in full: omitting them issues a core-only licence.
 `POST /cloud/v1/licenses/{id}/suspend|resume|revoke {reason}` **SU**
 `POST /cloud/v1/appliances/{id}/offline-license {valid_hours?}` **SU** → file
 
