@@ -1,4 +1,0 @@
-commit d3763d2c1a803a1ab23baf88ee896c556b7d2b50
-Date:   Mon Sep 28 21:42:50 2026 +0300
-
-    Delivery manifest for PR #202 (SiteModulesAcquisition, base 42823d9d)

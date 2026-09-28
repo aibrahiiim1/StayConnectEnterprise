@@ -1,18 +1,18 @@
-# cited committed source, not packaged. Verify at SOURCE_COMMIT d3763d2c.
-e5e6eab5a4b3ee6be22b42a2bce688fbc0585de4f8aadf6b7bee872102a00956  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
+# cited committed source, not packaged. Verify at SOURCE_COMMIT 48948911.
+30b920c979238369ff8f8d65a77248fe4f18bf4a929d88377d63444b4feab1fa  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
 d7ffc726816e4ed6a677d35cf0b645b79278ea2a48ed4eb561008fcebb640e3d  docs/architecture/Phase1B-Privilege-Matrix.md
 bb6281470a81df07fc8060b559eb55cf1e9265c536e6fe43d8258f78072a93d0  data-plane/internal/pmsguard/guard.go
-fb3e1f4b8fcb401b5595c2e415d4f055143f7846600674261f02cc103945e97a  data-plane/cmd/scd/main.go
+568953632f510a6a17ef5fca45ffdf5407e25747fba3590da329b034bea71a9c  data-plane/cmd/scd/main.go
 c734289e25e66a4f2f4b21328526b2af8b50c07e7de5efc59fdb213078ecdf6f  data-plane/cmd/acctd/main.go
 92b4c668cee8125af5a6594148df30de2e99c9ddbd7f33b0ca5e9ec12b569bc5  data-plane/cmd/edged/main.go
 c487dc22555c219a3306083f9d35c4ce9e376a5daa35bb410d17e1a23e0dfffc  data-plane/cmd/netd/main.go
-edb0b73e5a21219987b5b32692bfaa53af53a34540b855e82bc12d4b103121c3  data-plane/cmd/portald/main.go
+8079a9211b28e96eebe677f1f96586d203a3ff7c2d398de3365e056a5d2153b8  data-plane/cmd/portald/main.go
 MISSING  data-plane/internal/session/session.go
 MISSING  data-plane/internal/voucher/voucher.go
 3b40443df98a1daf833d2380f5cf60a2e420d26049e4e203712c573ec2873e91  data-plane/internal/otp/otp.go
 e7ed71ae4820f902f37863654565bdb53c3f45f5ad4ceef0918857cafefba5e1  data-plane/cmd/scd/credentials_handlers.go
-2c9e1525bb5ff2156ae6a6af2bf87c1e7fef6a540352ff5b955ce78ce92f6ecc  data-plane/cmd/scd/otp_handlers.go
-7afc06953a83307fd7bfbfce83768c91706ca3e4f0b2f680ce9fabf4c1c18e67  data-plane/cmd/scd/social_handlers.go
+80f1bb951a819a9ba0b92eca8758998dbdbfc321e02e7cf62f259b1a30dbdeb0  data-plane/cmd/scd/otp_handlers.go
+14224e2aace65655e4382c953d05055afb8ed4659b5f6842df01df5a1ac9cfc0  data-plane/cmd/scd/social_handlers.go
 MISSING  data-plane/cmd/scd/pms_handlers.go
 3420c8c0a824a7fa054b16af8381e61256bc4ff3764785a88235c3cf995a8237  iam_v2_scratch/roles.sql
 a3a0e72be03017b92de567588d0e6f58e1ae787fcddb1a55dc342fa660004033  iam_v2_scratch/migrations/mg1_pms_interface_core.sql
