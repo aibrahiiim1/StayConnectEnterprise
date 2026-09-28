@@ -62,7 +62,7 @@ The registry lives in the shared `license` module so Central and the appliance u
 | `paid_access` | — | Modules screen | priced Internet Packages |
 | `card_payment` | `paid_access` | Modules screen | Card payment through a provider-hosted page |
 | `room_charge` | `hospitality`, `paid_access` | Modules screen | PMS Room Charge, per-interface financial onboarding, financial review |
-| `sms_otp`, `email_otp`, `social_login` | — | Sign-in methods | identity add-ons (unchanged) |
+| `email_otp`, `sms_otp`, `whatsapp_otp`, `social_login` | — | Sign-in methods | identity add-ons (§12); WhatsApp is its own channel, never an SMS variant |
 | `white_label`, `ha` | — | none | licence-only |
 
 **Permanent core (never licensed):** client networks, Client Portal and branding, walled garden, **Free
@@ -312,3 +312,41 @@ a `PS` and nothing else and is reachable only from the relay.
 Real PMS financial posting remains prohibited until the Product Owner separately authorises it: on PRE-LIVE
 `STAYCONNECT_PHASE4_PMS_TRANSMIT` is off on both processes, readiness reports `PMS_POSTING_NOT_AUTHORISED`, and
 Room charge is configurable and reviewable but never offered.
+
+## 12. Module visibility and the optional sign-in methods (PR #202 corrections, 2026-09-29)
+
+**A site looks like what it is licensed for.** Site Type never decides this; the licence modules do.
+
+* Without `hospitality` the day-to-day Admin Console shows no hotel concept: no PMS card or Room sign-in tile on
+  the Overview, no Room sign-in method or sign-in protection, no Hotel conditions or per-night allowance in the
+  package editor, no room wording or Room preview in Portal Settings, no Room charge. The Hotel history surfaces
+  (stays, PMS activity, sign-in attempts, reconciliation, financial review) stay reachable while records exist.
+* Without `card_payment` nothing suggests the site accepts cards; without `paid_access` there is no price field.
+* Without an identity module its sign-in method, its provider screen entries and its portal preview are absent.
+* A page does not call a module-owned API for a module the site does not have, so "not licensed" is never shown
+  on a generic page. edged refuses to switch on a sign-in method whose module is not licensed and deployed
+  (`409 module_not_licensed`; `503` when module state is unreadable).
+* A module the site has already used keeps its stored configuration visible where it must remain removable (for
+  example a package that already offers Room charge).
+
+**Optional sign-in methods.** Each is offered to a client only when all four gates pass:
+
+| Method | Module | Deployed when | Provider readiness |
+|---|---|---|---|
+| Email one-time code | `email_otp` | `STAYCONNECT_IAMV2_MASTER` and `STAYCONNECT_IAMV2_OTP` | an enabled `email` sender |
+| Phone code by SMS | `sms_otp` | same | an enabled `sms` sender |
+| Phone code by WhatsApp | `whatsapp_otp` | same | an enabled `whatsapp` sender (Meta Cloud API or Twilio, approved authentication template) |
+| Google, Facebook, Apple, Microsoft | `social_login` | `STAYCONNECT_IAMV2_MASTER` and `STAYCONNECT_IAMV2_SOCIAL` | an enabled application for that provider |
+
+* scd removes every method that fails a gate from `/v1/tenant/auth-methods`, so the portal cannot draw it, and
+  refuses to issue a code when no sender exists for the channel.
+* WhatsApp codes are sent only as the parameter of an approved authentication template (Meta `template_name` +
+  `language`, Twilio `content_sid`). A verified WhatsApp code proves the phone number exactly as SMS does.
+* Social: Google, Microsoft and Apple are verified OpenID Connect `id_token`s (signature, issuer, audience,
+  expiry; Microsoft tenant rules; Apple ES256 client secret minted per exchange from the `.p8` key). Facebook uses
+  the Graph API with `appsecret_proof`. Only a verified email signs a client in. Apple returns by `form_post`.
+* **Secrets are write-only.** Sender API keys/tokens and social client secrets/keys are never returned by the API,
+  never shown in the UI after storage and never logged; logs carry the provider, the HTTP status and at most the
+  last four digits of a phone number.
+* "Test only" senders are an explicit operator choice for deterministic verification; they count as ready.
+
