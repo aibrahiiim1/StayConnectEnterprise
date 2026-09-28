@@ -196,8 +196,9 @@ func (h *handler) payReturn(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	nonce := setPortalCSP(w)
-	pg := h.newGuestPage(r, nonce, "pay.", "err.connect")
-	_ = payTmpl.Execute(w, payView{guestPage: pg, PurchaseID: p, Cancelled: r.URL.Query().Get("cancelled") == "1"})
+	pg := h.newGuestPage(r, nonce, "pay.", "room.", "err.connect")
+	_ = payTmpl.Execute(w, payView{guestPage: pg, PurchaseID: p, Cancelled: r.URL.Query().Get("cancelled") == "1",
+		Room: r.URL.Query().Get("m") == "room"})
 }
 
 // payStatusAPI serves GET /api/pay/status?p=<purchase>. When the purchase is granted it activates THIS device
@@ -229,6 +230,8 @@ type payView struct {
 	guestPage
 	PurchaseID string
 	Cancelled  bool
+	// Room is a room charge: the page says the room is being charged rather than naming a payment page.
+	Room bool
 }
 
 var payTmpl = template.Must(template.New("pay").Parse(compactMarkup(payHTML)))

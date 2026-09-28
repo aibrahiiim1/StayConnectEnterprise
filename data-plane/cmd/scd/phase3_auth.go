@@ -141,10 +141,14 @@ type phase3Response struct {
 // offers; they never name one that was not offered, and the grant re-validates the choice against the same
 // rules anyway — an offer is a convenience, never an authorization.
 type phase3Offer struct {
-	PackageRevisionID string `json:"package_revision_id"`
-	Code              string `json:"code"`
-	DownKbps          int    `json:"down_kbps"`
-	UpKbps            int    `json:"up_kbps"`
+	PackageRevisionID string   `json:"package_revision_id"`
+	Code              string   `json:"code"`
+	DownKbps          int      `json:"down_kbps"`
+	UpKbps            int      `json:"up_kbps"`
+	PriceMinor        int64    `json:"price_minor"`
+	Currency          string   `json:"currency,omitempty"`
+	CurrencyExponent  int      `json:"currency_exponent"`
+	Methods           []string `json:"methods"`
 }
 
 // notVerified writes the non-success answer for an exact internal result. The result is for the log and the
@@ -590,7 +594,8 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 	for _, d := range decisions {
 		offers = append(offers, phase3Offer{
 			PackageRevisionID: d.PackageRevisionID, Code: d.Code,
-			DownKbps: d.DownKbps, UpKbps: d.UpKbps})
+			DownKbps: d.DownKbps, UpKbps: d.UpKbps,
+			PriceMinor: d.PriceMinor, Currency: d.Currency, CurrencyExponent: d.CurrencyExponent, Methods: d.Methods})
 	}
 	writeJSONScd(w, http.StatusOK, phase3Response{
 		Outcome: outcomeVerified, AuthContextID: id, ExpiresIn: int(p.contextTTL.Seconds()), Offers: offers})
@@ -821,6 +826,11 @@ type phase3GrantReq struct {
 	AuthContextID string     `json:"auth_context_id"`
 	PackageRevID  string     `json:"package_revision_id"`
 	Device        wireDevice `json:"device"`
+	// Method is the acquisition method chosen for this offer: "" / NOT_REQUIRED for an included package,
+	// PMS_POSTING (room charge) or ONLINE_PAYMENT (card) for a priced one (phase3_paid.go).
+	Method string `json:"method,omitempty"`
+	// ReturnBase is the portal origin a card provider sends the client back to.
+	ReturnBase string `json:"return_base,omitempty"`
 }
 
 type phase3GrantResp struct {
@@ -963,6 +973,18 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 		// proved against facts that no longer hold.
 		grantResult = signinattempt.StayNotEligible
 		notVerified(w, grantResult, "stay_evidence_changed_since_the_offer")
+		return
+	}
+
+	// A PAID CHOICE: a quote, a purchase awaiting settlement and a REQUIRED settlement (and, for a room
+	// charge, the posting) -- and no access until the PMS or the card provider says the money is there.
+	if m := strings.TrimSpace(req.Method); m != "" && m != "NOT_REQUIRED" {
+		req.Method = m
+		res, ok := p.paidPurchase(w, r, tx, req, dev, offeredTier)
+		grantResult = res
+		if ok {
+			grantResult = signinattempt.Verified
+		}
 		return
 	}
 

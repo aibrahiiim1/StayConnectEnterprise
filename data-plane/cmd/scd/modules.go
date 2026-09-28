@@ -128,4 +128,38 @@ func (s *server) registerModuleProbes() {
 	}
 	s.modules.SetProbe(lic.ModuleCardPayment, s.cardReadiness)
 	s.modules.SetRecordsProbe(lic.ModuleCardPayment, s.cardHasRecords)
+	s.modules.SetProbe(lic.ModuleRoomCharge, s.roomChargeReadiness)
+	s.modules.SetRecordsProbe(lic.ModuleRoomCharge, s.roomChargeHasRecords)
+}
+
+// roomChargeReadiness: room charge can execute only when real posting is within the deployment ceiling (a
+// separate Product-Owner authorisation) and at least one PMS interface is financially onboarded. Per-stay and
+// per-package applicability is decided when offers are computed (phase3_paid.go).
+func (s *server) roomChargeReadiness(ctx context.Context, tenantID, siteID string) (bool, []string) {
+	if !s.ceiling.Available(deployment.CapRoomChargeTransmit) {
+		return false, []string{"PMS_POSTING_NOT_AUTHORISED"}
+	}
+	if s.db == nil {
+		return false, []string{"NO_DATABASE"}
+	}
+	var n int
+	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.pms_interfaces i
+		 CROSS JOIN LATERAL iam_v2.pms_interface_financially_ready(i.tenant_id, i.site_id, i.id) r
+		 WHERE i.tenant_id=$1 AND i.site_id=$2 AND r.ready`, tenantID, siteID).Scan(&n); err != nil {
+		return false, []string{"READINESS_UNREADABLE"}
+	}
+	if n == 0 {
+		return false, []string{"NO_ONBOARDED_INTERFACE"}
+	}
+	return true, nil
+}
+
+// roomChargeHasRecords keeps review and recovery reachable after the module is withdrawn.
+func (s *server) roomChargeHasRecords(ctx context.Context, tenantID, siteID string) bool {
+	if s.db == nil {
+		return false
+	}
+	var n int
+	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.pms_postings WHERE tenant_id=$1 AND site_id=$2`, tenantID, siteID).Scan(&n)
+	return n > 0
 }

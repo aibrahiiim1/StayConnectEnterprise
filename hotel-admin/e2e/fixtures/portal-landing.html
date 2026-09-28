@@ -1961,6 +1961,11 @@ main.card { display: block; }
         window.location = (j.redirect_to || '/success') + '?s=' + encodeURIComponent(j.session_id);
         return true;
       }
+      
+      if (j.ok && j.redirect_to && !j.needs_choice) {
+        window.location = j.redirect_to;
+        return true;
+      }
       if (j.ok && j.needs_choice) {
         PMS_AUTH_CONTEXT = j.auth_context_id || '';
         renderPhase3Choices(j.choices || [], errEl);
@@ -2018,12 +2023,20 @@ main.card { display: block; }
           detail.textContent = t('unit.mbps').split('{n}').join(String(down));
           text.appendChild(detail);
         }
+        if (c.method) {
+          const price = document.createElement('span');
+          price.className = 'c-detail c-price';
+          price.dir = 'auto';
+          const mk = { NOT_REQUIRED: 'acq.connect', PMS_POSTING: 'acq.room', ONLINE_PAYMENT: 'acq.card' }[c.method] || 'acq.connect';
+          price.textContent = (c.price || t('acq.free')) + ' · ' + t(mk);
+          text.appendChild(price);
+        }
         b.appendChild(text);
         b.insertAdjacentHTML('beforeend', ICON_CHEV);
         b.addEventListener('click', async function() {
           box.querySelectorAll('button').forEach(function(x){ x.disabled = true; });
           errEl.textContent = '';
-          const ok = await submitPhase3({ auth_context_id: PMS_AUTH_CONTEXT, package_revision_id: c.package_revision_id }, errEl);
+          const ok = await submitPhase3({ auth_context_id: PMS_AUTH_CONTEXT, package_revision_id: c.package_revision_id, method: c.method || '' }, errEl);
           
           
           if (!ok) resetPhase3ToSignIn(errEl);

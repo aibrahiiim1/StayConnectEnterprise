@@ -372,3 +372,12 @@ func (s *Store) effectiveDataQuota(ctx context.Context, tx pgx.Tx, tenant, site,
 	}
 	return &bytes, nil
 }
+
+// GrantShape exposes the stay grant's end-mode rule, so a PAID stay purchase (room charge, card) freezes exactly
+// the shape a free stay grant would.
+func GrantShape(durationPolicy []byte) (string, int64) { return grantShape(durationPolicy) }
+
+// EffectiveDataQuota exposes the frozen PER_STAY_NIGHT allowance computation for the same reason.
+func (s *Store) EffectiveDataQuota(ctx context.Context, tx pgx.Tx, tenant, site, stayID string, allocPolicy []byte) (*int64, error) {
+	return s.effectiveDataQuota(ctx, tx, tenant, site, stayID, allocPolicy)
+}

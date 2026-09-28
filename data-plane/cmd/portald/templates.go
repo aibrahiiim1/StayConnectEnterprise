@@ -1354,6 +1354,11 @@ const landingHTML = `<!doctype html>
         window.location = (j.redirect_to || '/success') + '?s=' + encodeURIComponent(j.session_id);
         return true;
       }
+      // A PAID choice (room charge or card): go to the provider's page or to the confirmation page.
+      if (j.ok && j.redirect_to && !j.needs_choice) {
+        window.location = j.redirect_to;
+        return true;
+      }
       if (j.ok && j.needs_choice) {
         PMS_AUTH_CONTEXT = j.auth_context_id || '';
         renderPhase3Choices(j.choices || [], errEl);
@@ -1411,12 +1416,20 @@ const landingHTML = `<!doctype html>
           detail.textContent = t('unit.mbps').split('{n}').join(String(down));
           text.appendChild(detail);
         }
+        if (c.method) {
+          const price = document.createElement('span');
+          price.className = 'c-detail c-price';
+          price.dir = 'auto';
+          const mk = { NOT_REQUIRED: 'acq.connect', PMS_POSTING: 'acq.room', ONLINE_PAYMENT: 'acq.card' }[c.method] || 'acq.connect';
+          price.textContent = (c.price || t('acq.free')) + ' · ' + t(mk);
+          text.appendChild(price);
+        }
         b.appendChild(text);
         b.insertAdjacentHTML('beforeend', ICON_CHEV);
         b.addEventListener('click', async function() {
           box.querySelectorAll('button').forEach(function(x){ x.disabled = true; });
           errEl.textContent = '';
-          const ok = await submitPhase3({ auth_context_id: PMS_AUTH_CONTEXT, package_revision_id: c.package_revision_id }, errEl);
+          const ok = await submitPhase3({ auth_context_id: PMS_AUTH_CONTEXT, package_revision_id: c.package_revision_id, method: c.method || '' }, errEl);
           // On success submitPhase3 has already navigated away. On failure the offer set can no longer be
           // trusted, so it is taken down rather than re-enabled.
           if (!ok) resetPhase3ToSignIn(errEl);
@@ -1535,7 +1548,7 @@ const payHTML = guestHead + `
 <main class="card card--page">` + guestBrandblock + `
 <div class="sc-body">
   <h1 class="page-title">{{index .T "pay.title"}}</h1>
-  <p class="page-lead" id="pay-lead" role="status" aria-live="polite">{{if .Cancelled}}{{index .T "pay.cancelled"}}{{else}}{{index .T "pay.lead"}}{{end}}</p>
+  <p class="page-lead" id="pay-lead" role="status" aria-live="polite">{{if .Cancelled}}{{index .T "pay.cancelled"}}{{else if .Room}}{{index .T "room.pending"}}{{else}}{{index .T "pay.lead"}}{{end}}</p>
   <div class="actions" id="pay-actions" hidden><a class="btn" href="/">{{index .T "pay.again"}}</a></div>
 </div>` + guestFoot + `
 </main>
