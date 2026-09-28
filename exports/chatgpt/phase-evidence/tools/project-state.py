@@ -178,10 +178,10 @@ def render_block(st):
         f"signed assignment: {_status(prod['signed_assignment'])}; licence: "
         f"{_status(prod['license'])}. {prod['lan_interface'].split(':')[0]} is "
         f"{'intentionally unconfigured' if 'UNCONFIGURED' in prod['lan_interface'].upper() else 'configured'}. "
-        f"Guest traffic: {prod['guest_traffic'].lower()}; PMS: {prod['pms_traffic'].lower()}; "
+        f"Client traffic: {prod['guest_traffic'].lower()}; PMS: {prod['pms_traffic'].lower()}; "
         f"payment/financial: {prod['payment_or_financial_traffic'].lower()}. "
         f"Go-Live: {prod['go_live'].split('.')[0].lower()}. "
-        f"Hotel Admin: {prod['hotel_admin'].split(' ')[0]}",
+        f"Admin Console: {prod['hotel_admin'].split(' ')[0]}",
     ] if prod else []) + [
         # THE RETIREMENT HAS TO REACH THE RENDER, or the block keeps publishing a retired host as a current
         # reference. governance/project-state.json has said `"status": "RETIRED"` here since 2026-09-12 and
