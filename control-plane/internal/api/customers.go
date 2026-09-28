@@ -41,6 +41,7 @@ type SiteRow struct {
 	Name       string  `json:"name"`
 	Timezone   string  `json:"timezone"`
 	Country    *string `json:"country"`
+	SiteType   string  `json:"site_type"` // descriptive only (site_types.go); UNSPECIFIED when not set
 	Status     string  `json:"status"`
 	Appliances int     `json:"appliances"`
 }
@@ -110,11 +111,16 @@ func createCustomer(ctx context.Context, q querier, name, slug string) (string, 
 	return id, slug, nil
 }
 
-// createSite inserts a site under customerID; the code is derived from the name when not given.
-func createSite(ctx context.Context, q querier, customerID, name, code, timezone, country string) (string, error) {
+// createSite inserts a site under customerID; the code is derived from the name when not given. siteType ""
+// is UNSPECIFIED; any other value must be one of SiteTypes.
+func createSite(ctx context.Context, q querier, customerID, name, code, timezone, country, siteType string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return "", errors.New("site name is required")
+	}
+	siteType, ok := normalizeSiteType(siteType)
+	if !ok {
+		return "", errors.New(msgUnknownSiteType)
 	}
 	timezone = strings.TrimSpace(timezone)
 	if timezone == "" {
@@ -144,9 +150,9 @@ func createSite(ctx context.Context, q querier, customerID, name, code, timezone
 	}
 	var id string
 	err := q.QueryRow(ctx, `
-        INSERT INTO sites (tenant_id, code, name, timezone, country)
-        VALUES ($1, $2, $3, $4, NULLIF($5,'')) RETURNING id::text`,
-		customerID, code, name, timezone, strings.TrimSpace(country)).Scan(&id)
+        INSERT INTO sites (tenant_id, code, name, timezone, country, site_type)
+        VALUES ($1, $2, $3, $4, NULLIF($5,''), $6) RETURNING id::text`,
+		customerID, code, name, timezone, strings.TrimSpace(country), siteType).Scan(&id)
 	if err != nil {
 		return "", errors.New("a site with that code already exists for this customer")
 	}
@@ -429,7 +435,7 @@ func (b *Base) deleteCustomer(w http.ResponseWriter, r *http.Request) {
 
 func (b *Base) siteRows(ctx context.Context, customerID, siteID string) ([]SiteRow, error) {
 	rows, err := b.DB.Query(ctx, `
-        SELECT s.id::text, s.tenant_id::text, s.code, s.name, s.timezone, s.country, s.status,
+        SELECT s.id::text, s.tenant_id::text, s.code, s.name, s.timezone, s.country, s.site_type, s.status,
                (SELECT count(*) FROM appliances a WHERE a.site_id = s.id
                    AND a.lifecycle_state NOT IN ('revoked','decommissioned'))
           FROM sites s
@@ -442,7 +448,7 @@ func (b *Base) siteRows(ctx context.Context, customerID, siteID string) ([]SiteR
 	out := []SiteRow{}
 	for rows.Next() {
 		var s SiteRow
-		if err := rows.Scan(&s.ID, &s.CustomerID, &s.Code, &s.Name, &s.Timezone, &s.Country, &s.Status, &s.Appliances); err != nil {
+		if err := rows.Scan(&s.ID, &s.CustomerID, &s.Code, &s.Name, &s.Timezone, &s.Country, &s.SiteType, &s.Status, &s.Appliances); err != nil {
 			return nil, err
 		}
 		out = append(out, s)
@@ -482,7 +488,7 @@ func (b *Base) writeSite(w http.ResponseWriter, r *http.Request, code int, id st
 	WriteJSON(w, code, rows[0])
 }
 
-// postSite: POST /cloud/v1/customers/{id}/sites {name, code?, timezone, country?}
+// postSite: POST /cloud/v1/customers/{id}/sites {name, code?, timezone, country?, site_type?}
 func (b *Base) postSite(w http.ResponseWriter, r *http.Request) {
 	customerID := chi.URLParam(r, "id")
 	if !requireCustomerManage(w, r, customerID, auth.PermSitesManage, auth.PermCustomerSitesManage) {
@@ -493,6 +499,7 @@ func (b *Base) postSite(w http.ResponseWriter, r *http.Request) {
 		Code     string `json:"code"`
 		Timezone string `json:"timezone"`
 		Country  string `json:"country"`
+		SiteType string `json:"site_type"`
 	}
 	if err := DecodeJSON(r, &in); err != nil {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body")
@@ -500,13 +507,14 @@ func (b *Base) postSite(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := DBCtx(r)
 	defer cancel()
-	id, err := createSite(ctx, b.DB, customerID, in.Name, in.Code, in.Timezone, in.Country)
+	id, err := createSite(ctx, b.DB, customerID, in.Name, in.Code, in.Timezone, in.Country, in.SiteType)
 	if err != nil {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, err.Error())
 		return
 	}
+	siteType, _ := normalizeSiteType(in.SiteType)
 	audit.Op(r.Context(), b.DB, r, "site.created", "site", id, map[string]any{
-		"_tenant_id": customerID, "name": in.Name})
+		"_tenant_id": customerID, "name": in.Name, "site_type": siteType})
 	b.writeSite(w, r, http.StatusCreated, id)
 }
 
@@ -522,7 +530,11 @@ func (b *Base) siteCustomer(w http.ResponseWriter, r *http.Request, siteID strin
 	return customerID, true
 }
 
-// patchSite: PATCH /cloud/v1/sites/{id} {name?, timezone?, country?}
+// patchSite: PATCH /cloud/v1/sites/{id} {name?, timezone?, country?, site_type?}
+//
+// The site's name and type are signed into the assignment of every appliance placed there. When either
+// changes, each such appliance holding a granting assignment gets a newly signed one (next version) in the
+// same transaction, so the change reaches it and the edit and the documents commit or roll back together.
 func (b *Base) patchSite(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	customerID, ok := b.siteCustomer(w, r, id)
@@ -533,6 +545,7 @@ func (b *Base) patchSite(w http.ResponseWriter, r *http.Request) {
 		Name     *string `json:"name"`
 		Timezone *string `json:"timezone"`
 		Country  *string `json:"country"`
+		SiteType *string `json:"site_type"`
 	}
 	if err := DecodeJSON(r, &in); err != nil {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body")
@@ -548,20 +561,103 @@ func (b *Base) patchSite(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	newType := ""
+	if in.SiteType != nil {
+		t, ok := normalizeSiteType(*in.SiteType)
+		if !ok {
+			Fail(w, r, http.StatusBadRequest, CodeBadRequest, msgUnknownSiteType)
+			return
+		}
+		newType = t
+	}
 	ctx, cancel := DBCtx(r)
 	defer cancel()
-	if _, err := b.DB.Exec(ctx, `
+	tx, err := b.DB.Begin(ctx)
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
+		return
+	}
+	defer tx.Rollback(ctx)
+	var oldName, oldType string
+	if err := tx.QueryRow(ctx, `SELECT name, site_type FROM sites WHERE id=$1 FOR UPDATE`, id).Scan(&oldName, &oldType); err != nil {
+		Fail(w, r, http.StatusNotFound, CodeNotFound, "site not found")
+		return
+	}
+	var newName string
+	if err := tx.QueryRow(ctx, `
         UPDATE sites SET name = COALESCE(NULLIF(btrim($2),''), name),
                          timezone = COALESCE(NULLIF(btrim($3),''), timezone),
                          country = CASE WHEN $5 THEN NULLIF(btrim($4),'') ELSE country END,
+                         site_type = COALESCE(NULLIF($6,''), site_type),
                          updated_at = now()
-         WHERE id = $1`, id, deref(in.Name), deref(in.Timezone), deref(in.Country), in.Country != nil); err != nil {
+         WHERE id = $1 RETURNING name, site_type`, id, deref(in.Name), deref(in.Timezone), deref(in.Country), in.Country != nil,
+		newType).Scan(&newName, &newType); err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
+		return
+	}
+	var reissued []map[string]any
+	if newName != oldName || newType != oldType {
+		if reissued, err = b.reissueSiteAssignmentsTx(ctx, tx, id); err != nil {
+			Fail(w, r, http.StatusServiceUnavailable, "assignment_unsignable",
+				"The site was not changed: the appliances placed there could not receive a newly signed assignment: "+err.Error())
+			return
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
 		return
 	}
 	audit.Op(r.Context(), b.DB, r, "site.updated", "site", id, map[string]any{"_tenant_id": customerID,
-		"name": deref(in.Name), "timezone": deref(in.Timezone), "country": deref(in.Country)})
+		"name": deref(in.Name), "timezone": deref(in.Timezone), "country": deref(in.Country),
+		"site_type_from": oldType, "site_type": newType, "assignments_reissued": reissued})
 	b.writeSite(w, r, http.StatusOK, id)
+}
+
+// reissueSiteAssignmentsTx signs a new assignment, in the SAME state and with the next version, for every
+// appliance placed at the site whose current assignment grants ownership. Appliances with a terminal
+// (clearing) assignment -- retiring or retired -- are never touched: re-granting them would undo a retirement.
+// The appliance rows are locked first so a concurrent move or retire cannot interleave.
+func (b *Base) reissueSiteAssignmentsTx(ctx context.Context, tx pgx.Tx, siteID string) ([]map[string]any, error) {
+	rows, err := tx.Query(ctx, `
+        SELECT a.id::text, sa.state
+          FROM appliances a
+          JOIN appliance_signed_assignments sa ON sa.appliance_id = a.id
+         WHERE a.site_id = $1 AND sa.state IN ('assigned','reassigned')
+         ORDER BY a.id
+           FOR UPDATE OF a`, siteID)
+	if err != nil {
+		return nil, err
+	}
+	type target struct{ id, state string }
+	var targets []target
+	for rows.Next() {
+		var t target
+		if err := rows.Scan(&t.id, &t.state); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		targets = append(targets, t)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := []map[string]any{}
+	if len(targets) == 0 {
+		return out, nil
+	}
+	if b.AssignKey == nil {
+		return nil, errors.New("assignment signing key not configured")
+	}
+	ab := &AssignmentBase{Base: b, SignKey: b.AssignKey}
+	for _, t := range targets {
+		doc, err := ab.IssueTx(ctx, tx, t.id, t.state)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{"appliance_id": t.id, "assignment_version": doc.Version})
+	}
+	return out, nil
 }
 
 // setSiteStatus: POST /cloud/v1/sites/{id}/archive|restore

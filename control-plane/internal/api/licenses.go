@@ -31,6 +31,9 @@ type licenseTerms struct {
 	ValidUntil                *time.Time `json:"valid_until"`
 	ValidDays                 int        `json:"valid_days"`
 	GracePeriodDays           *int       `json:"grace_period_days"`
+	// Modules are the registered module ids the licence authorises (GET /cloud/v1/modules). Omitted or empty =
+	// core only. Unknown ids and unmet dependencies are refused with 400.
+	Modules []string `json:"modules"`
 }
 
 const (
@@ -46,6 +49,11 @@ func (t licenseTerms) params(applianceID, createdBy string) (licensing.IssuePara
 	if t.MaxConcurrentOnlineGuests < 0 {
 		return p, errors.New("max_concurrent_online_guests cannot be negative (0 = unlimited)")
 	}
+	_, _, ids, err := licensing.ModuleTerms(t.Modules)
+	if err != nil {
+		return p, errors.New("modules: " + err.Error())
+	}
+	p.Modules = ids
 	if t.GracePeriodDays != nil {
 		p.GracePeriodDays = *t.GracePeriodDays
 	}
@@ -101,7 +109,8 @@ func (b *Base) setLicense(w http.ResponseWriter, r *http.Request) {
 	audit.Op(r.Context(), b.DB, r, "license.issued", "appliance", id, map[string]any{
 		"_tenant_id": doc.TenantID, "license_id": doc.LicenseID, "license_version": doc.LicenseVersion,
 		"max_concurrent_online_guests": doc.MaxConcurrentOnlineGuests, "valid_until": doc.ValidUntil,
-		"grace_period_days": doc.GracePeriodDays, "supersedes": doc.SupersedesLicenseID, "reason": in.Reason})
+		"grace_period_days": doc.GracePeriodDays, "modules": doc.Modules.ModuleIDs(),
+		"supersedes": doc.SupersedesLicenseID, "reason": in.Reason})
 	b.writeLicense(w, r, http.StatusCreated, doc.LicenseID)
 }
 

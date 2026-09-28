@@ -62,6 +62,7 @@ func (b *Base) CloudRoutes(off *OfflineBase) http.Handler {
 
 	// Licences.
 	r.Get("/licenses", b.listLicenses)
+	r.Get("/modules", b.listModules)
 	lm := r.With(perm(auth.PermLicensesManage), su)
 	lm.Post("/appliances/{id}/license", b.setLicense)
 	lm.Post("/licenses/{id}/suspend", b.licenseAction("suspend"))
