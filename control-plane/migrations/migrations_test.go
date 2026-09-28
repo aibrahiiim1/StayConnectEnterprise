@@ -156,3 +156,34 @@ func Test0048HeldCustomerHasNoForeignKeyAndNoData(t *testing.T) {
 		t.Error("0048 down must drop the column")
 	}
 }
+
+// 0049 adds the descriptive site type and the licence module projection. The site type is a forward-compatible
+// SHAPE (no enum list: a new type must not need a migration), both columns have defaults so no existing row is
+// touched, and no module is invented for an existing licence.
+func Test0049SiteTypeAndLicenceModulesShape(t *testing.T) {
+	up := read(t, "0049_site_type_and_licence_modules.up.sql")
+	for _, want := range []string{
+		"ALTER TABLE sites ADD COLUMN IF NOT EXISTS site_type text NOT NULL DEFAULT 'UNSPECIFIED';",
+		"CHECK (site_type ~ '^[A-Z][A-Z0-9_]{1,31}$')",
+		"ALTER TABLE licenses ADD COLUMN IF NOT EXISTS modules text[] NOT NULL DEFAULT '{}';",
+	} {
+		if !strings.Contains(up, want) {
+			t.Errorf("0049 up is missing %q", want)
+		}
+	}
+	code := strings.ToUpper(regexp.MustCompile(`(?m)^\s*--.*$`).ReplaceAllString(up, ""))
+	for _, bad := range []string{"UPDATE ", "DELETE ", "INSERT ", "CREATE TYPE", "'HOTEL'", "REFERENCES"} {
+		if strings.Contains(code, bad) {
+			t.Errorf("0049 up must not contain %q", bad)
+		}
+	}
+	down := read(t, "0049_site_type_and_licence_modules.down.sql")
+	for _, want := range []string{
+		"ALTER TABLE sites DROP COLUMN IF EXISTS site_type;",
+		"ALTER TABLE licenses DROP COLUMN IF EXISTS modules;",
+	} {
+		if !strings.Contains(down, want) {
+			t.Errorf("0049 down is missing %q", want)
+		}
+	}
+}
