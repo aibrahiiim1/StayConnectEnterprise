@@ -21,6 +21,7 @@ func testDoc(issued time.Time) *Document {
 		ValidUntil:         issued.AddDate(1, 0, 0),
 		OfflineGraceDays:   30,
 		Features:           Features{PMS: true, PaidWiFi: true, EmailOTP: true},
+		Modules:            Modules{ModuleHospitality: {}, ModulePaidAccess: {}, ModuleEmailOTP: {}},
 		Limits:             Limits{MaxConcurrentGuestSessions: 1500, MaxLocalOperators: 20},
 		SchemaVersion:      CurrentSchemaVersion,
 	}
