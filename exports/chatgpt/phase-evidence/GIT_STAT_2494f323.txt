@@ -1,4 +1,0 @@
-commit 2494f323161b094a6925206e6f9c255dbae9bc58
-Date:   Mon Sep 28 09:24:54 2026 +0300
-
-    Governance: the terminology work is the current delivery; generated blocks re-rendered from state
