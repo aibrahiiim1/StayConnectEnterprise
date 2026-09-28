@@ -589,6 +589,9 @@ export type SocialOAuthProvider = {
   client_id: string;
   redirect_uri: string;
   scopes?: string;
+  tenant?: string;   // Microsoft: directory (tenant) ID, or common / organizations / consumers
+  team_id?: string;  // Apple: Team ID
+  key_id?: string;   // Apple: Key ID of the .p8 key
   last_success_at?: string;
   last_error?: string;
   last_error_at?: string;
@@ -599,11 +602,12 @@ export type SocialOAuthProvider = {
 export type NotificationProvider = {
   id: string;
   tenant_id: string;
-  channel: "email" | "sms";
-  kind: "stub" | "sendgrid" | "ses" | "twilio";
+  channel: "email" | "sms" | "whatsapp";
+  kind: "stub" | "sendgrid" | "ses" | "twilio" | "meta_whatsapp" | "twilio_whatsapp";
   enabled: boolean;
   display_name?: string;
-  api_user?: string;       // Twilio account SID — not a secret
+  api_user?: string;       // Twilio account SID / Meta phone number ID — not a secret
+  extra?: { template_name?: string; language?: string; content_sid?: string } | null; // WhatsApp template, not secret
   from_address?: string;
   from_name?: string;
   region?: string;
