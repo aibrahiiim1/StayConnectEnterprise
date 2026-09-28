@@ -168,10 +168,13 @@ package → immutable quote → purchase AWAITING_SETTLEMENT → settlement ONLI
   write-only in every API. Central holds none of it.
 * **LIVE mode** is refused by the deployment ceiling unless `STAYCONNECT_PAYMENT_LIVE_ALLOWED` is set, which
   requires a separate Product-Owner authorisation. The legacy plaintext `public.stripe_accounts` path is removed.
-* **Walled garden (least privilege):** each adapter declares its hosted-payment domains; they are reachable
-  before sign-in only while Card payment is effective. A Site Admin may add a bounded, audited list of extra
-  FQDNs (for example a bank's 3-D Secure domain): FQDN only, no IP/CIDR, no bare TLD, at most one leading
-  wildcard label, a bounded count.
+* **Walled garden (least privilege):** each adapter declares its hosted-payment domains in code. Only the
+  domains of providers that have an ACTIVE account at the site are added, and only while Card payment is
+  deployed, licensed and switched on (readiness is deliberately not required: reaching the provider is part of
+  what readiness checks). A Site Admin may add a bounded, audited list of extra FQDNs (for example a bank's
+  3-D Secure domain): FQDN only, no IP/CIDR, no bare TLD, at most one leading wildcard label, at most 20.
+  Payment domains are ordinary walled-garden domain entries: like every domain entry they are not restricted
+  to a port. The whole payment set is withdrawn when Card payment is switched off or loses its licence.
 
 ### 6.4 PMS Room Charge
 Available only when `hospitality`, `paid_access` and `room_charge` are licensed, enabled and deployed **and**:
@@ -224,15 +227,19 @@ Each is enforced in the SQL grant entry point, which is the only path to the ent
 
 ## 8. Admin Console
 
-* **System → Appliance & licence → Modules:** licensed / enabled / ready per module, reasons in plain language,
-  Site Type (read-only), switch with password step-up and reason, change history.
+* **System → Modules:** available / licensed / switched on / ready per module, reasons in plain language,
+  Site Type (read-only), switch (site administrator, password step-up and reason; recorded in
+  `iam_v2.site_module_changes`).
 * **Internet offering → Payment methods:** Free and Voucher (core), Card payment (provider accounts, write-only
   secrets, test connection, readiness, extra payment domains), Room charge (readiness per interface, link to
   onboarding).
 * **Internet Packages editor:** price and currency; acquisition-method checkboxes limited to site-effective
   methods (others shown with the reason); room-charge settlement mapping per interface.
-* **Vouchers:** issue against a package that supports Voucher; revoke a code or a whole batch (audited).
-* **Hotel → PMS interfaces → Financial onboarding:** folio identity strategy, base currency, approval.
+* **Vouchers:** issue against a package that supports Voucher (the picker lists only those); revoke a code, or
+  cancel every unused card of a batch (audited, step-up, reason).
+* **Hotel → Room charge:** financial onboarding per FIAS interface — folio identity strategy, base currency and
+  an attestation, approved by a site administrator with step-up — and readiness per interface.
+* **Client Portal → Sign-in methods:** "Choose a package without signing in" (open package selection).
 * Navigation follows `/capabilities`, which reports module-owned surfaces only while their module is manageable
   and falls back to the core when module state is unreadable.
 
@@ -249,3 +256,21 @@ Each is enforced in the SQL grant entry point, which is the only path to the ent
 
 LIVE-mode provider transactions (`STAYCONNECT_PAYMENT_LIVE_ALLOWED`), real PMS posting
 (`STAYCONNECT_PHASE4_PMS_TRANSMIT`), Go-Live, and real guest-production cutover.
+
+## 11. Open Product-Owner decision: the FIAS posting transport
+
+Everything on the room-charge path up to the outbox is built: onboarding, mappings, offering, purchase,
+settlement, posting creation, the settle-on-`PA=OK` and review-apply functions, and the posting engine's
+settlement step. What is **not** built is the component that takes a queued posting off the outbox and sends
+`PS` over FIAS, because two accepted facts conflict:
+
+* The PMS accepts **exactly one** active FIAS client connection per interface (Gate 3A), and pmsd holds it for
+  Room sign-in.
+* pmsd **must never construct or send `PS`/`PA`** (accepted invariant, enforced by
+  `scripts/ci/phase4-dark-check.sh`).
+
+The options are (a) a separate, ceiling-gated financial sender that shares pmsd's one link through a narrow,
+audited hand-off — which changes the accepted pmsd invariant — or (b) a second, dedicated FIAS interface per
+property for posting, which needs a PMS-side configuration change at each property. Either is a product and
+architecture decision, and real posting is prohibited in this delivery in any case. Until it is decided, Room
+charge is configurable and reviewable, readiness reports `PMS_POSTING_NOT_AUTHORISED`, and it is never offered.
