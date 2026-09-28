@@ -375,11 +375,23 @@ REVOKE ALL ON FUNCTION iam_v2.p4_posting_settlement_outcome(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION iam_v2.p4_posting_review_apply(uuid,uuid,uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION iam_v2.p4_posting_settlement_outcome(uuid) TO sc_posting_runtime;
 
+-- Whether the site holds any room-charge posting: keeps review and recovery reachable after the module is
+-- withdrawn, without giving scd a read of the posting ledger.
+CREATE OR REPLACE FUNCTION iam_v2.p4_room_charge_has_records(p_tenant uuid, p_site uuid)
+  RETURNS boolean
+  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+  SELECT EXISTS (SELECT 1 FROM iam_v2.pms_postings WHERE tenant_id = p_tenant AND site_id = p_site);
+$fn$;
+REVOKE ALL ON FUNCTION iam_v2.p4_room_charge_has_records(uuid,uuid) FROM PUBLIC;
+
 DO $grant$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_scd') THEN
     GRANT EXECUTE ON FUNCTION iam_v2.p4_create_room_charge_posting(uuid,uuid,uuid) TO svc_scd;
     GRANT EXECUTE ON FUNCTION iam_v2.pms_interface_financially_ready(uuid,uuid,uuid) TO svc_scd;
+    GRANT EXECUTE ON FUNCTION iam_v2.p4_room_charge_has_records(uuid,uuid) TO svc_scd;
+    -- Offering a room charge reads the package's posting-code mapping and the stay's default folio.
+    GRANT SELECT ON iam_v2.package_settlement_mappings, iam_v2.stay_folios TO svc_scd;
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_edged') THEN
     GRANT SELECT ON iam_v2.pms_financial_onboardings TO svc_edged;
@@ -401,6 +413,7 @@ BEGIN
     EXECUTE 'ALTER FUNCTION iam_v2.p4_create_room_charge_posting(uuid,uuid,uuid) OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.p4_posting_settlement_outcome(uuid) OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.p4_posting_review_apply(uuid,uuid,uuid) OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER FUNCTION iam_v2.p4_room_charge_has_records(uuid,uuid) OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.p4_settlement_state_machine() OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.p4_consume_retry_authorization() OWNER TO iam_v2_owner';
   END IF;

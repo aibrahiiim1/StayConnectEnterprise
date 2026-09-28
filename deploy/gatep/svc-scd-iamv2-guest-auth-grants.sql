@@ -311,3 +311,6 @@ GRANT EXECUTE ON FUNCTION iam_v2.card_payment_settings_get(uuid,uuid) TO svc_scd
 -- interface is financially onboarded. No table privilege on the posting ledger.
 GRANT EXECUTE ON FUNCTION iam_v2.p4_create_room_charge_posting(uuid,uuid,uuid)  TO svc_scd;
 GRANT EXECUTE ON FUNCTION iam_v2.pms_interface_financially_ready(uuid,uuid,uuid) TO svc_scd;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_room_charge_has_records(uuid,uuid)           TO svc_scd;
+-- Offering a room charge reads the package's posting-code mapping and the stay's default folio.
+GRANT SELECT ON iam_v2.package_settlement_mappings, iam_v2.stay_folios TO svc_scd;

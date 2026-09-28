@@ -159,7 +159,7 @@ func (s *server) roomChargeHasRecords(ctx context.Context, tenantID, siteID stri
 	if s.db == nil {
 		return false
 	}
-	var n int
-	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.pms_postings WHERE tenant_id=$1 AND site_id=$2`, tenantID, siteID).Scan(&n)
-	return n > 0
+	var has bool
+	_ = s.db.QueryRow(ctx, `SELECT iam_v2.p4_room_charge_has_records($1::uuid,$2::uuid)`, tenantID, siteID).Scan(&has)
+	return has
 }

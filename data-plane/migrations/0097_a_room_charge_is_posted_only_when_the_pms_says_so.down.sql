@@ -74,6 +74,13 @@ BEGIN
 END $fn$;
 
 ALTER FUNCTION iam_v2.p4_consume_retry_authorization() SECURITY INVOKER;
+DO $rv$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_scd') THEN
+    REVOKE SELECT ON iam_v2.package_settlement_mappings, iam_v2.stay_folios FROM svc_scd;
+  END IF;
+END $rv$;
+DROP FUNCTION IF EXISTS iam_v2.p4_room_charge_has_records(uuid,uuid);
 DROP FUNCTION IF EXISTS iam_v2.p4_posting_review_apply(uuid,uuid,uuid);
 DROP FUNCTION IF EXISTS iam_v2.p4_posting_settlement_outcome(uuid);
 DROP FUNCTION IF EXISTS iam_v2.p4_create_room_charge_posting(uuid,uuid,uuid);
