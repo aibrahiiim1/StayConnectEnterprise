@@ -420,6 +420,28 @@ const landingHTML = `<!doctype html>
     </form>
   </div>
 
+  <div class="panel" id="panel-whatsapp">
+    <form data-otp="whatsapp" data-stage="dest" autocomplete="off">
+      <div class="field">
+        <label for="wa-phone"><span data-i18n="sms.dest" data-i18n-en="Phone number">{{index .T "sms.dest"}}</span></label>
+        <input id="wa-phone" name="dest" type="tel" required placeholder="+1 555 123 4567" autocomplete="tel" dir="ltr" aria-describedby="wa-hint">
+        <p class="hint" id="wa-hint" data-i18n="sms.hint" data-i18n-en="Include the country code, for example +44 20 7946 0958">{{index .T "sms.hint"}}</p>
+      </div>
+      <button class="primary" type="submit"><span data-i18n="btn.sendcode" data-i18n-en="Send code">{{index .T "btn.sendcode"}}</span></button>
+      <div class="err" id="wa-dest-err" role="alert" data-for="wa-phone"></div>
+    </form>
+    <form data-otp="whatsapp" data-stage="code" autocomplete="off" style="display:none">
+      <p class="small"><span data-i18n="otp.sent.whatsapp" data-i18n-en="We sent a 6-digit code on WhatsApp to">{{index .T "otp.sent.whatsapp"}}</span> <bdi class="dest"></bdi></p>
+      <div class="field">
+        <label for="wa-code"><span data-i18n="otp.code" data-i18n-en="Verification code">{{index .T "otp.code"}}</span></label>
+        <input id="wa-code" name="code" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" required maxlength="6" placeholder="••••••" dir="ltr">
+      </div>
+      <button class="primary" type="submit"><span data-i18n="btn.verify" data-i18n-en="Verify">{{index .T "btn.verify"}}</span></button>
+      <button type="button" class="link" data-resend data-i18n="otp.retry.sms" data-i18n-en="Use a different number">{{index .T "otp.retry.sms"}}</button>
+      <div class="err" id="wa-code-err" role="alert" data-for="wa-code"></div>
+    </form>
+  </div>
+
       <div class="alt" id="alt-methods" style="display:none"></div>
     </div>
     </div>
@@ -447,6 +469,7 @@ const landingHTML = `<!doctype html>
         <li data-help-method="account"><strong data-i18n="method.account" data-i18n-en="Personal account">{{index .T "method.account"}}</strong><span data-i18n="help.account" data-i18n-en="Enter the username and password you were given. If a voucher field is showing, switch on “Use Personal Account” first.">{{index .T "help.account"}}</span></li>
         <li data-help-method="email"><strong data-i18n="method.email" data-i18n-en="Email">{{index .T "method.email"}}</strong><span data-i18n="help.email" data-i18n-en="Enter your email address and tap Send code, then type the 6-digit code from the email. Check your spam folder if it does not arrive.">{{index .T "help.email"}}</span></li>
         <li data-help-method="sms"><strong data-i18n="method.sms" data-i18n-en="Phone">{{index .T "method.sms"}}</strong><span data-i18n="help.sms" data-i18n-en="Enter your phone number with the country code and tap Send code, then type the 6-digit code from the text message.">{{index .T "help.sms"}}</span></li>
+        <li data-help-method="whatsapp"><strong data-i18n="method.whatsapp" data-i18n-en="WhatsApp">{{index .T "method.whatsapp"}}</strong><span data-i18n="help.whatsapp" data-i18n-en="Enter your WhatsApp phone number with the country code and tap Send code, then type the 6-digit code from the WhatsApp message.">{{index .T "help.whatsapp"}}</span></li>
         <li data-help-method="social"><strong data-i18n="method.social" data-i18n-en="Social">{{index .T "method.social"}}</strong><span data-i18n="social.note" data-i18n-en="You will be redirected to the provider, then back here.">{{index .T "social.note"}}</span></li>
       </ul>
       <p class="help-fail" data-i18n="help.fail" data-i18n-en="Something not working? Please contact the site team for assistance.">{{index .T "help.fail"}}</p>
@@ -471,7 +494,7 @@ const landingHTML = `<!doctype html>
 
     const Groups = {
       guest:   { id:'guest',   label:'Client Login',  icon: ICON_DOOR, members:['pms','poststay'] },
-      account: { id:'account', label:'Account Login', icon: ICON_KEYS, members:['voucher','account','email','sms','social'] },
+      account: { id:'account', label:'Account Login', icon: ICON_KEYS, members:['voucher','account','email','sms','whatsapp','social'] },
     };
     const Tabs = {
       // Both point at the merged panel: which FORM shows is the switch's business, not the tab's.
@@ -479,6 +502,7 @@ const landingHTML = `<!doctype html>
       account: { id:'account', label:'Personal account', panel:'panel-accountlogin' },
       email:   { id:'email',   label:'Email',   panel:'panel-email' },
       sms:     { id:'sms',     label:'Phone',   panel:'panel-sms' },
+      whatsapp:{ id:'whatsapp',label:'WhatsApp',panel:'panel-whatsapp' },
       pms:     { id:'pms',     label:'Room',    panel:'panel-pms' },
       social:  { id:'social',  label:'Social',  panel:'panel-social' },
       poststay:{ id:'poststay',label:'Post-stay',panel:'panel-poststay' },
@@ -1005,6 +1029,7 @@ const landingHTML = `<!doctype html>
       if (cfg.guest_account && cfg.guest_account.enabled) enabled.push('account');
       if (cfg.email   && cfg.email.enabled)   enabled.push('email');
       if (cfg.sms     && cfg.sms.enabled)     enabled.push('sms');
+      if (cfg.whatsapp && cfg.whatsapp.enabled) enabled.push('whatsapp');
       PHASE3_PMS = !!cfg.phase3_pms;
       if (cfg.pms     && cfg.pms.enabled) {
         enabled.push('pms');
@@ -1205,6 +1230,7 @@ const landingHTML = `<!doctype html>
     }
     attach('email');
     attach('sms');
+    attach('whatsapp');
 
     // ---- Phase 3 (Stay resolution) ----------------------------------------
     // The guest sees exactly two possible outcomes: they are in, or the server's sentence. There is
