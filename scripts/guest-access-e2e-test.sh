@@ -104,6 +104,11 @@ account(){ local out; UN="e2e-$(date +%s%N | cut -c10-16)"
 ent_of_session(){ $PSQL "SELECT entitlement_id FROM iam_v2.sessions WHERE id='$1'"; }
 devs_on(){ $PSQL "SELECT count(*) FROM iam_v2.entitlement_device_authorizations WHERE entitlement_id='$1' AND deauthorized_at IS NULL"; }
 
+# ROOM SIGN-IN BELONGS TO HOSPITALITY. On a site not licensed for it, the room steps assert that Room sign-in is
+# REFUSED (the licence is enforced by the backend) instead of expecting it to work.
+HOSP=$(curl -sk $R -b $CK "$B/capabilities" | python3 -c 'import sys,json;m=(json.load(sys.stdin).get("modules") or {}).get("hospitality") or {};print(1 if m.get("licensed") and m.get("deployed") else 0)' 2>/dev/null)
+[ "$HOSP" = 1 ] || HOSP=0
+echo "   (hospitality licensed here: $HOSP)"
 echo "== 0. setup: guest network $GB ($GW); 1-device package ${REV1:0:8}, multi-device package ${REVN:0:8} =="
 issue; [ -n "$CODE" ] && [ -n "$VID" ] && ok "voucher issued through Hotel Admin (${VID:0:8})" || { bad "voucher issue failed"; exit 1; }
 client ga1; CIP1=$CIP; [ -n "$CIP1" ] && ok "device 1 leased $CIP1" || { bad "device 1 got no lease"; exit 1; }
@@ -120,7 +125,11 @@ curl -sk $R -b $CK -o /dev/null -H 'Content-Type: application/json' -d '{"passwo
 loc=$(signin ga1 /auth/voucher --data-urlencode "code=$RCODE")
 [ -z "$loc" ] && ok "a revoked voucher is refused (state $($PSQL "SELECT state FROM iam_v2.vouchers WHERE id='$RVID'"))" || bad "revoked voucher -> $loc"
 pj=$(roomsignin ga1 00000 e2e-no-such-guest)
-! printf '%s' "$pj" | grep -q '"ok":true' && [ "$(lastroom)" = ROOM_NOT_IN_MIRROR ] && ok "room sign-in refused for a room that does not exist (recorded ROOM_NOT_IN_MIRROR)" || bad "non-existent room: $(lastroom) $pj"
+if [ "$HOSP" = 1 ]; then
+  ! printf '%s' "$pj" | grep -q '"ok":true' && [ "$(lastroom)" = ROOM_NOT_IN_MIRROR ] && ok "room sign-in refused for a room that does not exist (recorded ROOM_NOT_IN_MIRROR)" || bad "non-existent room: $(lastroom) $pj"
+else
+  ! printf '%s' "$pj" | grep -q '"ok":true' && ok "without Hospitality, room sign-in is refused ($(lastroom))" || bad "room sign-in accepted without Hospitality: $pj"
+fi
 issue   # the voucher the rest of the run uses (the first one is spent on nothing; it is revoked on exit)
 
 echo "== 3. Hotel Admin's method switches are enforced by the backend, not only hidden =="
@@ -133,9 +142,11 @@ account; U1=$UN; P1=$PW
 methods '{"guest_account":{"enabled":false}}'
 loc=$(signin ga1 /auth/credentials --data-urlencode "username=$U1" --data-urlencode "password=$P1")
 [ -z "$loc" ] && says ga1 "not available" && ok "accounts switched off: correct credentials are refused ('not available')" || bad "disabled account method -> '$loc'"
-methods '{"pms":{"enabled":false,"mode":"room_any","provider":"protel-fias"}}'
-pj=$(roomsignin ga1 00000 x)
-printf '%s' "$pj" | grep -q '"ok":false' && [ "$(lastroom)" = SERVICE_UNAVAILABLE ] && ok "room sign-in switched off: refused before any room lookup (recorded SERVICE_UNAVAILABLE)" || bad "disabled PMS method: $(lastroom) $pj"
+if [ "$HOSP" = 1 ]; then
+  methods '{"pms":{"enabled":false,"mode":"room_any","provider":"protel-fias"}}'
+  pj=$(roomsignin ga1 00000 x)
+  printf '%s' "$pj" | grep -q '"ok":false' && [ "$(lastroom)" = SERVICE_UNAVAILABLE ] && ok "room sign-in switched off: refused before any room lookup (recorded SERVICE_UNAVAILABLE)" || bad "disabled PMS method: $(lastroom) $pj"
+fi
 methods "$AM0"; methods '{"guest_account":{"enabled":true}}'   # accounts on for the account tests below
 
 echo "== 4. voucher: one step -- sign-in redeems the card's own package, activates, enforces -> internet =="
@@ -218,6 +229,10 @@ loc=$(signin ga4 /auth/credentials --data-urlencode "username=$U" --data-urlenco
 logout ga2
 
 echo "== 8. PMS room sign-in: one in-house stay from the live mirror (not printed) =="
+if [ "$HOSP" = 0 ]; then
+  pj=$(roomsignin ga1 00000 x)
+  ! printf '%s' "$pj" | grep -q '"ok":true' && ok "Hospitality not licensed: the positive room test does not apply, and room sign-in is refused" || bad "room sign-in accepted without Hospitality"
+else
 methods '{"guest_account":{"enabled":false}}'
 STAY=$($PSQL "SELECT s.id FROM iam_v2.stays s WHERE s.status='IN_HOUSE' AND s.external_reservation_id IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM iam_v2.entitlements e WHERE e.stay_id=s.id)
@@ -299,6 +314,8 @@ if [ -n "$STAY" ]; then
   fi
 elif [ -z "${SKIP_ROOM:-}" ]; then
   bad "no in-house stay suitable for the positive room test"
+fi
+
 fi
 
 echo "== 9. no PMS posting, payment or financial traffic =="
