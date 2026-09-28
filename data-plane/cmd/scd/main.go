@@ -221,6 +221,9 @@ type server struct {
 	modules *modules.Resolver
 	// card is the card-payment wiring (card_checkout.go); never nil after initCard.
 	card *cardState
+	// openAccess issues OPEN auth contexts (open_access.go); nil when its key is missing.
+	openAccess  *iamv2.OpenAccess
+	openLimiter *recoveryLimiter
 
 	// PMS registry is live-reloadable (phase 5.3). All readers must go
 	// through currentPMSReg(); the reload path atomically swaps it under
@@ -765,6 +768,7 @@ func main() {
 		os.Exit(2)
 	}
 	s.initCard(rootCtx, c.SecretsDir)
+	s.initOpenAccess(c.SecretsDir)
 	s.registerModuleProbes()
 	// CRASH RECOVERY FOR OFFLINE FIRST ACTIVATION. Runs after the licence state is loaded, because deciding
 	// whether an interrupted activation completed means asking whether the licence actually landed. Either
@@ -838,6 +842,8 @@ func main() {
 	// resulting entitlement into something the enforcement plane can act on.
 	r.Post("/v1/sessions/activate", s.activateIAMv2Session)
 	r.Post("/v1/sessions/authorize", s.authorize)
+	// Open package selection: the anonymous access subject (open_access.go). A guest route, like authorize.
+	r.Post("/v1/sessions/authorize-open", s.authorizeOpen)
 	r.Post("/v1/sessions/authorize-otp", s.authorizeOTP)
 	r.Post("/v1/sessions/authorize-credentials", s.authorizeGuestAccount)
 	r.Post("/v1/sessions/revoke", s.revoke)

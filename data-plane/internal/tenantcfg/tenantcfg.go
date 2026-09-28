@@ -27,6 +27,9 @@ type AuthMethods struct {
 	// GuestAccount is the username/password method. Basic-access (never license-
 	// gated); shown on the portal only when enabled.
 	GuestAccount *AuthMethod `json:"guest_account,omitempty"`
+	// Open is "Clients may choose a package without signing in" (core, default off). The entitlement subject
+	// is an opaque anonymous access subject, never the device.
+	Open *AuthMethod `json:"open,omitempty"`
 }
 
 // PMSConfig configures the room-number-based guest auth flow. See migration

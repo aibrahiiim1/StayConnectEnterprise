@@ -86,6 +86,14 @@ func main() {
 	}
 	log.Printf("keybootstrap: card payment sealing key ready at %s", paymentKeyPath)
 
+	// 2d) Anonymous-access key: keys the HMACs of the resume tokens and recovery codes of clients who choose a
+	// package without signing in. Without it open selection is unavailable; nothing else is affected.
+	anonPath := filepath.Join(secretsDir, "anonymous_access.key")
+	if _, err := localkeys.CreateKeyIfAbsent(anonPath); err != nil {
+		log.Fatalf("keybootstrap: anonymous-access key: %v", err)
+	}
+	log.Printf("keybootstrap: anonymous-access key ready at %s", anonPath)
+
 	// 3) OTP generation-1 key + DB lifecycle metadata, validated together.
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {

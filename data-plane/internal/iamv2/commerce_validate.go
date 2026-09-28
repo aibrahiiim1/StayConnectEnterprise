@@ -13,8 +13,8 @@ import (
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 var (
-	validAuthMethods  = map[string]bool{"VOUCHER": true, "ACCOUNT": true, "OTP": true, "SOCIAL": true}
-	validSubjectKinds = map[string]bool{"VOUCHER": true, "ACCOUNT": true, "PRINCIPAL": true}
+	validAuthMethods  = map[string]bool{"VOUCHER": true, "ACCOUNT": true, "OTP": true, "SOCIAL": true, "OPEN": true}
+	validSubjectKinds = map[string]bool{"VOUCHER": true, "ACCOUNT": true, "PRINCIPAL": true, "ANONYMOUS": true}
 	ruleAllowedFields = map[string]map[string]bool{
 		RuleDateWindow:    {"from": true, "until": true},
 		RuleAuthMethod:    {"methods": true},
