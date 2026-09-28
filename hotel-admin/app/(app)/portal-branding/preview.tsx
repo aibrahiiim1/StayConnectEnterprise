@@ -27,6 +27,7 @@ import { api, ApiError } from "@/lib/api";
 import { Monitor, Smartphone, Tablet, RefreshCw } from "lucide-react";
 import { Segmented } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/misc";
+import { moduleLicensed, useCapabilities, type Capabilities } from "@/lib/capabilities";
 import { Design } from "./strings";
 
 type Device = "desktop" | "tablet" | "mobile";
@@ -42,20 +43,115 @@ export const DEVICES: Record<Device, { w: number; h: number; label: string }> = 
   mobile: { w: 390, h: 844, label: "Mobile" },
 };
 
-/** Sign-in methods the preview assumes. The real page asks the appliance; the preview shows the two groups so
- *  an operator can see both tabs and the strings inside them without changing what is enabled for guests. */
-const PREVIEW_METHODS = {
-  pms: { enabled: true, mode: "room_any" },
-  voucher: { enabled: true },
-  guest_account: { enabled: true },
-  internet_packages_available: true,
+// THE PREVIEW SHOWS THE SIGN-IN METHODS CLIENTS ACTUALLY SEE.
+//
+// It used to answer the portal's /api/auth-methods with a fixed "room, voucher and account are all on", so a
+// site with no hospitality licence was shown a Room tab its clients never get -- the preview made an office or
+// a campus look like a hotel. The answer is now the site's own sign-in methods (edged's /auth-methods, the same
+// document Sign-in methods edits), with each optional method kept only while its module is licensed here: a
+// method switched on under a licence that has since lapsed is not offered to clients either. The shape is the
+// one portald's /api/auth-methods relays from scd, because the portal's own script is what reads it.
+
+/** The tenant's auth_methods document, as edged returns it. Only what the portal reads is typed. */
+type Toggle = { enabled?: boolean };
+export type AuthMethodsDoc = {
+  voucher?: Toggle;
+  guest_account?: Toggle;
+  open?: Toggle;
+  email?: Toggle;
+  sms?: Toggle;
+  whatsapp?: Toggle;
+  social?: Record<string, Toggle>;
+  pms?: Toggle & { mode?: string };
+  phase3_pms?: boolean;
+  phase5_poststay?: boolean;
+  internet_packages_available?: boolean;
 };
 
-/** buildSrcDoc injects the stub and the settings ahead of the portal's own script. */
-export function buildSrcDoc(html: string, design: Design) {
+/** The optional methods, each with the module that must be licensed for a client to be offered it. Voucher,
+ *  personal account and open package selection are core and need none. */
+const OPTIONAL: { key: "pms" | "email" | "sms" | "whatsapp" | "social"; module: string; label: string }[] = [
+  { key: "pms", module: "hospitality", label: "Room" },
+  { key: "email", module: "email_otp", label: "Email" },
+  { key: "sms", module: "sms_otp", label: "Phone" },
+  { key: "whatsapp", module: "whatsapp_otp", label: "WhatsApp" },
+  { key: "social", module: "social_login", label: "Social" },
+];
+
+/** The answer the preview gives the portal's /api/auth-methods: what is switched on, less anything whose
+ *  module is not licensed here. `doc` null means the methods could not be read, and the preview then offers no
+ *  method rather than inventing one. */
+export function previewMethods(doc: AuthMethodsDoc | null, caps: Capabilities | null): AuthMethodsDoc {
+  const on = (m?: Toggle) => !!m && m.enabled === true;
+  const out: AuthMethodsDoc = {
+    internet_packages_available:
+      typeof doc?.internet_packages_available === "boolean" ? doc.internet_packages_available : true,
+  };
+  if (!doc) return out;
+  if (on(doc.voucher)) out.voucher = { enabled: true };
+  if (on(doc.guest_account)) out.guest_account = { enabled: true };
+  if (on(doc.open)) out.open = { enabled: true };
+  for (const o of OPTIONAL) {
+    if (!moduleLicensed(caps, o.module)) continue;
+    if (o.key === "social") {
+      const providers = Object.entries(doc.social ?? {}).filter(([, v]) => on(v));
+      if (providers.length) out.social = Object.fromEntries(providers.map(([k]) => [k, { enabled: true }]));
+    } else if (o.key === "pms") {
+      if (on(doc.pms)) out.pms = { enabled: true, mode: doc.pms?.mode };
+      // Post-stay is its own gate on the portal, but it is hospitality all the same.
+      if (doc.phase3_pms) out.phase3_pms = true;
+      if (doc.phase5_poststay) out.phase5_poststay = true;
+    } else if (on(doc[o.key])) {
+      out[o.key] = { enabled: true };
+    }
+  }
+  return out;
+}
+
+/** The optional methods a preview answer offers, by name -- for the sentence under the frame. */
+export function optionalMethodsShown(m: AuthMethodsDoc): string[] {
+  return OPTIONAL.filter((o) => (o.key === "social" ? Object.keys(m.social ?? {}).length > 0 : !!m[o.key]?.enabled))
+    .map((o) => o.label);
+}
+
+// ONE READ OF THE SIGN-IN METHODS, SHARED by the main preview and the six thumbnails, and kept briefly: an
+// operator who switches a method on in another tab sees it here on the next visit without reloading the app.
+const METHODS_TTL_MS = 30_000;
+let methodsDoc: Promise<AuthMethodsDoc | null> | null = null;
+let methodsAt = 0;
+
+function loadMethods(): Promise<AuthMethodsDoc | null> {
+  if (!methodsDoc || Date.now() - methodsAt > METHODS_TTL_MS) {
+    methodsAt = Date.now();
+    methodsDoc = api.get<AuthMethodsDoc>("/auth-methods").then((d) => d ?? {}).catch(() => null);
+  }
+  return methodsDoc;
+}
+
+/** The preview's /api/auth-methods answer, or null until both the methods and the module state are known: the
+ *  frame waits rather than drawing a tab that is about to disappear. `unreadable` is set when the methods could
+ *  not be read. */
+export function usePreviewMethods(): { methods: AuthMethodsDoc | null; unreadable: boolean } {
+  const caps = useCapabilities();
+  const [doc, setDoc] = useState<AuthMethodsDoc | null | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    loadMethods().then((d) => { if (live) setDoc(d); });
+    return () => { live = false; };
+  }, []);
+  const methods = useMemo(
+    () => (doc === undefined || caps === null ? null : previewMethods(doc, caps)),
+    [doc, caps],
+  );
+  return { methods, unreadable: doc === null };
+}
+
+/** buildSrcDoc injects the stub and the settings ahead of the portal's own script. `methodsAnswer` is what the
+ *  portal's /api/auth-methods receives -- see previewMethods. */
+export function buildSrcDoc(html: string, design: Design, methodsAnswer: AuthMethodsDoc) {
   // "</" is escaped so no value in the design can close the shim's <script> element early.
   const payload = JSON.stringify({ design }).replace(/<\//g, "<\\/");
-  const methods = JSON.stringify(PREVIEW_METHODS);
+  const methods = JSON.stringify(methodsAnswer).replace(/<\//g, "<\\/");
   const shim = `<script>
 (function () {
   var BRANDING = ${payload};
@@ -204,6 +300,7 @@ export function PortalPreview({ design, sanitized }: {
 }) {
   const [device, setDevice] = useState<Device>("desktop");
   const { html, err } = usePortalHTML();
+  const { methods, unreadable } = usePreviewMethods();
   const box = useRef<HTMLDivElement>(null);
   const [boxWidth, setBoxWidth] = useState(0);
 
@@ -220,7 +317,8 @@ export function PortalPreview({ design, sanitized }: {
       custom_html: inlined.custom_html ? sanitized.custom_html : inlined.custom_html,
     };
   }, [inlined, sanitized]);
-  const srcDoc = useMemo(() => (html ? buildSrcDoc(html, shown) : null), [html, shown]);
+  const srcDoc = useMemo(() => (html && methods ? buildSrcDoc(html, shown, methods) : null), [html, shown, methods]);
+  const optional = methods ? optionalMethodsShown(methods) : [];
 
   useEffect(() => {
     const el = box.current;
@@ -275,7 +373,11 @@ export function PortalPreview({ design, sanitized }: {
         )}
       </div>
       <p className="text-xs text-muted-foreground">
-        Every sign-in tab is shown here; which ones clients see is set in Sign-in methods.
+        {unreadable
+          ? "The sign-in methods could not be read, so the preview shows none. Which methods clients see is set in Sign-in methods."
+          : methods && optional.length === 0
+            ? "The preview shows the sign-in methods your clients actually see, as set in Sign-in methods. No optional sign-in method is switched on here."
+            : "The preview shows the sign-in methods your clients actually see, as set in Sign-in methods."}
       </p>
     </section>
   );

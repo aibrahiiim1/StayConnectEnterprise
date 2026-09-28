@@ -91,6 +91,8 @@ describe("navigation follows the appliance, not the build", () => {
 
 describe("a destination that is not enabled explains itself", () => {
   it("says so, says what is unaffected, and does not look like a fault", async () => {
+    // An appliance with no optional module reported: the screen asks, and must not name a PMS.
+    get.mockResolvedValue({ surfaces: PRELIVE_SURFACES });
     const { SurfaceNotEnabled } = await import("@/components/surface-not-enabled");
     render(<SurfaceNotEnabled label="Charge health" />);
 
@@ -98,9 +100,19 @@ describe("a destination that is not enabled explains itself", () => {
     expect(screen.getByRole("heading", { name: "Charge health" })).toBeTruthy();
     expect(screen.getByText("Not enabled on this appliance")).toBeTruthy();
     expect(screen.getByText(/configuration of the appliance, not a fault/)).toBeTruthy();
-    // The question behind every unexpected screen in an admin.
-    expect(screen.getByText(/Client internet, sign-in, the PMS connection, sessions and accounting are unaffected/)).toBeTruthy();
+    // The question behind every unexpected screen in an admin -- answered without a PMS the site does not have.
+    expect(screen.getByText(/Client internet, sign-in, sessions and accounting are unaffected/)).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/PMS/);
     // And a way out, rather than a dead end.
     expect(screen.getByRole("link", { name: /Back to the dashboard/ })).toBeTruthy();
+  });
+
+  it("names the PMS connection among what is unaffected only where hospitality is licensed", async () => {
+    const on = { deployed: true, licensed: true, enabled: true, ready: true, effective: true, manageable: true };
+    get.mockImplementation((p: string) =>
+      Promise.resolve(p === "/capabilities" ? { surfaces: PRELIVE_SURFACES, modules: { hospitality: on } } : {}));
+    const { SurfaceNotEnabled } = await import("@/components/surface-not-enabled");
+    render(<SurfaceNotEnabled label="Charge health" />);
+    expect(await screen.findByText(/Client internet, sign-in, the PMS connection, sessions and accounting are unaffected/)).toBeTruthy();
   });
 });

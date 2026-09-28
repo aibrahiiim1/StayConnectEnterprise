@@ -40,6 +40,19 @@ export const AUDIT_CATEGORIES: AuditCategory[] = [
   "Networks", "Licence & cloud", "Backups", "Diagnostics",
 ];
 
+/** Categories that belong to an optional module. "Hotel" (PMS, grace, stays) is hospitality: offered as a
+ *  filter only where that module is licensed or has left records -- the audit is history, so it stays
+ *  reachable after the licence lapses, but a site that never was a hotel is not shown a Hotel filter. */
+export const MODULE_CATEGORIES: Partial<Record<AuditCategory, string>> = { Hotel: "hospitality" };
+
+/** The categories offered as filters, given which modules have history here. */
+export function auditCategoriesFor(hasHistory: (module: string) => boolean): AuditCategory[] {
+  return AUDIT_CATEGORIES.filter((c) => {
+    const m = MODULE_CATEGORIES[c];
+    return !m || hasHistory(m);
+  });
+}
+
 const WORDS: Record<string, AuditWords> = {
   // ---- sign-in & access ---------------------------------------------------------------------------------
   "operator.login": { title: "Signed in to Admin Console", category: "Sign-in & access", severity: "notice" },

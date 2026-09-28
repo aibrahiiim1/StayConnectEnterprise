@@ -52,11 +52,14 @@ import { PortalPreview } from "./preview";
 import { TemplateGallery } from "./template-gallery";
 import { AdvancedSection } from "./advanced";
 import { HistorySection } from "./history";
-import { Design, TemplateOptions, advancedChanged, assetSrc, contrastRatio, offeredLanguages } from "./strings";
+import { Design, TemplateOptions, advancedChanged, assetSrc, collectedDetails, contrastRatio, offeredLanguages } from "./strings";
+import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 import { LanguagesSection } from "./languages";
 
 // The page's tips, shared by the loading header and the loaded one so the lightbulb is there from the start.
-const PAGE_HELP = (
+// Room numbers are mentioned only where hospitality is licensed: the help must not describe a hotel to a site
+// that is not one.
+const pageHelp = (hospitality: boolean) => (
   <>
     <HelpSection title="How this page works">
       <p>
@@ -64,8 +67,8 @@ const PAGE_HELP = (
         the real sign-in page with your unsaved changes. Clients see your changes as soon as you save.
       </p>
       <p>
-        Room sign-in, vouchers and personal accounts are all shown in the preview so you can check every tab —
-        which of them clients actually see is decided in Sign-in methods, not on this page.
+        The preview shows the sign-in methods your clients actually see. Which methods those are is decided in
+        Sign-in methods, not on this page.
       </p>
     </HelpSection>
     <HelpSection title="The sections">
@@ -99,7 +102,7 @@ const PAGE_HELP = (
         items={[
           <>Custom CSS is wrapped in its own cascade layer: your rules beat the portal&apos;s styling and template, but cannot hide the sign-in forms. !important is removed — it is not needed.</>,
           <>Custom HTML is shown below the sign-in (as content blocks in the Editorial layout): text, headings, lists, tables, links and images from your uploads or https.</>,
-          <>Saving a change to either asks for your password, because this page collects room numbers and voucher codes.</>,
+          <>Saving a change to either asks for your password, because this page collects {collectedDetails(hospitality)}.</>,
         ]}
       />
     </HelpSection>
@@ -135,6 +138,9 @@ const IMAGE_LABEL: Record<ImageKey, string> = {
 
 export default function PortalSettingsPage() {
   const toast = useToast();
+  // Whether this site is a hotel as far as the portal is concerned. Decides only which words this screen uses
+  // for what the sign-in page collects; unknown module state fails closed to the neutral wording.
+  const hospitality = moduleLicensed(useCapabilities(), "hospitality");
   const [saved, setSaved] = useState<Design | null>(null);
   const [d, setD] = useState<Design>({});
   const [revisions, setRevisions] = useState<RevisionSummary[]>([]);
@@ -296,7 +302,7 @@ export default function PortalSettingsPage() {
     return (
       <PageShell width="wide">
         <PageHeader icon={<Palette />} eyebrow="Client Portal" title="Portal settings"
-          description="Design the Wi-Fi sign-in page clients see." help={PAGE_HELP} />
+          description="Design the Wi-Fi sign-in page clients see." help={pageHelp(hospitality)} />
         {loadErr ? <ErrorBanner err={loadErr} /> : (
           <div className="space-y-3" aria-label="Loading portal settings">
             <Skeleton className="h-16 w-full" />
@@ -332,7 +338,7 @@ export default function PortalSettingsPage() {
         eyebrow="Client Portal"
         title="Portal settings"
         description="Design the Wi-Fi sign-in page clients see. Clients see your changes as soon as you save."
-        help={PAGE_HELP}
+        help={pageHelp(hospitality)}
         actions={
           writable ? (
             <>
@@ -370,7 +376,7 @@ export default function PortalSettingsPage() {
       {needsPassword && (
         <Callout tone="info" title="Saving will ask for your password">
           You changed the portal&apos;s custom CSS or HTML. Those are confirmed separately, because this page
-          collects room numbers and voucher codes.
+          collects {collectedDetails(hospitality)}.
         </Callout>
       )}
       {blocking.length > 0 && (
@@ -523,7 +529,7 @@ export default function PortalSettingsPage() {
                     onPick={(f) => upload("background_url", f)} onClear={() => set("background_url", "")} error={fieldError("background_url")} />
                   <p className="text-xs text-muted-foreground">
                     PNG, JPEG, WebP or GIF, up to 8&nbsp;MB. SVG is refused: it can carry script, and this page
-                    collects room numbers and voucher codes.
+                    collects {collectedDetails(hospitality)}.
                   </p>
                   {unused.length > 0 && (
                     <div className="border-t border-border pt-4">
@@ -621,7 +627,7 @@ export default function PortalSettingsPage() {
           {section === "advanced" && (
             <AdvancedSection d={d} set={set} writable={writable} checking={checking}
               issues={issues.filter((i) => i.field === "custom_css" || i.field === "custom_html")}
-              sanitized={validation?.sanitized ?? null} needsPassword={needsPassword} />
+              sanitized={validation?.sanitized ?? null} needsPassword={needsPassword} hospitality={hospitality} />
           )}
 
           {section === "history" && (
@@ -639,7 +645,7 @@ export default function PortalSettingsPage() {
         open={stepUp}
         onOpenChange={(o) => { if (!o) setStepUp(false); }}
         title="Save your custom CSS and HTML"
-        description="You changed the portal's custom CSS or HTML. This page collects room numbers and voucher codes, so the styling and markup injected into it are confirmed separately."
+        description={`You changed the portal's custom CSS or HTML. This page collects ${collectedDetails(hospitality)}, so the styling and markup injected into it are confirmed separately.`}
         confirmLabel="Save changes"
         busy={busy}
         error={stepUpErr}

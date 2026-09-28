@@ -15,7 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/misc";
 import { PORTAL_TEMPLATES, type TemplateId } from "@/lib/api/portal-design";
 import { Design } from "./strings";
-import { PortalFrame, buildSrcDoc, usePortalHTML, useInlinedDesign, useSettled } from "./preview";
+import { PortalFrame, buildSrcDoc, usePortalHTML, useInlinedDesign, usePreviewMethods, useSettled, type AuthMethodsDoc } from "./preview";
 
 const THUMB = { w: 1180, h: 820 };
 
@@ -26,6 +26,9 @@ export function TemplateGallery({ design, value, onChange, disabled }: {
   disabled?: boolean;
 }) {
   const { html } = usePortalHTML();
+  // The same sign-in methods as the main preview: the site's own, less any whose module is not licensed here.
+  // A thumbnail of a hotel room tab on a site that has none would sell a layout on something it cannot show.
+  const { methods } = usePreviewMethods();
   const inlined = useInlinedDesign(useSettled(design, 700));
   // One design per layout, rebuilt only when the hotel's design has settled. The Advanced fields are left out
   // of the thumbnails: they are the hotel's own additions, and the thumbnails are about the layouts.
@@ -48,15 +51,17 @@ export function TemplateGallery({ design, value, onChange, disabled }: {
           description={t.description}
           badge={t.id === "classic" ? <Badge tone="neutral">Default</Badge> : value === t.id ? <Badge tone="accent">In use</Badge> : undefined}
         >
-          <Thumbnail html={html} design={perTemplate[t.id]} name={t.name} />
+          <Thumbnail html={html} methods={methods} design={perTemplate[t.id]} name={t.name} />
         </OptionCard>
       ))}
     </div>
   );
 }
 
-function Thumbnail({ html, design, name }: { html: string | null; design: Design; name: string }) {
-  const srcDoc = useMemo(() => (html ? buildSrcDoc(html, design) : null), [html, design]);
+function Thumbnail({ html, methods, design, name }: {
+  html: string | null; methods: AuthMethodsDoc | null; design: Design; name: string;
+}) {
+  const srcDoc = useMemo(() => (html && methods ? buildSrcDoc(html, design, methods) : null), [html, design, methods]);
   // The whole desktop page, scaled to the card's width: the card is narrower in a three-column designer than
   // on a phone, and a thumbnail that clips its own layout is not a preview of it.
   const box = useRef<HTMLDivElement>(null);

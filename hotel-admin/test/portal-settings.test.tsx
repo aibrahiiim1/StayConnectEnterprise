@@ -36,11 +36,34 @@ vi.mock("@/app/(app)/portal-branding/preview", () => ({
   PortalFrame: ({ title }: any) => <div data-testid="thumb" data-title={title} />,
   buildSrcDoc: () => "<html></html>",
   usePortalHTML: () => ({ html: "<html></html>", err: null }),
+  usePreviewMethods: () => ({ methods: {}, unreadable: false }),
   useInlinedDesign: (d: any) => d,
   useSettled: (v: any) => v,
 }));
 
-beforeEach(() => { get.mockReset(); put.mockReset(); post.mockReset(); del.mockReset(); upload.mockReset(); mockPost(); });
+// WHICH MODULES THIS SITE HAS. File-scoped, as in nav.test.tsx: the holder lets a test choose, and the real
+// moduleLicensed decides. Hospitality is licensed by default because most wording tests below are about the
+// Room Number string; the module tests switch it off.
+const MODULES: { on: string[] } = { on: ["hospitality"] };
+const flags = (on: boolean) => ({ deployed: on, licensed: on, enabled: on, ready: on, effective: on, manageable: on });
+vi.mock("@/lib/capabilities", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/capabilities")>();
+  return {
+    ...actual,
+    useCapabilities: () => ({
+      surfaces: [],
+      modules: Object.fromEntries(
+        ["hospitality", "email_otp", "sms_otp", "whatsapp_otp", "social_login", "card_payment", "room_charge"]
+          .map((m) => [m, flags(MODULES.on.includes(m))]),
+      ),
+    }),
+  };
+});
+
+beforeEach(() => {
+  get.mockReset(); put.mockReset(); post.mockReset(); del.mockReset(); upload.mockReset(); mockPost();
+  MODULES.on = ["hospitality"];
+});
 afterEach(() => vi.resetModules());
 
 /** A slice of what the portal really ships, enough to prove the screen shows it rather than English. */
@@ -524,5 +547,66 @@ describe("unsaved work is kept only when the server would keep it (found on PRE-
     fireEvent.change(await screen.findByLabelText(/^custom html$/i), { target: { value: "<p>Breakfast 7-10</p>" } });
     await waitFor(() => expect(drafts().length).toBeGreaterThan(0), { timeout: 4000 });
     expect(drafts().at(-1)?.[1]?.design?.custom_html).toBe("<p>Breakfast 7-10</p>");
+  });
+});
+
+// A SITE IS NOT A HOTEL UNLESS HOSPITALITY IS LICENSED, and it does not take cards, codes or social sign-in
+// unless those modules are. The wording editor lists only what this site's portal can show -- and a
+// translation saved for a string it no longer lists survives a save untouched.
+describe("the wording follows the site's modules", () => {
+  const HIDDEN = [/Room Number in English/, /Post-stay PIN in English/, /Pay by card in English/,
+    /Charge to my room in English/, /Continue with Google in English/, /Email address in English/,
+    /Verification code in English/, /Confirming your payment in English/];
+
+  it("lists no room, post-stay, card, room-charge, code or social wording without those modules", async () => {
+    MODULES.on = [];
+    mock({});
+    await renderPage();
+    open(/Sign-in page text/);
+    await screen.findByLabelText(/Voucher Code in English/);
+    for (const re of HIDDEN) expect(screen.queryByLabelText(re), String(re)).toBeNull();
+    const groups = Array.from(document.querySelectorAll("summary")).map((s) => s.textContent ?? "");
+    for (const g of ["Client Login", "Post-stay", "Social sign-in", "Email and SMS", "Confirming a payment"]) {
+      expect(groups.some((t) => t.startsWith(g)), g).toBe(false);
+    }
+  });
+
+  it("lists each module's wording while it is licensed", async () => {
+    MODULES.on = ["hospitality", "email_otp", "sms_otp", "social_login", "card_payment", "room_charge"];
+    mock({});
+    await renderPage();
+    open(/Sign-in page text/);
+    for (const re of HIDDEN) expect(await screen.findByLabelText(re), String(re)).toBeTruthy();
+  });
+
+  it("keeps a saved translation for a string it does not list", async () => {
+    MODULES.on = [];
+    mock({ hotel_name: "Semantics Demo", translations: { it: { "pms.room": "Camera n.", "acq.card": "Carta" } } });
+    await renderPage();
+    open(/Sign-in page text/);
+    fireEvent.click(screen.getByRole("tab", { name: /Italiano/ }));
+    // A hidden override is not counted as one the operator can see.
+    expect(within(screen.getByRole("tab", { name: /Italiano/ })).getByText("Built-in")).toBeTruthy();
+    fireEvent.change(await screen.findByLabelText(/Voucher Code in Italiano/), { target: { value: "Codice" } });
+    await waitFor(() => expect((screen.getByRole("button", { name: /Save changes/i }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
+    await waitFor(() => expect(saves()).toHaveLength(1));
+    expect(saves()[0][1].design.translations.it).toEqual({ "pms.room": "Camera n.", "acq.card": "Carta", "voucher.label": "Codice" });
+  });
+
+  it("says what the page collects without mentioning rooms unless hospitality is licensed", async () => {
+    MODULES.on = [];
+    mock({});
+    await renderPage();
+    open(/Advanced HTML/);
+    expect(await screen.findByText(/This page collects clients' voucher codes and passwords/)).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/room number/i);
+  });
+
+  it("names room numbers where hospitality is licensed", async () => {
+    mock({});
+    await renderPage();
+    open(/Advanced HTML/);
+    expect(await screen.findByText(/This page collects clients' room numbers and voucher codes/)).toBeTruthy();
   });
 });

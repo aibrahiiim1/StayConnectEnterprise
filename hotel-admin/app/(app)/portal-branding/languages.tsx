@@ -26,8 +26,9 @@ import { SearchInput } from "@/components/ui/data";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { RotateCcw, Check } from "lucide-react";
+import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 import {
-  Design, PORTAL_STRINGS, STRING_GROUPS, SHIPPED_LANGUAGES, offeredLanguages,
+  Design, PORTAL_STRINGS, SHIPPED_LANGUAGES, offeredLanguages, stringApplies, type PortalModule,
 } from "./strings";
 
 /** What the portal ships, as it reports it: code -> key -> wording. */
@@ -53,6 +54,22 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
   const [filter, setFilter] = useState("");
   const [newCode, setNewCode] = useState("");
   const [newLabel, setNewLabel] = useState("");
+
+  // ONLY THE WORDING THIS SITE'S PORTAL CAN ACTUALLY SHOW. A string for room sign-in, a one-time code, social
+  // sign-in, card payment or a room charge is listed only while its module is licensed here -- a site without
+  // hospitality is not asked to translate "Room Number". Unknown module state lists only the core strings
+  // (fail closed). Every count on this screen is over this list, so "3 customised" means three the operator
+  // can see.
+  //
+  // A HIDDEN STRING'S SAVED TRANSLATION IS KEPT. Nothing here deletes a key it does not list: write() copies
+  // the language's whole map and changes one key, and "Reset all" removes only the listed keys. The document
+  // is saved whole, so a hidden translation round-trips unchanged and is there again if the licence returns.
+  const caps = useCapabilities();
+  const strings = useMemo(
+    () => PORTAL_STRINGS.filter((s) => stringApplies(s, (m: PortalModule) => moduleLicensed(caps, m))),
+    [caps],
+  );
+  const groups = useMemo(() => Array.from(new Set(strings.map((s) => s.group))), [strings]);
 
   useEffect(() => {
     let live = true;
@@ -95,12 +112,12 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
 
   function countCustom(code: string) {
     const tr = d.translations?.[code] ?? {};
-    return PORTAL_STRINGS.filter((s) => (tr[s.key] ?? "").trim() !== "").length;
+    return strings.filter((s) => (tr[s.key] ?? "").trim() !== "").length;
   }
   /** Only a language the portal does not ship can be short of words. */
   function countMissing(code: string) {
     if (isBuiltIn(code)) return 0;
-    return PORTAL_STRINGS.length - countCustom(code);
+    return strings.length - countCustom(code);
   }
 
   function setOffered(code: string, on: boolean) {
@@ -135,10 +152,15 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
     });
   }
 
+  /** Back to the built-in wording for every string LISTED here. A translation for a string this site does not
+   *  show is not the operator's to reset from a screen that never showed it, so it stays. */
   function resetLanguage(code: string) {
     setD((p) => {
       const all = { ...(p.translations ?? {}) };
-      delete all[code];
+      const one = { ...(all[code] ?? {}) };
+      strings.forEach((s) => { delete one[s.key]; });
+      if (Object.keys(one).length) all[code] = one;
+      else delete all[code];
       return { ...p, translations: all };
     });
   }
@@ -282,7 +304,7 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
                     {isBuiltIn(current.code)
                       ? countCustom(current.code) === 0
                         ? "Everything below is the wording that ships with the portal. This is exactly what your clients read."
-                        : `${countCustom(current.code)} of ${PORTAL_STRINGS.length} strings have been changed by this site. The rest are the wording that ships with the portal.`
+                        : `${countCustom(current.code)} of ${strings.length} strings have been changed by this site. The rest are the wording that ships with the portal.`
                       : "This site added this language, so the portal has no wording for it. Anything left empty shows English."}
                   </p>
                 </div>
@@ -302,12 +324,12 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
                 <p className="text-sm text-muted-foreground">Reading the portal&apos;s built-in wording…</p>
               )}
 
-              {STRING_GROUPS.map((g) => {
-                const rows = PORTAL_STRINGS.filter((s) => s.group === g && visible(s.key, s.english));
+              {groups.map((g) => {
+                const rows = strings.filter((s) => s.group === g && visible(s.key, s.english));
                 if (!rows.length) return null;
                 const changed = rows.filter((s) => customised(current.code, s.key)).length;
                 return (
-                  <details key={g} open={!!needle || !isBuiltIn(current.code) || g === STRING_GROUPS[0]}
+                  <details key={g} open={!!needle || !isBuiltIn(current.code) || g === groups[0]}
                     className="rounded-md border border-border">
                     <summary className="flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                       {g}

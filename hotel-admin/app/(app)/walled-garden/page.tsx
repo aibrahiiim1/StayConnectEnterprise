@@ -27,6 +27,7 @@ import { canWrite } from "@/lib/roles";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { formatRelative, errMsg } from "@/lib/utils";
+import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 
 function kindTone(kind: string): "info" | "default" | "warn" {
   switch (kind) {
@@ -44,6 +45,14 @@ const KIND_LABELS: Record<string, string> = {
 
 export default function WalledGardenPage() {
   const toast = useToast();
+  // WHY A SITE MIGHT BE ALLOWED, limited to what this site can have: a payment provider only with Card payment
+  // licensed, an identity provider only with Social sign-in. Unknown module state lists neither (fail closed).
+  const caps = useCapabilities();
+  const reasons: string[] = [
+    "a captive-portal check, so the device notices the sign-in page",
+    ...(moduleLicensed(caps, "card_payment") ? ["a payment provider, so a paid package's payment page loads"] : []),
+    ...(moduleLicensed(caps, "social_login") ? ["an identity provider, for social login"] : []),
+  ];
   const [rows, setRows] = useState<WalledGardenRule[] | null>(null);
   const [roles, setRoles] = useState<string[] | null>(null);
   const [err, setErr] = useState<unknown>(null);
@@ -124,11 +133,7 @@ export default function WalledGardenPage() {
                 reachable without any authentication at all, so keep it to what the sign-in page itself needs.
               </p>
               <HelpList
-                items={[
-                  <>a captive-portal check, so the device notices the sign-in page;</>,
-                  <>a payment provider, so a paid package&apos;s payment page loads;</>,
-                  <>an identity provider, for social login.</>,
-                ]}
+                items={reasons.map((r, i) => <>{r}{i === reasons.length - 1 ? "." : ";"}</>)}
               />
             </HelpSection>
             <HelpSection title="Writing a rule">

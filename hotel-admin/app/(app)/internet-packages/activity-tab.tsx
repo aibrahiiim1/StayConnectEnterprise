@@ -39,6 +39,7 @@ import { formatBytes } from "@/lib/bytes";
 import { formatDuration } from "@/lib/units";
 import { formatDate, formatRelative } from "@/lib/utils";
 import type { TabProps } from "./packages-tab";
+import { moduleHasHistory, moduleLicensed, useCapabilities } from "@/lib/capabilities";
 
 const PAGE = 25;
 
@@ -54,6 +55,11 @@ function localToISO(v: string): string | undefined {
   return Number.isFinite(t.getTime()) ? t.toISOString() : undefined;
 }
 
+/** Sources that exist only because of hospitality (stays, grace, post-stay, PMS transfer). */
+const HOSPITALITY_SOURCES = ["CHECKOUT_GRACE", "EMERGENCY_GRACE", "POST_STAY_CONVERSION", "CROSS_PMS_TRANSFER"];
+/** Modules through which a client signs in by email, phone or a social account. */
+const IDENTITY_MODULES = ["email_otp", "sms_otp", "whatsapp_otp", "social_login"];
+
 export function ActivityTab({ guard, setErr }: TabProps) {
   const [range, setRange] = useState<ActivityRange>("7d");
   const [customFrom, setCustomFrom] = useState("");
@@ -63,6 +69,18 @@ export function ActivityTab({ guard, setErr }: TabProps) {
   const [status, setStatus] = useState<ActivityStatus>("all");
   const [q, setQ] = useState("");
   const [offset, setOffset] = useState(0);
+
+  // HOW ACCESS CAN HAVE BEEN GIVEN HERE. The hospitality ways -- grace, emergency grace, after-stay access, a
+  // move between PMS connections -- are offered as filters only where hospitality is licensed or has left
+  // records; "Email, phone or social sign-in" only where an identity module is licensed. The filter currently
+  // chosen always stays listed, so a selection can never be hidden under its own control. Rows are data and
+  // are shown as the server returns them.
+  const caps = useCapabilities();
+  const stays = moduleHasHistory(caps, "hospitality");
+  const identity = IDENTITY_MODULES.some((m) => moduleLicensed(caps, m));
+  const offerSource = (v: string) =>
+    v === source
+    || (HOSPITALITY_SOURCES.includes(v) ? stays : v === "OTP_SOCIAL_DEFAULT" ? identity : true);
 
   const [resp, setResp] = useState<ActivityResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -137,12 +155,16 @@ export function ActivityTab({ guard, setErr }: TabProps) {
               <Field label="How it was given" className="w-full sm:w-56">
                 <Select value={source} onChange={(e) => { setOffset(0); setSource(e.target.value); }}>
                   <option value="">Every way</option>
-                  {Object.entries(SOURCE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  {Object.entries(SOURCE_LABELS).filter(([v]) => offerSource(v)).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 </Select>
               </Field>
             </div>
-            <SearchInput value={q} onChange={reset(setQ)} delay={300}
-              placeholder="Room or reservation" label="Search by room or reservation" />
+            {/* The server searches rooms and reservations and nothing else, so the box exists only where stays
+                can: a neutral placeholder on a search that can only match a room would be a promise it breaks. */}
+            {stays && (
+              <SearchInput value={q} onChange={reset(setQ)} delay={300}
+                placeholder="Room or reservation" label="Search by room or reservation" />
+            )}
           </Toolbar>
           {range === "custom" && !customReady && (
             <p className="text-xs text-muted-foreground">Choose both a start and an end to see a custom period.</p>
@@ -331,8 +353,12 @@ function ActivityRecord({ r }: { r: ActivityRow }) {
             { label: "Price", value: priceText(r.price_minor, r.currency, r.currency_exponent) },
             { label: "How it was given", value: r.source_label },
             { label: "Portal offer", value: r.had_offer ? "Chosen from an offer on the portal" : "Given without a portal offer" },
-            { label: "Room", value: r.room ? `Room ${r.room}` : "—", hint: r.room ? r.pms_interface : undefined },
-            { label: "Reservation", value: r.reservation || "—" },
+            // A room and a reservation are facts of a stay: shown when this grant has one, never as an empty
+            // "Room —" on a site that has no rooms.
+            ...(r.room ? [
+              { label: "Room", value: `Room ${r.room}`, hint: r.pms_interface },
+              { label: "Reservation", value: r.reservation || "—" },
+            ] : []),
             { label: "Service plan", value: r.service_plan || "—" },
             { label: "Data allowance", value: r.quota_bytes ? formatBytes(r.quota_bytes) : "No data limit",
               hint: r.consumed_data_bytes != null && r.quota_bytes ? `${formatBytes(r.consumed_data_bytes)} counted against it` : undefined },
