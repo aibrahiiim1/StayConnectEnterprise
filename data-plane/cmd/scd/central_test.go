@@ -37,7 +37,7 @@ func connected(in centralInputs) centralInputs {
 func TestComputeCentralStatus(t *testing.T) {
 	base := func() centralInputs {
 		return centralInputs{Now: now0, ApplianceID: "appl-1", Serial: "SC-1", CertRequired: true, CertReady: true,
-			CustomerName: "Coral Sea", SiteName: "Aqua"}
+			CustomerName: "Northwind", SiteName: "Main campus"}
 	}
 	cases := []struct {
 		name       string
