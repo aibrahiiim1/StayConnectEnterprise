@@ -8,7 +8,7 @@
 --   2. iam_v2.site_module_changes   -- append-only history of every change, written by the setter only.
 --   3. site_module_get / site_module_set -- the whole interface. No runtime role holds UPDATE on the table,
 --      so the change log is mandatory by privilege, not by convention.
---   4. public.sites.site_type       -- descriptive site metadata delivered by the signed assignment.
+--   4. (Site Type is read from the signed assignment; no column -- see the end of this file.)
 --      It authorises and enables NOTHING; it is shown and used for defaults only.
 --
 -- ABSENCE OF A ROW MEANS "NOT ENABLED". This is a product choice, not an operational value: a licensed module
@@ -154,10 +154,8 @@ SELECT s.tenant_id, s.site_id, s.module_id, 'migration 0094',
    AND NOT EXISTS (SELECT 1 FROM iam_v2.site_module_changes c
                     WHERE c.tenant_id = s.tenant_id AND c.site_id = s.site_id AND c.module_id = 'hospitality');
 
--- Site Type: descriptive metadata from the signed assignment. NULL until an assignment carries one.
-ALTER TABLE public.sites ADD COLUMN IF NOT EXISTS site_type text;
-COMMENT ON COLUMN public.sites.site_type IS
-  'Descriptive site type from the signed assignment (HOTEL, CAFE, ...). Unknown future values are stored as '
-  'received. Authorises and enables nothing.';
+-- Site Type has NO column here. It is descriptive metadata carried by the signed assignment, and the appliance
+-- reads it from the verified assignment it already persists; a database copy would be a second source that
+-- could disagree with the signed one, and a migration may not change public-schema structure in any case.
 
 COMMIT;

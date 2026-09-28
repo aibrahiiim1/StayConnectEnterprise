@@ -60,6 +60,15 @@ BEGIN
   RETURN NEW;
 END $fn$;
 
+-- Recreated EMPTY only by a role that may create in public (the same boundary as the forward drop); on a live
+-- site the rollback leaves it absent and says so. It held clear-text secrets and nothing reads it.
+DO $stripe$
+BEGIN
+  IF NOT has_schema_privilege(current_user, 'public', 'CREATE') THEN
+    RAISE NOTICE 'public.stripe_accounts not recreated: % may not create in public', current_user;
+    RETURN;
+  END IF;
+  EXECUTE $ddl$
 CREATE TABLE IF NOT EXISTS public.stripe_accounts (
     id uuid DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
     tenant_id uuid NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
@@ -75,8 +84,9 @@ CREATE TABLE IF NOT EXISTS public.stripe_accounts (
     last_error_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS stripe_accounts_tenant_enabled_idx ON public.stripe_accounts (tenant_id) WHERE enabled;
+)$ddl$;
+  EXECUTE $ddl$CREATE UNIQUE INDEX IF NOT EXISTS stripe_accounts_tenant_enabled_idx ON public.stripe_accounts (tenant_id) WHERE enabled$ddl$;
+END $stripe$;
 
 DO $own$
 BEGIN

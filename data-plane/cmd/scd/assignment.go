@@ -344,12 +344,6 @@ func (s *server) repointGuestNetworks(ctx context.Context, doc *assignment.Docum
 	// Ensure the appliance-local tenant/site mirror rows exist first (guest-domain
 	// tables FK to them).
 	s.seedTenantSiteMirror(ctx, doc.TenantID, doc.SiteID, doc.TenantName, doc.SiteName)
-	// Site Type is descriptive metadata carried by the signed assignment. Stored as received (a future type
-	// this appliance does not know is kept verbatim); it authorises and enables nothing.
-	if _, err := s.db.Exec(ctx, `UPDATE sites SET site_type = NULLIF($2,'') WHERE id = $1`,
-		doc.SiteID, doc.SiteType); err != nil {
-		slog.Warn("assignment: site type mirror failed", "err", err)
-	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return

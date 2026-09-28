@@ -451,7 +451,27 @@ END $fn$;
 -- ---------------------------------------------------------------------------------------------------------
 -- 6. The legacy plaintext Stripe credential path is removed.
 -- ---------------------------------------------------------------------------------------------------------
-DROP TABLE IF EXISTS public.stripe_accounts CASCADE;
+--
+-- A MIGRATION ON A LIVE SITE MAY NOT CHANGE PUBLIC-SCHEMA STRUCTURE: scripts/edge-migrate.sh applies it as
+-- iam_v2_owner, which owns nothing in public. So the table is dropped here only when the applying role owns
+-- it -- a factory-clean build and the baseline generator -- and a live appliance retires it with the
+-- owner-run deploy/scripts/retire-legacy-stripe-accounts.sql. Both paths end without the table. A table
+-- that still holds a row is never dropped: a stored credential is the operator's to delete, knowingly.
+DO $stripe$
+DECLARE v_owner oid;
+BEGIN
+  IF to_regclass('public.stripe_accounts') IS NULL THEN RETURN; END IF;
+  SELECT relowner INTO v_owner FROM pg_class WHERE oid = 'public.stripe_accounts'::regclass;
+  IF NOT pg_has_role(current_user, v_owner, 'USAGE') THEN
+    RAISE NOTICE 'public.stripe_accounts is not owned by %; retire it with deploy/scripts/retire-legacy-stripe-accounts.sql', current_user;
+    RETURN;
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.stripe_accounts) THEN
+    RAISE EXCEPTION 'STRIPE_ACCOUNTS_NOT_EMPTY: public.stripe_accounts still holds a stored credential; delete it deliberately first'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  EXECUTE 'DROP TABLE public.stripe_accounts CASCADE';
+END $stripe$;
 
 -- ---------------------------------------------------------------------------------------------------------
 -- 7. Privileges. scd owns the payment key: it seals credentials and runs checkouts and reconciliation. The
