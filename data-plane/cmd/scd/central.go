@@ -23,6 +23,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -53,9 +54,13 @@ const (
 	licRevoked       = "revoked"
 	licWrongHardware = "wrong_hardware"
 
-	centralConnected     = "connected"
-	centralUnreachable   = "unreachable"
-	centralNotConfigured = "not_configured"
+	centralConnected   = "connected"
+	centralUnreachable = "unreachable"
+	// centralCredentialRefused: Central is answering (a recent successful call) but refuses this appliance's
+	// certificate on its mTLS calls -- typically after "Reissue certificate", until the new one is installed.
+	// It is not "unreachable", and saying so sent operators looking for a network fault that did not exist.
+	centralCredentialRefused = "credential_refused"
+	centralNotConfigured     = "not_configured"
 )
 
 // expiringWithin is when an active licence starts being reported as "expiring" (section 3: <= 30 days).
@@ -76,6 +81,8 @@ type centralContact struct {
 	lastOK   time.Time
 	lastFail time.Time
 	lastErr  string
+	// lastFailCode is the HTTP status of the last failure (0 when it was not an HTTP answer).
+	lastFailCode int
 }
 
 // record notes one call's outcome. Central answering "nothing for you yet" (no licence, certificate pending) is
@@ -92,6 +99,32 @@ func (c *centralContact) record(err error, now time.Time) {
 	}
 	c.lastFail = now
 	c.lastErr = describeCentralErr(err)
+	c.lastFailCode = httpCodeOf(err)
+}
+
+// httpCodeOf returns the HTTP status an error carries, or 0.
+func httpCodeOf(err error) int {
+	var se *identity.StatusError
+	var he *licstate.HTTPError
+	var ce *httpStatusErr
+	switch {
+	case errors.As(err, &se):
+		return se.Code
+	case errors.As(err, &he):
+		return he.Code
+	case errors.As(err, &ce):
+		return ce.code
+	}
+	return 0
+}
+
+func (c *centralContact) failCode() int {
+	if c == nil {
+		return 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastFailCode
 }
 
 func (c *centralContact) snapshot() (ok, fail time.Time, lastErr string) {
@@ -190,6 +223,7 @@ type centralInputs struct {
 	CentralConfigured bool
 	LastOK, LastFail  time.Time
 	LastErr           string
+	LastFailCode      int
 
 	IdentityFpr, WANMAC, LANMAC, Endpoint string
 	Version, PermissiveBlocked            string
@@ -283,6 +317,15 @@ func centralLinkState(in centralInputs) centralLink {
 		return out
 	case !in.LastOK.IsZero() && !in.LastOK.Before(in.LastFail) && in.Now.Sub(in.LastOK) <= connectedWithin:
 		out.State = centralConnected
+		return out
+	}
+	// Central answered recently, and the failing calls are refusals of the certificate: reachable, not trusted.
+	if (in.LastFailCode == http.StatusUnauthorized || in.LastFailCode == http.StatusForbidden) &&
+		!in.LastOK.IsZero() && in.Now.Sub(in.LastOK) <= connectedWithin && in.LastFail.After(in.LastOK) {
+		out.State = centralCredentialRefused
+		e := "OneGate Central answers, but no longer accepts this appliance's certificate (HTTP " +
+			strconv.Itoa(in.LastFailCode) + "). This follows a certificate reissue in Central; the appliance requests a new certificate by itself."
+		out.LastError = &e
 		return out
 	}
 	out.State = centralUnreachable
@@ -456,6 +499,7 @@ func (s *server) centralInputs(ctx context.Context) centralInputs {
 		in.CertNotAfter, _ = st["not_after"].(time.Time)
 	}
 	in.LastOK, in.LastFail, in.LastErr = s.central.snapshot()
+	in.LastFailCode = s.central.failCode()
 	if s.db != nil {
 		cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		if n, err := s.activeSessionCount(cctx); err == nil {
@@ -495,6 +539,12 @@ func (s *server) centralRefresh(w http.ResponseWriter, r *http.Request) {
 		} else {
 			if s.certMgr != nil {
 				s.certMgr.Kick()
+			}
+			if s.certReconcile != nil {
+				select {
+				case s.certReconcile <- struct{}{}:
+				default:
+				}
 			}
 			if s.lic != nil {
 				s.lic.Kick()

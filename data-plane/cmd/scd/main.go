@@ -268,6 +268,9 @@ type server struct {
 	central *centralContact
 	reg     *registrar
 	asgKick chan struct{}
+	// certReconcile asks the certificate agent to check, now, that Central still honours the installed
+	// certificate (appliancecert.Reconcile). Sent when an mTLS call is refused with 401/403.
+	certReconcile chan struct{}
 
 	// The two messages to Central that are retried until Central confirms (central_retry.go): the
 	// terminal-assignment acknowledgement and the offline-package reconciliation. centralTransport overrides
@@ -699,6 +702,7 @@ func main() {
 	s.idStore = idStore
 	s.central = central
 	s.asgKick = make(chan struct{}, 1)
+	s.certReconcile = make(chan struct{}, 1)
 	s.reconcileKick = make(chan struct{}, 1)
 	if ident != nil {
 		s.idPriv = ident.PrivateKey()
@@ -1138,8 +1142,43 @@ func main() {
 					slog.Info("license fetch cut over to mTLS transport", "base", base)
 				}
 			}
+			// A NEW CERTIFICATE MUST REACH EVERY USER OF IT. The assignment agent asks certMgr for the client on
+			// every call; the licence fetcher was handed one client once, so after a rotation or a reissue it would
+			// have kept presenting the old certificate. Re-handed after every change.
+			rehand := func() {
+				if cl, base, ok := certMgr.Transport(); ok {
+					s.lic.SetMTLSTransport(cl, base)
+				}
+				select {
+				case s.asgKick <- struct{}{}:
+				default:
+				}
+			}
+			var lastReconcile time.Time
+			reconcile := func(why string) {
+				if time.Since(lastReconcile) < time.Minute {
+					return
+				}
+				lastReconcile = time.Now()
+				out, err := certMgr.Reconcile(rootCtx)
+				if err != nil {
+					central.record(err, time.Now())
+					slog.Warn("appliancecert: reconcile failed", "why", why, "err", err)
+					return
+				}
+				switch out {
+				case appliancecert.ReconcileInstalled, appliancecert.ReconcileReissued:
+					slog.Info("appliancecert: certificate replaced", "why", why, "outcome", string(out))
+					rehand()
+				case appliancecert.ReconcileWaiting:
+					slog.Info("appliancecert: a certificate request is waiting at Central", "why", why)
+				}
+			}
+			reconcile("startup")
 			t := time.NewTicker(6 * time.Hour)
 			defer t.Stop()
+			rt := time.NewTicker(5 * time.Minute)
+			defer rt.Stop()
 			for {
 				select {
 				case <-rootCtx.Done():
@@ -1147,7 +1186,13 @@ func main() {
 				case <-t.C:
 					if err := certMgr.MaybeRotate(rootCtx, 14*24*time.Hour); err != nil {
 						slog.Warn("appliancecert: rotation failed", "err", err)
+					} else {
+						rehand()
 					}
+				case <-rt.C:
+					reconcile("periodic")
+				case <-s.certReconcile:
+					reconcile("mtls_refused")
 				}
 			}
 		}()

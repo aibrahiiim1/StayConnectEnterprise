@@ -41,13 +41,28 @@ describe("Appliance page — the primary action follows the activation state", (
     expect(screen.getByText("Not assigned yet")).toBeInTheDocument();
   });
 
-  it("activating: explains the wait and offers the offline package", async () => {
-    mockFetch([detail(appliance("activating"))]);
+  it("activating with an imported offline request: offers the activation package", async () => {
+    mockFetch([detail({ ...appliance("activating"), offline_request_pending: true, activating_on: "certificate" })]);
     renderAs(PLATFORM_ME, <AppliancePage params={{ id: "a1" }} />);
     expect(await screen.findByRole("heading", { name: "Activating" })).toBeInTheDocument();
     expect(screen.getByText(/checks every 5 seconds/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Activation package/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Activate" })).not.toBeInTheDocument();
+  });
+
+  it("activating without an offline request: no package that could only fail, and says what to do first", async () => {
+    mockFetch([detail({ ...appliance("activating"), offline_request_pending: false, activating_on: "certificate" })]);
+    renderAs(PLATFORM_ME, <AppliancePage params={{ id: "a1" }} />);
+    expect(await screen.findByRole("heading", { name: "Activating" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Activation package/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/import it on the Appliances page/)).toBeInTheDocument();
+  });
+
+  it("certificate reissue: says the appliance will request a new certificate, and offers no offline package", async () => {
+    mockFetch([detail({ ...appliance("activating"), offline_request_pending: true, activating_on: "certificate_reissue" })]);
+    renderAs(PLATFORM_ME, <AppliancePage params={{ id: "a1" }} />);
+    expect(await screen.findByRole("heading", { name: "Waiting for a new certificate" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Activation package/ })).not.toBeInTheDocument();
   });
 
   it("activated: the license and its operations, plus Move and Retire", async () => {

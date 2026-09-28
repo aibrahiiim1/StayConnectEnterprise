@@ -281,20 +281,43 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
         <Card className="border-info/40">
           <CardHeader>
             <div className="space-y-1">
-              <CardTitle>Activating</CardTitle>
+              <CardTitle>{a.activating_on === "certificate_reissue" ? "Waiting for a new certificate" : "Activating"}</CardTitle>
               <CardDescription>
-                {activationText.explain} This page checks every 5 seconds.
+                {a.activating_on === "certificate_reissue" ? (
+                  <>
+                    Its certificate was revoked for reissue. The appliance requests a new one by itself the next time it
+                    contacts OneGate Central, and it is signed at once because the appliance is activated.
+                  </>
+                ) : a.activating_on === "license" ? (
+                  <>It holds its certificate and is waiting for a license.</>
+                ) : (
+                  activationText.explain
+                )}{" "}
+                This page checks every 5 seconds.
               </CardDescription>
             </div>
           </CardHeader>
-          {canManage && (
+          {/* OFFLINE ACTIVATION IS OFFERED ONLY WHEN IT CAN WORK. A package is generated from an imported
+              activation request; without one the download can only fail, so the button is not shown and the
+              card says what to do first instead. */}
+          {canManage && a.activating_on !== "certificate_reissue" && (
             <CardFooter>
-              <span className="me-auto text-caption text-muted-foreground">
-                No internet at the site? Download the activation package and upload it in the appliance&apos;s Admin Console.
-              </span>
-              <Button variant="secondary" size="sm" disabled={fileBusy} onClick={() => download("package")}>
-                <Download /> Activation package
-              </Button>
+              {a.offline_request_pending ? (
+                <>
+                  <span className="me-auto text-caption text-muted-foreground">
+                    An offline activation request is on file. Download the package and upload it in the appliance&apos;s
+                    Admin Console.
+                  </span>
+                  <Button variant="secondary" size="sm" disabled={fileBusy} onClick={() => download("package")}>
+                    <Download /> Activation package
+                  </Button>
+                </>
+              ) : (
+                <span className="text-caption text-muted-foreground">
+                  No internet at the site? Download the activation request from the appliance&apos;s Admin Console and
+                  import it on the Appliances page; the activation package can then be downloaded here.
+                </span>
+              )}
             </CardFooter>
           )}
         </Card>

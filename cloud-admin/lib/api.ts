@@ -194,6 +194,10 @@ export type ApplianceRow = {
    *  for that customer. The name is null when that customer is no longer in Central. */
   holds_customer_id?: string | null;
   holds_customer_name?: string | null;
+  /** An imported offline activation request is on file and unconsumed: an activation package can be generated. */
+  offline_request_pending?: boolean;
+  /** What an "activating" appliance still lacks: certificate_reissue | certificate | license. */
+  activating_on?: "certificate_reissue" | "certificate" | "license" | string;
 };
 
 export type LicenseRow = {

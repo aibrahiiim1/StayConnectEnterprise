@@ -720,3 +720,104 @@ func (m *Manager) signedDoWith(ctx context.Context, cl *http.Client, base, metho
 	}
 	return resp.StatusCode, nil
 }
+
+// ReconcileOutcome is what Reconcile found and did.
+type ReconcileOutcome string
+
+const (
+	ReconcileCurrent     ReconcileOutcome = "current"   // Central honours the installed certificate
+	ReconcileInstalled   ReconcileOutcome = "installed" // Central had signed a newer certificate; installed
+	ReconcileReissued    ReconcileOutcome = "reissued"  // Central held none; a CSR was sent and the result installed
+	ReconcileWaiting     ReconcileOutcome = "waiting"   // a request is on file; Central has not signed it yet
+	ReconcileNotYetReady ReconcileOutcome = "not_ready" // no certificate is installed; the bootstrap owns this
+)
+
+// Reconcile checks that the installed certificate is still the one Central honours, and repairs it when not.
+//
+// WHY. Central can withdraw a certificate by itself -- "Reissue certificate" revokes the active one and
+// waits for the appliance's next CSR, which it signs at once because the appliance is activated. An
+// appliance that holds a certificate FILE never re-enters the bootstrap, so before this it kept presenting the
+// revoked certificate on every mTLS call, was refused forever, and Central showed "Activating" indefinitely.
+//
+// It asks over the SIGNED HTTPS INGRESS, never over the mTLS channel -- the mTLS channel is exactly what is
+// being refused -- and it follows the same one status contract as the bootstrap:
+//
+//	issued, same fingerprint    nothing to do
+//	issued, other fingerprint   Central signed a newer certificate (a reissue from a waiting CSR): install it
+//	pending                     our request is on file: wait
+//	none                        Central holds no active certificate for us: send ONE CSR and install the result
+//
+// "none" is the only state that sends a CSR, exactly as in the bootstrap, so a reconcile can never file a
+// second request while one is pending. The mTLS private key is kept: the new certificate binds the same key.
+func (m *Manager) Reconcile(ctx context.Context) (ReconcileOutcome, error) {
+	if !m.Ready() {
+		return ReconcileNotYetReady, nil
+	}
+	status, certPEM, caPEM, err := m.collectIngress(ctx)
+	if err != nil {
+		return "", err
+	}
+	switch status {
+	case statusIssued:
+		if certPEM == "" || fprOfPEM(certPEM) == m.currentFpr() {
+			return ReconcileCurrent, nil
+		}
+		if err := m.store(ctx, []byte(certPEM), []byte(caPEM)); err != nil {
+			return "", err
+		}
+		slog.Warn("appliancecert: Central holds a newer certificate for this appliance; installed it", "fpr", m.currentFpr())
+		return ReconcileInstalled, nil
+	case statusPending:
+		return ReconcileWaiting, nil
+	case statusNone:
+		slog.Warn("appliancecert: Central no longer honours the installed certificate; requesting a new one")
+		if err := m.submitCSRIngress(ctx); err != nil {
+			return "", err
+		}
+		status, certPEM, caPEM, err = m.collectIngress(ctx)
+		if err != nil {
+			return "", err
+		}
+		if status == statusIssued && certPEM != "" {
+			if err := m.store(ctx, []byte(certPEM), []byte(caPEM)); err != nil {
+				return "", err
+			}
+			slog.Info("appliancecert: new certificate installed after reissue", "fpr", m.currentFpr())
+			return ReconcileReissued, nil
+		}
+		return ReconcileWaiting, nil
+	}
+	if reason, ok := terminalStatuses[status]; ok {
+		return "", fmt.Errorf("%w: %s (status %q)", ErrCertTerminal, reason, status)
+	}
+	return "", fmt.Errorf("%w: %q", ErrCertUnknownState, status)
+}
+
+func (m *Manager) currentFpr() string { m.mu.RLock(); defer m.mu.RUnlock(); return m.fpr }
+
+// collectIngress is collect over the signed HTTPS ingress, whatever certificate is installed.
+func (m *Manager) collectIngress(ctx context.Context) (status, certPEM, caPEM string, err error) {
+	var out struct {
+		Status         string `json:"status"`
+		CertificatePEM string `json:"certificate_pem"`
+		CAChain        string `json:"ca_chain"`
+	}
+	if _, err := m.signedDoWith(ctx, http.DefaultClient, m.ctrlBase, http.MethodGet, "/v1/appliance/certificate", nil, &out); err != nil {
+		return "", "", "", fmt.Errorf("cert fetch: %w", err)
+	}
+	return out.Status, out.CertificatePEM, out.CAChain, nil
+}
+
+// submitCSRIngress sends a CSR over the signed HTTPS ingress.
+func (m *Manager) submitCSRIngress(ctx context.Context) error {
+	csrPEM, err := m.makeCSR()
+	if err != nil {
+		return err
+	}
+	body, _ := json.Marshal(map[string]string{"csr_pem": string(csrPEM)})
+	if _, err := m.signedDoWith(ctx, http.DefaultClient, m.ctrlBase, http.MethodPost, "/v1/appliance/csr", body, nil); err != nil {
+		return fmt.Errorf("csr submit: %w", err)
+	}
+	slog.Info("appliancecert: CSR submitted (reconcile)")
+	return nil
+}

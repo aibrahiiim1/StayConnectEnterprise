@@ -1,5 +1,6 @@
 "use client";
 
+import { certCheckDetail } from "@/lib/cert-check";
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -73,12 +74,15 @@ export default function CertificatePage() {
   async function check() {
     setBusy("check"); setErr(null); setResult(null);
     try {
-      const r = await api.post<{ ok: boolean; exit: number }>("/hotel-admin-cert/check", {});
+      const r = await api.post<{ ok: boolean; exit: number; output_tail?: string }>("/hotel-admin-cert/check", {});
+      const detail = certCheckDetail(r.output_tail);
       if (r.ok) {
-        setResult({ tone: "success", text: "Certificate validated — no problems found." });
-        toast.success("Certificate checked", "No problems found.");
+        setResult({ tone: "success", text: detail ? `Certificate validated. ${detail}` : "Certificate validated — no problems found." });
+        toast.success("Certificate checked", detail || "No problems found.");
       } else {
-        setResult({ tone: "danger", text: `Validation reported a problem (exit ${r.exit}).` });
+        // The validator's own reason, not a bare exit code: "the served chain does not verify against the
+        // Caddy local root", "missing/incorrect IP SAN", "cert not currently valid", ...
+        setResult({ tone: "danger", text: detail ? `Validation found a problem: ${detail}.` : `Validation found a problem (code ${r.exit}).` });
       }
       await load();
     } catch (e) { setErr(errMsg(e)); }
@@ -261,3 +265,4 @@ export default function CertificatePage() {
     </PageShell>
   );
 }
+

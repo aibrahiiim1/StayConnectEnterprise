@@ -210,3 +210,28 @@ func TestCentralContactRecordsAnswersAndFailures(t *testing.T) {
 		}
 	}
 }
+
+// CENTRAL ANSWERING BUT REFUSING THE CERTIFICATE IS NOT "UNREACHABLE".
+//
+// Found on PRE-LIVE after "Reissue certificate" in Central: the signed hello kept succeeding (Central showed the
+// appliance Connected) while every mTLS call was refused with 403, and the Admin Console said "Temporarily
+// unreachable", which sent the operator looking for a network fault that did not exist.
+func TestCentralLinkCredentialRefusedIsNotUnreachable(t *testing.T) {
+	now := time.Date(2026, 9, 28, 22, 0, 0, 0, time.UTC)
+	in := centralInputs{Now: now, CentralConfigured: true,
+		LastOK: now.Add(-2 * time.Minute), LastFail: now.Add(-10 * time.Second),
+		LastErr: "OneGate Central did not accept this appliance's credentials (HTTP 403).", LastFailCode: 403}
+	got := centralLinkState(in)
+	if got.State != centralCredentialRefused || got.LastError == nil {
+		t.Fatalf("want credential_refused with a reason, got %+v", got)
+	}
+	// Silent for too long, or failing without an HTTP refusal, is still unreachable.
+	in.LastOK = now.Add(-time.Hour)
+	if got := centralLinkState(in); got.State != centralUnreachable {
+		t.Fatalf("no recent answer is unreachable, got %s", got.State)
+	}
+	in.LastOK, in.LastFailCode = now.Add(-2*time.Minute), 0
+	if got := centralLinkState(in); got.State != centralUnreachable {
+		t.Fatalf("a transport failure is unreachable, got %s", got.State)
+	}
+}

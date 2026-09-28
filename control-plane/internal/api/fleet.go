@@ -50,6 +50,14 @@ type ApplianceRow struct {
 	// customer is no longer in Central.
 	HoldsCustomerID   *string `json:"holds_customer_id"`
 	HoldsCustomerName *string `json:"holds_customer_name"`
+	// OfflineRequestPending: an imported offline activation request is on file and not yet consumed, so an
+	// activation package CAN be generated. Without one the package endpoint refuses, so the console offers it
+	// only when this is true.
+	OfflineRequestPending bool `json:"offline_request_pending"`
+	// ActivatingOn says what an "activating" appliance still lacks, so the console can say it plainly:
+	// "certificate_reissue" (its certificate was revoked for reissue and the appliance has not yet sent the
+	// new CSR), "certificate" (it never held one), "license" (no licence yet). Empty in every other state.
+	ActivatingOn string `json:"activating_on,omitempty"`
 
 	lifecycle          string
 	terminalDelivery   string
@@ -84,7 +92,10 @@ func (b *Base) queryAppliances(ctx context.Context, customerID, applianceID stri
                (SELECT count(*) FROM appliance_security_alerts x WHERE x.appliance_id = a.id AND NOT x.resolved),
                l.id::text, l.status, l.valid_until, l.grace_period_days, l.offline_grace_days,
                l.max_concurrent_online_guests, l.license_version, l.modules,
-               COALESCE(a.held_customer_id::text,''), COALESCE(hc.name,'')
+               COALESCE(a.held_customer_id::text,''), COALESCE(hc.name,''),
+               EXISTS (SELECT 1 FROM offline_activation_requests o WHERE o.appliance_id = a.id AND o.consumed_at IS NULL),
+               EXISTS (SELECT 1 FROM appliance_certificates c WHERE c.appliance_id = a.id AND c.status = 'revoked'
+                         AND c.revocation_reason LIKE 'reissue:%')
           FROM appliances a
           LEFT JOIN tenants t ON t.id = a.tenant_id
           LEFT JOIN tenants hc ON hc.id = a.held_customer_id
@@ -110,7 +121,7 @@ func (b *Base) queryAppliances(ctx context.Context, customerID, applianceID stri
 		var a ApplianceRow
 		var custID, custName, siteID, siteName, siteType, ip, td, heldID, heldName string
 		var licModules []string
-		var hasCert bool
+		var hasCert, reissued bool
 		var licID, licStatus *string
 		var licUntil *time.Time
 		var licGrace, licOffline, licCap *int
@@ -119,7 +130,8 @@ func (b *Base) queryAppliances(ctx context.Context, customerID, applianceID stri
 			&custID, &custName, &siteID, &siteName, &siteType,
 			&a.lifecycle, &a.LastSeenAt, &ip, &a.RegisteredAt, &a.ActivatedAt,
 			&hasCert, &td, &a.terminalDeadline, &a.replacementPending, &a.OpenAlerts,
-			&licID, &licStatus, &licUntil, &licGrace, &licOffline, &licCap, &licVer, &licModules, &heldID, &heldName); err != nil {
+			&licID, &licStatus, &licUntil, &licGrace, &licOffline, &licCap, &licVer, &licModules, &heldID, &heldName,
+			&a.OfflineRequestPending, &reissued); err != nil {
 			return nil, err
 		}
 		a.HoldsCustomerID, a.HoldsCustomerName = strPtr(heldID), strPtr(heldName)
@@ -146,6 +158,16 @@ func (b *Base) queryAppliances(ctx context.Context, customerID, applianceID stri
 		}
 		d := DeriveState(facts, now)
 		a.Activation, a.Connection, a.License.State = d.Activation, d.Connection, d.License
+		if a.Activation == ActivationActivating {
+			switch {
+			case !hasCert && reissued:
+				a.ActivatingOn = "certificate_reissue"
+			case !hasCert:
+				a.ActivatingOn = "certificate"
+			default:
+				a.ActivatingOn = "license"
+			}
+		}
 		out = append(out, a)
 	}
 	return out, rows.Err()

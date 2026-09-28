@@ -633,7 +633,7 @@ export type AuditEntry = {
 export type ActivationState = "not_registered" | "waiting" | "activating" | "activated" | "retired";
 export type LicenseState =
   | "none" | "active" | "expiring" | "grace" | "expired" | "suspended" | "revoked" | "wrong_hardware";
-export type CentralLinkState = "connected" | "unreachable" | "not_configured";
+export type CentralLinkState = "connected" | "unreachable" | "credential_refused" | "not_configured";
 
 export type CentralStatus = {
   activation: ActivationState;
