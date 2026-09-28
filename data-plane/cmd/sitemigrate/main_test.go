@@ -82,7 +82,7 @@ func TestMigrationTableSet(t *testing.T) {
 		"tenants", "sites", "appliances", "operators", "operator_roles",
 		"accounting_records", "auth_otps", "social_oauth_states", "pms_providers",
 		"pms_attempts", "walled_garden_rules", "notification_providers",
-		"social_oauth_providers", "stripe_accounts", "stripe_events",
+		"social_oauth_providers", "stripe_events",
 		"audit_log",
 	}
 	if len(migrationTables) != len(want) {

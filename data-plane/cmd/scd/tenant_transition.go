@@ -37,7 +37,6 @@ var tenantOwnedTables = []string{
 	"notification_providers",
 	"pms_providers",
 	"social_oauth_providers",
-	"stripe_accounts",
 	"operator_roles",
 	"operators",
 	"tenant_effective_limits",

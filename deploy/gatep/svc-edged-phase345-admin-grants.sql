@@ -376,3 +376,8 @@ GRANT EXECUTE ON FUNCTION iam_v2.site_module_set(uuid,uuid,text,boolean,text,tex
 -- who revoked what and why.
 GRANT SELECT ON iam_v2.anonymous_access_subjects TO svc_edged;
 GRANT SELECT ON iam_v2.voucher_revocations       TO svc_edged;
+
+-- CARD PAYMENT (migration 0096): the Payment methods screen reads accounts (never their secrets), their change
+-- history, the extra payment domains and checkout state. Every write goes through scd.
+GRANT SELECT ON iam_v2.payment_provider_accounts, iam_v2.payment_provider_account_changes,
+                iam_v2.site_payment_domains, iam_v2.site_payment_domain_changes, iam_v2.payment_checkouts TO svc_edged;

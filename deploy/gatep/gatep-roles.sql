@@ -16,6 +16,11 @@ DO $$ BEGIN CREATE ROLE svc_netd  LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBY
 -- svc_pmsd: the Phase-3 PMS connector daemon. It is the SINGLE owner of a PMS Interface socket and the only
 -- writer of the Stay inbox and Stay projection. Read-only towards the PMS; a writer only of its own domain.
 DO $$ BEGIN CREATE ROLE svc_pmsd  LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+-- Card payment (0096): scd runs checkouts as svc_payment (member of sc_payment_runtime only) and applies provider
+-- outcomes as svc_payment_outcome (member of sc_payment_outcome only). Memberships are granted in gatep-grants.sql,
+-- after the schema that creates those group roles exists.
+DO $$ BEGIN CREATE ROLE svc_payment         LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE ROLE svc_payment_outcome LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- Re-assert attributes (idempotent hardening).
 ALTER ROLE svc_scd   NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION CONNECTION LIMIT 20;
@@ -23,6 +28,10 @@ ALTER ROLE svc_edged NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATI
 ALTER ROLE svc_acctd NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION CONNECTION LIMIT 10;
 ALTER ROLE svc_netd  NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION CONNECTION LIMIT 10;
 ALTER ROLE svc_pmsd  NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION CONNECTION LIMIT 10;
+ALTER ROLE svc_payment         NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION CONNECTION LIMIT 5;
+ALTER ROLE svc_payment_outcome NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION CONNECTION LIMIT 5;
+ALTER ROLE svc_payment         SET statement_timeout = '30s';
+ALTER ROLE svc_payment_outcome SET statement_timeout = '30s';
 
 -- Per-parameter guards — one SET per statement (chained SET in a single ALTER ROLE is invalid).
 ALTER ROLE svc_scd   SET statement_timeout = '30s';

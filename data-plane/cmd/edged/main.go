@@ -414,7 +414,9 @@ func main() {
 			// payments is REMOVED. It was a read-only list over public.payments, a Stripe-session record
 			// keyed to a superseded voucher and access plan. The current financial surface is
 			// "financial-ops" below, over the Phase-4 iam_v2 payment transactions and settlements.
-			mountResource(r, s, "stripe-accounts", s.stripeAccountsRoutes)
+			// stripe-accounts is REMOVED (migration 0096). It stored provider secrets in clear text and was read by
+			// nothing. Card payment accounts live under "payment-providers": site-local, secrets sealed and
+			// write-only, served by scd which owns the key.
 			mountResource(r, s, "notification-providers", s.notificationProvidersRoutes)
 			mountResource(r, s, "social-providers", s.socialProvidersRoutes)
 			// Phase 2 (DARK): the commercial-packages admin resource is mounted ONLY when the admin

@@ -295,3 +295,12 @@ GRANT EXECUTE ON FUNCTION iam_v2.p4_grant_voucher_entitlement(uuid,uuid,uuid) TO
 GRANT SELECT, INSERT              ON iam_v2.anonymous_access_subjects      TO svc_scd;
 GRANT UPDATE (last_resumed_at)    ON iam_v2.anonymous_access_subjects      TO svc_scd;
 GRANT SELECT, INSERT              ON iam_v2.anonymous_subject_credentials  TO svc_scd;
+
+-- CARD PAYMENT (migration 0096). scd owns the payment key: it saves provider accounts, seals and stores their
+-- credentials, sets the site's extra payment domains, and reads what it needs to run checkouts. Every write is
+-- a definer function that records who changed what; no table write privilege.
+GRANT EXECUTE ON FUNCTION iam_v2.payment_account_save(uuid,uuid,uuid,text,text,text,text,text,text,boolean,text,text) TO svc_scd;
+GRANT EXECUTE ON FUNCTION iam_v2.payment_account_set_secret(uuid,uuid,uuid,uuid,bytea,bytea,text,smallint,text)       TO svc_scd;
+GRANT EXECUTE ON FUNCTION iam_v2.site_payment_domains_set(uuid,uuid,text[],text,text)                                  TO svc_scd;
+GRANT SELECT ON iam_v2.payment_provider_accounts, iam_v2.payment_provider_secret_generations,
+                iam_v2.site_payment_domains, iam_v2.payment_checkouts TO svc_scd;
