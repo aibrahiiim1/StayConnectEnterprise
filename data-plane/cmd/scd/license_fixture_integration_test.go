@@ -54,8 +54,12 @@ func signedLicence(t *testing.T, maxGuests int, pms, expired bool) *licstate.Man
 		TenantID: "22222222-2222-2222-2222-222222222222", SiteID: "33333333-3333-3333-3333-333333333333",
 		IssuedAt: issued, ValidUntil: until, SchemaVersion: lic.CurrentSchemaVersion, LicenseVersion: 1,
 		MaxConcurrentOnlineGuests: maxGuests,
-		Features:                  lic.Features{PMS: pms},
 	}
+	doc.Modules = lic.Modules{}
+	if pms {
+		doc.Modules[lic.ModuleHospitality] = lic.ModuleGrant{}
+	}
+	doc.Features = lic.ProjectFeatures(doc.Modules)
 	env, err := lic.NewSigner(priv).Sign(doc)
 	if err != nil {
 		t.Fatal(err)

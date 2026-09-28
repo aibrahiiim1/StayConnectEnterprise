@@ -90,7 +90,7 @@ type Document struct {
 	// Schema v4 — module authorisation. Modules is the SOLE commercial
 	// authority of a v4 licence; Features is emitted only as a compatibility
 	// projection computed by ProjectFeatures and is never read as authority.
-	Modules Modules `json:"modules,omitempty"`
+	Modules Modules `json:"modules"`
 
 	// SchemaVersion allows future payload evolution; verifiers reject
 	// versions they do not understand rather than misreading fields.

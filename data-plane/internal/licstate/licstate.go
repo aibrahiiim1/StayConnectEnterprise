@@ -267,40 +267,52 @@ func (m *Manager) MaxConcurrentOnlineGuests() int64 {
 	return -1
 }
 
-// FeatureEnabled evaluates a commercial feature under the current state.
-// Unlicensed dev mode allows everything (with the boot warning); a loaded
-// license is authoritative.
+// FeatureEnabled evaluates a legacy feature name under the current state. It
+// is a thin alias over ModuleEnabled: since licence v4 the signed `modules`
+// map is the SOLE authority, and a v1-v3 licence is read through the
+// conservative legacy mapping in license.AuthorizedModules. The Features
+// block of a v4 licence is never consulted.
 func (m *Manager) FeatureEnabled(name string) bool {
+	switch name {
+	case FeatPMS:
+		return m.ModuleEnabled(lic.ModuleHospitality)
+	case FeatPaidWiFi:
+		return m.ModuleEnabled(lic.ModulePaidAccess)
+	case FeatEmailOTP, FeatSMSOTP, FeatSocialLogin, FeatHA, FeatWhiteLabel:
+		return m.ModuleEnabled(name)
+	default:
+		return false
+	}
+}
+
+// ModuleEnabled reports whether the installed licence authorises module id
+// AND the licence state allows entitled features (Active or Grace).
+// Unlicensed dev mode allows everything (with the boot warning).
+func (m *Manager) ModuleEnabled(id string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if !m.loaded {
 		return !m.required
 	}
-	if m.wrongDevice != "" {
+	if m.wrongDevice != "" || m.current.Doc == nil {
 		return false
 	}
-	f := m.current.Doc.Features
-	var entitled bool
-	switch name {
-	case FeatEmailOTP:
-		entitled = f.EmailOTP
-	case FeatSMSOTP:
-		entitled = f.SMSOTP
-	case FeatSocialLogin:
-		entitled = f.SocialLogin
-	case FeatPMS:
-		entitled = f.PMS
-	case FeatPaidWiFi:
-		entitled = f.PaidWiFi
-	case FeatHA:
-		entitled = f.HA
-	case FeatWhiteLabel:
-		entitled = f.WhiteLabel
-	default:
-		return false
-	}
-	return lic.FeatureEnabled(m.current.State, entitled)
+	return lic.FeatureEnabled(m.current.State, m.current.Doc.AuthorizedModules()[id])
 }
+
+// AuthorizedModules returns the modules the installed licence authorises,
+// independent of licence state (for display). Nil when no usable licence.
+func (m *Manager) AuthorizedModules() map[string]bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if !m.loaded || m.wrongDevice != "" || m.current.Doc == nil {
+		return nil
+	}
+	return m.current.Doc.AuthorizedModules()
+}
+
+// LicenseRequired reports whether this build requires a licence (production).
+func (m *Manager) LicenseRequired() bool { return m.required }
 
 // Install verifies and persists a new envelope (Hotel Admin upload or cloud
 // push), then reloads.
@@ -409,14 +421,16 @@ func (m *Manager) syncLimits(ctx context.Context, d *lic.Document) error {
 		"retention_days_accounting": unlim(d.Limits.AccountingRetentionDays),
 		"retention_days_audit":      unlim(d.Limits.AuditRetentionDays),
 	}
+	// Mirrored from the authorised modules (never from a v4 Features block).
+	am := d.AuthorizedModules()
 	bools := map[string]bool{
-		"feature.pms_integration": d.Features.PMS,
-		"feature.paid_wifi":       d.Features.PaidWiFi,
-		"feature.auth.sms_otp":    d.Features.SMSOTP,
-		"feature.auth.email_otp":  d.Features.EmailOTP,
-		"feature.auth.social":     d.Features.SocialLogin,
-		"feature.ha_pair":         d.Features.HA,
-		"feature.white_label":     d.Features.WhiteLabel,
+		"feature.pms_integration": am[lic.ModuleHospitality],
+		"feature.paid_wifi":       am[lic.ModulePaidAccess],
+		"feature.auth.sms_otp":    am[lic.ModuleSMSOTP],
+		"feature.auth.email_otp":  am[lic.ModuleEmailOTP],
+		"feature.auth.social":     am[lic.ModuleSocialLogin],
+		"feature.ha_pair":         am[lic.ModuleHA],
+		"feature.white_label":     am[lic.ModuleWhiteLabel],
 	}
 	tx, err := m.db.Begin(ctx)
 	if err != nil {

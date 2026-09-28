@@ -92,3 +92,22 @@ func TestUnknownModuleSurvivesSignedRoundTrip(t *testing.T) {
 		t.Fatal("modules lost")
 	}
 }
+
+func TestCoreOnlyV4LicenceKeepsAnEmptyModulesMap(t *testing.T) {
+	s := newSigner(t)
+	v := NewVerifier(s.PublicKey())
+	d := testDoc(time.Now().UTC())
+	d.Modules = Modules{}
+	d.Features = ProjectFeatures(d.Modules)
+	env, err := s.Sign(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := v.Verify(env)
+	if err != nil {
+		t.Fatalf("core-only v4 licence must verify: %v", err)
+	}
+	if len(got.AuthorizedModules()) != 0 {
+		t.Fatal("core-only licence authorised a module")
+	}
+}

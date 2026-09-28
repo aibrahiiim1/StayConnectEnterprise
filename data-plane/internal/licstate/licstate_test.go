@@ -36,7 +36,7 @@ func (f *fixture) envelope(t *testing.T, idFpr string, version int64) []byte {
 	d := &lic.Document{
 		LicenseID: "11111111-1111-1111-1111-111111111111", Status: lic.DocActive,
 		TenantID: "22222222-2222-2222-2222-222222222222", SiteID: "33333333-3333-3333-3333-333333333333",
-		IssuedAt: now.Add(-time.Hour), ValidUntil: now.AddDate(0, 6, 0), SchemaVersion: lic.CurrentSchemaVersion,
+		IssuedAt: now.Add(-time.Hour), ValidUntil: now.AddDate(0, 6, 0), SchemaVersion: lic.CurrentSchemaVersion, Modules: lic.Modules{},
 		IdentityKeyFingerprint: idFpr, ApplianceSerial: "SC-1", LicenseVersion: version,
 		Limits: lic.Limits{MaxConcurrentGuestSessions: 50},
 	}
@@ -93,7 +93,7 @@ func TestWANMismatchIsRederivedAtLoadAndDoesNotRefuse(t *testing.T) {
 	d := &lic.Document{
 		LicenseID: "11111111-1111-1111-1111-111111111112", Status: lic.DocActive,
 		TenantID: "22222222-2222-2222-2222-222222222222", SiteID: "33333333-3333-3333-3333-333333333333",
-		IssuedAt: now.Add(-time.Hour), ValidUntil: now.AddDate(0, 6, 0), SchemaVersion: lic.CurrentSchemaVersion,
+		IssuedAt: now.Add(-time.Hour), ValidUntil: now.AddDate(0, 6, 0), SchemaVersion: lic.CurrentSchemaVersion, Modules: lic.Modules{},
 		IdentityKeyFingerprint: "aaaa", WANMAC: "00:11:22:33:44:55", LicenseVersion: 1,
 	}
 	env, _ := f.signer.Sign(d)
@@ -177,5 +177,40 @@ func TestFetchLoopFastPollAndKick(t *testing.T) {
 	}
 	if calls.Load() == before {
 		t.Fatal("Kick must trigger an immediate fetch")
+	}
+}
+
+// v4: modules are the sole authority. A v4 licence authorising only
+// hospitality enables PMS and nothing financial.
+func TestModulesAreTheSoleAuthority(t *testing.T) {
+	f := newFixture(t)
+	now := time.Now().UTC()
+	mods := lic.Modules{lic.ModuleHospitality: {}}
+	d := &lic.Document{
+		LicenseID: "11111111-1111-1111-1111-111111111119", Status: lic.DocActive,
+		TenantID: "22222222-2222-2222-2222-222222222222", SiteID: "33333333-3333-3333-3333-333333333333",
+		IssuedAt: now.Add(-time.Hour), ValidUntil: now.AddDate(0, 6, 0), SchemaVersion: lic.CurrentSchemaVersion,
+		IdentityKeyFingerprint: "aaaa", LicenseVersion: 1, Modules: mods, Features: lic.ProjectFeatures(mods),
+	}
+	env, err := f.signer.Sign(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := env.Encode()
+	m := New(nil, "", f.dir, f.pubPath, true)
+	m.SetLocalIdentity(lic.LocalIdentity{IdentityKeyFingerprint: "aaaa"})
+	if _, err := m.Install(context.Background(), raw); err != nil {
+		t.Fatal(err)
+	}
+	if !m.FeatureEnabled(FeatPMS) || !m.ModuleEnabled(lic.ModuleHospitality) {
+		t.Fatal("hospitality must be enabled")
+	}
+	for _, id := range []string{lic.ModulePaidAccess, lic.ModuleCardPayment, lic.ModuleRoomCharge, lic.ModuleSMSOTP} {
+		if m.ModuleEnabled(id) {
+			t.Fatalf("%s enabled without authorisation", id)
+		}
+	}
+	if m.FeatureEnabled(FeatPaidWiFi) {
+		t.Fatal("paid_wifi must follow paid_access")
 	}
 }
