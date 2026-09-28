@@ -303,6 +303,22 @@ func (s *server) applyLicenseToMethods(cfg *tenantcfg.AuthMethods) {
 	if !s.lic.FeatureEnabled(licstate.FeatSocialLogin) {
 		cfg.Social = nil
 	}
+	// Licensed is not enough: the deployed guest authority must accept that kind of identity, or a client who
+	// verifies a code or a social account would be refused after doing everything right.
+	if s.modules != nil {
+		if !s.ceiling.ModuleDeployed(lic.ModuleEmailOTP) {
+			cfg.Email = nil
+		}
+		if !s.ceiling.ModuleDeployed(lic.ModuleSMSOTP) {
+			cfg.SMS = nil
+		}
+		if !s.ceiling.ModuleDeployed(lic.ModuleWhatsAppOTP) {
+			cfg.WhatsApp = nil
+		}
+		if !s.ceiling.ModuleDeployed(lic.ModuleSocialLogin) {
+			cfg.Social = nil
+		}
+	}
 	// Room sign-in is part of the Hotel module: licensed is not enough, the site must have it enabled and the
 	// software deployed (the four-gate resolver decides).
 	if !s.lic.FeatureEnabled(licstate.FeatPMS) || (s.modules != nil && !s.moduleEffective(context.Background(), lic.ModuleHospitality)) {

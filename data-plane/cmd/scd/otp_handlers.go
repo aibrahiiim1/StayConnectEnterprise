@@ -33,8 +33,10 @@ func (s *server) tenantAuthMethods(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusInternalServerError, "tenant config unavailable")
 		return
 	}
-	// License gating: unlicensed methods never reach the portal.
+	// License gating: unlicensed methods never reach the portal. Nor do code or social methods that nothing
+	// can deliver (provider readiness).
 	s.applyLicenseToMethods(cfg)
+	s.applyProviderReadiness(r.Context(), cfg)
 
 	// CAN THIS SITE GIVE A GUEST ANYTHING AT ALL?
 	//
@@ -189,6 +191,13 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 	if method == nil || !method.Enabled {
 		httpErr(w, http.StatusForbidden, channelLabel+" auth disabled for this tenant")
 		return
+	}
+	// A code is issued only when an enabled sender exists for the channel: it is never "sent" to nowhere.
+	if s.providerReadiness != nil || s.db != nil {
+		if channels, _, ok := s.readProviderReadiness(r.Context()); !ok || !channels[req.Channel] {
+			httpErr(w, http.StatusServiceUnavailable, channelLabel+" codes cannot be sent: no sender is configured")
+			return
+		}
 	}
 
 	// Durable throttle on issuance (authoritative; no-op unless enabled). otp.Issue also enforces its

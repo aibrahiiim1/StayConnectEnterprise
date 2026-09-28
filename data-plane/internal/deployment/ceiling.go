@@ -36,6 +36,8 @@ const (
 	CapRoomChargeConfig   Capability = "room_charge_config"   // posting domain: onboarding, mappings, quotes
 	CapRoomChargeReview   Capability = "room_charge_review"   // financial review and recovery surfaces
 	CapRoomChargeTransmit Capability = "room_charge_transmit" // PS bytes may reach a PMS (real posting)
+	CapOTPSignIn          Capability = "otp_sign_in"          // IAM-v2 accepts a verified one-time code (email, SMS, WhatsApp)
+	CapSocialSignIn       Capability = "social_sign_in"       // IAM-v2 accepts a verified social identity
 )
 
 // Ceiling is the evaluated deployment state. The zero value allows nothing optional.
@@ -45,6 +47,9 @@ type Ceiling struct {
 	pay         payment.Config
 	post        posting.Config
 	liveAllowed bool
+	// otp and social: the IAM-v2 guest authority accepts that kind of identity. Without it a verified code or
+	// social sign-in has nowhere to go, so the identity modules are not deployed and no screen offers them.
+	otp, social bool
 }
 
 // Getenv reads one variable.
@@ -80,7 +85,36 @@ func Load(get Getenv) (Ceiling, error) {
 	if c.liveAllowed && !c.pay.ProviderOn() {
 		return Ceiling{}, fmt.Errorf("%s set while the payment provider is not deployed", EnvPaymentLiveAllowed)
 	}
+	flag := func(name string) (bool, error) {
+		v := strings.TrimSpace(get(name))
+		if v == "" {
+			return false, nil
+		}
+		b, perr := strconv.ParseBool(v)
+		if perr != nil {
+			return false, fmt.Errorf("%s: %q is not a boolean", name, v)
+		}
+		return b, nil
+	}
+	master, err := flag(iamv2.EnvMaster)
+	if err != nil {
+		return Ceiling{}, err
+	}
+	if c.otp, err = flag(iamv2.EnvOTP); err != nil {
+		return Ceiling{}, err
+	}
+	if c.social, err = flag(iamv2.EnvSocial); err != nil {
+		return Ceiling{}, err
+	}
+	c.otp, c.social = c.otp && master, c.social && master
 	return c, nil
+}
+
+// WithIdentity returns the ceiling with the IAM-v2 identity methods set (tests and callers that build a
+// ceiling with New).
+func (c Ceiling) WithIdentity(otp, social bool) Ceiling {
+	c.otp, c.social = otp, social
+	return c
 }
 
 // New builds a ceiling from already-loaded configurations (tests and callers that load them anyway).
@@ -109,12 +143,16 @@ func (c Ceiling) Available(cp Capability) bool {
 		return c.post.ReviewOn()
 	case CapRoomChargeTransmit:
 		return c.post.TransmitOn() && c.post.PostingOn()
+	case CapOTPSignIn:
+		return c.otp
+	case CapSocialSignIn:
+		return c.social
 	}
 	return false
 }
 
-// ModuleDeployed reports whether the software for a licensable module is deployed here. Modules with no
-// optional code path (identity add-ons, white label, HA) are always deployed.
+// ModuleDeployed reports whether the software for a licensable module is deployed here. The identity add-ons
+// need their IAM-v2 method; modules with no optional code path (white label, HA) are always deployed.
 func (c Ceiling) ModuleDeployed(id string) bool {
 	switch id {
 	case lic.ModuleHospitality:
@@ -125,6 +163,10 @@ func (c Ceiling) ModuleDeployed(id string) bool {
 		return c.Available(CapCardPayment)
 	case lic.ModuleRoomCharge:
 		return c.Available(CapRoomChargeConfig)
+	case lic.ModuleEmailOTP, lic.ModuleSMSOTP, lic.ModuleWhatsAppOTP:
+		return c.Available(CapOTPSignIn)
+	case lic.ModuleSocialLogin:
+		return c.Available(CapSocialSignIn)
 	}
 	_, known := lic.LookupModule(id)
 	return known
@@ -134,7 +176,7 @@ func (c Ceiling) ModuleDeployed(id string) bool {
 func (c Ceiling) Summary() string {
 	parts := []string{}
 	for _, cp := range []Capability{CapClientPackages, CapPackageAdmin, CapHospitality, CapPaidAccess, CapCardPayment,
-		CapCardLive, CapRoomChargeConfig, CapRoomChargeReview, CapRoomChargeTransmit} {
+		CapCardLive, CapRoomChargeConfig, CapRoomChargeReview, CapRoomChargeTransmit, CapOTPSignIn, CapSocialSignIn} {
 		parts = append(parts, string(cp)+"="+strconv.FormatBool(c.Available(cp)))
 	}
 	return "deployment ceiling " + strings.Join(parts, " ")

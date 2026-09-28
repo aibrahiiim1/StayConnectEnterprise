@@ -38,7 +38,7 @@ func allDeployed() deployment.Ceiling {
 		iamv2.PMSConfig{MasterEnabled: true, AdminEnabled: true},
 		payment.Config{MasterEnabled: true, PaymentEnabled: true, ProviderEnabled: true},
 		posting.Config{MasterEnabled: true, PostingEnabled: true, ReviewEnabled: true},
-		false)
+		false).WithIdentity(true, true)
 }
 
 func ids(map[string]bool) IdentitySwitches {

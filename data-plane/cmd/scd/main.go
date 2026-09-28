@@ -227,7 +227,9 @@ type server struct {
 	// ceiling is the deployment ceiling and modules the four-gate module resolver (modules.go). New product
 	// logic asks these, never the phase flags directly.
 	ceiling deployment.Ceiling
-	modules *modules.Resolver
+	// providerReadiness overrides the sender/social-application lookup (tests); nil reads the database.
+	providerReadiness providerReadinessFunc
+	modules           *modules.Resolver
 	// card is the card-payment wiring (card_checkout.go); never nil after initCard.
 	card *cardState
 	// openAccess issues OPEN auth contexts (open_access.go); nil when its key is missing.
