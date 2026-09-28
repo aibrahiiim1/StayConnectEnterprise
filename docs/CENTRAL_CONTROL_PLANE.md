@@ -11,7 +11,7 @@ Central is the vendor's cloud-hosted **licensing, appliance-activation and fleet
 questions: *who is the customer, which site and appliance, is it activated, what does its licence allow, and is it
 healthy right now.*
 
-Central is **not** a site operations system. It holds no guest, session, usage, voucher, PMS, payment, portal or
+Central is **not** a site operations system. It holds no client, session, usage, voucher, PMS, payment, portal or
 network configuration, and it offers no remote control of an appliance. Those live on the appliance (CLAUDE.md §0E:
 Central serves the appliance for licensing only).
 

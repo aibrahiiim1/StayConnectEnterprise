@@ -23,8 +23,8 @@ Nothing else is mounted (`control-plane/internal/http/router.go`):
 
 | Removed | Now |
 |---|---|
-| Legacy guest-domain `/v1/*` adapters (ticket templates, voucher batches, vouchers, sessions, PMS providers, walled garden, notification providers, social providers, Stripe accounts, payments) | On each appliance's Edge API `/edge/v1/*` against the site DB; Central holds no guest domain (tables dropped, migration 0046) |
-| `POST /v1/checkout/*`, `POST /v1/webhooks/stripe/{tenant_id}` (public checkout, Stripe webhook) | Removed from Central; guest payment is an appliance concern |
+| Legacy client-domain `/v1/*` adapters (ticket templates, voucher batches, vouchers, sessions, PMS providers, walled garden, notification providers, social providers, Stripe accounts, payments) | On each appliance's Edge API `/edge/v1/*` against the site DB; Central holds no client domain (tables dropped, migration 0046) |
+| `POST /v1/checkout/*`, `POST /v1/webhooks/stripe/{tenant_id}` (public checkout, Stripe webhook) | Removed from Central; client payment is an appliance concern |
 | `GET/POST /v1/auth/sso/*`, `/oauth/stub/*`, `idp_providers` | Removed — Central sign-in is email and password only |
 | `POST /v1/appliances/enroll`, `/cloud/v1/appliance-bootstrap-tokens` | Removed — the appliance registers itself (`POST /v1/appliances/register`, token-less); offline sites use offline activation |
 | `/cloud/v1/tenants*` (incl. subscription, effective-limits, usage sub-routes), `/v1/tenants*` | `/cloud/v1/customers*` (`customer_id` is the old `tenant_id`) |
@@ -32,7 +32,7 @@ Nothing else is mounted (`control-plane/internal/http/router.go`):
 | `/cloud/v1/appliances` create (manual appliance creation), `…/effective-config` | Removed — appliances only register themselves; Central holds no appliance configuration |
 | `/cloud/v1/commercial-plans`, `/v1/plans`, subscriptions, `tenant_limit_overrides` | Removed — the signed appliance licence is the only entitlement; the archived commercial history was deleted with schema `legacy_archive` (migration 0047) |
 | `/cloud/v1/licenses` POST (site-scoped issue from a subscription) | `POST /cloud/v1/appliances/{id}/activate` and `POST /cloud/v1/appliances/{id}/license` |
-| `/cloud/v1/operators*`, `/v1/operators*` | `/cloud/v1/team*` (Central operators) and `/cloud/v1/customers/{id}/users*` (customer users); hotel staff are `/edge/v1/operators` on the appliance |
+| `/cloud/v1/operators*`, `/v1/operators*` | `/cloud/v1/team*` (Central operators) and `/cloud/v1/customers/{id}/users*` (customer users); site staff are `/edge/v1/operators` on the appliance |
 | `/cloud/v1/fleet/*` (registry + telemetry) | `/cloud/v1/overview` and `/cloud/v1/appliances` (activation, connection and licence state derived by ctrlapi); telemetry is off (CLAUDE.md §0E, migration 0045) |
 | Appliance deactivate / decommission / reconcile / claim endpoints | `POST /cloud/v1/appliances/{id}/retire` (two-phase or emergency), `…/move`, `…/replace`, `…/rebind-wan-mac`, `…/reissue-certificate`, `DELETE /cloud/v1/appliances/{id}` |
 | A **cross-customer** `POST /cloud/v1/appliances/{id}/move` (licence revoked, appliance purged its local data in place) | Refused with `409 cross_customer_move`. Changing customer is Retire → factory-reset the appliance → it registers again → `…/activate` for the new customer. A same-customer move re-issues the licence with the same terms and answers `503 licensing_unavailable` when it cannot |
@@ -53,7 +53,7 @@ and Admin Console is `hotel-admin` on each appliance.
 | `GET/PUT /edge/v1/cloud-sync-settings`, `GET/POST /edge/v1/cloud-sync-recovery` (delivered-record retention and recovery of the telemetry queue) and their role permissions | Removed with the telemetry subsystem (2026-09-27, appliance migration 0093). Nothing replaces them: there is no queue |
 | `sync_outbox` figures in edged `GET /edge/v1/health`, and edged's `service_health` telemetry producer | Removed; local service health is still recorded in `appliance_service_health` and shown in Admin Console |
 | scd socket `GET /v1/admin/outbox/stats` | Removed with the outbox |
-| scd NATS subjects: RPC dispatcher and heartbeat, remote guest-session revoke, remote PMS test / cache / health, tenant PMS config broadcast, nft set replication (`nft.<siteID>`), the signed command channel and the software-update agent; env `SCD_NATS_URL`, `SCD_NATS_MTLS_URL`, `SCD_COMMAND_PUB`, `SCD_UPDATE_PUB` | Removed — the appliance has no message-bus client (CLAUDE.md §0E). Session revoke, PMS operations and configuration are local, in Admin Console |
+| scd NATS subjects: RPC dispatcher and heartbeat, remote client-session revoke, remote PMS test / cache / health, tenant PMS config broadcast, nft set replication (`nft.<siteID>`), the signed command channel and the software-update agent; env `SCD_NATS_URL`, `SCD_NATS_MTLS_URL`, `SCD_COMMAND_PUB`, `SCD_UPDATE_PUB` | Removed — the appliance has no message-bus client (CLAUDE.md §0E). Session revoke, PMS operations and configuration are local, in Admin Console |
 
 `POST /edge/v1/license` (licence file upload) stays. While the appliance is *Removed from OneGate Central* it
 answers `409 removed_from_central`, as do `POST /edge/v1/central/offline-package` and the scd install routes.

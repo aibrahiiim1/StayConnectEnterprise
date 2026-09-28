@@ -17,7 +17,7 @@ UUIDs. Both consoles refresh themselves.
 | Console | URL | Login |
 |---------|-----|-------|
 | **OneGate Central** (Control Panel) | `https://sc-central.echofusion.com` | your Central operator account |
-| **Appliance Admin Console** (formerly Hotel Admin) | `https://hotel.stayconnect.local` or the appliance's management IP | your Hotel-IT operator |
+| **Appliance Admin Console** (formerly Hotel Admin) | `https://hotel.stayconnect.local` or the appliance's management IP | your Site IT manager account |
 
 The Admin Console is reachable on the **management network only** (clients are firewalled
 off). If your workstation can't resolve `hotel.stayconnect.local`, use the appliance's
@@ -27,7 +27,7 @@ management IP.
 
 ## A. Install the appliance
 1. Rack and cable the appliance: **WAN** to the site uplink, **LAN/trunk** to the
-   switch carrying your guest VLANs. Power on.
+   switch carrying your client VLANs. Power on.
 2. On first boot the box generates its own identity, detects its hardware, and — if
    it has internet — **registers itself with Central automatically**, retrying until
    Central answers. There is nothing to type on the appliance. Admin Console →
@@ -97,4 +97,4 @@ There are no enrollment tokens.
 *Vendor/support-only procedures (operator provisioning, appliance wipe/removal,
 break-glass diagnostics) are intentionally **not** part of this manual — see
 [VENDOR_BREAKGLASS_RUNBOOK.md](VENDOR_BREAKGLASS_RUNBOOK.md). They require root, an
-incident reference and a reason, and are not available to Hotel-IT operators.*
+incident reference and a reason, and are not available to Site IT managers.*

@@ -1,8 +1,8 @@
 # Cloud Architecture
 
 > The vendor half of the edge-first split. Central manages customers, sites,
-> appliance activation, licences and fleet status. It never serves a guest,
-> never stores guest PII and never controls an appliance remotely (CLAUDE.md
+> appliance activation, licences and fleet status. It never serves a client,
+> never stores client PII and never controls an appliance remotely (CLAUDE.md
 > §0E: licensing only). The console structure, appliance states, lifecycle, API
 > contract and roles are specified in
 > [CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md), which wins over this file
@@ -57,11 +57,11 @@ The Central DB holds exactly the licensing, activation and fleet-status domain:
 | `audit_log` (hypertable) | every Central write |
 
 
-Guest-domain data (guests, sessions, vouchers, PMS, payments, OTP, portal, …)
+Client-domain data (guests, sessions, vouchers, PMS, payments, OTP, portal, …)
 is **edge-owned** and does not exist on Central: the empty legacy tables were
 dropped by migration 0046, and the fleet telemetry tables by migration 0045.
 Migration 0047 dropped the `legacy_archive` schema with everything in it (the
-retired commercial history 0046 had moved there and an older guest-history
+retired commercial history 0046 had moved there and an older client-history
 archive) and the columns nothing read any more (operator SSO, tenant sign-in
 methods and metadata, the licence table's plan/features/limits copies,
 site-scoped operator roles). Full matrix: [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md).
@@ -137,9 +137,9 @@ appliance keeps fetching. Details and the edge-side state machine:
 
 ## 6. What the cloud must never do
 
-- Serve a captive portal or authorize a guest session.
-- Store or receive guest PII.
+- Serve a captive portal or authorize a client session.
+- Store or receive client PII.
 - Open a connection *to* an appliance — all links are appliance-initiated
   HTTPS (registration, assignment, certificate, licence, hello).
-- Be a runtime dependency of the guest path: an appliance with a valid signed
+- Be a runtime dependency of the client path: an appliance with a valid signed
   license operates fully with the cloud unreachable ([OFFLINE_OPERATION.md](OFFLINE_OPERATION.md)).
