@@ -4,7 +4,7 @@
 everything day to day: client networks, sign-in methods, vouchers, internet packages, the PMS, sessions and
 reports. It is reached over HTTPS on the site's management network and keeps working when OneGate Central
 cannot be reached. Operator accounts are local to the appliance: they are not OneGate cloud accounts and do
-not work at any other property.
+not work at any other site.
 
 This document describes every page in the menu, in menu order: what it is for, what it shows, what an
 operator can do, which roles can change it, and which actions ask for a reason, password confirmation, typed
@@ -72,14 +72,14 @@ states) is defined once in the [OneGate design system](../../design-system/READM
   countdown turns red in the last 30 seconds.
 - **Secrets are never shown back.** API keys, client secrets, PMS credentials and tokens are write-only:
   a form shows whether one is stored, never its value.
-- **"PMS offline" does not mean guests are cut off.** The appliance keeps its own copy of the in-house guest
+- **"PMS offline" does not mean clients are cut off.** The appliance keeps its own copy of the in-house guest
   list, so room sign-in, vouchers, client accounts and sessions in progress continue while the PMS link is
   down. What is lost is news: a guest who checked in during the outage cannot sign in by room number until
   the link is back.
 - **Licence state.** When the appliance's licence is expired, suspended, revoked or missing, new client
   sign-ins are refused — by every method, room sign-in included — and some creation actions are blocked for
   every role; existing client sessions are not dropped. The licence also caps how many clients may be online at
-  once, again across every method: a room guest's second device takes a place just like a voucher guest.
+  once, again across every method: a second device signed in with a room takes a place just like a voucher client's.
   **System → Appliance & licence** says why.
 
 **Role names used below:** Site admin, Site IT manager, Client services operator, Client relations operator,
@@ -485,7 +485,7 @@ after too many wrong tries.
 - **Shows:** tiles *Policy in force*, *Published version*, *Last changed*, *Emergency fallback used*; any
   warnings; **what a departing client receives** in plain words (grace time, speeds, data, devices, who
   qualifies); and the policy history (each version opens with who published it, when and why).
-- **Edit policy / Create hotel policy** (side sheet, two steps): **Terms** — grace time, download/upload
+- **Edit policy / Create site policy** (side sheet, two steps): **Terms** — grace time, download/upload
   speed, data allowance (MB), device handling and limit, stay rules after checkout, with a live *"Client will
   receive…"* sentence — then **Review**: every change shown old → new, a **reason** (chosen from a list) and
   **password confirmation**. Publishing creates a new version.
@@ -645,7 +645,7 @@ Whether each service on the appliance is running.
 
 - **Shows:** live status (refreshed every 10 seconds), a *"still starting after boot"* banner when relevant,
   count tiles by state, and the services table (state, health check, restarts, backoff, last failure,
-  uptime). A service opens a panel with details, recent logs (secrets and guest details removed) and
+  uptime). A service opens a panel with details, recent logs (secrets and client details removed) and
   recovery history.
 - **Actions:** **Recheck**; **Logs**; **Restart** — a dialog describing the impact for that service,
   **reason + password confirmation**.
@@ -664,8 +664,8 @@ Every change made to this appliance, by staff and by the system itself, written 
 edited or removed.
 
 - **Filters:** search, period (last 24 hours, 7 days, 30 days, everything), and chips **Everything**,
-  **Security** (with a count), and categories *Sign-in & access, Client Portal, Internet offering, Property
-  management system, Networks, Licence & cloud, Backups, Diagnostics*.
+  **Security** (with a count), and categories *Sign-in & access, Client Portal, Internet offering, Hotel,
+  Networks, Licence & cloud, Backups, Diagnostics*.
 - **List:** a plain-language title, category and security badges, who, when and from which address; expand
   for the recorded details. Up to 500 entries.
 - **Who can see it:** Site admin, Site IT manager, Client services, Client relations, Payments operator, Site

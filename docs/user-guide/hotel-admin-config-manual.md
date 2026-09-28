@@ -220,7 +220,7 @@ internet access.
   printed keep working.
 
 > **A voucher code is recoverable, and that is why the record matters.** A
-> post-stay PIN and a guest-account password are shown once and cannot be
+> post-stay PIN and a client-account password are shown once and cannot be
 > produced again. A voucher code can be read again — but never without leaving a
 > record of who read it and why.
 
@@ -370,7 +370,7 @@ renews automatically. Use **Check certificate** to check it now, and **Rotate**
 **System → Diagnostics** (`/health`) shows every service's health, restart counts,
 backoff, and recovery history. Services recover on their own; you should not
 normally need to intervene. If you do: **Recheck** re-runs a health check,
-**Logs** shows recent logs (with secrets and guest details removed), and
+**Logs** shows recent logs (with secrets and client details removed), and
 **Restart** (**reason + password**) restarts a service.
 
 ---

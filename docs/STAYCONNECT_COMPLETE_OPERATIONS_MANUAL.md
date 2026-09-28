@@ -66,7 +66,7 @@ StayConnect has two tiers:
   — the binding description is [CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md).
 - **Appliance** (the on-site gateway) — a hardened box running Go daemons and an
   on-box web app called **Admin Console** (formerly Hotel Admin; `hotel-admin`, Next.js). The daemons:
-  - `scd` — supervisor / guest-authorization / license state.
+  - `scd` — supervisor / client authorization / license state.
   - `edged` — the Edge API behind the Admin Console (client networks, DHCP, integrations,
     and the appliance's Central status).
   - `netd` — applies WAN/LAN/VLAN/nftables changes with an auto-rollback watchdog.
@@ -96,7 +96,7 @@ generates itself on first boot; Central never learns the private key.
 | Access plans, voucher batches, sessions | — (issues license terms) | ✅ |
 | PMS / OTP / Social / Payments integrations | — | ✅ |
 | WAN / LAN IP configuration | — | ✅ |
-| Enforce concurrent-guest capacity & license state | — | ✅ (locally, offline-safe) |
+| Enforce concurrent-client capacity & license state | — | ✅ (locally, offline-safe) |
 
 **Rule of thumb:** Central decides *whether and how much* a site may serve (the
 license). The appliance decides *how the site network actually works* and
@@ -205,7 +205,7 @@ bridge gateway must change.
 6. **If you do not confirm within the window (default 120 seconds), the change
    auto-rolls-back.** A wrong IP can never lock you out.
 
-The same apply-and-confirm safety wraps guest-network changes (§11).
+The same apply-and-confirm safety wraps client-network changes (§11).
 
 ---
 
@@ -300,7 +300,7 @@ The appliance evaluates state locally against the signed document and the local
 clock, every minute and at boot, and re-checks the hardware binding on every
 evaluation. States and what they do to **new** client logins:
 
-| State | New client logins | Existing sessions | DHCP/DNS/portal/Hotel-Admin |
+| State | New client logins | Existing sessions | DHCP/DNS/portal/Admin Console |
 |---|---|---|---|
 | **Active** | Allowed, up to capacity | Keep running | Up |
 | **GracePeriod** (expired but within grace) | **Still allowed**, with renewal warning | Keep running | Up |
@@ -333,8 +333,8 @@ Key guarantees:
   login and **PMS room sign-in**. A room guest's first device, a second device
   joining the same stay, and a device rejoining after its session ended each
   take a slot; a device signing in again while its session is still open keeps
-  that session and takes none. A refused room sign-in is recorded on **Client
-  sign-in attempts** as *Licensed capacity full* (`LICENSE_CAPACITY_REACHED`);
+  that session and takes none. A refused room sign-in is recorded on **Hotel →
+  Guest sign-in attempts** as *Licensed capacity full* (`LICENSE_CAPACITY_REACHED`);
   one the licence did not admit at all, as *Licence refused new clients*
   (`LICENSE_REFUSED`).
 - `0` means **unlimited** (older licenses may carry `-1`, also unlimited).
@@ -389,7 +389,7 @@ Reference hardware: **WAN = `ens160`**, **client trunk = `ens192`**.
 
 ### Example A — two VLANs, two different portals/experiences
 
-| | VLAN 100 (Guest) | VLAN 200 (Conference) |
+| | VLAN 100 (Clients) | VLAN 200 (Conference) |
 |---|---|---|
 | Subnet | `10.100.0.0/24` | `10.200.0.0/24` |
 | Gateway (appliance) | `10.100.0.1` | `10.200.0.1` |
@@ -532,7 +532,7 @@ Clients can authenticate by:
   Hotel → Room sign-in**: *any one of first name, surname or reservation number*
   (recommended — one box, compared against all three; an ambiguous match in the
   room is refused), *surname*, *first name* or *reservation number*. The on/off
-  switch stays in **Client Portal → Sign-in methods**, which links to it. Subject to the same licence gate and concurrent-guest
+  switch stays in **Client Portal → Sign-in methods**, which links to it. Subject to the same licence gate and concurrent-client
   capacity as every other method (§10).
 - **Social login** — Google/Apple/Facebook/Microsoft (needs a Social provider).
 - **Payment** — paid WiFi via Stripe (needs a Payments provider).
@@ -552,7 +552,7 @@ login via the **Walled garden** (§17).
 
 Repeated incorrect room sign-ins from the **same device** cause that device to be asked to wait before it can
 try again. It is always on — there is no switch — and the three numbers that decide how strict it is are
-editable in the **Admin Console → Sign-in methods → Client sign-in protection**.
+editable in the **Admin Console → Client Portal → Sign-in methods → Client sign-in protection**.
 
 | Setting | Unit | Default | Allowed | What it does |
 |---|---|---|---|---|
@@ -711,9 +711,9 @@ the appliance itself.
 | `GET /v1/appliance/hello` | **licence enforcement** — detects that Central deleted this appliance (§26) | signed appliance id only | at boot, then every 5 minutes |
 | `GET /v1/appliance/assignment`, `/assignment-registry`, `POST /assignment/ack` | the signed customer/site binding the licence is scoped to; carries retirement | signed document: customer, site, state, version; the ack returns the version adopted | every 30 seconds (mutual TLS only); a terminal acknowledgement is retried until Central confirms |
 
-**No guest identity, stay, session, usage or log content appears in any of them.**
+**No client identity, stay, session, usage or log content appears in any of them.**
 
-**Nothing local depends on Central.** The PMS connection, mirrored stays, guest sign-in and its attempt
+**Nothing local depends on Central.** The PMS connection, mirrored stays, client sign-in and its attempt
 records, packages, allowances, sessions, accounting, enforcement and every Admin Console screen run on this
 appliance. A client does not need Central to get online, and the offline licence and grace rules apply.
 
@@ -733,13 +733,13 @@ Description, **Duration (s)** (blank = unlimited time), **Data cap (bytes)** (bl
 
 > "Max devices" on an access plan is a **per-credential device limit** — the
 > concurrent devices allowed on one voucher or one client account — a different
-> concept from the license's appliance-wide concurrent-guest capacity (§10). Both
+> concept from the license's appliance-wide concurrent-client capacity (§10). Both
 > are enforced on **every** login, atomically and concurrency-safe: a device
 > rejected for either reason gets `MAX_DEVICES_REACHED` / `LICENSE_CAPACITY_REACHED`
 > and no session/nft/shaping/accounting/voucher-activation is created. A reconnect
 > from a device already signed in on the same credential does **not** consume a
 > second slot; disconnect/expiry/reap frees the slot. Client Access Plans are the
-> per-guest tiers here — not the retired commercial *License Plans*.
+> per-client tiers here — not the retired commercial *License Plans*.
 
 **Voucher batch** (**Voucher batches** → **New batch**): choose an active **Plan**,
 a **Count** (1–10000), a **Label**, and the **code generation options**:
@@ -797,7 +797,7 @@ expose the method. Wrong/unknown/disabled/expired/locked all return one **generi
 error and create no session; per-account lockout plus layered throttling
 (username+IP, username+device, endpoint-wide) damps brute force.
 
-New plans/voucher batches/guest accounts require the license to permit
+New plans/voucher batches/client accounts require the license to permit
 provisioning — if the license is Expired/Suspended/Revoked/Unlicensed you'll get a
 "license doesn't currently allow…" error; renew or activate first.
 
@@ -833,7 +833,7 @@ authenticating. Keep the list small.
 
 Do this before go-live, on a real device, per client VLAN:
 
-1. Join the guest SSID (mapped to the VLAN on your controller).
+1. Join the client SSID (mapped to the VLAN on your controller).
 2. Confirm the device gets a DHCP lease in the expected subnet and the gateway/DNS
    is the appliance gateway IP.
 3. Confirm the **captive portal auto-pops** (or browse to any HTTP site and get
@@ -987,8 +987,8 @@ customer's local data leaves with the factory reset, not with an in-place purge.
 
 ### Cross-customer transition & secure data purge
 
-An appliance's local site database holds tenant-owned guest data (access plans,
-vouchers, sessions, guest PII, PMS/notification/social/payment **credentials**,
+An appliance's local site database holds tenant-owned client data (access plans,
+vouchers, sessions, client PII, PMS/notification/social/payment **credentials**,
 walled garden, portal config, operators, usage/accounting). When an appliance
 moves to a **different Customer** — a genuine reassignment, or a Customer that was
 **deleted and recreated** (a new tenant UUID), decommission-and-reuse, or an
@@ -1006,7 +1006,7 @@ automatically, comparing **immutable tenant UUIDs**
   valid).
 - **Cross-customer** transition (different tenant UUID) → on the next boot the
   appliance **securely purges every previous-tenant row and cached secret** in one
-  transaction *before it authorizes any client*: it repoints the live guest
+  transaction *before it authorizes any client*: it repoints the live client
   networks (VLAN/DHCP/portal stay up) to the new owner, deletes all foreign-tenant
   rows across every tenant-owned table + the local tenant/site mirror, flushes runtime client
   authorization (nftables), and writes an **audited transition record**
@@ -1017,7 +1017,7 @@ automatically, comparing **immutable tenant UUIDs**
   retry (or reboot) completes safely.
 
 Preserved across a transition: appliance/system/network/bootstrap state (WAN/mgmt,
-identity, certs, guest-network topology) and the immutable security **audit
+identity, certs, client-network topology) and the immutable security **audit
 history**. Client-facing data and secrets are not.
 
 ---
@@ -1132,7 +1132,7 @@ appliance needs a human to come back, the run fails rather than hiding it.
 | Registration refused (403) + security alert | Clone/hardware-reuse protection | Retire the old appliance (§25), then retry |
 | Registration refused `403 identity_retired` | This identity key was retired | Factory-reset the box (§24); it registers with a new key |
 | Admin Console shows *Removed from OneGate Central* | Central deleted the appliance after it had held a customer | Factory-clean install (§24), then activate it again (§26) |
-| Room sign-in attempts show *Licence refused new clients* / *Licensed capacity full* | The licence, not the guest: room sign-in answers to the same licence gate and capacity as every method | Check the license state; wait for a slot or raise capacity (§10) |
+| Room sign-in attempts show *Licence refused new clients* / *Licensed capacity full* | The licence, not the client's details: room sign-in answers to the same licence gate and capacity as every method | Check the license state; wait for a slot or raise capacity (§10) |
 | Stuck at Waiting for activation | Not activated yet | Activate it (§7) |
 | Stuck activating / no license | CSR/license not yet pulled, or Central briefly unreachable | Wait; check Diagnostics; confirm Central reachability |
 | Clients denied, License shows Expired | Past valid-until + grace | Renew the license (§20) |

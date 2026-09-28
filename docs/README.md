@@ -2,7 +2,7 @@
 
 Start here. This index is organized by what you're trying to do. If you're new to
 StayConnect, read the **Complete Operations Manual** first — it takes a site from
-an unpacked appliance to live, licensed guest WiFi and covers day-2 operations.
+an unpacked appliance to live, licensed client Wi-Fi and covers day-2 operations.
 The product words used throughout (Client, Admin Console, Client Portal, Site) are defined in
 [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md).
 
