@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0097, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0098, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -3997,6 +3997,36 @@ BEGIN
   END IF;
   RETURN NEW;
 END $$;
+
+
+--
+-- Name: p4_posting_command_authorised(uuid, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_posting_command_authorised(p_iface uuid, p_pnum text, p_sha256 text) RETURNS text
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $_$
+DECLARE a record; n int; v_outbox text; v_type text; rdy record;
+BEGIN
+  IF p_iface IS NULL OR p_pnum IS NULL OR p_pnum !~ '^[0-9]{1,18}$' OR p_sha256 IS NULL OR p_sha256 !~ '^[0-9a-f]{64}$' THEN
+    RETURN 'COMMAND_MALFORMED';
+  END IF;
+  SELECT count(*) INTO n FROM iam_v2.posting_attempts WHERE pms_interface_id = p_iface AND p_number = p_pnum;
+  IF n = 0 THEN RETURN 'NO_SUCH_ATTEMPT'; END IF;
+  IF n > 1 THEN RETURN 'P_NUMBER_NOT_UNIQUE'; END IF;
+  SELECT * INTO a FROM iam_v2.posting_attempts x WHERE x.pms_interface_id = p_iface AND x.p_number = p_pnum;
+  IF a.outcome <> 'SENDING' THEN RETURN 'ATTEMPT_NOT_SENDING'; END IF;
+  IF a.ps_sha256 IS NULL OR a.ps_sha256 <> p_sha256 THEN RETURN 'COMMAND_BYTES_NOT_AUTHORISED'; END IF;
+  IF a.sent_at < now() - interval '2 minutes' THEN RETURN 'ATTEMPT_TOO_OLD'; END IF;
+  SELECT p.posting_type INTO v_type FROM iam_v2.pms_postings p WHERE p.id = a.internal_posting_id;
+  IF v_type IS DISTINCT FROM 'CHARGE' THEN RETURN 'NOT_A_CHARGE'; END IF;
+  SELECT o.state INTO v_outbox FROM iam_v2.posting_outbox o WHERE o.posting_id = a.internal_posting_id;
+  IF v_outbox IS DISTINCT FROM 'IN_FLIGHT' THEN RETURN 'POSTING_NOT_IN_FLIGHT'; END IF;
+  SELECT * INTO rdy FROM iam_v2.pms_interface_financially_ready(a.tenant_id, a.site_id, p_iface);
+  IF NOT COALESCE(rdy.ready, false) THEN RETURN 'INTERFACE_NOT_FINANCIALLY_READY'; END IF;
+  RETURN 'AUTHORISED';
+END $_$;
 
 
 --
@@ -8060,8 +8090,8 @@ CREATE FUNCTION iam_v2.trg_posting_attempt_oneway() RETURNS trigger
     AS $$
 BEGIN
   IF TG_OP='DELETE' THEN RAISE EXCEPTION 'posting_attempts is not deletable'; END IF;
-  IF ROW(NEW.p_number,NEW.rn,NEW.g_number,NEW.sent_at,NEW.internal_posting_id,NEW.attempt_no,NEW.pms_interface_id)
-     IS DISTINCT FROM ROW(OLD.p_number,OLD.rn,OLD.g_number,OLD.sent_at,OLD.internal_posting_id,OLD.attempt_no,OLD.pms_interface_id)
+  IF ROW(NEW.p_number,NEW.rn,NEW.g_number,NEW.sent_at,NEW.internal_posting_id,NEW.attempt_no,NEW.pms_interface_id,NEW.ps_sha256)
+     IS DISTINCT FROM ROW(OLD.p_number,OLD.rn,OLD.g_number,OLD.sent_at,OLD.internal_posting_id,OLD.attempt_no,OLD.pms_interface_id,OLD.ps_sha256)
   THEN RAISE EXCEPTION 'posting_attempts identity is immutable'; END IF;
   IF OLD.outcome <> 'SENDING' AND NEW.outcome <> OLD.outcome THEN
      RAISE EXCEPTION 'posting_attempts.outcome is terminal (% -> %)', OLD.outcome, NEW.outcome; END IF;
@@ -10618,14 +10648,23 @@ CREATE TABLE iam_v2.posting_attempts (
     outcome text DEFAULT 'SENDING'::text NOT NULL,
     response_at timestamp with time zone,
     pa_as_status text,
+    ps_sha256 text,
     CONSTRAINT attempt_gnumber_verified CHECK (((g_number IS NOT NULL) AND (btrim(g_number) <> ''::text) AND (length(g_number) <= 32))),
     CONSTRAINT attempt_gnumber_wire_safe CHECK ((g_number !~ '[\x00-\x1f\x7f|]'::text)),
     CONSTRAINT attempt_pnumber_wire_safe CHECK ((p_number ~ '^[0-9]{1,18}$'::text)),
+    CONSTRAINT attempt_ps_sha256_shape CHECK (((ps_sha256 IS NULL) OR (ps_sha256 ~ '^[0-9a-f]{64}$'::text))),
     CONSTRAINT attempt_rn_verified CHECK (((rn IS NOT NULL) AND (btrim(rn) <> ''::text) AND (length(rn) <= 32))),
     CONSTRAINT attempt_rn_wire_safe CHECK ((rn !~ '[\x00-\x1f\x7f|]'::text)),
     CONSTRAINT posting_attempts_outcome_check CHECK ((outcome = ANY (ARRAY['SENDING'::text, 'ACKED'::text, 'UNKNOWN'::text, 'FAILED'::text]))),
     CONSTRAINT posting_attempts_pa_as_status_check CHECK ((pa_as_status = ANY (ARRAY['OK'::text, 'NG'::text, 'NA'::text, 'NP'::text, 'NR'::text, 'RY'::text, 'UR'::text])))
 );
+
+
+--
+-- Name: COLUMN posting_attempts.ps_sha256; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.posting_attempts.ps_sha256 IS 'SHA-256 (lowercase hex) of the exact PS body this attempt authorises. pmsd transmits a PS only when p4_posting_command_authorised confirms a SENDING attempt carrying this hash (decision D45).';
 
 
 --
@@ -17646,6 +17685,14 @@ REVOKE ALL ON FUNCTION iam_v2.p4_payment_admission_gate() FROM PUBLIC;
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p4_payment_identity_gate() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION p4_posting_command_authorised(p_iface uuid, p_pnum text, p_sha256 text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_posting_command_authorised(p_iface uuid, p_pnum text, p_sha256 text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p4_posting_command_authorised(p_iface uuid, p_pnum text, p_sha256 text) TO svc_pmsd;
 
 
 --

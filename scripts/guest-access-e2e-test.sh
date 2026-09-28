@@ -138,18 +138,17 @@ pj=$(roomsignin ga1 00000 x)
 printf '%s' "$pj" | grep -q '"ok":false' && [ "$(lastroom)" = SERVICE_UNAVAILABLE ] && ok "room sign-in switched off: refused before any room lookup (recorded SERVICE_UNAVAILABLE)" || bad "disabled PMS method: $(lastroom) $pj"
 methods "$AM0"; methods '{"guest_account":{"enabled":true}}'   # accounts on for the account tests below
 
-echo "== 4. voucher: sign-in -> packages -> acquisition -> activation -> enforcement -> internet =="
-loc=$(signin ga1 /auth/voucher --data-urlencode "code=$CODE")
-[ "$loc" = "/packages" ] && ok "voucher authenticated; package selection" || bad "voucher sign-in went to '$loc'"
-[ "$($PSQL "SELECT state FROM iam_v2.vouchers WHERE id='$VID'")" = UNUSED ] && ok "voucher still UNUSED after authentication alone" || bad "voucher changed state at authentication"
-ip netns exec ga1 curl -s -o /tmp/ga1.pk -b /tmp/ga1.jar "$PORTAL/packages"
-N=$(grep -c 'name="package_id"' /tmp/ga1.pk); grep -q "value=\"$PKG1\"" /tmp/ga1.pk && [ "$N" = 1 ] && ok "exactly the voucher's own package is offered" || bad "$N packages offered; own offered: $(grep -c "$PKG1" /tmp/ga1.pk)"
-loc=$(acquire ga1 "$PKG1"); SID=$(sidof "$loc")
-[ -n "$SID" ] && ok "acquisition redirected to success only after activation" || bad "acquire went to '$loc'"
+echo "== 4. voucher: one step -- sign-in redeems the card's own package, activates, enforces -> internet =="
+# A VOUCHER IS A PACKAGE, PRINTED (docs/architecture/ONEGATE_MODULES_AND_ACQUISITION.md 6.2): the code pins the
+# package revision it grants, so sign-in quotes and confirms that revision at once, burns the voucher in the same
+# transaction as the grant, and lands on success only after activation. There is no package page to tap.
+loc=$(signin ga1 /auth/voucher --data-urlencode "code=$CODE"); SID=$(sidof "$loc")
+[ -n "$SID" ] && ok "voucher sign-in went straight to success, only after activation" || bad "voucher sign-in went to '$loc'"
 VENT=$(ent_of_session "$SID")
-row=$($PSQL "SELECT s.state||'|'||e.status||'|'||pu.state FROM iam_v2.sessions s JOIN iam_v2.entitlements e ON e.id=s.entitlement_id JOIN iam_v2.purchases pu ON pu.id=e.purchase_id WHERE s.id='$SID'")
-[ "$row" = "active|ACTIVE|GRANTED" ] && ok "session active (set by netd), entitlement ACTIVE, purchase GRANTED" || bad "state $row"
-[ "$($PSQL "SELECT state FROM iam_v2.vouchers WHERE id='$VID'")" = REDEEMED ] && ok "voucher REDEEMED at acquisition" || bad "voucher not redeemed"
+row=$($PSQL "SELECT s.state||'|'||e.status||'|'||pu.state||'|'||pu.trigger FROM iam_v2.sessions s JOIN iam_v2.entitlements e ON e.id=s.entitlement_id JOIN iam_v2.purchases pu ON pu.id=e.purchase_id WHERE s.id='$SID'")
+[ "$row" = "active|ACTIVE|GRANTED|VOUCHER_REDEMPTION" ] && ok "session active (set by netd), entitlement ACTIVE, purchase GRANTED by VOUCHER_REDEMPTION" || bad "state $row"
+[ "$($PSQL "SELECT e.package_revision_id FROM iam_v2.entitlements e WHERE e.id='$VENT'")" = "$REV1" ] && ok "the entitlement is the voucher's own pinned package revision" || bad "entitlement revision differs from the voucher's"
+[ "$($PSQL "SELECT state FROM iam_v2.vouchers WHERE id='$VID'")" = REDEEMED ] && ok "voucher REDEEMED atomically with the grant" || bad "voucher not redeemed"
 [ "$(devs_on "$VENT")" = 1 ] && ok "one device authorized on the entitlement" || bad "device authorizations: $(devs_on "$VENT")"
 inset "$CIP1" && ok "enforcement: device in nft set phase3_auth_ipv4" || bad "device not enforced"
 c=$(online ga1); [ "$c" = 204 ] && ok "REAL INTERNET: $PROBE answered 204" || bad "no internet after activation ($c)"
@@ -175,8 +174,10 @@ loc=$(signin ga1 /auth/voucher --data-urlencode "code=$CODE")
 [ -z "$loc" ] && ok "a redeemed voucher whose access ended cannot sign in again (single use)" || bad "ended voucher -> '$loc'"
 
 echo "== 6. the success-page panel path (/api/commerce/*) ends enforced, or not at all =="
-issue; client ga3; CIP3=$CIP
-signin ga3 /auth/voucher --data-urlencode "code=$CODE" >/dev/null
+# Run with a client account: an account still chooses its package, so it walks the panel's quote -> confirm.
+# (A voucher no longer does -- it is granted at sign-in, section 4.)
+account; UP=$UN; PP=$PW; client ga3; CIP3=$CIP
+signin ga3 /auth/credentials --data-urlencode "username=$UP" --data-urlencode "password=$PP" >/dev/null
 j=$(ip netns exec ga3 curl -s -b /tmp/ga3.jar "$PORTAL/api/commerce/packages")
 P3=$(printf '%s' "$j" | python3 -c 'import sys,json;print((json.load(sys.stdin).get("packages") or [{}])[0].get("package_id",""))' 2>/dev/null)
 q=$(ip netns exec ga3 curl -s -b /tmp/ga3.jar -H 'Content-Type: application/json' -d "{\"package_id\":\"$P3\"}" "$PORTAL/api/commerce/quote")
