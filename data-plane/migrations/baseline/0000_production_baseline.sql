@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0093, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0097, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -24,7 +24,11 @@ DO $do$ BEGIN CREATE ROLE sc_financial_operator NOLOGIN; EXCEPTION WHEN duplicat
 DO $do$ BEGIN CREATE ROLE sc_financial_readonly NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $do$;
 DO $do$ BEGIN CREATE ROLE sc_payment_outcome NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $do$;
 DO $do$ BEGIN CREATE ROLE sc_payment_runtime NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $do$;
+DO $do$ BEGIN CREATE ROLE sc_posting_runtime NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $do$;
+DO $do$ BEGIN CREATE ROLE svc_payment NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $do$;
+DO $do$ BEGIN CREATE ROLE svc_payment_outcome NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $do$;
 DO $do$ BEGIN CREATE ROLE svc_pmsd NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $do$;
+DO $do$ BEGIN CREATE ROLE svc_posting NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $do$;
 
 --
 -- PostgreSQL database dump
@@ -561,6 +565,59 @@ BEGIN
   IF iam_v2.emergency_grace_health(p_tenant,p_site) <> 'OK' THEN
     RAISE EXCEPTION 'emergency-grace catalog not OK after bootstrap (fail closed)';
   END IF;
+END $$;
+
+
+--
+-- Name: card_payment_settings_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.card_payment_settings_get(p_tenant uuid, p_site uuid) RETURNS TABLE(checkout_expiry_minutes integer, reconcile_grace_minutes integer, config_version bigint, updated_at timestamp with time zone, is_default boolean)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE(s.checkout_expiry_minutes, 30), COALESCE(s.reconcile_grace_minutes, 60),
+         COALESCE(s.config_version, 1), s.updated_at, (s.tenant_id IS NULL)
+    FROM (SELECT 1) one
+    LEFT JOIN iam_v2.site_card_payment_settings s ON s.tenant_id = p_tenant AND s.site_id = p_site;
+$$;
+
+
+--
+-- Name: card_payment_settings_set(uuid, uuid, integer, integer, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.card_payment_settings_set(p_tenant uuid, p_site uuid, p_expiry integer, p_grace integer, p_operator text, p_reason text DEFAULT NULL::text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_version bigint; v_old_e int; v_old_g int;
+BEGIN
+  IF p_operator IS NULL OR btrim(p_operator) = '' THEN
+    RAISE EXCEPTION 'an operator label is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_expiry IS NULL OR p_expiry < 30 OR p_expiry > 240 THEN
+    RAISE EXCEPTION 'checkout expiry must be between 30 and 240 minutes (got %)', p_expiry;
+  END IF;
+  IF p_grace IS NULL OR p_grace < 15 OR p_grace > 1440 THEN
+    RAISE EXCEPTION 'reconciliation grace must be between 15 and 1440 minutes (got %)', p_grace;
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('card_payment_settings'), hashtext(p_site::text));
+  SELECT s.checkout_expiry_minutes, s.reconcile_grace_minutes INTO v_old_e, v_old_g
+    FROM iam_v2.site_card_payment_settings s WHERE s.tenant_id = p_tenant AND s.site_id = p_site FOR UPDATE;
+  INSERT INTO iam_v2.site_card_payment_settings AS s (tenant_id, site_id, checkout_expiry_minutes, reconcile_grace_minutes)
+  VALUES (p_tenant, p_site, p_expiry, p_grace)
+  ON CONFLICT (tenant_id, site_id) DO UPDATE
+     SET checkout_expiry_minutes = EXCLUDED.checkout_expiry_minutes,
+         reconcile_grace_minutes = EXCLUDED.reconcile_grace_minutes,
+         config_version = s.config_version + 1, updated_at = now()
+  RETURNING s.config_version INTO v_version;
+  INSERT INTO iam_v2.site_card_payment_setting_changes
+    (tenant_id, site_id, changed_by, change_reason, old_checkout_expiry_minutes, old_reconcile_grace_minutes,
+     new_checkout_expiry_minutes, new_reconcile_grace_minutes, new_config_version)
+  VALUES (p_tenant, p_site, btrim(p_operator), NULLIF(btrim(COALESCE(p_reason,'')),''), v_old_e, v_old_g,
+          p_expiry, p_grace, v_version);
+  RETURN v_version;
 END $$;
 
 
@@ -2789,6 +2846,18 @@ END $$;
 
 
 --
+-- Name: p4_append_only_refuse(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_append_only_refuse() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION '% is append-only: % refused', TG_TABLE_NAME, TG_OP USING ERRCODE = 'restrict_violation';
+END $$;
+
+
+--
 -- Name: p4_apply_provider_outcome(text, text, text, text, text, jsonb); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -3101,7 +3170,7 @@ END $$;
 --
 
 CREATE FUNCTION iam_v2.p4_consume_retry_authorization() RETURNS trigger
-    LANGUAGE plpgsql
+    LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
 BEGIN
@@ -3114,6 +3183,53 @@ BEGIN
      AND terminal_action = 'CONFIRM_NOT_POSTED_RETRY'
      AND retry_authorized_attempt_no = NEW.attempt_no;
   RETURN NULL;
+END $$;
+
+
+--
+-- Name: p4_create_room_charge_posting(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_create_room_charge_posting(p_tenant uuid, p_site uuid, p_settlement uuid) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE se record; pu record; ac record; i record; rdy record; v_folio uuid; v_posting uuid;
+BEGIN
+  SELECT * INTO se FROM iam_v2.settlements WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_settlement FOR UPDATE;
+  IF se.id IS NULL OR se.method <> 'PMS_POSTING' OR se.status <> 'REQUIRED' THEN
+    RAISE EXCEPTION 'ROOM_CHARGE_SETTLEMENT: not a REQUIRED room-charge settlement' USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT * INTO pu FROM iam_v2.purchases WHERE id = se.purchase_id FOR UPDATE;
+  IF pu.state <> 'AWAITING_SETTLEMENT' OR pu.stay_id IS NULL OR pu.pms_interface_id IS NULL OR pu.settlement_mapping_id IS NULL THEN
+    RAISE EXCEPTION 'ROOM_CHARGE_PURCHASE: the purchase does not pin a stay, interface and mapping' USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT * INTO ac FROM iam_v2.auth_contexts WHERE id = pu.auth_context_id;
+  IF ac.method <> 'PMS' OR ac.stay_id IS DISTINCT FROM pu.stay_id THEN
+    RAISE EXCEPTION 'ROOM_CHARGE_AUTHENTICATION: a room charge needs a verified Room sign-in for the same stay' USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT * INTO rdy FROM iam_v2.pms_interface_financially_ready(p_tenant, p_site, pu.pms_interface_id);
+  IF NOT rdy.ready THEN
+    RAISE EXCEPTION 'ROOM_CHARGE_NOT_READY: %', rdy.reason USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT * INTO i FROM iam_v2.pms_interfaces WHERE id = pu.pms_interface_id;
+  SELECT sf.folio_id INTO v_folio FROM iam_v2.stay_folios sf
+   WHERE sf.tenant_id = p_tenant AND sf.site_id = p_site AND sf.pms_interface_id = pu.pms_interface_id
+     AND sf.stay_id = pu.stay_id AND sf.is_default_posting_target;
+  IF v_folio IS NULL THEN
+    RAISE EXCEPTION 'ROOM_CHARGE_NO_FOLIO: the stay has no default posting folio' USING ERRCODE = 'check_violation';
+  END IF;
+  INSERT INTO iam_v2.pms_postings
+    (tenant_id, site_id, pms_interface_id, settlement_id, purchase_id, stay_id, folio_id,
+     posting_interface_revision_id, posting_type, amount_minor, currency, currency_exponent, idempotency_key)
+  VALUES (p_tenant, p_site, pu.pms_interface_id, se.id, pu.id, pu.stay_id, v_folio,
+          i.current_revision_id, 'CHARGE', pu.amount_minor, pu.currency, pu.currency_exponent,
+          'room-charge:' || se.id::text)
+  RETURNING id INTO v_posting;
+  INSERT INTO iam_v2.posting_outbox (tenant_id, site_id, pms_interface_id, posting_id, state)
+  VALUES (p_tenant, p_site, pu.pms_interface_id, v_posting, 'QUEUED');
+  UPDATE iam_v2.settlements SET status = 'IN_PROGRESS' WHERE id = se.id;
+  RETURN v_posting;
 END $$;
 
 
@@ -3166,39 +3282,39 @@ END $$;
 --
 
 CREATE FUNCTION iam_v2.p4_entitlement_grant_kernel(p_tenant uuid, p_site uuid, p_purchase uuid, p_voucher uuid, p_account uuid, p_principal uuid, p_snapshot jsonb, p_plan_rev uuid, p_pkg_rev uuid) RETURNS TABLE(entitlement_id uuid, already_granted boolean, superseded uuid)
+    LANGUAGE sql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT * FROM iam_v2.p4_entitlement_grant_kernel_v2(p_tenant, p_site, p_purchase,
+    p_voucher, p_account, p_principal, NULL, NULL, NULL, p_snapshot, p_plan_rev, p_pkg_rev);
+$$;
+
+
+--
+-- Name: p4_entitlement_grant_kernel_v2(uuid, uuid, uuid, uuid, uuid, uuid, uuid, uuid, uuid, jsonb, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_entitlement_grant_kernel_v2(p_tenant uuid, p_site uuid, p_purchase uuid, p_voucher uuid, p_account uuid, p_principal uuid, p_anon uuid, p_stay uuid, p_iface uuid, p_snapshot jsonb, p_plan_rev uuid, p_pkg_rev uuid) RETURNS TABLE(entitlement_id uuid, already_granted boolean, superseded uuid)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
 DECLARE
   v_subject_key text; v_existing uuid; v_superseded uuid; v_new uuid;
   v_time_mode text; v_end_mode text; v_window timestamptz; v_state text;
-  v_burned int; v_voucher_pkg uuid;
+  v_burned int; v_voucher_pkg uuid; v_quota bigint;
 BEGIN
-  IF p_voucher IS NULL AND p_account IS NULL AND p_principal IS NULL THEN
+  IF num_nonnulls(p_voucher, p_account, p_principal, p_anon, p_stay) <> 1 THEN
     RAISE EXCEPTION 'GRANT_SUBJECT_UNRESOLVED: an entitlement always belongs to exactly one subject'
       USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_stay IS NOT NULL AND p_iface IS NULL THEN
+    RAISE EXCEPTION 'GRANT_STAY_UNPINNED: a stay entitlement names its PMS interface' USING ERRCODE = 'check_violation';
   END IF;
   IF p_snapshot IS NULL OR p_snapshot->>'service_plan_revision_id' IS NULL THEN
     RAISE EXCEPTION 'GRANT_SNAPSHOT_UNREADABLE' USING ERRCODE = 'check_violation';
   END IF;
 
-  -- A VOUCHER GRANTS WHAT IT WAS PRINTED FOR, AND NOTHING ELSE.
-  --
-  -- iam_v2.vouchers.package_revision_id is NOT NULL and has been pinned at issuance since mg3, and the
-  -- issuance path's own comment states why: "what a voucher grants is fixed at issuance by an immutable
-  -- revision, so republishing a package later cannot retroactively change what an already-printed card is
-  -- worth". NOTHING ENFORCED IT. The auth context carries voucher_id and no package pin, so the offer and
-  -- quote path was free to select any package the subject was eligible for -- and at a property with two
-  -- voucher-eligible free tiers, a card printed for the lower one could be redeemed against the higher.
-  --
-  -- Checked HERE because this is the one kernel both grant entry points funnel through, it already receives
-  -- both the voucher and the package revision, and it runs as its owner -- so no caller can route around
-  -- it. Checked BEFORE the subject lock and before any write, so a grant that will be refused does not
-  -- first terminate the guest's previous entitlement.
-  --
-  -- The offer path narrows to the pinned revision as well, so an operator never sees a choice this refuses;
-  -- that is the product behaviour, and this is the invariant. A caller that disagrees with the card gets an
-  -- error rather than a better package.
+  -- A voucher grants what it was printed for, and nothing else (0088).
   IF p_voucher IS NOT NULL THEN
     IF p_pkg_rev IS NULL THEN
       RAISE EXCEPTION 'VOUCHER_PACKAGE_UNPINNED: a voucher grant must name the package revision it grants'
@@ -3220,12 +3336,15 @@ BEGIN
   v_end_mode  := coalesce(nullif(p_snapshot->>'end_mode',''), 'MANUAL_END');
   v_window    := CASE WHEN p_snapshot->>'window_ends_at' IS NOT NULL
                       THEN (p_snapshot->>'window_ends_at')::timestamptz ELSE NULL END;
+  -- A PER_STAY_NIGHT allowance resolved ONCE at quote time from the pinned stay and frozen here. Only this
+  -- explicit key is read: the snapshot's plan data_quota_bytes is the plan's own number and the entitlement
+  -- keeps reading its plan revision for it, exactly as before.
+  v_quota     := CASE WHEN (p_snapshot->>'frozen_data_quota_bytes') IS NOT NULL
+                       AND (p_snapshot->>'frozen_data_quota_bytes')::bigint > 0
+                      THEN (p_snapshot->>'frozen_data_quota_bytes')::bigint ELSE NULL END;
 
-  -- The SUBJECT lock. Taken before the already-granted check so two concurrent callers cannot both read
-  -- "not granted" and both grant. The key shape is shared with the Go path deliberately: two entry points
-  -- that lock differently are two entry points that do not serialize against each other.
   v_subject_key := 'phase2.subject|' || p_tenant::text || '|' || p_site::text || '|' ||
-                   coalesce(p_voucher::text, p_account::text, p_principal::text);
+                   coalesce(p_voucher::text, p_account::text, p_principal::text, p_anon::text, p_stay::text);
   PERFORM pg_advisory_xact_lock(hashtext(v_subject_key));
 
   SELECT id INTO v_existing FROM iam_v2.entitlements WHERE purchase_id = p_purchase LIMIT 1;
@@ -3235,50 +3354,45 @@ BEGIN
 
   SELECT id INTO v_superseded FROM iam_v2.entitlements
    WHERE tenant_id = p_tenant AND site_id = p_site AND status IN ('PENDING','ACTIVE','SUSPENDED')
-     AND ( (p_voucher   IS NOT NULL AND voucher_id         = p_voucher)
-        OR (p_account   IS NOT NULL AND guest_account_id   = p_account)
-        OR (p_principal IS NOT NULL AND guest_principal_id = p_principal) )
+     AND ( (p_voucher   IS NOT NULL AND voucher_id           = p_voucher)
+        OR (p_account   IS NOT NULL AND guest_account_id     = p_account)
+        OR (p_principal IS NOT NULL AND guest_principal_id   = p_principal)
+        OR (p_anon      IS NOT NULL AND anonymous_subject_id = p_anon)
+        OR (p_stay      IS NOT NULL AND stay_id              = p_stay) )
    ORDER BY activated_at DESC NULLS LAST, id LIMIT 1 FOR UPDATE;
   IF v_superseded IS NOT NULL THEN
     PERFORM iam_v2.apply_entitlement_transition(v_superseded, 'TERMINATED', now(), 'SUPERSEDED');
   END IF;
 
   INSERT INTO iam_v2.entitlements
-    (tenant_id, site_id, voucher_id, guest_account_id, guest_principal_id, purchase_id,
+    (tenant_id, site_id, voucher_id, guest_account_id, guest_principal_id, anonymous_subject_id,
+     stay_id, pms_interface_id, purchase_id,
      policy_snapshot, service_plan_revision_id, package_revision_id, time_accounting_mode,
-     end_mode, window_ends_at, status, supersedes_entitlement_id, activated_at)
-  VALUES (p_tenant, p_site, p_voucher, p_account, p_principal, p_purchase,
+     end_mode, window_ends_at, status, supersedes_entitlement_id, activated_at, data_quota_bytes)
+  VALUES (p_tenant, p_site, p_voucher, p_account, p_principal, p_anon,
+          p_stay, CASE WHEN p_stay IS NOT NULL THEN p_iface END, p_purchase,
           p_snapshot, p_plan_rev, p_pkg_rev, v_time_mode, v_end_mode, v_window,
-          'ACTIVE', v_superseded, now())
+          'ACTIVE', v_superseded, now(), v_quota)
   RETURNING id INTO v_new;
-  -- The row and its opening transition are inseparable: an ACTIVE entitlement whose status no transition
-  -- backs cannot commit (Phase-3's deferred coherence constraint), and separating them is the T0037 defect.
   PERFORM iam_v2.apply_entitlement_transition(v_new, 'ACTIVE', now(), 'GRANTED');
 
-  -- SINGLE-USE: the voucher is spent here, inside the grant, or the grant does not happen.
-  --
-  -- This runs as the function owner, so it needs no privilege from the caller. It is inside the subject
-  -- advisory lock taken above, so two concurrent grants for one voucher cannot both burn it. And it is in
-  -- the transaction that creates the entitlement, so a grant can never commit with the voucher still
-  -- spendable -- which was the requirement the Go statement stated and could not keep.
+  -- SINGLE-USE: the voucher is spent here, inside the grant, or the grant does not happen (0084).
   IF p_voucher IS NOT NULL THEN
     UPDATE iam_v2.vouchers
        SET state = 'REDEEMED'
      WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_voucher
-       AND state = 'UNUSED';
+       AND state = 'UNUSED'
+       AND (redemption_valid_from  IS NULL OR redemption_valid_from  <= now())
+       AND (redemption_valid_until IS NULL OR redemption_valid_until >  now());
     GET DIAGNOSTICS v_burned = ROW_COUNT;
     IF v_burned <> 1 THEN
-      -- Nothing was burned, and the early return above means this is not an idempotent retry. Either the
-      -- voucher is already spent, revoked or expired, or it does not belong to this owner. A grant that
-      -- cannot spend its own credential must not commit.
-      RAISE EXCEPTION 'VOUCHER_NOT_REDEEMABLE: voucher % is not UNUSED for this owner; a grant cannot spend '
-                      'a voucher that is already spent, revoked or expired', p_voucher
-        USING ERRCODE = 'check_violation';
+      RAISE EXCEPTION 'VOUCHER_NOT_REDEEMABLE: voucher % is not UNUSED and inside its window for this owner',
+        p_voucher USING ERRCODE = 'check_violation';
     END IF;
   END IF;
 
   SELECT state INTO v_state FROM iam_v2.purchases WHERE id = p_purchase FOR UPDATE;
-  IF v_state NOT IN ('PENDING','AWAITING_SETTLEMENT') THEN
+  IF v_state NOT IN ('PENDING','AWAITING_SETTLEMENT','MANUAL_REVIEW') THEN
     RAISE EXCEPTION 'PURCHASE_STATE_TRANSITION: % -> GRANTED is not an approved transition', v_state
       USING ERRCODE = 'check_violation';
   END IF;
@@ -3342,15 +3456,14 @@ BEGIN
     RAISE EXCEPTION 'GRANT_SETTLEMENT_UNKNOWN: no such settlement in this tenant and site'
       USING ERRCODE = 'no_data_found';
   END IF;
-  IF se.method <> 'ONLINE_PAYMENT' THEN
-    RAISE EXCEPTION 'GRANT_WRONG_RAIL: settlement method is %; this operation grants only against an '
-                    'online payment', se.method USING ERRCODE = 'check_violation';
+  IF se.method NOT IN ('ONLINE_PAYMENT','PMS_POSTING') THEN
+    RAISE EXCEPTION 'GRANT_WRONG_RAIL: settlement method is %; this operation grants only against a card '
+                    'payment or a room charge', se.method USING ERRCODE = 'check_violation';
   END IF;
   IF se.status <> 'SETTLED' THEN
     RAISE EXCEPTION 'GRANT_NOT_SETTLED: settlement is %; money is the authorization and nothing short of '
                     'SETTLED is money', se.status USING ERRCODE = 'check_violation';
   END IF;
-
   SELECT * INTO pu FROM iam_v2.purchases
    WHERE tenant_id = p_tenant AND site_id = p_site AND id = se.purchase_id FOR UPDATE;
   IF pu.id IS NULL THEN RAISE EXCEPTION 'GRANT_PURCHASE_UNKNOWN' USING ERRCODE = 'no_data_found'; END IF;
@@ -3358,11 +3471,10 @@ BEGIN
     RETURN QUERY SELECT e.id, true, NULL::uuid FROM iam_v2.entitlements e WHERE e.purchase_id = pu.id LIMIT 1;
     RETURN;
   END IF;
-  IF pu.state <> 'AWAITING_SETTLEMENT' THEN
+  IF pu.state NOT IN ('AWAITING_SETTLEMENT','MANUAL_REVIEW') THEN
     RAISE EXCEPTION 'GRANT_PURCHASE_STATE: a paid grant requires the purchase to be AWAITING_SETTLEMENT, '
                     'not %', pu.state USING ERRCODE = 'check_violation';
   END IF;
-
   SELECT * INTO q  FROM iam_v2.offer_quotes
    WHERE tenant_id = p_tenant AND site_id = p_site AND id = pu.offer_quote_id;
   SELECT * INTO ac FROM iam_v2.auth_contexts
@@ -3371,9 +3483,15 @@ BEGIN
     RAISE EXCEPTION 'GRANT_EVIDENCE_MISSING: the purchase has no pinned quote or auth context'
       USING ERRCODE = 'no_data_found';
   END IF;
-
-  RETURN QUERY SELECT * FROM iam_v2.p4_entitlement_grant_kernel(
-    p_tenant, p_site, pu.id, ac.voucher_id, ac.guest_account_id, ac.guest_principal_id,
+  IF se.method = 'PMS_POSTING' AND (pu.stay_id IS NULL OR pu.pms_interface_id IS NULL) THEN
+    RAISE EXCEPTION 'GRANT_EVIDENCE_MISSING: a room charge grant needs the pinned stay and interface'
+      USING ERRCODE = 'no_data_found';
+  END IF;
+  RETURN QUERY SELECT * FROM iam_v2.p4_entitlement_grant_kernel_v2(
+    p_tenant, p_site, pu.id,
+    ac.voucher_id, ac.guest_account_id, ac.guest_principal_id, ac.anonymous_subject_id,
+    CASE WHEN ac.stay_id IS NOT NULL THEN pu.stay_id END,
+    CASE WHEN ac.stay_id IS NOT NULL THEN pu.pms_interface_id END,
     q.grant_snapshot, (q.grant_snapshot->>'service_plan_revision_id')::uuid, pu.package_revision_id);
 END $$;
 
@@ -3391,7 +3509,6 @@ BEGIN
   SELECT * INTO pu FROM iam_v2.purchases
    WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_purchase FOR UPDATE;
   IF pu.id IS NULL THEN RAISE EXCEPTION 'GRANT_PURCHASE_UNKNOWN' USING ERRCODE = 'no_data_found'; END IF;
-
   SELECT * INTO se FROM iam_v2.settlements
    WHERE tenant_id = p_tenant AND site_id = p_site AND purchase_id = pu.id;
   IF se.id IS NULL OR se.method <> 'NOT_REQUIRED' OR se.status <> 'NOT_REQUIRED' THEN
@@ -3399,7 +3516,6 @@ BEGIN
                     'right authorization for it', coalesce(se.method,'none'), coalesce(se.status,'none')
       USING ERRCODE = 'check_violation';
   END IF;
-
   SELECT * INTO q  FROM iam_v2.offer_quotes
    WHERE tenant_id = p_tenant AND site_id = p_site AND id = pu.offer_quote_id;
   SELECT * INTO ac FROM iam_v2.auth_contexts
@@ -3412,9 +3528,46 @@ BEGIN
     RAISE EXCEPTION 'GRANT_NOT_FREE: the pinned quote is priced at %; money has to arrive first',
       q.price_minor USING ERRCODE = 'check_violation';
   END IF;
-
-  RETURN QUERY SELECT * FROM iam_v2.p4_entitlement_grant_kernel(
+  RETURN QUERY SELECT * FROM iam_v2.p4_entitlement_grant_kernel_v2(
     p_tenant, p_site, pu.id, ac.voucher_id, ac.guest_account_id, ac.guest_principal_id,
+    ac.anonymous_subject_id, NULL, NULL,
+    q.grant_snapshot, (q.grant_snapshot->>'service_plan_revision_id')::uuid, pu.package_revision_id);
+END $$;
+
+
+--
+-- Name: p4_grant_voucher_entitlement(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_grant_voucher_entitlement(p_tenant uuid, p_site uuid, p_purchase uuid) RETURNS TABLE(entitlement_id uuid, already_granted boolean, superseded uuid)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE pu record; se record; q record; ac record;
+BEGIN
+  SELECT * INTO pu FROM iam_v2.purchases
+   WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_purchase FOR UPDATE;
+  IF pu.id IS NULL THEN RAISE EXCEPTION 'GRANT_PURCHASE_UNKNOWN' USING ERRCODE = 'no_data_found'; END IF;
+  IF pu.trigger <> 'VOUCHER_REDEMPTION' THEN
+    RAISE EXCEPTION 'GRANT_WRONG_RAIL: a voucher grant needs a VOUCHER_REDEMPTION purchase, not %', pu.trigger
+      USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT * INTO se FROM iam_v2.settlements
+   WHERE tenant_id = p_tenant AND site_id = p_site AND purchase_id = pu.id;
+  IF se.id IS NULL OR se.method <> 'PREPAID' OR se.status <> 'SETTLED' THEN
+    RAISE EXCEPTION 'GRANT_NOT_PREPAID: settlement is % / %', coalesce(se.method,'none'), coalesce(se.status,'none')
+      USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT * INTO q  FROM iam_v2.offer_quotes
+   WHERE tenant_id = p_tenant AND site_id = p_site AND id = pu.offer_quote_id;
+  SELECT * INTO ac FROM iam_v2.auth_contexts
+   WHERE tenant_id = p_tenant AND site_id = p_site AND id = pu.auth_context_id;
+  IF q.id IS NULL OR ac.id IS NULL OR ac.voucher_id IS NULL THEN
+    RAISE EXCEPTION 'GRANT_EVIDENCE_MISSING: a voucher grant needs a pinned quote and a voucher auth context'
+      USING ERRCODE = 'no_data_found';
+  END IF;
+  RETURN QUERY SELECT * FROM iam_v2.p4_entitlement_grant_kernel_v2(
+    p_tenant, p_site, pu.id, ac.voucher_id, NULL, NULL, NULL, NULL, NULL,
     q.grant_snapshot, (q.grant_snapshot->>'service_plan_revision_id')::uuid, pu.package_revision_id);
 END $$;
 
@@ -3781,14 +3934,13 @@ BEGIN
                     'says %. A payment must name the provider it is actually going to',
       NEW.provider, acct.provider USING ERRCODE = 'check_violation';
   END IF;
-  IF acct.status <> 'ACTIVE' THEN
+  IF NEW.transaction_type = 'CHARGE' AND acct.status <> 'ACTIVE' THEN
     RAISE EXCEPTION 'PAYMENT_ACCOUNT_NOT_ACTIVE: merchant account % is %; a disabled account cannot take '
                     'money', acct.id, acct.status USING ERRCODE = 'check_violation';
   END IF;
   IF acct.currency IS NOT NULL AND acct.currency <> NEW.currency THEN
-    RAISE EXCEPTION 'PAYMENT_ACCOUNT_CURRENCY: account % settles in %, this payment is in %. Phase 4 '
-                    'performs no conversion', acct.id, acct.currency, NEW.currency
-      USING ERRCODE = 'check_violation';
+    RAISE EXCEPTION 'PAYMENT_ACCOUNT_CURRENCY: account % settles in %, this payment is in %. No conversion '
+                    'is performed', acct.id, acct.currency, NEW.currency USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
 END $$;
@@ -3966,6 +4118,113 @@ END $$;
 
 
 --
+-- Name: p4_posting_review_apply(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_posting_review_apply(p_tenant uuid, p_site uuid, p_posting uuid) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE p record; se record; rs record; v_ent uuid;
+BEGIN
+  SELECT * INTO p FROM iam_v2.pms_postings WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_posting AND posting_type = 'CHARGE';
+  IF p.id IS NULL THEN RAISE EXCEPTION 'POSTING_UNKNOWN' USING ERRCODE = 'no_data_found'; END IF;
+  SELECT * INTO rs FROM iam_v2.posting_review_state WHERE posting_id = p.id;
+  IF rs.terminal_action IS NULL THEN RETURN 'NO_DECISION'; END IF;
+  SELECT * INTO se FROM iam_v2.settlements WHERE id = p.settlement_id FOR UPDATE;
+  IF rs.terminal_action = 'CONFIRM_NOT_POSTED_RETRY' THEN
+    UPDATE iam_v2.posting_outbox SET state = 'QUEUED'
+     WHERE posting_id = p.id AND state = 'HELD_RECOVERY' AND rs.retry_authorized_attempt_no IS NOT NULL
+       AND rs.retry_authorization_consumed_at IS NULL;
+    RETURN 'REQUEUED';
+  END IF;
+  IF se.method <> 'PMS_POSTING' THEN RETURN 'NOT_A_ROOM_CHARGE'; END IF;
+  IF rs.terminal_action = 'CONFIRM_POSTED' THEN
+    IF se.status IN ('IN_PROGRESS','MANUAL_REVIEW') THEN
+      UPDATE iam_v2.settlements SET status = 'SETTLED' WHERE id = se.id;
+    END IF;
+    IF (SELECT status FROM iam_v2.settlements WHERE id = se.id) = 'SETTLED' THEN
+      SELECT entitlement_id INTO v_ent FROM iam_v2.p4_grant_paid_entitlement(p.tenant_id, p.site_id, se.id);
+      RETURN 'GRANTED';
+    END IF;
+    RETURN 'NOT_SETTLED';
+  END IF;
+  IF rs.terminal_action = 'CONFIRM_NOT_POSTED_ABANDON' THEN
+    IF se.status IN ('IN_PROGRESS','MANUAL_REVIEW') THEN
+      UPDATE iam_v2.settlements SET status = 'FAILED' WHERE id = se.id;
+    END IF;
+    RETURN 'FAILED';
+  END IF;
+  RETURN 'NO_EFFECT';
+END $$;
+
+
+--
+-- Name: p4_posting_settlement_outcome(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_posting_settlement_outcome(p_posting uuid) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE p record; se record; a record; v_target text; v_ent uuid;
+BEGIN
+  SELECT * INTO p FROM iam_v2.pms_postings WHERE id = p_posting AND posting_type = 'CHARGE';
+  IF p.id IS NULL THEN RAISE EXCEPTION 'POSTING_UNKNOWN' USING ERRCODE = 'no_data_found'; END IF;
+  SELECT * INTO se FROM iam_v2.settlements WHERE id = p.settlement_id FOR UPDATE;
+  IF se.method <> 'PMS_POSTING' THEN RETURN 'NOT_A_ROOM_CHARGE'; END IF;
+  SELECT * INTO a FROM iam_v2.posting_attempts WHERE internal_posting_id = p.id ORDER BY attempt_no DESC LIMIT 1;
+  IF a.id IS NULL THEN RETURN 'NO_ATTEMPT'; END IF;
+  IF a.outcome = 'ACKED' AND a.pa_as_status = 'OK' THEN
+    v_target := 'SETTLED';
+  ELSIF a.outcome = 'ACKED' THEN
+    v_target := 'FAILED';
+  ELSIF a.outcome = 'UNKNOWN' THEN
+    v_target := 'MANUAL_REVIEW';
+  ELSE
+    RETURN 'NOT_CONCLUSIVE';
+  END IF;
+  IF se.status = v_target OR se.status IN ('FAILED','PARTIALLY_REVERSED','REVERSED') THEN
+    NULL;
+  ELSIF se.status IN ('IN_PROGRESS','MANUAL_REVIEW') THEN
+    IF NOT (se.status = 'MANUAL_REVIEW' AND v_target = 'MANUAL_REVIEW') THEN
+      UPDATE iam_v2.settlements SET status = v_target WHERE id = se.id;
+    END IF;
+  ELSE
+    RAISE EXCEPTION 'POSTING_SETTLEMENT_STATE: settlement is %', se.status USING ERRCODE = 'check_violation';
+  END IF;
+  IF v_target = 'SETTLED' THEN
+    SELECT entitlement_id INTO v_ent FROM iam_v2.p4_grant_paid_entitlement(p.tenant_id, p.site_id, se.id);
+    RETURN 'GRANTED';
+  END IF;
+  RETURN v_target;
+END $$;
+
+
+--
+-- Name: p4_purchase_follows_settlement(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_purchase_follows_settlement() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+BEGIN
+  IF NEW.status = OLD.status THEN
+    RETURN NEW;
+  END IF;
+  IF NEW.status = 'FAILED' THEN
+    UPDATE iam_v2.purchases SET state = 'FAILED'
+     WHERE id = NEW.purchase_id AND state IN ('PENDING','AWAITING_SETTLEMENT','MANUAL_REVIEW');
+  ELSIF NEW.status = 'MANUAL_REVIEW' THEN
+    UPDATE iam_v2.purchases SET state = 'MANUAL_REVIEW'
+     WHERE id = NEW.purchase_id AND state IN ('PENDING','AWAITING_SETTLEMENT');
+  END IF;
+  RETURN NEW;
+END $$;
+
+
+--
 -- Name: p4_reconcile_financial_epoch(uuid, uuid, text); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -4129,6 +4388,50 @@ BEGIN
      SET receipt_verified = true, receipt_authority = p_authority, receipt_reference = p_reference,
          receipt_verified_at = now(), receipt_blocked_reason = NULL
    WHERE id = p_archive;
+END $$;
+
+
+--
+-- Name: p4_record_provider_reversal(uuid, uuid, uuid, text, bigint, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_record_provider_reversal(p_tenant uuid, p_site uuid, p_parent uuid, p_kind text, p_amount_minor bigint, p_provider_event_id text, p_provider_txn_ref text) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE par record; v_key text; v_ref text; v_id uuid; v_result text;
+BEGIN
+  IF p_kind NOT IN ('REFUND','CHARGEBACK') THEN
+    RAISE EXCEPTION 'REVERSAL_KIND: %', p_kind USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_amount_minor IS NULL OR p_amount_minor <= 0 THEN
+    RAISE EXCEPTION 'REVERSAL_AMOUNT: must be positive' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_provider_event_id IS NULL OR btrim(p_provider_event_id) = '' THEN
+    RAISE EXCEPTION 'REVERSAL_EVENT_ID: the provider event id is the deduplication key' USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT * INTO par FROM iam_v2.payment_transactions
+   WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_parent AND transaction_type = 'CHARGE' FOR UPDATE;
+  IF par.id IS NULL OR par.status <> 'CAPTURED' THEN
+    RAISE EXCEPTION 'REVERSAL_PARENT: a reversal belongs to a captured charge' USING ERRCODE = 'check_violation';
+  END IF;
+  v_key := left('provider-reversal:' || p_provider_event_id, 200);
+  IF EXISTS (SELECT 1 FROM iam_v2.payment_transactions WHERE tenant_id = p_tenant AND idempotency_key = v_key) THEN
+    RETURN 'DUPLICATE';
+  END IF;
+  v_ref := left('rev_' || md5(v_key), 200);
+  INSERT INTO iam_v2.payment_transactions
+    (tenant_id, site_id, settlement_id, merchant_account_id, transaction_type, parent_transaction_id,
+     provider, provider_ref, idempotency_key, amount_minor, currency, currency_exponent, status)
+  VALUES (p_tenant, p_site, par.settlement_id, par.merchant_account_id, p_kind, par.id,
+          par.provider, v_ref, v_key, p_amount_minor, par.currency, par.currency_exponent, 'CREATED')
+  RETURNING id INTO v_id;
+  UPDATE iam_v2.payment_transactions SET status = 'PENDING' WHERE id = v_id;
+  SELECT iam_v2.apply_payment_callback_v2(p_tenant, par.provider, par.merchant_account_id, v_ref,
+           left(p_provider_event_id, 200), p_kind, 'CAPTURED', left('evt:' || p_provider_event_id, 200),
+           jsonb_build_object('provider_status','CAPTURED','provider_message','provider-reported ' || lower(p_kind)))
+    INTO v_result;
+  RETURN v_result;
 END $$;
 
 
@@ -4309,6 +4612,27 @@ BEGIN
                     'online payment cannot be attempted' USING ERRCODE = 'no_data_found';
   END IF;
   account_id := acct.id; provider := acct.provider; merchant_account_ref := acct.merchant_account_ref;
+  RETURN NEXT;
+END $$;
+
+
+--
+-- Name: p4_resolve_payment_account_v2(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_resolve_payment_account_v2(p_tenant uuid, p_site uuid) RETURNS TABLE(account_id uuid, provider text, merchant_account_ref text, currency text, mode text)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE acct record;
+BEGIN
+  SELECT * INTO acct FROM iam_v2.payment_provider_accounts
+   WHERE tenant_id = p_tenant AND site_id = p_site AND status = 'ACTIVE' AND is_default LIMIT 1;
+  IF acct.id IS NULL THEN
+    RAISE EXCEPTION 'PAYMENT_NO_CONFIGURED_ACCOUNT' USING ERRCODE = 'no_data_found';
+  END IF;
+  account_id := acct.id; provider := acct.provider; merchant_account_ref := acct.merchant_account_ref;
+  currency := acct.currency; mode := acct.mode;
   RETURN NEXT;
 END $$;
 
@@ -4508,6 +4832,50 @@ END $$;
 
 
 --
+-- Name: p4_room_charge_has_records(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_room_charge_has_records(p_tenant uuid, p_site uuid) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT EXISTS (SELECT 1 FROM iam_v2.pms_postings WHERE tenant_id = p_tenant AND site_id = p_site);
+$$;
+
+
+--
+-- Name: p4_settlement_birth(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_settlement_birth() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_trigger text; v_voucher uuid;
+BEGIN
+  IF NEW.method = 'NOT_REQUIRED' AND NEW.status = 'NOT_REQUIRED' THEN
+    RETURN NEW;
+  END IF;
+  IF NEW.method IN ('ONLINE_PAYMENT','PMS_POSTING','MANUAL_APPROVAL') AND NEW.status = 'REQUIRED' THEN
+    RETURN NEW;
+  END IF;
+  IF NEW.method = 'PREPAID' AND NEW.status = 'SETTLED' THEN
+    SELECT pu.trigger, ac.voucher_id INTO v_trigger, v_voucher
+      FROM iam_v2.purchases pu
+      JOIN iam_v2.auth_contexts ac ON ac.id = pu.auth_context_id
+     WHERE pu.id = NEW.purchase_id;
+    IF v_trigger = 'VOUCHER_REDEMPTION' AND v_voucher IS NOT NULL THEN
+      RETURN NEW;
+    END IF;
+    RAISE EXCEPTION 'SETTLEMENT_BIRTH: a PREPAID settlement is born SETTLED only for a voucher redemption'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RAISE EXCEPTION 'SETTLEMENT_BIRTH: % / % is not a coherent first state', NEW.method, NEW.status
+    USING ERRCODE = 'check_violation';
+END $$;
+
+
+--
 -- Name: p4_settlement_state_machine(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -4544,11 +4912,18 @@ BEGIN
           USING ERRCODE = 'check_violation';
       END IF;
     ELSIF NEW.method = 'PMS_POSTING' THEN
+      -- The PMS acknowledged the charge (PA=OK), OR an authorised reviewer recorded CONFIRM_POSTED after
+      -- verifying from external evidence that an UNKNOWN attempt did post (the accepted Phase-0 review action).
       IF NOT EXISTS (SELECT 1 FROM iam_v2.pms_postings p
                        JOIN iam_v2.posting_attempts a ON a.internal_posting_id = p.id
                       WHERE p.settlement_id = NEW.id AND p.posting_type = 'CHARGE'
-                        AND a.outcome = 'ACKED' AND a.pa_as_status = 'OK') THEN
-        RAISE EXCEPTION 'SETTLEMENT_NOT_EVIDENCED: PMS_POSTING settles only on a posting the PMS ACKed OK'
+                        AND a.outcome = 'ACKED' AND a.pa_as_status = 'OK')
+         AND NOT EXISTS (SELECT 1 FROM iam_v2.pms_postings p
+                           JOIN iam_v2.posting_review_state rs ON rs.posting_id = p.id
+                          WHERE p.settlement_id = NEW.id AND p.posting_type = 'CHARGE'
+                            AND rs.terminal_action = 'CONFIRM_POSTED') THEN
+        RAISE EXCEPTION 'SETTLEMENT_NOT_EVIDENCED: PMS_POSTING settles only on a posting the PMS ACKed OK '
+                        'or a reviewed CONFIRM_POSTED'
           USING ERRCODE = 'check_violation';
       END IF;
     END IF;
@@ -5861,6 +6236,109 @@ COMMENT ON FUNCTION iam_v2.p6_tick_online_time(p_tenant uuid, p_site uuid, p_now
 
 
 --
+-- Name: payment_account_save(uuid, uuid, uuid, text, text, text, text, text, text, boolean, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.payment_account_save(p_tenant uuid, p_site uuid, p_id uuid, p_provider text, p_merchant_ref text, p_display_name text, p_currency text, p_mode text, p_status text, p_is_default boolean, p_operator text, p_reason text) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $_$
+DECLARE v_id uuid; v_old jsonb; v_new jsonb;
+BEGIN
+  IF p_operator IS NULL OR btrim(p_operator) = '' THEN
+    RAISE EXCEPTION 'an operator label is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_provider NOT IN ('stripe','paymob') THEN
+    RAISE EXCEPTION 'PAYMENT_PROVIDER_UNSUPPORTED: %', p_provider USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_currency IS NULL OR p_currency !~ '^[A-Z]{3}$' THEN
+    RAISE EXCEPTION 'a three-letter currency is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('payment_account_save'), hashtext(p_site::text));
+  IF p_is_default THEN
+    UPDATE iam_v2.payment_provider_accounts SET is_default = false, updated_at = now()
+     WHERE tenant_id = p_tenant AND site_id = p_site AND is_default AND id IS DISTINCT FROM p_id;
+  END IF;
+  IF p_id IS NULL THEN
+    INSERT INTO iam_v2.payment_provider_accounts
+      (tenant_id, site_id, provider, merchant_account_ref, display_name, currency, mode, status, is_default, provenance)
+    VALUES (p_tenant, p_site, p_provider, p_merchant_ref, p_display_name, p_currency, p_mode, p_status, p_is_default, 'CONFIGURED')
+    RETURNING id INTO v_id;
+  ELSE
+    SELECT to_jsonb(a) - 'created_at' - 'updated_at' INTO v_old FROM iam_v2.payment_provider_accounts a
+     WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_id FOR UPDATE;
+    IF v_old IS NULL THEN
+      RAISE EXCEPTION 'PAYMENT_ACCOUNT_UNKNOWN' USING ERRCODE = 'no_data_found';
+    END IF;
+    UPDATE iam_v2.payment_provider_accounts
+       SET provider = p_provider, merchant_account_ref = p_merchant_ref, display_name = p_display_name,
+           currency = p_currency, mode = p_mode, status = p_status, is_default = p_is_default,
+           provenance = 'CONFIGURED', updated_at = now()
+     WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_id
+    RETURNING id INTO v_id;
+  END IF;
+  SELECT to_jsonb(a) - 'created_at' - 'updated_at' INTO v_new FROM iam_v2.payment_provider_accounts a WHERE id = v_id;
+  INSERT INTO iam_v2.payment_provider_account_changes
+    (tenant_id, site_id, account_id, changed_by, change_reason, change_kind, old_values, new_values)
+  VALUES (p_tenant, p_site, v_id, btrim(p_operator), NULLIF(btrim(coalesce(p_reason,'')),''),
+          CASE WHEN v_old IS NULL THEN 'CREATED' ELSE 'UPDATED' END, v_old, v_new);
+  RETURN v_id;
+END $_$;
+
+
+--
+-- Name: payment_account_set_secret(uuid, uuid, uuid, uuid, bytea, bytea, text, smallint, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.payment_account_set_secret(p_tenant uuid, p_site uuid, p_account uuid, p_generation uuid, p_ciphertext bytea, p_nonce bytea, p_key_id text, p_cipher_version smallint, p_operator text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+BEGIN
+  IF p_operator IS NULL OR btrim(p_operator) = '' THEN
+    RAISE EXCEPTION 'an operator label is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  PERFORM 1 FROM iam_v2.payment_provider_accounts
+   WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_account FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'PAYMENT_ACCOUNT_UNKNOWN' USING ERRCODE = 'no_data_found';
+  END IF;
+  UPDATE iam_v2.payment_provider_secret_generations SET superseded_at = now()
+   WHERE account_id = p_account AND superseded_at IS NULL;
+  INSERT INTO iam_v2.payment_provider_secret_generations
+    (id, tenant_id, site_id, account_id, ciphertext, nonce, key_id, cipher_version, created_by)
+  VALUES (p_generation, p_tenant, p_site, p_account, p_ciphertext, p_nonce, p_key_id, p_cipher_version, btrim(p_operator));
+  INSERT INTO iam_v2.payment_provider_account_changes
+    (tenant_id, site_id, account_id, changed_by, change_kind, new_values)
+  VALUES (p_tenant, p_site, p_account, btrim(p_operator), 'CREDENTIALS_ROTATED',
+          jsonb_build_object('generation', p_generation, 'key_id', p_key_id));
+END $$;
+
+
+--
+-- Name: payment_checkouts_guard(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.payment_checkouts_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'payment_checkouts rows are never deleted' USING ERRCODE = 'restrict_violation';
+  END IF;
+  IF OLD.provider_session_ref IS NOT NULL AND NEW.provider_session_ref IS DISTINCT FROM OLD.provider_session_ref THEN
+    RAISE EXCEPTION 'PAYMENT_SESSION_REF_IMMUTABLE: a checkout keeps the provider reference it was created with'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF NEW.transaction_id <> OLD.transaction_id OR NEW.tenant_id <> OLD.tenant_id OR NEW.site_id <> OLD.site_id
+     OR NEW.created_at <> OLD.created_at THEN
+    RAISE EXCEPTION 'payment_checkouts identity is immutable' USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+
+
+--
 -- Name: pms_accept_startup_data_gap(uuid, uuid, uuid, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -6060,6 +6538,18 @@ $$;
 
 
 --
+-- Name: pms_financial_onboardings_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_financial_onboardings_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'iam_v2.pms_financial_onboardings is append-only: % refused', TG_OP USING ERRCODE = 'restrict_violation';
+END $$;
+
+
+--
 -- Name: pms_integration_blockers(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -6126,6 +6616,92 @@ CREATE FUNCTION iam_v2.pms_integration_blockers(p_tenant uuid, p_site uuid) RETU
        AND NOT EXISTS (SELECT 1 FROM iam_v2.pms_case_resolutions x WHERE x.stay_event_id = e.id)
      HAVING count(*) > 0;
 $$;
+
+
+--
+-- Name: pms_interface_financial_onboard(uuid, uuid, uuid, uuid, text, text, smallint, text, text, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_interface_financial_onboard(p_tenant uuid, p_site uuid, p_iface uuid, p_expected_revision uuid, p_strategy text, p_currency text, p_exponent smallint, p_attestation text, p_reason text, p_operator uuid) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'public', 'pg_temp'
+    AS $_$
+DECLARE v_current uuid; v_kind text; v_new uuid; v_status text;
+BEGIN
+  IF p_strategy NOT IN ('GLOBALLY_UNIQUE','UNIQUE_PER_STAY','REUSED_SEQUENTIAL') THEN
+    RAISE EXCEPTION 'ONBOARDING_STRATEGY: a concrete folio identity strategy is required' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_currency IS NULL OR p_currency !~ '^[A-Z]{3}$' OR p_exponent IS NULL OR p_exponent NOT BETWEEN 0 AND 4 THEN
+    RAISE EXCEPTION 'ONBOARDING_CURRENCY: a three-letter currency and an exponent 0..4 are required' USING ERRCODE = 'check_violation';
+  END IF;
+  IF length(btrim(coalesce(p_attestation,''))) < 20 THEN
+    RAISE EXCEPTION 'ONBOARDING_ATTESTATION: state what was observed about how this PMS identifies folios' USING ERRCODE = 'check_violation';
+  END IF;
+  IF length(btrim(coalesce(p_reason,''))) < 4 THEN
+    RAISE EXCEPTION 'ONBOARDING_REASON: a reason is required' USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT status INTO v_status FROM public.operators WHERE id = p_operator AND tenant_id = p_tenant;
+  IF v_status IS DISTINCT FROM 'active' THEN
+    RAISE EXCEPTION 'ONBOARDING_ACTOR: an active operator of this tenant must approve onboarding' USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT current_revision_id, connector_kind INTO v_current, v_kind FROM iam_v2.pms_interfaces
+   WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_iface FOR UPDATE;
+  IF v_current IS NULL THEN
+    RAISE EXCEPTION 'ONBOARDING_INTERFACE: no published revision for this interface' USING ERRCODE = 'no_data_found';
+  END IF;
+  IF v_current IS DISTINCT FROM p_expected_revision THEN
+    RAISE EXCEPTION 'ONBOARDING_REVISION_CONFLICT: the interface changed while this form was open' USING ERRCODE = 'serialization_failure';
+  END IF;
+  IF v_kind <> 'protel-fias' THEN
+    RAISE EXCEPTION 'ONBOARDING_CONNECTOR: room charge is supported for FIAS interfaces only' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_exponent <> 2 THEN
+    RAISE EXCEPTION 'ONBOARDING_EXPONENT: FIAS transmits amounts with exponent 2' USING ERRCODE = 'check_violation';
+  END IF;
+  INSERT INTO iam_v2.pms_interface_revisions
+    (tenant_id, site_id, pms_interface_id, revision_no, source_timezone, folio_identity_strategy, config,
+     normalization_version, source_fingerprint, financial_base_currency, financial_base_currency_exponent)
+  SELECT r.tenant_id, r.site_id, r.pms_interface_id,
+         (SELECT COALESCE(MAX(x.revision_no),0)+1 FROM iam_v2.pms_interface_revisions x
+           WHERE x.tenant_id = r.tenant_id AND x.site_id = r.site_id AND x.pms_interface_id = r.pms_interface_id),
+         r.source_timezone, p_strategy, r.config, r.normalization_version, r.source_fingerprint, p_currency, p_exponent
+    FROM iam_v2.pms_interface_revisions r WHERE r.id = v_current
+  RETURNING id INTO v_new;
+  UPDATE iam_v2.pms_interfaces SET current_revision_id = v_new
+   WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_iface;
+  INSERT INTO iam_v2.pms_financial_onboardings
+    (tenant_id, site_id, pms_interface_id, revision_id, previous_revision_id, folio_identity_strategy, currency,
+     currency_exponent, attestation, reason, approved_by)
+  VALUES (p_tenant, p_site, p_iface, v_new, v_current, p_strategy, p_currency, p_exponent, btrim(p_attestation),
+          btrim(p_reason), p_operator);
+  RETURN v_new;
+END $_$;
+
+
+--
+-- Name: pms_interface_financially_ready(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_interface_financially_ready(p_tenant uuid, p_site uuid, p_iface uuid) RETURNS TABLE(ready boolean, reason text, currency character, currency_exponent smallint)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE i record; r record;
+BEGIN
+  SELECT * INTO i FROM iam_v2.pms_interfaces WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_iface;
+  IF i.id IS NULL THEN ready := false; reason := 'INTERFACE_UNKNOWN'; RETURN NEXT; RETURN; END IF;
+  IF i.connector_kind <> 'protel-fias' THEN ready := false; reason := 'CONNECTOR_NOT_FINANCIAL'; RETURN NEXT; RETURN; END IF;
+  IF i.lifecycle_state NOT IN ('ACTIVE','AUTH_DISABLED') THEN ready := false; reason := 'INTERFACE_NOT_ACTIVE'; RETURN NEXT; RETURN; END IF;
+  SELECT * INTO r FROM iam_v2.pms_interface_revisions WHERE id = i.current_revision_id;
+  currency := r.financial_base_currency; currency_exponent := r.financial_base_currency_exponent;
+  IF r.folio_identity_strategy = 'UNSET' OR r.financial_base_currency IS NULL THEN
+    ready := false; reason := 'NOT_ONBOARDED'; RETURN NEXT; RETURN;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM iam_v2.pms_financial_onboardings o WHERE o.revision_id = r.id) THEN
+    ready := false; reason := 'ONBOARDING_NOT_APPROVED'; RETURN NEXT; RETURN;
+  END IF;
+  ready := true; reason := NULL; RETURN NEXT;
+END $$;
 
 
 --
@@ -7202,6 +7778,112 @@ END $$;
 
 
 --
+-- Name: site_module_changes_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.site_module_changes_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'iam_v2.site_module_changes is append-only: % refused', TG_OP
+    USING ERRCODE = 'restrict_violation';
+END $$;
+
+
+--
+-- Name: site_module_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.site_module_get(p_tenant uuid, p_site uuid) RETURNS TABLE(module_id text, enabled boolean, config_version bigint, updated_at timestamp with time zone)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT m.id, COALESCE(s.enabled, false), COALESCE(s.config_version, 0), s.updated_at
+    FROM unnest(ARRAY['hospitality','paid_access','card_payment','room_charge']) AS m(id)
+    LEFT JOIN iam_v2.site_module_settings s
+      ON s.tenant_id = p_tenant AND s.site_id = p_site AND s.module_id = m.id
+   ORDER BY m.id;
+$$;
+
+
+--
+-- Name: site_module_set(uuid, uuid, text, boolean, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.site_module_set(p_tenant uuid, p_site uuid, p_module text, p_enabled boolean, p_operator text, p_reason text DEFAULT NULL::text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_old boolean; v_version bigint;
+BEGIN
+  IF p_operator IS NULL OR btrim(p_operator) = '' THEN
+    RAISE EXCEPTION 'an operator label is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_module IS NULL OR p_module NOT IN ('hospitality','paid_access','card_payment','room_charge') THEN
+    RAISE EXCEPTION 'unknown switchable module %', p_module USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_enabled IS NULL THEN
+    RAISE EXCEPTION 'enabled must be true or false' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('site_module_settings'), hashtext(p_site::text));
+  SELECT s.enabled INTO v_old FROM iam_v2.site_module_settings s
+   WHERE s.tenant_id = p_tenant AND s.site_id = p_site AND s.module_id = p_module FOR UPDATE;
+  INSERT INTO iam_v2.site_module_settings AS s (tenant_id, site_id, module_id, enabled)
+  VALUES (p_tenant, p_site, p_module, p_enabled)
+  ON CONFLICT (tenant_id, site_id, module_id) DO UPDATE
+     SET enabled = EXCLUDED.enabled, config_version = s.config_version + 1, updated_at = now()
+  RETURNING s.config_version INTO v_version;
+  INSERT INTO iam_v2.site_module_changes
+    (tenant_id, site_id, module_id, changed_by, change_reason, old_enabled, new_enabled, new_config_version)
+  VALUES (p_tenant, p_site, p_module, btrim(p_operator), NULLIF(btrim(COALESCE(p_reason,'')),''),
+          v_old, p_enabled, v_version);
+  RETURN v_version;
+END $$;
+
+
+--
+-- Name: FUNCTION site_module_set(p_tenant uuid, p_site uuid, p_module text, p_enabled boolean, p_operator text, p_reason text); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.site_module_set(p_tenant uuid, p_site uuid, p_module text, p_enabled boolean, p_operator text, p_reason text) IS 'Switches a licensed module on or off for a site and records the change. Does not check the licence: enabling an unlicensed module stores the choice but the resolver still refuses it (the licence is a separate gate). Takes effect on the next resolver read; no restart.';
+
+
+--
+-- Name: site_payment_domains_set(uuid, uuid, text[], text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.site_payment_domains_set(p_tenant uuid, p_site uuid, p_domains text[], p_operator text, p_reason text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_old text[]; v_version bigint; d text;
+BEGIN
+  IF p_operator IS NULL OR btrim(p_operator) = '' THEN
+    RAISE EXCEPTION 'an operator label is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_domains IS NULL OR cardinality(p_domains) > 20 THEN
+    RAISE EXCEPTION 'at most 20 payment domains' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  FOREACH d IN ARRAY p_domains LOOP
+    IF NOT iam_v2.valid_payment_domain(d) THEN
+      RAISE EXCEPTION 'PAYMENT_DOMAIN_INVALID: %', d USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+  END LOOP;
+  PERFORM pg_advisory_xact_lock(hashtext('site_payment_domains'), hashtext(p_site::text));
+  SELECT domains INTO v_old FROM iam_v2.site_payment_domains
+   WHERE tenant_id = p_tenant AND site_id = p_site FOR UPDATE;
+  INSERT INTO iam_v2.site_payment_domains AS s (tenant_id, site_id, domains)
+  VALUES (p_tenant, p_site, p_domains)
+  ON CONFLICT (tenant_id, site_id) DO UPDATE
+     SET domains = EXCLUDED.domains, config_version = s.config_version + 1, updated_at = now()
+  RETURNING s.config_version INTO v_version;
+  INSERT INTO iam_v2.site_payment_domain_changes (tenant_id, site_id, changed_by, change_reason, old_domains, new_domains)
+  VALUES (p_tenant, p_site, btrim(p_operator), NULLIF(btrim(coalesce(p_reason,'')),''), v_old, p_domains);
+  RETURN v_version;
+END $$;
+
+
+--
 -- Name: supersede_entitlement_transition(uuid, text, timestamp with time zone, text); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -7489,6 +8171,48 @@ END; $$;
 
 
 --
+-- Name: valid_payment_domain(text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.valid_payment_domain(p text) RETURNS boolean
+    LANGUAGE sql IMMUTABLE
+    AS $_$
+  SELECT p IS NOT NULL
+     AND length(p) BETWEEN 4 AND 253
+     AND p ~ '^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$'
+     AND p !~ '^(\*\.)?[a-z]{2,63}$'
+     AND p !~ '^(\*\.)?(com|net|org|co\.[a-z]{2}|com\.[a-z]{2}|gov\.[a-z]{2}|org\.[a-z]{2}|ac\.[a-z]{2})$'
+     AND p !~ '^[0-9.]+$';
+$_$;
+
+
+--
+-- Name: voucher_batch_revoke(uuid, uuid, uuid, uuid, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.voucher_batch_revoke(p_tenant uuid, p_site uuid, p_batch uuid, p_operator uuid, p_reason text) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'public', 'pg_temp'
+    AS $$
+DECLARE v_n integer;
+BEGIN
+  IF p_operator IS NULL THEN
+    RAISE EXCEPTION 'VOUCHER_REVOKE_NEEDS_AN_OPERATOR' USING ERRCODE = 'check_violation';
+  END IF;
+  IF length(btrim(coalesce(p_reason, ''))) < 4 THEN
+    RAISE EXCEPTION 'VOUCHER_REVOKE_NEEDS_A_REASON' USING ERRCODE = 'check_violation';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('voucher_batch_revoke'), hashtext(p_batch::text));
+  UPDATE iam_v2.vouchers SET state = 'REVOKED'
+   WHERE tenant_id = p_tenant AND site_id = p_site AND batch_id = p_batch AND state = 'UNUSED';
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  INSERT INTO iam_v2.voucher_revocations (tenant_id, site_id, batch_id, revoked_count, operator_id, reason)
+  VALUES (p_tenant, p_site, p_batch, v_n, p_operator, btrim(p_reason));
+  RETURN v_n;
+END $$;
+
+
+--
 -- Name: voucher_code_generation_supersede(uuid, uuid, uuid, uuid, text); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -7635,6 +8359,53 @@ COMMENT ON FUNCTION iam_v2.voucher_code_settings_set(p_tenant uuid, p_site uuid,
 
 
 --
+-- Name: voucher_issuance_gate(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.voucher_issuance_gate() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_methods text[]; v_active boolean; v_current uuid;
+BEGIN
+  SELECT r.settlement_methods, p.active, p.current_revision_id
+    INTO v_methods, v_active, v_current
+    FROM iam_v2.internet_package_revisions r
+    JOIN iam_v2.internet_packages p
+      ON p.tenant_id = r.tenant_id AND p.site_id = r.site_id AND p.id = r.package_id
+   WHERE r.tenant_id = NEW.tenant_id AND r.site_id = NEW.site_id AND r.id = NEW.package_revision_id;
+  IF v_methods IS NULL THEN
+    RAISE EXCEPTION 'VOUCHER_PACKAGE_UNKNOWN' USING ERRCODE = 'check_violation';
+  END IF;
+  IF NOT ('PREPAID' = ANY (v_methods)) THEN
+    RAISE EXCEPTION 'VOUCHER_NOT_ACCEPTED: this package does not accept Voucher acquisition'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF v_active IS NOT TRUE THEN
+    RAISE EXCEPTION 'VOUCHER_PACKAGE_INACTIVE: vouchers are issued only for an active package'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF v_current IS DISTINCT FROM NEW.package_revision_id THEN
+    RAISE EXCEPTION 'VOUCHER_REVISION_NOT_CURRENT: vouchers are issued against the package''s current revision'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+
+
+--
+-- Name: voucher_revocations_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.voucher_revocations_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'iam_v2.voucher_revocations is append-only: % refused', TG_OP USING ERRCODE = 'restrict_violation';
+END $$;
+
+
+--
 -- Name: voucher_revoke(uuid, uuid, uuid, uuid, text); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -7650,19 +8421,16 @@ BEGIN
   IF length(btrim(coalesce(p_reason, ''))) < 4 THEN
     RAISE EXCEPTION 'VOUCHER_REVOKE_NEEDS_A_REASON' USING ERRCODE = 'check_violation';
   END IF;
-  -- UNUSED only. A REDEEMED voucher has already granted an entitlement, and revoking the card would not
-  -- take that entitlement back -- so answering "revoked" would be a false statement about access. The
-  -- entitlement is ended through the session/entitlement surface, which is a different action.
   UPDATE iam_v2.vouchers
      SET state = 'REVOKED'
    WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_voucher AND state = 'UNUSED';
   GET DIAGNOSTICS v_n = ROW_COUNT;
-  -- Not a silent no-op: the same reasoning as 0084's burn. "Nothing happened" and "it was already spent"
-  -- are different answers and the caller must be able to tell them apart.
   IF v_n <> 1 THEN
     RAISE EXCEPTION 'VOUCHER_NOT_REVOCABLE: no UNUSED voucher % for tenant %/site %', p_voucher, p_tenant, p_site
       USING ERRCODE = 'check_violation';
   END IF;
+  INSERT INTO iam_v2.voucher_revocations (tenant_id, site_id, voucher_id, revoked_count, operator_id, reason)
+  VALUES (p_tenant, p_site, p_voucher, 1, p_operator, btrim(p_reason));
 END $$;
 
 
@@ -7801,6 +8569,52 @@ CREATE VIEW iam_v2.active_operational_alerts AS
 
 
 --
+-- Name: anonymous_access_subjects; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.anonymous_access_subjects (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_resumed_at timestamp with time zone
+);
+
+
+--
+-- Name: TABLE anonymous_access_subjects; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.anonymous_access_subjects IS 'The entitlement subject of a client who chose a package without signing in. Server-generated and opaque: it carries no identity factor and no MAC (a MAC identifies a Device only). Not a guest principal.';
+
+
+--
+-- Name: anonymous_subject_credentials; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.anonymous_subject_credentials (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    subject_id uuid NOT NULL,
+    kind text NOT NULL,
+    secret_hmac bytea NOT NULL,
+    key_id text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    revoked_at timestamp with time zone,
+    CONSTRAINT anonymous_subject_credentials_kind_check CHECK ((kind = ANY (ARRAY['RESUME'::text, 'RECOVERY'::text])))
+);
+
+
+--
+-- Name: TABLE anonymous_subject_credentials; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.anonymous_subject_credentials IS 'Resume token (HttpOnly portal cookie) and recovery code (shown to the client) of an anonymous subject. Only keyed HMACs are stored; the plaintext exists only in the client''s browser or hand.';
+
+
+--
 -- Name: appliance_class_generation; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -7904,11 +8718,12 @@ CREATE TABLE iam_v2.auth_contexts (
     pinned_lifecycle_version integer,
     pinned_occupancy_evidence_version bigint,
     resolution_request_id uuid,
-    CONSTRAINT ac_method_subject CHECK ((((method = 'PMS'::text) AND (stay_id IS NOT NULL)) OR ((method = 'VOUCHER'::text) AND (voucher_id IS NOT NULL)) OR ((method = 'ACCOUNT'::text) AND (guest_account_id IS NOT NULL)) OR ((method = ANY (ARRAY['OTP'::text, 'SOCIAL'::text])) AND (guest_principal_id IS NOT NULL)) OR ((method = 'POST_STAY_PIN'::text) AND (post_stay_profile_id IS NOT NULL)))),
-    CONSTRAINT ac_one_subject CHECK ((num_nonnulls(stay_id, guest_account_id, voucher_id, guest_principal_id, post_stay_profile_id) = 1)),
+    anonymous_subject_id uuid,
+    CONSTRAINT ac_method_subject CHECK ((((method = 'PMS'::text) AND (stay_id IS NOT NULL)) OR ((method = 'VOUCHER'::text) AND (voucher_id IS NOT NULL)) OR ((method = 'ACCOUNT'::text) AND (guest_account_id IS NOT NULL)) OR ((method = ANY (ARRAY['OTP'::text, 'SOCIAL'::text])) AND (guest_principal_id IS NOT NULL)) OR ((method = 'POST_STAY_PIN'::text) AND (post_stay_profile_id IS NOT NULL)) OR ((method = 'OPEN'::text) AND (anonymous_subject_id IS NOT NULL)))),
+    CONSTRAINT ac_one_subject CHECK ((num_nonnulls(stay_id, guest_account_id, voucher_id, guest_principal_id, post_stay_profile_id, anonymous_subject_id) = 1)),
     CONSTRAINT ac_pms_pins CHECK (((method <> 'PMS'::text) OR ((pms_interface_id IS NOT NULL) AND (authentication_interface_revision_id IS NOT NULL)))),
     CONSTRAINT ac_post_stay_pins CHECK (((method <> 'POST_STAY_PIN'::text) OR ((post_stay_profile_id IS NOT NULL) AND (pinned_lifecycle_version IS NOT NULL)))),
-    CONSTRAINT auth_contexts_method_check CHECK ((method = ANY (ARRAY['PMS'::text, 'VOUCHER'::text, 'ACCOUNT'::text, 'OTP'::text, 'SOCIAL'::text, 'POST_STAY_PIN'::text]))),
+    CONSTRAINT auth_contexts_method_check CHECK ((method = ANY (ARRAY['PMS'::text, 'VOUCHER'::text, 'ACCOUNT'::text, 'OTP'::text, 'SOCIAL'::text, 'POST_STAY_PIN'::text, 'OPEN'::text]))),
     CONSTRAINT auth_contexts_pinned_lifecycle_version_check CHECK (((pinned_lifecycle_version IS NULL) OR (pinned_lifecycle_version > 0))),
     CONSTRAINT auth_contexts_pinned_occupancy_evidence_version_check CHECK (((pinned_occupancy_evidence_version IS NULL) OR (pinned_occupancy_evidence_version >= 0)))
 );
@@ -8276,7 +9091,8 @@ CREATE TABLE iam_v2.entitlements (
     terminated_at timestamp with time zone,
     online_time_exhausted_at timestamp with time zone,
     data_quota_bytes bigint,
-    CONSTRAINT ent_one_subject CHECK ((num_nonnulls(stay_id, guest_account_id, voucher_id, guest_principal_id) = 1)),
+    anonymous_subject_id uuid,
+    CONSTRAINT ent_one_subject CHECK ((num_nonnulls(stay_id, guest_account_id, voucher_id, guest_principal_id, anonymous_subject_id) = 1)),
     CONSTRAINT ent_terminal CHECK (((status = 'TERMINATED'::text) = (terminal_reason IS NOT NULL))),
     CONSTRAINT entitlements_consumed_data_bytes_check CHECK ((consumed_data_bytes >= 0)),
     CONSTRAINT entitlements_consumed_online_seconds_check CHECK ((consumed_online_seconds >= 0)),
@@ -8609,7 +9425,8 @@ CREATE TABLE iam_v2.internet_package_revisions (
     data_allocation_policy jsonb,
     CONSTRAINT internet_package_revisions_data_allocation_policy_shape CHECK (((data_allocation_policy IS NULL) OR COALESCE(((jsonb_typeof(data_allocation_policy) = 'object'::text) AND (((data_allocation_policy ->> 'mode'::text) = 'FIXED'::text) OR (((data_allocation_policy ->> 'mode'::text) = 'PER_STAY_NIGHT'::text) AND (jsonb_typeof((data_allocation_policy -> 'gb_per_night'::text)) = 'number'::text) AND (((data_allocation_policy ->> 'gb_per_night'::text))::numeric > (0)::numeric) AND (((data_allocation_policy -> 'min_gb'::text) IS NULL) OR COALESCE(((jsonb_typeof((data_allocation_policy -> 'min_gb'::text)) = 'number'::text) AND (((data_allocation_policy ->> 'min_gb'::text))::numeric >= (0)::numeric)), false)) AND (((data_allocation_policy -> 'max_gb'::text) IS NULL) OR COALESCE(((jsonb_typeof((data_allocation_policy -> 'max_gb'::text)) = 'number'::text) AND (((data_allocation_policy ->> 'max_gb'::text))::numeric > (0)::numeric) AND (((data_allocation_policy ->> 'max_gb'::text))::numeric >= COALESCE(((data_allocation_policy ->> 'min_gb'::text))::numeric, (0)::numeric))), false))))), false))),
     CONSTRAINT internet_package_revisions_package_type_check CHECK ((package_type = ANY (ARRAY['FREE_STAY'::text, 'ONE_DAY'::text, 'REST_OF_STAY'::text, 'POST_STAY'::text, 'GENERAL'::text, 'CHECKOUT_GRACE'::text]))),
-    CONSTRAINT internet_package_revisions_price_minor_check CHECK ((price_minor >= 0))
+    CONSTRAINT internet_package_revisions_price_minor_check CHECK ((price_minor >= 0)),
+    CONSTRAINT ipr_acquisition_methods CHECK (((cardinality(settlement_methods) >= 1) AND (settlement_methods <@ ARRAY['NOT_REQUIRED'::text, 'PREPAID'::text, 'ONLINE_PAYMENT'::text, 'PMS_POSTING'::text]) AND ((price_minor <> 0) OR (settlement_methods <@ ARRAY['NOT_REQUIRED'::text, 'PREPAID'::text])) AND ((price_minor = 0) OR (NOT ('NOT_REQUIRED'::text = ANY (settlement_methods))))))
 );
 
 
@@ -8618,6 +9435,13 @@ CREATE TABLE iam_v2.internet_package_revisions (
 --
 
 COMMENT ON COLUMN iam_v2.internet_package_revisions.data_allocation_policy IS 'How this revision turns a stay into a byte allowance. NULL or {"mode":"FIXED"} uses the pinned service plan revision''s data_quota_bytes unchanged. {"mode":"PER_STAY_NIGHT","gb_per_night":N,"min_gb":N,"max_gb":N} computes nights x gb_per_night, raises it to min_gb and caps it at max_gb when set. The computed value is frozen onto the entitlement at grant time and never recomputed.';
+
+
+--
+-- Name: CONSTRAINT ipr_acquisition_methods ON internet_package_revisions; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON CONSTRAINT ipr_acquisition_methods ON iam_v2.internet_package_revisions IS 'How a package may be acquired: NOT_REQUIRED=Free, PREPAID=Voucher, ONLINE_PAYMENT=Card payment, PMS_POSTING=Room charge. Free requires price 0 and a priced package cannot be free. MANUAL_APPROVAL is a dormant settlement method and never a package acquisition method.';
 
 
 --
@@ -8729,7 +9553,53 @@ CREATE TABLE iam_v2.package_settlement_mappings (
     tax_code text,
     tax_rate_bp integer,
     retired_at timestamp with time zone,
-    replaces_mapping_id uuid
+    replaces_mapping_id uuid,
+    CONSTRAINT psm_posting_code_wire_safe CHECK ((((length(btrim(posting_code)) >= 1) AND (length(btrim(posting_code)) <= 20)) AND (posting_code !~ '[|\x00-\x1f\x7f]'::text) AND ((tax_rate_bp IS NULL) OR ((tax_rate_bp >= 0) AND (tax_rate_bp <= 10000)))))
+);
+
+
+--
+-- Name: payment_checkouts; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.payment_checkouts (
+    transaction_id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    provider_session_ref text,
+    redirect_url text,
+    expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    creation_outcome text DEFAULT 'PENDING'::text NOT NULL,
+    last_status_at timestamp with time zone,
+    last_state text,
+    status_checks integer DEFAULT 0 NOT NULL,
+    consecutive_failures integer DEFAULT 0 NOT NULL,
+    CONSTRAINT payment_checkouts_consecutive_failures_check CHECK ((consecutive_failures >= 0)),
+    CONSTRAINT payment_checkouts_creation_outcome_check CHECK ((creation_outcome = ANY (ARRAY['PENDING'::text, 'CREATED'::text, 'NOT_CREATED'::text, 'AMBIGUOUS'::text]))),
+    CONSTRAINT payment_checkouts_provider_session_ref_check CHECK (((provider_session_ref IS NULL) OR ((length(provider_session_ref) >= 1) AND (length(provider_session_ref) <= 300)))),
+    CONSTRAINT payment_checkouts_redirect_url_check CHECK (((redirect_url IS NULL) OR ((length(redirect_url) <= 2048) AND (redirect_url ~ '^https://'::text)))),
+    CONSTRAINT payment_checkouts_status_checks_check CHECK ((status_checks >= 0))
+);
+
+
+--
+-- Name: payment_provider_account_changes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.payment_provider_account_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    account_id uuid NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by text NOT NULL,
+    change_reason text,
+    change_kind text NOT NULL,
+    old_values jsonb,
+    new_values jsonb NOT NULL,
+    CONSTRAINT payment_provider_account_changes_change_kind_check CHECK ((change_kind = ANY (ARRAY['CREATED'::text, 'UPDATED'::text, 'CREDENTIALS_ROTATED'::text]))),
+    CONSTRAINT payment_provider_account_changes_changed_by_check CHECK ((length(btrim(changed_by)) > 0))
 );
 
 
@@ -8750,11 +9620,13 @@ CREATE TABLE iam_v2.payment_provider_accounts (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     provenance text DEFAULT 'CONFIGURED'::text NOT NULL,
+    mode text DEFAULT 'TEST'::text NOT NULL,
     CONSTRAINT payment_provider_accounts_merchant_account_ref_check CHECK (((btrim(merchant_account_ref) <> ''::text) AND (length(merchant_account_ref) <= 128))),
     CONSTRAINT payment_provider_accounts_provenance_check CHECK ((provenance = ANY (ARRAY['CONFIGURED'::text, 'BACKFILLED_UNVERIFIED'::text]))),
     CONSTRAINT payment_provider_accounts_provider_check CHECK (((provider ~ '^[a-z][a-z0-9_-]{1,31}$'::text) AND (provider <> ALL (ARRAY['none'::text, 'unknown'::text, 'placeholder'::text, 'todo'::text, 'default'::text, 'null'::text, 'na'::text, 'n_a'::text])))),
     CONSTRAINT payment_provider_accounts_status_check CHECK ((status = ANY (ARRAY['ACTIVE'::text, 'DISABLED'::text]))),
     CONSTRAINT ppa_default_is_active CHECK (((NOT is_default) OR (status = 'ACTIVE'::text))),
+    CONSTRAINT ppa_mode_known CHECK ((mode = ANY (ARRAY['TEST'::text, 'LIVE'::text]))),
     CONSTRAINT ppa_reference_matches_provenance CHECK ((((provenance = 'CONFIGURED'::text) AND (merchant_account_ref IS NOT NULL) AND (btrim(merchant_account_ref) <> ''::text) AND (length(merchant_account_ref) <= 128)) OR ((provenance = 'BACKFILLED_UNVERIFIED'::text) AND (merchant_account_ref IS NULL)))),
     CONSTRAINT ppa_unverified_is_never_live CHECK (((provenance = 'CONFIGURED'::text) OR ((status = 'DISABLED'::text) AND (NOT is_default))))
 );
@@ -8772,6 +9644,41 @@ COMMENT ON TABLE iam_v2.payment_provider_accounts IS 'Authoritative per-site pay
 --
 
 COMMENT ON COLUMN iam_v2.payment_provider_accounts.provenance IS 'CONFIGURED: an operator supplied this account and its external reference is the provider''s own. BACKFILLED_UNVERIFIED: reconstructed by migration 0018 from a payment row that predates this table. Its external reference is UNKNOWN, not invented, and it can never become ACTIVE or default.';
+
+
+--
+-- Name: COLUMN payment_provider_accounts.mode; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.payment_provider_accounts.mode IS 'TEST uses the provider sandbox. LIVE moves real money and is refused by the deployment ceiling unless STAYCONNECT_PAYMENT_LIVE_ALLOWED is set, which requires a separate Product-Owner authorisation.';
+
+
+--
+-- Name: payment_provider_secret_generations; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.payment_provider_secret_generations (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    account_id uuid NOT NULL,
+    ciphertext bytea NOT NULL,
+    nonce bytea NOT NULL,
+    key_id text NOT NULL,
+    cipher_version smallint NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_by text NOT NULL,
+    superseded_at timestamp with time zone,
+    CONSTRAINT payment_provider_secret_generations_cipher_version_check CHECK ((cipher_version = 1)),
+    CONSTRAINT payment_provider_secret_generations_created_by_check CHECK ((length(btrim(created_by)) > 0))
+);
+
+
+--
+-- Name: TABLE payment_provider_secret_generations; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.payment_provider_secret_generations IS 'Sealed provider credentials. Only ciphertext is stored; the AEAD key lives in /etc/stayconnect/secrets and the AAD binds each ciphertext to its tenant, site, account and generation. Never returned by any API.';
 
 
 --
@@ -8928,6 +9835,32 @@ CREATE TABLE iam_v2.pms_connection_settings_changes (
     pms_interface_id uuid,
     CONSTRAINT pms_connection_settings_changes_changed_by_check CHECK ((length(btrim(changed_by)) > 0)),
     CONSTRAINT pms_connection_settings_changes_reason_check CHECK (((reason IS NULL) OR (length(reason) <= 500)))
+);
+
+
+--
+-- Name: pms_financial_onboardings; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.pms_financial_onboardings (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    pms_interface_id uuid NOT NULL,
+    revision_id uuid NOT NULL,
+    previous_revision_id uuid,
+    folio_identity_strategy text NOT NULL,
+    currency character(3) NOT NULL,
+    currency_exponent smallint NOT NULL,
+    attestation text NOT NULL,
+    reason text NOT NULL,
+    approved_by uuid NOT NULL,
+    approved_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pms_financial_onboardings_attestation_check CHECK (((length(btrim(attestation)) >= 20) AND (length(btrim(attestation)) <= 2000))),
+    CONSTRAINT pms_financial_onboardings_currency_check CHECK ((currency ~ '^[A-Z]{3}$'::text)),
+    CONSTRAINT pms_financial_onboardings_currency_exponent_check CHECK (((currency_exponent >= 0) AND (currency_exponent <= 4))),
+    CONSTRAINT pms_financial_onboardings_folio_identity_strategy_check CHECK ((folio_identity_strategy = ANY (ARRAY['GLOBALLY_UNIQUE'::text, 'UNIQUE_PER_STAY'::text, 'REUSED_SEQUENTIAL'::text]))),
+    CONSTRAINT pms_financial_onboardings_reason_check CHECK (((length(btrim(reason)) >= 4) AND (length(btrim(reason)) <= 500)))
 );
 
 
@@ -10097,6 +11030,41 @@ COMMENT ON COLUMN iam_v2.sign_in_attempts.sensitive_ciphertext IS 'AES-256-GCM o
 
 
 --
+-- Name: site_card_payment_setting_changes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.site_card_payment_setting_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by text NOT NULL,
+    change_reason text,
+    old_checkout_expiry_minutes integer,
+    old_reconcile_grace_minutes integer,
+    new_checkout_expiry_minutes integer NOT NULL,
+    new_reconcile_grace_minutes integer NOT NULL,
+    new_config_version bigint NOT NULL,
+    CONSTRAINT site_card_payment_setting_changes_changed_by_check CHECK ((length(btrim(changed_by)) > 0))
+);
+
+
+--
+-- Name: site_card_payment_settings; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.site_card_payment_settings (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    checkout_expiry_minutes integer DEFAULT 30 NOT NULL,
+    reconcile_grace_minutes integer DEFAULT 60 NOT NULL,
+    config_version bigint DEFAULT 1 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT site_card_payment_settings_bounds CHECK ((((checkout_expiry_minutes >= 30) AND (checkout_expiry_minutes <= 240)) AND ((reconcile_grace_minutes >= 15) AND (reconcile_grace_minutes <= 1440))))
+);
+
+
+--
 -- Name: site_checkout_grace_config; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -10150,6 +11118,79 @@ COMMENT ON TABLE iam_v2.site_guest_signin_protection IS 'Per-site guest sign-in 
 --
 
 COMMENT ON COLUMN iam_v2.site_guest_signin_protection.observation_window_seconds IS 'The ROLLING window. Failures older than this stop counting continuously, not at a clock boundary: a guest who mistypes twice at 10:00:59 and three times at 10:01:01 is one run of five, not two clean slates.';
+
+
+--
+-- Name: site_module_changes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.site_module_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    module_id text NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by text NOT NULL,
+    change_reason text,
+    old_enabled boolean,
+    new_enabled boolean NOT NULL,
+    new_config_version bigint NOT NULL,
+    CONSTRAINT site_module_changes_actor CHECK ((length(btrim(changed_by)) > 0))
+);
+
+
+--
+-- Name: site_module_settings; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.site_module_settings (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    module_id text NOT NULL,
+    enabled boolean NOT NULL,
+    config_version bigint DEFAULT 1 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT site_module_settings_known CHECK ((module_id = ANY (ARRAY['hospitality'::text, 'paid_access'::text, 'card_payment'::text, 'room_charge'::text]))),
+    CONSTRAINT site_module_settings_version CHECK ((config_version >= 1))
+);
+
+
+--
+-- Name: TABLE site_module_settings; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.site_module_settings IS 'Local enablement of licensed optional modules, per site. Absence of a row means not enabled. The licence authorises; this row chooses; readiness decides whether anything can execute now. Written only by iam_v2.site_module_set, which records every change in iam_v2.site_module_changes.';
+
+
+--
+-- Name: site_payment_domain_changes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.site_payment_domain_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by text NOT NULL,
+    change_reason text,
+    old_domains text[],
+    new_domains text[] NOT NULL,
+    CONSTRAINT site_payment_domain_changes_changed_by_check CHECK ((length(btrim(changed_by)) > 0))
+);
+
+
+--
+-- Name: site_payment_domains; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.site_payment_domains (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    domains text[] DEFAULT '{}'::text[] NOT NULL,
+    config_version bigint DEFAULT 1 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT site_payment_domains_bounded CHECK ((cardinality(domains) <= 20))
+);
 
 
 --
@@ -10458,6 +11499,26 @@ CREATE TABLE iam_v2.voucher_code_settings_changes (
     new_config_version bigint NOT NULL,
     changed_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT voucher_code_settings_changes_actor CHECK ((length(btrim(changed_by)) > 0))
+);
+
+
+--
+-- Name: voucher_revocations; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.voucher_revocations (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    batch_id uuid,
+    voucher_id uuid,
+    revoked_count integer NOT NULL,
+    operator_id uuid NOT NULL,
+    reason text NOT NULL,
+    revoked_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT voucher_revocations_reason_check CHECK ((length(btrim(reason)) >= 4)),
+    CONSTRAINT voucher_revocations_revoked_count_check CHECK ((revoked_count >= 0)),
+    CONSTRAINT voucher_revocations_target CHECK ((num_nonnulls(batch_id, voucher_id) = 1))
 );
 
 
@@ -11050,8 +12111,16 @@ CREATE TABLE public.sites (
     country text,
     metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    site_type text
 );
+
+
+--
+-- Name: COLUMN sites.site_type; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.sites.site_type IS 'Descriptive site type from the signed assignment (HOTEL, CAFE, ...). Unknown future values are stored as received. Authorises and enables nothing.';
 
 
 --
@@ -11094,28 +12163,6 @@ CREATE TABLE public.social_oauth_states (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     expires_at timestamp with time zone NOT NULL,
     consumed_at timestamp with time zone
-);
-
-
---
--- Name: stripe_accounts; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.stripe_accounts (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    tenant_id uuid NOT NULL,
-    enabled boolean DEFAULT true NOT NULL,
-    display_name text,
-    publishable_key text NOT NULL,
-    secret_key text NOT NULL,
-    webhook_secret text NOT NULL,
-    success_url text NOT NULL,
-    cancel_url text NOT NULL,
-    last_success_at timestamp with time zone,
-    last_error text,
-    last_error_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -11241,6 +12288,38 @@ ALTER TABLE ONLY iam_v2.accounting_records
 
 ALTER TABLE ONLY iam_v2.accounting_records
     ADD CONSTRAINT accounting_records_session_id_sample_seq_key UNIQUE (session_id, sample_seq);
+
+
+--
+-- Name: anonymous_access_subjects anonymous_access_subjects_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.anonymous_access_subjects
+    ADD CONSTRAINT anonymous_access_subjects_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: anonymous_access_subjects anonymous_access_subjects_tenant_id_site_id_id_key; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.anonymous_access_subjects
+    ADD CONSTRAINT anonymous_access_subjects_tenant_id_site_id_id_key UNIQUE (tenant_id, site_id, id);
+
+
+--
+-- Name: anonymous_subject_credentials anonymous_subject_credentials_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.anonymous_subject_credentials
+    ADD CONSTRAINT anonymous_subject_credentials_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: anonymous_subject_credentials anonymous_subject_credentials_secret_hmac_key; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.anonymous_subject_credentials
+    ADD CONSTRAINT anonymous_subject_credentials_secret_hmac_key UNIQUE (secret_hmac);
 
 
 --
@@ -11884,6 +12963,22 @@ ALTER TABLE ONLY iam_v2.package_settlement_mappings
 
 
 --
+-- Name: payment_checkouts payment_checkouts_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.payment_checkouts
+    ADD CONSTRAINT payment_checkouts_pkey PRIMARY KEY (transaction_id);
+
+
+--
+-- Name: payment_provider_account_changes payment_provider_account_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.payment_provider_account_changes
+    ADD CONSTRAINT payment_provider_account_changes_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: payment_provider_accounts payment_provider_accounts_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -11905,6 +13000,14 @@ ALTER TABLE ONLY iam_v2.payment_provider_accounts
 
 ALTER TABLE ONLY iam_v2.payment_provider_accounts
     ADD CONSTRAINT payment_provider_accounts_tenant_id_site_id_provider_mercha_key UNIQUE (tenant_id, site_id, provider, merchant_account_ref);
+
+
+--
+-- Name: payment_provider_secret_generations payment_provider_secret_generations_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.payment_provider_secret_generations
+    ADD CONSTRAINT payment_provider_secret_generations_pkey PRIMARY KEY (id);
 
 
 --
@@ -11993,6 +13096,22 @@ ALTER TABLE ONLY iam_v2.pms_connection_settings_changes
 
 ALTER TABLE ONLY iam_v2.pms_connection_settings
     ADD CONSTRAINT pms_connection_settings_pkey PRIMARY KEY (tenant_id, site_id, pms_interface_id);
+
+
+--
+-- Name: pms_financial_onboardings pms_financial_onboardings_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.pms_financial_onboardings
+    ADD CONSTRAINT pms_financial_onboardings_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: pms_financial_onboardings pms_financial_onboardings_revision_id_key; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.pms_financial_onboardings
+    ADD CONSTRAINT pms_financial_onboardings_revision_id_key UNIQUE (revision_id);
 
 
 --
@@ -12460,6 +13579,22 @@ ALTER TABLE ONLY iam_v2.sign_in_attempts
 
 
 --
+-- Name: site_card_payment_setting_changes site_card_payment_setting_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.site_card_payment_setting_changes
+    ADD CONSTRAINT site_card_payment_setting_changes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: site_card_payment_settings site_card_payment_settings_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.site_card_payment_settings
+    ADD CONSTRAINT site_card_payment_settings_pkey PRIMARY KEY (tenant_id, site_id);
+
+
+--
 -- Name: site_checkout_grace_config site_checkout_grace_config_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -12473,6 +13608,38 @@ ALTER TABLE ONLY iam_v2.site_checkout_grace_config
 
 ALTER TABLE ONLY iam_v2.site_guest_signin_protection
     ADD CONSTRAINT site_guest_signin_protection_pkey PRIMARY KEY (tenant_id, site_id);
+
+
+--
+-- Name: site_module_changes site_module_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.site_module_changes
+    ADD CONSTRAINT site_module_changes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: site_module_settings site_module_settings_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.site_module_settings
+    ADD CONSTRAINT site_module_settings_pkey PRIMARY KEY (tenant_id, site_id, module_id);
+
+
+--
+-- Name: site_payment_domain_changes site_payment_domain_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.site_payment_domain_changes
+    ADD CONSTRAINT site_payment_domain_changes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: site_payment_domains site_payment_domains_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.site_payment_domains
+    ADD CONSTRAINT site_payment_domains_pkey PRIMARY KEY (tenant_id, site_id);
 
 
 --
@@ -12633,6 +13800,14 @@ ALTER TABLE ONLY iam_v2.voucher_code_reveals
 
 ALTER TABLE ONLY iam_v2.voucher_code_settings_changes
     ADD CONSTRAINT voucher_code_settings_changes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: voucher_revocations voucher_revocations_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.voucher_revocations
+    ADD CONSTRAINT voucher_revocations_pkey PRIMARY KEY (id);
 
 
 --
@@ -12924,14 +14099,6 @@ ALTER TABLE ONLY public.social_oauth_states
 
 
 --
--- Name: stripe_accounts stripe_accounts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.stripe_accounts
-    ADD CONSTRAINT stripe_accounts_pkey PRIMARY KEY (id);
-
-
---
 -- Name: stripe_events stripe_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -12994,6 +14161,13 @@ CREATE INDEX aco_by_context ON iam_v2.auth_context_offers USING btree (auth_cont
 
 
 --
+-- Name: anonymous_subject_credentials_subject; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX anonymous_subject_credentials_subject ON iam_v2.anonymous_subject_credentials USING btree (tenant_id, site_id, subject_id);
+
+
+--
 -- Name: aps_changes_lookup; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
@@ -13019,6 +14193,13 @@ CREATE INDEX eda_boundary_lookup ON iam_v2.entitlement_device_authorizations USI
 --
 
 CREATE UNIQUE INDEX ent_live_account ON iam_v2.entitlements USING btree (guest_account_id) WHERE (status = ANY (ARRAY['PENDING'::text, 'ACTIVE'::text, 'SUSPENDED'::text]));
+
+
+--
+-- Name: ent_live_anonymous; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE UNIQUE INDEX ent_live_anonymous ON iam_v2.entitlements USING btree (anonymous_subject_id) WHERE (status = ANY (ARRAY['PENDING'::text, 'ACTIVE'::text, 'SUSPENDED'::text]));
 
 
 --
@@ -13204,6 +14385,13 @@ CREATE INDEX package_revision_visibility ON iam_v2.internet_package_revisions US
 
 
 --
+-- Name: payment_checkouts_open; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX payment_checkouts_open ON iam_v2.payment_checkouts USING btree (tenant_id, site_id, last_status_at NULLS FIRST);
+
+
+--
 -- Name: pms_case_resolutions_scope_idx; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
@@ -13215,6 +14403,13 @@ CREATE INDEX pms_case_resolutions_scope_idx ON iam_v2.pms_case_resolutions USING
 --
 
 CREATE INDEX pms_connection_settings_changes_iface_idx ON iam_v2.pms_connection_settings_changes USING btree (tenant_id, site_id, pms_interface_id, changed_at DESC);
+
+
+--
+-- Name: pms_financial_onboardings_iface; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX pms_financial_onboardings_iface ON iam_v2.pms_financial_onboardings USING btree (tenant_id, site_id, pms_interface_id, approved_at DESC);
 
 
 --
@@ -13257,6 +14452,27 @@ COMMENT ON INDEX iam_v2.ppa_merchant_ref_globally_unique IS 'C27: one external m
 --
 
 CREATE UNIQUE INDEX ppa_one_default_per_site ON iam_v2.payment_provider_accounts USING btree (tenant_id, site_id) WHERE is_default;
+
+
+--
+-- Name: ppac_lookup; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX ppac_lookup ON iam_v2.payment_provider_account_changes USING btree (tenant_id, site_id, changed_at DESC);
+
+
+--
+-- Name: ppsg_one_current; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE UNIQUE INDEX ppsg_one_current ON iam_v2.payment_provider_secret_generations USING btree (account_id) WHERE (superseded_at IS NULL);
+
+
+--
+-- Name: psm_one_live_per_interface; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE UNIQUE INDEX psm_one_live_per_interface ON iam_v2.package_settlement_mappings USING btree (package_revision_id, pms_interface_id) WHERE (retired_at IS NULL);
 
 
 --
@@ -13390,6 +14606,13 @@ CREATE INDEX sign_in_attempts_site_recent ON iam_v2.sign_in_attempts USING btree
 --
 
 CREATE INDEX sign_in_attempts_site_room ON iam_v2.sign_in_attempts USING btree (tenant_id, site_id, submitted_room, occurred_at DESC);
+
+
+--
+-- Name: site_module_changes_lookup; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX site_module_changes_lookup ON iam_v2.site_module_changes USING btree (tenant_id, site_id, changed_at DESC);
 
 
 --
@@ -13698,13 +14921,6 @@ CREATE UNIQUE INDEX social_oauth_providers_tenant_provider_enabled_idx ON public
 --
 
 CREATE INDEX social_oauth_states_expiry_idx ON public.social_oauth_states USING btree (expires_at) WHERE (consumed_at IS NULL);
-
-
---
--- Name: stripe_accounts_tenant_enabled_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX stripe_accounts_tenant_enabled_idx ON public.stripe_accounts USING btree (tenant_id) WHERE (enabled = true);
 
 
 --
@@ -14240,6 +15456,13 @@ CREATE TRIGGER p4_posting_lifecycle_gate BEFORE INSERT ON iam_v2.pms_postings FO
 
 
 --
+-- Name: settlements p4_purchase_follows_settlement; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER p4_purchase_follows_settlement AFTER UPDATE OF status ON iam_v2.settlements FOR EACH ROW EXECUTE FUNCTION iam_v2.p4_purchase_follows_settlement();
+
+
+--
 -- Name: posting_outbox p4_recovery_gate_outbox; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
@@ -14279,6 +15502,13 @@ CREATE TRIGGER p4_reversal_never_queued BEFORE INSERT ON iam_v2.posting_outbox F
 --
 
 CREATE TRIGGER p4_review_writer_only BEFORE INSERT ON iam_v2.posting_review_actions FOR EACH ROW EXECUTE FUNCTION iam_v2.p4_review_writer_only();
+
+
+--
+-- Name: settlements p4_settlement_birth; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER p4_settlement_birth BEFORE INSERT ON iam_v2.settlements FOR EACH ROW EXECUTE FUNCTION iam_v2.p4_settlement_birth();
 
 
 --
@@ -14401,6 +15631,13 @@ CREATE TRIGGER pa_oneway BEFORE DELETE OR UPDATE ON iam_v2.posting_attempts FOR 
 
 
 --
+-- Name: payment_checkouts payment_checkouts_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER payment_checkouts_guard BEFORE DELETE OR UPDATE ON iam_v2.payment_checkouts FOR EACH ROW EXECUTE FUNCTION iam_v2.payment_checkouts_guard();
+
+
+--
 -- Name: pms_case_resolutions pms_case_resolutions_no_update; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
@@ -14412,6 +15649,13 @@ CREATE TRIGGER pms_case_resolutions_no_update BEFORE DELETE OR UPDATE ON iam_v2.
 --
 
 CREATE TRIGGER pms_connection_settings_changes_no_update BEFORE DELETE OR UPDATE ON iam_v2.pms_connection_settings_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.pms_connection_settings_append_only();
+
+
+--
+-- Name: pms_financial_onboardings pms_financial_onboardings_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER pms_financial_onboardings_append_only BEFORE DELETE OR UPDATE ON iam_v2.pms_financial_onboardings FOR EACH ROW EXECUTE FUNCTION iam_v2.pms_financial_onboardings_append_only();
 
 
 --
@@ -14429,6 +15673,13 @@ CREATE TRIGGER pms_room_inventory_changes_no_update BEFORE DELETE OR UPDATE ON i
 
 
 --
+-- Name: payment_provider_account_changes ppac_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER ppac_append_only BEFORE DELETE OR UPDATE ON iam_v2.payment_provider_account_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.p4_append_only_refuse();
+
+
+--
 -- Name: purchases purchase_quote_pin_equal; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
@@ -14436,10 +15687,31 @@ CREATE TRIGGER purchase_quote_pin_equal BEFORE INSERT OR UPDATE ON iam_v2.purcha
 
 
 --
+-- Name: site_card_payment_setting_changes scpsc_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER scpsc_append_only BEFORE DELETE OR UPDATE ON iam_v2.site_card_payment_setting_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.p4_append_only_refuse();
+
+
+--
 -- Name: pms_interface_secret_generations sg_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
 CREATE TRIGGER sg_guard BEFORE DELETE OR UPDATE ON iam_v2.pms_interface_secret_generations FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_secret_gen_guard();
+
+
+--
+-- Name: site_module_changes site_module_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER site_module_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.site_module_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.site_module_changes_append_only();
+
+
+--
+-- Name: site_payment_domain_changes spdc_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER spdc_append_only BEFORE DELETE OR UPDATE ON iam_v2.site_payment_domain_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.p4_append_only_refuse();
 
 
 --
@@ -14457,9 +15729,31 @@ CREATE TRIGGER voucher_code_settings_changes_append_only BEFORE DELETE OR UPDATE
 
 
 --
+-- Name: vouchers voucher_issuance_gate; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER voucher_issuance_gate BEFORE INSERT ON iam_v2.vouchers FOR EACH ROW EXECUTE FUNCTION iam_v2.voucher_issuance_gate();
+
+
+--
+-- Name: voucher_revocations voucher_revocations_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER voucher_revocations_append_only BEFORE DELETE OR UPDATE ON iam_v2.voucher_revocations FOR EACH ROW EXECUTE FUNCTION iam_v2.voucher_revocations_append_only();
+
+
+--
 -- Name: accounting_records ts_insert_blocker; Type: TRIGGER; Schema: public; Owner: -
 --
 
+
+
+--
+-- Name: auth_contexts ac_anonymous_subject_fk; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.auth_contexts
+    ADD CONSTRAINT ac_anonymous_subject_fk FOREIGN KEY (tenant_id, site_id, anonymous_subject_id) REFERENCES iam_v2.anonymous_access_subjects(tenant_id, site_id, id);
 
 
 --
@@ -14476,6 +15770,14 @@ ALTER TABLE ONLY iam_v2.accounting_checkpoints
 
 ALTER TABLE ONLY iam_v2.accounting_records
     ADD CONSTRAINT accounting_records_tenant_id_site_id_session_id_fkey FOREIGN KEY (tenant_id, site_id, session_id) REFERENCES iam_v2.sessions(tenant_id, site_id, id);
+
+
+--
+-- Name: anonymous_subject_credentials anonymous_subject_credentials_tenant_id_site_id_subject_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.anonymous_subject_credentials
+    ADD CONSTRAINT anonymous_subject_credentials_tenant_id_site_id_subject_id_fkey FOREIGN KEY (tenant_id, site_id, subject_id) REFERENCES iam_v2.anonymous_access_subjects(tenant_id, site_id, id) ON DELETE CASCADE;
 
 
 --
@@ -14644,6 +15946,14 @@ ALTER TABLE ONLY iam_v2.device_network_appearances
 
 ALTER TABLE ONLY iam_v2.device_network_appearances
     ADD CONSTRAINT device_network_appearances_tenant_id_site_id_guest_network_fkey FOREIGN KEY (tenant_id, site_id, guest_network_id) REFERENCES public.guest_networks(tenant_id, site_id, id);
+
+
+--
+-- Name: entitlements ent_anonymous_subject_fk; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.entitlements
+    ADD CONSTRAINT ent_anonymous_subject_fk FOREIGN KEY (tenant_id, site_id, anonymous_subject_id) REFERENCES iam_v2.anonymous_access_subjects(tenant_id, site_id, id) ON DELETE CASCADE;
 
 
 --
@@ -14948,6 +16258,22 @@ ALTER TABLE ONLY iam_v2.package_settlement_mappings
 
 ALTER TABLE ONLY iam_v2.package_settlement_mappings
     ADD CONSTRAINT package_settlement_mappings_tenant_id_site_id_pms_interfac_fkey FOREIGN KEY (tenant_id, site_id, pms_interface_id) REFERENCES iam_v2.pms_interfaces(tenant_id, site_id, id);
+
+
+--
+-- Name: payment_checkouts payment_checkouts_transaction_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.payment_checkouts
+    ADD CONSTRAINT payment_checkouts_transaction_id_fkey FOREIGN KEY (transaction_id) REFERENCES iam_v2.payment_transactions(id);
+
+
+--
+-- Name: payment_provider_secret_generations payment_provider_secret_gener_tenant_id_site_id_account_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.payment_provider_secret_generations
+    ADD CONSTRAINT payment_provider_secret_gener_tenant_id_site_id_account_id_fkey FOREIGN KEY (tenant_id, site_id, account_id) REFERENCES iam_v2.payment_provider_accounts(tenant_id, site_id, id);
 
 
 --
@@ -15623,14 +16949,6 @@ ALTER TABLE ONLY public.social_oauth_states
 
 
 --
--- Name: stripe_accounts stripe_accounts_tenant_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.stripe_accounts
-    ADD CONSTRAINT stripe_accounts_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) ON DELETE CASCADE;
-
-
---
 -- Name: stripe_events stripe_events_tenant_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -15674,6 +16992,7 @@ GRANT USAGE ON SCHEMA iam_v2 TO sc_financial_operator;
 GRANT USAGE ON SCHEMA iam_v2 TO sc_financial_readonly;
 GRANT USAGE ON SCHEMA iam_v2 TO sc_commerce_runtime;
 GRANT USAGE ON SCHEMA iam_v2 TO sc_payment_outcome;
+GRANT USAGE ON SCHEMA iam_v2 TO sc_posting_runtime;
 GRANT USAGE ON SCHEMA iam_v2 TO svc_scd;
 GRANT USAGE ON SCHEMA iam_v2 TO svc_netd;
 GRANT USAGE ON SCHEMA iam_v2 TO svc_acctd;
@@ -15702,6 +17021,7 @@ GRANT ALL ON FUNCTION iam_v2.allocate_class_generation(p_tenant uuid, p_site uui
 --
 
 REVOKE ALL ON FUNCTION iam_v2.allocate_p_number(p_tenant uuid, p_site uuid, p_interface uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.allocate_p_number(p_tenant uuid, p_site uuid, p_interface uuid) TO sc_posting_runtime;
 
 
 --
@@ -15757,6 +17077,24 @@ GRANT ALL ON FUNCTION iam_v2.begin_payment_execution(p_txn uuid) TO sc_payment_r
 --
 
 REVOKE ALL ON FUNCTION iam_v2.bootstrap_emergency_grace(p_tenant uuid, p_site uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION card_payment_settings_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.card_payment_settings_get(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.card_payment_settings_get(p_tenant uuid, p_site uuid) TO sc_payment_runtime;
+GRANT ALL ON FUNCTION iam_v2.card_payment_settings_get(p_tenant uuid, p_site uuid) TO svc_scd;
+GRANT ALL ON FUNCTION iam_v2.card_payment_settings_get(p_tenant uuid, p_site uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION card_payment_settings_set(p_tenant uuid, p_site uuid, p_expiry integer, p_grace integer, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.card_payment_settings_set(p_tenant uuid, p_site uuid, p_expiry integer, p_grace integer, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.card_payment_settings_set(p_tenant uuid, p_site uuid, p_expiry integer, p_grace integer, p_operator text, p_reason text) TO svc_edged;
 
 
 --
@@ -16150,6 +17488,13 @@ REVOKE ALL ON FUNCTION iam_v2.p3_stay_lifecycle_guard() FROM PUBLIC;
 
 
 --
+-- Name: FUNCTION p4_append_only_refuse(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_append_only_refuse() FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION p4_apply_provider_outcome(p_client_ref text, p_provider_event_id text, p_event_type text, p_outcome text, p_provider_txn_ref text, p_evidence jsonb); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -16180,6 +17525,21 @@ GRANT ALL ON FUNCTION iam_v2.p4_authorize_zero_attempt_retry(p_posting uuid, p_a
 
 
 --
+-- Name: FUNCTION p4_consume_retry_authorization(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_consume_retry_authorization() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION p4_create_room_charge_posting(p_tenant uuid, p_site uuid, p_settlement uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_create_room_charge_posting(p_tenant uuid, p_site uuid, p_settlement uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p4_create_room_charge_posting(p_tenant uuid, p_site uuid, p_settlement uuid) TO svc_scd;
+
+
+--
 -- Name: FUNCTION p4_current_restore_generation(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -16201,6 +17561,13 @@ GRANT ALL ON FUNCTION iam_v2.p4_declare_financial_recovery(p_tenant uuid, p_site
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p4_entitlement_grant_kernel(p_tenant uuid, p_site uuid, p_purchase uuid, p_voucher uuid, p_account uuid, p_principal uuid, p_snapshot jsonb, p_plan_rev uuid, p_pkg_rev uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION p4_entitlement_grant_kernel_v2(p_tenant uuid, p_site uuid, p_purchase uuid, p_voucher uuid, p_account uuid, p_principal uuid, p_anon uuid, p_stay uuid, p_iface uuid, p_snapshot jsonb, p_plan_rev uuid, p_pkg_rev uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_entitlement_grant_kernel_v2(p_tenant uuid, p_site uuid, p_purchase uuid, p_voucher uuid, p_account uuid, p_principal uuid, p_anon uuid, p_stay uuid, p_iface uuid, p_snapshot jsonb, p_plan_rev uuid, p_pkg_rev uuid) FROM PUBLIC;
 
 
 --
@@ -16230,6 +17597,15 @@ GRANT ALL ON FUNCTION iam_v2.p4_grant_quoted_entitlement(p_tenant uuid, p_site u
 
 
 --
+-- Name: FUNCTION p4_grant_voucher_entitlement(p_tenant uuid, p_site uuid, p_purchase uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_grant_voucher_entitlement(p_tenant uuid, p_site uuid, p_purchase uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p4_grant_voucher_entitlement(p_tenant uuid, p_site uuid, p_purchase uuid) TO sc_commerce_runtime;
+GRANT ALL ON FUNCTION iam_v2.p4_grant_voucher_entitlement(p_tenant uuid, p_site uuid, p_purchase uuid) TO svc_scd;
+
+
+--
 -- Name: FUNCTION p4_hold_financial_rails(p_tenant uuid, p_site uuid, p_epoch bigint); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -16242,6 +17618,13 @@ REVOKE ALL ON FUNCTION iam_v2.p4_hold_financial_rails(p_tenant uuid, p_site uuid
 
 REVOKE ALL ON FUNCTION iam_v2.p4_insert_entitlement(p_tenant uuid, p_site uuid, p_voucher uuid, p_account uuid, p_principal uuid, p_purchase uuid, p_policy jsonb, p_plan_rev uuid, p_pkg_rev uuid, p_time_mode text, p_end_mode text, p_window_ends timestamp with time zone, p_supersedes uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.p4_insert_entitlement(p_tenant uuid, p_site uuid, p_voucher uuid, p_account uuid, p_principal uuid, p_purchase uuid, p_policy jsonb, p_plan_rev uuid, p_pkg_rev uuid, p_time_mode text, p_end_mode text, p_window_ends timestamp with time zone, p_supersedes uuid) TO svc_scd;
+
+
+--
+-- Name: FUNCTION p4_interface_freshness_block(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_at timestamp with time zone); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT ALL ON FUNCTION iam_v2.p4_interface_freshness_block(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_at timestamp with time zone) TO sc_posting_runtime;
 
 
 --
@@ -16271,6 +17654,29 @@ REVOKE ALL ON FUNCTION iam_v2.p4_payment_admission_gate() FROM PUBLIC;
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p4_payment_identity_gate() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION p4_posting_review_apply(p_tenant uuid, p_site uuid, p_posting uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_posting_review_apply(p_tenant uuid, p_site uuid, p_posting uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p4_posting_review_apply(p_tenant uuid, p_site uuid, p_posting uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION p4_posting_settlement_outcome(p_posting uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_posting_settlement_outcome(p_posting uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p4_posting_settlement_outcome(p_posting uuid) TO sc_posting_runtime;
+
+
+--
+-- Name: FUNCTION p4_purchase_follows_settlement(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_purchase_follows_settlement() FROM PUBLIC;
 
 
 --
@@ -16304,6 +17710,14 @@ REVOKE ALL ON FUNCTION iam_v2.p4_record_compliance_receipt(p_archive uuid, p_aut
 
 
 --
+-- Name: FUNCTION p4_record_provider_reversal(p_tenant uuid, p_site uuid, p_parent uuid, p_kind text, p_amount_minor bigint, p_provider_event_id text, p_provider_txn_ref text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_record_provider_reversal(p_tenant uuid, p_site uuid, p_parent uuid, p_kind text, p_amount_minor bigint, p_provider_event_id text, p_provider_txn_ref text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p4_record_provider_reversal(p_tenant uuid, p_site uuid, p_parent uuid, p_kind text, p_amount_minor bigint, p_provider_event_id text, p_provider_txn_ref text) TO sc_payment_outcome;
+
+
+--
 -- Name: FUNCTION p4_record_supported_restore(p_tenant uuid, p_site uuid, p_generation bigint, p_manifest_sha text, p_backup_taken_at timestamp with time zone, p_restored_by text); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -16334,11 +17748,34 @@ GRANT ALL ON FUNCTION iam_v2.p4_resolve_payment_account(p_tenant uuid, p_site uu
 
 
 --
+-- Name: FUNCTION p4_resolve_payment_account_v2(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_resolve_payment_account_v2(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p4_resolve_payment_account_v2(p_tenant uuid, p_site uuid) TO sc_payment_runtime;
+
+
+--
 -- Name: FUNCTION p4_resolve_recovery_hold(p_hold uuid, p_resolution text, p_actor uuid, p_note text); Type: ACL; Schema: iam_v2; Owner: -
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p4_resolve_recovery_hold(p_hold uuid, p_resolution text, p_actor uuid, p_note text) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.p4_resolve_recovery_hold(p_hold uuid, p_resolution text, p_actor uuid, p_note text) TO sc_financial_operator;
+
+
+--
+-- Name: FUNCTION p4_room_charge_has_records(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_room_charge_has_records(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p4_room_charge_has_records(p_tenant uuid, p_site uuid) TO svc_scd;
+
+
+--
+-- Name: FUNCTION p4_settlement_birth(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_settlement_birth() FROM PUBLIC;
 
 
 --
@@ -16361,9 +17798,15 @@ GRANT ALL ON FUNCTION iam_v2.p5_begin_controlled_operation(p_family text) TO svc
 -- Name: FUNCTION p5_controlled_operation_open(p_family text); Type: ACL; Schema: iam_v2; Owner: -
 --
 
+REVOKE ALL ON FUNCTION iam_v2.p5_controlled_operation_open(p_family text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p5_controlled_operation_open(p_family text) TO sc_commerce_runtime;
+GRANT ALL ON FUNCTION iam_v2.p5_controlled_operation_open(p_family text) TO sc_financial_operator;
+GRANT ALL ON FUNCTION iam_v2.p5_controlled_operation_open(p_family text) TO sc_financial_readonly;
 GRANT ALL ON FUNCTION iam_v2.p5_controlled_operation_open(p_family text) TO svc_scd;
 GRANT ALL ON FUNCTION iam_v2.p5_controlled_operation_open(p_family text) TO svc_netd;
 GRANT ALL ON FUNCTION iam_v2.p5_controlled_operation_open(p_family text) TO svc_acctd;
+GRANT ALL ON FUNCTION iam_v2.p5_controlled_operation_open(p_family text) TO svc_edged;
+GRANT ALL ON FUNCTION iam_v2.p5_controlled_operation_open(p_family text) TO svc_pmsd;
 
 
 --
@@ -16535,6 +17978,29 @@ GRANT ALL ON FUNCTION iam_v2.p6_tick_online_time(p_tenant uuid, p_site uuid, p_n
 
 
 --
+-- Name: FUNCTION payment_account_save(p_tenant uuid, p_site uuid, p_id uuid, p_provider text, p_merchant_ref text, p_display_name text, p_currency text, p_mode text, p_status text, p_is_default boolean, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.payment_account_save(p_tenant uuid, p_site uuid, p_id uuid, p_provider text, p_merchant_ref text, p_display_name text, p_currency text, p_mode text, p_status text, p_is_default boolean, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.payment_account_save(p_tenant uuid, p_site uuid, p_id uuid, p_provider text, p_merchant_ref text, p_display_name text, p_currency text, p_mode text, p_status text, p_is_default boolean, p_operator text, p_reason text) TO svc_scd;
+
+
+--
+-- Name: FUNCTION payment_account_set_secret(p_tenant uuid, p_site uuid, p_account uuid, p_generation uuid, p_ciphertext bytea, p_nonce bytea, p_key_id text, p_cipher_version smallint, p_operator text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.payment_account_set_secret(p_tenant uuid, p_site uuid, p_account uuid, p_generation uuid, p_ciphertext bytea, p_nonce bytea, p_key_id text, p_cipher_version smallint, p_operator text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.payment_account_set_secret(p_tenant uuid, p_site uuid, p_account uuid, p_generation uuid, p_ciphertext bytea, p_nonce bytea, p_key_id text, p_cipher_version smallint, p_operator text) TO svc_scd;
+
+
+--
+-- Name: FUNCTION payment_checkouts_guard(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.payment_checkouts_guard() FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION pms_accept_startup_data_gap(p_tenant uuid, p_site uuid, p_event uuid, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -16546,7 +18012,14 @@ GRANT ALL ON FUNCTION iam_v2.pms_accept_startup_data_gap(p_tenant uuid, p_site u
 -- Name: FUNCTION pms_connection_settings_get(p_tenant uuid, p_site uuid, p_interface uuid); Type: ACL; Schema: iam_v2; Owner: -
 --
 
+REVOKE ALL ON FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site uuid, p_interface uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site uuid, p_interface uuid) TO sc_commerce_runtime;
+GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site uuid, p_interface uuid) TO sc_financial_operator;
+GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site uuid, p_interface uuid) TO sc_financial_readonly;
 GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site uuid, p_interface uuid) TO svc_edged;
+GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site uuid, p_interface uuid) TO svc_scd;
+GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site uuid, p_interface uuid) TO svc_acctd;
+GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site uuid, p_interface uuid) TO svc_netd;
 GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site uuid, p_interface uuid) TO svc_pmsd;
 
 
@@ -16554,14 +18027,37 @@ GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site u
 -- Name: FUNCTION pms_connection_settings_set(p_tenant uuid, p_site uuid, p_interface uuid, p_operator text, p_reason text, p_backoff_min_ms integer, p_backoff_max_ms integer, p_stable_reset_seconds integer, p_link_down_alert_seconds integer, p_blocked_after_refusals integer); Type: ACL; Schema: iam_v2; Owner: -
 --
 
+REVOKE ALL ON FUNCTION iam_v2.pms_connection_settings_set(p_tenant uuid, p_site uuid, p_interface uuid, p_operator text, p_reason text, p_backoff_min_ms integer, p_backoff_max_ms integer, p_stable_reset_seconds integer, p_link_down_alert_seconds integer, p_blocked_after_refusals integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_set(p_tenant uuid, p_site uuid, p_interface uuid, p_operator text, p_reason text, p_backoff_min_ms integer, p_backoff_max_ms integer, p_stable_reset_seconds integer, p_link_down_alert_seconds integer, p_blocked_after_refusals integer) TO sc_commerce_runtime;
+GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_set(p_tenant uuid, p_site uuid, p_interface uuid, p_operator text, p_reason text, p_backoff_min_ms integer, p_backoff_max_ms integer, p_stable_reset_seconds integer, p_link_down_alert_seconds integer, p_blocked_after_refusals integer) TO sc_financial_operator;
+GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_set(p_tenant uuid, p_site uuid, p_interface uuid, p_operator text, p_reason text, p_backoff_min_ms integer, p_backoff_max_ms integer, p_stable_reset_seconds integer, p_link_down_alert_seconds integer, p_blocked_after_refusals integer) TO sc_financial_readonly;
 GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_set(p_tenant uuid, p_site uuid, p_interface uuid, p_operator text, p_reason text, p_backoff_min_ms integer, p_backoff_max_ms integer, p_stable_reset_seconds integer, p_link_down_alert_seconds integer, p_blocked_after_refusals integer) TO svc_edged;
+GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_set(p_tenant uuid, p_site uuid, p_interface uuid, p_operator text, p_reason text, p_backoff_min_ms integer, p_backoff_max_ms integer, p_stable_reset_seconds integer, p_link_down_alert_seconds integer, p_blocked_after_refusals integer) TO svc_scd;
+GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_set(p_tenant uuid, p_site uuid, p_interface uuid, p_operator text, p_reason text, p_backoff_min_ms integer, p_backoff_max_ms integer, p_stable_reset_seconds integer, p_link_down_alert_seconds integer, p_blocked_after_refusals integer) TO svc_acctd;
+GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_set(p_tenant uuid, p_site uuid, p_interface uuid, p_operator text, p_reason text, p_backoff_min_ms integer, p_backoff_max_ms integer, p_stable_reset_seconds integer, p_link_down_alert_seconds integer, p_blocked_after_refusals integer) TO svc_netd;
+GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_set(p_tenant uuid, p_site uuid, p_interface uuid, p_operator text, p_reason text, p_backoff_min_ms integer, p_backoff_max_ms integer, p_stable_reset_seconds integer, p_link_down_alert_seconds integer, p_blocked_after_refusals integer) TO svc_pmsd;
 
 
 --
 -- Name: FUNCTION pms_dispose_snapshot_cases(p_tenant uuid, p_site uuid, p_iface uuid, p_operator text, p_note text); Type: ACL; Schema: iam_v2; Owner: -
 --
 
+REVOKE ALL ON FUNCTION iam_v2.pms_dispose_snapshot_cases(p_tenant uuid, p_site uuid, p_iface uuid, p_operator text, p_note text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_dispose_snapshot_cases(p_tenant uuid, p_site uuid, p_iface uuid, p_operator text, p_note text) TO sc_commerce_runtime;
+GRANT ALL ON FUNCTION iam_v2.pms_dispose_snapshot_cases(p_tenant uuid, p_site uuid, p_iface uuid, p_operator text, p_note text) TO sc_financial_operator;
+GRANT ALL ON FUNCTION iam_v2.pms_dispose_snapshot_cases(p_tenant uuid, p_site uuid, p_iface uuid, p_operator text, p_note text) TO sc_financial_readonly;
 GRANT ALL ON FUNCTION iam_v2.pms_dispose_snapshot_cases(p_tenant uuid, p_site uuid, p_iface uuid, p_operator text, p_note text) TO svc_edged;
+GRANT ALL ON FUNCTION iam_v2.pms_dispose_snapshot_cases(p_tenant uuid, p_site uuid, p_iface uuid, p_operator text, p_note text) TO svc_scd;
+GRANT ALL ON FUNCTION iam_v2.pms_dispose_snapshot_cases(p_tenant uuid, p_site uuid, p_iface uuid, p_operator text, p_note text) TO svc_acctd;
+GRANT ALL ON FUNCTION iam_v2.pms_dispose_snapshot_cases(p_tenant uuid, p_site uuid, p_iface uuid, p_operator text, p_note text) TO svc_netd;
+GRANT ALL ON FUNCTION iam_v2.pms_dispose_snapshot_cases(p_tenant uuid, p_site uuid, p_iface uuid, p_operator text, p_note text) TO svc_pmsd;
+
+
+--
+-- Name: FUNCTION pms_financial_onboardings_append_only(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.pms_financial_onboardings_append_only() FROM PUBLIC;
 
 
 --
@@ -16570,6 +18066,23 @@ GRANT ALL ON FUNCTION iam_v2.pms_dispose_snapshot_cases(p_tenant uuid, p_site uu
 
 REVOKE ALL ON FUNCTION iam_v2.pms_integration_blockers(p_tenant uuid, p_site uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.pms_integration_blockers(p_tenant uuid, p_site uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION pms_interface_financial_onboard(p_tenant uuid, p_site uuid, p_iface uuid, p_expected_revision uuid, p_strategy text, p_currency text, p_exponent smallint, p_attestation text, p_reason text, p_operator uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.pms_interface_financial_onboard(p_tenant uuid, p_site uuid, p_iface uuid, p_expected_revision uuid, p_strategy text, p_currency text, p_exponent smallint, p_attestation text, p_reason text, p_operator uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_interface_financial_onboard(p_tenant uuid, p_site uuid, p_iface uuid, p_expected_revision uuid, p_strategy text, p_currency text, p_exponent smallint, p_attestation text, p_reason text, p_operator uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION pms_interface_financially_ready(p_tenant uuid, p_site uuid, p_iface uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.pms_interface_financially_ready(p_tenant uuid, p_site uuid, p_iface uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_interface_financially_ready(p_tenant uuid, p_site uuid, p_iface uuid) TO svc_scd;
+GRANT ALL ON FUNCTION iam_v2.pms_interface_financially_ready(p_tenant uuid, p_site uuid, p_iface uuid) TO svc_edged;
 
 
 --
@@ -16593,7 +18106,14 @@ GRANT ALL ON FUNCTION iam_v2.pms_rebaseline_room_inventory(p_tenant uuid, p_site
 -- Name: FUNCTION pms_reconciliation_settings_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
 --
 
+REVOKE ALL ON FUNCTION iam_v2.pms_reconciliation_settings_get(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_get(p_tenant uuid, p_site uuid) TO sc_commerce_runtime;
+GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_get(p_tenant uuid, p_site uuid) TO sc_financial_operator;
+GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_get(p_tenant uuid, p_site uuid) TO sc_financial_readonly;
 GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_get(p_tenant uuid, p_site uuid) TO svc_edged;
+GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_get(p_tenant uuid, p_site uuid) TO svc_scd;
+GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_get(p_tenant uuid, p_site uuid) TO svc_acctd;
+GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_get(p_tenant uuid, p_site uuid) TO svc_netd;
 GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_get(p_tenant uuid, p_site uuid) TO svc_pmsd;
 
 
@@ -16601,13 +18121,29 @@ GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_get(p_tenant uuid, p_si
 -- Name: FUNCTION pms_reconciliation_settings_set(p_tenant uuid, p_site uuid, p_floor integer, p_cap integer, p_operator text, p_reason text, p_tolerance integer, p_lookback integer); Type: ACL; Schema: iam_v2; Owner: -
 --
 
+REVOKE ALL ON FUNCTION iam_v2.pms_reconciliation_settings_set(p_tenant uuid, p_site uuid, p_floor integer, p_cap integer, p_operator text, p_reason text, p_tolerance integer, p_lookback integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_set(p_tenant uuid, p_site uuid, p_floor integer, p_cap integer, p_operator text, p_reason text, p_tolerance integer, p_lookback integer) TO sc_commerce_runtime;
+GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_set(p_tenant uuid, p_site uuid, p_floor integer, p_cap integer, p_operator text, p_reason text, p_tolerance integer, p_lookback integer) TO sc_financial_operator;
+GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_set(p_tenant uuid, p_site uuid, p_floor integer, p_cap integer, p_operator text, p_reason text, p_tolerance integer, p_lookback integer) TO sc_financial_readonly;
 GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_set(p_tenant uuid, p_site uuid, p_floor integer, p_cap integer, p_operator text, p_reason text, p_tolerance integer, p_lookback integer) TO svc_edged;
+GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_set(p_tenant uuid, p_site uuid, p_floor integer, p_cap integer, p_operator text, p_reason text, p_tolerance integer, p_lookback integer) TO svc_scd;
+GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_set(p_tenant uuid, p_site uuid, p_floor integer, p_cap integer, p_operator text, p_reason text, p_tolerance integer, p_lookback integer) TO svc_acctd;
+GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_set(p_tenant uuid, p_site uuid, p_floor integer, p_cap integer, p_operator text, p_reason text, p_tolerance integer, p_lookback integer) TO svc_netd;
+GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_set(p_tenant uuid, p_site uuid, p_floor integer, p_cap integer, p_operator text, p_reason text, p_tolerance integer, p_lookback integer) TO svc_pmsd;
 
 
 --
 -- Name: FUNCTION pms_record_resync_coverage(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_rooms text[], p_roster integer, p_vacant integer, p_conflicts integer); Type: ACL; Schema: iam_v2; Owner: -
 --
 
+REVOKE ALL ON FUNCTION iam_v2.pms_record_resync_coverage(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_rooms text[], p_roster integer, p_vacant integer, p_conflicts integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_record_resync_coverage(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_rooms text[], p_roster integer, p_vacant integer, p_conflicts integer) TO sc_commerce_runtime;
+GRANT ALL ON FUNCTION iam_v2.pms_record_resync_coverage(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_rooms text[], p_roster integer, p_vacant integer, p_conflicts integer) TO sc_financial_operator;
+GRANT ALL ON FUNCTION iam_v2.pms_record_resync_coverage(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_rooms text[], p_roster integer, p_vacant integer, p_conflicts integer) TO sc_financial_readonly;
+GRANT ALL ON FUNCTION iam_v2.pms_record_resync_coverage(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_rooms text[], p_roster integer, p_vacant integer, p_conflicts integer) TO svc_scd;
+GRANT ALL ON FUNCTION iam_v2.pms_record_resync_coverage(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_rooms text[], p_roster integer, p_vacant integer, p_conflicts integer) TO svc_edged;
+GRANT ALL ON FUNCTION iam_v2.pms_record_resync_coverage(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_rooms text[], p_roster integer, p_vacant integer, p_conflicts integer) TO svc_acctd;
+GRANT ALL ON FUNCTION iam_v2.pms_record_resync_coverage(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_rooms text[], p_roster integer, p_vacant integer, p_conflicts integer) TO svc_netd;
 GRANT ALL ON FUNCTION iam_v2.pms_record_resync_coverage(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_rooms text[], p_roster integer, p_vacant integer, p_conflicts integer) TO svc_pmsd;
 
 
@@ -16615,7 +18151,14 @@ GRANT ALL ON FUNCTION iam_v2.pms_record_resync_coverage(p_tenant uuid, p_site uu
 -- Name: FUNCTION pms_roster_of_generation(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint); Type: ACL; Schema: iam_v2; Owner: -
 --
 
+REVOKE ALL ON FUNCTION iam_v2.pms_roster_of_generation(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_roster_of_generation(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint) TO sc_commerce_runtime;
+GRANT ALL ON FUNCTION iam_v2.pms_roster_of_generation(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint) TO sc_financial_operator;
+GRANT ALL ON FUNCTION iam_v2.pms_roster_of_generation(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint) TO sc_financial_readonly;
 GRANT ALL ON FUNCTION iam_v2.pms_roster_of_generation(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint) TO svc_edged;
+GRANT ALL ON FUNCTION iam_v2.pms_roster_of_generation(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint) TO svc_scd;
+GRANT ALL ON FUNCTION iam_v2.pms_roster_of_generation(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint) TO svc_acctd;
+GRANT ALL ON FUNCTION iam_v2.pms_roster_of_generation(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint) TO svc_netd;
 GRANT ALL ON FUNCTION iam_v2.pms_roster_of_generation(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint) TO svc_pmsd;
 
 
@@ -16626,6 +18169,21 @@ GRANT ALL ON FUNCTION iam_v2.pms_roster_of_generation(p_tenant uuid, p_site uuid
 REVOKE ALL ON FUNCTION iam_v2.pms_roster_reconcile(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_operator text, p_apply boolean, p_reason text) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.pms_roster_reconcile(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_operator text, p_apply boolean, p_reason text) TO svc_edged;
 GRANT ALL ON FUNCTION iam_v2.pms_roster_reconcile(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_operator text, p_apply boolean, p_reason text) TO svc_pmsd;
+
+
+--
+-- Name: FUNCTION pms_site_blocked_after_refusals(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.pms_site_blocked_after_refusals(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_site_blocked_after_refusals(p_tenant uuid, p_site uuid) TO sc_commerce_runtime;
+GRANT ALL ON FUNCTION iam_v2.pms_site_blocked_after_refusals(p_tenant uuid, p_site uuid) TO sc_financial_operator;
+GRANT ALL ON FUNCTION iam_v2.pms_site_blocked_after_refusals(p_tenant uuid, p_site uuid) TO sc_financial_readonly;
+GRANT ALL ON FUNCTION iam_v2.pms_site_blocked_after_refusals(p_tenant uuid, p_site uuid) TO svc_scd;
+GRANT ALL ON FUNCTION iam_v2.pms_site_blocked_after_refusals(p_tenant uuid, p_site uuid) TO svc_edged;
+GRANT ALL ON FUNCTION iam_v2.pms_site_blocked_after_refusals(p_tenant uuid, p_site uuid) TO svc_acctd;
+GRANT ALL ON FUNCTION iam_v2.pms_site_blocked_after_refusals(p_tenant uuid, p_site uuid) TO svc_netd;
+GRANT ALL ON FUNCTION iam_v2.pms_site_blocked_after_refusals(p_tenant uuid, p_site uuid) TO svc_pmsd;
 
 
 --
@@ -16717,6 +18275,38 @@ GRANT ALL ON FUNCTION iam_v2.service_plan_deletion_blockers(p_tenant uuid, p_sit
 
 
 --
+-- Name: FUNCTION site_module_changes_append_only(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.site_module_changes_append_only() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION site_module_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.site_module_get(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.site_module_get(p_tenant uuid, p_site uuid) TO svc_scd;
+GRANT ALL ON FUNCTION iam_v2.site_module_get(p_tenant uuid, p_site uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION site_module_set(p_tenant uuid, p_site uuid, p_module text, p_enabled boolean, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.site_module_set(p_tenant uuid, p_site uuid, p_module text, p_enabled boolean, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.site_module_set(p_tenant uuid, p_site uuid, p_module text, p_enabled boolean, p_operator text, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION site_payment_domains_set(p_tenant uuid, p_site uuid, p_domains text[], p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.site_payment_domains_set(p_tenant uuid, p_site uuid, p_domains text[], p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.site_payment_domains_set(p_tenant uuid, p_site uuid, p_domains text[], p_operator text, p_reason text) TO svc_scd;
+
+
+--
 -- Name: FUNCTION supersede_entitlement_transition(p_target uuid, p_to text, p_at timestamp with time zone, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -16737,6 +18327,14 @@ GRANT ALL ON FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at 
 --
 
 REVOKE ALL ON FUNCTION iam_v2.trg_catalogue_revision_immutable() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION voucher_batch_revoke(p_tenant uuid, p_site uuid, p_batch uuid, p_operator uuid, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.voucher_batch_revoke(p_tenant uuid, p_site uuid, p_batch uuid, p_operator uuid, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.voucher_batch_revoke(p_tenant uuid, p_site uuid, p_batch uuid, p_operator uuid, p_reason text) TO svc_scd;
 
 
 --
@@ -16779,6 +18377,20 @@ GRANT ALL ON FUNCTION iam_v2.voucher_code_settings_set(p_tenant uuid, p_site uui
 
 
 --
+-- Name: FUNCTION voucher_issuance_gate(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.voucher_issuance_gate() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION voucher_revocations_append_only(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.voucher_revocations_append_only() FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION voucher_revoke(p_tenant uuid, p_site uuid, p_voucher uuid, p_operator uuid, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -16813,6 +18425,28 @@ GRANT SELECT,INSERT ON TABLE iam_v2.checkout_grace_audit TO svc_pmsd;
 --
 
 GRANT SELECT ON TABLE iam_v2.active_operational_alerts TO svc_edged;
+
+
+--
+-- Name: TABLE anonymous_access_subjects; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT,INSERT ON TABLE iam_v2.anonymous_access_subjects TO svc_scd;
+GRANT SELECT ON TABLE iam_v2.anonymous_access_subjects TO svc_edged;
+
+
+--
+-- Name: COLUMN anonymous_access_subjects.last_resumed_at; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT UPDATE(last_resumed_at) ON TABLE iam_v2.anonymous_access_subjects TO svc_scd;
+
+
+--
+-- Name: TABLE anonymous_subject_credentials; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT,INSERT ON TABLE iam_v2.anonymous_subject_credentials TO svc_scd;
 
 
 --
@@ -16996,6 +18630,7 @@ GRANT SELECT ON TABLE iam_v2.financial_restore_events TO sc_financial_operator;
 -- Name: TABLE folios; Type: ACL; Schema: iam_v2; Owner: -
 --
 
+GRANT SELECT ON TABLE iam_v2.folios TO sc_posting_runtime;
 GRANT SELECT ON TABLE iam_v2.folios TO svc_edged;
 GRANT SELECT,INSERT ON TABLE iam_v2.folios TO svc_pmsd;
 
@@ -17049,6 +18684,7 @@ GRANT SELECT ON TABLE iam_v2.guest_signin_restrictions TO svc_edged;
 --
 
 GRANT SELECT ON TABLE iam_v2.internet_package_revisions TO sc_payment_runtime;
+GRANT SELECT ON TABLE iam_v2.internet_package_revisions TO sc_posting_runtime;
 GRANT SELECT ON TABLE iam_v2.internet_package_revisions TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.internet_package_revisions TO svc_acctd;
 GRANT SELECT,INSERT ON TABLE iam_v2.internet_package_revisions TO svc_edged;
@@ -17091,10 +18727,94 @@ GRANT INSERT ON TABLE iam_v2.package_grant_tiers TO svc_edged;
 
 
 --
+-- Name: TABLE package_settlement_mappings; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.package_settlement_mappings TO sc_posting_runtime;
+GRANT SELECT ON TABLE iam_v2.package_settlement_mappings TO svc_scd;
+GRANT SELECT,INSERT ON TABLE iam_v2.package_settlement_mappings TO svc_edged;
+
+
+--
+-- Name: TABLE payment_checkouts; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT,INSERT ON TABLE iam_v2.payment_checkouts TO sc_payment_runtime;
+GRANT SELECT ON TABLE iam_v2.payment_checkouts TO svc_scd;
+GRANT SELECT ON TABLE iam_v2.payment_checkouts TO svc_edged;
+
+
+--
+-- Name: COLUMN payment_checkouts.provider_session_ref; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT UPDATE(provider_session_ref) ON TABLE iam_v2.payment_checkouts TO sc_payment_runtime;
+
+
+--
+-- Name: COLUMN payment_checkouts.redirect_url; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT UPDATE(redirect_url) ON TABLE iam_v2.payment_checkouts TO sc_payment_runtime;
+
+
+--
+-- Name: COLUMN payment_checkouts.creation_outcome; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT UPDATE(creation_outcome) ON TABLE iam_v2.payment_checkouts TO sc_payment_runtime;
+
+
+--
+-- Name: COLUMN payment_checkouts.last_status_at; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT UPDATE(last_status_at) ON TABLE iam_v2.payment_checkouts TO sc_payment_runtime;
+
+
+--
+-- Name: COLUMN payment_checkouts.last_state; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT UPDATE(last_state) ON TABLE iam_v2.payment_checkouts TO sc_payment_runtime;
+
+
+--
+-- Name: COLUMN payment_checkouts.status_checks; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT UPDATE(status_checks) ON TABLE iam_v2.payment_checkouts TO sc_payment_runtime;
+
+
+--
+-- Name: COLUMN payment_checkouts.consecutive_failures; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT UPDATE(consecutive_failures) ON TABLE iam_v2.payment_checkouts TO sc_payment_runtime;
+
+
+--
+-- Name: TABLE payment_provider_account_changes; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.payment_provider_account_changes TO svc_edged;
+
+
+--
 -- Name: TABLE payment_provider_accounts; Type: ACL; Schema: iam_v2; Owner: -
 --
 
 GRANT SELECT ON TABLE iam_v2.payment_provider_accounts TO sc_payment_runtime;
+GRANT SELECT ON TABLE iam_v2.payment_provider_accounts TO svc_scd;
+GRANT SELECT ON TABLE iam_v2.payment_provider_accounts TO svc_edged;
+
+
+--
+-- Name: TABLE payment_provider_secret_generations; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.payment_provider_secret_generations TO sc_payment_runtime;
+GRANT SELECT ON TABLE iam_v2.payment_provider_secret_generations TO svc_scd;
 
 
 --
@@ -17136,9 +18856,17 @@ GRANT SELECT ON TABLE iam_v2.pms_connection_settings_changes TO svc_edged;
 
 
 --
+-- Name: TABLE pms_financial_onboardings; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.pms_financial_onboardings TO svc_edged;
+
+
+--
 -- Name: TABLE pms_interface_revisions; Type: ACL; Schema: iam_v2; Owner: -
 --
 
+GRANT SELECT ON TABLE iam_v2.pms_interface_revisions TO sc_posting_runtime;
 GRANT SELECT ON TABLE iam_v2.pms_interface_revisions TO svc_scd;
 GRANT SELECT,INSERT ON TABLE iam_v2.pms_interface_revisions TO svc_edged;
 GRANT SELECT ON TABLE iam_v2.pms_interface_revisions TO svc_pmsd;
@@ -17148,6 +18876,7 @@ GRANT SELECT ON TABLE iam_v2.pms_interface_revisions TO svc_pmsd;
 -- Name: TABLE pms_interface_runtime; Type: ACL; Schema: iam_v2; Owner: -
 --
 
+GRANT SELECT ON TABLE iam_v2.pms_interface_runtime TO sc_posting_runtime;
 GRANT SELECT ON TABLE iam_v2.pms_interface_runtime TO svc_edged;
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.pms_interface_runtime TO svc_pmsd;
 
@@ -17164,6 +18893,7 @@ GRANT SELECT ON TABLE iam_v2.pms_interface_secret_generations TO svc_pmsd;
 -- Name: TABLE pms_interfaces; Type: ACL; Schema: iam_v2; Owner: -
 --
 
+GRANT SELECT ON TABLE iam_v2.pms_interfaces TO sc_posting_runtime;
 GRANT SELECT ON TABLE iam_v2.pms_interfaces TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.pms_interfaces TO svc_acctd;
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.pms_interfaces TO svc_edged;
@@ -17175,6 +18905,7 @@ GRANT SELECT ON TABLE iam_v2.pms_interfaces TO svc_pmsd;
 --
 
 GRANT SELECT ON TABLE iam_v2.pms_postings TO sc_financial_operator;
+GRANT SELECT ON TABLE iam_v2.pms_postings TO sc_posting_runtime;
 GRANT SELECT ON TABLE iam_v2.pms_postings TO svc_edged;
 
 
@@ -17190,6 +18921,7 @@ GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.stay_events TO svc_pmsd;
 -- Name: TABLE stays; Type: ACL; Schema: iam_v2; Owner: -
 --
 
+GRANT SELECT ON TABLE iam_v2.stays TO sc_posting_runtime;
 GRANT SELECT ON TABLE iam_v2.stays TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.stays TO svc_acctd;
 GRANT SELECT ON TABLE iam_v2.stays TO svc_edged;
@@ -17283,9 +19015,17 @@ GRANT SELECT ON TABLE iam_v2.post_stay_profiles TO svc_edged;
 
 
 --
+-- Name: TABLE posting_attempt_events; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT INSERT ON TABLE iam_v2.posting_attempt_events TO sc_posting_runtime;
+
+
+--
 -- Name: TABLE posting_attempts; Type: ACL; Schema: iam_v2; Owner: -
 --
 
+GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.posting_attempts TO sc_posting_runtime;
 GRANT SELECT ON TABLE iam_v2.posting_attempts TO svc_edged;
 
 
@@ -17294,6 +19034,14 @@ GRANT SELECT ON TABLE iam_v2.posting_attempts TO svc_edged;
 --
 
 GRANT SELECT ON TABLE iam_v2.posting_outbox TO sc_financial_operator;
+GRANT SELECT ON TABLE iam_v2.posting_outbox TO sc_posting_runtime;
+
+
+--
+-- Name: COLUMN posting_outbox.state; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT UPDATE(state) ON TABLE iam_v2.posting_outbox TO sc_posting_runtime;
 
 
 --
@@ -17301,6 +19049,7 @@ GRANT SELECT ON TABLE iam_v2.posting_outbox TO sc_financial_operator;
 --
 
 GRANT SELECT ON TABLE iam_v2.posting_review_state TO sc_financial_operator;
+GRANT SELECT ON TABLE iam_v2.posting_review_state TO sc_posting_runtime;
 GRANT SELECT ON TABLE iam_v2.posting_review_state TO svc_edged;
 
 
@@ -17308,6 +19057,7 @@ GRANT SELECT ON TABLE iam_v2.posting_review_state TO svc_edged;
 -- Name: TABLE posting_execution_state; Type: ACL; Schema: iam_v2; Owner: -
 --
 
+GRANT SELECT ON TABLE iam_v2.posting_execution_state TO sc_posting_runtime;
 GRANT SELECT ON TABLE iam_v2.posting_execution_state TO svc_edged;
 
 
@@ -17325,6 +19075,7 @@ GRANT SELECT ON TABLE iam_v2.posting_review_actions TO svc_edged;
 
 GRANT SELECT ON TABLE iam_v2.purchases TO sc_payment_runtime;
 GRANT SELECT ON TABLE iam_v2.purchases TO sc_financial_operator;
+GRANT SELECT ON TABLE iam_v2.purchases TO sc_posting_runtime;
 GRANT SELECT,INSERT ON TABLE iam_v2.purchases TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.purchases TO svc_acctd;
 GRANT SELECT ON TABLE iam_v2.purchases TO svc_edged;
@@ -17383,6 +19134,7 @@ GRANT SELECT,UPDATE ON TABLE iam_v2.sessions TO svc_pmsd;
 GRANT SELECT ON TABLE iam_v2.settlements TO sc_payment_runtime;
 GRANT SELECT ON TABLE iam_v2.settlements TO sc_financial_operator;
 GRANT SELECT ON TABLE iam_v2.settlements TO sc_payment_outcome;
+GRANT SELECT ON TABLE iam_v2.settlements TO sc_posting_runtime;
 GRANT SELECT,INSERT ON TABLE iam_v2.settlements TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.settlements TO svc_edged;
 
@@ -17396,6 +19148,13 @@ GRANT SELECT ON TABLE iam_v2.sign_in_attempts TO svc_edged;
 
 
 --
+-- Name: TABLE site_card_payment_setting_changes; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.site_card_payment_setting_changes TO svc_edged;
+
+
+--
 -- Name: TABLE site_checkout_grace_config; Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -17404,9 +19163,33 @@ GRANT SELECT ON TABLE iam_v2.site_checkout_grace_config TO svc_pmsd;
 
 
 --
+-- Name: TABLE site_module_changes; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.site_module_changes TO svc_edged;
+
+
+--
+-- Name: TABLE site_payment_domain_changes; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.site_payment_domain_changes TO svc_edged;
+
+
+--
+-- Name: TABLE site_payment_domains; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.site_payment_domains TO svc_scd;
+GRANT SELECT ON TABLE iam_v2.site_payment_domains TO svc_edged;
+
+
+--
 -- Name: TABLE stay_folios; Type: ACL; Schema: iam_v2; Owner: -
 --
 
+GRANT SELECT ON TABLE iam_v2.stay_folios TO sc_posting_runtime;
+GRANT SELECT ON TABLE iam_v2.stay_folios TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.stay_folios TO svc_edged;
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.stay_folios TO svc_pmsd;
 
@@ -17463,6 +19246,13 @@ GRANT SELECT ON TABLE iam_v2.v_zero_attempt_recovery_queue TO svc_edged;
 
 
 --
+-- Name: TABLE voucher_batches; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT,INSERT ON TABLE iam_v2.voucher_batches TO svc_scd;
+
+
+--
 -- Name: TABLE voucher_code_key_generations; Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -17482,6 +19272,13 @@ GRANT SELECT ON TABLE iam_v2.voucher_code_reveals TO svc_edged;
 --
 
 GRANT SELECT ON TABLE iam_v2.voucher_code_settings_changes TO svc_edged;
+
+
+--
+-- Name: TABLE voucher_revocations; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.voucher_revocations TO svc_edged;
 
 
 --
@@ -17728,14 +19525,6 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.social_oauth_providers TO svc_
 --
 
 GRANT SELECT,INSERT,UPDATE ON TABLE public.social_oauth_states TO svc_scd;
-
-
---
--- Name: TABLE stripe_accounts; Type: ACL; Schema: public; Owner: -
---
-
-GRANT SELECT,DELETE ON TABLE public.stripe_accounts TO svc_scd;
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.stripe_accounts TO svc_edged;
 
 
 --
