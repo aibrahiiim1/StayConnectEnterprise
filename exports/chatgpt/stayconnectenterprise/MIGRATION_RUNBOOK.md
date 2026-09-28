@@ -1,4 +1,12 @@
-# Migration Runbook — Central Schema → Site-Local DB
+# Migration Runbook — Central Schema → Site-Local DB (HISTORICAL — COMPLETED)
+
+> **HISTORICAL — COMPLETED.** This cutover is finished and cannot be repeated: Central no longer holds any
+> guest-domain table (the empty legacy tables were verified empty and dropped by Central migration 0046),
+> the legacy `/v1` routes are removed (API_DEPRECATIONS.md), the plans/subscriptions
+> history 0046 archived in schema `legacy_archive` was deleted with that schema by migration 0047, and fleet
+> telemetry was dropped (migration 0045). Central schema
+> changes today are applied with `deploy/scripts/central-migrate.sh up` (DEPLOYMENT_CLOUD.md §4).
+> The steps below are kept as the record of how the pilot was cut over.
 
 > **Scope banner:** this runbook describes the **already-delivered Central-to-site *edge*
 > migration** (moving a site's guest rows from the shared central Postgres into its isolated
@@ -181,12 +189,12 @@ DELETE FROM walled_garden_rules WHERE tenant_id = :tenant;
 COMMIT;
 ```
 
-Keep `tenants`, `sites`, `appliances`, `plans`, `tenant_subscriptions`,
-`licenses`, `fleet_telemetry`, `operators` (platform/group), `audit_log` — those
-are cloud-owned. **Status on the pilot (2026-07-11): NOT yet purged** — the
-dev tenant's historical guest rows still exist in the cloud schema pending the
-soak window. This is expected and safe (no new guest PII is written to cloud),
-but it is the one open cleanup item from the pilot cutover.
+At the time, `tenants`, `sites`, `appliances`, `plans`, `tenant_subscriptions`,
+`licenses`, `fleet_telemetry`, `operators` (platform/group) and `audit_log` were
+kept as cloud-owned. **Closed:** the central guest-domain tables were later
+verified empty and dropped by Central migration 0046, which also archived
+`plans`/`subscription_events` in `legacy_archive` and dropped
+`tenant_subscriptions`; `fleet_telemetry` was dropped by 0045.
 
 ## Rollback procedure
 
@@ -206,4 +214,5 @@ window.
 5. Re-run phase 1/2 suites to confirm the pre-migration state; file the
    failure before retrying.
 
-Keep the rollback package until the legacy routes are removed.
+(The legacy routes have since been removed, so this rollback path no longer
+exists.)

@@ -1,4 +1,0 @@
-commit 77065f5033ec64407c1df233e9faa499b03d2e7f
-Date:   Sun Sep 27 06:38:40 2026 +0300
-
-    Change manifest for the guest-access delivery
