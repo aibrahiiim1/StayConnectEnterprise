@@ -171,13 +171,20 @@ func (r *Resolver) Resolve(ctx context.Context, tenantID, siteID string) Snapsho
 		if !st.Enabled && (switchable[spec.ID] || identity[spec.ID]) && localErr == nil && idErr == nil {
 			st.Reasons = append(st.Reasons, ReasonDisabledBySite)
 		}
+		// Readiness is probed as soon as the module is deployed and licensed -- before the site switches it on,
+		// so the administrator sees what is missing first. A module with a probe that cannot be probed (not
+		// deployed or not licensed) is not ready; one without a probe has nothing to be ready for.
 		st.Ready = true
-		if p, ok := r.probes[spec.ID]; ok && st.Deployed && st.Licensed && st.Enabled {
-			ready, details := p(ctx, tenantID, siteID)
-			st.Ready = ready
-			st.Readiness = details
-			if !ready {
-				st.Reasons = append(st.Reasons, ReasonNotReady)
+		if p, ok := r.probes[spec.ID]; ok {
+			if st.Deployed && st.Licensed {
+				ready, details := p(ctx, tenantID, siteID)
+				st.Ready = ready
+				st.Readiness = details
+				if !ready && st.Enabled {
+					st.Reasons = append(st.Reasons, ReasonNotReady)
+				}
+			} else {
+				st.Ready = false
 			}
 		}
 		st.Effective = st.Deployed && st.Licensed && st.Enabled && st.Ready

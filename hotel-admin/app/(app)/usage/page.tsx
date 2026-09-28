@@ -70,7 +70,7 @@ type DeviceDetail = {
 };
 
 /** The access-source types edged serves: GET /usage/sources?type=… and /usage/sources/{type}/{id}. */
-type SourceType = "account" | "voucher" | "stay";
+type SourceType = "account" | "voucher" | "stay" | "open";
 type SourceRow = {
   source_type: SourceType; source_id: string;
   account_username?: string;
@@ -92,6 +92,8 @@ const SOURCE_LABEL: Record<SourceType, string> = {
   account: "Client account",
   voucher: "Voucher",
   stay: "Hotel room/stay",
+  // A package chosen without signing in: an anonymous access subject, known only by its reference.
+  open: "Without sign-in",
 };
 
 const SEARCH_HINT: Record<TypeFilter, { label: string; placeholder: string }> = {
@@ -102,6 +104,7 @@ const SEARCH_HINT: Record<TypeFilter, { label: string; placeholder: string }> = 
   account: { label: "Client account username", placeholder: "Username, e.g. alex.morgan" },
   voucher: { label: "Voucher card reference", placeholder: "Card reference — the first characters are enough" },
   stay: { label: "Room number or reservation", placeholder: "Room number or reservation" },
+  open: { label: "Access reference", placeholder: "Access reference — the first characters are enough" },
 };
 
 // The stay lifecycle in the words Stays uses.
@@ -132,6 +135,7 @@ function sourceTitle(s: SourceRow): string {
     case "stay": return s.room ? `Room ${s.room}` : "Stay";
     case "account": return s.account_username || "Client account";
     case "voucher": return `Card ${shortRef(s.source_id)}`;
+    case "open": return `Access ${shortRef(s.source_id)}`;
   }
 }
 
@@ -282,6 +286,7 @@ export default function UsageExplorerPage() {
                     { value: "account", label: SOURCE_LABEL.account },
                     { value: "voucher", label: SOURCE_LABEL.voucher },
                     { value: "stay", label: SOURCE_LABEL.stay },
+                    { value: "open", label: SOURCE_LABEL.open },
                   ]}
                 />
                 <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); search(); }}>
@@ -386,6 +391,11 @@ export default function UsageExplorerPage() {
                     {src.source_type === "voucher" && (
                       <div className="flex items-center gap-1.5 text-caption text-muted-foreground">
                         Card reference <MonoId value={src.source_id} title="Card reference" />
+                      </div>
+                    )}
+                    {src.source_type === "open" && (
+                      <div className="flex items-center gap-1.5 text-caption text-muted-foreground">
+                        Access reference <MonoId value={src.source_id} title="Access reference" />
                       </div>
                     )}
                   </div>

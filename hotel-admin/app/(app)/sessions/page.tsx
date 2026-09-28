@@ -41,7 +41,7 @@ import { formatBytes, formatRelative, formatDate, errMsg } from "@/lib/utils";
 import {
   identifySession, methodLabel, stateWords, endReasonWords, speedPair,
 } from "@/lib/session-words";
-import { Users, Monitor, ArrowDownUp, Hotel, KeyRound, Ticket, UserCircle, Power } from "lucide-react";
+import { Users, Monitor, ArrowDownUp, Hotel, KeyRound, Ticket, UserCircle, Power, PackageOpen } from "lucide-react";
 
 type Tab = "active" | "recent";
 
@@ -52,6 +52,7 @@ const KIND_ICON = {
   account: KeyRound,
   voucher: Ticket,
   guest: UserCircle,
+  open: PackageOpen,
   "": Monitor,
 } as const;
 
@@ -284,6 +285,7 @@ export default function SessionsPage() {
                 <option value="account">Account ({kindCounts.account ?? 0})</option>
                 <option value="voucher">Voucher ({kindCounts.voucher ?? 0})</option>
                 <option value="guest">Email / social ({kindCounts.guest ?? 0})</option>
+                <option value="open">Without sign-in ({kindCounts.open ?? 0})</option>
               </Select>
               {(query || kind) && (
                 <Button variant="ghost" size="sm" onClick={() => { setQuery(""); setKind(""); }}>

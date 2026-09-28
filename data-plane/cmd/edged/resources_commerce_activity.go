@@ -210,6 +210,7 @@ func activityBaseSQL(f activityFilter, tenantID, siteID string, withStatus bool)
 	              WHEN e.voucher_id IS NOT NULL THEN 'VOUCHER'
 	              WHEN e.guest_principal_id IS NOT NULL THEN 'SIGN_IN'
 	              WHEN COALESCE(e.stay_id, p.stay_id) IS NOT NULL THEN 'STAY'
+	              WHEN e.anonymous_subject_id IS NOT NULL THEN 'OPEN'
 	              ELSE '' END AS subject_kind,
 	         st.id AS stay_id, st.normalized_room_number AS room, st.external_reservation_id AS reservation,
 	         pi.display_label AS pms_interface,

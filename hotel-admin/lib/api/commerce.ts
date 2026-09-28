@@ -85,7 +85,7 @@ export type ActivityRow = {
   source: ActivitySource | string; source_label: string; purchase_state: string;
   status: "PENDING" | "ACTIVE" | "SUSPENDED" | "TERMINATED" | "NOT_GRANTED" | string;
   end_reason?: string; emergency_grace?: boolean;
-  sign_in_kind?: "STAY" | "GUEST_ACCOUNT" | "VOUCHER" | "SIGN_IN" | string;
+  sign_in_kind?: "STAY" | "GUEST_ACCOUNT" | "VOUCHER" | "SIGN_IN" | "OPEN" | string;
   stay_id?: string; room?: string; pms_interface?: string; reservation?: string;
   had_offer: boolean; offer_taken_at?: string; offer_expires_at?: string;
   started_at?: string; ended_at?: string; occurred_at?: string;
@@ -168,6 +168,7 @@ export function whoWords(r: Pick<ActivityRow, "room" | "pms_interface" | "sign_i
     case "VOUCHER": return "A voucher client";
     case "SIGN_IN": return "An email, phone or social sign-in";
     case "STAY": return "A stay with no room recorded";
+    case "OPEN": return "A client who chose a package without signing in";
     default: return "A client";
   }
 }

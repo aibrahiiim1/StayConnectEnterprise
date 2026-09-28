@@ -22,6 +22,9 @@ DO $$ BEGIN CREATE ROLE svc_pmsd  LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBY
 DO $$ BEGIN CREATE ROLE svc_payment         LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 -- Room charge (0097): the posting worker connects as svc_posting, a member of sc_posting_runtime only.
 DO $$ BEGIN CREATE ROLE svc_posting LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+-- The group role itself. Migration 0097 creates it too, but a live site applies migrations as iam_v2_owner,
+-- which may not create roles; creating it here first makes that step a no-op there.
+DO $$ BEGIN CREATE ROLE sc_posting_runtime NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN CREATE ROLE svc_payment_outcome LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- Re-assert attributes (idempotent hardening).

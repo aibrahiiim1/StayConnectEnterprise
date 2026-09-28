@@ -12111,16 +12111,8 @@ CREATE TABLE public.sites (
     country text,
     metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    site_type text
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
-
-
---
--- Name: COLUMN sites.site_type; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.sites.site_type IS 'Descriptive site type from the signed assignment (HOTEL, CAFE, ...). Unknown future values are stored as received. Authorises and enables nothing.';
 
 
 --

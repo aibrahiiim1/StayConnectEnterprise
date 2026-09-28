@@ -207,7 +207,7 @@ export type Voucher = {
 // SubjectKind — the four things an Entitlement can belong to, which is therefore the four things a session can
 // belong to. The database guarantees exactly one (iam_v2 ent_one_subject), so this is a closed set rather than a
 // convention. An empty string means the session's entitlement could not be read, not that it has no subject.
-export type SubjectKind = "room" | "account" | "voucher" | "guest" | "";
+export type SubjectKind = "room" | "account" | "voucher" | "guest" | "open" | "";
 
 export type Session = {
   id: string; tenant_id: string; site_id: string; appliance_id: string;
