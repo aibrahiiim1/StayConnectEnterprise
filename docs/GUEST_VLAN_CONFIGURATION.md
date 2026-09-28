@@ -1,11 +1,11 @@
-# Guest VLAN & Network Configuration (Phase 19)
+# Client VLAN & Network Configuration (Phase 19)
 
-> How to add a guest network — untagged (a bridge straight over a parent port)
+> How to add a client network — untagged (a bridge straight over a parent port)
 > or a tagged 802.1Q VLAN — and what the appliance renders for it. Model:
 > `data-plane/internal/netcfg/model.go`; netplan renderer:
 > `render_netplan.go`. Overview: [EDGE_NETWORKING.md](EDGE_NETWORKING.md).
 
-A guest network is one L2/L3 domain the appliance serves: its own bridge, L3
+A client network (a `guest_networks` row) is one L2/L3 domain the appliance serves: its own bridge, L3
 gateway, DHCP scope, DNS, firewall zone and captive-portal policy. Two shapes:
 
 - **untagged** — the bridge enslaves the parent interface directly. Only **one**
@@ -31,9 +31,9 @@ kept within the Linux `IFNAMSIZ` limit of **15 characters**:
 `VLANIfaceName` caps the parent so `parent.<vlan>` stays ≤ 15 (a long parent name
 is truncated before the `.vlan` suffix).
 
-## 2. Worked example — untagged guest network
+## 2. Worked example — untagged client network
 
-Parent `ens192` is a plain guest access port (role `guest_access`). One untagged
+Parent `ens192` is a plain client access port (role `guest_access`, *Client access*). One untagged
 network, gateway `10.30.0.1/24`:
 
 | Field | Value |
@@ -62,9 +62,9 @@ network:
         forward-delay: 0
 ```
 
-## 3. Worked example — tagged VLAN 20 (Rooms)
+## 3. Worked example — tagged VLAN 20 (Main)
 
-Parent `ens192` is a `guest_trunk` carrying tagged VLANs from the WLAN
+Parent `ens192` is a `guest_trunk` (*Client trunk*) carrying tagged VLANs from the WLAN
 controller. Create VLAN 20 → `ens192.20` → `br-g20` → `10.20.0.1/22`, pool
 `10.20.0.100 – 10.20.3.250`:
 
@@ -112,7 +112,7 @@ length (`10.20.0.1` + `/22` → `10.20.0.1/22`).
 
 ## 4. Worked example — multiple VLANs on one trunk
 
-VLAN 20 "Rooms" + VLAN 40 "Conference", both on `ens192`:
+VLAN 20 "Main" + VLAN 40 "Conference", both on `ens192`:
 
 ```yaml
 network:
@@ -176,7 +176,7 @@ operator through a client network (a `guest_networks` row) and its apply:
 
 - One untagged network per parent; no duplicate enabled VLAN on a parent.
 - Bridge names are globally unique (`guest_networks_bridge_uniq`).
-- Enabled guest subnets on one appliance must **not overlap** (no VRF yet) —
+- Enabled client subnets on one appliance must **not overlap** (no VRF yet) —
   `ValidateSet` returns `subnet_overlap`; the DB keeps IP→network unambiguous so
   sessions map cleanly.
 - The parent interface may not be the management or WAN interface — the
