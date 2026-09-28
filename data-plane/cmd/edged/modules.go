@@ -53,6 +53,36 @@ var surfaceModules = map[string][]string{
 	"financial-ops":             {lic.ModuleRoomCharge, lic.ModuleCardPayment},
 }
 
+// historySurfaces are the module-owned surfaces that hold HISTORY, AUDIT, RECONCILIATION or RECOVERY. They
+// stay reachable while the module is manageable -- licensed, OR no longer licensed but still holding records --
+// because withdrawing a licence must never make evidence or recovery inaccessible.
+//
+// Every OTHER module-owned surface is day-to-day configuration or operation, and is served only while the
+// module is LICENSED (and deployed). A site without Hospitality therefore does not see PMS connection, Room
+// sign-in protection, grace or routing screens merely because it once ran a PMS; it keeps its stays, PMS
+// activity, sign-in history, reconciliation and financial review.
+var historySurfaces = map[string]bool{
+	"pms-stays":                 true,
+	"pms-events":                true,
+	"pms-resolutions":           true,
+	"guest-signin-attempts":     true,
+	"guest-signin-credentials":  true,
+	"pms-reconciliation":        true,
+	"pms-roster-reconciliation": true,
+	"operational-alerts":        true,
+	"financial-review":          true,
+	"financial-ops":             true,
+}
+
+// surfaceServed is the one rule for a module-owned surface: history needs the module manageable, everything
+// else needs it licensed and deployed.
+func surfaceServed(name string, st moduleState) bool {
+	if historySurfaces[name] {
+		return st.Manageable
+	}
+	return st.Licensed && st.Deployed
+}
+
 // moduleState is one module as scd reports it (internal/modules.State).
 type moduleState struct {
 	ID         string   `json:"id"`
@@ -137,7 +167,7 @@ func (s *server) surfaceManageable(ctx context.Context, name string) (manageable
 		return false, false
 	}
 	for _, id := range mods {
-		if rep.Modules[id].Manageable {
+		if surfaceServed(name, rep.Modules[id]) {
 			return true, true
 		}
 	}
@@ -185,7 +215,7 @@ func (s *server) filterSurfaces(ctx context.Context, all []string) ([]string, *m
 			continue
 		}
 		for _, id := range mods {
-			if rep.Modules[id].Manageable {
+			if surfaceServed(n, rep.Modules[id]) {
 				out = append(out, n)
 				break
 			}

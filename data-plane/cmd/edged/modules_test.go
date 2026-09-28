@@ -43,7 +43,7 @@ func report(mods map[string]moduleState) moduleReport {
 
 func TestModuleGateServesCoreAndManageableOnly(t *testing.T) {
 	s := &server{modCache: &moduleCache{}, scd: fakeSCDModules(t, 200, report(map[string]moduleState{
-		"hospitality":  {ID: "hospitality", Manageable: true},
+		"hospitality":  {ID: "hospitality", Manageable: true, Licensed: true, Deployed: true},
 		"room_charge":  {ID: "room_charge", Manageable: false},
 		"card_payment": {ID: "card_payment", Manageable: false},
 	}))}
@@ -84,12 +84,41 @@ func TestModuleGateFailsClosedWhenStateUnreadable(t *testing.T) {
 // is not effective, yet its screens stay manageable (scd reports manageable=true, effective=false).
 func TestNotReadyStaysManageable(t *testing.T) {
 	s := &server{modCache: &moduleCache{}, scd: fakeSCDModules(t, 200, report(map[string]moduleState{
-		"card_payment": {ID: "card_payment", Manageable: true, Effective: false, Reasons: []string{"NOT_READY"}},
+		"card_payment": {ID: "card_payment", Manageable: true, Licensed: true, Deployed: true, Effective: false, Reasons: []string{"NOT_READY"}},
 	}))}
 	rec := httptest.NewRecorder()
 	s.moduleGate("payment-providers")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })).
 		ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
 	if rec.Code != 204 {
 		t.Fatalf("got %d", rec.Code)
+	}
+}
+
+// A SITE THAT IS NOT A HOTEL DOES NOT LOOK LIKE ONE -- AND KEEPS ITS HISTORY.
+//
+// Hospitality no longer licensed, but the site ran a PMS (scd reports manageable through its records probe):
+// day-to-day hotel screens (PMS connection, sign-in protection, grace, routing) are gone; stays, PMS activity,
+// sign-in history, reconciliation and alerts stay reachable.
+func TestUnlicensedModuleKeepsOnlyItsHistory(t *testing.T) {
+	s := &server{modCache: &moduleCache{}, scd: fakeSCDModules(t, 200, report(map[string]moduleState{
+		"hospitality": {ID: "hospitality", Deployed: true, Licensed: false, Manageable: true, Reasons: []string{"NOT_LICENSED"}},
+	}))}
+	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
+	for name, want := range map[string]int{
+		"pms-interfaces":            404,
+		"guest-signin-protection":   404,
+		"guest-signin-restrictions": 404,
+		"checkout-grace":            404,
+		"pms-routing":               404,
+		"pms-stays":                 204,
+		"pms-events":                204,
+		"guest-signin-attempts":     204,
+		"pms-reconciliation":        204,
+	} {
+		rec := httptest.NewRecorder()
+		s.moduleGate(name)(ok).ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+		if rec.Code != want {
+			t.Fatalf("%s: got %d want %d", name, rec.Code, want)
+		}
 	}
 }

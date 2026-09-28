@@ -126,10 +126,24 @@ func (s *server) registerModuleProbes() {
 	if s.modules == nil {
 		return
 	}
+	// Hospitality records: a site that ran a PMS keeps its stays, activity and reconciliation reachable after
+	// the licence stops covering Hospitality (history only; day-to-day screens need the licence).
+	s.modules.SetRecordsProbe(lic.ModuleHospitality, s.hospitalityHasRecords)
 	s.modules.SetProbe(lic.ModuleCardPayment, s.cardReadiness)
 	s.modules.SetRecordsProbe(lic.ModuleCardPayment, s.cardHasRecords)
 	s.modules.SetProbe(lic.ModuleRoomCharge, s.roomChargeReadiness)
 	s.modules.SetRecordsProbe(lic.ModuleRoomCharge, s.roomChargeHasRecords)
+}
+
+// hospitalityHasRecords reports whether the site holds any PMS interface or stay.
+func (s *server) hospitalityHasRecords(ctx context.Context, tenantID, siteID string) bool {
+	if s.db == nil {
+		return false
+	}
+	var has bool
+	_ = s.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM iam_v2.pms_interfaces WHERE tenant_id=$1 AND site_id=$2)
+		OR EXISTS (SELECT 1 FROM iam_v2.stays WHERE tenant_id=$1 AND site_id=$2)`, tenantID, siteID).Scan(&has)
+	return has
 }
 
 // roomChargeReadiness: room charge can execute only when real posting is within the deployment ceiling (a

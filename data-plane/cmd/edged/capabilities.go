@@ -76,8 +76,9 @@ func (m *mountedSurfaces) list() []string {
 // endpoint a statement of fact rather than a second, parallel authorisation model that could disagree with
 // the first one.
 //
-// MODULE-OWNED SURFACES are reported only while their module is manageable (licensed, or holding records),
-// so the navigation follows the licence and the site's own switch. If the module state cannot be read they
+// MODULE-OWNED SURFACES are reported only while they may be served (modules.go surfaceServed): a day-to-day
+// surface while its module is LICENSED; a history/recovery surface while the module is licensed or still
+// holds records. If the module state cannot be read they
 // are all omitted: the navigation then shows only the core, which fails closed. "modules" carries the full
 // state for the Modules and Payment methods screens; it is null when unreadable.
 func (s *server) capabilities(w http.ResponseWriter, r *http.Request) {
