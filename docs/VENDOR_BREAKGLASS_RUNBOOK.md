@@ -1,7 +1,7 @@
 # Vendor Break-Glass / Support Runbook
 
-Support-only procedures that bypass the normal UI onboarding. **Not part of hotel
-onboarding** and **not available to Hotel-IT operators.**
+Support-only procedures that bypass the normal UI onboarding. **Not part of site
+onboarding** and **not available to Site IT managers.**
 
 Every action here:
 
@@ -35,7 +35,7 @@ deliberate per-appliance provisioning action, never a shipped default.
 
 ## Reset the appliance identity/activation state (same customer only)
 
-Wipes identity + credentials; **preserves** WAN/LAN + guest config, trust anchors,
+Wipes identity + credentials; **preserves** WAN/LAN + client-network config, trust anchors,
 Central URL and the Admin Console operator — and therefore the current customer's
 local data. It is **not** a factory reset:
 

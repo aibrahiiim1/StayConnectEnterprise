@@ -27,11 +27,14 @@ user, including by a customer admin managing their own users. The legacy roles `
 Central**; rows that still carry them are shown but cannot be assigned. A
 customer-scoped user never sees another customer or the fleet. Customer roles
 see **activation, connection and licence status** for their appliances — never
-guest data (it isn't in the cloud; see [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md)).
+client data (it isn't in the cloud; see [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md)).
 
-## 3. Site level (edge, per-hotel `operators`/`operator_roles`)
+## 3. Site level (edge, per-site `operators`/`operator_roles`)
 
-Seven roles, enforced by edged per `/edge/v1` resource. Legend:
+Seven roles, enforced by edged per `/edge/v1` resource. The Admin Console labels
+`hotel_it_manager` *Site IT manager*, `front_office_operator` *Client services
+operator* and `guest_relations_operator` *Client relations operator* (labels only;
+the keys are unchanged, [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md)). Legend:
 **W** = read-write, **R** = read-only, **–** = no access.
 
 | /edge/v1 resource | site_admin | hotel_it_manager | front_office_operator | guest_relations_operator | voucher_operator | payments_operator | site_viewer |
@@ -64,11 +67,11 @@ Seven roles, enforced by edged per `/edge/v1` resource. Legend:
 | reports | R | R | R | R | – | R | R |
 | backups (view/trigger) | W | W | R | R | – | R | R |
 
-**The four guest sign-in keys are four keys on purpose, and none implies another.**
+**The four guest sign-in keys (Room sign-in, in the Hotel module) are four keys on purpose, and none implies another.**
 
 * `guest-signin-attempts` — the list, the rooms, the results and the diagnostic reasons.
-* `guest-signin-credentials` — what the guest typed and what the property would have accepted.
-* `guest-signin-protection` — **W** changes the property's thresholds, window and waiting period.
+* `guest-signin-credentials` — what the guest typed and what the site would have accepted.
+* `guest-signin-protection` — **W** changes the site's thresholds, window and waiting period.
 * `pms-reconciliation` — **read-only for every role, including site_admin.** It lists the unresolved
   departures, the rooms holding several stays and the stays past their planned departure. There is no write
   form because there is no local action: a departure that went to review is resolved by the PMS sending one
@@ -78,7 +81,7 @@ Seven roles, enforced by edged per `/edge/v1` resource. Legend:
 * `guest-signin-restrictions` — **W** releases ONE device's wait early, with a mandatory reason.
 
 The blast radii are not comparable. A release affects one device for the remainder of one wait; a policy
-change affects every guest on the property until somebody changes it back. So the reception desk holds the
+change affects every guest on the site until somebody changes it back. So the client-services desk holds the
 release and reads the policy: a desk under pressure must not be able to turn "five attempts" into "twenty"
 for everybody as the quickest way to help one person. Holding the release key also carries no access to
 credential values — releasing a restriction permits another attempt, and grants nobody anything.
@@ -86,10 +89,11 @@ credential values — releasing a restriction permits another attempt, and grant
 Summary of intent:
 
 - **site_admin** — everything, including staff accounts and refunds.
-- **hotel_it_manager** — everything technical, but **not** staff management and
+- **hotel_it_manager** (Site IT manager) — everything technical, but **not** staff management and
   **not** payment refunds (money and people stay with site_admin/payments).
-- **front_office_operator / guest_relations_operator** — the reception desk:
-  read-write on vouchers, sessions and guests; read-only elsewhere. (Same
+- **front_office_operator / guest_relations_operator** (Client services operator /
+  Client relations operator) — the site team's desk: read-write on vouchers,
+  sessions and the `guests` resource; read-only elsewhere. (Same
   permissions today; kept as two roles for audit attribution and future
   divergence.)
 - **voucher_operator** — vouchers only (kiosk/print station accounts). No other
@@ -119,27 +123,27 @@ second key protects: issuing creates codes **nobody holds yet**, while revealing
 reads a code somebody may already be carrying — possibly from a batch another
 operator printed. That is why `hotel_it_manager` is **–** on `voucher-codes`
 while holding **W** on `vouchers`: that role owns configuration and the PMS
-integration, and neither job requires reading a guest's credential. `site_viewer`
+integration, and neither job requires reading a client's credential. `site_viewer`
 is **–** for the same reason it is **–** on `guest-signin-credentials`: a
-read-only observer has no business holding guest secrets.
+read-only observer has no business holding client secrets.
 
-Unlike a post-stay PIN or a guest-account password, **a voucher code is
+Unlike a post-stay PIN or a client-account password, **a voucher code is
 encrypted and recoverable**, so "shown once" is not enforced by arithmetic here
 and is not claimed to be. What constrains a reveal is that it cannot happen
 unseen.
 
 **guest-device-self-service** (Phase 6, DARK) is the per-appliance product
-setting that decides whether this property offers guests the ability to remove
+setting that decides whether this site offers clients the ability to remove
 their own offline devices. It follows `auth-methods` exactly, and for the same
-reason: *which capabilities the property offers its guests* is a configuration
+reason: *which capabilities the site offers its clients* is a configuration
 decision, not a desk action. So the two management roles hold **W**, the desk
 roles hold **R** (they are asked "why can't I remove my old phone" and need to
 be able to answer it), `voucher_operator` gains nothing — a kiosk account has no
 business here — and the two read-only roles keep their established read.
 
 The setting is separate from the Phase-6 **deployment gate**: turning the
-setting on does not deploy the capability, and while the gate is dark the guest
-routes do not exist at all. edged does not even mount this resource unless the
+setting on does not deploy the capability, and while the gate is dark the
+client-facing routes do not exist at all. edged does not even mount this resource unless the
 build's Phase-6 admin flag is on, so the row above describes who may use the
 screen once it exists, not whether it exists.
 
@@ -150,20 +154,20 @@ site_admin cannot create GuestAccessPlans or voucher batches
 ## 4. Isolation guarantees
 
 1. **Credential isolation** — site operators exist only in that site's DB;
-   there is no cloud record of them and no cross-site login. A leaked hotel
-   password compromises one hotel.
+   there is no cloud record of them and no cross-site login. A leaked site
+   password compromises one site.
 2. **Data isolation** — a site role can only ever see its own site's data,
    because the API it talks to is physically connected to only one database.
    No `tenant_id` filter bugs can leak across sites — there is no other
    site's data in the process.
-3. **Cloud/edge separation** — platform and group roles cannot read guest
+3. **Cloud/edge separation** — platform and group roles cannot read client
    data (not present in the cloud); site roles cannot touch licensing data
    (licenses are cloud-writable only; the edge holds a signed, read-only
    entitlement).
 4. **Appliance identity** — appliances authenticate to the cloud with their
    own Ed25519 keys (signed request tokens with replay protection, then mutual
    TLS) and can only speak for themselves.
-5. **Audit locality** — hotel-staff actions land in the site's local
+5. **Audit locality** — site-staff actions land in the site's local
    `audit_log`; platform/group actions in the cloud `audit_log`. Neither log
    syncs to the other side.
 
@@ -188,7 +192,7 @@ constraint when the compatibility window closes
 
 ## 6. Phase 19 — Networking permissions
 
-Guest-network management ([EDGE_NETWORKING.md](EDGE_NETWORKING.md)) adds a
+Client-network management ([EDGE_NETWORKING.md](EDGE_NETWORKING.md)) adds a
 `network.*` permission family, gated by edged on the `/edge/v1/network/*`,
 `/edge/v1/guest-networks/*` and `/edge/v1/dhcp/*` routes (all writes proxy to
 `netd`). Because a bad apply can affect connectivity, only the two technical
@@ -198,8 +202,8 @@ roles get write/apply; everyone else is read-only or none.
 |---|---|---|---|---|---|
 | `network.interfaces.read` | list/read interfaces | R | R | R | – |
 | `network.interfaces.assign` | assign guest_access/guest_trunk/unused role | W | W | – | – |
-| `network.guest.read` | read guest networks + revisions | R | R | R | – |
-| `network.guest.write` | create/edit/delete guest networks, pools, reservations (draft) | W | W | – | – |
+| `network.guest.read` | read client networks + revisions | R | R | R | – |
+| `network.guest.write` | create/edit/delete client networks, pools, reservations (draft) | W | W | – | – |
 | `network.guest.apply` | validate + apply + confirm a revision | W | W | – | – |
 | `network.guest.rollback` | roll back to a prior revision | W | W | – | – |
 | `network.dhcp.read` | read pools/reservations/leases | R | R | R | – |
@@ -207,7 +211,7 @@ roles get write/apply; everyone else is read-only or none.
 
 Summary: **site_admin** and **hotel_it_manager** have full networking control
 (read/write/apply/rollback); **site_viewer** is read-only across networking; the
-reception/kiosk/payments roles (`front_office_operator`, `guest_relations_operator`,
+client-services/kiosk/payments roles (`front_office_operator`, `guest_relations_operator`,
 `voucher_operator`, `payments_operator`) have **no** networking access.
 Management/WAN interfaces are `is_protected` and refuse role edits regardless of
 permission. As elsewhere, license-state gates apply on top of roles.
