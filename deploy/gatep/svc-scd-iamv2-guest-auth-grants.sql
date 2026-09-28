@@ -305,3 +305,9 @@ GRANT EXECUTE ON FUNCTION iam_v2.site_payment_domains_set(uuid,uuid,text[],text,
 GRANT SELECT ON iam_v2.payment_provider_accounts, iam_v2.payment_provider_secret_generations,
                 iam_v2.site_payment_domains, iam_v2.payment_checkouts TO svc_scd;
 GRANT EXECUTE ON FUNCTION iam_v2.card_payment_settings_get(uuid,uuid) TO svc_scd;
+
+-- ROOM CHARGE (migration 0097). scd creates a room-charge posting through one definer function that
+-- re-derives every pin from the purchase (the caller names only the settlement), and asks whether an
+-- interface is financially onboarded. No table privilege on the posting ledger.
+GRANT EXECUTE ON FUNCTION iam_v2.p4_create_room_charge_posting(uuid,uuid,uuid)  TO svc_scd;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_interface_financially_ready(uuid,uuid,uuid) TO svc_scd;

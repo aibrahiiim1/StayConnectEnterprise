@@ -459,6 +459,9 @@ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_payment_outcome') AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'sc_payment_outcome') THEN
     EXECUTE 'GRANT sc_payment_outcome TO svc_payment_outcome';
   END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_posting') AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'sc_posting_runtime') THEN
+    EXECUTE 'GRANT sc_posting_runtime TO svc_posting';
+  END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_scd') AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'sc_payment_runtime')
      AND (pg_has_role('svc_scd', 'sc_payment_runtime', 'MEMBER') OR pg_has_role('svc_scd', 'sc_payment_outcome', 'MEMBER')) THEN
     RAISE EXCEPTION 'GATE-P BLOCKER: svc_scd must not be a member of a payment role';

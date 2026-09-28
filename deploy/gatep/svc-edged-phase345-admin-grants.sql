@@ -386,3 +386,12 @@ GRANT SELECT ON iam_v2.payment_provider_accounts, iam_v2.payment_provider_accoun
 GRANT SELECT ON iam_v2.site_card_payment_setting_changes TO svc_edged;
 GRANT EXECUTE ON FUNCTION iam_v2.card_payment_settings_get(uuid,uuid)                           TO svc_edged;
 GRANT EXECUTE ON FUNCTION iam_v2.card_payment_settings_set(uuid,uuid,integer,integer,text,text) TO svc_edged;
+
+-- ROOM CHARGE (migration 0097): per-interface financial onboarding (one audited definer: new revision +
+-- approval record), readiness, the package -> posting code mapping writer, and applying an accepted review
+-- decision to its settlement (CONFIRM_POSTED settles and grants, ABANDON fails, RETRY requeues once).
+GRANT SELECT ON iam_v2.pms_financial_onboardings TO svc_edged;
+GRANT SELECT, INSERT ON iam_v2.package_settlement_mappings TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_interface_financial_onboard(uuid,uuid,uuid,uuid,text,text,smallint,text,text,uuid) TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_interface_financially_ready(uuid,uuid,uuid) TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_posting_review_apply(uuid,uuid,uuid) TO svc_edged;
