@@ -1,15 +1,15 @@
 # Edge Networking (Phase 19)
 
-> How the appliance turns hotel intent — "give me a guest VLAN 20 on 10.20.0.0/22
+> How the appliance turns site intent — "give me a client VLAN 20 on 10.20.0.0/22
 > with DHCP and a captive portal" — into live netplan/Kea/nftables/Unbound
 > configuration, transactionally and without losing management connectivity.
 > Model & renderers: `data-plane/internal/netcfg/`. Schema:
 > `data-plane/migrations/0002_edge_networking.up.sql`. Design rationale:
 > [PHASE19_ASSESSMENT.md](PHASE19_ASSESSMENT.md).
 
-Before Phase 19 the appliance hardcoded exactly one guest network (`br-lan`,
+Before Phase 19 the appliance hardcoded exactly one client network (`br-lan`,
 `10.10.0.0/24`) in every layer. Phase 19 makes the **site database the source of
-truth** for any number of guest networks and VLANs, and renders the OS files
+truth** for any number of client networks and VLANs, and renders the OS files
 from it.
 
 ## 1. The network hierarchy
@@ -18,13 +18,13 @@ from it.
 Site  (one row in `sites`)
  └─ Appliance  (`appliances`; the box or HA pair)
      ├─ Interfaces        (`network_interfaces` — ens160, ens192, bond0 …)
-     └─ Guest Networks    (`guest_networks` — one L2/L3 guest domain each)
+     └─ Client Networks   (`guest_networks` — one L2/L3 client domain each)
          ├─ DHCP Pools        (`dhcp_pools` — 1..N ranges per subnet)
          ├─ DHCP Reservations (`dhcp_reservations` — MAC → fixed IP)
          └─ (served by) Config Revisions (`network_config_revisions`)
 ```
 
-Every mutation to the guest-network intent is captured and applied as a numbered
+Every mutation to the client-network intent is captured and applied as a numbered
 **revision** with a full rendered bundle on disk. Revisions carry the audit trail
 (`network_apply_events`, `network_health_checks`).
 
@@ -42,14 +42,14 @@ Every mutation to the guest-network intent is captured and applied as a numbered
 | `unused` | discovered but unassigned (default) | yes |
 
 `mode` is one of `auto | manual | trunk | bridge_slave`. `is_protected=true`
-marks management/WAN so a guest-network apply can never touch them. netd
+marks management/WAN so a client-network apply can never touch them. netd
 *observes* `link_state`, `speed_mbps`, `mtu`, `driver`, `ip_addresses`,
 `last_seen_at` — these columns are never authoritative for intent, only
 refreshed.
 
 ## 3. The `netd` privileged daemon
 
-Guest-network apply requires root (create bridges/VLANs, drive nftables, write
+Client-network apply requires root (create bridges/VLANs, drive nftables, write
 Kea via the control socket). Rather than make scd/portald/acctd root, Phase 19
 adds one new privileged surface:
 
@@ -80,7 +80,7 @@ adds one new privileged surface:
 The static `deploy/nftables/stayconnect.nft`, `deploy/kea/…`, `deploy/netplan/…`
 files become **bootstrap skeletons**; the live configuration is the generated
 bundle for the currently `active` revision. The legacy `br-lan` network is
-imported at migration time as the first guest network (`Legacy Guest Network`,
+imported at migration time as the first client network (the legacy network,
 untagged, 10.10.0.0/24), marked already-active, so nothing re-applies.
 
 ### Component diagram
@@ -116,7 +116,7 @@ netd; reads may be served from the site DB.
 
 | Method & path | Purpose |
 |---|---|
-| `GET /edge/v1/guest-networks` | list guest networks |
+| `GET /edge/v1/guest-networks` | list client networks |
 | `POST /edge/v1/guest-networks` | create (draft) |
 | `GET /edge/v1/guest-networks/{id}` | detail incl. pools + reservations |
 | `PUT /edge/v1/guest-networks/{id}` | edit |
@@ -150,5 +150,5 @@ netd; reads may be served from the site DB.
 - [DHCP_OPTION_114.md](DHCP_OPTION_114.md) — RFC 8910 captive-portal option
 - [NETWORK_APPLY_AND_ROLLBACK.md](NETWORK_APPLY_AND_ROLLBACK.md) — the transactional lifecycle
 - [ARUBA_SSID_VLAN_MAPPING.md](ARUBA_SSID_VLAN_MAPPING.md) — the WLAN-controller boundary
-- [EXTERNAL_DHCP_MODE.md](EXTERNAL_DHCP_MODE.md) — when the hotel runs its own DHCP
+- [EXTERNAL_DHCP_MODE.md](EXTERNAL_DHCP_MODE.md) — when the site runs its own DHCP
 - [NETWORK_TROUBLESHOOTING.md](NETWORK_TROUBLESHOOTING.md) — symptom → check → fix

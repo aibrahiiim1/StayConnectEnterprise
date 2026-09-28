@@ -10,9 +10,9 @@
 | Daemon | Listens | Role |
 |---|---|---|
 | `scd` | Unix socket `/run/stayconnect/scd.sock` (+ loopback `/metrics`) | Session controller: owns nft `auth_ipv4` set, tc classes, sessions table; validates vouchers/OTP/social/PMS; PMS provider registry; reaper. **Also hosts the Central agent**: token-less registration, signed assignment poll, certificate, licence fetch, hello (§6) |
-| `portald` | `:8380` HTTP / `:8343` HTTPS on the guest interface | Captive portal front end; no DB, no business logic — proxies to scd over the socket |
+| `portald` | `:8380` HTTP / `:8343` HTTPS on the client-network interface | Captive portal front end; no DB, no business logic — proxies to scd over the socket |
 | `acctd` | none (1s tick) | tc byte-counter snapshots → `accounting_records`, quota enforcement via scd |
-| `edged` | loopback, fronted by Caddy on the **management IP** | The Admin Console (formerly Hotel Admin) API (`/edge/v1`): local operator auth, guest-domain CRUD, Central/licence status, reports, backups. Serves the `hotel-admin/` UI bundle |
+| `edged` | loopback, fronted by Caddy on the **management IP** | The Admin Console (formerly Hotel Admin) API (`/edge/v1`): local operator auth, client-access CRUD, Central/licence status, reports, backups. Serves the `hotel-admin/` UI bundle |
 
 All four read/write only the local DB, and each takes its tenant/site from the
 **verified** signed assignment (no environment fallback in a production build).
@@ -23,7 +23,7 @@ HTTPS only; the appliance has no message-bus client — CLAUDE.md §0E).
 
 One site = one isolated Postgres database, schema
 `data-plane/migrations/0001_edge_init.up.sql` — intentionally shape-compatible
-with the guest-domain subset of the central schema so scd/portald/acctd cut over
+with the client-access subset of the central schema so scd/portald/acctd cut over
 by changing only their DSN and `sitemigrate` copies rows 1:1.
 
 | Domain | Tables |
@@ -75,14 +75,14 @@ Provisioning writes are additionally gated by license state
 | Interface | Example | Carries |
 |---|---|---|
 | **Management** | `172.21.15.30/24` on the site's IT/management VLAN | Admin Console (`https://172.21.15.30` via Caddy), SSH, outbound HTTPS to Central, monitoring |
-| **Guest gateway** | `10.20.0.1/24` on the guest bridge | Kea DHCP (+ RFC 8910 option 114 → `http://10.20.0.1:8380/`), Unbound DNS, nftables captive DNAT :80→8380/:443→8343, portald, tc shaping, masquerade to uplink |
+| **Client gateway** | `10.20.0.1/24` on the client bridge | Kea DHCP (+ RFC 8910 option 114 → `http://10.20.0.1:8380/`), Unbound DNS, nftables captive DNAT :80→8380/:443→8343, portald, tc shaping, masquerade to uplink |
 | **HA sync** (optional) | dedicated link/VLAN between the pair | VRRP adverts, conntrackd FTFW, Postgres streaming replication |
 
 nftables retains the `inet stayconnect` table (auth_ipv4 / walled_garden_ip
 sets, drop-by-default input/forward). Refactor tightening: the dev-era WAN
 accepts for :8080/:3000 are removed, and — because the DNAT captive redirect is
 **IPv4-only** while the inet table would otherwise forward authenticated v6 —
-**IPv6 is dropped on the guest LAN** until v6 capture is implemented
+**IPv6 is dropped on the client LAN** until v6 capture is implemented
 ([SECURITY_HARDENING.md](SECURITY_HARDENING.md)).
 
 ## 5. Caddy exposure rules
@@ -91,8 +91,8 @@ Caddy on the appliance is the only TLS terminator:
 
 | vhost / bind | Upstream | Rule |
 |---|---|---|
-| `https://<mgmt-ip>` (e.g. `https://172.21.15.30`) | hotel-admin UI + `/edge/v1` → edged | **Management interface only.** Never bound to the WAN/uplink or the guest bridge. Internal CA (`local_certs`) until sites have real names |
-| Client Portal (formerly Guest Portal) | portald `:8380/:8343` | Guest interface only; portal HTTP stays direct-to-portald for RFC 8910 (no HTTPS redirect on the captive path) |
+| `https://<mgmt-ip>` (e.g. `https://172.21.15.30`) | Admin Console UI (`hotel-admin/`) + `/edge/v1` → edged | **Management interface only.** Never bound to the WAN/uplink or the client bridge. Internal CA (`local_certs`) until sites have real names |
+| Client Portal (formerly Guest Portal) | portald `:8380/:8343` | Client-network interface only; portal HTTP stays direct-to-portald for RFC 8910 (no HTTPS redirect on the captive path) |
 
 Admin Console is therefore reachable exclusively from the site's management
 network — not from client devices and not from the internet. Central operators
@@ -219,7 +219,7 @@ current single-appliance behaviour.
 
 ## 8. Phase 19 — Networking
 
-Phase 19 makes the site DB the source of truth for the appliance's guest
+Phase 19 makes the site DB the source of truth for the appliance's client
 networks and VLANs; the OS files become rendered artifacts. Full suite:
 [EDGE_NETWORKING.md](EDGE_NETWORKING.md).
 
@@ -247,9 +247,9 @@ Site DB (guest_networks + dhcp_pools + dhcp_reservations + network_interfaces)
 
 nftables becomes generated per revision: concatenated `auth_ipv4`
 (`ifname . ipv4_addr`), dynamic `guest_interfaces`/`guest_subnets` sets,
-per-network captive DNAT and masquerade, inter-guest isolation. Sessions gain
+per-network captive DNAT and masquerade, inter-client isolation. Sessions gain
 `guest_network_id` / `vlan_id` / `ingress_interface` / `gateway_ip`; scd derives
-the guest network from the source IP's subnet.
+the client network from the source IP's subnet.
 
 ### New site tables (`0002_edge_networking`)
 
@@ -261,6 +261,6 @@ the guest network from the source IP's subnet.
 | Transactional apply | `network_config_revisions` (draft→validated→applying→pending_confirmation→active/failed/rolled_back/superseded), `network_apply_events`, `network_health_checks` |
 | Session association | `sessions` gains `guest_network_id`/`vlan_id`/`ingress_interface`/`gateway_ip` |
 
-Management/WAN interfaces are `is_protected` and read-only in this release; guest
+Management/WAN interfaces are `is_protected` and read-only in this release; client-network
 interfaces/VLANs are fully configurable. DHCP `relay` is supported in the schema
 but minimal in this release.

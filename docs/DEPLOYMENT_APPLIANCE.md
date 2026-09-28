@@ -7,7 +7,7 @@
 > **⚠️ Topology correction (2026-07-16) — approved two-NIC rule governs.** The approved,
 > permanent appliance topology is **exactly two physical NICs: WAN and LAN.** **WAN is
 > also the management interface** (the Admin Console, formerly Hotel Admin; SSH, outbound sync, PMS reachability if the
-> PMS is on the WAN-side site network); **LAN** carries guest connectivity and guest
+> PMS is on the WAN-side site network); **LAN** carries client connectivity and client
 > VLAN/trunk behavior. There is **no separate physical management NIC** and **no approved
 > third HA-sync NIC.** The historical "separate `mgmt` at `172.21.15.30`" and "optional
 > `hasync` third NIC" wording below is **superseded** — see `SYSTEM_OVERVIEW.md` (WAN=`ens160`,
@@ -19,9 +19,9 @@
 | Interface | Example | Role |
 |---|---|---|
 | **WAN = management** (`ens160`) | `the retired development reference appliance's address`, default route | uplink/masquerade **and** management: Admin Console (`https://<WAN-IP>`), SSH, outbound HTTPS to Central (licensing only), PMS reachability when the PMS is on the WAN-side site network, monitoring |
-| **LAN = guest** (`ens192`, over `br-lan` / per-VLAN bridges) | `10.20.0.1/24` (and per-VLAN gateways) | guest gateway: DHCP/DNS/captive portal/shaping + 802.1Q guest VLAN trunk; option 114 → `http://10.20.0.1:8380/` (**keep the RFC 8910 stanza in the repo Kea config — it was VM-only drift once already**) |
+| **LAN = client** (`ens192`, over `br-lan` / per-VLAN bridges) | `10.20.0.1/24` (and per-VLAN gateways) | client gateway: DHCP/DNS/captive portal/shaping + 802.1Q client VLAN trunk; option 114 → `http://10.20.0.1:8380/` (**keep the RFC 8910 stanza in the repo Kea config — it was VM-only drift once already**) |
 
-Guest traffic masquerades out the **WAN** interface, never onto the guest LAN. ESXi installs:
+Client traffic masquerades out the **WAN** interface, never onto the client LAN. ESXi installs:
 the LAN portgroup needs Promiscuous/MAC-changes/Forged-transmits = Accept (SYSTEM_OVERVIEW §3).
 
 **Superseded:** a third **`hasync`** NIC (e.g. `ens224`) for VRRP/conntrackd/Postgres
@@ -35,10 +35,10 @@ synchronization transport is an **OPEN architecture decision** (see §7 and
 |---|---|---|
 | `postgresql` | local Postgres 16 (+TimescaleDB where available) | database `stayconnect_site`, site-only credentials; loopback |
 | `stayconnect-scd` | session controller **+ Central agent** (token-less registration, assignment, certificate, licence fetch, hello — [EDGE_ARCHITECTURE.md](EDGE_ARCHITECTURE.md) §6) | root (CAP_NET_ADMIN); `SCD_DB_URL` → site DSN; `SCD_CTRLAPI_BASE` / `SCD_MTLS_BASE` from `deploy/config/central-endpoint.env` (`https://sc-central.echofusion.com`, mTLS `:9443`). scd has no message-bus client and no telemetry, command or update settings (`SCD_NATS_URL`, `SCD_NATS_MTLS_URL`, `SCD_COMMAND_PUB`, `SCD_UPDATE_PUB` are removed — CLAUDE.md §0E). `SCD_REMOVED_MARKER` (default `/etc/stayconnect/removed-from-central.json`) is the removed-from-Central marker |
-| `stayconnect-portald` | captive portal | user `stayconnect`, guest iface :8380/:8343 |
+| `stayconnect-portald` | captive portal | user `stayconnect`, client-network iface :8380/:8343 |
 | `stayconnect-acctd` | accounting/quotas | root (tc); site DSN |
 | `stayconnect-edged` | Admin Console API `/edge/v1` + serves `hotel-admin/` | loopback listener, fronted by Caddy on mgmt; site DSN; reads license store |
-| `kea-dhcp4` / `unbound` | guest DHCP/DNS | bound to 10.20.0.1 |
+| `kea-dhcp4` / `unbound` | client-network DHCP/DNS | bound to 10.20.0.1 |
 | `nftables` | `inet stayconnect` ruleset | see §3 |
 | `stayconnect-caddy` | TLS for the Admin Console on the **mgmt IP only** | internal CA (`local_certs`) unless the site has real names |
 | backup agent (timer) | nightly `pg_dump` → `backup_records` | [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md) §1 |
@@ -57,18 +57,18 @@ revoked.json), env files, and the Postgres data dir.
 ## 3. nftables policy (deltas vs the pilot ruleset)
 
 - input (drop default): mgmt allows SSH 22 + Caddy 443 (Admin Console) **from the
-  mgmt VLAN only**; guest allows DHCP/DNS/8380/8343/ICMP. **No 8080/3000
+  mgmt VLAN only**; client networks allow DHCP/DNS/8380/8343/ICMP. **No 8080/3000
   accepts anywhere** ([SECURITY_HARDENING.md](SECURITY_HARDENING.md) §2).
-- forward: guest→uplink iff `saddr @auth_ipv4` or `daddr @walled_garden_ip`;
-  guest→mgmt VLAN explicitly dropped.
-- **IPv6: dropped on the guest LAN** (no RAs, no v6 forwarding from br-lan)
+- forward: client→uplink iff `saddr @auth_ipv4` or `daddr @walled_garden_ip`;
+  client→mgmt VLAN explicitly dropped.
+- **IPv6: dropped on the client LAN** (no RAs, no v6 forwarding from br-lan)
   until dual-stack capture exists ([SECURITY_HARDENING.md](SECURITY_HARDENING.md) §4).
 - prerouting DNAT :80→10.20.0.1:8380, :443→10.20.0.1:8343 for unauthenticated
-  clients; masquerade guest subnet out the uplink.
+  clients; masquerade client subnet out the uplink.
 
 ## 4. Caddy exposure
 
-One vhost: `https://172.21.15.30` → hotel-admin static bundle + `/edge/v1/*`
+One vhost: `https://172.21.15.30` → Admin Console static bundle (`hotel-admin/`) + `/edge/v1/*`
 reverse-proxy to edged (loopback). Bind the listener to the mgmt address —
 never `:443` on all interfaces. Client Portal (formerly Guest Portal) traffic does **not** pass Caddy
 (portald serves the captive path directly; plain HTTP is required for
@@ -85,14 +85,14 @@ once, or the site installs a real cert.
 | hotel PMS (FIAS) | TCP on the site LAN | local — not internet |
 
 No inbound rule from the internet exists at all. The site firewall needs only
-these outbound allowances; a site that blocks them still has working guest
-WiFi ([OFFLINE_OPERATION.md](OFFLINE_OPERATION.md)).
+these outbound allowances; a site that blocks them still has working Client
+Wi-Fi ([OFFLINE_OPERATION.md](OFFLINE_OPERATION.md)).
 
 ## 6. Bring-up order (new site)
 
-1. OS, netplan (**WAN/management + LAN/guest** — two NICs; no dedicated hasync NIC),
+1. OS, netplan (**WAN/management + LAN/client** — two NICs; no dedicated hasync NIC),
    sysctl, nftables, Kea (incl. option 114), Unbound. (No tc priming unit: netd owns the HTB roots,
-   the guest IFB and the ingress redirect, and rebuilds them from zero on every pass.)
+   the client-network IFB and the ingress redirect, and rebuilds them from zero on every pass.)
 2. Local Postgres → create `stayconnect_site` + role → apply
    `data-plane/migrations/0001_edge_init.up.sql`.
 3. Install binaries + env files (`deploy/scripts/install-central-endpoint.sh`,
@@ -105,7 +105,7 @@ WiFi ([OFFLINE_OPERATION.md](OFFLINE_OPERATION.md)).
    offline activation (activation request → activation package) via Admin
    Console → **Appliance & licence**.
 5. Start portald, acctd, edged, Caddy; seed the first `site_admin` operator.
-6. Verify: phase 1/2 suites (guest path), Admin Console login on the mgmt IP,
+6. Verify: phase 1/2 suites (client path), Admin Console login on the mgmt IP,
    **Appliance & licence** shows *Activated*, licence *Active*, OneGate Central
    *Connected* (`GET /edge/v1/central/status`), and Central shows the appliance
    **Activated** and **Connected**.
@@ -115,13 +115,13 @@ WiFi ([OFFLINE_OPERATION.md](OFFLINE_OPERATION.md)).
 
 > **Superseded transport / OPEN decision:** the HA design below was written for a **third
 > dedicated `hasync` NIC**, which the approved **two-NIC (WAN+LAN)** rule removes. The HA
-> *behaviors* (VRRP on the guest VIP, connection-tracking sync, nft-set replication,
+> *behaviors* (VRRP on the client-network VIP, connection-tracking sync, nft-set replication,
 > Postgres streaming replication, manual split-brain fencing) are **preserved as intent**,
 > but the **synchronization transport over a two-NIC appliance is an OPEN architecture
 > decision — not yet defined or implemented.** Do **not** claim any WAN/LAN HA transport is
 > implemented. HA overall remains a documented, not-yet-implemented limitation.
 
-Second appliance: same stack; keepalived VRRP on the guest VIP (10.20.0.1),
+Second appliance: same stack; keepalived VRRP on the client-network VIP (10.20.0.1),
 conntrackd connection-tracking sync, nft `auth_ipv4` replication (the earlier message-bus
 replication over `nft.<siteID>` was removed with scd's NATS transport; a new transport is part of
 the OPEN decision).
@@ -144,7 +144,7 @@ nightly backups need headroom for one extra dump generation.
 
 ## 9. Phase 19 — Networking
 
-Guest networks/VLANs/DHCP are now DB-driven and applied by `netd`. Full suite:
+Client networks/VLANs/DHCP are now DB-driven and applied by `netd`. Full suite:
 [EDGE_NETWORKING.md](EDGE_NETWORKING.md).
 
 ### `netd` systemd unit
@@ -153,13 +153,13 @@ Guest networks/VLANs/DHCP are now DB-driven and applied by `netd`. Full suite:
 |---|---|---|
 | `stayconnect-netd` | privileged network config daemon | root; listens **only** on `/run/stayconnect/netd.sock` (group `stayconnect`, 0660, no TCP); renders + applies netplan/Kea/nftables/Unbound from the site DB; owns validate/apply/health/rollback. edged proxies `/edge/v1/network/*` to it. Ordered before `kea-dhcp4`/`nftables`/`unbound` reconcile. |
 
-### Guest-trunk interface
+### Client-trunk interface
 
-On the **LAN** interface (§1), the guest-facing NIC assigned the **`guest_trunk`**
-role carries **tagged** 802.1Q guest VLANs from the WLAN controller (e.g. `ens192`
+On the **LAN** interface (§1), the client-facing NIC assigned the **`guest_trunk`**
+role (*Client trunk*) carries **tagged** 802.1Q client VLANs from the WLAN controller (e.g. `ens192`
 as a trunk; VLAN 20 → `ens192.20` → `br-g20` → `10.20.0.1/22`). The trunk parent
 is address-less (an L2 trunk); StayConnect owns the per-VLAN gateway. A plain
-untagged guest port uses role `guest_access` instead. See
+untagged client port uses role `guest_access` (*Client access*) instead. See
 [ARUBA_SSID_VLAN_MAPPING.md](ARUBA_SSID_VLAN_MAPPING.md).
 
 ### Generated config directory
@@ -180,5 +180,5 @@ restarted** to change DHCP, and leases are never read from the memfile CSV
 ([DHCP_MANAGEMENT.md](DHCP_MANAGEMENT.md)).
 
 Bring-up (§6) is unchanged except that after the base netplan/Kea/nftables/Unbound
-skeletons, netd imports the legacy `br-lan` as the first guest network (marked
-already-active, zero disruption) and thereafter owns guest-network changes.
+skeletons, netd imports the legacy `br-lan` as the first client network (marked
+already-active, zero disruption) and thereafter owns client-network changes.

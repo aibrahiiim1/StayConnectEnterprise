@@ -21,8 +21,8 @@ The option-114 value is **always** `http://<gateway>:8380/`:
 - The captive-portal endpoint must be reachable **before** the client trusts the
   network or has a working DNS/PKI path. A plain-HTTP URL to the gateway IP
   avoids any certificate-name / trust-anchor problem on the captive path.
-- Caddy on the appliance terminates TLS **only on the management IP** for Hotel
-  Admin — it is never bound to the guest bridge. The guest captive path goes
+- Caddy on the appliance terminates TLS **only on the management IP** for the Admin
+  Console — it is never bound to the client bridge. The client captive path goes
   **directly to portald** on `:8380` (`:8343` exists for the TLS portal but is
   not the option-114 target).
 - The validator enforces this: if the derived URL ever came out `https://` it
@@ -71,7 +71,7 @@ definition is needed — the name is used directly.
 
 ## 6. What to tell an external-DHCP admin
 
-When the hotel runs its own DHCP server ([EXTERNAL_DHCP_MODE.md](EXTERNAL_DHCP_MODE.md)),
+When the site runs its own DHCP server ([EXTERNAL_DHCP_MODE.md](EXTERNAL_DHCP_MODE.md)),
 StayConnect does not serve the subnet — but the captive portal still needs
 option 114 pointed at the StayConnect gateway. The Admin Console external-DHCP
 checklist shows the admin the exact values to set on **their** server:
@@ -79,7 +79,7 @@ checklist shows the admin the exact values to set on **their** server:
 | Setting | Value |
 |---|---|
 | Router / default gateway | the StayConnect gateway for that VLAN, e.g. `10.20.0.1` |
-| DNS | the StayConnect gateway (or the hotel's resolver, if it can reach the walled garden) |
+| DNS | the StayConnect gateway (or the site's resolver, if it can reach the walled garden) |
 | Option 114 (`Captive-Portal`, RFC 8910) | `http://10.20.0.1:8380/` — **plain HTTP**, the gateway IP, port 8380 |
 
 Vendor syntax examples:
@@ -91,7 +91,7 @@ Vendor syntax examples:
 - **MikroTik / RouterOS**: DHCP option name `captive-portal`, code 114,
   value string `http://10.20.0.1:8380/`.
 
-If the hotel's DHCP can't set option 114, captive sign-in still works via the
+If the site's DHCP can't set option 114, captive sign-in still works via the
 nftables DNAT interception (probe requests get redirected), but auto-pop is less
 reliable — recommend they set the option.
 
@@ -119,5 +119,5 @@ to load a page" into "the sign-in sheet appears on its own."
 - On a client after a lease: the DHCP ACK carries option 114 (visible in a packet
   capture or the client's network detail on some OSes).
 - If it's absent, check `captive_portal_enabled` (it's only emitted for captive
-  networks) and `dhcp_mode = local`; `external` networks rely on the hotel's
+  networks) and `dhcp_mode = local`; `external` networks rely on the site's
   server to set it ([EXTERNAL_DHCP_MODE.md](EXTERNAL_DHCP_MODE.md)).
