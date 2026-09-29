@@ -741,6 +741,22 @@
       ],
       "does_not_authorize": "Real PMS financial posting, which remains prohibited until separately authorised (STAYCONNECT_PHASE4_PMS_TRANSMIT stays off on scd and on pmsd); Go-Live; a second FIAS connection or interface; any property-side PMS change.",
       "implementation": "Migration 0098 (posting_attempts.ps_sha256 in the immutable attempt identity; p4_posting_command_authorised, EXECUTE for svc_pmsd only); internal/postinghandoff; internal/posting handoff transport and orphan recovery; internal/pmsd FinancialRelay and the PS-only writer path; scd posting worker as svc_posting. Commit db05d7ba; recorded by T0198."
+    },
+    {
+      "id": "D46",
+      "title": "FIAS GUEST POSTING TARGETS THE RESERVATION (RN + G#), NOT A FOLIO (2026-09-29, Phase-0 Amendment A1). Posting identity is (PMS interface, G#): G# is the stable reservation identity, RN is mutable targeting data refreshed immediately before each attempt is built, and pmsd revalidates RN against the reservation's current room inside its single writer before the first byte. folios, stay_folios, external_folio_id, folio discovery and default-folio selection are removed from the posting path; the integration never models or selects Protel folio windows. A room-only PS is never sent. A non-OK PA is not assumed to mean nothing posted: until the vendor confirms a code's meaning for the interface, it is UNKNOWN (manual review + POSTING_UNRESOLVED block). Confirmed NP fails the purchase and sets PMS_NO_POST (cleared only by fresh authoritative Protel data); confirmed NG/NR fail it, mark the data suspect, request a resync and block until fresh valid data; confirmed NA and RY fail it with no stay block and are never retried automatically. Operators cannot lift PMS_NO_POST or PMS_DATA_SUSPECT; ADMIN_BLOCK stays administrative. Only one unresolved / in-flight / UNKNOWN room-charge transaction per stay; terminal charges do not prevent sequential purchases. folio_identity_strategy is replaced by posting_target_model (UNSET | RESERVATION), fail-closed.",
+      "decided_on": "2026-09-29",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-09-29",
+      "authorization_evidence": "Product-Owner approval of 2026-09-29 of the simplified RN + G# posting contract, the two wording corrections, and the instruction to finalise Amendment A1, apply it to the FINAL Phase-0 contract, record D46 and implement it on PR #202 with deployment to PRE-LIVE (docs/architecture/StayConnect-IAM-Phase0-Amendment-A1.md).",
+      "supersedes": [
+        "The Phase-0 folio model in the posting path (folios, stay_folios, external_folio_id, default posting folio) and the 2026-07-16 folio_identity_strategy fail-closed amendment, replaced by posting_target_model with the same fail-closed UNSET sentinel.",
+        "Phase-0 invariant 9's evaluation of posting permission from open folios and credit policy, replaced by IN_HOUSE ∧ reservation number ∧ no active posting block, with the PMS answer authoritative at posting time."
+      ],
+      "does_not_authorize": "Real PMS financial posting (STAYCONNECT_PHASE4_PMS_TRANSMIT stays off on scd and pmsd); a supervised live charge; recording vendor-confirmed answer meanings or onboarding an interface to RESERVATION without the vendor confirmations; Go-Live; any property-side PMS change.",
+      "implementation": "PR #202 (unmerged): Phase-0 Amendment A1 applied to docs/architecture/StayConnect-IAM-Phase0-Contract.md; implementation recorded with its transition."
     }
   ]
 }

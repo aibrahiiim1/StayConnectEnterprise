@@ -1,5 +1,7 @@
 # StayConnect Internet Access Management — Phase 0 Contract
 
+> **Amended by [Amendment A1, D46](StayConnect-IAM-Phase0-Amendment-A1.md) (2026-09-29).** FIAS guest posting targets the reservation: posting identity `(PMS interface, G#)`; the room is refreshed before sending; no folio model. The sections below carry the amended wording.
+
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
 <!-- source: governance/project-state.json (schema 1.0.0) @ transition T0202 -->
 **Current phase:** 7 — Cleanup, final docs, full-system re-acceptance
@@ -56,26 +58,29 @@ Phase-0 finalization deliberately separates three distinct validation tiers (§9
 | **Offer Quote** | One-time, short-lived server-side snapshot of the exact package revision, price, tax, settlement mapping, and grants shown to the guest; consumable by exactly one Purchase. |
 | **Purchase** | Durable acquisition of a package revision (including zero-cost acquisitions); the idempotency root of all commerce. |
 | **Settlement** | How a Purchase is settled: not required, prepaid, PMS posting, online payment, or manual approval. |
-| **PMS Posting** | Append-only ledger record of a charge command against a PMS folio. |
+| **PMS Posting** | Append-only ledger record of a charge command against a PMS reservation (posting identity `(PMS interface, G#)`). |
+| **Posting identity / targeting fields** | The posting identity is `(pms_interface_id, G#)`, pinned at purchase and never re-resolved. The targeting fields sent on a `PS` are the reservation's **current** `RN` (re-read immediately before each attempt is built) and the same `G#` (§9a rule 7). |
+| **Definite non-posted outcome** | A posting that provably never reached the PMS (`NOT_SENT`), or a `PA` whose status the vendor has confirmed means nothing was posted (§9a rule 8). |
+| **Posting block** | A recorded, reasoned stop on room charging for one stay (§4.2, §9a rule 9). |
 | **Payment Transaction** | Typed append-only online-payment ledger row (CHARGE / REFUND / CHARGEBACK), scoped by tenant, provider, and merchant account. |
 | **Entitlement** | The enforceable right to use the Internet: immutable policy snapshot, immutable end policy, monotonic usage counters, terminal state. Exactly one live entitlement per subject. |
 | **Checkout Grace** | Mandatory site-level mechanism: an eligible checked-out guest is atomically superseded onto one hidden grace package with no interruption and no re-authentication. |
 | **Stay / Lifecycle episode** | Durable PMS-derived occupancy record in one PMS-interface namespace; each IN_HOUSE→CHECKED_OUT cycle is one episode (`lifecycle_version`). |
-| **PMS Interface** | One configured PMS connection: immutable id, immutable configuration revisions, generational secrets, measured capabilities, and its own room/reservation/folio namespace. A site may run several concurrently. |
+| **PMS Interface** | One configured PMS connection: immutable id, immutable configuration revisions, generational secrets, measured capabilities, and its own room/reservation namespace. A site may run several concurrently. |
 | **Device** | Observed network identity `(tenant, site, appliance, MAC)`. MAC addresses identify devices only — never people. |
 | **Session** | One runtime authorization of a Device under an Entitlement (nftables + traffic-control + accounting). |
 
 ## 2. Product Invariants
 
 1. Guests supply normal hotel credentials only. StayConnect resolves exactly one PMS Interface and Stay in the backend. **There is no guest-facing PMS/property selector**; connector names are never shown to guests.
-2. Every Room, Stay, Guest, Folio, Event, Purchase, and Posting lives in exactly one PMS-interface namespace. Identical room numbers across interfaces never collide. **Room Number is evidence, never identity or financial ownership.**
+2. Every Room, Stay, Guest, Event, Purchase, and Posting lives in exactly one PMS-interface namespace, and a reservation number is unique only within its interface. Identical room numbers across interfaces never collide. **Room Number is evidence, never identity or financial ownership.**
 3. One authorization pipeline for all methods. Logically, signed-license capacity is the outermost gate; physically, all gates re-verify inside one transaction under the global lock order, and a capacity failure rolls back everything — no session, device, or binding row survives a failed authorization.
 4. **One live data-plane entitlement per subject.** Access changes are atomic supersessions that rebind sessions without nft interruption. Supersession never changes the subject; cross-PMS movement uses an explicit typed transfer relationship.
 5. Entitlement policy = immutable snapshot (plan revision + package revision overrides) + immutable end policy. Later edits to plans, packages, or mappings never affect existing entitlements; corrections are new entitlements or audited adjustments.
 6. Time quota is a durable wall-clock validity window (device count, reconnects, crashes, restarts, reboots never move it). Data quota is an aggregate across all devices. First reached limit terminates atomically exactly once. Consumed usage is monotonic; late accounting is audited and never reopens access.
 7. Every acquisition — including free and grace — creates a Purchase. Guest-selected purchases consume an Offer Quote and its Auth Context **atomically with Purchase creation**, and the Purchase cannot differ from the quote in any pinned dimension (DB + trigger enforced, null-safe). Renewal/upgrade creates a new Purchase and Entitlement.
-8. Financial commands pin at the DB layer: PMS interface, interface revisions (authentication and posting separately), secret generation, package revision, settlement-mapping row, Stay, Folio, and the exact Settlement/Purchase pair. Retries never re-resolve anything. Cross-tenant/site/interface/revision references are unrepresentable.
-9. `posting_allowed = true` requires `IN_HOUSE` (DB CHECK), but IN_HOUSE grants nothing by itself: posting permission is evaluated from PMS flags, open folios, credit policy, and administrative blocks, with recorded reason, source, and check timestamp. Checkout ends posting for the episode irreversibly (except trusted Reinstatement, which re-evaluates).
+8. Financial commands pin at the DB layer: PMS interface, interface revisions (authentication and posting separately), secret generation, package revision, settlement-mapping row, Stay, the Stay's reservation number (`G#`), and the exact Settlement/Purchase pair. Nothing is re-resolved, with one exception: the room number sent on a `PS` is re-read from the same pinned reservation immediately before each attempt is built (§9a rule 7). The reservation is never re-resolved. Cross-tenant/site/interface/revision references are unrepresentable.
+9. `posting_allowed = true` requires `IN_HOUSE` (DB CHECK). A stay is postable when it is `IN_HOUSE`, carries a reservation number (`G#`), and has no active posting block (§4.2); each evaluation records its reason, source and check timestamp. IN_HOUSE without a reservation number is never postable, and IN_HOUSE alone grants nothing. Data freshness is checked separately at admission and again before sending (§9, §9a rule 7). The PMS is the authority for no-post and credit restrictions at the moment of posting: its `PA` status decides the result and may place a posting block (§9a rules 8–9). Where the vendor supplies a no-post or credit indicator in the guest feed, it is an additional block, never a substitute for the PMS answer. Checkout ends posting for the episode irreversibly (except trusted Reinstatement, which re-evaluates).
 10. **Seamless Checkout Grace is mandatory and site-level:** at checkout, an eligible guest — one holding an **ACTIVE valid Entitlement at the effective-checkout boundary** (proven from immutable state history, not "recent authorization") — is superseded onto the hidden grace package regardless of whether their access was free, paid, or prepaid; sessions rebind with zero nft churn and no re-authentication; devices above the grace limit are grandfathered; no future room posting can occur. A corrupt grace configuration triggers the durable emergency-grace fallback — never an outage, never a silent skip.
 11. Multi-PMS resolution is **STRICT-only**, fail-closed on unmapped guest networks, complete-vector, uniform-response, and returns a one-time **Auth Context — never a session. Sessions are created only after Entitlement grant.**
 12. A restored system never auto-replays financial commands. **Exactly-once FIAS posting is guaranteed only under supported, manifest-signed restore workflows**; this limitation is part of the operational and support contract (§14), not only of the architecture.
@@ -91,11 +96,10 @@ Phase-0 finalization deliberately separates three distinct validation tiers (§9
 Customer ─ Site ─ Appliance ── signed-license capacity (distinct active devices)
 
 pms_interfaces ─< pms_interface_revisions (immutable; timezone; evidence rules;
-      │             folio identity strategy; MEASURED capabilities)
+      │             posting target model; MEASURED capabilities)
       │        ─< pms_interface_secret_generations (AEAD, generational)
       │        ─< guest_network_pms_map >─ guest_networks      (fail-closed routing)
       ├──< stays ──< stay_guests (one primary)  ──< stay_events
-      │      ├──< stay_folios >── folios (identity-strategy aware)
       │      └──< stay_links · entitlement_transfers (typed, cycle-safe cross-PMS lineage)
       └── pms_source_conflicts
 
@@ -142,12 +146,12 @@ CREATE TABLE pms_interface_revisions (                        -- append-only (tr
   tenant_id uuid NOT NULL, site_id uuid NOT NULL, pms_interface_id uuid NOT NULL,
   revision_no int NOT NULL,
   source_timezone text NOT NULL,                              -- the ONE timezone source for this connector
-  folio_identity_strategy text NOT NULL DEFAULT 'UNSET'          -- FAIL-CLOSED: 'UNSET' blocks every
-    CHECK (folio_identity_strategy IN (                          -- financial CHARGE/Posting until property
-      'UNSET',                                                    -- onboarding records one concrete strategy.
-      'GLOBALLY_UNIQUE','UNIQUE_PER_STAY','REUSED_SEQUENTIAL')),  -- Read-only ingestion/lookup/auth allowed.
-    -- Setting a concrete strategy creates a NEW immutable interface revision; it never mutates this one.
-    -- ('UNSET' is the ONLY unset sentinel here — 'UNKNOWN' is reserved as a financial Posting state, not a folio strategy.)
+  posting_target_model text NOT NULL DEFAULT 'UNSET'           -- FAIL-CLOSED: 'UNSET' blocks every
+    CHECK (posting_target_model IN ('UNSET','RESERVATION')),   -- financial CHARGE until property onboarding
+                                                               -- records 'RESERVATION' (§9c Tier 2).
+    -- 'RESERVATION' = a PS targets RN + G#; G# is the vendor-confirmed, non-reused reservation number.
+    -- Recording it creates a NEW immutable interface revision; it never mutates this one.
+    -- ('UNSET' is the ONLY unset sentinel — 'UNKNOWN' remains a financial Posting state.) Amendment A1.
   config jsonb NOT NULL,   -- field maps, normalization, MEASURED capability matrix,
                            -- auth.verifier_combinations (connector-specific evidence classes and
                            -- uniqueness flags), freshness bounds, requires_live_lookup_for_financial
@@ -185,11 +189,10 @@ CREATE UNIQUE INDEX gnpm_one_default ON guest_network_pms_map (guest_network_id)
 -- all mapped interfaces must share ≥ 1 common determinate verifier combination.
 ```
 
-> **NORMATIVE — `folio_identity_strategy` fail-closed amendment (Product-Owner APPROVED, 2026-07-16).** The column is `NOT NULL DEFAULT 'UNSET'` with the 4-value `CHECK` `('UNSET','GLOBALLY_UNIQUE','UNIQUE_PER_STAY','REUSED_SEQUENTIAL')`. Semantics:
-> - **`UNSET` is the only unset sentinel** for this field. `GLOBALLY_UNIQUE` is **no longer** the default. (`UNKNOWN` is **not** used here — it is a financial Posting state, per §9a/§16.)
-> - An interface revision with `folio_identity_strategy = 'UNSET'` **may be created and used for read-only PMS ingestion, guest lookup, and authentication.**
-> - While the strategy is `UNSET`, **every financial CHARGE / Posting is rejected fail-closed** — the rejection happens **before** posting-outbox creation, `P#` allocation, or any PMS transmission (see §9a rule 6 and §16 PMS-Posting preconditions).
-> - **Setting a concrete strategy** (`GLOBALLY_UNIQUE` / `UNIQUE_PER_STAY` / `REUSED_SEQUENTIAL`) is done by property financial-onboarding (§9c Tier 2) and **creates a new immutable interface revision** — it never mutates an existing revision. Postings pin the revision they were built against.
+> **NORMATIVE — posting-target fail-closed rule ([Amendment A1, D46](StayConnect-IAM-Phase0-Amendment-A1.md), supersedes the 2026-07-16 `folio_identity_strategy` amendment).** `posting_target_model` is `NOT NULL DEFAULT 'UNSET'` with the CHECK `('UNSET','RESERVATION')`.
+> - An interface revision with `posting_target_model = 'UNSET'` may be used for read-only PMS ingestion, guest lookup and authentication.
+> - While it is `UNSET`, every financial CHARGE is rejected fail-closed, before posting-outbox creation, `P#` allocation or any PMS transmission.
+> - Recording `RESERVATION` is done by property financial onboarding (§9c Tier 2), requires the vendor's confirmation that the interface's reservation numbers are unique and never reused, and creates a new immutable interface revision. Postings pin the revision they were built against.
 
 ### 4.2 Stays, sharers, folios, events
 
@@ -204,6 +207,10 @@ CREATE TABLE stays (
   lifecycle_version int NOT NULL DEFAULT 1,                   -- ++ on Reinstatement
   posting_allowed boolean NOT NULL DEFAULT false,
   posting_block_reason text, posting_permission_source text, posting_checked_at timestamptz,
+  -- external_reservation_id is the PMS reservation number; for a FIAS interface it is the G# on every PS.
+  -- posting_allowed = IN_HOUSE ∧ external_reservation_id present ∧ no active posting block (§2 inv. 9).
+  -- Active blocks live in stay_posting_blocks: PMS_NO_POST, PMS_DATA_SUSPECT, POSTING_UNRESOLVED,
+  -- ADMIN_BLOCK (NO_RESERVATION is derived). Source: PMS_FEED | PMS_ANSWER | POSTING_LEDGER | OPERATOR.
   last_applied_event_version bigint NOT NULL DEFAULT 0,
   vip boolean, travel_agent text, room_type text, arrival date, departure date,
   UNIQUE (tenant_id, site_id, pms_interface_id, external_reservation_id, external_stay_identity),
@@ -227,28 +234,15 @@ CREATE UNIQUE INDEX one_primary_guest_per_stay ON stay_guests (stay_id) WHERE is
 -- re-asserting the same primary ⇒ SKIPPED_DUPLICATE; a conflicting primary with materially
 -- different identity ⇒ MANUAL_REVIEW. Never two primaries; never silent replacement.
 
-CREATE TABLE folios (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id uuid NOT NULL, site_id uuid NOT NULL, pms_interface_id uuid NOT NULL,
-  external_folio_id text NOT NULL,
-  identity_epoch int NOT NULL DEFAULT 1,      -- ++ when a REUSED_SEQUENTIAL connector recycles the number
-  folio_kind text NOT NULL DEFAULT 'GUEST' CHECK (folio_kind IN ('GUEST','COMPANY','GROUP_MASTER','OTHER')),
-  status text NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','CLOSED')),
-  UNIQUE (tenant_id, site_id, pms_interface_id, external_folio_id, identity_epoch),
-  UNIQUE (tenant_id, site_id, pms_interface_id, id),
-  FOREIGN KEY (tenant_id, site_id, pms_interface_id) REFERENCES pms_interfaces (tenant_id, site_id, id));
-CREATE UNIQUE INDEX folio_open_identity ON folios (tenant_id, site_id, pms_interface_id, external_folio_id)
-  WHERE status='OPEN';
--- Folio identity strategy (per interface revision): the default is 'UNSET' (fail-closed: no
--- financial CHARGE until onboarding sets a concrete strategy in a new revision — §4.1 amendment).
--- GLOBALLY_UNIQUE keeps epoch=1 forever;
--- UNIQUE_PER_STAY resolves through stay_folios; REUSED_SEQUENTIAL creates a new row with
--- identity_epoch+1 when a recycled number reappears — postings pin folio ROW ids, so
--- recycled numbers can never alias history.
-
--- stay_folios(tenant, site, pms_interface_id, stay_id, folio_id, is_default_posting_target)
---   PK(stay_id, folio_id); composite FKs to stays and folios;
---   UNIQUE(stay_id) WHERE is_default_posting_target.
+-- FOLIOS ARE NOT MODELLED ([Amendment A1, D46](StayConnect-IAM-Phase0-Amendment-A1.md)). The posting target is the reservation (G#) within its
+-- interface. There is no folios or stay_folios table in the posting path, no external folio identifier, no
+-- folio discovery and no default-folio selection. How Protel places a charge inside a reservation that holds
+-- several folios or windows is an open vendor question (§9d); this integration never models or selects a
+-- folio window.
+--
+-- stay_posting_blocks(tenant, site, pms_interface_id, stay_id, reason, source, posting_id NULL, created_at,
+--   cleared_at, cleared_by_source, cleared_reason): one ACTIVE row per (stay, reason[, posting]). Clearing
+--   rules are §9a rule 9; PMS_NO_POST and PMS_DATA_SUSPECT are never cleared by an operator.
 -- stay_events(id, tenant, site, pms_interface_id, stay_id NULL, external_event_identity,
 --   event_type, pms_timestamp_raw, pms_timestamp_utc, source_timezone, received_at,
 --   sequence_version, normalization_version, clock_suspect, payload jsonb (redacted at write),
@@ -483,12 +477,15 @@ CREATE TABLE settlements (
 -- pms_postings (append-only ledger): pins settlement/purchase EXACT PAIR via
 --   FK (settlement_id, purchase_id) → settlements(id, purchase_id) and
 --   FK (purchase_id, pms_interface_id) → purchases(id, pms_interface_id);
---   plus composite FKs (all tenant/site/interface-scoped) to stays, folios,
---   stay_folios(stay_id, folio_id), package_settlement_mappings (incl. package_revision_id),
---   pms_interface_revisions (posting_interface_revision_id), pms_interface_secret_generations;
+--   plus composite FKs (all tenant/site/interface-scoped) to stays, package_settlement_mappings (incl.
+--   package_revision_id), pms_interface_revisions (posting_interface_revision_id),
+--   pms_interface_secret_generations; g_number snapshotted from the stay at creation and immutable (A1);
 --   UNIQUE idempotency_key; posting_type CHARGE|REVERSAL with reverses_posting_id and
---   Σ(REVERSAL) ≤ CHARGE trigger; INSERT trigger re-reads stays (IN_HOUSE ∧ posting_allowed,
---   except REVERSAL); amount_minor/currency/exponent snapshotted; request/response evidence
+--   Σ(REVERSAL) ≤ CHARGE trigger; INSERT trigger re-reads the stay (IN_HOUSE ∧ posting_allowed ∧ g_number =
+--   the stay's reservation number, except REVERSAL); ONLY ONE unresolved / in-flight / UNKNOWN room-charge
+--   transaction may exist for a stay at a time (a CHARGE whose settlement is REQUIRED, IN_PROGRESS or
+--   MANUAL_REVIEW); terminal charges do not count, so sequential purchases in one stay are allowed;
+--   amount_minor/currency/exponent snapshotted; request/response evidence
 --   redacted; UNIQUE(tenant, site, pms_interface_id, id) as the outbox pin anchor.
 -- posting_outbox: composite FK (tenant, site, pms_interface_id, posting_id) → that anchor;
 --   state QUEUED|IN_FLIGHT|DONE|HELD_RECOVERY; per-interface serialized lanes;
@@ -532,11 +529,15 @@ CREATE TABLE posting_attempts (             -- IMMUTABLE request identity + cont
   attempt_no int NOT NULL,
   -- IMMUTABLE request/transmission identity (never updated after insert; trigger-enforced):
   p_number text NOT NULL,                    -- FIAS P# — unique protocol attempt, NOT business idempotency
-  rn text, g_number text,                    -- RN / G# sent on the PS (G# mandatory for guest folio)
+  rn text NOT NULL,                          -- the reservation's CURRENT room when this attempt was built (A1)
+  g_number text NOT NULL,                    -- = pms_postings.g_number (trigger-enforced); never room-only
   sent_at timestamptz NOT NULL,
   -- CONTROLLED one-way state (the ONLY mutable columns; monotonic transitions only):
   outcome text NOT NULL DEFAULT 'SENDING'
-    CHECK (outcome IN ('SENDING','ACKED','UNKNOWN','FAILED')),
+    CHECK (outcome IN ('SENDING','ACKED','UNKNOWN','NOT_SENT')),
+    -- SENDING  = durable, handed towards pmsd; from here the PS MAY have been transmitted.
+    -- NOT_SENT = pmsd proved no byte was written (refused before its single writer wrote the first byte).
+    -- ACKED    = a PA matched by interface + P#; UNKNOWN = possibly transmitted, not proven.
   response_at timestamptz,
   pa_as_status text CHECK (pa_as_status IN ('OK','NG','NA','NP','NR','RY','UR')),
   UNIQUE (tenant_id, site_id, pms_interface_id, p_number),   -- uniqueness scoped by tenant+site+interface+P#
@@ -545,7 +546,9 @@ CREATE TABLE posting_attempts (             -- IMMUTABLE request identity + cont
   FOREIGN KEY (tenant_id, site_id, pms_interface_id) REFERENCES pms_interfaces (tenant_id, site_id, id),
   FOREIGN KEY (tenant_id, site_id, internal_posting_id) REFERENCES pms_postings (tenant_id, site_id, id));
 -- Trigger: identity columns are immutable after insert; `outcome` may advance only
--- SENDING → {ACKED|UNKNOWN|FAILED} (one-way, never back to SENDING). A PS with sent_at and no
+-- SENDING → {ACKED|UNKNOWN|NOT_SENT} (one-way, never back to SENDING). Only a NOT_SENT attempt may be
+-- followed automatically by a new attempt (not a retry: nothing was transmitted); historical attempts are
+-- never rewritten. A PS with sent_at and no
 -- matched PA past the timeout ⇒ outcome=UNKNOWN (never auto-retried). A manually-approved retry
 -- inserts a NEW attempt_no (new P#) under the SAME internal_posting_id.
 
@@ -701,7 +704,7 @@ Auxiliary tables — all with tenant (and site where site-operational) columns a
 3. **STRICT (the only mode):** authenticate iff exactly one candidate returns exactly one VERIFIED stay and every other candidate returns a determinate NO_MATCH. Any UNAVAILABLE/STALE/UNSUPPORTED_EVIDENCE ⇒ INDETERMINATE. `V≥2` or any AMBIGUOUS_LOCAL (sharers) ⇒ discriminator escalation. No fallback to another PMS, including the single-candidate case.
 4. All non-success outcomes return one **uniform, time-padded envelope** (fixed budget) with the same escalation prompt, computed from the intersection of candidate verifier fields (save-time validation guarantees a non-empty intersection). Layered throttles (room+IP, room+MAC, per-interface, global); `auth_resolutions` audit rows carry outcome codes only.
 5. **Success mints a one-time Auth Context — never a session.** Package listing, quotes, and purchases consume the context server-side; the Internet session is created only after the Purchase reaches GRANTED and the Entitlement exists. All credential methods (voucher, account, OTP, social, post-stay PIN) mint and consume contexts identically.
-6. **No folio at authentication.** Folio selection, freshness revalidation, and pinning happen inside the purchase transaction: lock Stay → verify IN_HOUSE ∧ posting_allowed → fresh stay/folio revalidation per the revision's policy → select the OPEN default posting target from `stay_folios` → pin folio + posting interface revision + secret generation atomically.
+6. **No posting target at authentication.** Revalidation and pinning happen inside the purchase transaction: lock Stay → verify IN_HOUSE ∧ posting_allowed ∧ reservation number present ∧ no unresolved room-charge transaction on the stay → fresh stay revalidation per the revision's policy → pin the Stay, its reservation number (`G#`), the posting interface revision and the secret generation atomically. The room number is not pinned; it is re-read before sending (§9a rule 7).
 7. Duplicate-source detection: endpoint/property `source_fingerprint` equality or sustained correlated identity/event evidence ⇒ CRITICAL (PMS-settled purchases on the pair require manual approval until resolved); repeated collisions ⇒ WARN; single ⇒ INFO.
 
 ## 9. FIAS Freshness & Financial Validation — SPIKE-GATED
@@ -713,15 +716,15 @@ Four independent axes per interface (thresholds marked `*` are defaults pending 
 3. **Last successful state synchronization** — age of the last full resync/night-audit completion\*.
 4. **Occupancy freshness** — age of the specific stay/room data relied upon (auth ≤ 15 min\*; financial bound tighter\*).
 
-Authentication requires axis 4 within the auth bound. **Financial creation requires all four green plus fresh stay/folio revalidation and occupancy re-verification** (mandatory for room-only-posting connectors); otherwise the purchase is refused or routed to manual approval — never posted stale.
+Authentication requires axis 4 within the auth bound. **Financial creation requires all four green plus fresh stay revalidation (same reservation, IN_HOUSE, not blocked, room resolvable) and occupancy re-verification** (mandatory for room-only-posting connectors); otherwise the purchase is refused or routed to manual approval — never posted stale.
 
-The live Protel spike must measure and record: missed-checkout-while-link-down behavior; timeout-after-post → UNKNOWN → manual review verified against the folio; reversal semantics; stale-occupancy abort; heartbeat/keepalive cadence; resync/night-audit behavior; folio-number reuse behavior (drives `folio_identity_strategy`). Results populate the per-revision capability matrix: `can_post, supports_idempotency, read_back, reversal, folio_identity, room_only_posting, safe_retry`. FIAS never auto-retries out of UNKNOWN. **A new interface revision starts with `folio_identity_strategy = 'UNSET'` (fail-closed): `can_post` is effectively false — every financial CHARGE is rejected — until property onboarding records one concrete strategy in a new revision (§4.1 amendment, §9a rule 6).**
+The live Protel spike must measure and record: missed-checkout-while-link-down behavior; timeout-after-post → UNKNOWN → manual review verified against the folio; reversal semantics; stale-occupancy abort; heartbeat/keepalive cadence; resync/night-audit behavior; reservation-number uniqueness and non-reuse (drives `posting_target_model`, vendor-confirmed). Results populate the per-revision capability matrix: `can_post, supports_idempotency, read_back, reversal, reservation_target, room_only_posting, safe_retry` (`room_only_posting` is always false: a room-only `PS` is never sent). FIAS never auto-retries out of UNKNOWN. **A new interface revision starts with `posting_target_model = 'UNSET'` (fail-closed): every financial CHARGE is rejected until property onboarding records `RESERVATION` in a new revision (§4.1, §9a rule 6).**
 
 ### 9a. FIAS posting — grounded rules (from the accepted production-implementation review)
 
 The legacy Coral Sea Protel wire is authoritative for existing behavior; FidServ/Protel **accounting-configuration** facts (e.g. what `SO=WIFI` maps to) remain subject to confirmation by the property's Protel administrator / Finance. Grounded wire: financial record **`PS`** with field order `RN, G#, TA, PT, SO, CT, P#, WS`; `PT=D` (debit); `SO=WIFI`; `WS=STAYCONNECT`; `CT` ≤ 20 chars; **`TA` integer minor units, exponent 2, no currency code on the wire**; `G#` mandatory (an `RN`-only `ASOK` does **not** prove a Guest-Folio posting); `PA` fields `RN, AS, P#, CT`; `AS ∈ {OK, NG, NA, NP, NR, RY, UR}`; `P#` is a **unique protocol-attempt sequence, not business idempotency**.
 
-1. **UNKNOWN, never auto-retried.** A transmitted `PS` without a matched `PA` becomes **UNKNOWN** and is never automatically retried (the legacy "retry after 3 minutes with a new `P#`" is removed — it can double-post). Resolution is external evidence + audited MANUAL_REVIEW only.
+1. **UNKNOWN, never auto-retried.** A transmitted `PS` without a matched `PA` becomes **UNKNOWN** and is never automatically retried (the legacy "retry after 3 minutes with a new `P#`" is removed — it can double-post). Resolution is external evidence + audited MANUAL_REVIEW only. An UNKNOWN charge places a `POSTING_UNRESOLVED` block on its stay (rule 9).
 2. **Protocol-attempt ledger (`posting_attempts` + `posting_attempt_events`).** DDL in §4.5.
    - **`posting_attempts`** holds an **immutable request/transmission identity** (`internal_posting_id`, `attempt_no`, `pms_interface_id`, `p_number`, `rn`, `g_number`, `sent_at` — never updated after insert) plus a **controlled one-way state** (`outcome` advancing `SENDING → ACKED|UNKNOWN|FAILED` only, with `response_at`/`pa_as_status`). It is therefore **not** fully append-only — it carries current state under strict one-way transitions.
    - **`posting_attempt_events`** is the **fully append-only** audit history (insert-only; every state change writes one event).
@@ -730,7 +733,64 @@ The legacy Coral Sea Protel wire is authoritative for existing behavior; FidServ
 3. **Currency equality (no FX in v1).** A PMS-settled Package's currency **must equal the pinned PMS Interface base currency**. FIAS carries no currency field on the wire; the interface base currency + exponent is authoritative. **Reject the Purchase if package currency ≠ interface currency.** No implicit FX conversion in v1.
 4. **`SO=WIFI` acceptance ≠ revenue correctness.** An `ASOK` on `SO=WIFI` proves wire acceptance, not that the charge hit the correct revenue/transaction account. **Property Finance/Protel must confirm the FidServ `WIFI` (`SOWIFI`) mapping before any financial testing or production enablement.**
 5. **Programmatic reversal is `capability=false`** until a supervised test proves the exact `PT`/`TA`/`SO` reversal semantics. **Do not assume `PT=C` or a negative `TA`.** The first controlled debit is corrected **manually in Protel by Front Office** if explicitly approved.
-6. **Fail-closed folio identity (`folio_identity_strategy = 'UNSET'`) blocks all financial CHARGE (§4.1 amendment, PO-approved 2026-07-16).** A new interface revision defaults to `UNSET`. While `UNSET`, read-only PMS ingestion, guest lookup, and authentication are permitted, but **every financial CHARGE/Posting is rejected fail-closed**. The rejection is enforced **before** posting-outbox creation, **before** `P#` allocation from `pms_interface_pnumber_seq`, and **before** any PMS transmission — nothing is queued, no `P#` is consumed, no bytes reach the wire. Financial posting becomes possible only once property onboarding (§9c Tier 2) sets a concrete strategy (`GLOBALLY_UNIQUE` / `UNIQUE_PER_STAY` / `REUSED_SEQUENTIAL`) in a **new immutable revision**; existing postings pin the revision they were built against.
+6. **Fail-closed posting target (`posting_target_model = 'UNSET'`) blocks all financial CHARGE ([Amendment A1, D46](StayConnect-IAM-Phase0-Amendment-A1.md)).** While `UNSET`, read-only PMS ingestion, guest lookup and authentication are permitted, but every CHARGE is rejected before posting-outbox creation, before `P#` allocation and before any transmission. Posting becomes possible only once property onboarding (§9c Tier 2) records `RESERVATION` in a new immutable revision.
+7. **G# is stable. RN is mutable. RN is refreshed before sending. After sending begins, the attempt is
+immutable.**
+- **At purchase** the posting pins the interface and the reservation (`G#`). The room is not pinned.
+- **Before an attempt is created** the worker locks the pinned stay and re-reads it by interface + `G#`. It
+  continues only if it is the same reservation, IN_HOUSE, the interface's freshness axes are green, the stay
+  has no posting block and its current room resolves. The attempt is then built with **the current room + the
+  same `G#`**, and that `RN`, the exact `PS` bytes and their hash are recorded immutably. A room move between
+  purchase and attempt creation therefore does not fail the purchase. It is aborted — definitely not posted,
+  purchase FAILED, no access — only when the reservation is no longer IN_HOUSE, its data is stale, the stay is
+  blocked, or its current room cannot be resolved.
+- **Immediately before the socket write** pmsd revalidates, inside its single serialized writer, that the same
+  `G#` still exists and is postable and that its current room — from the database and from any newer guest
+  record already read on the link — still equals the `RN` in the prepared command. If not, it writes nothing
+  and answers not-transmitted with the reason; the attempt becomes **`NOT_SENT`** (audited, not a PMS failure
+  and not UNKNOWN), fresh state is read, and a new attempt may be built with the new room and the same `G#`.
+  That is not a retry, because nothing was transmitted.
+- **Once the first byte of the `PS` is written** the attempt is immutable. A later room move never rebuilds it
+  and never causes another `PS` to be sent automatically. The `RN`/`G#` it carried remain its record; its `PA`
+  or its timeout decides the outcome, and an outcome that cannot be proven is UNKNOWN, which blocks further
+  room charging until manual resolution.
+- **A room move** (GC) updates the current room of the existing reservation atomically. It never creates a
+  second stay; the same `G#` continues to identify the stay. A `PS` is never sent without `G#`.
+8. **`PA` status is authoritative for the posting result.** `OK` settles the charge and grants access. A
+**definite non-posted** answer — a status the vendor has confirmed means nothing was posted (the only codes
+that can be confirmed so are `NP`, `NG`, `NR`, `NA` and `RY`; the confirmation is recorded per interface,
+§A9) — **always fails that purchase**: no access is granted, the
+answer is recorded, and the client may choose again. Whether it also affects the **stay** depends on the
+status (rule 9); most do not. An answer whose posting effect cannot be proven — no answer, a status outside
+the catalogue, or a catalogue status not yet vendor-confirmed as definitely not posted (for example `UR`) —
+is **UNKNOWN** (rule 1), never success and never failure.
+
+**Safety policy (OneGate's, not a Protel protocol requirement):** a definite non-posted answer — including
+night audit and "retry" — is never retried automatically. The purchase fails and a later purchase is a new
+charge. This may be revisited only by a later amendment once the vendor has confirmed which answers
+guarantee that nothing was posted.
+9. **Stay effect depends on the answer.** A failed purchase does not by itself block the stay.
+
+| Answer | Purchase | Stay |
+|---|---|---|
+| `NP` (no-post restriction) | FAILS | Blocked for room charge (`PMS_NO_POST`) until fresh authoritative Protel data explicitly allows posting again |
+| `NG` / `NR` (guest or room not found) | FAILS | Data marked suspect (`PMS_DATA_SUSPECT`), resync requested, room charge blocked until fresh valid PMS data confirms the same reservation is IN_HOUSE with a resolvable current room |
+| `NA` (night audit) | FAILS | No stay block; a later new purchase may be attempted when the PMS/interface is available again |
+| `RY` / vendor-confirmed "definitely not posted, try later" | FAILS, never retried automatically | No persistent stay block, unless the answer specifically identifies a stay-level data problem, in which case it is handled as `NG` / `NR` |
+| UNKNOWN, or an answer whose posting effect cannot be proven | Held for manual review | Blocked (`POSTING_UNRESOLVED`) until the manual-review decision on that charge resolves it |
+
+A stay without a reservation number carries `NO_RESERVATION` and is never postable. While any block is
+active, room charge is neither offered nor admitted for that stay. **An operator cannot lift
+`PMS_NO_POST` or `PMS_DATA_SUSPECT`** to permit another charge: only fresh authoritative Protel data clears
+them, as the table states. `ADMIN_BLOCK` is set and cleared administratively, because its source is
+administrative. `POSTING_UNRESOLVED` clears only when its charge reaches a terminal state (manual-review
+decision, or a reviewed retry that concludes). Every block and clearance records reason, source and
+timestamp. The code-to-effect mapping applies to a status once the vendor has confirmed its
+meaning (§A9); until then that status is handled as UNKNOWN (rule 8).
+10. **The integration never models or selects Protel folio windows.** It posts `RN + G#` with `SO=WIFI` and
+records exactly what it sent. Where the charge lands inside a reservation holding several folios or windows
+is decided by Protel and is an open vendor question (§9d). A single `SO=WIFI` sales outlet is used for every
+package.
 
 ### 9b. FIAS live validation — Gate 3A CLOSED: PASS (2026-07-16, production-grounded)
 
@@ -772,7 +832,7 @@ The earlier closure plan incorrectly gated Phase-0 finalization on product behav
 
 **Gate 3B — programmatic reversal (v1 decision: DEFERRED, non-blocking).** `programmatic_reversal` capability = **false**; `PT=C` / negative-`TA` **unverified** (assume neither); corrections are **manual Front Office** operations; **not a Phase-1A requirement**; may be added only after a separate capability spike. Non-blocking for v1 provided the manual-correction limitation is **visible, audited, operationally documented** (§9a rule 5, §15 `CREATE_REVERSAL`).
 
-**Tier 2 — Per-property financial-onboarding checklist (deployment prerequisite, NOT a Phase-0 blocker).** Before PMS Posting is enabled for **any** Property, that Property must independently confirm: PMS Interface **currency + exponent**; **Package-currency compatibility** (§9a rule 3); **`SO=WIFI` revenue mapping**; **`RN`+`G#`** folio targeting; **one controlled debit**; **actual Folio placement**; **approved cleanup/correction**; and **record one concrete `folio_identity_strategy`** (`GLOBALLY_UNIQUE` / `UNIQUE_PER_STAY` / `REUSED_SEQUENTIAL`) — this is what moves the interface **out of fail-closed `UNSET`**, and it is applied as a **new immutable interface revision** (§4.1 amendment, §9a rule 6). Until that concrete strategy is recorded, the interface stays `UNSET` and **no financial CHARGE is permitted**. **Aqua Club / Hotel ID 2 (`120.0.0.15:5001`)** sits here: it remains **read-only capable and financially unapproved** (and `folio_identity_strategy = 'UNSET'`) until it passes this checklist. Full checklist + prerequisites: spike doc "Per-property deployment checklist".
+**Tier 2 — Per-property financial-onboarding checklist (deployment prerequisite, NOT a Phase-0 blocker).** Before PMS Posting is enabled for **any** Property, that Property must independently confirm: PMS Interface **currency + exponent**; **Package-currency compatibility** (§9a rule 3); **`SO=WIFI` revenue mapping**; **`RN`+`G#`** reservation targeting; **vendor confirmation that the interface's reservation numbers are unique and never reused**; **vendor confirmation of the `PA` status meanings** (recorded per interface before real posting is enabled); **one controlled debit**; **actual folio placement confirmed by Front Office**; **approved cleanup/correction**; and **record `posting_target_model = 'RESERVATION'`** — this is what moves the interface **out of fail-closed `UNSET`**, applied as a new immutable interface revision ([Amendment A1, D46](StayConnect-IAM-Phase0-Amendment-A1.md)). Until it is recorded, the interface stays `UNSET` and **no financial CHARGE is permitted**. Recorded evidence: Hotel ID 3 (`150.0.0.18:5003`) — USD, exponent 2 (owner-confirmed) and `SO=WIFI` → Internet revenue account (Front Office-confirmed) at Gate 3A, 2026-07-16; reservation-number non-reuse and `PA` status meanings not yet vendor-confirmed. **Aqua Club / Hotel ID 2 (`120.0.0.15:5001`)** sits here: it remains **read-only capable and financially unapproved** (and `posting_target_model = 'UNSET'`) until it passes this checklist. Full checklist + prerequisites: spike doc "Per-property deployment checklist".
 
 **Tier 3 — Post-implementation acceptance (cannot be measured pre-code; preserved as binding requirements).**
 
@@ -787,6 +847,7 @@ The earlier closure plan incorrectly gated Phase-0 finalization on product behav
 
 - **Hotel ID 2 (Aqua Club) financial Posting not yet approved** — read-only until its per-property onboarding checklist passes.
 - **Programmatic reversal disabled** — manual Front Office correction only in v1.
+- **Multi-folio / window placement is unverified ([Amendment A1, D46](StayConnect-IAM-Phase0-Amendment-A1.md)).** Open vendor question: *"When posting through FIAS with RN + G# and SO=WIFI, if the reservation contains multiple folio/windows, does Protel apply its configured transaction/routing rules automatically, and which window receives the charge?"* Until answered, the integration does not model or select folio windows (§9a rule 10).
 - **UNKNOWN / Manual-Review behavior pending Posting-Engine implementation** — safety design specified (§9a rules 1–2), acceptance-tested post-build (Tier 3 / 3C).
 - **Checkout-Grace behavior pending PMS/Entitlement implementation** — specified (§3 invariants, §16 state machines), acceptance-tested post-build (Tier 3 / 3D).
 - **Physical traffic accounting** still requires live implementation acceptance (non-zero real-device usage → accounting), which cannot be proven at Phase 0.
@@ -827,7 +888,7 @@ Manual-review actions (each requires financial-review write **and password re-au
 - **Stay:** `RESERVED → IN_HOUSE → CHECKED_OUT → (POST_STAY_ACTIVE)`; `RESERVED → CANCELLED | NO_SHOW`; `CHECKED_OUT → IN_HOUSE` only via trusted Reinstatement or privileged audited action (`lifecycle_version++`, posting permission re-evaluated). DUE_IN/DUE_OUT are derived UI states, never stored.
 - **Purchase:** `PENDING → AWAITING_SETTLEMENT → GRANTED | FAILED | CANCELLED`; `AWAITING_SETTLEMENT → MANUAL_REVIEW → GRANTED | FAILED`; zero-cost/prepaid: `PENDING → GRANTED`. The Entitlement is created exactly once inside the `→ GRANTED` transaction (`entitlements.purchase_id UNIQUE`).
 - **Settlement:** `NOT_REQUIRED` (terminal at birth) | `REQUIRED → IN_PROGRESS → SETTLED | FAILED | MANUAL_REVIEW`; `SETTLED → PARTIALLY_REVERSED | REVERSED` via child rows only.
-- **PMS Posting:** **precondition (fail-closed):** a financial CHARGE is admitted only when the pinned interface revision's `folio_identity_strategy ≠ 'UNSET'`; while `'UNSET'` the CHARGE is **rejected before** entering `PENDING` — no outbox row, no `P#` allocation, no transmission (§4.1 amendment, §9a rule 6). Then `PENDING → SENDING → POSTED | FAILED_RETRYABLE | FAILED_FINAL | UNKNOWN`; `UNKNOWN → MANUAL_REVIEW → POSTED | FAILED_FINAL`; reversal is a new REVERSAL row. Connectors without idempotency/read-back never auto-retry from UNKNOWN. *(Note: `UNKNOWN` here is a Posting state — distinct from the folio `'UNSET'` sentinel.)*
+- **PMS Posting:** **precondition (fail-closed):** a financial CHARGE is admitted only when the pinned interface revision's `posting_target_model ≠ 'UNSET'`, the stay is postable (§2 inv. 9) and it has no unresolved / in-flight / UNKNOWN room-charge transaction (terminal charges do not count); otherwise it is rejected before `PENDING` — no outbox row, no `P#`, no transmission. Then `PENDING → SENDING → POSTED | FAILED_FINAL | UNKNOWN`; `PENDING → FAILED_FINAL` when the pre-send revalidation aborts (§9a rule 7); an attempt refused by pmsd before its first byte is `NOT_SENT` and the posting returns to `PENDING`; `UNKNOWN → MANUAL_REVIEW → POSTED | FAILED_FINAL`, with the accepted `CONFIRM_NOT_POSTED_RETRY` decision creating one new attempt under the same posting; reversal is a new REVERSAL row. No state is retried automatically after transmission (§9a rules 1 and 8). *(`UNKNOWN` is a Posting state, distinct from the `UNSET` sentinel.)* ([Amendment A1, D46](StayConnect-IAM-Phase0-Amendment-A1.md))
 - **Payment Transaction:** CHARGE: `CREATED → PENDING → CAPTURED | FAILED | EXPIRED | CANCELLED | UNKNOWN`; REFUND/CHARGEBACK are child rows (same tenant/site/settlement/merchant account/currency; Σ ≤ parent).
 - **Entitlement:** `PENDING → ACTIVE ⇄ SUSPENDED → TERMINATED(terminal_reason)`; `PENDING → TERMINATED(CANCELLED)`; no exit from TERMINATED; SUSPENDED revokes sessions while the window keeps running.
 - **Device binding:** `AUTHORIZED ⇄ DISCONNECTED(reason)`.
@@ -864,7 +925,7 @@ Phases 2 and 3 are parallelizable after 1B. The detailed **Phase 1A execution pl
 **B. Credentials/identities:** B1 voucher HMAC redemption, single-use enforced · B2 reveal/export re-auth + audit + CSV guard + last4 default · B3 account attaches to its live entitlement (never fresh quota per login); assigned package follows-current-then-pins · B4 OTP/social: the same verified factor on a new MAC resolves to the same tenant-wide principal and the same per-site live entitlement; issuer-scoped social subjects (same subject value from two providers = two identities); MAC never an owner · B5 lockouts, layered throttles, generic errors, one-time password reveal · B6 auth contexts one-time/TTL; method↔subject coherence (PMS context without stay rejected; POST_STAY_PIN context requires post_stay_profile_id; etc.).
 **C. Commerce:** C1 eligibility rules + grant tiers · C2 quote exactness: forged purchases with a different revision/mapping/context are rejected (FK + null-safe trigger); price edits mid-flow cannot change the charge; CAS race yields exactly one consumer; context and quote consumed atomically with the purchase · C3 once-per-stay uniqueness under concurrent purchase race · C4 revision immutability · C5 mapping retire-and-create atomicity; pinned old codes on retries · C6 money: minor units, HALF-UP tax once, Σ refunds ≤ charge, parent same settlement + merchant account + currency (cross-settlement or cross-merchant parents rejected).
 **D. Resolution:** D1 PMS-A room 101 vs PMS-B room 101 resolve correctly; no selector ever shown · D2 dual-verified ambiguity → uniform escalation; reservation number resolves · D3 slow verified match beats fast no-match (complete vector) · D4 STRICT refuses on any UNAVAILABLE/STALE candidate · D5 unmapped network fails closed + alert · D6 candidate cap at save and runtime · D7 forged interface hints ignored · D8 evidence-intersection validation at save; broken-by-revision alerts + fail closed · D9 sharers authenticate independently; one-primary-per-stay enforced (primary-change demotes-then-sets in one transaction; conflicting duplicate → MANUAL_REVIEW) · D10 stale cache post-checkout: no VERIFIED; financial fresh-validation blocks · D11 zero/ambiguous/unavailable responses byte-identical and time-padded; throttles and audit fire.
-**E. Financial:** E1 full pin-chain fuzz (quote tuple, payment parent scope, watermark tenancy, posting pair) rejected at the SQL layer · E2 idempotency-key race → one charge · E3 UNKNOWN → manual review; all five governance actions with re-auth/reason/evidence; dual approval threshold · E4 posting on non-IN_HOUSE/blocked stay aborts · E4b **folio `UNSET` fail-closed: a CHARGE against an interface revision with `folio_identity_strategy = 'UNSET'` is rejected with no outbox row, no `P#` allocation and no transmission; read-only ingestion/lookup/auth on that interface still succeed; recording a concrete strategy (new revision) then admits CHARGE** · E5 posting permission evaluation recorded (no-post flag, closed folio, admin block, credit policy); IN_HOUSE alone grants nothing · E6 folio change between auth and purchase handled (folio pinned at purchase) · E7 secret generations pinned; delete refused until drained · E8 outbox one-active-row; retries never change interface · E9 duplicate-source severity tiers; only CRITICAL gates posting · E10 interface outage isolation · E11 decommission guards + audited override · E12 folio-number reuse: recycled number ⇒ new identity_epoch; history unaffected; open-folio uniqueness held.
+**E. Financial:** E1 full pin-chain fuzz (quote tuple, payment parent scope, watermark tenancy, posting pair) rejected at the SQL layer · E2 idempotency-key race → one charge · E3 UNKNOWN → manual review; all five governance actions with re-auth/reason/evidence; dual approval threshold · E4 posting on a non-IN_HOUSE, blocked or reservation-less stay is rejected before `PENDING`; a stay that becomes checked out, stale or blocked between purchase and sending aborts before transmission (FAILED_FINAL, no grant, no `P#` on the wire). · E4b **`posting_target_model = 'UNSET'` fail-closed: a CHARGE is rejected with no outbox row, no `P#` allocation and no transmission; read-only ingestion/lookup/auth still succeed; recording `RESERVATION` (new revision) then admits CHARGE.** · E5 posting permission is evaluated and recorded (reason, source, timestamp): IN_HOUSE without a reservation number is never postable; each block reason is set and cleared as §9a rule 9 states; a feed-supplied no-post indicator, where configured, blocks; IN_HOUSE alone grants nothing. · E6 reservation pinned at purchase: a posting's `G#` equals the stay's reservation number at creation and never changes; an attempt whose `G#` differs from the posting's is refused by the database. · E7 secret generations pinned; delete refused until drained · E8 outbox one-active-row; retries never change interface · E9 duplicate-source severity tiers; only CRITICAL gates posting · E10 interface outage isolation · E11 decommission guards + audited override · E12 no folio identity: no posting, attempt or admission path reads or writes a folio, folio window or external folio identifier, and a room-only `PS` cannot be built. · E13 room move before sending: the attempt carries the reservation's current room and the same `G#`, the purchase is not failed, and a room change detected at the moment of writing produces a new attempt with a new `P#` while the first is recorded as provably not written. · E14 missing `G#`: room charge is never offered, never admitted and never built for a stay without a reservation number. · E15 definite non-posted answers, by status: each fails its purchase with no grant and no automatic retry, and records the status. `NP` blocks room charge on the stay until a fresh Protel update explicitly re-allows posting. `NG` / `NR` mark the stay data suspect, request a resync and block room charge until fresh valid stay data arrives. `NA`, and a vendor-confirmed `RY`, place no stay block: the same guest can make a new room-charge purchase at once. A later purchase is always a new charge. · E16 one unresolved transaction per stay: while a stay has a CHARGE in PENDING, SENDING, UNKNOWN or MANUAL_REVIEW, a second room charge is neither offered nor admitted for it; once that charge reaches POSTED or FAILED_FINAL, a new purchase on the same stay is admitted, so sequential purchases in one stay succeed. An UNKNOWN charge keeps the stay blocked until its manual-review decision. · E17 unprovable answer: a status outside the catalogue, or a catalogue status not yet vendor-confirmed as definitely not posted, is UNKNOWN — never success or failure — and blocks further room charging on the stay until manual review resolves it. · **E18 room-move races** ([Amendment A1, D46](StayConnect-IAM-Phase0-Amendment-A1.md) §A8): move before purchase; after purchase before attempt creation; after attempt creation before the socket write (RN101/G#5000 built → GC to RN205 → the RN101 PS is never written, the attempt is NOT_SENT, the next attempt carries RN205/G#5000); while the PS is being written; after the write before the PA (RN205 is never sent automatically; the original attempt stays authoritative; UNKNOWN blocks new charges); after the PA — each deterministic, none able to produce an automatic duplicate posting.
 **F. Stays/grace:** F1 room move preserves entitlement/devices/quota · F2 stale events never reopen a stay · F3 checkout supersedes free AND paid AND prepaid entitlements into the site grace package; zero nft churn; no re-authentication · F4 grandfathering: devices above the grace limit carry over; new admits blocked until below limit · F5 grace eligibility: an ACTIVE valid Entitlement AT the effective-checkout boundary (state-history + quota proven) ⇒ grace; otherwise no grace purchase; window/boundary tested · F6 grace-config corruption ⇒ emergency fallback entitlement + critical alert + audit (checkout never fails, never skips) · F7 duplicate checkout idempotent per episode; reinstatement → new episode → exactly one new grace (race-tested) · F8 post-stay PIN isolation from the next occupant · F9 cross-PMS transfer via entitlement_transfers (typed, no supersedes pointer, cycle-free), idempotent, seamless rebind.
 **G. Recovery/isolation:** G1 DB-restore recovery drill (held commands; read-back reconciles; FIAS → review; audited release) · G2 snapshot-restore detection drills, including the documented unsupported-raw-snapshot limitation and support-runbook path · G3 appliance replacement via DEK escrow; missing escrow → needs-credentials + review · G4 reboot mid-flight: lanes, pins, breaker states rebuilt; zero duplicate postings · G5 compliance archive → verified receipt → purge + DEK shred; archive failure keeps the transition fail-closed · G6 cross-tenant/site/interface constraint fuzzing · G7 secrets/keys/codes absent from logs, telemetry, audit payloads, exports · G8 retention jobs respect financial minimums.
 
